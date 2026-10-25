@@ -31,7 +31,7 @@ class ModelConfig:
     timeout: float = 60.0
 
 
-PROVIDER_SPECS = [
+PROVIDER_SPECS: list[dict[str, Any]] = [
     {
         "name": "openrouter",
         "env_key": "OPENROUTER_API_KEY",
@@ -152,7 +152,7 @@ class ModelRouter:
     async def _call_provider(
         self,
         provider: ModelConfig,
-        messages: list[ChatCompletionMessageParam],
+        messages: list[ChatCompletionMessageParam],  # type: ignore[type-arg]
         **kwargs: Any,
     ) -> str:
         """Call a single provider with retries."""
@@ -171,7 +171,7 @@ class ModelRouter:
 
     async def complete(
         self,
-        messages: list[ChatCompletionMessageParam],
+        messages: list[ChatCompletionMessageParam],  # type: ignore[type-arg]
         task_type: str = "general",
         priority: TaskPriority = TaskPriority.NORMAL,
         **kwargs: Any,

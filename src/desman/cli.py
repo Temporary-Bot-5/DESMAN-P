@@ -131,7 +131,7 @@ def _load_existing_env() -> dict[str, str]:
     env_path = Path(".env")
     if not env_path.exists():
         return {}
-    
+
     existing = {}
     for line in env_path.read_text().splitlines():
         line = line.strip()
@@ -143,11 +143,11 @@ def _load_existing_env() -> dict[str, str]:
 
 def _prompt_keys(existing: dict[str, str]) -> dict[str, str]:
     """Interactively ask for API keys. Returns dict env_var -> key (non-empty only).
-    
+
     Shows which keys are already configured and only prompts for missing ones.
     """
     keys = dict(existing)  # Start with existing keys
-    
+
     # Show summary of already configured keys
     seen_vars = set()
     configured = []
@@ -161,12 +161,12 @@ def _prompt_keys(existing: dict[str, str]) -> dict[str, str]:
             val = existing[p["env_var"]]
             console.print(f"  ✓ {p['name']} ({p['env_var']}) = {val[:8]}...")
         console.print()
-    
+
     for p in FREE_PROVIDERS:
         # Skip if already configured (from .env or earlier prompt)
         if p["env_var"] in existing:
             continue
-            
+
         # Skip duplicates (OpenRouter appears twice)
         if p["env_var"] in keys and p["env_var"] != "OPENROUTER_API_KEY":
             continue
@@ -181,7 +181,7 @@ def _prompt_keys(existing: dict[str, str]) -> dict[str, str]:
             keys[p["env_var"]] = key.strip()
             console.print(f"  [green]✓[/green] {p['env_var']} сохранён")
         else:
-            console.print(f"  [dim]⊘ пропущен[/dim]")
+            console.print("  [dim]⊘ пропущен[/dim]")
 
     # Cloudflare needs Account ID too
     if "CLOUDFLARE_API_KEY" in keys and "CLOUDFLARE_ACCOUNT_ID" not in keys:
