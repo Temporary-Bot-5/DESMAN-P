@@ -126,12 +126,49 @@ def _print_providers_table() -> None:
     console.print(table)
 
 
-def _prompt_keys() -> dict[str, str]:
-    """Interactively ask for API keys. Returns dict env_var -> key (non-empty only)."""
-    keys = {}
+def _load_existing_env() -> dict[str, str]:
+    """Load existing .env file if present, return dict of key -> value."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        return {}
+    
+    existing = {}
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            existing[key.strip()] = value.strip()
+    return existing
+
+
+def _prompt_keys(existing: dict[str, str]) -> dict[str, str]:
+    """Interactively ask for API keys. Returns dict env_var -> key (non-empty only).
+    
+    Shows which keys are already configured and only prompts for missing ones.
+    """
+    keys = dict(existing)  # Start with existing keys
+    
+    # Show summary of already configured keys
+    seen_vars = set()
+    configured = []
     for p in FREE_PROVIDERS:
+        if p["env_var"] in existing and p["env_var"] not in seen_vars:
+            configured.append(p)
+            seen_vars.add(p["env_var"])
+    if configured:
+        console.print("[bold green]Уже настроено:[/bold green]")
+        for p in configured:
+            val = existing[p["env_var"]]
+            console.print(f"  ✓ {p['name']} ({p['env_var']}) = {val[:8]}...")
+        console.print()
+    
+    for p in FREE_PROVIDERS:
+        # Skip if already configured (from .env or earlier prompt)
+        if p["env_var"] in existing:
+            continue
+            
         # Skip duplicates (OpenRouter appears twice)
-        if p["env_var"] in keys:
+        if p["env_var"] in keys and p["env_var"] != "OPENROUTER_API_KEY":
             continue
 
         default = os.getenv(p["env_var"], "")
@@ -147,13 +184,18 @@ def _prompt_keys() -> dict[str, str]:
             console.print(f"  [dim]⊘ пропущен[/dim]")
 
     # Cloudflare needs Account ID too
-    if "CLOUDFLARE_API_KEY" in keys:
-        account_id = Prompt.ask(
-            "[bold]Cloudflare Account ID[/bold] (CLOUDFLARE_ACCOUNT_ID)", default="", show_default=False
-        )
-        if account_id.strip():
-            keys["CLOUDFLARE_ACCOUNT_ID"] = account_id.strip()
-            console.print("  [green]✓[/green] CLOUDFLARE_ACCOUNT_ID сохранён")
+    if "CLOUDFLARE_API_KEY" in keys and "CLOUDFLARE_ACCOUNT_ID" not in keys:
+        account_id = existing.get("CLOUDFLARE_ACCOUNT_ID") or os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+        if account_id:
+            keys["CLOUDFLARE_ACCOUNT_ID"] = account_id
+            console.print("  [green]✓[/green] CLOUDFLARE_ACCOUNT_ID уже был в .env")
+        else:
+            account_id = Prompt.ask(
+                "[bold]Cloudflare Account ID[/bold] (CLOUDFLARE_ACCOUNT_ID)", default="", show_default=False
+            )
+            if account_id.strip():
+                keys["CLOUDFLARE_ACCOUNT_ID"] = account_id.strip()
+                console.print("  [green]✓[/green] CLOUDFLARE_ACCOUNT_ID сохранён")
 
     return keys
 
@@ -198,10 +240,13 @@ def setup() -> None:
     _print_providers_table()
     console.print()
 
-    keys = _prompt_keys()
+    existing = _load_existing_env()
+    keys = _prompt_keys(existing)
 
-    if not keys:
-        console.print("[yellow]Ни один ключ не введён. Минимум нужен OPENROUTER_API_KEY.[/yellow]")
+    # Check if we have at least one provider configured (existing or new)
+    provider_keys = [k for k in keys if k in [p["env_var"] for p in FREE_PROVIDERS]]
+    if not provider_keys:
+        console.print("[yellow]Ни один ключ провайдера не настроен. Минимум нужен один (например, OPENROUTER_API_KEY).[/yellow]")
         return
 
     env_path = _write_env_file(keys)
