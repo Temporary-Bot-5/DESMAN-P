@@ -31,6 +31,67 @@ class ModelConfig:
     timeout: float = 60.0
 
 
+PROVIDER_SPECS = [
+    {
+        "name": "openrouter",
+        "env_key": "OPENROUTER_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "meta-llama/llama-3.1-8b-instruct:free",
+        "env_model": "OPENROUTER_MODEL",
+    },
+    {
+        "name": "gemini",
+        "env_key": "GEMINI_API_KEY",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "default_model": "gemini-1.5-flash",
+        "env_model": "GEMINI_MODEL",
+    },
+    {
+        "name": "groq",
+        "env_key": "GROQ_API_KEY",
+        "base_url": "https://api.groq.com/openai/v1",
+        "default_model": "llama-3.1-8b-instant",
+        "env_model": "GROQ_MODEL",
+    },
+    {
+        "name": "mistral",
+        "env_key": "MISTRAL_API_KEY",
+        "base_url": "https://api.mistral.ai/v1",
+        "default_model": "mistral-small-latest",
+        "env_model": "MISTRAL_MODEL",
+    },
+    {
+        "name": "cloudflare",
+        "env_key": "CLOUDFLARE_API_KEY",
+        "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/",
+        "default_model": "@cf/meta/llama-3.1-8b-instruct",
+        "env_model": "CLOUDFLARE_MODEL",
+        "needs_account_id": True,
+    },
+    {
+        "name": "cohere",
+        "env_key": "COHERE_API_KEY",
+        "base_url": "https://api.cohere.com/v1",
+        "default_model": "command-r",
+        "env_model": "COHERE_MODEL",
+    },
+    {
+        "name": "nvidia",
+        "env_key": "NVIDIA_API_KEY",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "default_model": "nvidia/nemotron-3-ultra",
+        "env_model": "NVIDIA_MODEL",
+    },
+    {
+        "name": "vercel",
+        "env_key": "VERCEL_AI_GATEWAY_KEY",
+        "base_url": "https://ai-gateway.vercel.sh/v1",
+        "default_model": "openrouter/meta-llama/llama-3.1-8b-instruct:free",
+        "env_model": "VERCEL_MODEL",
+    },
+]
+
+
 class ModelRouter:
     """Routes LLM requests to available providers with fallback."""
 
@@ -41,26 +102,34 @@ class ModelRouter:
 
     def _load_providers(self) -> None:
         """Load providers from environment variables."""
-        # OpenRouter (primary - many free models)
-        openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        if openrouter_key:
+        for spec in PROVIDER_SPECS:
+            api_key = os.getenv(spec["env_key"])
+            if not api_key:
+                continue
+
+            # Cloudflare needs account ID in base_url
+            base_url = spec["base_url"]
+            if spec.get("needs_account_id"):
+                account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+                if not account_id:
+                    continue
+                base_url = base_url.format(account_id=account_id)
+
+            model = os.getenv(spec["env_model"], spec["default_model"])
+
             self.providers.append(
                 ModelConfig(
-                    name="openrouter",
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=openrouter_key,
-                    model=os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free"),
+                    name=spec["name"],
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
                 )
             )
 
-        # Google Gemini (via OpenAI-compatible endpoint or direct)
-        # For now, OpenRouter covers Gemini too
-
-        # Add more providers here (Groq, Together, etc.)
-
         if not self.providers:
             raise RuntimeError(
-                "No LLM providers configured. Set OPENROUTER_API_KEY in .env"
+                "No LLM providers configured. Run `desman setup` to configure API keys, "
+                "or set at least OPENROUTER_API_KEY in .env"
             )
 
         # Create clients

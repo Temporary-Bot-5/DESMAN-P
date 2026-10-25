@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from desman.core.models import Artifact, Subtask
-from desman.router import ModelRouter
+
+if TYPE_CHECKING:
+    from desman.router import ModelRouter
 
 
 @dataclass

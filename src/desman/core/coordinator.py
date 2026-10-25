@@ -5,14 +5,17 @@ from __future__ import annotations
 import asyncio
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from desman.core.models import Artifact, Task, TaskPriority, TaskStatus
 from desman.core.store import TaskStore
 from desman.review.validator import Reviewer
-from desman.router import ModelRouter
 from desman.runtime.executor import Executor
 from desman.runtime.planner import Planner
+
+if TYPE_CHECKING:
+    from desman.router import ModelRouter
 
 
 class Coordinator:

@@ -7,10 +7,12 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from desman.core.models import Subtask
-from desman.router import ModelRouter
+
+if TYPE_CHECKING:
+    from desman.router import ModelRouter
 
 
 class Executor:
