@@ -15,7 +15,7 @@ from desman.core.audit import check_history, history
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
-from desman.core.store import Store
+from desman.core.store import StaleStateError, Store
 
 S = SubtaskStatus
 
@@ -179,3 +179,74 @@ def test_cancel(store: Store) -> None:
     assert store.task_status(task_id) is TaskStatus.CANCELLED
     again = json.loads(desman("cancel", task_id[:8], "--json").output)
     assert again["cancelled"] == [] and again["status"] == "cancelled"
+
+
+# ── Review regressions (PR #14) ──────────────────────────────────────────────
+
+
+def test_decision_does_not_apply_to_a_newer_escalation(store: Store) -> None:
+    task_id, sub_id = escalated(store, chain("fetch"))
+    seen = store.status_version(sub_id)
+    # Meanwhile another operator retries and the next attempt escalates again.
+    store.transition(sub_id, S.NEEDS_HUMAN, S.READY, Actor.HUMAN, reason="other operator")
+    again = store.claim("w")
+    assert again is not None and again.lease_token is not None
+    store.record_failure(
+        sub_id,
+        S.RUNNING,
+        Actor.EXECUTOR,
+        FailureKind.PERMANENT,
+        lease=again.lease_token,
+        reason="403",
+    )
+    assert store.get_subtask(sub_id).status is S.NEEDS_HUMAN  # same status, newer situation
+    with pytest.raises(StaleStateError, match="changed since version"):
+        store.transition(sub_id, S.NEEDS_HUMAN, S.DONE, Actor.HUMAN, expected_version=seen)
+    assert store.get_subtask(sub_id).status is S.NEEDS_HUMAN
+    store.transition(
+        sub_id, S.NEEDS_HUMAN, S.DONE, Actor.HUMAN, expected_version=store.status_version(sub_id)
+    )
+
+
+def test_if_version_refuses_a_decision_on_what_you_did_not_see(store: Store) -> None:
+    task_id, sub_id = escalated(store, chain("fetch"))
+    [item] = json.loads(desman("inbox", "--json").output)
+    store.transition(sub_id, S.NEEDS_HUMAN, S.READY, Actor.HUMAN)
+    store.transition(sub_id, S.READY, S.CANCELLED, Actor.HUMAN)
+    stale = desman("accept", item["ref"], "--if-version", str(item["version"]))
+    assert stale.exit_code == 1 and "changed since version" in stale.output
+
+    task_id, sub_id = escalated(store, chain("other"))
+    [item] = json.loads(desman("inbox", "--json").output)
+    ok = desman("accept", item["ref"], "--if-version", str(item["version"]))
+    assert ok.exit_code == 0, ok.output
+
+
+def test_inbox_refs_stay_unique_when_ids_share_a_prefix(store: Store) -> None:
+    for task_id in ("abcdef12" + "a" * 24, "abcdef12" + "b" * 24):
+        store.conn.execute("INSERT INTO tasks (id, goal) VALUES (?, 'g')", (task_id,))
+        store.conn.execute(
+            "INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria, status) "
+            "VALUES (?, ?, 0, 'd', 'c', 'needs_human')",
+            (task_id[::-1], task_id),
+        )
+    refs = [i["ref"] for i in json.loads(desman("inbox", "--json").output)]
+    assert sorted(refs) == ["abcdef12a/0", "abcdef12b/0"]
+    for ref in refs:
+        result = desman("retry", ref)
+        assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize("note", ["", "   "])
+def test_fail_needs_a_real_reason(store: Store, note: str) -> None:
+    task_id, sub_id = escalated(store, chain("fetch"))
+    result = desman("fail", f"{task_id[:8]}/0", "--note", note)
+    assert result.exit_code == 2 and "say why it failed" in result.output
+    assert store.get_subtask(sub_id).status is S.NEEDS_HUMAN
+
+
+def test_blank_retry_note_falls_back_to_the_default(store: Store) -> None:
+    task_id, sub_id = escalated(store, chain("fetch"))
+    desman("retry", f"{task_id[:8]}/0", "--note", "  ")
+    feedback = store.last_feedback(sub_id)
+    assert feedback is not None and feedback.text == "retry requested by operator"

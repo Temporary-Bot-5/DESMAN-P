@@ -132,7 +132,9 @@ class InboxItem(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     ref: str
-    """How to name it in `desman retry/accept/fail`: "<task prefix>/<seq>"."""
+    """How to name it in `desman retry/accept/fail`: "<unique task prefix>/<seq>"."""
+    version: int
+    """`Store.status_version`: pass it as `--if-version` to act only on this exact situation."""
     task_id: str
     goal: str
     subtask_id: str
@@ -157,6 +159,7 @@ def inbox(store: Store) -> list[InboxItem]:
             [s.value for s in INBOX_STATUSES],
         ).fetchall()
         for task_id, goal in rows:
+            short = store.short_id(task_id)
             subtasks = store.list_subtasks(task_id)
             by_id = {s.id: s for s in subtasks}
             for sub in subtasks:
@@ -164,7 +167,8 @@ def inbox(store: Store) -> list[InboxItem]:
                     continue
                 items.append(
                     InboxItem(
-                        ref=f"{task_id[:8]}/{sub.seq}",
+                        ref=f"{short}/{sub.seq}",
+                        version=store.status_version(sub.id),
                         task_id=task_id,
                         goal=goal,
                         subtask_id=sub.id,
