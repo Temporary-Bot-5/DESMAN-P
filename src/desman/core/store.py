@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
 from desman.core import db
+from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
 from desman.core.models import Subtask, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
@@ -794,9 +795,7 @@ class Store:
 
     def audit_log(self, task_id: str) -> list[sqlite3.Row]:
         """Full history of a task and its subtasks, in order."""
-        return self.conn.execute(
-            "SELECT * FROM audit_log WHERE task_id = ? ORDER BY seq", (task_id,)
-        ).fetchall()
+        return self.conn.execute(TASK_HISTORY_SQL, {"task": task_id}).fetchall()
 
     def note(
         self, subtask_id: str, actor: Actor, action: str, details: dict[str, Any] | None = None
