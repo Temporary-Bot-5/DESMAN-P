@@ -224,6 +224,20 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
+@contextmanager
+def read_snapshot(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Consistent reads: every SELECT inside sees the same committed state (one WAL snapshot),
+    without blocking writers. Inside an open transaction it adds nothing."""
+    if conn.in_transaction:
+        yield conn
+        return
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    finally:
+        conn.execute("COMMIT")
+
+
 def schema_version(conn: sqlite3.Connection) -> int:
     """Version of the schema in this database; 0 for an empty database."""
     version: int = conn.execute("PRAGMA user_version").fetchone()[0]

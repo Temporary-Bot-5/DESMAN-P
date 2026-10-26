@@ -100,10 +100,11 @@ def audit(task: str, db_path: Path | None, as_json: bool) -> None:
         except LookupError as e:
             raise click.ClickException(str(e)) from e
         task_id = row["id"]
-        entries = history(store.conn, task_id)
-        problems = check_history(store.conn, task_id)
-        status = store.task_status(task_id)
-        labels = {s.id: f"[{s.seq}] {s.description}" for s in store.list_subtasks(task_id)}
+        with db.read_snapshot(store.conn):  # a worker may be committing meanwhile
+            entries = [_redacted(e) for e in history(store.conn, task_id)]
+            problems = check_history(store.conn, task_id)
+            status = store.task_status(task_id)
+            labels = {s.id: f"[{s.seq}] {s.description}" for s in store.list_subtasks(task_id)}
     finally:
         store.conn.close()
 
@@ -124,6 +125,14 @@ def audit(task: str, db_path: Path | None, as_json: bool) -> None:
         for problem in problems:
             click.echo(f"  {problem}", err=True)
         raise SystemExit(1)
+
+
+def _redacted(entry: AuditEntry) -> AuditEntry:
+    """Lease tokens let their holder act as the executor: show only enough to tell them apart."""
+    lease = entry.details.get("lease")
+    if not isinstance(lease, str):
+        return entry
+    return entry.model_copy(update={"details": {**entry.details, "lease": lease[:8] + "…"}})
 
 
 def _format_entry(entry: AuditEntry, labels: dict[str, str]) -> str:

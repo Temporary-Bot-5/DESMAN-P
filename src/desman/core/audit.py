@@ -3,9 +3,10 @@
 The store writes an entry for every status change (all of them pass through `Store._apply` or
 `claim`), every reviewer verdict, checkpoint, interrupted review and discarded piece of work.
 The triggers of migration 3 make each entry name its task. `check_history` replays the log:
-every subtask starts PENDING, each status change must leave the status the previous one
-reached, and the last one must match the subtask's current status. A gap means a status was
-changed without being recorded, which is a bug.
+the subtasks are those `task_created` listed, each starting PENDING; each status change must
+leave the status the previous one reached, and the last one must match the subtask's current
+status. A gap means something was changed without being recorded, which is a bug. All reads
+happen in one snapshot, so a worker committing meanwhile cannot cause a false alarm.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from desman.core import db
 from desman.core.states import Actor, SubtaskStatus
 
 
@@ -55,14 +57,20 @@ def history(conn: sqlite3.Connection, task_id: str) -> list[AuditEntry]:
 
 def check_history(conn: sqlite3.Connection, task_id: str) -> list[str]:
     """Problems found replaying the task's history; empty when it accounts for every change."""
-    entries = history(conn, task_id)
-    current = {
-        row["id"]: SubtaskStatus(row["status"])
-        for row in conn.execute("SELECT id, status FROM subtasks WHERE task_id = ?", (task_id,))
-    }
+    with db.read_snapshot(conn):
+        entries = history(conn, task_id)
+        rows = conn.execute("SELECT id, status FROM subtasks WHERE task_id = ?", (task_id,))
+        current = {row["id"]: SubtaskStatus(row["status"]) for row in rows}
     problems = []
-    if not any(e.action == "task_created" for e in entries):
+    created = next((e for e in entries if e.action == "task_created"), None)
+    if created is None:
         problems.append("no task_created entry")
+    recorded = created.details.get("subtasks") if created else None
+    if isinstance(recorded, list):  # ids; entries written before 1.9 hold only a count
+        for subtask_id in sorted(current.keys() - set(recorded)):
+            problems.append(f"subtask {subtask_id} was never recorded as created")
+        for subtask_id in sorted(set(recorded) - current.keys()):
+            problems.append(f"subtask {subtask_id} was recorded as created but is missing")
     replayed = dict.fromkeys(current, SubtaskStatus.PENDING)
     for entry in entries:
         if entry.to_status is None:

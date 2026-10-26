@@ -272,3 +272,70 @@ def test_audit_uses_the_default_database(clock: FakeClock) -> None:
     result = CliRunner().invoke(cli, ["audit", task_id])
     assert result.exit_code == 0, result.output
     assert "task_created" in result.output
+
+
+# ── Review regressions (PR #10) ──────────────────────────────────────────────
+
+
+def test_history_check_reads_one_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A worker commits between the check's reads: the check must not see half of it.
+    path = tmp_path / "live.db"
+    reader, writer = db.open_db(path), db.open_db(path)
+    task_id = Store(writer).create_task(one_step())
+    import desman.core.audit as audit_module
+
+    original = audit_module.history
+
+    def history_then_claim(conn: Any, task: str) -> Any:
+        entries = original(conn, task)
+        Store(writer).claim("other-worker")  # commits ready -> running and its entry
+        return entries
+
+    monkeypatch.setattr(audit_module, "history", history_then_claim)
+    assert check_history(reader, task_id) == []
+    monkeypatch.setattr(audit_module, "history", original)
+    assert check_history(reader, task_id) == []  # and the next check sees the claim
+    assert [e.action for e in history(reader, task_id)][-1] == "claim"
+    reader.close()
+    writer.close()
+
+
+def test_subtask_added_without_a_record_is_detected(store: Store) -> None:
+    task_id = store.create_task(one_step())
+    store.conn.execute(
+        "INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria) "
+        "VALUES ('sneaky', ?, 1, 'd', 'c')",
+        (task_id,),
+    )
+    assert check_history(store.conn, task_id) == ["subtask sneaky was never recorded as created"]
+
+
+def test_legacy_creation_entry_with_a_count_still_replays(store: Store) -> None:
+    task_id = "legacy"
+    store.conn.execute("INSERT INTO tasks (id, goal) VALUES (?, 'g')", (task_id,))
+    store.conn.execute(
+        "INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria) "
+        "VALUES ('s1', ?, 0, 'd', 'c')",
+        (task_id,),
+    )
+    store.conn.execute(
+        "INSERT INTO audit_log (task_id, actor, action, details_json) "
+        "VALUES (?, 'human', 'task_created', '{\"subtasks\": 1}')",
+        (task_id,),
+    )
+    assert check_history(store.conn, task_id) == []
+
+
+def test_audit_output_does_not_show_live_lease_tokens(tmp_path: Path, clock: FakeClock) -> None:
+    path = tmp_path / "desman.db"
+    conn = db.open_db(path)
+    store = Store(conn, clock=clock)
+    task_id = store.create_task(one_step())
+    claimed = store.claim("w")
+    assert claimed is not None and claimed.lease_token is not None
+    conn.close()
+    for args in ([], ["--json"]):
+        result = CliRunner().invoke(cli, ["audit", task_id, "--db", str(path), *args])
+        assert result.exit_code == 0, result.output
+        assert claimed.lease_token not in result.output
+        assert claimed.lease_token[:8] in result.output  # enough to tell leases apart
