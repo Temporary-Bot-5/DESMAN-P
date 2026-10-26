@@ -116,24 +116,43 @@ class Store:
     def find_task(self, prefix: str) -> sqlite3.Row:
         """The task whose id is `prefix` or starts with it (at least MIN_ID_PREFIX characters),
         as typed by an operator."""
+        return self._find_by_prefix("tasks", "task", prefix)
+
+    def find_subtask(self, ref: str) -> Subtask:
+        """A subtask as an operator names it: "<task id or prefix>/<seq>" (as `desman status`
+        numbers them) or its own id or unique prefix."""
+        task_part, slash, seq = ref.rpartition("/")
+        if slash:
+            if not seq.isdigit():
+                raise NotFoundError(f"subtask {ref!r}: expected <task>/<number>")
+            task_id = self.find_task(task_part)["id"]
+            row = self.conn.execute(
+                "SELECT * FROM subtasks WHERE task_id = ? AND seq = ?", (task_id, int(seq))
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"task {task_id} has no subtask {seq}")
+            return Subtask.from_row(row)
+        return Subtask.from_row(self._find_by_prefix("subtasks", "subtask", ref))
+
+    def _find_by_prefix(self, table: str, kind: str, prefix: str) -> sqlite3.Row:
         exact: sqlite3.Row | None = self.conn.execute(
-            "SELECT * FROM tasks WHERE id = ?", (prefix,)
+            f"SELECT * FROM {table} WHERE id = ?", (prefix,)
         ).fetchone()
         if exact is not None:
             return exact
         if len(prefix) < MIN_ID_PREFIX:
             raise NotFoundError(
-                f"task {prefix!r} not found (give at least {MIN_ID_PREFIX} characters)"
+                f"{kind} {prefix!r} not found (give at least {MIN_ID_PREFIX} characters)"
             )
         rows = self.conn.execute(
-            "SELECT * FROM tasks WHERE substr(id, 1, ?) = ? ORDER BY created_at LIMIT 6",
+            f"SELECT * FROM {table} WHERE substr(id, 1, ?) = ? ORDER BY created_at LIMIT 6",
             (len(prefix), prefix),
         ).fetchall()
         if not rows:
-            raise NotFoundError(f"task {prefix!r} not found")
+            raise NotFoundError(f"{kind} {prefix!r} not found")
         if len(rows) > 1:
             shown = ", ".join(r["id"] for r in rows[:5]) + (", …" if len(rows) > 5 else "")
-            raise AmbiguousIdError(f"task id {prefix!r} is ambiguous: {shown}")
+            raise AmbiguousIdError(f"{kind} id {prefix!r} is ambiguous: {shown}")
         row: sqlite3.Row = rows[0]
         return row
 

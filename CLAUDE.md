@@ -32,7 +32,8 @@ The old core was removed (still in git history at `3d10a5e`). What remains:
 ```
 src/desman/
 ├── cli.py         # Click entry point: `desman`, `config`, `help`, `init-db`, and the task
-│                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes)
+│                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
+│                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # Minimal LLM executor/reviewer (JSON replies) behind `desman run`
 ├── config.py      # ConfigManager + bilingual (en/ru) setup wizard
 ├── info.py        # Banner / project info
