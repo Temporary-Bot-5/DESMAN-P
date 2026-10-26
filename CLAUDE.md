@@ -39,7 +39,8 @@ src/desman/
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently)
     ├── db.py      # sqlite3 connection, transactions, append-only migrations
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
-    └── store.py   # Store: create_task, claim (atomic), transition (compare-and-swap + audit)
+    └── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
+                   #        record_failure (retry policy applied atomically)
 ```
 
 Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a

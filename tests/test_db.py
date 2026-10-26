@@ -130,7 +130,7 @@ def test_transaction_commits(conn: sqlite3.Connection) -> None:
 
 def test_status_check_matches_state_machine(conn: sqlite3.Connection) -> None:
     task_id = add_task(conn)
-    lease: dict[str, object] = {"lease_owner": "w", "lease_until": db.now_iso()}
+    lease: dict[str, object] = {"lease_owner": "w", "lease_token": "t", "lease_until": db.now_iso()}
     for seq, status in enumerate(SubtaskStatus):
         extra: dict[str, object] = {}
         if status is SubtaskStatus.RUNNING:
@@ -148,6 +148,8 @@ def test_running_requires_lease(conn: sqlite3.Connection) -> None:
         add_subtask(conn, task_id, status="running")
     with pytest.raises(sqlite3.IntegrityError):
         add_subtask(conn, task_id, status="ready", lease_owner="w", lease_until=db.now_iso())
+    with pytest.raises(sqlite3.IntegrityError):  # half a lease is not a lease
+        add_subtask(conn, task_id, status="running", lease_owner="w", lease_until=db.now_iso())
 
 
 def test_paused_requires_resume_status(conn: sqlite3.Connection) -> None:
@@ -156,6 +158,8 @@ def test_paused_requires_resume_status(conn: sqlite3.Connection) -> None:
         add_subtask(conn, task_id, status="paused")
     with pytest.raises(sqlite3.IntegrityError):
         add_subtask(conn, task_id, status="paused", resume_status="running")
+    with pytest.raises(sqlite3.IntegrityError):
+        add_subtask(conn, task_id, status="ready", paused_until=db.now_iso())
 
 
 def test_json_columns_are_validated(conn: sqlite3.Connection) -> None:

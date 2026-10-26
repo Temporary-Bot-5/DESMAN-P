@@ -17,10 +17,11 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NoReturn
 
 from desman.core import db
 from desman.core.models import Subtask, TaskSpec
+from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
 from desman.core.states import Actor, SubtaskStatus
 from desman.core.states import transition as check_transition
 
@@ -32,6 +33,10 @@ DEFAULT_LEASE_SECONDS = 300
 
 class StaleStateError(RuntimeError):
     """The subtask is no longer in the expected state (or no longer held by this executor)."""
+
+
+class PauseNotOverError(StaleStateError):
+    """A paused subtask cannot resume before its `paused_until`."""
 
 
 class NotFoundError(LookupError):
@@ -128,20 +133,23 @@ class Store:
     ) -> Subtask | None:
         """Atomically take the most urgent READY subtask; None if nothing is ready.
 
-        Order: priority (high first), then age, then position in the task.
+        Order: priority (high first), then age, then position in the task. The returned subtask
+        carries a fresh `lease_token`; the executor must present it to leave RUNNING.
         """
         check_transition(S.READY, S.RUNNING, Actor.EXECUTOR)
+        lease_token = _new_id()
         lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         with db.transaction(self.conn):
             self._promote_ready()
             row = self.conn.execute(
                 f"""UPDATE subtasks
-                    SET status = 'running', lease_owner = ?, lease_until = ?, updated_at = ?
+                    SET status = 'running', lease_owner = ?, lease_token = ?, lease_until = ?,
+                        updated_at = ?
                     WHERE id = (SELECT id FROM subtasks WHERE status = 'ready' {scope}
                                 ORDER BY priority DESC, created_at, seq LIMIT 1)
                     RETURNING *""",
-                (owner, lease_until, self._now(), *params),
+                (owner, lease_token, lease_until, self._now(), *params),
             ).fetchone()
             if row is None:
                 return None
@@ -152,7 +160,7 @@ class Store:
                 subtask=subtask,
                 from_status=S.READY,
                 to_status=S.RUNNING,
-                details={"owner": owner, "lease_until": lease_until},
+                details={"owner": owner, "lease": lease_token, "lease_until": lease_until},
             )
         return subtask
 
@@ -163,77 +171,161 @@ class Store:
         dst: SubtaskStatus,
         actor: Actor,
         *,
-        owner: str | None = None,
+        lease: str | None = None,
+        attempts: Attempts | None = None,
         reason: str | None = None,
         paused_until: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> Subtask:
         """Move a subtask from `src` to `dst` if it is still in `src`.
 
-        Leaving RUNNING as the executor requires `owner` to match the lease holder, so an executor
-        whose lease expired and was handed to someone else cannot overwrite the new holder's work.
-        Lease and pause bookkeeping follows the status automatically. Claiming (-> RUNNING) goes
-        through `claim()`.
+        - Leaving RUNNING as the executor requires `lease`, the token from `claim()`: an executor
+          whose claim expired cannot touch a later claim, even one taken under the same name.
+        - `attempts` replaces the failure counters in the same update; a human sending the
+          subtask back to READY resets them (a fresh budget is the point of a restart).
+        - Resuming from PAUSED goes back where the subtask stopped and not before `paused_until`.
+        - Lease and pause fields follow the status. Claiming (-> RUNNING) goes through `claim()`.
         """
+        with db.transaction(self.conn):
+            return self._apply(
+                subtask_id,
+                src,
+                dst,
+                actor,
+                lease=lease,
+                attempts=attempts,
+                reason=reason,
+                paused_until=paused_until,
+                details=details,
+            )
+
+    def record_failure(
+        self,
+        subtask_id: str,
+        src: SubtaskStatus,
+        actor: Actor,
+        kind: FailureKind,
+        *,
+        lease: str | None = None,
+        reason: str | None = None,
+        paused_until: str | None = None,
+        policy: RetryPolicy | None = None,
+    ) -> Subtask:
+        """Apply the retry policy to a failed attempt: retry, pause or escalate to the operator.
+
+        Counters are read and written in one transaction, so concurrent failures cannot lose a count.
+        """
+        with db.transaction(self.conn):
+            current = self.get_subtask(subtask_id)
+            decision = decide(kind, current.attempts, policy)
+            return self._apply(
+                subtask_id,
+                src,
+                decision.status,
+                actor,
+                lease=lease,
+                attempts=decision.attempts,
+                reason=f"{reason}: {decision.reason}" if reason else decision.reason,
+                paused_until=paused_until,
+                details={"failure": kind.value},
+            )
+
+    def _apply(
+        self,
+        subtask_id: str,
+        src: SubtaskStatus,
+        dst: SubtaskStatus,
+        actor: Actor,
+        *,
+        lease: str | None,
+        attempts: Attempts | None,
+        reason: str | None,
+        paused_until: str | None,
+        details: dict[str, Any] | None,
+    ) -> Subtask:
+        """Compare-and-swap status change plus audit entry. Needs a transaction."""
         if dst is S.RUNNING:
             raise ValueError("use claim() to start running a subtask")
         check_transition(src, dst, actor)
-        if src is S.RUNNING and actor is Actor.EXECUTOR and owner is None:
-            raise ValueError("executor must pass owner= to leave RUNNING")
+        if src is S.RUNNING and actor is Actor.EXECUTOR and lease is None:
+            raise ValueError("executor must pass lease= (the token from claim()) to leave RUNNING")
 
+        now = self._now()
         sets = ["status = ?", "updated_at = ?"]
-        params: list[Any] = [dst.value, self._now()]
+        params: list[Any] = [dst.value, now]
         if src is S.RUNNING:
-            sets += ["lease_owner = NULL", "lease_until = NULL"]
+            sets += ["lease_owner = NULL", "lease_token = NULL", "lease_until = NULL"]
         if dst is S.PAUSED:
             sets += ["resume_status = ?", "paused_until = ?"]
             params += [(S.READY if src is S.RUNNING else S.REVIEW).value, paused_until]
         if src is S.PAUSED:
             sets += ["resume_status = NULL", "paused_until = NULL"]
+        if actor is Actor.HUMAN and dst is S.READY:
+            attempts = Attempts()
+        if attempts is not None:
+            sets += ["attempts_quality = ?", "attempts_transient = ?"]
+            params += [attempts.quality, attempts.transient]
 
         where = ["id = ?", "status = ?"]
         params += [subtask_id, src.value]
-        if src is S.RUNNING and owner is not None:
-            where.append("lease_owner = ?")
-            params.append(owner)
+        if src is S.RUNNING and lease is not None:
+            where.append("lease_token = ?")
+            params.append(lease)
         if src is S.PAUSED:
             where.append("resume_status = ?")  # resume where it stopped
-            params.append(dst.value)
+            where.append("(paused_until IS NULL OR paused_until <= ?)")
+            params += [dst.value, now]
 
-        with db.transaction(self.conn):
-            row = self.conn.execute(
-                f"UPDATE subtasks SET {', '.join(sets)} WHERE {' AND '.join(where)} RETURNING *",
-                params,
-            ).fetchone()
-            if row is None:
-                raise StaleStateError(self._stale_reason(subtask_id, src, dst, owner))
-            subtask = Subtask.from_row(row)
-            audit_details = dict(details or {})
-            if reason:
-                audit_details["reason"] = reason
-            if owner:
-                audit_details["owner"] = owner
-            self._audit(
-                actor,
-                "transition",
-                subtask=subtask,
-                from_status=src,
-                to_status=dst,
-                details=audit_details,
-            )
-            if dst is S.DONE:
-                self._promote_ready()
+        before = self.conn.execute(
+            "SELECT lease_owner FROM subtasks WHERE id = ?", (subtask_id,)
+        ).fetchone()
+        row = self.conn.execute(
+            f"UPDATE subtasks SET {', '.join(sets)} WHERE {' AND '.join(where)} RETURNING *",
+            params,
+        ).fetchone()
+        if row is None:
+            self._raise_stale(subtask_id, src, dst, lease, now)
+        subtask = Subtask.from_row(row)
+
+        audit_details = dict(details or {})
+        if reason:
+            audit_details["reason"] = reason
+        if src is S.RUNNING and before is not None:
+            audit_details["owner"] = before["lease_owner"]
+        if attempts is not None:
+            audit_details["attempts"] = attempts.model_dump()
+        self._audit(
+            actor,
+            "transition",
+            subtask=subtask,
+            from_status=src,
+            to_status=dst,
+            details=audit_details,
+        )
+        if dst is S.DONE:
+            self._promote_ready()
         return subtask
 
-    def _stale_reason(
-        self, subtask_id: str, src: SubtaskStatus, dst: SubtaskStatus, owner: str | None
-    ) -> str:
+    def _raise_stale(
+        self, subtask_id: str, src: SubtaskStatus, dst: SubtaskStatus, lease: str | None, now: str
+    ) -> NoReturn:
         current = self.get_subtask(subtask_id)
         if current.status is not src:
-            return f"subtask {subtask_id} is {current.status}, expected {src} (wanted -> {dst})"
-        if src is S.RUNNING and owner is not None and current.lease_owner != owner:
-            return f"subtask {subtask_id} is leased to {current.lease_owner}, not {owner}"
-        return f"subtask {subtask_id} paused to resume as {current.resume_status}, not {dst}"
+            raise StaleStateError(
+                f"subtask {subtask_id} is {current.status}, expected {src} (wanted -> {dst})"
+            )
+        if src is S.RUNNING and lease is not None and current.lease_token != lease:
+            raise StaleStateError(
+                f"subtask {subtask_id}: lease {lease} is no longer valid "
+                f"(now held by {current.lease_owner})"
+            )
+        if current.resume_status is not dst:
+            raise StaleStateError(
+                f"subtask {subtask_id} paused to resume as {current.resume_status}, not {dst}"
+            )
+        raise PauseNotOverError(
+            f"subtask {subtask_id} is paused until {current.paused_until} (now {now})"
+        )
 
     def _promote_ready(self) -> None:
         """PENDING -> READY for every subtask whose dependencies are all DONE. Needs a transaction."""

@@ -41,6 +41,7 @@ class TaskSpec(BaseModel):
     def _dependencies_form_a_dag(self) -> Self:
         count = len(self.subtasks)
         for i, sub in enumerate(self.subtasks):
+            sub.depends_on = list(dict.fromkeys(sub.depends_on))  # a repeated edge is one edge
             for dep in sub.depends_on:
                 if not 0 <= dep < count:
                     raise ValueError(f"subtask {i} depends on unknown subtask {dep}")
@@ -72,6 +73,7 @@ class Subtask(BaseModel):
     priority: int
     status: SubtaskStatus
     lease_owner: str | None
+    lease_token: str | None
     lease_until: str | None
     resume_status: SubtaskStatus | None
     paused_until: str | None
@@ -90,6 +92,7 @@ class Subtask(BaseModel):
             priority=row["priority"],
             status=SubtaskStatus(row["status"]),
             lease_owner=row["lease_owner"],
+            lease_token=row["lease_token"],
             lease_until=row["lease_until"],
             resume_status=row["resume_status"],
             paused_until=row["paused_until"],
