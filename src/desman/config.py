@@ -49,17 +49,23 @@ class ConfigManager:
 
         Written to a private temporary file and renamed over the old one: a crash or a
         serialisation error never leaves a half-written or world-readable config behind.
+        A symlinked config (e.g. into a dotfiles directory) is updated at its target, so the link
+        stays. The old file is made private before it is replaced, so another hard link to it
+        does not keep the previous keys readable by others.
         """
         config["configured"] = True
         text = json.dumps(config, indent=2, ensure_ascii=False)
-        tmp = self.config_path.with_name(f".{self.config_path.name}.{secrets.token_hex(6)}.tmp")
+        target = self.config_path.resolve() if self.config_path.is_symlink() else self.config_path
+        tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(text)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, self.config_path)
+            if target.exists():
+                os.chmod(target, 0o600)  # the old inode, shared by any other hard link
+            os.replace(tmp, target)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
@@ -211,7 +217,7 @@ TEXTS: dict[str, dict[str, Any]] = {
         "step3_select_prompt": "Enter provider numbers to configure (comma-separated), or press Enter to skip:",
         "step3_key_prompt": "API key for {name} ({env}):",
         "step3_key_keep": "[saved: Enter keeps it, '-' deletes it]",
-        "step3_local_prompt": "Setting for {name} ({env}) [current: {default}]:",
+        "step3_local_prompt": "Setting for {name} ({env}) [current: {default}; '-' clears it]:",
         "complete_title": "Configuration Complete",
         "complete_msg": "DESMAN is ready. Run `desman` to start.",
         "config_path": "Config saved to",
@@ -311,7 +317,7 @@ TEXTS: dict[str, dict[str, Any]] = {
         "step3_select_prompt": "Введите номера провайдеров для настройки (через запятую), или Enter для пропуска:",
         "step3_key_prompt": "API-ключ для {name} ({env}):",
         "step3_key_keep": "[сохранён: Enter — оставить, '-' — удалить]",
-        "step3_local_prompt": "Настройка {name} ({env}) [текущее: {default}]:",
+        "step3_local_prompt": "Настройка {name} ({env}) [текущее: {default}; '-' — очистить]:",
         "complete_title": "Настройка завершена",
         "complete_msg": "DESMAN готов. Запустите `desman` для старта.",
         "config_path": "Конфиг сохранён в",
@@ -451,7 +457,9 @@ def _run_provider_selection(
                 default=default_val,
                 show_default=True,
             )
-            if val.strip():
+            if val.strip() == "-":
+                local_settings.pop(p["env"], None)
+            elif val.strip():
                 local_settings[p["env"]] = val.strip()
 
     return api_keys, local_settings
