@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -14,6 +15,7 @@ from click.testing import CliRunner
 
 from desman.cli import cli
 from desman.core import db
+from desman.core.audit import check_history, history
 from desman.core.states import SubtaskStatus
 from desman.core.store import Store
 
@@ -256,6 +258,35 @@ def test_v2_database_upgrades_and_keeps_its_history(tmp_path: Path) -> None:
     ]
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO audit_log (actor, action) VALUES ('human', 'new')")
+    conn.close()
+
+
+def test_legacy_entries_without_task_id_stay_in_the_task_history(tmp_path: Path) -> None:
+    # Before migration 3 nothing forced task_id; the log is append-only, so such rows are found
+    # through their subtask rather than backfilled.
+    path = tmp_path / "v2.db"
+    old = _db_at_version(path, 2)
+    task_id = add_task(old)
+    subtask = add_subtask(old, task_id, status="ready")
+    old.execute(
+        "INSERT INTO audit_log (task_id, actor, action, details_json) "
+        "VALUES (?, 'human', 'task_created', ?)",
+        (task_id, json.dumps({"subtasks": [subtask]})),
+    )
+    old.execute(
+        "INSERT INTO audit_log (subtask_id, actor, action, from_status, to_status) "
+        "VALUES (?, 'scheduler', 'dependencies_met', 'pending', 'ready')",
+        (subtask,),
+    )
+    old.close()
+    conn = db.open_db(path)
+    entries = history(conn, task_id)
+    assert [(e.action, e.task_id) for e in entries] == [
+        ("task_created", task_id),
+        ("dependencies_met", task_id),
+    ]
+    assert check_history(conn, task_id) == []
+    assert len(Store(conn).audit_log(task_id)) == 2
     conn.close()
 
 

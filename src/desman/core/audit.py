@@ -35,11 +35,11 @@ class AuditEntry(BaseModel):
     details: dict[str, Any]
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row) -> AuditEntry:
+    def from_row(cls, row: sqlite3.Row, task_id: str) -> AuditEntry:
         return cls(
             seq=row["seq"],
             ts=row["ts"],
-            task_id=row["task_id"],
+            task_id=row["task_id"] or task_id,  # legacy rows: known through their subtask
             subtask_id=row["subtask_id"],
             actor=Actor(row["actor"]),
             action=row["action"],
@@ -49,10 +49,19 @@ class AuditEntry(BaseModel):
         )
 
 
+# Rows written before migration 3 may lack task_id; their subtask still says which task they
+# belong to. The log is append-only, so they are matched here instead of being backfilled.
+TASK_HISTORY_SQL = """
+    SELECT * FROM audit_log
+    WHERE task_id = :task
+       OR (task_id IS NULL AND subtask_id IN (SELECT id FROM subtasks WHERE task_id = :task))
+    ORDER BY seq"""
+
+
 def history(conn: sqlite3.Connection, task_id: str) -> list[AuditEntry]:
     """Every entry of a task and its subtasks, in the order they were written."""
-    rows = conn.execute("SELECT * FROM audit_log WHERE task_id = ? ORDER BY seq", (task_id,))
-    return [AuditEntry.from_row(row) for row in rows]
+    rows = conn.execute(TASK_HISTORY_SQL, {"task": task_id})
+    return [AuditEntry.from_row(row, task_id) for row in rows]
 
 
 def check_history(conn: sqlite3.Connection, task_id: str) -> list[str]:
