@@ -11,7 +11,8 @@ Prompts start with "Execute subtask" and "Review subtask", so a fake script can 
 from __future__ import annotations
 
 import json
-from typing import Any
+import math
+from typing import Any, NoReturn
 
 from desman.core.coordinator import Executor, Failure, Review, Reviewer, Success, Work
 from desman.core.models import Subtask
@@ -84,8 +85,21 @@ def _request(system: str, heading: str, payload: dict[str, Any]) -> Request:
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
+    """The reply as a JSON object, or None. Strict JSON only: Python's parser also accepts NaN,
+    Infinity and overflowing numbers such as 1e999, which no JSON store accepts."""
     try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
+        value = json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float)
+    except ValueError:  # JSONDecodeError is one
         return None
     return value if isinstance(value, dict) else None
+
+
+def _reject_constant(name: str) -> NoReturn:
+    raise ValueError(f"{name} is not JSON")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"{text} does not fit a finite number")
+    return value

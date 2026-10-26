@@ -53,6 +53,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
         row = store.find_task(task_id)
         subtasks = store.list_subtasks(row["id"])
         seq_of = {s.id: s.seq for s in subtasks}
+        by_id = {s.id: s for s in subtasks}
         reports = []
         for sub in subtasks:
             last = store.conn.execute(
@@ -60,7 +61,13 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                    ORDER BY seq DESC LIMIT 1""",
                 (sub.id, sub.status.value),
             ).fetchone()
-            reason = json.loads(last[0]).get("reason") if last else None
+            details = json.loads(last[0]) if last else {}
+            reason = details.get("reason")
+            root = (
+                by_id.get(details.get("cause", "")) if sub.status is SubtaskStatus.BLOCKED else None
+            )
+            if root is not None:  # blocking names the failed or cancelled root, not a reason
+                reason = f"blocked by [{root.seq}] {root.description} ({root.status})"
             reports.append(
                 SubtaskReport(
                     id=sub.id,
@@ -81,21 +88,36 @@ def task_report(store: Store, task_id: str) -> TaskReport:
 def task_summaries(
     store: Store, *, status: TaskStatus | None = None, limit: int = 20
 ) -> list[TaskReport]:
-    """Tasks newest first, without their subtasks."""
+    """Tasks newest first, without their subtasks.
+
+    Read page by page: status is derived from subtasks, so a filter cannot be pushed into SQL,
+    but without one only `limit` tasks are read.
+    """
+    page = limit if status is None else max(limit, 100)
+    summaries: list[TaskReport] = []
     with db.read_snapshot(store.conn):
-        statuses: dict[str, list[SubtaskStatus]] = {}
-        for task_id, value in store.conn.execute("SELECT task_id, status FROM subtasks"):
-            statuses.setdefault(task_id, []).append(SubtaskStatus(value))
-        rows = store.conn.execute(
-            "SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC"
-        ).fetchall()
-    summaries = []
-    for row in rows:
-        report = _report(row, statuses.get(row["id"], []), [])
-        if status is None or report.status is status:
-            summaries.append(report)
-            if len(summaries) >= limit:
+        offset = 0
+        while len(summaries) < limit:
+            rows = store.conn.execute(
+                "SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                (page, offset),
+            ).fetchall()
+            if not rows:
                 break
+            offset += len(rows)
+            ids = [row["id"] for row in rows]
+            statuses: dict[str, list[SubtaskStatus]] = {}
+            placeholders = ", ".join("?" for _ in ids)
+            for task_id, value in store.conn.execute(
+                f"SELECT task_id, status FROM subtasks WHERE task_id IN ({placeholders})", ids
+            ):
+                statuses.setdefault(task_id, []).append(SubtaskStatus(value))
+            for row in rows:
+                report = _report(row, statuses.get(row["id"], []), [])
+                if status is None or report.status is status:
+                    summaries.append(report)
+                    if len(summaries) >= limit:
+                        break
     return summaries
 
 

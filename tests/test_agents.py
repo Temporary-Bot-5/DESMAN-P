@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from conftest import FakeClock
 from desman.agents import llm_executor, llm_reviewer
 from desman.core.context import build_context
@@ -111,3 +114,60 @@ def test_unusable_verdict_is_an_interrupted_review(store: Store, clock: FakeCloc
     [sub] = store.list_subtasks(task_id)
     assert (sub.attempts.quality, sub.attempts.transient) == (0, 2)  # the work was never redone
     assert sum(r.prompt.startswith("Execute") for r in llm.calls) == 1
+
+
+# ── Review regressions (PR #11) ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "reply", ['{"value": 1e999}', '{"value": -1e999}', '{"v": NaN}', '{"v": Infinity}']
+)
+def test_non_finite_numbers_are_a_quality_failure(
+    store: Store, clock: FakeClock, reply: str
+) -> None:
+    llm = (
+        FakeLLM()
+        .on("Execute", reply, '{"ok": 1}')
+        .on("Review", '{"verdict": "accept"}', repeat_last=True)
+    )
+    task_id = store.create_task(one_step())
+    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
+        task_id
+    )
+    assert result.status is TaskStatus.DONE
+    [sub] = store.list_subtasks(task_id)
+    assert sub.attempts.quality == 1
+    assert store.latest_artifact(sub.id) == {"ok": 1}
+
+
+def test_success_content_must_be_strict_json() -> None:
+    with pytest.raises(ValidationError):
+        Success(content={"x": float("inf")})
+    with pytest.raises(ValidationError):
+        Success(content={"when": object()})
+    assert Success(content={"nested": [1, "a", None, {"b": 2.5}]}).content["nested"][3] == {
+        "b": 2.5
+    }
+
+
+def test_task_text_naming_the_other_role_does_not_misroute(store: Store, clock: FakeClock) -> None:
+    # Routes in the order a careless script would write them: Execute first.
+    llm = (
+        FakeLLM()
+        .on("Execute", '{"plan": "Review subtask: done"}')
+        .on("Review", '{"verdict": "accept"}', repeat_last=True)
+    )
+    spec = TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(
+                description="Execute this plan, then Review it",
+                acceptance_criteria="Execute subtask",
+            )
+        ],
+    )
+    task_id = store.create_task(spec)
+    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
+        task_id
+    )
+    assert result.status is TaskStatus.DONE

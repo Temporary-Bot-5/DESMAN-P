@@ -34,6 +34,7 @@ EXIT_DONE = 0
 EXIT_NEEDS_HUMAN = 3
 EXIT_PAUSED = 4
 EXIT_STOPPED = 5  # failed or cancelled
+EXIT_ACTIVE = 6  # still in progress (someone holds a lease, or nobody has run it)
 TEMPLATE_CRITERIA = "The result fully achieves the stated goal."
 
 
@@ -237,7 +238,7 @@ def run(
 
     Without --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP
     2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),
-    5 failed or cancelled.
+    5 failed or cancelled, 6 still in progress elsewhere.
     """
     if (goal is None) == (spec_path is None):
         raise click.UsageError("give either GOAL or --spec, not both")
@@ -413,7 +414,7 @@ def _exit_code(status: TaskStatus, *, paused: bool) -> int:
     if status is TaskStatus.NEEDS_HUMAN:
         return EXIT_NEEDS_HUMAN
     if status is TaskStatus.ACTIVE:
-        return EXIT_PAUSED if paused else EXIT_DONE  # still active: someone is working on it
+        return EXIT_PAUSED if paused else EXIT_ACTIVE
     return EXIT_STOPPED
 
 

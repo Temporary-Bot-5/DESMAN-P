@@ -13,6 +13,8 @@ Calls from different roles interleave, so a fake can route by prompt instead of 
 
     llm = FakeLLM().on("Review", "accept", repeat_last=True).on("Plan", plan_json)
 
+matching on how the prompt starts (the role's heading), never on text further inside it.
+
 Running out of script raises `ScriptExhausted`, a `BaseException`, so the coordinator does not
 swallow it as a transient error and the test fails loudly. Time comes from the injected `clock`
 and `sleep` (pass `FakeClock`), so timeouts and latency cost no real time.
@@ -123,7 +125,7 @@ class Route(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     match: str
-    """Substring of the last user message."""
+    """Prefix of the last user message (its heading, e.g. "Review")."""
     steps: list[Step | str]
     repeat_last: bool = False
 
@@ -177,12 +179,13 @@ class FakeLLM:
         """The step each call resolved to, in call order."""
 
     def on(self, match: Matcher, *steps: ScriptItem, repeat_last: bool = False) -> FakeLLM:
-        """Serve `steps` to calls whose prompt contains `match` (or for which it returns True).
-        Routes are tried in the order they were added, before the main script."""
+        """Serve `steps` to calls whose prompt starts with `match` (or for which it returns True).
+        Routes are tried in the order they were added, before the main script. A prefix, not a
+        substring: task text inside a prompt must not be able to divert a call to another role."""
         matches: Callable[[Request], bool]
         if isinstance(match, str):
             text = match
-            matches = lambda request: text in request.prompt  # noqa: E731
+            matches = lambda request: request.prompt.startswith(text)  # noqa: E731
         else:
             matches = match
         self._routes.append((matches, _Queue(f"route {match!r}", steps, repeat_last)))

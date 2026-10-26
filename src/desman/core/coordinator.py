@@ -16,6 +16,7 @@ driven by real LLM-backed agents.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -41,6 +42,16 @@ class Success(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     content: dict[str, Any]
+    """Stored as the artifact: must be strict JSON (no NaN/Infinity, only JSON types)."""
+
+    @field_validator("content")
+    @classmethod
+    def _strict_json(cls, content: dict[str, Any]) -> dict[str, Any]:
+        try:
+            json.dumps(content, allow_nan=False)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"result is not storable as JSON: {e}") from e
+        return content
 
 
 class Failure(BaseModel):

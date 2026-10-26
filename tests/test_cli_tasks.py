@@ -11,10 +11,11 @@ from typing import Any
 import pytest
 from click.testing import CliRunner, Result
 
-from desman.cli import EXIT_DONE, EXIT_NEEDS_HUMAN, EXIT_PAUSED, EXIT_STOPPED, cli
+from desman.cli import EXIT_ACTIVE, EXIT_DONE, EXIT_NEEDS_HUMAN, EXIT_PAUSED, EXIT_STOPPED, cli
 from desman.core import db
 from desman.core.audit import check_history, history
 from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.states import TaskStatus
 from desman.core.store import Store
 
 ACCEPT = '{"verdict": "accept"}'
@@ -229,7 +230,7 @@ def test_status_json_and_running_subtask() -> None:
     claimed = s.claim("worker-7")
     assert claimed is not None and claimed.lease_token is not None
     text = desman("status", task_id)
-    assert text.exit_code == EXIT_DONE  # active, someone is working on it
+    assert text.exit_code == EXIT_ACTIVE  # someone is working on it
     assert "line one line two" in text.output and "held by worker-7" in text.output
     out = desman("status", task_id, "--json")
     report = json.loads(out.output)
@@ -263,3 +264,74 @@ def test_task_commands_never_prompt(tmp_path: Path) -> None:
         result = runner.invoke(cli, args, input="")
         assert result.exit_code == EXIT_DONE, (args, result.output)
         assert "language" not in result.output.lower(), args
+
+
+# ── Review regressions (PR #11) ──────────────────────────────────────────────
+
+
+def test_active_task_has_its_own_exit_code() -> None:
+    s = store()
+    task_id = s.create_task(
+        TaskSpec(goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")])
+    )
+    result = desman("status", task_id)
+    assert result.exit_code == EXIT_ACTIVE != EXIT_DONE
+    assert "active" in result.output
+
+
+def test_blocked_subtask_names_what_blocks_it(tmp_path: Path) -> None:
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor, SubtaskStatus
+
+    s = store()
+    spec = TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(description="fetch data", acceptance_criteria="c"),
+            SubtaskSpec(description="analyse", acceptance_criteria="c", depends_on=[0]),
+            SubtaskSpec(description="report", acceptance_criteria="c", depends_on=[1]),
+        ],
+    )
+    task_id = s.create_task(spec)
+    claimed = s.claim("w")
+    assert claimed is not None and claimed.lease_token is not None
+    s.record_failure(
+        claimed.id,
+        SubtaskStatus.RUNNING,
+        Actor.EXECUTOR,
+        FailureKind.PERMANENT,
+        lease=claimed.lease_token,
+        reason="403",
+    )
+    s.transition(
+        claimed.id,
+        SubtaskStatus.NEEDS_HUMAN,
+        SubtaskStatus.FAILED,
+        Actor.HUMAN,
+        reason="source is gone",
+    )
+    report = json.loads(desman("status", task_id, "--json").output)
+    reasons = [sub["reason"] for sub in report["subtasks"]]
+    assert reasons[0] == "source is gone"
+    assert reasons[1] == reasons[2] == "blocked by [0] fetch data (failed)"
+    assert "blocked by [0] fetch data (failed)" in desman("status", task_id).output
+
+
+def test_list_limit_does_not_load_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = store()
+    for i in range(30):
+        s.create_task(
+            TaskSpec(
+                goal=f"goal {i}", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")]
+            )
+        )
+    seen: list[str] = []
+    s.conn.set_trace_callback(seen.append)
+    from desman.core.report import task_summaries
+
+    newest = task_summaries(s, limit=2)
+    assert [t.goal for t in newest] == ["goal 29", "goal 28"]
+    full_scans = [q for q in seen if "FROM subtasks" in q and "WHERE" not in q]
+    assert full_scans == []
+    only_done = task_summaries(s, status=TaskStatus.DONE, limit=5)
+    assert only_done == []
