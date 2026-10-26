@@ -2,13 +2,16 @@
 
 A research prototype for a decentralized, fault-tolerant, self-evolving network of small AI agents.
 
-## Overview
+DESMAN(P) coordinates many short-lived, specialized agents (LLM-based workers, tools, lightweight
+services) to decompose large tasks, recover from agent failures, prioritize critical work, and
+gradually improve its own components under human supervision.
 
-DESMAN(P) coordinates many short-lived, specialized agents (LLM-based workers, tools, lightweight services) to decompose large tasks, recover from agent failures, prioritize critical work, and gradually improve its own components under human supervision.
+> **Status:** the core is being rewritten (see `ROADMAP.md`). Right now only the CLI shell and
+> the configuration wizard work.
 
 ## Core Principles
 
-- **Durable state first** - No agent holds important state alone; SQLite/file-based persistence
+- **Durable state first** - No agent holds important state alone; SQLite persistence
 - **Resumability** - Every task decomposed into checkpoints for crash recovery
 - **Fault tolerance** - Agent failure is normal; stale tasks detected via leases/timeouts
 - **Prioritization & preemption** - Critical tasks interrupt lower-priority work
@@ -17,81 +20,33 @@ DESMAN(P) coordinates many short-lived, specialized agents (LLM-based workers, t
 - **Controlled self-evolution** - Changes through reviewable pipeline only
 - **Budget awareness** - Designed for free-tier LLM APIs with rate limits
 
-## Architecture (v1)
-
-```
-Task Store (SQLite) ←→ Scheduler/Coordinator ←→ Agent Runtime ←→ Model Router
-                                                          ↓
-                                                  Tool Registry
-                                                          ↓
-                                                  Reviewer/Validator
-                                                          ↓
-                                                  Evolution Module (later)
-```
-
-**Roles:** Planner, Executor, Reviewer, Coordinator, Improvement Analyst
-
 ## Quick Start
 
 ```bash
-# Install dependencies
-pip install -e ".[dev]"
+uv venv -p python3.12 .venv
+uv pip install -e ".[dev]"
 
-# Run tests
-pytest
-
-# Run CLI (when implemented)
-python -m desman --help
+desman          # first run: configuration wizard, then project info
+desman config   # reconfigure (language, providers, API keys, agent permissions)
+desman help
 ```
 
-## Project Structure
+Configuration is stored in `~/.config/desman/config.json` (override the directory with
+`DESMAN_CONFIG_DIR`).
 
-```
-desman-p/
-├── src/desman/           # Main package
-│   ├── core/             # Task store, scheduler, coordinator
-│   ├── runtime/          # Agent runtime, executor
-│   ├── models/           # Pydantic models for tasks, artifacts
-│   ├── router/           # Model router, provider fallback
-│   ├── tools/            # Tool registry, sandbox
-│   ├── review/           # Reviewer/validator
-│   └── evolution/        # Improvement analyst (later)
-├── tests/
-├── data/                 # SQLite databases, artifacts (gitignored)
-├── workspace/            # Agent working directories (gitignored)
-├── PROJECT_PLAN.md       # Full project specification
-├── CLAUDE.md             # Guidance for Claude Code
-├── pyproject.toml
-└── .gitignore
+## Development
+
+```bash
+pre-commit install
+ruff check . && ruff format --check . && mypy && pytest
 ```
 
-## Development Status
+## Documents
 
-**Phase 1 (Current):** Single-agent execution loop
-- Task store with SQLite
-- Basic planner → executor → reviewer loop
-- Checkpoint/resume capability
-- Audit logging
-
-**Phase 2:** Multi-executor, model routing, priority preemption
-
-**Phase 3:** Fault injection tests, self-improvement workflow
-
-## Free-tier Constraints
-
-- Uses free/trial cloud LLM APIs (Gemini, Groq, OpenRouter, Cloudflare Workers AI, etc.)
-- Every provider treated as unreliable and rate-limited
-- Implements fallback, throttling, caching, task pausing
-- No secrets/personal data sent to free APIs without policy review
-
-## Security Rules
-
-- No agent modifies its own permissions/safety constraints
-- No generated code with broad system access
-- Sandboxing + least-privilege tools
-- All decisions logged
-- Self-modifications as reviewable diffs/PRs
-- Rollback path preserved
+- `PROJECT_PLAN.md` - full specification
+- `ROADMAP.md` - audit of the first prototype and the ordered task chain
+- `docs/adr/` - architecture decisions
+- `CLAUDE.md` - guidance for AI assistants
 
 ## License
 

@@ -1,3 +1,4 @@
-"""DESMAN-P+Human - Multimodal Weak Agent Framework CLI"""
-__version__ = "0.1.0"
-__author__ = "DESMAN-P+Human Team"
+"""DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)."""
+
+__version__ = "0.2.0.dev0"
+__author__ = "Temporary Bot 5"
