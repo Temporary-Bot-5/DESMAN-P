@@ -66,9 +66,9 @@ class Store:
     def create_task(self, spec: TaskSpec, actor: Actor = Actor.HUMAN) -> str:
         """Store a task and its subtask graph; returns the task id."""
         task_id = _new_id()
-        now = self._now()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
+            now = self._now()  # after the lock: creation order matches commit order
             self.conn.execute(
                 "INSERT INTO tasks (id, goal, priority, created_at) VALUES (?, ?, ?, ?)",
                 (task_id, spec.goal, spec.priority, now),
@@ -140,9 +140,10 @@ class Store:
         """
         check_transition(S.READY, S.RUNNING, Actor.EXECUTOR)
         lease_token = _new_id()
-        lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         with db.transaction(self.conn):
+            # Times are taken after the write lock is held: waiting for it must not eat the lease.
+            lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
             self._promote_ready()
             row = self.conn.execute(
                 f"""UPDATE subtasks
@@ -250,13 +251,16 @@ class Store:
         just passed and nobody has requeued the subtask yet. Once it was requeued or reclaimed,
         raises StaleStateError: the executor must stop and drop its work.
         """
-        lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
         sets = ["lease_until = ?", "updated_at = ?"]
-        params: list[Any] = [lease_until, self._now()]
         if checkpoint is not None:
             sets.append("checkpoint_json = ?")
-            params.append(json.dumps(checkpoint, ensure_ascii=False))
         with db.transaction(self.conn):
+            # Deadline from after the write lock is acquired, or a slow lock wait could commit
+            # an already expired lease that recover_expired() would immediately take away.
+            lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
+            params: list[Any] = [lease_until, self._now()]
+            if checkpoint is not None:
+                params.append(json.dumps(checkpoint, ensure_ascii=False))
             row = self.conn.execute(
                 f"""UPDATE subtasks SET {", ".join(sets)}
                     WHERE id = ? AND status = 'running' AND lease_token = ? RETURNING *""",
@@ -266,12 +270,13 @@ class Store:
                 self._raise_stale(subtask_id, S.RUNNING, S.RUNNING, lease, self._now())
             subtask = Subtask.from_row(row)
             if checkpoint is not None:
-                # Plain heartbeats are not audited (too frequent); checkpoints are.
+                # Plain heartbeats are not audited (too frequent). Checkpoints are, with their
+                # content: the column only keeps the latest one, the audit log keeps them all.
                 self._audit(
                     Actor.EXECUTOR,
                     "checkpoint",
                     subtask=subtask,
-                    details={"owner": subtask.lease_owner, "keys": sorted(checkpoint)},
+                    details={"owner": subtask.lease_owner, "checkpoint": checkpoint},
                 )
         return subtask
 
@@ -282,9 +287,9 @@ class Store:
         ends up with the operator instead of looping forever. The checkpoint is kept, so the next
         executor resumes from it.
         """
-        now = self._now()
         recovered: list[Subtask] = []
         with db.transaction(self.conn):
+            now = self._now()
             rows = self.conn.execute(
                 """SELECT * FROM subtasks WHERE status = 'running' AND lease_until < ?
                    ORDER BY lease_until""",
@@ -313,9 +318,9 @@ class Store:
 
     def resume_due(self) -> list[Subtask]:
         """Resume PAUSED subtasks whose pause is over, back to where each one stopped."""
-        now = self._now()
         resumed: list[Subtask] = []
         with db.transaction(self.conn):
+            now = self._now()
             rows = self.conn.execute(
                 """SELECT id, resume_status FROM subtasks
                    WHERE status = 'paused' AND (paused_until IS NULL OR paused_until <= ?)

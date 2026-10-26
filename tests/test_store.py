@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -581,3 +583,83 @@ def test_direct_pause_without_deadline_gets_default(store: Store, clock: FakeClo
     )
     assert paused.paused_until == db.to_iso(clock.now + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
     assert store.resume_due() == []
+
+
+def _under_lock_contention(
+    path: Path, action: Callable[[Store], Subtask | None]
+) -> tuple[Subtask | None, str]:
+    """Run `action` in a thread while another connection holds the write lock for 1.5 s.
+
+    Returns the action's result and the time the lock was released.
+    """
+    outcome: dict[str, Any] = {}
+    opened, locked = threading.Event(), threading.Event()
+
+    def run() -> None:
+        store = Store(db.open_db(path))  # migrating takes the lock too, so open before it is held
+        opened.set()
+        locked.wait()
+        try:
+            outcome["result"] = action(store)
+        except Exception as e:  # reported via the assertion below
+            outcome["error"] = e
+        finally:
+            store.conn.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    opened.wait()
+    other = db.connect(path)
+    other.execute("BEGIN IMMEDIATE")
+    locked.set()
+    time.sleep(1.5)
+    released = db.now_iso()
+    other.execute("COMMIT")
+    other.close()
+    thread.join(timeout=10)
+    assert "error" not in outcome, outcome.get("error")
+    return outcome["result"], released
+
+
+def test_heartbeat_deadline_counts_from_when_it_commits(tmp_path: Path) -> None:
+    path = tmp_path / "d.db"
+    setup = Store(db.open_db(path))
+    setup.create_task(spec(sub("a")))
+    claimed = setup.claim("w1")
+    setup.conn.close()
+    assert claimed is not None and claimed.lease_token is not None
+    token = claimed.lease_token
+
+    beaten, released = _under_lock_contention(
+        path, lambda store: store.heartbeat(claimed.id, token, lease_seconds=1)
+    )
+    assert beaten is not None and beaten.lease_until is not None
+    # Computed before waiting for the lock, the deadline would already be in the past.
+    assert beaten.lease_until > released
+
+
+def test_claim_deadline_counts_from_when_it_commits(tmp_path: Path) -> None:
+    path = tmp_path / "d.db"
+    setup = Store(db.open_db(path))
+    setup.create_task(spec(sub("a")))
+    setup.conn.close()
+
+    claimed, released = _under_lock_contention(
+        path, lambda store: store.claim("w1", lease_seconds=1)
+    )
+    assert claimed is not None and claimed.lease_until is not None
+    assert claimed.lease_until > released
+
+
+def test_checkpoint_history_is_kept_in_audit(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    assert claimed.lease_token is not None
+    for step in (1, 2, 3):
+        store.heartbeat(claimed.id, claimed.lease_token, checkpoint={"step": step})
+    saved = [
+        json.loads(r["details_json"])["checkpoint"]
+        for r in store.audit_log(task_id)
+        if r["action"] == "checkpoint"
+    ]
+    assert saved == [{"step": 1}, {"step": 2}, {"step": 3}]
