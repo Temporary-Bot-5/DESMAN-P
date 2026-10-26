@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
 from desman.core import db
+from desman.core.context import DependencyResult, Feedback
 from desman.core.models import Subtask, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
@@ -283,7 +284,8 @@ class Store:
                 attempts=decision.attempts,
                 reason=f"{reason}: {decision.reason}" if reason else decision.reason,
                 paused_until=paused_until,
-                details={"failure": kind.value},
+                # `cause` is the raw reason (e.g. reviewer feedback), passed to the next attempt.
+                details={"failure": kind.value, **({"cause": reason} if reason else {})},
             )
 
     def _count_review_interruption(
@@ -360,6 +362,45 @@ class Store:
         ).fetchone()
         content: dict[str, Any] | None = json.loads(row[0]) if row else None
         return content
+
+    def dependency_results(self, subtask_id: str) -> list[DependencyResult]:
+        """Accepted results of the subtask's direct dependencies, in task order.
+
+        Only the artifact the DONE verdict accepted is passed on (`accepted_attempt`), never a
+        rejected attempt.
+        """
+        rows = self.conn.execute(
+            """SELECT dep.id, dep.description,
+                      (SELECT a.content_json FROM artifacts a
+                       WHERE a.subtask_id = dep.id AND a.attempt = dep.accepted_attempt)
+                      AS content_json
+               FROM subtask_deps d JOIN subtasks dep ON dep.id = d.depends_on
+               WHERE d.subtask_id = ? AND dep.status = 'done'
+               ORDER BY dep.seq""",
+            (subtask_id,),
+        ).fetchall()
+        return [
+            DependencyResult(
+                subtask_id=r["id"],
+                description=r["description"],
+                content=json.loads(r["content_json"]) if r["content_json"] else None,
+            )
+            for r in rows
+        ]
+
+    def last_feedback(self, subtask_id: str) -> Feedback | None:
+        """Why the subtask was last sent back to READY by the reviewer or the operator."""
+        rows = self.conn.execute(
+            """SELECT actor, details_json FROM audit_log
+               WHERE subtask_id = ? AND to_status = 'ready' AND actor IN ('reviewer', 'human')
+               ORDER BY seq DESC LIMIT 1""",
+            (subtask_id,),
+        ).fetchall()
+        if not rows:
+            return None
+        details = json.loads(rows[0]["details_json"])
+        text = details.get("cause") or details.get("reason")
+        return Feedback(source=rows[0]["actor"], text=text) if text else None
 
     # ── Leases and recovery ──────────────────────────────────────────────────
 
@@ -540,6 +581,9 @@ class Store:
         if attempts is not None:
             sets += ["attempts_quality = ?", "attempts_transient = ?"]
             params += [attempts.quality, attempts.transient]
+        if dst is S.DONE:
+            sets.append("accepted_attempt = ?")
+            params.append(self._accepted_attempt(subtask_id, src))
 
         where = ["id = ?", "status = ?"]
         params += [subtask_id, src.value]
@@ -587,6 +631,26 @@ class Store:
         if dst is S.DONE or src is S.FAILED:
             self._promote_ready()
         return subtask
+
+    def _accepted_attempt(self, subtask_id: str, src: SubtaskStatus) -> int | None:
+        """The artifact a DONE verdict accepts.
+
+        The reviewer accepts what it reviewed: the latest attempt. The operator resolving an
+        escalation accepts the latest attempt only if it was under review when escalated; if the
+        executor escalated (e.g. after earlier attempts were rejected), the latest artifact is a
+        rejected one and nothing is accepted - the subtask was done by other means.
+        """
+        latest: int | None = self.conn.execute(
+            "SELECT MAX(attempt) FROM artifacts WHERE subtask_id = ?", (subtask_id,)
+        ).fetchone()[0]
+        if src is S.REVIEW:
+            return latest
+        escalated_from = self.conn.execute(
+            """SELECT from_status FROM audit_log
+               WHERE subtask_id = ? AND to_status = 'needs_human' ORDER BY seq DESC LIMIT 1""",
+            (subtask_id,),
+        ).fetchone()
+        return latest if escalated_from and escalated_from[0] == S.REVIEW.value else None
 
     def _raise_stale(
         self, subtask_id: str, src: SubtaskStatus, dst: SubtaskStatus, lease: str | None, now: str

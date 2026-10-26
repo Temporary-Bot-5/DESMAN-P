@@ -43,6 +43,8 @@ src/desman/
                    #        record_failure (retry policy applied atomically)
                    #        heartbeat/checkpoint, recover_expired, resume_due, sweep,
                    #        submit, task_status, cancel_task, failure propagation
+    ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
+                   #   fitted to a token budget, feedback on the previous attempt
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
 ```
 

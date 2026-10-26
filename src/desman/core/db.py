@@ -96,6 +96,8 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         resume_status       TEXT CHECK (resume_status IN ('ready', 'review')),
         paused_until        TEXT,
         checkpoint_json     TEXT CHECK (checkpoint_json IS NULL OR json_valid(checkpoint_json)),
+        -- Which artifact was accepted (artifacts.attempt); NULL if DONE without one.
+        accepted_attempt    INTEGER CHECK (accepted_attempt IS NULL OR status = 'done'),
         attempts_quality    INTEGER NOT NULL DEFAULT 0 CHECK (attempts_quality >= 0),
         attempts_transient  INTEGER NOT NULL DEFAULT 0 CHECK (attempts_transient >= 0),
         created_at          TEXT NOT NULL DEFAULT {_NOW_SQL},

@@ -79,6 +79,7 @@ class Subtask(BaseModel):
     paused_until: str | None
     checkpoint: dict[str, Any] | None
     attempts: Attempts
+    accepted_attempt: int | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -98,4 +99,5 @@ class Subtask(BaseModel):
             paused_until=row["paused_until"],
             checkpoint=json.loads(row["checkpoint_json"]) if row["checkpoint_json"] else None,
             attempts=Attempts(quality=row["attempts_quality"], transient=row["attempts_transient"]),
+            accepted_attempt=row["accepted_attempt"],
         )

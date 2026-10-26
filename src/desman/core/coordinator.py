@@ -25,6 +25,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from desman.core import db
+from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.models import Subtask
 from desman.core.retry import FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -75,11 +76,14 @@ class Review(BaseModel):
 
 
 class Work(BaseModel):
-    """What an executor gets: the subtask and a way to keep its lease alive."""
+    """What an executor gets: the subtask, its context and a way to keep its lease alive."""
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     subtask: Subtask
+    context: Context
+    """Inputs, checkpoint, accepted results of dependencies (fitted to the budget), feedback on
+    the previous attempt. Everything the executor may build on."""
     heartbeat: Callable[[dict[str, Any] | None], None]
     """Call during long work; pass a checkpoint to save progress. Raises StaleStateError if the
     lease was lost: stop and drop the work."""
@@ -108,6 +112,7 @@ class Coordinator:
         owner: str = "coordinator",
         policy: RetryPolicy | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -116,6 +121,7 @@ class Coordinator:
         self.owner = owner
         self.policy = policy
         self.lease_seconds = lease_seconds
+        self.context_budget_tokens = context_budget_tokens
         self.sleep = sleep
 
     def run(
@@ -179,7 +185,13 @@ class Coordinator:
 
         outcome: Outcome
         try:
-            returned = self.executor(Work(subtask=subtask, heartbeat=heartbeat))
+            context = build_context(
+                subtask,
+                self.store.dependency_results(subtask.id),
+                self.store.last_feedback(subtask.id),
+                self.context_budget_tokens,
+            )
+            returned = self.executor(Work(subtask=subtask, context=context, heartbeat=heartbeat))
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
