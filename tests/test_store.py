@@ -93,7 +93,8 @@ def test_create_task_is_audited(store: Store) -> None:
     task_id = store.create_task(spec(sub("a")))
     actions = [(r["actor"], r["action"]) for r in store.audit_log(task_id)]
     assert actions == [("human", "task_created"), ("scheduler", "dependencies_met")]
-    assert json.loads(store.audit_log(task_id)[0]["details_json"])["subtasks"] == 1
+    created = json.loads(store.audit_log(task_id)[0]["details_json"])
+    assert created["subtasks"] == [s.id for s in store.list_subtasks(task_id)]
 
 
 # ── Readiness and claim ──────────────────────────────────────────────────────

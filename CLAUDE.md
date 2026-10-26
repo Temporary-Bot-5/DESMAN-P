@@ -31,7 +31,7 @@ The old core was removed (still in git history at `3d10a5e`). What remains:
 
 ```
 src/desman/
-├── cli.py         # Click entry point: `desman`, `desman config`, `desman help`, `desman init-db`
+├── cli.py         # Click entry point: `desman`, `config`, `help`, `init-db`, `audit`
 ├── config.py      # ConfigManager + bilingual (en/ru) setup wizard
 ├── info.py        # Banner / project info
 └── core/
@@ -45,6 +45,8 @@ src/desman/
                    #        submit, task_status, cancel_task, failure propagation
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
                    #   fitted to a token budget, feedback on the previous attempt
+    ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
+                   #   every status change was recorded (D7)
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
@@ -63,7 +65,8 @@ backfill if needed) and test upgrading a database built with the previous migrat
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,
 audit in one place) — public entry points are `claim()`, `transition()`, `record_failure()`,
 `submit()`, `cancel_task()` and the housekeeping methods. Never `UPDATE subtasks SET status`
-anywhere else; `claim()` is the one other writer. Contracts crossing a boundary (executor /
+anywhere else; `claim()` is the one other writer. Give each audit entry a meaningful `action`;
+record events that change no status (e.g. discarded work) with `Store.note()`. Contracts crossing a boundary (executor /
 reviewer results, provider data) are Pydantic models validated where they enter.
 
 The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the

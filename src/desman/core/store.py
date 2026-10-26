@@ -46,6 +46,13 @@ class NotFoundError(LookupError):
     pass
 
 
+class AmbiguousIdError(LookupError):
+    pass
+
+
+MIN_ID_PREFIX = 4
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -100,10 +107,34 @@ class Store:
                 actor,
                 "task_created",
                 task_id=task_id,
-                details={"goal": spec.goal, "priority": spec.priority, "subtasks": len(ids)},
+                details={"goal": spec.goal, "priority": spec.priority, "subtasks": ids},
             )
             self._promote_ready()
         return task_id
+
+    def find_task(self, prefix: str) -> sqlite3.Row:
+        """The task whose id is `prefix` or starts with it (at least MIN_ID_PREFIX characters),
+        as typed by an operator."""
+        exact: sqlite3.Row | None = self.conn.execute(
+            "SELECT * FROM tasks WHERE id = ?", (prefix,)
+        ).fetchone()
+        if exact is not None:
+            return exact
+        if len(prefix) < MIN_ID_PREFIX:
+            raise NotFoundError(
+                f"task {prefix!r} not found (give at least {MIN_ID_PREFIX} characters)"
+            )
+        rows = self.conn.execute(
+            "SELECT * FROM tasks WHERE substr(id, 1, ?) = ? ORDER BY created_at LIMIT 6",
+            (len(prefix), prefix),
+        ).fetchall()
+        if not rows:
+            raise NotFoundError(f"task {prefix!r} not found")
+        if len(rows) > 1:
+            shown = ", ".join(r["id"] for r in rows[:5]) + (", …" if len(rows) > 5 else "")
+            raise AmbiguousIdError(f"task id {prefix!r} is ambiguous: {shown}")
+        row: sqlite3.Row = rows[0]
+        return row
 
     def task_status(self, task_id: str) -> TaskStatus:
         rows = self.conn.execute(
@@ -144,6 +175,7 @@ class Store:
                         reason=reason,
                         paused_until=None,
                         details={"scope": "task"},
+                        action="cancel",
                     )
                 )
         return cancelled
@@ -223,6 +255,7 @@ class Store:
         reason: str | None = None,
         paused_until: str | None = None,
         details: dict[str, Any] | None = None,
+        action: str = "transition",
     ) -> Subtask:
         """Move a subtask from `src` to `dst` if it is still in `src`.
 
@@ -246,6 +279,7 @@ class Store:
                 reason=reason,
                 paused_until=paused_until,
                 details=details,
+                action=action,
             )
 
     def record_failure(
@@ -259,6 +293,8 @@ class Store:
         reason: str | None = None,
         paused_until: str | None = None,
         policy: RetryPolicy | None = None,
+        action: str = "failure",
+        details: dict[str, Any] | None = None,
     ) -> Subtask:
         """Apply the retry policy to a failed attempt: retry, pause or escalate to the operator.
 
@@ -274,6 +310,7 @@ class Store:
                     current,
                     decision.attempts,
                     f"{reason}: {decision.reason}" if reason else decision.reason,
+                    details,
                 )
             return self._apply(
                 subtask_id,
@@ -285,11 +322,20 @@ class Store:
                 reason=f"{reason}: {decision.reason}" if reason else decision.reason,
                 paused_until=paused_until,
                 # `cause` is the raw reason (e.g. reviewer feedback), passed to the next attempt.
-                details={"failure": kind.value, **({"cause": reason} if reason else {})},
+                details={
+                    **(details or {}),
+                    "failure": kind.value,
+                    **({"cause": reason} if reason else {}),
+                },
+                action=action,
             )
 
     def _count_review_interruption(
-        self, current: Subtask, attempts: Attempts, reason: str
+        self,
+        current: Subtask,
+        attempts: Attempts,
+        reason: str,
+        details: dict[str, Any] | None = None,
     ) -> Subtask:
         """Bump the transient counter of a subtask that stays in REVIEW. Needs a transaction."""
         if current.status is not S.REVIEW:
@@ -306,7 +352,12 @@ class Store:
             Actor.REVIEWER,
             "review_interrupted",
             subtask=subtask,
-            details={"reason": reason, "attempts": attempts.model_dump(), "failure": "transient"},
+            details={
+                **(details or {}),
+                "reason": reason,
+                "attempts": attempts.model_dump(),
+                "failure": "transient",
+            },
         )
         return subtask
 
@@ -334,6 +385,7 @@ class Store:
                 reason=None,
                 paused_until=None,
                 details={"artifact_attempt": attempt},
+                action="submit",
             )
             self.conn.execute(
                 """INSERT INTO artifacts (id, subtask_id, attempt, kind, content_json, created_at)
@@ -483,6 +535,7 @@ class Store:
                             "failure": FailureKind.TRANSIENT.value,
                             "lease": expired.lease_token,
                         },
+                        action="lease_expired",
                     )
                 )
         return recovered
@@ -511,6 +564,7 @@ class Store:
                         reason="pause over",
                         paused_until=None,
                         details=None,
+                        action="pause_over",
                     )
                 )
         return resumed
@@ -743,6 +797,14 @@ class Store:
         return self.conn.execute(
             "SELECT * FROM audit_log WHERE task_id = ? ORDER BY seq", (task_id,)
         ).fetchall()
+
+    def note(
+        self, subtask_id: str, actor: Actor, action: str, details: dict[str, Any] | None = None
+    ) -> None:
+        """Record something that happened to a subtask without changing it (e.g. work that was
+        thrown away because its lease was lost), so the history explains every outcome."""
+        with db.transaction(self.conn):
+            self._audit(actor, action, subtask=self.get_subtask(subtask_id), details=details)
 
     def _audit(
         self,
