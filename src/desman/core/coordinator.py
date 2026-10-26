@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -30,6 +31,7 @@ from desman.core.models import Subtask
 from desman.core.retry import FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
+from desman.core.workspace import PathEscapeError, Workspace, default_workspace_root
 
 S = SubtaskStatus
 
@@ -87,6 +89,9 @@ class Work(BaseModel):
     heartbeat: Callable[[dict[str, Any] | None], None]
     """Call during long work; pass a checkpoint to save progress. Raises StaleStateError if the
     lease was lost: stop and drop the work."""
+    workspace: Workspace
+    """The task's own directory; the only place files may be read or written. A path that
+    escapes it raises PathEscapeError, which counts as a bad attempt (quality failure)."""
 
 
 Executor = Callable[[Work], Outcome]
@@ -113,6 +118,7 @@ class Coordinator:
         policy: RetryPolicy | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
+        workspaces: Path | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -122,6 +128,7 @@ class Coordinator:
         self.policy = policy
         self.lease_seconds = lease_seconds
         self.context_budget_tokens = context_budget_tokens
+        self.workspaces = workspaces if workspaces is not None else default_workspace_root()
         self.sleep = sleep
 
     def run(
@@ -191,13 +198,20 @@ class Coordinator:
                 self.store.last_feedback(subtask.id),
                 self.context_budget_tokens,
             )
-            returned = self.executor(Work(subtask=subtask, context=context, heartbeat=heartbeat))
+            workspace = Workspace(self.workspaces, subtask.task_id)
+            returned = self.executor(
+                Work(subtask=subtask, context=context, heartbeat=heartbeat, workspace=workspace)
+            )
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
         except StaleStateError:
             events.append(f"lost lease {subtask.id}")
             return
+        except (
+            PathEscapeError
+        ) as e:  # the attempt asked for a forbidden path: try again, differently
+            outcome = Failure(kind=FailureKind.QUALITY, reason=f"path refused: {e}")
         except Exception as e:  # an executor bug or crash: the attempt was interrupted
             outcome = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"executor raised {type(e).__name__}: {e}"
