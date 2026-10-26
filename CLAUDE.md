@@ -48,8 +48,11 @@ src/desman/
 
 Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a
 released migration in `db.MIGRATIONS`; append a new one. Keep the `subtasks.status` CHECK in
-sync with `SubtaskStatus` (a test enforces it). All status changes go through
-`Store.claim()` / `Store.transition()`; never `UPDATE subtasks SET status` anywhere else.
+sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,
+audit in one place) — public entry points are `claim()`, `transition()`, `record_failure()`,
+`submit()`, `cancel_task()` and the housekeeping methods. Never `UPDATE subtasks SET status`
+anywhere else; `claim()` is the one other writer. Contracts crossing a boundary (executor /
+reviewer results, provider data) are Pydantic models validated where they enter.
 
 The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the
 current phase (no multiple workers, routing, preemption or self-improvement before their phase).

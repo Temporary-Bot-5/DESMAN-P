@@ -18,6 +18,7 @@ from desman.core import db
 from desman.core.models import Priority, Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy
 from desman.core.states import Actor, InvalidTransitionError, SubtaskStatus, TaskStatus
+from desman.core.states import transition as check_transition
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
     DEFAULT_PAUSE_SECONDS,
@@ -765,3 +766,71 @@ def test_pending_reviews_scoped_to_task(store: Store) -> None:
         assert claimed.lease_token is not None
         store.submit(claimed.id, claimed.lease_token, {})
     assert [s.task_id for s in store.pending_reviews(task_id=mine)] == [mine]
+
+
+# ── Review fixes (PR #6) ─────────────────────────────────────────────────────
+
+
+def test_housekeeping_can_be_scoped_to_a_task(store: Store, clock: FakeClock) -> None:
+    mine = store.create_task(spec(sub("a")))
+    other = store.create_task(spec(sub("b")))
+    a = store.claim("w", task_id=mine)
+    b = store.claim("w", task_id=other)
+    assert a is not None and b is not None
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
+    assert [s.id for s in store.recover_expired(task_id=mine)] == [a.id]
+    assert store.get_subtask(b.id).status is S.RUNNING
+
+
+def test_transient_review_failure_keeps_the_artifact_in_review(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    assert claimed.lease_token is not None
+    store.submit(claimed.id, claimed.lease_token, {"x": 1})
+    policy = RetryPolicy(max_transient=2)
+    kept = store.record_failure(
+        claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT, policy=policy
+    )
+    assert (kept.status, kept.attempts) == (S.REVIEW, Attempts(transient=1))
+    escalated = store.record_failure(
+        claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT, policy=policy
+    )
+    assert escalated.status is S.NEEDS_HUMAN
+
+
+def test_every_audited_change_is_a_legal_transition(store: Store) -> None:
+    # Exercise every automatic path (readiness, blocking, unblocking, cancelling) and check the
+    # audit: each status change must be one the state machine allows for its actor.
+    task_id = store.create_task(spec(sub("a"), sub("b", 0), sub("c", 1), sub("d")))
+    a = claim(store)
+    give_up(store, a.id)
+    store.transition(a.id, S.FAILED, S.READY, A.HUMAN)
+    finish(store, claim(store))
+    store.cancel_task(task_id, reason="done testing")
+    changes = [r for r in store.audit_log(task_id) if r["to_status"] is not None]
+    assert {r["action"] for r in changes} >= {
+        "dependencies_met",
+        "dependency_failed",
+        "dependency_revived",
+        "claim",
+        "transition",
+    }
+    for r in changes:
+        check_transition(
+            SubtaskStatus(r["from_status"]), SubtaskStatus(r["to_status"]), Actor(r["actor"])
+        )
+
+
+def test_bad_pause_deadline_is_rejected(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    with pytest.raises(ValueError):
+        store.transition(
+            claimed.id,
+            S.RUNNING,
+            S.PAUSED,
+            A.EXECUTOR,
+            lease=claimed.lease_token,
+            paused_until="later",
+        )
+    assert store.get_subtask(claimed.id).status is S.RUNNING

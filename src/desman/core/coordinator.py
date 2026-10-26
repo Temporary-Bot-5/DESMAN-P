@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from desman.core import db
 from desman.core.models import Subtask
 from desman.core.retry import FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -31,16 +33,29 @@ from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 S = SubtaskStatus
 
 
-@dataclass(frozen=True)
-class Success:
+class Success(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     content: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class Failure:
+class Failure(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     kind: FailureKind
     reason: str
-    paused_until: str | None = None  # for LIMIT: when the provider's quota resets
+    paused_until: str | None = None
+    """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
+
+    @field_validator("paused_until", mode="before")
+    @classmethod
+    def _normalize_deadline(cls, value: object) -> object:
+        # Provider data: reject garbage here rather than crash the loop later.
+        if isinstance(value, datetime):
+            return db.to_iso(value)
+        if isinstance(value, str):
+            return db.normalize_iso(value)
+        return value
 
 
 Outcome = Success | Failure
@@ -52,15 +67,17 @@ class Verdict(StrEnum):
     ESCALATE = "escalate"
 
 
-@dataclass(frozen=True)
-class Review:
+class Review(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     verdict: Verdict
     feedback: str = ""
 
 
-@dataclass(frozen=True)
-class Work:
+class Work(BaseModel):
     """What an executor gets: the subtask and a way to keep its lease alive."""
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     subtask: Subtask
     heartbeat: Callable[[dict[str, Any] | None], None]
@@ -72,14 +89,13 @@ Executor = Callable[[Work], Outcome]
 Reviewer = Callable[[Subtask, dict[str, Any] | None], Review | Failure]
 
 
-@dataclass
-class RunResult:
+class RunResult(BaseModel):
     task_id: str
     status: TaskStatus
     ticks: int
     paused_until: str | None = None
     """Set when the run returned because only paused work was left."""
-    events: list[str] = field(default_factory=list)
+    events: list[str] = Field(default_factory=list)
 
 
 class Coordinator:
@@ -137,9 +153,10 @@ class Coordinator:
 
     def tick(self, task_id: str, events: list[str]) -> bool:
         """One pass; returns whether anything moved."""
-        recovered, resumed = self.store.sweep(self.policy)
-        events += [f"recovered {s.id}" for s in recovered if s.task_id == task_id]
-        events += [f"resumed {s.id}" for s in resumed if s.task_id == task_id]
+        # Only this task: `policy` belongs to this run, other tasks may have their own.
+        recovered, resumed = self.store.sweep(self.policy, task_id=task_id)
+        events += [f"recovered {s.id}" for s in recovered]
+        events += [f"resumed {s.id}" for s in resumed]
         progressed = bool(recovered or resumed)
 
         for subtask in self.store.pending_reviews(task_id=task_id):
@@ -160,13 +177,19 @@ class Coordinator:
                 subtask.id, lease, lease_seconds=self.lease_seconds, checkpoint=checkpoint
             )
 
+        outcome: Outcome
         try:
-            outcome = self.executor(Work(subtask=subtask, heartbeat=heartbeat))
+            returned = self.executor(Work(subtask=subtask, heartbeat=heartbeat))
+            if not isinstance(returned, Success | Failure):
+                raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
+            outcome = returned
         except StaleStateError:
             events.append(f"lost lease {subtask.id}")
             return
         except Exception as e:  # an executor bug or crash: the attempt was interrupted
-            outcome = Failure(FailureKind.TRANSIENT, f"executor raised {type(e).__name__}: {e}")
+            outcome = Failure(
+                kind=FailureKind.TRANSIENT, reason=f"executor raised {type(e).__name__}: {e}"
+            )
 
         try:
             if isinstance(outcome, Success):
@@ -188,15 +211,20 @@ class Coordinator:
             events.append(f"lost lease {subtask.id}")  # e.g. cancelled while running
 
     def _review(self, subtask: Subtask, events: list[str]) -> bool:
+        review: Review | Failure
         try:
-            review = self.reviewer(subtask, self.store.latest_artifact(subtask.id))
-        except Exception as e:
-            review = Failure(FailureKind.TRANSIENT, f"reviewer raised {type(e).__name__}: {e}")
+            returned = self.reviewer(subtask, self.store.latest_artifact(subtask.id))
+            # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
+            review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
+        except (Exception, ValidationError) as e:
+            review = Failure(
+                kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"
+            )
         try:
             if isinstance(review, Failure):
                 # Counts against the subtask's budget, so a reviewer that keeps failing cannot
-                # loop forever. (A reviewer *process* that dies leaves the subtask in REVIEW and it
-                # is simply reviewed again; that path does not re-run the work.)
+                # loop forever. A transient one keeps the subtask in REVIEW: the submitted work is
+                # reviewed again, not run again.
                 moved = self.store.record_failure(
                     subtask.id,
                     S.REVIEW,
@@ -219,7 +247,7 @@ class Coordinator:
                     reason=review.feedback or "rejected by reviewer",
                     policy=self.policy,
                 )
-            else:
+            elif review.verdict is Verdict.ESCALATE:
                 moved = self.store.transition(
                     subtask.id,
                     S.REVIEW,
@@ -241,5 +269,5 @@ class Coordinator:
         return moment
 
     def _seconds_until(self, moment: str) -> float:
-        target = datetime.strptime(moment, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+        target = db.parse_iso(moment)
         return max(0.0, (target - self.store.clock()).total_seconds())
