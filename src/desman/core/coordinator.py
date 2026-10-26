@@ -32,6 +32,7 @@ from desman.core.retry import FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
+from desman.llm.base import ProviderError
 
 S = SubtaskStatus
 
@@ -208,9 +209,10 @@ class Coordinator:
         except StaleStateError:
             events.append(f"lost lease {subtask.id}")
             return
-        except (
-            PathEscapeError
-        ) as e:  # the attempt asked for a forbidden path: try again, differently
+        except ProviderError as e:  # agents may let these propagate: the error knows its kind
+            outcome = self._provider_failure(e)
+        except PathEscapeError as e:
+            # The attempt asked for a forbidden path: try again, differently.
             outcome = Failure(kind=FailureKind.QUALITY, reason=f"path refused: {e}")
         except Exception as e:  # an executor bug or crash: the attempt was interrupted
             outcome = Failure(
@@ -242,6 +244,8 @@ class Coordinator:
             returned = self.reviewer(subtask, self.store.latest_artifact(subtask.id))
             # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
+        except ProviderError as e:
+            review = self._provider_failure(e)
         except (Exception, ValidationError) as e:
             review = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"
@@ -285,6 +289,14 @@ class Coordinator:
             return False  # another reviewer got there first
         events.append(f"reviewed {subtask.id} -> {moved.status}")
         return True
+
+    def _provider_failure(self, error: ProviderError) -> Failure:
+        until = error.paused_until(self.store.clock())
+        return Failure(
+            kind=error.kind,
+            reason=f"{type(error).__name__}: {error}",
+            paused_until=None if until is None else db.to_iso(until),
+        )
 
     def _earliest(self, task_id: str, status: str, column: str) -> str | None:
         row = self.store.conn.execute(
