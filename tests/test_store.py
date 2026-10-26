@@ -15,7 +15,13 @@ from desman.core import db
 from desman.core.models import Priority, Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy
 from desman.core.states import Actor, InvalidTransitionError, SubtaskStatus
-from desman.core.store import PauseNotOverError, StaleStateError, Store
+from desman.core.store import (
+    DEFAULT_LEASE_SECONDS,
+    DEFAULT_PAUSE_SECONDS,
+    PauseNotOverError,
+    StaleStateError,
+    Store,
+)
 
 S = SubtaskStatus
 A = Actor
@@ -234,11 +240,12 @@ def test_only_lease_holder_can_leave_running(store: Store) -> None:
     assert store.get_subtask(claimed.id).status is S.RUNNING
 
 
-def test_stale_claim_under_same_name_is_rejected(store: Store) -> None:
+def test_stale_claim_under_same_name_is_rejected(store: Store, clock: FakeClock) -> None:
     # Executor "w1" stalls, its subtask is requeued and claimed again by a restarted "w1".
     # The stalled process must not be able to submit into the new claim.
     store.create_task(spec(sub("a")))
     old = claim(store, "w1")
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
     store.transition(old.id, S.RUNNING, S.READY, A.SCHEDULER, reason="lease expired")
     new = claim(store, "w1")
     assert new.id == old.id and new.lease_token != old.lease_token
@@ -396,3 +403,181 @@ def test_failed_record_failure_changes_nothing(store: Store) -> None:
     with pytest.raises(StaleStateError):
         store.record_failure(claimed.id, S.RUNNING, A.EXECUTOR, FailureKind.QUALITY, lease="forged")
     assert store.get_subtask(claimed.id).attempts == Attempts()
+
+
+# ── Leases, heartbeats and recovery (ROADMAP 1.4) ────────────────────────────
+
+
+def test_heartbeat_extends_lease_and_keeps_work_safe(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    assert claimed.lease_token is not None
+    clock.advance(250)
+    beaten = store.heartbeat(claimed.id, claimed.lease_token, lease_seconds=300)
+    assert beaten.lease_until == db.to_iso(clock.now + timedelta(seconds=300))
+    clock.advance(250)  # 500 s after the claim, but only 250 s after the heartbeat
+    assert store.recover_expired() == []
+    assert store.get_subtask(claimed.id).status is S.RUNNING
+
+
+def test_heartbeat_saves_checkpoint_and_audits_it(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    assert claimed.lease_token is not None
+    store.heartbeat(claimed.id, claimed.lease_token, checkpoint={"step": 2, "notes": "half"})
+    assert store.get_subtask(claimed.id).checkpoint == {"step": 2, "notes": "half"}
+    store.heartbeat(claimed.id, claimed.lease_token)  # plain heartbeat keeps the checkpoint
+    assert store.get_subtask(claimed.id).checkpoint == {"step": 2, "notes": "half"}
+    actions = [r["action"] for r in store.audit_log(task_id)]
+    assert actions.count("checkpoint") == 1
+
+
+def test_crashed_executor_is_recovered_with_its_checkpoint(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(spec(sub("a")))
+    dead = claim(store, "w1")
+    assert dead.lease_token is not None
+    store.heartbeat(dead.id, dead.lease_token, lease_seconds=60, checkpoint={"step": 3})
+    clock.advance(61)
+
+    [recovered] = store.recover_expired()
+    assert recovered.status is S.READY
+    assert recovered.attempts == Attempts(transient=1)
+    assert recovered.lease_owner is None
+
+    heir = claim(store, "w2")
+    assert heir.id == dead.id
+    assert heir.checkpoint == {"step": 3}  # resume, not restart
+
+    last_recovery = [r for r in store.audit_log(task_id) if r["actor"] == "scheduler"][-1]
+    assert (last_recovery["from_status"], last_recovery["to_status"]) == ("running", "ready")
+    details = json.loads(last_recovery["details_json"])
+    assert details["owner"] == "w1" and "lease expired" in details["reason"]
+
+
+def test_dead_executor_cannot_come_back(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a")))
+    dead = claim(store, "w1")
+    assert dead.lease_token is not None
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
+    store.recover_expired()
+    with pytest.raises(StaleStateError):
+        store.heartbeat(dead.id, dead.lease_token)
+    with pytest.raises(StaleStateError):
+        store.transition(dead.id, S.RUNNING, S.REVIEW, A.EXECUTOR, lease=dead.lease_token)
+
+
+def test_late_heartbeat_before_recovery_still_counts(store: Store, clock: FakeClock) -> None:
+    # The deadline passed but nobody requeued the subtask yet: the claim is still valid.
+    store.create_task(spec(sub("a")))
+    slow = claim(store)
+    assert slow.lease_token is not None
+    clock.advance(DEFAULT_LEASE_SECONDS + 5)
+    store.heartbeat(slow.id, slow.lease_token)
+    assert store.recover_expired() == []
+
+
+def test_subtask_that_keeps_killing_executors_goes_to_human(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("poison")))
+    policy = RetryPolicy(max_transient=3)
+    statuses = []
+    for _ in range(3):
+        claim(store)
+        clock.advance(DEFAULT_LEASE_SECONDS + 1)
+        [recovered] = store.recover_expired(policy)
+        statuses.append(recovered.status)
+    assert statuses == [S.READY, S.READY, S.NEEDS_HUMAN]
+    assert store.claim("w") is None
+
+
+def test_recovery_only_touches_expired_leases(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a"), sub("b")))
+    short = store.claim("w1", lease_seconds=10)
+    long = store.claim("w2", lease_seconds=1000)
+    assert short is not None and long is not None
+    clock.advance(11)
+    assert [s.id for s in store.recover_expired()] == [short.id]
+    assert store.get_subtask(long.id).status is S.RUNNING
+
+
+def test_resume_due_respects_deadlines(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a"), sub("b")))
+    first, second = claim(store), claim(store)
+    for claimed, minutes in ((first, 5), (second, 30)):
+        store.transition(
+            claimed.id,
+            S.RUNNING,
+            S.PAUSED,
+            A.EXECUTOR,
+            lease=claimed.lease_token,
+            paused_until=db.to_iso(clock.now + timedelta(minutes=minutes)),
+        )
+    clock.advance(4 * 60)
+    assert store.resume_due() == []
+    clock.advance(60)
+    assert [s.id for s in store.resume_due()] == [first.id]
+    clock.advance(25 * 60)
+    [resumed] = store.resume_due()
+    assert (resumed.id, resumed.status) == (second.id, S.READY)
+
+
+def test_limit_without_reset_time_gets_default_pause(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    paused = store.record_failure(
+        claimed.id, S.RUNNING, A.EXECUTOR, FailureKind.LIMIT, lease=claimed.lease_token
+    )
+    assert paused.paused_until == db.to_iso(clock.now + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
+    assert store.resume_due() == []
+    clock.advance(DEFAULT_PAUSE_SECONDS)
+    assert [s.status for s in store.resume_due()] == [S.READY]
+
+
+def test_stuck_review_is_reviewed_again_without_rerunning(store: Store) -> None:
+    store.create_task(spec(sub("a", priority=1), sub("b", priority=9)))
+    for claimed in (claim(store), claim(store)):
+        store.transition(claimed.id, S.RUNNING, S.REVIEW, A.EXECUTOR, lease=claimed.lease_token)
+    # A reviewer died mid-review: nothing to recover, the subtasks are still waiting for a verdict.
+    assert store.recover_expired() == []
+    assert [s.description for s in store.pending_reviews()] == ["b", "a"]
+    assert store.claim("w") is None  # the work is not handed out again
+
+
+def test_two_reviewers_one_verdict(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    store.transition(claimed.id, S.RUNNING, S.REVIEW, A.EXECUTOR, lease=claimed.lease_token)
+    store.transition(claimed.id, S.REVIEW, S.DONE, A.REVIEWER)
+    with pytest.raises(StaleStateError):
+        store.record_failure(claimed.id, S.REVIEW, A.REVIEWER, FailureKind.QUALITY)
+    assert store.get_subtask(claimed.id).status is S.DONE
+
+
+def test_sweep_combines_recovery_and_resume(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a"), sub("b")))
+    crashed, limited = claim(store), claim(store)
+    store.record_failure(
+        limited.id, S.RUNNING, A.EXECUTOR, FailureKind.LIMIT, lease=limited.lease_token
+    )
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
+    recovered, resumed = store.sweep()
+    assert [s.id for s in recovered] == [crashed.id]
+    assert [s.id for s in resumed] == [limited.id]
+
+
+def test_scheduler_cannot_take_a_live_lease(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    with pytest.raises(StaleStateError, match="leased to w1 until"):
+        store.transition(claimed.id, S.RUNNING, S.READY, A.SCHEDULER)
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
+    assert store.transition(claimed.id, S.RUNNING, S.READY, A.SCHEDULER).status is S.READY
+
+
+def test_direct_pause_without_deadline_gets_default(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    paused = store.transition(
+        claimed.id, S.RUNNING, S.PAUSED, A.EXECUTOR, lease=claimed.lease_token
+    )
+    assert paused.paused_until == db.to_iso(clock.now + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
+    assert store.resume_due() == []
