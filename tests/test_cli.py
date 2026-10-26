@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
@@ -128,3 +129,44 @@ def test_reconfigure_replaces_or_deletes_a_key() -> None:
     result = CliRunner().invoke(cli, ["config"], input=answers)
     assert result.exit_code == 0, result.output
     assert ConfigManager(default_config_path()).get_api_keys() == {"GROQ_API_KEY": "gsk_new"}
+
+
+# ── Review regressions (PR #13) ──────────────────────────────────────────────
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symlinks and modes are POSIX here")
+def test_symlinked_config_is_updated_at_its_target(tmp_path: Path) -> None:
+    path = default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    target = dotfiles / "desman.json"
+    target.write_text("{}", encoding="utf-8")
+    path.symlink_to(target)
+    ConfigManager(path).save_config({"api_keys": {"GROQ_API_KEY": "gsk_new"}})
+    assert path.is_symlink() and path.resolve() == target
+    assert json.loads(target.read_text())["api_keys"] == {"GROQ_API_KEY": "gsk_new"}
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert [p.name for p in dotfiles.iterdir()] == ["desman.json"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="hard links and modes are POSIX here")
+def test_old_hard_link_does_not_stay_world_readable(tmp_path: Path) -> None:
+    path = default_config_path()
+    manager = ConfigManager(path)
+    path.write_text('{"api_keys": {"GROQ_API_KEY": "gsk_old"}}', encoding="utf-8")
+    os.chmod(path, 0o644)
+    backup = tmp_path / "backup.json"
+    os.link(path, backup)
+    manager.save_config({"api_keys": {"GROQ_API_KEY": "gsk_new"}})
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+
+
+def test_local_setting_can_be_cleared() -> None:
+    manager = ConfigManager(default_config_path())
+    manager.save_config({"language": "en", "local_settings": {"OLLAMA_HOST": "http://box:11434"}})
+    # English, local only, then '-' at the first local prompt and Enter for the rest.
+    answers = wizard("1", "2", "-", *[""] * 10, *NO_PERMISSIONS)
+    result = CliRunner().invoke(cli, ["config"], input=answers)
+    assert result.exit_code == 0, result.output
+    assert "OLLAMA_HOST" not in ConfigManager(default_config_path()).get_local_settings()
