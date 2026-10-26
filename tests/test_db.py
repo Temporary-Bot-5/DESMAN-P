@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -237,3 +239,67 @@ def test_init_db_cli_refuses_newer_schema(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, ["init-db", "--db", str(path)])
     assert result.exit_code != 0
     assert "newer" in result.output
+
+
+def test_concurrent_migrators_do_not_collide(tmp_path: Path) -> None:
+    # Another process holds the write lock and is migrating; we must wait for it and then see
+    # the version it committed, instead of re-applying migrations from a stale version read.
+    path = tmp_path / "d.db"
+    other = db.connect(path)
+    other.execute("BEGIN IMMEDIATE")
+
+    outcome: dict[str, object] = {}
+
+    def migrate_ours() -> None:
+        ours = db.connect(path)  # sqlite3 connections belong to the thread that opened them
+        try:
+            outcome["applied"] = db.migrate(ours)
+            outcome["version"] = db.schema_version(ours)
+        except Exception as e:  # reported via the assertion below
+            outcome["error"] = e
+        finally:
+            ours.close()
+
+    thread = threading.Thread(target=migrate_ours)
+    thread.start()
+    time.sleep(0.3)  # let our migrator reach the lock
+    for version, script in enumerate(db.MIGRATIONS, start=1):
+        for statement in db._split_sql(script):
+            other.execute(statement)
+        other.execute(f"PRAGMA user_version = {version}")
+    other.execute("COMMIT")
+    thread.join(timeout=10)
+
+    assert "error" not in outcome, outcome.get("error")
+    assert outcome["applied"] == 0
+    assert outcome["version"] == db.SCHEMA_VERSION
+    other.close()
+
+
+def test_connect_waits_for_lock_when_switching_to_wal(tmp_path: Path) -> None:
+    # Switching a fresh database to WAL needs an exclusive lock, and SQLite does not apply
+    # busy_timeout to it: concurrent first connections used to fail with "database is locked".
+    path = tmp_path / "d.db"
+    other = sqlite3.connect(path, isolation_level=None)
+    other.execute("CREATE TABLE t (x INTEGER)")
+    other.execute("BEGIN IMMEDIATE")
+
+    outcome: dict[str, object] = {}
+
+    def connect_ours() -> None:
+        try:
+            conn = db.connect(path)
+            outcome["mode"] = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            conn.close()
+        except Exception as e:  # reported via the assertion below
+            outcome["error"] = e
+
+    thread = threading.Thread(target=connect_ours)
+    thread.start()
+    time.sleep(0.3)
+    other.execute("COMMIT")
+    thread.join(timeout=10)
+    other.close()
+
+    assert "error" not in outcome, outcome.get("error")
+    assert outcome["mode"] == "wal"
