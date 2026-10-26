@@ -13,12 +13,28 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
+from desman.config import ConfigManager, reconfigure, run_initial_config
 from desman.core.coordinator import Coordinator
 from desman.core.models import TaskPriority
 from desman.core.store import TaskStore
+from desman.info import print_project_info
 from desman.router import ModelRouter
 
 console = Console()
+
+CONFIG_DIR = Path.home() / ".config" / "desman"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def ensure_configured() -> bool:
+    """Ensure DESMAN is configured, run wizard if not. Returns True if ready."""
+    config_manager = ConfigManager(CONFIG_FILE)
+    if not config_manager.is_configured():
+        console.print("[yellow]DESMAN is not configured. Starting initial configuration...[/yellow]\n")
+        run_initial_config(config_manager)
+        return True
+    return True
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # First-run setup wizard — multimodal weak-agent structure needs many API keys
@@ -73,13 +89,6 @@ FREE_PROVIDERS = [
         "url": "https://build.nvidia.com/explore/discover",
         "free_models": "Nemotron-3-Ultra, Llama-3.1-Nemotron-70B (бесплатные кредиты при регистрации)",
         "notes": "Мощные модели от NVIDIA. Кредиты заканчиваются — потом платные.",
-    },
-    {
-        "name": "OpenRouter (referral: Kilo Code)",
-        "env_var": "OPENROUTER_API_KEY",
-        "url": "https://openrouter.ai/keys",
-        "free_models": "Тот же OpenRouter, но иногда промо-коды дают бонусные кредиты",
-        "notes": "Если у тебя есть реф-код Kilo Code / Vercel AI Gateway — вписывай сюда.",
     },
     {
         "name": "Vercel AI Gateway",
@@ -162,14 +171,18 @@ def _prompt_keys(existing: dict[str, str]) -> dict[str, str]:
             console.print(f"  ✓ {p['name']} ({p['env_var']}) = {val[:8]}...")
         console.print()
 
+    # Track which env_vars we've already prompted for in this loop
+    prompted_in_loop = set()
+
     for p in FREE_PROVIDERS:
         # Skip if already configured (from .env or earlier prompt)
         if p["env_var"] in existing:
             continue
 
-        # Skip duplicates (OpenRouter appears twice)
-        if p["env_var"] in keys and p["env_var"] != "OPENROUTER_API_KEY":
+        # Skip duplicates (same env_var appears multiple times in FREE_PROVIDERS)
+        if p["env_var"] in prompted_in_loop:
             continue
+        prompted_in_loop.add(p["env_var"])
 
         default = os.getenv(p["env_var"], "")
         prompt_text = f"[bold]{p['name']}[/bold] ({p['env_var']})"
@@ -223,15 +236,37 @@ def _write_env_file(keys: dict[str, str]) -> Path:
     return env_path
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--db", default="sqlite+aiosqlite:///data/desman.db", help="Database URL")
 @click.option("--workspace", default="workspace", help="Workspace root directory")
 @click.pass_context
 def cli(ctx: click.Context, db: str, workspace: str) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
+    # Auto-run config if not configured (for any invocation including no subcommand)
+    ensure_configured()
+
     ctx.ensure_object(dict)
     ctx.obj["db"] = db
     ctx.obj["workspace"] = Path(workspace)
+
+    if ctx.invoked_subcommand is None:
+        print_project_info()
+        return
+
+
+@cli.command()
+@click.pass_context
+def help(ctx: click.Context) -> None:
+    """Show help for commands."""
+    if ctx.parent:
+        click.echo(ctx.parent.get_help())
+
+
+@cli.command()
+def config() -> None:
+    """Run/re-run DESMAN configuration."""
+    config_manager = ConfigManager(CONFIG_FILE)
+    reconfigure(config_manager)
 
 
 @cli.command()
