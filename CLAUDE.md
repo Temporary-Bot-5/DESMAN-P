@@ -31,7 +31,9 @@ The old core was removed (still in git history at `3d10a5e`). What remains:
 
 ```
 src/desman/
-├── cli.py         # Click entry point: `desman`, `config`, `help`, `init-db`, `audit`
+├── cli.py         # Click entry point: `desman`, `config`, `help`, `init-db`, and the task
+│                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes)
+├── agents.py      # Minimal LLM executor/reviewer (JSON replies) behind `desman run`
 ├── config.py      # ConfigManager + bilingual (en/ru) setup wizard
 ├── info.py        # Banner / project info
 └── core/
@@ -45,6 +47,7 @@ src/desman/
                    #        submit, task_status, cancel_task, failure propagation
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
                    #   fitted to a token budget, feedback on the previous attempt
+    ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
     ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
                    #   every status change was recorded (D7)
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
