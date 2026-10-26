@@ -49,7 +49,8 @@ src/desman/
 ```
 
 Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a
-released migration in `db.MIGRATIONS`; append a new one. Keep the `subtasks.status` CHECK in
+migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
+backfill if needed) and test upgrading a database built with the previous migrations. Keep the `subtasks.status` CHECK in
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,
 audit in one place) — public entry points are `claim()`, `transition()`, `record_failure()`,
 `submit()`, `cancel_task()` and the housekeeping methods. Never `UPDATE subtasks SET status`

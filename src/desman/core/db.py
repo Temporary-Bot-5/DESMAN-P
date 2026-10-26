@@ -6,8 +6,9 @@ The database is the only place where task state lives (PROJECT_PLAN: "durable st
   lock up front (`BEGIN IMMEDIATE`) so concurrent workers queue on `busy_timeout` instead of
   failing halfway through.
 - WAL lets readers (`desman status`) work while a worker writes.
-- Migrations are append-only: once a migration is on `master` never edit it, add the next
-  number instead.
+- Migrations are append-only: once a migration has been pushed (to any branch: someone may
+  have a database from it) never edit it, add the next number instead. `verify_schema()`
+  catches databases whose schema does not match their version.
 - Timestamps are UTC ISO-8601 strings with millisecond precision (`now_iso()`), so they compare
   correctly as text inside SQL.
 """
@@ -96,8 +97,6 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         resume_status       TEXT CHECK (resume_status IN ('ready', 'review')),
         paused_until        TEXT,
         checkpoint_json     TEXT CHECK (checkpoint_json IS NULL OR json_valid(checkpoint_json)),
-        -- Which artifact was accepted (artifacts.attempt); NULL if DONE without one.
-        accepted_attempt    INTEGER CHECK (accepted_attempt IS NULL OR status = 'done'),
         attempts_quality    INTEGER NOT NULL DEFAULT 0 CHECK (attempts_quality >= 0),
         attempts_transient  INTEGER NOT NULL DEFAULT 0 CHECK (attempts_transient >= 0),
         created_at          TEXT NOT NULL DEFAULT {_NOW_SQL},
@@ -151,6 +150,21 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
     CREATE TRIGGER audit_log_no_delete BEFORE DELETE ON audit_log
         BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+    """,
+    # 2 — which artifact a DONE verdict accepted (NULL: done without one)
+    """
+    ALTER TABLE subtasks ADD COLUMN accepted_attempt INTEGER
+        CHECK (accepted_attempt IS NULL OR status = 'done');
+
+    -- Backfill with the rule Store._accepted_attempt applies from now on: the reviewer accepted
+    -- the latest attempt; the operator did so only when resolving an escalation from REVIEW.
+    UPDATE subtasks SET accepted_attempt = (
+        SELECT MAX(a.attempt) FROM artifacts a WHERE a.subtask_id = subtasks.id)
+    WHERE status = 'done' AND (
+        (SELECT from_status FROM audit_log l WHERE l.subtask_id = subtasks.id
+           AND l.to_status = 'done' ORDER BY l.seq DESC LIMIT 1) = 'review'
+        OR (SELECT from_status FROM audit_log l WHERE l.subtask_id = subtasks.id
+              AND l.to_status = 'needs_human' ORDER BY l.seq DESC LIMIT 1) = 'review');
     """,
 )
 
@@ -252,8 +266,64 @@ def _split_sql(script: str) -> list[str]:
     return statements
 
 
+class SchemaMismatchError(RuntimeError):
+    """The database's tables do not match what its schema version promises."""
+
+
+def expected_schema() -> dict[str, list[str]]:
+    """Columns per table that the migrations produce, built from scratch in memory."""
+    reference = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        for script in MIGRATIONS:
+            for statement in _split_sql(script):
+                reference.execute(statement)
+        return _columns(reference)
+    finally:
+        reference.close()
+
+
+def _columns(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    tables = [
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    ]
+    return {t: sorted(r[1] for r in conn.execute(f"PRAGMA table_info({t})")) for t in tables}
+
+
+def verify_schema(conn: sqlite3.Connection) -> None:
+    """Refuse databases whose columns differ from the current schema.
+
+    Happens with a database created by an unreleased development revision whose migration was
+    later changed; failing here with a clear message beats a KeyError deep inside a task run.
+    """
+    expected, actual = expected_schema(), _columns(conn)
+    problems = []
+    for table, columns in expected.items():
+        have = actual.get(table)
+        if have is None:
+            problems.append(f"missing table {table}")
+            continue
+        if missing := sorted(set(columns) - set(have)):
+            problems.append(f"{table}: missing {', '.join(missing)}")
+        if extra := sorted(set(have) - set(columns)):
+            problems.append(f"{table}: unexpected {', '.join(extra)}")
+    if problems:
+        raise SchemaMismatchError(
+            f"database schema does not match v{schema_version(conn)} ({'; '.join(problems)}). "
+            "It was probably created by a development revision; move it away and run "
+            "`desman init-db` to start fresh."
+        )
+
+
 def open_db(path: Path | str | None = None) -> sqlite3.Connection:
-    """Connect and bring the schema up to date."""
+    """Connect, bring the schema up to date and check it matches."""
     conn = connect(path if path is not None else default_db_path())
-    migrate(conn)
+    try:
+        migrate(conn)
+        verify_schema(conn)
+    except BaseException:
+        conn.close()
+        raise
     return conn
