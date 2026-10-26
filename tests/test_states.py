@@ -63,6 +63,16 @@ def test_crashed_executor_is_requeued_by_scheduler() -> None:
     walk([(S.READY, A.SCHEDULER), (S.RUNNING, A.EXECUTOR)], start=S.RUNNING)
 
 
+@pytest.mark.parametrize(("src", "actor"), [(S.RUNNING, A.EXECUTOR), (S.REVIEW, A.REVIEWER)])
+def test_quota_pause_resumes_where_it_stopped(src: SubtaskStatus, actor: Actor) -> None:
+    back = S.READY if src is S.RUNNING else S.REVIEW
+    walk([(S.PAUSED, actor), (back, A.SCHEDULER)], start=src)
+
+
+def test_exhausted_retries_escalate_and_human_gives_up() -> None:
+    walk([(S.NEEDS_HUMAN, A.EXECUTOR), (S.FAILED, A.HUMAN), (S.READY, A.HUMAN)], start=S.RUNNING)
+
+
 def test_failed_dependency_blocks_and_human_revives() -> None:
     walk([(S.BLOCKED, A.SCHEDULER)])
     walk([(S.READY, A.HUMAN)], start=S.FAILED)
@@ -88,6 +98,9 @@ def test_human_resolves_escalation(dst: SubtaskStatus) -> None:
         (S.NEEDS_HUMAN, S.READY, A.SCHEDULER),  # only humans resolve escalations
         (S.FAILED, S.READY, A.SCHEDULER),  # failures are not silently retried
         (S.BLOCKED, S.PENDING, A.SCHEDULER),  # nor silently unblocked
+        (S.RUNNING, S.FAILED, A.EXECUTOR),  # the system never gives up by itself
+        (S.REVIEW, S.FAILED, A.REVIEWER),
+        (S.PAUSED, S.RUNNING, A.EXECUTOR),  # a paused subtask is requeued, not grabbed
         (S.RUNNING, S.RUNNING, A.EXECUTOR),  # no self-transitions
     ],
 )
@@ -153,6 +166,13 @@ def test_system_alone_can_finish_live_work(status: SubtaskStatus) -> None:
     assert S.DONE in reachable(status, machine)
 
 
+def test_only_human_marks_failed() -> None:
+    actors = {
+        actor for (_, dst), allowed in TRANSITIONS.items() if dst == S.FAILED for actor in allowed
+    }
+    assert actors == {A.HUMAN}
+
+
 def test_only_reviewer_or_human_marks_done() -> None:
     actors = {
         actor for (_, dst), allowed in TRANSITIONS.items() if dst == S.DONE for actor in allowed
@@ -161,6 +181,6 @@ def test_only_reviewer_or_human_marks_done() -> None:
 
 
 def test_allowed_targets() -> None:
-    assert allowed_targets(S.RUNNING, A.EXECUTOR) == {S.REVIEW, S.READY, S.FAILED, S.NEEDS_HUMAN}
-    assert allowed_targets(S.RUNNING, A.SCHEDULER) == {S.READY, S.FAILED}
+    assert allowed_targets(S.RUNNING, A.EXECUTOR) == {S.REVIEW, S.READY, S.PAUSED, S.NEEDS_HUMAN}
+    assert allowed_targets(S.RUNNING, A.SCHEDULER) == {S.READY, S.NEEDS_HUMAN}
     assert allowed_targets(S.PENDING, A.EXECUTOR) == frozenset()

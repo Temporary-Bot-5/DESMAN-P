@@ -7,11 +7,16 @@ reach the database.
 
 Checkpoints, retry counters and lease deadlines are data on the subtask, not statuses: a crashed
 subtask goes back to READY and keeps its checkpoint; "retry" is the RUNNING/REVIEW -> READY edge.
+Which edge to take after a failure is decided by `desman.core.retry`.
+
+The system works autonomously until it runs out of retries, then hands over to the operator.
+It never gives up on its own: FAILED is a human verdict.
 
     happy path         PENDING -> READY -> RUNNING -> REVIEW -> DONE
     retry / crash      RUNNING, REVIEW -> READY
-    give up            RUNNING, REVIEW -> FAILED -(human)-> READY
+    out of quota       RUNNING, REVIEW -> PAUSED -> READY | REVIEW   (attempt not spent)
     escalate           RUNNING, REVIEW -> NEEDS_HUMAN -(human)-> READY | DONE | FAILED
+    revive             FAILED -(human)-> READY
     dependency failed  PENDING -> BLOCKED -(human)-> PENDING
     cancel             any non-terminal -(human)-> CANCELLED
 """
@@ -43,16 +48,17 @@ class SubtaskStatus(StrEnum):
     RUNNING = "running"  # claimed by an executor holding a lease
     REVIEW = "review"  # result submitted; waiting for the reviewer's verdict
     DONE = "done"  # accepted
-    FAILED = "failed"  # retries exhausted or unrecoverable; only a human can revive it
+    PAUSED = "paused"  # provider limits hit; resumes when the quota resets
+    NEEDS_HUMAN = "needs_human"  # retries exhausted or unretryable; waits for the operator
+    FAILED = "failed"  # the operator gave up on it; only the operator can revive it
     BLOCKED = "blocked"  # a dependency failed or was cancelled
-    NEEDS_HUMAN = "needs_human"  # escalated; waits for an operator decision
     CANCELLED = "cancelled"  # stopped by a human
 
 
 class Actor(StrEnum):
     """Who requests a transition."""
 
-    SCHEDULER = "scheduler"  # dependency tracking, lease expiry, retry budget
+    SCHEDULER = "scheduler"  # dependency tracking, lease expiry, quota resets
     EXECUTOR = "executor"  # claims and performs the work
     REVIEWER = "reviewer"  # judges submitted results
     HUMAN = "human"  # the operator; final authority
@@ -66,9 +72,10 @@ _NON_TERMINAL: Final = (
     S.READY,
     S.RUNNING,
     S.REVIEW,
+    S.PAUSED,
+    S.NEEDS_HUMAN,
     S.FAILED,
     S.BLOCKED,
-    S.NEEDS_HUMAN,
 )
 
 TRANSITIONS: Final[Mapping[tuple[SubtaskStatus, SubtaskStatus], frozenset[Actor]]] = {
@@ -80,14 +87,17 @@ TRANSITIONS: Final[Mapping[tuple[SubtaskStatus, SubtaskStatus], frozenset[Actor]
     # Execution
     (S.READY, S.RUNNING): frozenset({A.EXECUTOR}),  # claim
     (S.RUNNING, S.REVIEW): frozenset({A.EXECUTOR}),  # submit result
-    (S.RUNNING, S.READY): frozenset({A.EXECUTOR, A.SCHEDULER}),  # release / lease expired
-    (S.RUNNING, S.FAILED): frozenset({A.EXECUTOR, A.SCHEDULER}),  # fatal / retries exhausted
-    (S.RUNNING, S.NEEDS_HUMAN): frozenset({A.EXECUTOR}),
+    (S.RUNNING, S.READY): frozenset({A.EXECUTOR, A.SCHEDULER}),  # retry / lease expired
+    (S.RUNNING, S.PAUSED): frozenset({A.EXECUTOR}),  # provider limits
+    (S.RUNNING, S.NEEDS_HUMAN): frozenset({A.EXECUTOR, A.SCHEDULER}),  # out of retries
     # Review
     (S.REVIEW, S.DONE): frozenset({A.REVIEWER}),
     (S.REVIEW, S.READY): frozenset({A.REVIEWER}),  # retry with feedback
-    (S.REVIEW, S.FAILED): frozenset({A.REVIEWER}),
-    (S.REVIEW, S.NEEDS_HUMAN): frozenset({A.REVIEWER}),
+    (S.REVIEW, S.PAUSED): frozenset({A.REVIEWER}),  # provider limits
+    (S.REVIEW, S.NEEDS_HUMAN): frozenset({A.REVIEWER}),  # out of retries
+    # Quota reset: back to where the subtask was paused
+    (S.PAUSED, S.READY): frozenset({A.SCHEDULER}),
+    (S.PAUSED, S.REVIEW): frozenset({A.SCHEDULER}),
     # Operator decisions
     (S.NEEDS_HUMAN, S.READY): frozenset({A.HUMAN}),
     (S.NEEDS_HUMAN, S.DONE): frozenset({A.HUMAN}),
