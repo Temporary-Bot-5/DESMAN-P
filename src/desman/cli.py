@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -20,6 +19,7 @@ from desman.core import db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
 from desman.core.models import Priority, SubtaskSpec, TaskSpec
+from desman.core.owner import current_owner, owner_is_gone
 from desman.core.report import TaskReport, task_report, task_summaries
 from desman.core.states import TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
@@ -188,7 +188,8 @@ def run_options(command: F) -> F:
         "fake_script",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         default=None,
-        help="Drive the agents with a scripted fake provider (JSON script, see desman.llm.fake).",
+        help="Drive the agents with a scripted fake provider (JSON script, see desman.llm.fake). "
+        "Scripted latency and timeouts take real time.",
     )(command)
     command = click.option(
         "--wait",
@@ -277,7 +278,8 @@ def resume(
 ) -> None:
     """Continue TASK where it stopped: after a crash, a pause or the operator's decisions.
 
-    Work a crashed run left behind is taken back once its lease expires. Same exit codes as
+    Work a crashed run left behind is taken back at once if that run was on this machine,
+    otherwise when its lease expires. Finished subtasks are never redone. Same exit codes as
     `run`.
     """
     llm = _provider(fake_script)
@@ -359,7 +361,7 @@ def _provider(fake_script: Path | None) -> LLM:
             "Pass --fake-llm SCRIPT.json to run with a scripted fake."
         )
     try:
-        return FakeLLM.from_file(fake_script)
+        return FakeLLM.from_file(fake_script, sleep=time.sleep)  # latency and timeouts are real
     except (ValidationError, ValueError) as e:
         raise click.ClickException(f"{fake_script}: not a valid fake LLM script:\n{e}") from e
 
@@ -379,8 +381,9 @@ def _drive(
         store,
         llm_executor(llm),
         llm_reviewer(llm),
-        owner=f"{socket.gethostname()}:{os.getpid()}",
+        owner=current_owner(),
         lease_seconds=lease_seconds,
+        abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
     )
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)

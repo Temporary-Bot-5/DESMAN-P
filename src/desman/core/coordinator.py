@@ -131,6 +131,7 @@ class Coordinator:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
+        abandoned: Callable[[str], bool] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -141,6 +142,9 @@ class Coordinator:
         self.lease_seconds = lease_seconds
         self.context_budget_tokens = context_budget_tokens
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
+        self.abandoned = abandoned
+        """Tells whether a lease owner is certainly gone, so its work is taken back at once
+        instead of after the lease expires (see core/owner.py)."""
         self.sleep = sleep
 
     def run(
@@ -179,7 +183,9 @@ class Coordinator:
     def tick(self, task_id: str, events: list[str]) -> bool:
         """One pass; returns whether anything moved."""
         # Only this task: `policy` belongs to this run, other tasks may have their own.
-        recovered, resumed = self.store.sweep(self.policy, task_id=task_id)
+        recovered, resumed = self.store.sweep(
+            self.policy, task_id=task_id, abandoned=self.abandoned
+        )
         events += [f"recovered {s.id}" for s in recovered]
         events += [f"resumed {s.id}" for s in resumed]
         progressed = bool(recovered or resumed)

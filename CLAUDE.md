@@ -47,6 +47,8 @@ src/desman/
                    #        submit, task_status, cancel_task, failure propagation
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
                    #   fitted to a token budget, feedback on the previous attempt
+    ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
+                   #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
     ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
                    #   every status change was recorded (D7)
@@ -100,7 +102,7 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 - Every task in ROADMAP lands with tests
 - Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
-  except in lock-contention tests
+  except in lock-contention tests and the subprocess crash tests (`tests/test_crash.py`)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
 - Idempotency test: re-run same subtask → no duplicate side effects

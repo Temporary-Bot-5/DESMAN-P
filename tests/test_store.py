@@ -835,3 +835,52 @@ def test_bad_pause_deadline_is_rejected(store: Store) -> None:
             paused_until="later",
         )
     assert store.get_subtask(claimed.id).status is S.RUNNING
+
+
+# ── Abandoned leases (1.11) ──────────────────────────────────────────────────
+
+
+def test_abandoned_lease_is_taken_back_before_it_expires(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b")))
+    dead = claim(store, owner="host:111")
+    alive = claim(store, owner="host:222")
+    store.heartbeat(dead.id, dead.lease_token or "", checkpoint={"page": 3})
+    asked: list[str] = []
+
+    def gone(owner: str) -> bool:
+        asked.append(owner)
+        return owner == "host:111"
+
+    [recovered] = store.recover_expired(abandoned=gone, task_id=task_id)
+    assert recovered.id == dead.id and recovered.status is S.READY
+    assert recovered.checkpoint == {"page": 3}  # the next executor resumes from it
+    assert recovered.attempts.transient == 1
+    assert store.get_subtask(alive.id).status is S.RUNNING
+    assert sorted(asked) == ["host:111", "host:222"]
+    [entry] = [r for r in store.audit_log(task_id) if r["action"] == "lease_abandoned"]
+    assert "host:111 is gone" in json.loads(entry["details_json"])["reason"]
+    # The dead run's token is useless now, and its late result is refused.
+    with pytest.raises(StaleStateError):
+        store.submit(dead.id, dead.lease_token or "", {"late": True})
+
+
+def test_expired_lease_does_not_ask_about_its_owner(store: Store, clock: FakeClock) -> None:
+    store.create_task(spec(sub("a")))
+    held = claim(store, owner="host:111")
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
+
+    def never_called(owner: str) -> bool:
+        raise AssertionError("expiry alone decides")
+
+    [recovered] = store.recover_expired(abandoned=never_called)
+    assert recovered.id == held.id
+    actions = [r["action"] for r in store.audit_log(held.task_id)]
+    assert "lease_expired" in actions and "lease_abandoned" not in actions
+
+
+def test_without_the_predicate_live_leases_are_never_taken(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    held = claim(store, owner="host:111")
+    assert store.recover_expired() == []
+    assert store.recover_expired(abandoned=lambda owner: False) == []
+    assert store.get_subtask(held.id).status is S.RUNNING
