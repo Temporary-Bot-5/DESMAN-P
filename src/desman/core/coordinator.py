@@ -31,7 +31,7 @@ from desman.core.models import Subtask
 from desman.core.retry import FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
-from desman.core.workspace import PathEscapeError, Workspace, default_workspace_root
+from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 
 S = SubtaskStatus
 
@@ -128,7 +128,7 @@ class Coordinator:
         self.policy = policy
         self.lease_seconds = lease_seconds
         self.context_budget_tokens = context_budget_tokens
-        self.workspaces = workspaces if workspaces is not None else default_workspace_root()
+        self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
         self.sleep = sleep
 
     def run(

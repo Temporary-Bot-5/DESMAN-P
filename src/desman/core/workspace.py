@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sqlite3
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -55,10 +56,22 @@ def default_workspace_root() -> Path:
     return db.default_db_path().parent / WORKSPACES_DIR
 
 
+def workspace_root_for(conn: sqlite3.Connection) -> Path:
+    """Next to the database `conn` is open on; the default location for in-memory databases."""
+    for _seq, name, file in conn.execute("PRAGMA database_list"):
+        if name == "main" and file:
+            return Path(file).parent / WORKSPACES_DIR
+    return default_workspace_root()
+
+
 def check_path(path: str) -> tuple[str, ...]:
     """Validate a workspace-relative path and return its components (`.` and empty dropped)."""
     if not isinstance(path, str):
         raise PathEscapeError(f"path must be a string, not {type(path).__name__}")
+    try:
+        path.encode()
+    except UnicodeEncodeError as e:  # lone surrogates, e.g. from JSON or undecodable names
+        raise PathEscapeError(f"path {path[:80]!r} cannot be encoded: {e.reason}") from e
     if any(ord(ch) < 32 or ch == "\x7f" for ch in path):
         raise PathEscapeError(f"control character in path {path!r}")
     if "\\" in path:
@@ -94,18 +107,18 @@ class Workspace:
         if self.root.is_symlink() or not self.root.is_dir():
             raise PathEscapeError(f"workspace {self.root} is not a plain directory")
 
-    def resolve(self, path: str) -> Path:
-        """Absolute location of `path`, refusing anything that is or crosses a symlink."""
-        parts = check_path(path)
-        self._check_no_links(parts)
-        return self.root.joinpath(*parts)
+    # There is deliberately no method returning an absolute path to a file: a path checked now
+    # can be swapped for a symlink before the caller opens it. Use read/write/exists/files.
 
-    def write(self, path: str, data: bytes | str) -> Path:
-        """Create or replace a file, making parent directories as needed."""
+    def write(self, path: str, data: bytes | str) -> str:
+        """Create or replace a file, making parent directories as needed.
+
+        Returns the normalized relative path (as `files()` would list it)."""
         payload = data.encode() if isinstance(data, str) else data
         parts = check_path(path)
         if not SECURE:
-            return self._write_fallback(parts, payload)
+            self._write_fallback(parts, payload)
+            return "/".join(parts)
         with self._parent(parts, create=True) as parent:
             tmp = f"{_TMP_PREFIX}{secrets.token_hex(8)}"
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC | _BINARY
@@ -121,7 +134,7 @@ class Workspace:
                 with suppress(FileNotFoundError):
                     os.unlink(tmp, dir_fd=parent)
                 raise
-        return self.root.joinpath(*parts)
+        return "/".join(parts)
 
     def read(self, path: str) -> bytes:
         parts = check_path(path)
@@ -144,13 +157,26 @@ class Workspace:
         return self.read(path).decode()
 
     def exists(self, path: str) -> bool:
+        """True for a regular file reachable without crossing a symlink."""
         try:
-            return self.resolve(path).is_file()
+            parts = check_path(path)
+            if not SECURE:
+                self._check_no_links(parts)
+                mode = self.root.joinpath(*parts).lstat().st_mode
+            else:
+                with self._parent(parts, create=False) as parent:
+                    mode = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False).st_mode
         except (PathEscapeError, OSError):
             return False
+        return stat.S_ISREG(mode)
 
     def files(self) -> list[str]:
-        """Regular files in the workspace, as sorted `/`-separated relative paths."""
+        """Regular files in the workspace, as sorted `/`-separated relative paths.
+
+        Names the guard would refuse (generated code can create any name) are left out, so
+        everything listed can be read back."""
+        if self.root.is_symlink():  # os.walk would follow the top directory
+            return []
         found = []
         for dirpath, _dirnames, filenames in os.walk(self.root, followlinks=False):
             base = Path(dirpath)  # followlinks=False: linked directories are not entered
@@ -158,14 +184,19 @@ class Workspace:
                 full = base / name
                 if name.startswith(_TMP_PREFIX) or full.is_symlink() or not full.is_file():
                     continue
-                found.append(full.relative_to(self.root).as_posix())
+                relative = full.relative_to(self.root).as_posix()
+                try:
+                    check_path(relative)
+                except PathEscapeError:
+                    continue
+                found.append(relative)
         return sorted(found)
 
     @contextmanager
     def _parent(self, parts: tuple[str, ...], *, create: bool) -> Iterator[int]:
         """Descriptor of the directory holding `parts[-1]`, walked without following links."""
         dir_flags = os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC
-        fd = os.open(self.root, dir_flags)
+        fd = _open(str(self.root), dir_flags, None, ".")  # the task directory may be swapped too
         try:
             for i, part in enumerate(parts[:-1]):
                 if create:
@@ -179,6 +210,8 @@ class Workspace:
             os.close(fd)
 
     def _check_no_links(self, parts: tuple[str, ...]) -> None:
+        if self.root.is_symlink():
+            raise PathEscapeError(f"symlink in path '.': workspace {self.root} was replaced")
         current = self.root
         for i, part in enumerate(parts):
             current = current / part
@@ -191,7 +224,7 @@ class Workspace:
             if i < len(parts) - 1 and not stat.S_ISDIR(mode):
                 raise NotADirectoryError(f"{'/'.join(parts[: i + 1])!r} is not a directory")
 
-    def _write_fallback(self, parts: tuple[str, ...], payload: bytes) -> Path:
+    def _write_fallback(self, parts: tuple[str, ...], payload: bytes) -> None:
         self._check_no_links(parts)
         target = self.root.joinpath(*parts)
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -207,10 +240,9 @@ class Workspace:
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
-        return target
 
 
-def _open(name: str, flags: int, dir_fd: int, shown: str) -> int:
+def _open(name: str, flags: int, dir_fd: int | None, shown: str) -> int:
     try:
         return os.open(name, flags, dir_fd=dir_fd)
     except OSError as e:
@@ -220,7 +252,7 @@ def _open(name: str, flags: int, dir_fd: int, shown: str) -> int:
         raise
 
 
-def _is_link(name: str, dir_fd: int) -> bool:
+def _is_link(name: str, dir_fd: int | None) -> bool:
     try:
         return stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
     except OSError:

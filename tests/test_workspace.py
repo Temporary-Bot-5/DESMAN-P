@@ -104,8 +104,8 @@ def outside(tmp_path: Path) -> Path:
 
 
 def test_write_read_roundtrip(ws: Workspace) -> None:
-    path = ws.write("dir/sub/a.txt", "привет")
-    assert path == ws.root / "dir" / "sub" / "a.txt"
+    assert ws.write("dir/sub/a.txt", "привет") == "dir/sub/a.txt"
+    assert (ws.root / "dir" / "sub" / "a.txt").read_text() == "привет"
     assert ws.read_text("dir/sub/a.txt") == "привет"
     ws.write("dir/sub/a.txt", b"\x00\x01")
     assert ws.read("dir/sub/a.txt") == b"\x00\x01"
@@ -128,8 +128,7 @@ def test_malicious_paths_never_touch_the_disk(ws: Workspace, tmp_path: Path, pat
         ws.write(path, "pwned")
     with pytest.raises(PathEscapeError):
         ws.read(path)
-    with pytest.raises(PathEscapeError):
-        ws.resolve(path)
+    assert not ws.exists(path)
     assert sorted(p for p in tmp_path.rglob("*")) == before
 
 
@@ -164,8 +163,7 @@ def test_symlinked_directory_pointing_outside_is_not_followed(ws: Workspace, out
         ws.write("link/secret", "pwned")
     with pytest.raises(PathEscapeError, match="symlink"):
         ws.read("link/secret")
-    with pytest.raises(PathEscapeError, match="symlink"):
-        ws.resolve("link/secret")
+    assert not ws.exists("link/secret")
     assert sorted(os.listdir(outside)) == ["secret"]
     assert (outside / "secret").read_text() == "keep me"
     assert ws.files() == []
@@ -309,3 +307,64 @@ def test_forbidden_path_is_a_quality_failure(
     assert any("path refused" in event or "quality" in event for event in result.events)
     assert not (tmp_path / ".bashrc").exists()
     assert (root / task_id / "notes.txt").is_file()
+
+
+# ── Review regressions (PR #8) ───────────────────────────────────────────────
+
+
+def test_task_directory_replaced_by_a_symlink_later_is_not_followed(
+    ws: Workspace, outside: Path
+) -> None:
+    ws.root.rmdir()
+    ws.root.symlink_to(outside)
+    with pytest.raises(PathEscapeError, match="symlink"):
+        ws.write("new", "pwned")
+    with pytest.raises(PathEscapeError, match="symlink"):
+        ws.write("sub/new", "pwned")
+    with pytest.raises(PathEscapeError, match="symlink"):
+        ws.read("secret")
+    assert not ws.exists("secret")
+    assert ws.files() == []
+    assert sorted(os.listdir(outside)) == ["secret"]
+    assert (outside / "secret").read_text() == "keep me"
+
+
+@pytest.mark.parametrize("path", ["bad\ud800.txt", "dir/\udcff", "\udfff" * 300])
+def test_unencodable_paths_are_refused(path: str) -> None:
+    with pytest.raises(PathEscapeError, match="encod"):
+        check_path(path)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="arbitrary bytes in names are POSIX-only")
+def test_files_lists_only_names_the_guard_accepts(ws: Workspace) -> None:
+    # Generated code (3.3) can create any name; list only what read() will accept.
+    ws.write("ok.txt", "x")
+    for name in ("a:b", "back\\slash", "line\nbreak"):
+        (ws.root / name).write_text("x")
+    fd = os.open(os.fsencode(str(ws.root)) + b"/\xff\xfe", os.O_WRONLY | os.O_CREAT, 0o600)
+    os.close(fd)
+    assert ws.files() == ["ok.txt"]
+    assert all(ws.read(name) == b"x" for name in ws.files())
+
+
+def test_write_returns_the_normalized_relative_path(ws: Workspace) -> None:
+    assert ws.write("./a//b.txt", "x") == "a/b.txt"
+
+
+def test_workspaces_live_next_to_the_store_database(clock: FakeClock, tmp_path: Path) -> None:
+    from desman.core import db
+
+    conn = db.open_db(tmp_path / "jobs" / "desman.db")
+    try:
+        store = Store(conn, clock=clock)
+
+        def executor(work: Work) -> Success:
+            work.workspace.write("x.txt", "x")
+            return Success(content={})
+
+        task_id = store.create_task(one_step())
+        Coordinator(store, executor, accept, sleep=clock.sleep).run(task_id)
+    finally:
+        conn.close()
+    assert (tmp_path / "jobs" / "workspaces" / task_id / "x.txt").is_file()
+    assert not (default_workspace_root() / task_id).exists()
