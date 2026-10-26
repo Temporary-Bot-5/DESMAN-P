@@ -33,7 +33,10 @@ data/
 *.sqlite
 *.sqlite3
 
-# API Keys (never commit)
+# API Keys (never commit). DESMAN keeps them in ~/.config/desman/config.json, outside the repo;
+# these catch a DESMAN_CONFIG_DIR pointed inside it.
 DESMAN_API-Keys/
 **/api_keys*
 **/secrets*
+config.json
+.config.json.*.tmp
