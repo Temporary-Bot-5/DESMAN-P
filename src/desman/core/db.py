@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -136,9 +137,27 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
-    conn.execute("PRAGMA journal_mode = WAL")
+    _enable_wal(conn)
     conn.execute("PRAGMA synchronous = NORMAL")
     return conn
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switch to WAL, waiting for other connections like busy_timeout would.
+
+    The switch needs an exclusive lock and SQLite reports "database is locked" at once instead of
+    waiting, so several processes opening a fresh database together would otherwise fail.
+    The mode is stored in the file, so later connections find it already set.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
 
 
 @contextmanager
@@ -160,23 +179,30 @@ def schema_version(conn: sqlite3.Connection) -> int:
 
 
 def migrate(conn: sqlite3.Connection) -> int:
-    """Apply pending migrations, each in its own transaction. Safe to call repeatedly.
+    """Apply pending migrations, each in its own transaction. Safe to call repeatedly and from
+    several processes at once.
 
-    Returns the number of migrations applied.
+    Returns the number of migrations this call applied.
     """
-    current = schema_version(conn)
-    if current > SCHEMA_VERSION:
-        raise SchemaVersionError(
-            f"database schema v{current} is newer than this DESMAN (v{SCHEMA_VERSION}); upgrade DESMAN"
-        )
-    for version in range(current + 1, SCHEMA_VERSION + 1):
-        # executescript() would COMMIT on its own, so run statements one by one inside the
-        # transaction; user_version is bumped in the same transaction as the schema change.
+    applied = 0
+    while True:
+        # The version is read under the write lock, so another migrator cannot change it between
+        # the read and the migration (two fresh `init-db` runs would otherwise both see v0).
         with transaction(conn):
-            for statement in _split_sql(MIGRATIONS[version - 1]):
+            current = schema_version(conn)
+            if current > SCHEMA_VERSION:
+                raise SchemaVersionError(
+                    f"database schema v{current} is newer than this DESMAN (v{SCHEMA_VERSION}); "
+                    "upgrade DESMAN"
+                )
+            if current == SCHEMA_VERSION:
+                return applied
+            # executescript() would COMMIT on its own, so run statements one by one inside the
+            # transaction; user_version is bumped in the same transaction as the schema change.
+            for statement in _split_sql(MIGRATIONS[current]):
                 conn.execute(statement)
-            conn.execute(f"PRAGMA user_version = {version}")
-    return SCHEMA_VERSION - current
+            conn.execute(f"PRAGMA user_version = {current + 1}")
+        applied += 1
 
 
 def _split_sql(script: str) -> list[str]:
