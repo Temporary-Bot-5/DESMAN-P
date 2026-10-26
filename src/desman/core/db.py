@@ -39,9 +39,14 @@ def default_db_path() -> Path:
     return base / "desman.db"
 
 
+def to_iso(moment: datetime) -> str:
+    """Format an aware datetime in the database timestamp format."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
 def now_iso() -> str:
     """Current UTC time in the database timestamp format."""
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return to_iso(datetime.now(UTC))
 
 
 MIGRATIONS: Final[tuple[str, ...]] = (

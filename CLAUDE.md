@@ -37,12 +37,15 @@ src/desman/
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently)
-    └── db.py      # sqlite3 connection, transactions, append-only migrations
+    ├── db.py      # sqlite3 connection, transactions, append-only migrations
+    ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
+    └── store.py   # Store: create_task, claim (atomic), transition (compare-and-swap + audit)
 ```
 
 Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a
 released migration in `db.MIGRATIONS`; append a new one. Keep the `subtasks.status` CHECK in
-sync with `SubtaskStatus` (a test enforces it).
+sync with `SubtaskStatus` (a test enforces it). All status changes go through
+`Store.claim()` / `Store.transition()`; never `UPDATE subtasks SET status` anywhere else.
 
 The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the
 current phase (no multiple workers, routing, preemption or self-improvement before their phase).
