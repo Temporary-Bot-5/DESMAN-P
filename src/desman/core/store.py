@@ -22,7 +22,7 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.models import Subtask, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
-from desman.core.states import Actor, SubtaskStatus
+from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.states import transition as check_transition
 
 S = SubtaskStatus
@@ -103,6 +103,49 @@ class Store:
             )
             self._promote_ready()
         return task_id
+
+    def task_status(self, task_id: str) -> TaskStatus:
+        rows = self.conn.execute(
+            "SELECT status FROM subtasks WHERE task_id = ?", (task_id,)
+        ).fetchall()
+        if not rows:
+            raise NotFoundError(f"task {task_id} not found")
+        return derive_task_status(SubtaskStatus(r[0]) for r in rows)
+
+    def cancel_task(self, task_id: str, reason: str) -> list[Subtask]:
+        """Operator stops a whole task: every subtask not finished yet becomes CANCELLED.
+
+        A running executor finds out at its next heartbeat or submit (its lease is gone).
+        """
+        cancelled: list[Subtask] = []
+        with db.transaction(self.conn):
+            ids = [
+                r[0]
+                for r in self.conn.execute(
+                    "SELECT id FROM subtasks WHERE task_id = ? ORDER BY seq", (task_id,)
+                )
+            ]
+            if not ids:
+                raise NotFoundError(f"task {task_id} not found")
+            for subtask_id in ids:
+                # Re-read each time: cancelling one subtask blocks its dependents.
+                current = self.get_subtask(subtask_id)
+                if current.status in TERMINAL:
+                    continue
+                cancelled.append(
+                    self._apply(
+                        subtask_id,
+                        current.status,
+                        S.CANCELLED,
+                        Actor.HUMAN,
+                        lease=None,
+                        attempts=None,
+                        reason=reason,
+                        paused_until=None,
+                        details={"scope": "task"},
+                    )
+                )
+        return cancelled
 
     # ── Subtasks ─────────────────────────────────────────────────────────────
 
@@ -235,6 +278,59 @@ class Store:
                 details={"failure": kind.value},
             )
 
+    def submit(
+        self, subtask_id: str, lease: str, content: dict[str, Any], *, kind: str = "result"
+    ) -> Subtask:
+        """Executor hands in its result: stores the artifact and moves RUNNING -> REVIEW atomically.
+
+        If the lease is no longer valid nothing is stored.
+        """
+        with db.transaction(self.conn):
+            attempt = (
+                1
+                + self.conn.execute(
+                    "SELECT COUNT(*) FROM artifacts WHERE subtask_id = ?", (subtask_id,)
+                ).fetchone()[0]
+            )
+            subtask = self._apply(
+                subtask_id,
+                S.RUNNING,
+                S.REVIEW,
+                Actor.EXECUTOR,
+                lease=lease,
+                attempts=None,
+                reason=None,
+                paused_until=None,
+                details={"artifact_attempt": attempt},
+            )
+            self.conn.execute(
+                """INSERT INTO artifacts (id, subtask_id, attempt, kind, content_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    _new_id(),
+                    subtask_id,
+                    attempt,
+                    kind,
+                    json.dumps(content, ensure_ascii=False),
+                    self._now(),
+                ),
+            )
+        return subtask
+
+    def artifacts(self, subtask_id: str) -> list[sqlite3.Row]:
+        """All artifacts of a subtask, oldest attempt first."""
+        return self.conn.execute(
+            "SELECT * FROM artifacts WHERE subtask_id = ? ORDER BY attempt", (subtask_id,)
+        ).fetchall()
+
+    def latest_artifact(self, subtask_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT content_json FROM artifacts WHERE subtask_id = ? ORDER BY attempt DESC LIMIT 1",
+            (subtask_id,),
+        ).fetchone()
+        content: dict[str, Any] | None = json.loads(row[0]) if row else None
+        return content
+
     # ── Leases and recovery ──────────────────────────────────────────────────
 
     def heartbeat(
@@ -343,17 +439,18 @@ class Store:
                 )
         return resumed
 
-    def pending_reviews(self, limit: int = 10) -> list[Subtask]:
+    def pending_reviews(self, limit: int = 10, *, task_id: str | None = None) -> list[Subtask]:
         """Subtasks waiting for a verdict, most urgent first.
 
         Review needs no lease: it only reads the submitted result, and the verdict is a
         compare-and-swap from REVIEW. If a reviewer dies, the subtask simply stays here and is
         reviewed again without re-running the work.
         """
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         rows = self.conn.execute(
-            """SELECT * FROM subtasks WHERE status = 'review'
-               ORDER BY priority DESC, updated_at, seq LIMIT ?""",
-            (limit,),
+            f"""SELECT * FROM subtasks WHERE status = 'review' {scope}
+                ORDER BY priority DESC, updated_at, seq LIMIT ?""",
+            (*params, limit),
         ).fetchall()
         return [Subtask.from_row(r) for r in rows]
 
@@ -438,7 +535,11 @@ class Store:
             to_status=dst,
             details=audit_details,
         )
-        if dst is S.DONE:
+        if dst in (S.FAILED, S.CANCELLED):
+            self._block_dependents(subtask_id)
+        if src is S.FAILED:
+            self._unblock_dependents(actor)
+        if dst is S.DONE or src is S.FAILED:
             self._promote_ready()
         return subtask
 
@@ -467,6 +568,63 @@ class Store:
         raise PauseNotOverError(
             f"subtask {subtask_id} is paused until {current.paused_until} (now {now})"
         )
+
+    def _block_dependents(self, subtask_id: str) -> None:
+        """PENDING -> BLOCKED for everything downstream of a failed or cancelled subtask.
+
+        The audit names the root cause, not the immediate parent: that is what needs fixing.
+        """
+        frontier = [subtask_id]
+        while frontier:
+            placeholders = ", ".join("?" for _ in frontier)
+            rows = self.conn.execute(
+                f"""UPDATE subtasks SET status = 'blocked', updated_at = ?
+                    WHERE status = 'pending' AND id IN (
+                        SELECT subtask_id FROM subtask_deps WHERE depends_on IN ({placeholders}))
+                    RETURNING id, task_id""",
+                (self._now(), *frontier),
+            ).fetchall()
+            for row in rows:
+                check_transition(S.PENDING, S.BLOCKED, Actor.SCHEDULER)
+                self._write_audit(
+                    Actor.SCHEDULER,
+                    "dependency_failed",
+                    task_id=row["task_id"],
+                    subtask_id=row["id"],
+                    from_status=S.PENDING,
+                    to_status=S.BLOCKED,
+                    details={"cause": subtask_id},
+                )
+            frontier = [row["id"] for row in rows]
+
+    def _unblock_dependents(self, actor: Actor) -> None:
+        """BLOCKED -> PENDING where no dependency is failed, cancelled or blocked any more.
+
+        Runs as part of the operator reviving a failed subtask, hence the operator's authority.
+        Repeats so that a whole blocked chain comes back, not just its first link.
+        """
+        while True:
+            rows = self.conn.execute(
+                """UPDATE subtasks SET status = 'pending', updated_at = ?
+                   WHERE status = 'blocked' AND NOT EXISTS (
+                       SELECT 1 FROM subtask_deps d JOIN subtasks dep ON dep.id = d.depends_on
+                       WHERE d.subtask_id = subtasks.id
+                         AND dep.status IN ('failed', 'cancelled', 'blocked'))
+                   RETURNING id, task_id""",
+                (self._now(),),
+            ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                check_transition(S.BLOCKED, S.PENDING, actor)
+                self._write_audit(
+                    actor,
+                    "dependency_revived",
+                    task_id=row["task_id"],
+                    subtask_id=row["id"],
+                    from_status=S.BLOCKED,
+                    to_status=S.PENDING,
+                )
 
     def _promote_ready(self) -> None:
         """PENDING -> READY for every subtask whose dependencies are all DONE. Needs a transaction."""

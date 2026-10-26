@@ -1,0 +1,305 @@
+"""Tests for the coordinator loop: it finishes work, recovers, and always stops."""
+
+from __future__ import annotations
+
+import random
+from datetime import timedelta
+from typing import Any
+
+import pytest
+
+from conftest import FakeClock
+from desman.core import db
+from desman.core.coordinator import (
+    Coordinator,
+    Executor,
+    Failure,
+    Review,
+    Reviewer,
+    Success,
+    Verdict,
+    Work,
+)
+from desman.core.models import Subtask, SubtaskSpec, TaskSpec
+from desman.core.retry import Attempts, FailureKind, RetryPolicy
+from desman.core.states import Actor, SubtaskStatus, TaskStatus
+from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+
+S = SubtaskStatus
+K = FailureKind
+
+
+def chain(*names: str) -> TaskSpec:
+    return TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(description=n, acceptance_criteria="ok", depends_on=[i - 1] if i else [])
+            for i, n in enumerate(names)
+        ],
+    )
+
+
+def ok_executor(work: Work) -> Success:
+    return Success({"by": work.subtask.description})
+
+
+def accept(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+    return Review(Verdict.ACCEPT)
+
+
+def coordinator(
+    store: Store,
+    clock: FakeClock,
+    executor: Executor = ok_executor,
+    reviewer: Reviewer = accept,
+    **kwargs: Any,
+) -> Coordinator:
+    return Coordinator(store, executor, reviewer, sleep=clock.sleep, **kwargs)
+
+
+def test_runs_chain_to_completion(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(chain("a", "b", "c"))
+    result = coordinator(store, clock).run(task_id)
+    assert result.status is TaskStatus.DONE
+    subtasks = store.list_subtasks(task_id)
+    assert {s.status for s in subtasks} == {S.DONE}
+    assert [store.latest_artifact(s.id) for s in subtasks] == [
+        {"by": "a"},
+        {"by": "b"},
+        {"by": "c"},
+    ]
+
+
+def test_reviewer_sees_submitted_artifact_and_retry_feedback_is_audited(
+    store: Store, clock: FakeClock
+) -> None:
+    seen: list[dict[str, Any] | None] = []
+
+    def picky(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        seen.append(artifact)
+        return Review(Verdict.RETRY, "too short") if len(seen) == 1 else Review(Verdict.ACCEPT)
+
+    task_id = store.create_task(chain("a"))
+    assert coordinator(store, clock, reviewer=picky).run(task_id).status is TaskStatus.DONE
+    assert seen == [{"by": "a"}, {"by": "a"}]
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts == Attempts(quality=1)
+    reasons = [r["details_json"] for r in store.audit_log(task_id) if r["actor"] == "reviewer"]
+    assert any("too short" in r for r in reasons)
+
+
+def test_old_prototype_hang_now_ends_with_operator(store: Store, clock: FakeClock) -> None:
+    # B1: the first subtask never passes review. The old loop waited forever on its dependents.
+    def never(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        return Review(Verdict.RETRY, "still wrong")
+
+    task_id = store.create_task(chain("a", "b", "c"))
+    result = coordinator(store, clock, reviewer=never).run(task_id)
+    assert result.status is TaskStatus.NEEDS_HUMAN
+    a, b, c = store.list_subtasks(task_id)
+    assert (a.status, b.status, c.status) == (S.NEEDS_HUMAN, S.PENDING, S.PENDING)
+
+    store.transition(a.id, S.NEEDS_HUMAN, S.FAILED, Actor.HUMAN, reason="give up")
+    assert coordinator(store, clock, reviewer=never).run(task_id).status is TaskStatus.FAILED
+    assert {s.status for s in store.list_subtasks(task_id)[1:]} == {S.BLOCKED}
+
+
+def test_independent_work_continues_while_one_branch_waits_for_human(
+    store: Store, clock: FakeClock
+) -> None:
+    spec = TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(description="bad", acceptance_criteria="ok"),
+            SubtaskSpec(description="good", acceptance_criteria="ok"),
+        ],
+    )
+
+    def judge(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        bad = subtask.description == "bad"
+        return Review(Verdict.ESCALATE, "unclear goal") if bad else Review(Verdict.ACCEPT)
+
+    task_id = store.create_task(spec)
+    result = coordinator(store, clock, reviewer=judge).run(task_id)
+    assert result.status is TaskStatus.NEEDS_HUMAN
+    assert [s.status for s in store.list_subtasks(task_id)] == [S.NEEDS_HUMAN, S.DONE]
+
+
+def test_crashing_executor_is_bounded(store: Store, clock: FakeClock) -> None:
+    def crash(work: Work) -> Success:
+        raise RuntimeError("segfault, sort of")
+
+    task_id = store.create_task(chain("a"))
+    result = coordinator(store, clock, crash, policy=RetryPolicy(max_transient=3)).run(task_id)
+    assert result.status is TaskStatus.NEEDS_HUMAN
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts == Attempts(transient=3)
+    assert any(
+        "executor raised RuntimeError" in r["details_json"] for r in store.audit_log(task_id)
+    )
+
+
+def test_failing_reviewer_is_bounded(store: Store, clock: FakeClock) -> None:
+    def broken(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        raise ConnectionError("provider down")
+
+    task_id = store.create_task(chain("a"))
+    result = coordinator(store, clock, reviewer=broken, policy=RetryPolicy(max_transient=2)).run(
+        task_id
+    )
+    assert result.status is TaskStatus.NEEDS_HUMAN
+
+
+def test_permanent_failure_goes_straight_to_human(store: Store, clock: FakeClock) -> None:
+    calls = []
+
+    def unauthorized(work: Work) -> Failure:
+        calls.append(1)
+        return Failure(K.PERMANENT, "401 invalid API key")
+
+    task_id = store.create_task(chain("a"))
+    assert coordinator(store, clock, unauthorized).run(task_id).status is TaskStatus.NEEDS_HUMAN
+    assert len(calls) == 1
+
+
+def limited_once(clock: FakeClock, minutes: int = 10) -> Executor:
+    state = {"hit": False}
+
+    def run(work: Work) -> Success | Failure:
+        if not state["hit"]:
+            state["hit"] = True
+            return Failure(
+                K.LIMIT, "429", paused_until=db.to_iso(clock.now + timedelta(minutes=minutes))
+            )
+        return ok_executor(work)
+
+    return run
+
+
+def test_pause_returns_control_and_resumes_later(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(chain("a"))
+    co = coordinator(store, clock, limited_once(clock))
+    first = co.run(task_id)
+    assert first.status is TaskStatus.ACTIVE
+    assert first.paused_until == db.to_iso(clock.now + timedelta(minutes=10))
+    assert clock.slept == 0
+    clock.advance(10 * 60)
+    assert co.run(task_id).status is TaskStatus.DONE
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts == Attempts()  # the pause spent nothing
+
+
+def test_pause_can_be_waited_out(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(chain("a"))
+    result = coordinator(store, clock, limited_once(clock)).run(task_id, wait_for_pauses=True)
+    assert result.status is TaskStatus.DONE
+    assert clock.slept == pytest.approx(600)
+
+
+def test_endless_quota_trouble_does_not_hang(store: Store, clock: FakeClock) -> None:
+    def always_limited(work: Work) -> Failure:
+        return Failure(K.LIMIT, "429")
+
+    task_id = store.create_task(chain("a"))
+    co = coordinator(store, clock, always_limited)
+    for _ in range(20):
+        result = co.run(task_id)
+        assert result.status is TaskStatus.ACTIVE and result.paused_until is not None
+        clock.advance(3600)
+    # Never escalated for quota trouble alone.
+    assert store.list_subtasks(task_id)[0].status is S.PAUSED
+
+
+def test_resumes_after_own_crash_from_checkpoint(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(chain("a"))
+    # A previous coordinator process claimed the subtask, saved a checkpoint and died.
+    previous = store.claim("coordinator-old")
+    assert previous is not None and previous.lease_token is not None
+    store.heartbeat(previous.id, previous.lease_token, checkpoint={"step": 2})
+
+    resumed_from: list[dict[str, Any] | None] = []
+
+    def resume(work: Work) -> Success:
+        resumed_from.append(work.subtask.checkpoint)
+        return Success({"done": True})
+
+    result = coordinator(store, clock, resume).run(task_id)
+    assert result.status is TaskStatus.DONE
+    assert resumed_from == [{"step": 2}]
+    assert clock.slept == pytest.approx(DEFAULT_LEASE_SECONDS, abs=0.01)  # waited out the lease
+
+
+def test_executor_checkpoints_through_heartbeat(store: Store, clock: FakeClock) -> None:
+    def stepwise(work: Work) -> Success:
+        for step in range(3):
+            work.heartbeat({"step": step})
+        return Success({})
+
+    task_id = store.create_task(chain("a"))
+    coordinator(store, clock, stepwise).run(task_id)
+    saved = [r for r in store.audit_log(task_id) if r["action"] == "checkpoint"]
+    assert len(saved) == 3
+
+
+def test_cancel_while_running_stops_cleanly(store: Store, clock: FakeClock) -> None:
+    task_id = store.create_task(chain("a", "b"))
+
+    def cancelled_midway(work: Work) -> Success:
+        store.cancel_task(task_id, reason="operator stop")
+        work.heartbeat(None)  # raises: the lease is gone
+        return Success({})
+
+    result = coordinator(store, clock, cancelled_midway).run(task_id)
+    assert result.status is TaskStatus.CANCELLED
+    assert "lost lease" in result.events[-1]
+
+
+# ── Termination under arbitrary behaviour ────────────────────────────────────
+
+
+def random_task(rng: random.Random) -> TaskSpec:
+    count = rng.randint(1, 6)
+    return TaskSpec(
+        goal="random",
+        subtasks=[
+            SubtaskSpec(
+                description=f"s{i}",
+                acceptance_criteria="ok",
+                depends_on=rng.sample(range(i), rng.randint(0, min(i, 2))),
+            )
+            for i in range(count)
+        ],
+    )
+
+
+@pytest.mark.parametrize("seed", range(200))
+def test_loop_always_terminates(store: Store, clock: FakeClock, seed: int) -> None:
+    rng = random.Random(seed)
+
+    def chaotic_executor(work: Work) -> Success | Failure:
+        roll = rng.random()
+        if roll < 0.1:
+            raise RuntimeError("boom")
+        if roll < 0.2:
+            return Failure(K.TRANSIENT, "timeout")
+        if roll < 0.25:
+            return Failure(K.PERMANENT, "403")
+        if roll < 0.3:
+            return Failure(K.LIMIT, "429")
+        return Success({"roll": roll})
+
+    def chaotic_reviewer(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        roll = rng.random()
+        if roll < 0.1:
+            raise RuntimeError("reviewer boom")
+        if roll < 0.15:
+            return Review(Verdict.ESCALATE)
+        if roll < 0.45:
+            return Review(Verdict.RETRY)
+        return Review(Verdict.ACCEPT)
+
+    task_id = store.create_task(random_task(rng))
+    result = coordinator(store, clock, chaotic_executor, chaotic_reviewer).run(
+        task_id, wait_for_pauses=True, max_ticks=500
+    )
+    assert result.status is not TaskStatus.ACTIVE
