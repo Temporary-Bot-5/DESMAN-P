@@ -23,6 +23,7 @@ from click.testing import CliRunner
 from desman.cli import cli
 from desman.core import db
 from desman.core.audit import check_history, history
+from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
 
@@ -176,12 +177,20 @@ def test_killed_mid_review_reviews_again_without_rerunning(tmp_path: Path) -> No
     seen: list[float] = []
 
     def reviewing_b(path: Path, pid: int) -> bool:
-        # Kill a moment after b enters review, so the slow review call is surely under way.
+        # The kill point is "b submitted, no verdict yet". Whether the reviewer's (slow) call
+        # has begun cannot be seen from outside; waiting a moment makes it very likely.
         if not seen and subtask(path, 1).get("status") == "review":
             seen.append(time.monotonic())
         return bool(seen) and time.monotonic() - seen[0] > 0.3
 
     path, _ = run_and_kill(tmp_path, first, reviewing_b)
+    killed = Store(db.open_db(path))
+    task_id = killed.conn.execute("SELECT id FROM tasks").fetchone()[0]
+    b_id = killed.list_subtasks(task_id)[1].id
+    assert killed.get_subtask(b_id).status.value == "review"
+    verdicts = [e for e in history(killed.conn, task_id) if e.action == "verdict"]
+    assert [e.subtask_id for e in verdicts] == [killed.list_subtasks(task_id)[0].id]
+    killed.conn.close()
     second = fake(tmp_path, "second", execute=['{"step": "c"}'], review=[ACCEPT])
     done, _ = resume(path, second)
     assert done.returncode == 0, done.stdout + done.stderr
@@ -189,6 +198,64 @@ def test_killed_mid_review_reviews_again_without_rerunning(tmp_path: Path) -> No
     store = Store(db.open_db(path))
     assert artifacts(store) == {"a": [{"step": "a"}], "b": [{"step": "b"}], "c": [{"step": "c"}]}
     task_id = store.conn.execute("SELECT id FROM tasks").fetchone()[0]
+    assert check_history(store.conn, task_id) == []
+    store.conn.close()
+
+
+# A worker built on the library with its own executor, which checkpoints before it blocks: the
+# LLM executor behind `desman run` makes a single call and has nothing to checkpoint.
+WORKER = """
+import sys, time
+from desman.core import db
+from desman.core.coordinator import Coordinator, Review, Success, Verdict
+from desman.core.owner import current_owner, owner_is_gone
+from desman.core.store import Store
+
+path, task_id, mode = sys.argv[1:]
+
+def executor(work):
+    if mode == "first":
+        work.heartbeat({"pages_done": 2})  # committed before the process is killed
+        time.sleep(120)
+    return Success(content={"resumed_from": work.context.checkpoint})
+
+def reviewer(subtask, artifact):
+    return Review(verdict=Verdict.ACCEPT)
+
+store = Store(db.open_db(path))
+loop = Coordinator(store, executor, reviewer, owner=current_owner(), abandoned=owner_is_gone)
+sys.exit(0 if loop.run(task_id).status.value == "done" else 1)
+"""
+
+
+def test_checkpoint_survives_sigkill_and_reaches_the_next_executor(tmp_path: Path) -> None:
+    path = tmp_path / "desman.db"
+    worker = tmp_path / "worker.py"
+    worker.write_text(WORKER)
+    conn = db.open_db(path)
+    spec = TaskSpec(
+        goal="g", subtasks=[SubtaskSpec(description="long job", acceptance_criteria="ok")]
+    )
+    task_id = Store(conn).create_task(spec)
+    conn.close()
+
+    proc = subprocess.Popen([sys.executable, str(worker), str(path), task_id, "first"])
+    try:
+        wait_for(
+            lambda: subtask(path, 0).get("checkpoint_json") is not None, proc, "the checkpoint"
+        )
+    finally:
+        proc.send_signal(signal.SIGKILL)
+        proc.wait(timeout=10)
+    assert json.loads(subtask(path, 0)["checkpoint_json"]) == {"pages_done": 2}
+
+    again = subprocess.run([sys.executable, str(worker), str(path), task_id, "second"], timeout=60)
+    assert again.returncode == 0
+    store = Store(db.open_db(path))
+    [sub] = store.list_subtasks(task_id)
+    assert [json.loads(a["content_json"]) for a in store.artifacts(sub.id)] == [
+        {"resumed_from": {"pages_done": 2}}
+    ]
     assert check_history(store.conn, task_id) == []
     store.conn.close()
 

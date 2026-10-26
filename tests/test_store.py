@@ -884,3 +884,11 @@ def test_without_the_predicate_live_leases_are_never_taken(store: Store) -> None
     assert store.recover_expired() == []
     assert store.recover_expired(abandoned=lambda owner: False) == []
     assert store.get_subtask(held.id).status is S.RUNNING
+
+
+def test_scheduler_cannot_revoke_a_live_lease_even_with_its_token(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    held = claim(store)
+    with pytest.raises(StaleStateError, match="leased to"):
+        store.transition(held.id, S.RUNNING, S.READY, Actor.SCHEDULER, lease=held.lease_token)
+    assert store.get_subtask(held.id).status is S.RUNNING

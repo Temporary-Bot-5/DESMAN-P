@@ -558,6 +558,7 @@ class Store:
                             "lease": stuck.lease_token,
                         },
                         action="lease_expired" if expired else "lease_abandoned",
+                        abandoned_lease=gone,
                     )
                 )
         return recovered
@@ -630,8 +631,12 @@ class Store:
         paused_until: str | None = None,
         details: dict[str, Any] | None = None,
         action: str = "transition",
+        abandoned_lease: bool = False,
     ) -> Subtask:
         """Compare-and-swap status change plus audit entry. Needs a transaction.
+
+        `abandoned_lease` lets the scheduler take back the live lease `lease` because its owner
+        is gone; only recover_expired sets it, after asking its `abandoned` predicate.
 
         Every status change except claiming goes through here, including the ones the store makes
         on its own (readiness, blocking, unblocking): one place checks the state machine, keeps
@@ -671,9 +676,9 @@ class Store:
         if src is S.RUNNING and lease is not None:
             where.append("lease_token = ?")
             params.append(lease)
-        if src is S.RUNNING and actor is Actor.SCHEDULER and lease is None:
-            where.append("lease_until < ?")  # never take a live lease away...
-            params.append(now)  # ...unless its exact token was judged abandoned (recover_expired)
+        if src is S.RUNNING and actor is Actor.SCHEDULER and not abandoned_lease:
+            where.append("lease_until < ?")  # never take a live lease away
+            params.append(now)
         if src is S.PAUSED:
             where.append("resume_status = ?")  # resume where it stopped
             where.append("(paused_until IS NULL OR paused_until <= ?)")
