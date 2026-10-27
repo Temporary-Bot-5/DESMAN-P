@@ -22,7 +22,7 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.models import Subtask, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
-from desman.core.states import Actor, SubtaskStatus
+from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.states import transition as check_transition
 
 S = SubtaskStatus
@@ -103,6 +103,49 @@ class Store:
             )
             self._promote_ready()
         return task_id
+
+    def task_status(self, task_id: str) -> TaskStatus:
+        rows = self.conn.execute(
+            "SELECT status FROM subtasks WHERE task_id = ?", (task_id,)
+        ).fetchall()
+        if not rows:
+            raise NotFoundError(f"task {task_id} not found")
+        return derive_task_status(SubtaskStatus(r[0]) for r in rows)
+
+    def cancel_task(self, task_id: str, reason: str) -> list[Subtask]:
+        """Operator stops a whole task: every subtask not finished yet becomes CANCELLED.
+
+        A running executor finds out at its next heartbeat or submit (its lease is gone).
+        """
+        cancelled: list[Subtask] = []
+        with db.transaction(self.conn):
+            ids = [
+                r[0]
+                for r in self.conn.execute(
+                    "SELECT id FROM subtasks WHERE task_id = ? ORDER BY seq", (task_id,)
+                )
+            ]
+            if not ids:
+                raise NotFoundError(f"task {task_id} not found")
+            for subtask_id in ids:
+                # Re-read each time: cancelling one subtask blocks its dependents.
+                current = self.get_subtask(subtask_id)
+                if current.status in TERMINAL:
+                    continue
+                cancelled.append(
+                    self._apply(
+                        subtask_id,
+                        current.status,
+                        S.CANCELLED,
+                        Actor.HUMAN,
+                        lease=None,
+                        attempts=None,
+                        reason=reason,
+                        paused_until=None,
+                        details={"scope": "task"},
+                    )
+                )
+        return cancelled
 
     # ── Subtasks ─────────────────────────────────────────────────────────────
 
@@ -219,10 +262,18 @@ class Store:
         """Apply the retry policy to a failed attempt: retry, pause or escalate to the operator.
 
         Counters are read and written in one transaction, so concurrent failures cannot lose a count.
+        A transient failure during REVIEW is the reviewer's, not the work's: the subtask stays in
+        REVIEW with its artifact (only the counter grows), so the work is not run again.
         """
         with db.transaction(self.conn):
             current = self.get_subtask(subtask_id)
             decision = decide(kind, current.attempts, policy)
+            if src is S.REVIEW and kind is FailureKind.TRANSIENT and decision.status is S.READY:
+                return self._count_review_interruption(
+                    current,
+                    decision.attempts,
+                    f"{reason}: {decision.reason}" if reason else decision.reason,
+                )
             return self._apply(
                 subtask_id,
                 src,
@@ -234,6 +285,81 @@ class Store:
                 paused_until=paused_until,
                 details={"failure": kind.value},
             )
+
+    def _count_review_interruption(
+        self, current: Subtask, attempts: Attempts, reason: str
+    ) -> Subtask:
+        """Bump the transient counter of a subtask that stays in REVIEW. Needs a transaction."""
+        if current.status is not S.REVIEW:
+            raise StaleStateError(
+                f"subtask {current.id} is {current.status}, expected {S.REVIEW} (review interrupted)"
+            )
+        row = self.conn.execute(
+            """UPDATE subtasks SET attempts_quality = ?, attempts_transient = ?, updated_at = ?
+               WHERE id = ? AND status = 'review' RETURNING *""",
+            (attempts.quality, attempts.transient, self._now(), current.id),
+        ).fetchone()
+        subtask = Subtask.from_row(row)
+        self._audit(
+            Actor.REVIEWER,
+            "review_interrupted",
+            subtask=subtask,
+            details={"reason": reason, "attempts": attempts.model_dump(), "failure": "transient"},
+        )
+        return subtask
+
+    def submit(
+        self, subtask_id: str, lease: str, content: dict[str, Any], *, kind: str = "result"
+    ) -> Subtask:
+        """Executor hands in its result: stores the artifact and moves RUNNING -> REVIEW atomically.
+
+        If the lease is no longer valid nothing is stored.
+        """
+        with db.transaction(self.conn):
+            attempt = (
+                1
+                + self.conn.execute(
+                    "SELECT COUNT(*) FROM artifacts WHERE subtask_id = ?", (subtask_id,)
+                ).fetchone()[0]
+            )
+            subtask = self._apply(
+                subtask_id,
+                S.RUNNING,
+                S.REVIEW,
+                Actor.EXECUTOR,
+                lease=lease,
+                attempts=None,
+                reason=None,
+                paused_until=None,
+                details={"artifact_attempt": attempt},
+            )
+            self.conn.execute(
+                """INSERT INTO artifacts (id, subtask_id, attempt, kind, content_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    _new_id(),
+                    subtask_id,
+                    attempt,
+                    kind,
+                    json.dumps(content, ensure_ascii=False),
+                    self._now(),
+                ),
+            )
+        return subtask
+
+    def artifacts(self, subtask_id: str) -> list[sqlite3.Row]:
+        """All artifacts of a subtask, oldest attempt first."""
+        return self.conn.execute(
+            "SELECT * FROM artifacts WHERE subtask_id = ? ORDER BY attempt", (subtask_id,)
+        ).fetchall()
+
+    def latest_artifact(self, subtask_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT content_json FROM artifacts WHERE subtask_id = ? ORDER BY attempt DESC LIMIT 1",
+            (subtask_id,),
+        ).fetchone()
+        content: dict[str, Any] | None = json.loads(row[0]) if row else None
+        return content
 
     # ── Leases and recovery ──────────────────────────────────────────────────
 
@@ -280,20 +406,24 @@ class Store:
                 )
         return subtask
 
-    def recover_expired(self, policy: RetryPolicy | None = None) -> list[Subtask]:
+    def recover_expired(
+        self, policy: RetryPolicy | None = None, *, task_id: str | None = None
+    ) -> list[Subtask]:
         """Requeue RUNNING subtasks whose lease ran out: their executor is presumed dead.
 
         Each expiry counts as a transient failure, so a subtask that keeps killing its executor
         ends up with the operator instead of looping forever. The checkpoint is kept, so the next
-        executor resumes from it.
+        executor resumes from it. `policy` is charged to every subtask recovered, so pass
+        `task_id` when the policy belongs to one task's run.
         """
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         recovered: list[Subtask] = []
         with db.transaction(self.conn):
             now = self._now()
             rows = self.conn.execute(
-                """SELECT * FROM subtasks WHERE status = 'running' AND lease_until < ?
-                   ORDER BY lease_until""",
-                (now,),
+                f"""SELECT * FROM subtasks WHERE status = 'running' AND lease_until < ? {scope}
+                    ORDER BY lease_until""",
+                (now, *params),
             ).fetchall()
             for row in rows:
                 expired = Subtask.from_row(row)
@@ -316,16 +446,17 @@ class Store:
                 )
         return recovered
 
-    def resume_due(self) -> list[Subtask]:
+    def resume_due(self, *, task_id: str | None = None) -> list[Subtask]:
         """Resume PAUSED subtasks whose pause is over, back to where each one stopped."""
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         resumed: list[Subtask] = []
         with db.transaction(self.conn):
             now = self._now()
             rows = self.conn.execute(
-                """SELECT id, resume_status FROM subtasks
-                   WHERE status = 'paused' AND (paused_until IS NULL OR paused_until <= ?)
-                   ORDER BY paused_until""",
-                (now,),
+                f"""SELECT id, resume_status FROM subtasks
+                    WHERE status = 'paused' AND (paused_until IS NULL OR paused_until <= ?) {scope}
+                    ORDER BY paused_until""",
+                (now, *params),
             ).fetchall()
             for row in rows:
                 resumed.append(
@@ -343,23 +474,26 @@ class Store:
                 )
         return resumed
 
-    def pending_reviews(self, limit: int = 10) -> list[Subtask]:
+    def pending_reviews(self, limit: int = 10, *, task_id: str | None = None) -> list[Subtask]:
         """Subtasks waiting for a verdict, most urgent first.
 
         Review needs no lease: it only reads the submitted result, and the verdict is a
         compare-and-swap from REVIEW. If a reviewer dies, the subtask simply stays here and is
         reviewed again without re-running the work.
         """
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         rows = self.conn.execute(
-            """SELECT * FROM subtasks WHERE status = 'review'
-               ORDER BY priority DESC, updated_at, seq LIMIT ?""",
-            (limit,),
+            f"""SELECT * FROM subtasks WHERE status = 'review' {scope}
+                ORDER BY priority DESC, updated_at, seq LIMIT ?""",
+            (*params, limit),
         ).fetchall()
         return [Subtask.from_row(r) for r in rows]
 
-    def sweep(self, policy: RetryPolicy | None = None) -> tuple[list[Subtask], list[Subtask]]:
+    def sweep(
+        self, policy: RetryPolicy | None = None, *, task_id: str | None = None
+    ) -> tuple[list[Subtask], list[Subtask]]:
         """Scheduler housekeeping: (requeued or escalated expired leases, resumed pauses)."""
-        return self.recover_expired(policy), self.resume_due()
+        return self.recover_expired(policy, task_id=task_id), self.resume_due(task_id=task_id)
 
     def _apply(
         self,
@@ -368,13 +502,19 @@ class Store:
         dst: SubtaskStatus,
         actor: Actor,
         *,
-        lease: str | None,
-        attempts: Attempts | None,
-        reason: str | None,
-        paused_until: str | None,
-        details: dict[str, Any] | None,
+        lease: str | None = None,
+        attempts: Attempts | None = None,
+        reason: str | None = None,
+        paused_until: str | None = None,
+        details: dict[str, Any] | None = None,
+        action: str = "transition",
     ) -> Subtask:
-        """Compare-and-swap status change plus audit entry. Needs a transaction."""
+        """Compare-and-swap status change plus audit entry. Needs a transaction.
+
+        Every status change except claiming goes through here, including the ones the store makes
+        on its own (readiness, blocking, unblocking): one place checks the state machine, keeps
+        lease/pause fields consistent and writes the audit entry.
+        """
         if dst is S.RUNNING:
             raise ValueError("use claim() to start running a subtask")
         check_transition(src, dst, actor)
@@ -389,6 +529,8 @@ class Store:
         if dst is S.PAUSED:
             if paused_until is None:
                 paused_until = db.to_iso(self.clock() + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
+            else:
+                paused_until = db.normalize_iso(paused_until)  # may come from a provider
             sets += ["resume_status = ?", "paused_until = ?"]
             params += [(S.READY if src is S.RUNNING else S.REVIEW).value, paused_until]
         if src is S.PAUSED:
@@ -432,13 +574,17 @@ class Store:
             audit_details["attempts"] = attempts.model_dump()
         self._audit(
             actor,
-            "transition",
+            action,
             subtask=subtask,
             from_status=src,
             to_status=dst,
             details=audit_details,
         )
-        if dst is S.DONE:
+        if dst in (S.FAILED, S.CANCELLED):
+            self._block_dependents(subtask_id)
+        if src is S.FAILED:
+            self._unblock_dependents(actor)
+        if dst is S.DONE or src is S.FAILED:
             self._promote_ready()
         return subtask
 
@@ -468,26 +614,63 @@ class Store:
             f"subtask {subtask_id} is paused until {current.paused_until} (now {now})"
         )
 
+    def _block_dependents(self, subtask_id: str) -> None:
+        """PENDING -> BLOCKED for everything downstream of a failed or cancelled subtask.
+
+        The audit names the root cause, not the immediate parent: that is what needs fixing.
+        """
+        frontier = [subtask_id]
+        while frontier:
+            placeholders = ", ".join("?" for _ in frontier)
+            ids = [
+                r[0]
+                for r in self.conn.execute(
+                    f"""SELECT DISTINCT s.id FROM subtasks s JOIN subtask_deps d ON d.subtask_id = s.id
+                        WHERE s.status = 'pending' AND d.depends_on IN ({placeholders})""",
+                    frontier,
+                )
+            ]
+            for dependent in ids:
+                self._apply(
+                    dependent,
+                    S.PENDING,
+                    S.BLOCKED,
+                    Actor.SCHEDULER,
+                    details={"cause": subtask_id},
+                    action="dependency_failed",
+                )
+            frontier = ids
+
+    def _unblock_dependents(self, actor: Actor) -> None:
+        """BLOCKED -> PENDING where no dependency is failed, cancelled or blocked any more.
+
+        Runs as part of the operator reviving a failed subtask, hence the operator's authority.
+        Repeats so that a whole blocked chain comes back, not just its first link.
+        """
+        while ids := [
+            r[0]
+            for r in self.conn.execute(
+                """SELECT id FROM subtasks s WHERE status = 'blocked' AND NOT EXISTS (
+                       SELECT 1 FROM subtask_deps d JOIN subtasks dep ON dep.id = d.depends_on
+                       WHERE d.subtask_id = s.id
+                         AND dep.status IN ('failed', 'cancelled', 'blocked'))"""
+            )
+        ]:
+            for subtask_id in ids:
+                self._apply(subtask_id, S.BLOCKED, S.PENDING, actor, action="dependency_revived")
+
     def _promote_ready(self) -> None:
         """PENDING -> READY for every subtask whose dependencies are all DONE. Needs a transaction."""
-        rows = self.conn.execute(
-            """UPDATE subtasks SET status = 'ready', updated_at = ?
-               WHERE status = 'pending' AND NOT EXISTS (
-                   SELECT 1 FROM subtask_deps d JOIN subtasks dep ON dep.id = d.depends_on
-                   WHERE d.subtask_id = subtasks.id AND dep.status != 'done')
-               RETURNING id, task_id""",
-            (self._now(),),
-        ).fetchall()
-        for row in rows:
-            check_transition(S.PENDING, S.READY, Actor.SCHEDULER)
-            self._write_audit(
-                Actor.SCHEDULER,
-                "dependencies_met",
-                task_id=row["task_id"],
-                subtask_id=row["id"],
-                from_status=S.PENDING,
-                to_status=S.READY,
+        ids = [
+            r[0]
+            for r in self.conn.execute(
+                """SELECT id FROM subtasks s WHERE status = 'pending' AND NOT EXISTS (
+                       SELECT 1 FROM subtask_deps d JOIN subtasks dep ON dep.id = d.depends_on
+                       WHERE d.subtask_id = s.id AND dep.status != 'done')"""
             )
+        ]
+        for subtask_id in ids:
+            self._apply(subtask_id, S.PENDING, S.READY, Actor.SCHEDULER, action="dependencies_met")
 
     # ── Audit ────────────────────────────────────────────────────────────────
 

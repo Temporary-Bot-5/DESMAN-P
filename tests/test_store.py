@@ -5,21 +5,24 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
+from conftest import FakeClock
 from desman.core import db
 from desman.core.models import Priority, Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy
-from desman.core.states import Actor, InvalidTransitionError, SubtaskStatus
+from desman.core.states import Actor, InvalidTransitionError, SubtaskStatus, TaskStatus
+from desman.core.states import transition as check_transition
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
     DEFAULT_PAUSE_SECONDS,
+    NotFoundError,
     PauseNotOverError,
     StaleStateError,
     Store,
@@ -27,29 +30,6 @@ from desman.core.store import (
 
 S = SubtaskStatus
 A = Actor
-
-
-class FakeClock:
-    def __init__(self) -> None:
-        self.now = datetime(2026, 1, 1, tzinfo=UTC)
-
-    def __call__(self) -> datetime:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += timedelta(seconds=seconds)
-
-
-@pytest.fixture
-def clock() -> FakeClock:
-    return FakeClock()
-
-
-@pytest.fixture
-def store(clock: FakeClock) -> Iterator[Store]:
-    conn = db.open_db(":memory:")
-    yield Store(conn, clock=clock)
-    conn.close()
 
 
 def sub(name: str, *deps: int, priority: int | None = None) -> SubtaskSpec:
@@ -663,3 +643,194 @@ def test_checkpoint_history_is_kept_in_audit(store: Store) -> None:
         if r["action"] == "checkpoint"
     ]
     assert saved == [{"step": 1}, {"step": 2}, {"step": 3}]
+
+
+# ── Failure propagation and task status (ROADMAP 1.5) ────────────────────────
+
+
+def give_up(store: Store, subtask_id: str) -> None:
+    """Executor escalates, operator gives up."""
+    claimed = store.get_subtask(subtask_id)
+    store.transition(subtask_id, S.RUNNING, S.NEEDS_HUMAN, A.EXECUTOR, lease=claimed.lease_token)
+    store.transition(subtask_id, S.NEEDS_HUMAN, S.FAILED, A.HUMAN, reason="not worth it")
+
+
+def test_failure_blocks_dependents_transitively(store: Store) -> None:
+    # a -> b -> c, and d independent
+    task_id = store.create_task(spec(sub("a"), sub("b", 0), sub("c", 1), sub("d")))
+    a, b, c, d = store.list_subtasks(task_id)
+    first = claim(store)
+    assert first.id == a.id
+    give_up(store, a.id)
+    assert [store.get_subtask(x.id).status for x in (b, c, d)] == [S.BLOCKED, S.BLOCKED, S.READY]
+    causes = [
+        json.loads(r["details_json"])["cause"]
+        for r in store.audit_log(task_id)
+        if r["action"] == "dependency_failed"
+    ]
+    assert causes == [a.id, a.id]  # the root cause: what the operator has to fix
+    assert store.task_status(task_id) is TaskStatus.ACTIVE  # d can still run
+    finish(store, claim(store))
+    assert store.task_status(task_id) is TaskStatus.FAILED
+
+
+def test_reviving_failure_unblocks_whole_chain(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b", 0), sub("c", 1)))
+    a, b, c = store.list_subtasks(task_id)
+    claim(store)
+    give_up(store, a.id)
+    revived = store.transition(a.id, S.FAILED, S.READY, A.HUMAN, reason="try again")
+    assert revived.attempts == Attempts()
+    assert [store.get_subtask(x.id).status for x in (b, c)] == [S.PENDING, S.PENDING]
+    actors = {r["actor"] for r in store.audit_log(task_id) if r["action"] == "dependency_revived"}
+    assert actors == {"human"}
+    for _ in range(3):
+        finish(store, claim(store))
+    assert store.task_status(task_id) is TaskStatus.DONE
+
+
+def test_dependent_of_two_failures_needs_both_revived(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b"), sub("c", 0, 1)))
+    a, b, c = store.list_subtasks(task_id)
+    claim(store), claim(store)
+    give_up(store, a.id)
+    give_up(store, b.id)
+    store.transition(a.id, S.FAILED, S.READY, A.HUMAN)
+    assert store.get_subtask(c.id).status is S.BLOCKED
+    store.transition(b.id, S.FAILED, S.READY, A.HUMAN)
+    assert store.get_subtask(c.id).status is S.PENDING
+
+
+def test_cancelled_subtask_blocks_dependents_for_good(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b", 0)))
+    a, b = store.list_subtasks(task_id)
+    store.transition(a.id, S.READY, S.CANCELLED, A.HUMAN)
+    assert store.get_subtask(b.id).status is S.BLOCKED
+    assert store.task_status(task_id) is TaskStatus.CANCELLED
+
+
+def test_needs_human_task_status(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b", 0)))
+    reject(store), reject(store)
+    assert store.task_status(task_id) is TaskStatus.ACTIVE
+    reject(store)
+    assert store.task_status(task_id) is TaskStatus.NEEDS_HUMAN
+
+
+def test_cancel_task_stops_everything(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b"), sub("c", 0), sub("d", 2)))
+    running = claim(store)
+    cancelled = store.cancel_task(task_id, reason="changed my mind")
+    assert {s.status for s in cancelled} == {S.CANCELLED}
+    assert {s.status for s in store.list_subtasks(task_id)} == {S.CANCELLED}
+    assert store.task_status(task_id) is TaskStatus.CANCELLED
+    assert running.lease_token is not None
+    with pytest.raises(StaleStateError):  # the executor learns at its next heartbeat
+        store.heartbeat(running.id, running.lease_token)
+
+
+def test_cancel_task_keeps_finished_work(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a"), sub("b")))
+    finish(store, claim(store))
+    store.cancel_task(task_id, reason="enough")
+    assert sorted(s.status for s in store.list_subtasks(task_id)) == [S.CANCELLED, S.DONE]
+
+
+def test_unknown_task(store: Store) -> None:
+    with pytest.raises(NotFoundError):
+        store.task_status("nope")
+    with pytest.raises(NotFoundError):
+        store.cancel_task("nope", reason="x")
+
+
+def test_submit_stores_artifact_atomically(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    first = claim(store)
+    assert first.lease_token is not None
+    store.submit(first.id, first.lease_token, {"answer": 1})
+    store.record_failure(first.id, S.REVIEW, A.REVIEWER, FailureKind.QUALITY)
+    second = claim(store)
+    assert second.lease_token is not None
+    store.submit(second.id, second.lease_token, {"answer": 2})
+    assert [r["attempt"] for r in store.artifacts(first.id)] == [1, 2]
+    assert store.latest_artifact(first.id) == {"answer": 2}
+    with pytest.raises(StaleStateError):  # stale lease: nothing stored
+        store.submit(first.id, first.lease_token, {"answer": "late"})
+    assert len(store.artifacts(first.id)) == 2
+
+
+def test_pending_reviews_scoped_to_task(store: Store) -> None:
+    mine = store.create_task(spec(sub("a")))
+    store.create_task(spec(sub("b")))
+    for claimed in (claim(store), claim(store)):
+        assert claimed.lease_token is not None
+        store.submit(claimed.id, claimed.lease_token, {})
+    assert [s.task_id for s in store.pending_reviews(task_id=mine)] == [mine]
+
+
+# ── Review fixes (PR #6) ─────────────────────────────────────────────────────
+
+
+def test_housekeeping_can_be_scoped_to_a_task(store: Store, clock: FakeClock) -> None:
+    mine = store.create_task(spec(sub("a")))
+    other = store.create_task(spec(sub("b")))
+    a = store.claim("w", task_id=mine)
+    b = store.claim("w", task_id=other)
+    assert a is not None and b is not None
+    clock.advance(DEFAULT_LEASE_SECONDS + 1)
+    assert [s.id for s in store.recover_expired(task_id=mine)] == [a.id]
+    assert store.get_subtask(b.id).status is S.RUNNING
+
+
+def test_transient_review_failure_keeps_the_artifact_in_review(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    assert claimed.lease_token is not None
+    store.submit(claimed.id, claimed.lease_token, {"x": 1})
+    policy = RetryPolicy(max_transient=2)
+    kept = store.record_failure(
+        claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT, policy=policy
+    )
+    assert (kept.status, kept.attempts) == (S.REVIEW, Attempts(transient=1))
+    escalated = store.record_failure(
+        claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT, policy=policy
+    )
+    assert escalated.status is S.NEEDS_HUMAN
+
+
+def test_every_audited_change_is_a_legal_transition(store: Store) -> None:
+    # Exercise every automatic path (readiness, blocking, unblocking, cancelling) and check the
+    # audit: each status change must be one the state machine allows for its actor.
+    task_id = store.create_task(spec(sub("a"), sub("b", 0), sub("c", 1), sub("d")))
+    a = claim(store)
+    give_up(store, a.id)
+    store.transition(a.id, S.FAILED, S.READY, A.HUMAN)
+    finish(store, claim(store))
+    store.cancel_task(task_id, reason="done testing")
+    changes = [r for r in store.audit_log(task_id) if r["to_status"] is not None]
+    assert {r["action"] for r in changes} >= {
+        "dependencies_met",
+        "dependency_failed",
+        "dependency_revived",
+        "claim",
+        "transition",
+    }
+    for r in changes:
+        check_transition(
+            SubtaskStatus(r["from_status"]), SubtaskStatus(r["to_status"]), Actor(r["actor"])
+        )
+
+
+def test_bad_pause_deadline_is_rejected(store: Store) -> None:
+    store.create_task(spec(sub("a")))
+    claimed = claim(store)
+    with pytest.raises(ValueError):
+        store.transition(
+            claimed.id,
+            S.RUNNING,
+            S.PAUSED,
+            A.EXECUTOR,
+            lease=claimed.lease_token,
+            paused_until="later",
+        )
+    assert store.get_subtask(claimed.id).status is S.RUNNING

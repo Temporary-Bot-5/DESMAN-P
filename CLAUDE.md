@@ -39,15 +39,20 @@ src/desman/
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently)
     ├── db.py      # sqlite3 connection, transactions, append-only migrations
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
-    └── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
+    ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
                    #        record_failure (retry policy applied atomically)
-                   #        heartbeat/checkpoint, recover_expired, resume_due, sweep
+                   #        heartbeat/checkpoint, recover_expired, resume_due, sweep,
+                   #        submit, task_status, cancel_task, failure propagation
+    └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
 ```
 
 Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a
 released migration in `db.MIGRATIONS`; append a new one. Keep the `subtasks.status` CHECK in
-sync with `SubtaskStatus` (a test enforces it). All status changes go through
-`Store.claim()` / `Store.transition()`; never `UPDATE subtasks SET status` anywhere else.
+sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,
+audit in one place) — public entry points are `claim()`, `transition()`, `record_failure()`,
+`submit()`, `cancel_task()` and the housekeeping methods. Never `UPDATE subtasks SET status`
+anywhere else; `claim()` is the one other writer. Contracts crossing a boundary (executor /
+reviewer results, provider data) are Pydantic models validated where they enter.
 
 The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the
 current phase (no multiple workers, routing, preemption or self-improvement before their phase).
@@ -76,6 +81,8 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 
 - Every task in ROADMAP lands with tests
 - Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
+- Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
+  except in lock-contention tests
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
 - Idempotency test: re-run same subtask → no duplicate side effects

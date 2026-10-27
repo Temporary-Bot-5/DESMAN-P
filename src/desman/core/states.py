@@ -23,7 +23,7 @@ It never gives up on its own: FAILED is a human verdict.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Final
 
@@ -34,8 +34,10 @@ __all__ = [
     "Actor",
     "InvalidTransitionError",
     "SubtaskStatus",
+    "TaskStatus",
     "allowed_targets",
     "can_transition",
+    "derive_task_status",
     "transition",
 ]
 
@@ -145,3 +147,42 @@ def allowed_targets(src: SubtaskStatus, actor: Actor) -> frozenset[SubtaskStatus
     return frozenset(
         dst for (s, dst), actors in TRANSITIONS.items() if s == src and actor in actors
     )
+
+
+# ── Task status ──────────────────────────────────────────────────────────────
+
+
+class TaskStatus(StrEnum):
+    """Status of a whole task, derived from its subtasks (it is never stored)."""
+
+    ACTIVE = "active"  # the system can still make progress on its own
+    NEEDS_HUMAN = "needs_human"  # nothing moves until the operator decides an escalation
+    DONE = "done"  # every subtask accepted
+    FAILED = "failed"  # the operator gave up on a subtask; the rest is blocked or finished
+    CANCELLED = "cancelled"  # stopped by the operator
+
+
+_ACTIVE: Final = frozenset({S.READY, S.RUNNING, S.REVIEW, S.PAUSED})
+
+
+def derive_task_status(statuses: Iterable[SubtaskStatus]) -> TaskStatus:
+    """Task status from its subtasks' statuses.
+
+    PENDING alone does not count as progress: a pending subtask only moves when one of its
+    dependencies does, so if nothing is ACTIVE the pending ones are waiting on the operator too.
+    Anything but ACTIVE means the coordinator has nothing left to do for this task.
+    """
+    present = set(statuses)
+    if present & _ACTIVE:
+        return TaskStatus.ACTIVE
+    if not present or present == {S.DONE}:
+        return TaskStatus.DONE
+    if S.NEEDS_HUMAN in present:
+        return TaskStatus.NEEDS_HUMAN
+    if S.FAILED in present:
+        return TaskStatus.FAILED
+    if present & {S.CANCELLED, S.BLOCKED}:
+        return TaskStatus.CANCELLED
+    # Only PENDING (and DONE) left with nothing active: impossible for a valid DAG, since a
+    # pending subtask whose dependencies are all DONE is promoted to READY in the same transaction.
+    raise ValueError(f"inconsistent subtask statuses: {sorted(present)}")

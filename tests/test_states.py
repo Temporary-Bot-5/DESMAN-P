@@ -13,8 +13,10 @@ from desman.core.states import (
     Actor,
     InvalidTransitionError,
     SubtaskStatus,
+    TaskStatus,
     allowed_targets,
     can_transition,
+    derive_task_status,
     transition,
 )
 
@@ -184,3 +186,38 @@ def test_allowed_targets() -> None:
     assert allowed_targets(S.RUNNING, A.EXECUTOR) == {S.REVIEW, S.READY, S.PAUSED, S.NEEDS_HUMAN}
     assert allowed_targets(S.RUNNING, A.SCHEDULER) == {S.READY, S.NEEDS_HUMAN}
     assert allowed_targets(S.PENDING, A.EXECUTOR) == frozenset()
+
+
+# ── Task status ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        ([S.DONE, S.DONE], TaskStatus.DONE),
+        ([S.DONE, S.PENDING, S.READY], TaskStatus.ACTIVE),
+        ([S.PAUSED, S.PENDING], TaskStatus.ACTIVE),  # waiting for quota still counts as active
+        ([S.REVIEW, S.NEEDS_HUMAN], TaskStatus.ACTIVE),  # other work can still go on
+        ([S.NEEDS_HUMAN, S.PENDING], TaskStatus.NEEDS_HUMAN),
+        ([S.NEEDS_HUMAN, S.FAILED, S.BLOCKED], TaskStatus.NEEDS_HUMAN),  # a decision is pending
+        ([S.DONE, S.FAILED, S.BLOCKED], TaskStatus.FAILED),
+        ([S.DONE, S.CANCELLED], TaskStatus.CANCELLED),
+        ([S.CANCELLED, S.BLOCKED], TaskStatus.CANCELLED),
+    ],
+)
+def test_derive_task_status(statuses: list[SubtaskStatus], expected: TaskStatus) -> None:
+    assert derive_task_status(statuses) is expected
+
+
+def test_derive_task_status_rejects_impossible_state() -> None:
+    with pytest.raises(ValueError, match="inconsistent"):
+        derive_task_status([S.DONE, S.PENDING])
+
+
+def test_every_non_active_combination_is_settled() -> None:
+    # Whatever mix of non-active statuses a task ends up with, it has a definite outcome:
+    # this is what lets the coordinator loop always stop.
+    settled = [s for s in S if s not in (S.READY, S.RUNNING, S.REVIEW, S.PAUSED, S.PENDING)]
+    for status in settled:
+        for other in settled:
+            assert derive_task_status([status, other]) is not TaskStatus.ACTIVE

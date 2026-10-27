@@ -46,6 +46,19 @@ def to_iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def parse_iso(moment: str) -> datetime:
+    """Parse a timestamp that carries a timezone (e.g. "2026-01-01T12:00:00Z", "...+02:00")."""
+    parsed = datetime.fromisoformat(moment)
+    if parsed.tzinfo is None:
+        raise ValueError(f"timestamp without timezone: {moment!r}")
+    return parsed
+
+
+def normalize_iso(moment: str) -> str:
+    """Validate a timestamp from outside (e.g. a provider's reset time) into the database format."""
+    return to_iso(parse_iso(moment))
+
+
 def now_iso() -> str:
     """Current UTC time in the database timestamp format."""
     return to_iso(datetime.now(UTC))
