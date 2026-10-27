@@ -68,6 +68,8 @@ src/desman/
                    #   routes by prompt, JSON scripts, seeded chaos. All model tests use it.
     ├── openai_compat.py # HTTP client for every cloud provider: typed errors, key rotation,
                    #   CallRecord per attempt (hashes and key fingerprint, never the key)
+    ├── structured.py # complete_json(): JSON from a reply, validated by a Pydantic schema,
+                   #   one repair request showing the model its errors, then StructuredOutputError
     ├── router.py  # provider/model for a run (--provider, PREFERENCE), built from the config
     └── check.py   # `desman keys check`: is a key accepted, limits reported; spends no tokens
 ```

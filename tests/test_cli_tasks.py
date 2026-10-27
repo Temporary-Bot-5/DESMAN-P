@@ -195,7 +195,15 @@ def test_rejected_request_waits_for_the_operator(tmp_path: Path) -> None:
 
 
 def test_garbage_then_valid_reply(tmp_path: Path) -> None:
+    # The repair request turns the second reply into the first attempt's result.
     fake = script(tmp_path, ["Sure! Here it is.", '{"ok": true}'])
+    result = desman("run", "g", "--fake-llm", fake)
+    assert result.exit_code == EXIT_DONE, result.output
+    assert "attempts" not in result.output  # no attempt was spent
+
+
+def test_garbage_after_repair_costs_an_attempt(tmp_path: Path) -> None:
+    fake = script(tmp_path, ["Sure! Here it is.", "Here it is again.", '{"ok": true}'])
     result = desman("run", "g", "--fake-llm", fake)
     assert result.exit_code == EXIT_DONE, result.output
     assert "attempts q1/t0" in result.output
