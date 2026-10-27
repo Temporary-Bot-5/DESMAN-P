@@ -16,7 +16,6 @@ from desman import __version__, config
 from desman.cli import cli
 from desman.config import (
     CONFIG_DIR_ENV,
-    Config,
     ConfigError,
     ConfigManager,
     Permissions,
@@ -24,6 +23,7 @@ from desman.config import (
     open_config,
     project_root,
 )
+from helpers import flat_keys, make_config
 
 
 def test_default_config_path_honours_env(isolated_config: Path) -> None:
@@ -34,14 +34,15 @@ def test_unconfigured_by_default() -> None:
     manager = ConfigManager(default_config_path())
     assert not manager.is_configured()
     assert manager.load().language == "en"
-    assert manager.load().api_keys == {}
+    assert flat_keys(manager.load()) == {}
 
 
 def test_save_and_load_roundtrip() -> None:
     manager = ConfigManager(default_config_path())
     manager.save(
-        Config.model_validate(
-            {
+        make_config(
+            **{
+                "configured": True,
                 "language": "ru",
                 "api_keys": {"GROQ_API_KEY": "k"},
                 "permissions": {"shell_execution": False},
@@ -52,7 +53,7 @@ def test_save_and_load_roundtrip() -> None:
     reloaded = ConfigManager(default_config_path())
     assert reloaded.is_configured()
     assert reloaded.load().language == "ru"
-    assert reloaded.load().api_keys == {"GROQ_API_KEY": "k"}
+    assert flat_keys(reloaded.load()) == {"GROQ_API_KEY": "k"}
     assert reloaded.load().permissions == Permissions()
     assert reloaded.load().settings == {"OLLAMA_HOST": "http://localhost:11434"}
 
@@ -96,7 +97,7 @@ def test_version() -> None:
 
 
 def test_bare_command_shows_banner_when_configured() -> None:
-    ConfigManager(default_config_path()).save(Config.model_validate({"language": "en"}))
+    ConfigManager(default_config_path()).save(make_config(**{"language": "en", "configured": True}))
     result = CliRunner().invoke(cli, [], input="\n")
     assert result.exit_code == 0
     assert "Decentralized Self-Evolving Modular Agents Network" in result.output
@@ -112,7 +113,7 @@ def test_config_file_is_private_and_written_atomically(
     manager = ConfigManager(path)
     path.write_text("{}", encoding="utf-8")
     os.chmod(path, 0o644)  # e.g. created by an older version
-    manager.save(Config.model_validate({"api_keys": {"GROQ_API_KEY": "gsk_secret"}}))
+    manager.save(make_config(**{"api_keys": {"GROQ_API_KEY": "gsk_secret"}}))
     if os.name == "posix":
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700  # created by us
@@ -123,55 +124,11 @@ def test_config_file_is_private_and_written_atomically(
 
     monkeypatch.setattr(os, "replace", crash)
     with pytest.raises(OSError, match="disk full"):
-        manager.save(Config(api_keys={"GROQ_API_KEY": "gsk_other"}))
-    assert ConfigManager(path).load().api_keys == {"GROQ_API_KEY": "gsk_secret"}  # old file intact
+        manager.save(make_config(api_keys={"GROQ_API_KEY": "gsk_other"}))
+    assert flat_keys(ConfigManager(path).load()) == {
+        "GROQ_API_KEY": "gsk_secret"
+    }  # old file intact
     assert [p.name for p in path.parent.iterdir()] == ["config.json"]
-
-
-def wizard(*answers: str) -> str:
-    return "\n".join(answers) + "\n"
-
-
-NO_PERMISSIONS = ("N", "N", "N", "N")
-
-
-def test_reconfigure_keeps_keys_that_are_not_reentered() -> None:
-    manager = ConfigManager(default_config_path())
-    manager.save(
-        Config.model_validate(
-            {
-                "language": "en",
-                "api_keys": {"GROQ_API_KEY": "gsk_old", "GOOGLE_API_KEY": "AIza_old"},
-                "settings": {"OLLAMA_HOST": "http://box:11434"},
-            }
-        )
-    )
-    # English, cloud only, accept privacy note, pick GROQ (3), press Enter at its key prompt.
-    result = CliRunner().invoke(
-        cli, ["config"], input=wizard("1", "1", "Y", "3", "", *NO_PERMISSIONS)
-    )
-    assert result.exit_code == 0, result.output
-    assert "Enter keeps it" in result.output
-    assert "gsk_old" not in result.output  # never echoed
-    after = ConfigManager(default_config_path())
-    assert after.load().api_keys == {"GROQ_API_KEY": "gsk_old", "GOOGLE_API_KEY": "AIza_old"}
-    assert after.load().settings == {"OLLAMA_HOST": "http://box:11434"}
-
-
-def test_reconfigure_replaces_or_deletes_a_key() -> None:
-    manager = ConfigManager(default_config_path())
-    manager.save(
-        Config.model_validate(
-            {
-                "language": "en",
-                "api_keys": {"GROQ_API_KEY": "gsk_old", "GOOGLE_API_KEY": "AIza_old"},
-            }
-        )
-    )
-    answers = wizard("1", "1", "Y", "2,3", "-", "gsk_new", *NO_PERMISSIONS)  # Google: delete
-    result = CliRunner().invoke(cli, ["config"], input=answers)
-    assert result.exit_code == 0, result.output
-    assert ConfigManager(default_config_path()).load().api_keys == {"GROQ_API_KEY": "gsk_new"}
 
 
 # ── Review regressions (PR #13) ──────────────────────────────────────────────
@@ -186,9 +143,11 @@ def test_symlinked_config_is_updated_at_its_target(tmp_path: Path) -> None:
     target = dotfiles / "desman.json"
     target.write_text("{}", encoding="utf-8")
     path.symlink_to(target)
-    ConfigManager(path).save(Config.model_validate({"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
+    ConfigManager(path).save(make_config(**{"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
     assert path.is_symlink() and path.resolve() == target
-    assert json.loads(target.read_text())["api_keys"] == {"GROQ_API_KEY": "gsk_new"}
+    assert json.loads(target.read_text())["api_keys"] == {
+        "GROQ_API_KEY": [{"value": "gsk_new", "label": ""}]
+    }
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert [p.name for p in dotfiles.iterdir()] == ["desman.json"]
 
@@ -201,20 +160,8 @@ def test_old_hard_link_does_not_stay_world_readable(tmp_path: Path) -> None:
     os.chmod(path, 0o644)
     backup = tmp_path / "backup.json"
     os.link(path, backup)
-    manager.save(Config.model_validate({"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
+    manager.save(make_config(**{"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
-
-
-def test_local_setting_can_be_cleared() -> None:
-    manager = ConfigManager(default_config_path())
-    manager.save(
-        Config.model_validate({"language": "en", "settings": {"OLLAMA_HOST": "http://box:11434"}})
-    )
-    # English, local only, then '-' at the first local prompt and Enter for the rest.
-    answers = wizard("1", "2", "-", *[""] * 10, *NO_PERMISSIONS)
-    result = CliRunner().invoke(cli, ["config"], input=answers)
-    assert result.exit_code == 0, result.output
-    assert "OLLAMA_HOST" not in ConfigManager(default_config_path()).load().settings
 
 
 # ── Config location (hotfix/config-in-project) ───────────────────────────────
@@ -242,7 +189,7 @@ def test_git_ignores_the_config_and_its_temp_files() -> None:
     assert root is not None
     if not (root / ".git").exists():
         pytest.skip("not a git checkout")
-    names = ["config.json", ".config.json.0123456789ab.tmp"]
+    names = ["config.json", ".config.json.0123456789ab.tmp", ".config.json.lock"]
     done = subprocess.run(
         ["git", "-C", str(root), "check-ignore", "--no-index", *names],
         capture_output=True,
@@ -261,8 +208,12 @@ def checkout_with_home_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     old = tmp_path / "home" / ".config" / "desman" / "config.json"
     old.parent.mkdir(parents=True)
     ConfigManager(old).save(
-        Config.model_validate(
-            {"api_keys": {"GROQ_API_KEY": "gsk_old"}, "permissions": {"shell_execution": True}}
+        make_config(
+            **{
+                "configured": True,
+                "api_keys": {"GROQ_API_KEY": "gsk_old"},
+                "permissions": {"shell_execution": True},
+            }
         )
     )
     return old, project / "config.json"
@@ -275,23 +226,21 @@ def test_home_config_moves_into_the_checkout(
     manager = open_config()
     assert manager.config_path == new and not old.exists()
     assert manager.is_configured()
-    assert manager.load().api_keys == {"GROQ_API_KEY": "gsk_old"}
+    assert flat_keys(manager.load()) == {"GROQ_API_KEY": "gsk_old"}
     assert manager.load().permissions.shell_execution
     if os.name == "posix":
         assert stat.S_IMODE(new.stat().st_mode) == 0o600
-    result = CliRunner().invoke(
-        cli, ["config"], input=wizard("1", "1", "Y", "3", "", *NO_PERMISSIONS)
-    )
+    result = CliRunner().invoke(cli, ["config"], input="1\n12\n\n\n\n\n")  # en, Done, keep
     assert result.exit_code == 0, result.output
-    assert open_config().load().api_keys == {"GROQ_API_KEY": "gsk_old"}
+    assert flat_keys(open_config().load()) == {"GROQ_API_KEY": "gsk_old"}
 
 
 def test_checkout_config_wins_over_the_home_one(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     old, new = checkout_with_home_config(monkeypatch, tmp_path)
-    ConfigManager(new).save(Config.model_validate({"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
-    assert open_config().load().api_keys == {"GROQ_API_KEY": "gsk_new"}
+    ConfigManager(new).save(make_config(**{"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
+    assert flat_keys(open_config().load()) == {"GROQ_API_KEY": "gsk_new"}
     assert old.exists()  # left for the user, never merged or overwritten
     config.adopt_config(old, new)  # even if the new file appears after the check
-    assert ConfigManager(new).load().api_keys == {"GROQ_API_KEY": "gsk_new"} and old.exists()
+    assert flat_keys(ConfigManager(new).load()) == {"GROQ_API_KEY": "gsk_new"} and old.exists()

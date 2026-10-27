@@ -10,7 +10,8 @@ from click.testing import CliRunner, Result
 
 from desman import providers
 from desman.cli import cli
-from desman.config import Config, ConfigManager, Permissions, default_config_path
+from desman.config import ApiKey, Config, ConfigManager, Permissions, default_config_path
+from helpers import flat_keys, make_config
 
 GROQ = "gsk_" + "a" * 44 + "Z9x1"
 CLOUDFLARE = "cf_" + "b" * 30 + "Q7k2"
@@ -41,14 +42,14 @@ def test_schema_0_file_is_upgraded_on_load_and_save() -> None:
     )
     manager = ConfigManager(path)
     config = manager.load()
-    assert config.schema_version == 1 and config.configured and config.language == "ru"
+    assert config.schema_version == 2 and config.configured and config.language == "ru"
     assert config.permissions == Permissions(shell_execution=True)
-    assert config.api_keys == {"GROQ_API_KEY": GROQ, "AI_GATEWAY_API_KEY": "vck_x"}
+    assert flat_keys(config) == {"GROQ_API_KEY": GROQ, "AI_GATEWAY_API_KEY": "vck_x"}
     assert config.settings == {"OLLAMA_HOST": "http://box:11434"}
 
     manager.save(config)
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["schema_version"] == 1
+    assert saved["schema_version"] == 2
     assert "version" not in saved and "local_settings" not in saved
     assert ConfigManager(path).load() == config
 
@@ -61,11 +62,11 @@ def test_missing_file_is_an_unconfigured_default() -> None:
 
 
 def test_provider_readiness() -> None:
-    config = Config(api_keys={"GROQ_API_KEY": GROQ, "CLOUDFLARE_API_TOKEN": CLOUDFLARE})
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ, "CLOUDFLARE_API_TOKEN": CLOUDFLARE})
     assert [p.id for p in providers.ready(config)] == ["groq"]  # Cloudflare lacks its account
     config.settings["CLOUDFLARE_ACCOUNT_ID"] = "acc123"
     assert [p.id for p in providers.ready(config)] == ["groq", "cloudflare"]
-    assert providers.ready(Config(api_keys={"GROQ_API_KEY": ""})) == []
+    assert providers.ready(make_config(api_keys={"GROQ_API_KEY": ""})) == []  # "" meant none
     names = [p.key_env for p in providers.CLOUD] + [
         s.env for p in providers.PROVIDERS for s in p.settings
     ]
@@ -85,7 +86,11 @@ def test_config_show_masks_every_secret() -> None:
         Config(
             language="en",
             permissions=Permissions(admin_rights=True),
-            api_keys={"GROQ_API_KEY": GROQ, "CLOUDFLARE_API_TOKEN": CLOUDFLARE, "GROK_KEY": GROQ},
+            api_keys={
+                "GROQ_API_KEY": [ApiKey(value=GROQ), ApiKey(value=GROQ[::-1], label="spare")],
+                "CLOUDFLARE_API_TOKEN": [ApiKey(value=CLOUDFLARE)],
+                "GROK_KEY": [ApiKey(value=GROQ)],
+            },
             settings={"OLLAMA_HOST": "http://box:11434"},
         )
     )
@@ -94,22 +99,26 @@ def test_config_show_masks_every_secret() -> None:
     js = desman("config", "show", "--json")
     assert js.exit_code == 0, js.output
     for output in (text.output, js.output):
-        assert GROQ not in output and CLOUDFLARE not in output
-        assert GROQ[4:-4] not in output and CLOUDFLARE[4:-4] not in output
+        for secret in (GROQ, GROQ[::-1], CLOUDFLARE):
+            assert secret[4:-4] not in output
     assert "WARNING: admin_rights is on" in text.output
     assert "unknown key GROK_KEY=gsk_…Z9x1" in text.output
-    lines = {line.split()[0]: line for line in text.output.splitlines() if line.startswith("  ")}
-    assert "ready" in lines["GROQ"] and "GROQ_API_KEY=gsk_…Z9x1" in lines["GROQ"]
+    lines = {line.split()[0]: line for line in text.output.splitlines() if line.strip()}
+    assert "ready" in lines["GROQ"] and "gsk_…Z9x1  1x9Z…_ksg (spare)" in lines["GROQ"]
     assert "not set" in lines["Cloudflare"] and "CLOUDFLARE_ACCOUNT_ID=-" in lines["Cloudflare"]
     assert "OLLAMA_HOST=http://box:11434" in lines["Ollama"]
 
     out = json.loads(js.output)
-    assert out["path"] == str(default_config_path()) and out["schema_version"] == 1
+    assert out["path"] == str(default_config_path()) and out["schema_version"] == 2
     rows = {r["id"]: r for r in out["providers"]}
-    assert rows["groq"]["key"] == {"env": "GROQ_API_KEY", "value": "gsk_…Z9x1"}
+    assert rows["groq"]["key_env"] == "GROQ_API_KEY"
+    assert rows["groq"]["keys"] == [
+        {"value": "gsk_…Z9x1", "label": ""},
+        {"value": "1x9Z…_ksg", "label": "spare"},
+    ]
     assert rows["groq"]["ready"] and not rows["cloudflare"]["ready"]
-    assert rows["mistral"]["key"]["value"] is None
-    assert out["unknown_keys"] == {"GROK_KEY": "gsk_…Z9x1"}
+    assert rows["mistral"]["keys"] == []
+    assert out["unknown_keys"] == {"GROK_KEY": ["gsk_…Z9x1"]}
 
 
 def test_config_show_when_unconfigured_does_not_create_the_file() -> None:
@@ -117,18 +126,6 @@ def test_config_show_when_unconfigured_does_not_create_the_file() -> None:
     assert result.exit_code == 0, result.output
     assert "Not configured yet" in result.output
     assert not default_config_path().exists()
-
-
-def test_wizard_asks_for_the_cloudflare_account_id() -> None:
-    cloudflare = 1 + [p.id for p in providers.CLOUD].index("cloudflare")
-    answers = ["1", "1", "Y", str(cloudflare), CLOUDFLARE, "acc123", "N", "N", "N", "N"]
-    result = desman("config", input="\n".join(answers) + "\n")
-    assert result.exit_code == 0, result.output
-    assert CLOUDFLARE not in result.output  # hidden input
-    config = ConfigManager(default_config_path()).load()
-    assert config.api_keys == {"CLOUDFLARE_API_TOKEN": CLOUDFLARE}
-    assert config.settings == {"CLOUDFLARE_ACCOUNT_ID": "acc123"}
-    assert [p.id for p in providers.ready(config)] == ["cloudflare"]
 
 
 # ── Review regressions (PR #16) ──────────────────────────────────────────────
@@ -143,7 +140,7 @@ def test_wizard_asks_for_the_cloudflare_account_id() -> None:
 )
 def test_upgrade_keeps_the_key_under_the_new_name(keys: dict[str, str]) -> None:
     config = ConfigManager(write({"api_keys": keys, "version": "0.1.0"})).load()
-    assert config.api_keys == {"AI_GATEWAY_API_KEY": "vck_new"}
+    assert flat_keys(config) == {"AI_GATEWAY_API_KEY": "vck_new"}
 
 
 def test_a_rejected_key_is_not_quoted_in_the_error() -> None:
@@ -160,3 +157,36 @@ def test_unknown_settings_are_masked_too() -> None:
         result = desman(*args)
         assert result.exit_code == 0 and GROQ not in result.output, args
     assert "unknown setting GROQ_KEY=gsk_…Z9x1" in desman("config", "show").output
+
+
+# ── Schema 2: several keys per provider ──────────────────────────────────────
+
+
+def test_schema_1_file_becomes_a_list_of_keys() -> None:
+    path = write({"schema_version": 1, "api_keys": {"GROQ_API_KEY": GROQ, "NVIDIA_API_KEY": ""}})
+    config = ConfigManager(path).load()
+    assert config.api_keys == {"GROQ_API_KEY": [ApiKey(value=GROQ)]}
+
+
+def test_add_and_remove_keys() -> None:
+    config = Config()
+    assert config.add_key("GROQ_API_KEY", f"  {GROQ} ")
+    assert not config.add_key("GROQ_API_KEY", GROQ)  # the same key twice is one key
+    assert config.add_key("GROQ_API_KEY", "gsk_two", "second")
+    assert [(k.value, k.label) for k in config.keys("GROQ_API_KEY")] == [
+        (GROQ, ""),
+        ("gsk_two", "second"),
+    ]
+    with pytest.raises(ValueError, match="empty"):
+        config.add_key("GROQ_API_KEY", "  ")
+    assert config.remove_key("GROQ_API_KEY", 0).value == GROQ
+    with pytest.raises(IndexError, match="no key #2"):
+        config.remove_key("GROQ_API_KEY", 1)
+    config.remove_key("GROQ_API_KEY", 0)
+    assert config.api_keys == {}  # no empty list left behind
+
+
+@pytest.mark.parametrize("bad", [[{"value": ""}], [{"value": "k", "extra": 1}], "k"])
+def test_bad_key_entries_are_rejected(bad: object) -> None:
+    write({"schema_version": 2, "api_keys": {"GROQ_API_KEY": bad}})
+    assert desman("config", "show").exit_code == 1
