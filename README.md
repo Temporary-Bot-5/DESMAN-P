@@ -26,9 +26,14 @@ gradually improve its own components under human supervision.
 uv venv -p python3.12 .venv
 uv pip install -e ".[dev]"
 
-desman          # first run: configuration wizard, then project info
-desman config   # reconfigure (language, providers, API keys, agent permissions)
-desman config show   # what is configured, API keys masked
+desman                        # first run: configuration wizard, then project info
+desman config                 # providers, API keys (several per provider), permissions
+desman config show            # what is configured, API keys masked
+desman config reset           # delete the configuration, keys included
+desman keys                   # how many keys each provider has
+desman keys add groq          # add a key (asked for, hidden); --label, --stdin
+desman keys remove groq 2     # remove key #2 (or --all)
+desman keys import keys.txt   # add keys from a file (JSON or NAME=value lines)
 desman help
 ```
 

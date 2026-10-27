@@ -12,9 +12,9 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, providers
+from desman import __version__
 from desman.agents import llm_executor, llm_reviewer
-from desman.config import ConfigError, ConfigManager, open_config, reconfigure, run_initial_config
+from desman.config_cli import config, keys, load_config, run_wizard
 from desman.core import db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
@@ -68,20 +68,8 @@ def cli(ctx: click.Context) -> None:
         # Bare `desman` is the interactive entry point: configure on first run, then show info.
         config_manager = load_config()
         if not config_manager.is_configured():
-            run_initial_config(config_manager)
+            run_wizard(config_manager)
         print_project_info(config_manager)
-
-
-def load_config() -> ConfigManager:
-    """The config for commands that use it; a broken file is an error, never "unconfigured"."""
-    manager = open_config()
-    try:
-        manager.load()
-    except ConfigError as e:
-        raise click.ClickException(
-            f"config {e}\nFix the file, or move it away and run `desman config` to start over."
-        ) from e
-    return manager
 
 
 @cli.command()
@@ -92,43 +80,8 @@ def help(ctx: click.Context) -> None:
         click.echo(ctx.parent.get_help())
 
 
-@cli.group(invoke_without_command=True)
-@click.pass_context
-def config(ctx: click.Context) -> None:
-    """Run/re-run DESMAN configuration (`desman config show` prints it)."""
-    if ctx.invoked_subcommand is None:
-        reconfigure(load_config())
-
-
-@config.command("show")
-@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
-def config_show(as_json: bool) -> None:
-    """Show the configuration with API keys masked."""
-    manager = load_config()
-    out = providers.describe(manager.load())
-    if as_json:
-        click.echo(json.dumps({"path": str(manager.config_path), **out}, indent=2))
-        return
-    click.echo(f"Config:   {manager.config_path}")
-    if not out["configured"]:
-        click.echo("Not configured yet: run `desman config`.")
-    click.echo(f"Language: {out['language']}")
-    granted = [name for name, on in out["permissions"].items() if on]
-    click.echo(f"Permissions: {', '.join(granted) if granted else 'none'}")
-    if out["permissions"]["admin_rights"]:
-        click.echo("WARNING: admin_rights is on: agents may act with elevated privileges.")
-    click.echo("Providers:")
-    for row in out["providers"]:
-        parts = []
-        if "key" in row:
-            parts.append(f"{row['key']['env']}={row['key']['value'] or '-'}")
-        parts += [f"{env}={value or '-'}" for env, value in row["settings"].items()]
-        state = "local" if row["local"] else ("ready" if row["ready"] else "not set")
-        click.echo(f"  {row['name']:<22} {state:<8} {'  '.join(parts)}")
-    for env, value in out["unknown_keys"].items():
-        click.echo(f"  unknown key {env}={value} (no provider uses this name)")
-    for env, value in out["unknown_settings"].items():
-        click.echo(f"  unknown setting {env}={value}")
+cli.add_command(config)
+cli.add_command(keys)
 
 
 @cli.command("init-db")

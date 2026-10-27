@@ -35,8 +35,11 @@ src/desman/
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # Minimal LLM executor/reviewer (JSON replies) behind `desman run`
-├── config.py      # Config model (schema_version), ConfigManager, en/ru setup wizard
-├── providers.py   # known model providers, readiness, masked `config show`
+├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
+├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import`
+├── wizard.py      # en/ru setup wizard: provider menu loop, permissions
+├── providers.py   # known model providers, readiness, key masking, key-file parsing
+├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise)
 ├── info.py        # Banner / project info
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
@@ -91,7 +94,9 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 - Never print or log an API key; show it through `providers.mask()`.
 - `permissions` are set by the human only. Agents must never write them; they become the
   upper bound of the tool policy.
-- Subcommands must stay non-interactive; only bare `desman` and `desman config` may prompt.
+- Subcommands must stay non-interactive; only bare `desman`, `desman config`, `config reset`
+  (confirmation, `--yes` skips it) and `keys add` (the hidden key; `--stdin` for scripts) may
+  prompt. A key is never accepted as a command-line argument.
 
 ## Code Style & Conventions (ADR 0001)
 
@@ -99,7 +104,9 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 - **Synchronous** code. No asyncio/anyio. Concurrency later = separate worker processes.
 - Storage: stdlib `sqlite3`, explicit SQL, numbered migrations, WAL + busy_timeout
 - Pydantic v2 for all contracts (specs, LLM responses, review verdicts)
-- Click for CLI; `click.style` helpers from `config.py` for colours
+- Click for CLI; all human-facing output and prompts through `ui.py` (rich, one theme).
+  Prompts must keep working without a terminal (numbered fallback) so tests can drive them.
+  `--json` output stays plain `json.dumps`.
 - `httpx` for LLM calls (OpenAI-compatible protocol), no `openai` SDK
 - Ruff for lint/format, pytest for tests
 - Keep dependencies minimal: adding one needs a reason (ADR if non-trivial)
