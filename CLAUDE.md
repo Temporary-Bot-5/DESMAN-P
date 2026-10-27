@@ -80,8 +80,10 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 
 ## Configuration
 
-- Single source: `~/.config/desman/config.json` via `ConfigManager` (`language`, `api_keys`,
-  `local_settings`, `permissions`). Override the directory with `DESMAN_CONFIG_DIR`.
+- Single source: `config.json` via `ConfigManager` (`language`, `api_keys`, `local_settings`,
+  `permissions`), opened with `open_config()`. It lives in the project folder (git-ignored,
+  0600); an installed package without one uses `~/.config/desman/config.json`. Override the
+  directory with `DESMAN_CONFIG_DIR`.
 - No `.env`. Do not add a second configuration path.
 - `permissions` are set by the human only. Agents must never write them; they become the
   upper bound of the tool policy.

@@ -33,8 +33,41 @@ def default_config_path() -> Path:
     if config_dir:
         return Path(config_dir) / "config.json"
     root = project_root()
-    base = root if root is not None else Path.home() / ".config" / "desman"
+    base = root if root is not None else home_config_dir()
     return base / "config.json"
+
+
+def home_config_dir() -> Path:
+    return Path.home() / ".config" / "desman"
+
+
+def open_config() -> ConfigManager:
+    """The ConfigManager the CLI uses. A checkout that used to keep its config in the home
+    directory moves it into the project folder once, so saved keys are not lost."""
+    path = default_config_path()
+    old = home_config_dir() / "config.json"
+    if path != old and not path.exists() and old.is_file() and CONFIG_DIR_ENV not in os.environ:
+        adopt_config(old, path)
+    return ConfigManager(path)
+
+
+def adopt_config(old: Path, new: Path) -> None:
+    """Move `old` to `new` (0600). A config already at `new` wins and `old` is left alone."""
+    data = old.read_bytes()
+    try:
+        fd = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:  # created meanwhile, e.g. by another `desman`
+        return
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        new.unlink(missing_ok=True)
+        raise
+    old.unlink()
+    click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
 class ConfigManager:
