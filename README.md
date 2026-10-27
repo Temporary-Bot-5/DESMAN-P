@@ -28,6 +28,7 @@ uv pip install -e ".[dev]"
 
 desman          # first run: configuration wizard, then project info
 desman config   # reconfigure (language, providers, API keys, agent permissions)
+desman config show   # what is configured, API keys masked
 desman help
 ```
 

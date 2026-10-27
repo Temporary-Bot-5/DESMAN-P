@@ -35,7 +35,8 @@ src/desman/
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # Minimal LLM executor/reviewer (JSON replies) behind `desman run`
-├── config.py      # ConfigManager + bilingual (en/ru) setup wizard
+├── config.py      # Config model (schema_version), ConfigManager, en/ru setup wizard
+├── providers.py   # known model providers, readiness, masked `config show`
 ├── info.py        # Banner / project info
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
@@ -80,11 +81,14 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 
 ## Configuration
 
-- Single source: `config.json` via `ConfigManager` (`language`, `api_keys`, `local_settings`,
+- Single source: `config.json` via `ConfigManager` (`language`, `api_keys`, `settings`,
   `permissions`), opened with `open_config()`. It lives in the project folder (git-ignored,
   0600); an installed package without one uses `~/.config/desman/config.json`. Override the
   directory with `DESMAN_CONFIG_DIR`.
 - No `.env`. Do not add a second configuration path.
+- The file is the `Config` model; a schema change bumps `schema_version` and adds a step to
+  `upgrade()`. A file that does not load is a `ConfigError`, never "unconfigured".
+- Never print or log an API key; show it through `providers.mask()`.
 - `permissions` are set by the human only. Agents must never write them; they become the
   upper bound of the tool policy.
 - Subcommands must stay non-interactive; only bare `desman` and `desman config` may prompt.
