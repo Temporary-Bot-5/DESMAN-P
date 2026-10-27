@@ -78,24 +78,26 @@ def _check_key(
         data = {}
     if provider.id == "openrouter":
         info = data.get("data") if isinstance(data, dict) else None
-        info = info if isinstance(info, dict) else {}
+        if not isinstance(info, dict):
+            return result(ok=False, http_status=200, detail=_UNEXPECTED, limits=limits)
         limits.update(_openrouter_limits(info))
         return result(ok=True, http_status=200, detail="accepted", limits=limits)
     models = data.get("data") if isinstance(data, dict) else None
-    ids = (
-        [str(m.get("id", "")) for m in models if isinstance(m, dict)]
-        if isinstance(models, list)
-        else []
-    )
-    listed = any(i.removeprefix("models/") == provider.default_model for i in ids) if ids else None
+    if not isinstance(models, list):  # an HTML page from a proxy is not an answer
+        return result(ok=False, http_status=200, detail=_UNEXPECTED, limits=limits)
+    ids = [str(m.get("id", "")) for m in models if isinstance(m, dict)]
+    listed = any(i.removeprefix("models/") == provider.default_model for i in ids)
     return result(
         ok=True,
         http_status=200,
         detail="accepted",
-        models=len(ids) if ids else None,
+        models=len(ids),
         default_model_listed=listed,
         limits=limits,
     )
+
+
+_UNEXPECTED = "unexpected reply (not the provider's API?): the key could not be verified"
 
 
 def _refusal(status: int) -> str:

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import stat
 import threading
 import time
 import uuid
@@ -457,3 +459,37 @@ def test_drifted_development_database_is_refused_clearly(tmp_path: Path) -> None
 def test_current_schema_verifies(conn: sqlite3.Connection) -> None:
     db.verify_schema(conn)
     assert "accepted_attempt" in db.expected_schema()["subtasks"]
+
+
+def test_v3_database_with_history_upgrades_to_the_call_log(tmp_path: Path) -> None:
+    path = tmp_path / "v3.db"
+    old = _db_at_version(path, 3)
+    task_id = add_task(old)
+    sub = add_subtask(old, task_id, 0, status="done")
+    old.execute(
+        "INSERT INTO audit_log (task_id, subtask_id, actor, action, from_status, to_status) "
+        "VALUES (?, ?, 'reviewer', 'verdict', 'review', 'done')",
+        (task_id, sub),
+    )
+    old.close()
+
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == 1  # history kept
+    assert conn.execute("SELECT status FROM subtasks").fetchone()[0] == "done"
+    assert conn.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0] == 0
+    conn.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="file modes")
+def test_a_new_database_is_private(tmp_path: Path) -> None:
+    old_umask = os.umask(0o022)
+    try:
+        conn = db.open_db(tmp_path / "data" / "desman.db")
+        conn.execute("INSERT INTO tasks (id, goal) VALUES ('t', 'g')")  # creates the WAL
+        conn.close()
+    finally:
+        os.umask(old_umask)
+    modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in (tmp_path / "data").iterdir()}
+    assert modes and all(mode == 0o600 for mode in modes.values()), modes
+    assert stat.S_IMODE((tmp_path / "data").stat().st_mode) == 0o700

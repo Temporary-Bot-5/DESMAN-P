@@ -201,7 +201,7 @@ def test_every_key_refused() -> None:
     llm, _ = client(lambda r: httpx.Response(403), [KEY_A, KEY_B])
     with pytest.raises(ProviderRejected):
         llm.complete(REQUEST)
-    with pytest.raises(ProviderRejected, match="every key was refused"):
+    with pytest.raises(ProviderRejected, match="rejected with 403"):  # the provider's own answer
         llm.complete(REQUEST)
 
 
@@ -362,3 +362,117 @@ def test_provider_messages_are_kept() -> None:
         ProviderUnavailable, match="Provider returned error: x is rate-limited upstream"
     ):
         llm.complete(REQUEST)
+
+
+# ── Review regressions (PR #18) ──────────────────────────────────────────────
+
+
+def test_a_limited_key_wins_over_a_refused_one() -> None:
+    llm, _ = client(
+        by_key(
+            {
+                KEY_A: iter([httpx.Response(429, headers={"retry-after": "5"})]),
+                KEY_B: iter([httpx.Response(401)]),
+            }
+        ),
+        [KEY_A, KEY_B],
+    )
+    with pytest.raises(RateLimited) as raised:  # a pause, not the operator's inbox
+        llm.complete(REQUEST)
+    assert raised.value.retry_after == 5
+
+
+def test_the_soonest_key_decides_the_pause() -> None:
+    llm, _ = client(
+        by_key(
+            {
+                KEY_A: iter([httpx.Response(429, headers={"retry-after": "5"})]),
+                KEY_B: iter([httpx.Response(429, headers={"retry-after": "3600"})]),
+            }
+        ),
+        [KEY_A, KEY_B],
+    )
+    with pytest.raises(RateLimited) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.retry_after == 5
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(429, json={"error": {"message": "daily quota exceeded"}}),
+        httpx.Response(402, json={"error": {"message": "no credits"}}),
+    ],
+)
+def test_a_quota_without_a_hint_pauses_long(response: httpx.Response) -> None:
+    llm, _ = client(lambda r: response)
+    with pytest.raises(QuotaExhausted) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.paused_until(NOW) == NOW + timedelta(hours=1)
+    with pytest.raises(QuotaExhausted) as again:  # the key stays aside as long: no new request
+        llm.complete(REQUEST)
+    assert again.value.paused_until(NOW) == NOW + timedelta(hours=1)
+
+
+def test_tokens_of_an_unusable_reply_are_counted() -> None:
+    body = {"choices": [], "usage": {"prompt_tokens": 200, "completion_tokens": 4}}
+    llm, records = client(lambda r: httpx.Response(200, json=body))
+    with pytest.raises(ProviderUnavailable):
+        llm.complete(REQUEST)
+    assert (records[-1].prompt_tokens, records[-1].completion_tokens) == (200, 4)
+
+
+def test_retry_after_as_an_http_date() -> None:
+    later = datetime.now(UTC) + timedelta(hours=1)
+    header = later.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    llm, _ = client(lambda r: httpx.Response(429, headers={"retry-after": header}))
+    with pytest.raises(RateLimited) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.retry_after is not None and 3500 < raised.value.retry_after <= 3600
+    past = "Tue, 01 Jan 2002 00:00:00 GMT"
+    llm, _ = client(lambda r: httpx.Response(429, headers={"retry-after": past}))
+    with pytest.raises(RateLimited) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.retry_after == 0
+
+
+def test_reset_headers_of_a_used_up_limit() -> None:
+    headers = {
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-reset-requests": "2m52.8s",
+        "x-ratelimit-remaining-tokens": "500",
+        "x-ratelimit-reset-tokens": "1h0m0s",  # not used up: not the reason
+    }
+    llm, _ = client(lambda r: httpx.Response(429, headers=headers))
+    with pytest.raises(RateLimited) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.retry_after == pytest.approx(172.8)
+
+
+def test_an_echoed_key_is_redacted() -> None:
+    echo = httpx.Response(401, json={"error": {"message": f"Invalid API key: {KEY_A}"}})
+    llm, records = client(lambda r: echo)
+    with pytest.raises(ProviderRejected) as raised:
+        llm.complete(REQUEST)
+    assert KEY_A not in str(raised.value) and "<key>" in str(raised.value)
+    assert all(KEY_A not in (r.error or "") for r in records)
+
+
+@pytest.mark.parametrize(
+    ("host", "response"),
+    [
+        ("api.groq.com", httpx.Response(200, text="<html>proxy login</html>")),
+        ("api.groq.com", httpx.Response(200, json={"object": "list"})),
+        ("openrouter.ai", httpx.Response(200, json={"data": "nope"})),
+    ],
+)
+def test_keys_check_needs_a_real_answer(
+    mock_http: Callable[[Handler], None], host: str, response: httpx.Response
+) -> None:
+    env = "OPENROUTER_API_KEY" if host == "openrouter.ai" else "GROQ_API_KEY"
+    ConfigManager(default_config_path()).save(make_config(api_keys={env: KEY_A}))
+    mock_http(lambda r: response)
+    result = desman("keys", "check", "--json")
+    assert result.exit_code == 1
+    [check] = json.loads(result.output)
+    assert not check["ok"] and "could not be verified" in check["detail"]

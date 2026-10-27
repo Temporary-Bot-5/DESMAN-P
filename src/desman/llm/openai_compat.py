@@ -26,6 +26,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -43,6 +44,10 @@ from desman.llm.base import (
 )
 
 DEFAULT_TIMEOUT = 60.0
+DEFAULT_LIMIT_PAUSE = 60.0  # a rate limit without a hint
+# A used-up quota without a reset hint: daily quotas reset hours later, so probing every minute
+# would only burn requests. An hour is a cheap, conservative probe.
+DEFAULT_QUOTA_PAUSE = 3600.0
 _QUOTA_WORDS = re.compile(r"quota|per[ -]day|daily|exhausted|insufficient|credits", re.I)
 _RETRY_IN = re.compile(r"(?:try again|retry) in (?:about )?(\d+(?:\.\d+)?)\s*(ms|s)", re.I)
 
@@ -100,7 +105,9 @@ class OpenAICompatible:
         self.clock = clock
         self.monotonic = monotonic
         self._aside_until: dict[int, datetime] = {}  # key index -> limited until
+        self._quota: set[int] = set()  # aside for a used-up quota, not a rate limit
         self._refused: set[int] = set()  # key indexes the provider refused
+        self._refusal: ProviderRejected | None = None  # the latest, with the provider's words
 
     def complete(self, request: Request) -> Completion:
         model = request.model or self.model
@@ -121,7 +128,6 @@ class OpenAICompatible:
         ]
         if not usable:
             raise self._all_aside(now)
-        last: ProviderError | None = None
         for i in usable:
             try:
                 return self._attempt(i, model, body, prompt_hash)
@@ -129,19 +135,30 @@ class OpenAICompatible:
                 if e.status not in (401, 403):
                     raise  # the request is wrong, not the key: another key will not help
                 self._refused.add(i)
-                last = e
+                self._refusal = e
             except (RateLimited, QuotaExhausted) as e:
-                until = e.paused_until(self.clock()) or self.clock() + timedelta(seconds=60)
-                self._aside_until[i] = until
-                last = e
-        assert last is not None
-        raise last
+                if isinstance(e, QuotaExhausted):
+                    self._quota.add(i)
+                else:
+                    self._quota.discard(i)
+                self._aside_until[i] = e.paused_until(self.clock()) or self.clock() + timedelta(
+                    seconds=DEFAULT_LIMIT_PAUSE
+                )
+        # No key worked. Decide from all keys, not from the last one tried: while any key
+        # will come back, this is a pause until the soonest; only when every key was refused
+        # is it permanent.
+        raise self._all_aside(self.clock())
 
     def _all_aside(self, now: datetime) -> ProviderError:
-        if len(self._refused) == len(self.keys):
-            return ProviderRejected(self.name, 401, "every key was refused")
-        soonest = min(self._aside_until[i] for i in self._aside_until if i not in self._refused)
-        return RateLimited(self.name, retry_after=max(0.0, (soonest - now).total_seconds()))
+        waiting = {i: until for i, until in self._aside_until.items() if i not in self._refused}
+        if not waiting:
+            return self._refusal or ProviderRejected(self.name, 401, "every key was refused")
+        soonest = min(waiting, key=lambda i: waiting[i])
+        if soonest in self._quota:
+            return QuotaExhausted(self.name, waiting[soonest])
+        return RateLimited(
+            self.name, retry_after=max(0.0, (waiting[soonest] - now).total_seconds())
+        )
 
     def _attempt(
         self, index: int, model: str, body: dict[str, Any], prompt_hash: str
@@ -156,6 +173,11 @@ class OpenAICompatible:
         ) -> None:
             if self.on_call is None:
                 return
+            spent = (
+                _usage(response)
+                if response is not None
+                else Usage(prompt_tokens=0, completion_tokens=0)
+            )
             self.on_call(
                 CallRecord(
                     provider=self.name,
@@ -163,8 +185,10 @@ class OpenAICompatible:
                     key_id=key_id(key),
                     prompt_hash=prompt_hash,
                     response_hash=text_hash(completion.text) if completion else None,
-                    prompt_tokens=completion.usage.prompt_tokens if completion else 0,
-                    completion_tokens=completion.usage.completion_tokens if completion else 0,
+                    # From the response, not the completion: a 200 without usable text may
+                    # still have cost tokens.
+                    prompt_tokens=spent.prompt_tokens,
+                    completion_tokens=spent.completion_tokens,
                     latency_ms=max(0, round((self.monotonic() - started) * 1000)),
                     http_status=response.status_code if response is not None else None,
                     error_kind=error.kind.value if error else None,
@@ -210,32 +234,53 @@ class OpenAICompatible:
             raise ProviderUnavailable(self.name, 200, "reply without a message") from None
         if not isinstance(text, str):  # e.g. null content with only reasoning or tool calls
             raise ProviderUnavailable(self.name, 200, "reply without text")
-        usage = data.get("usage") or {}
         return Completion(
             text=text,
             provider=self.name,
             model=str(data.get("model") or model),
-            usage=Usage(
-                prompt_tokens=_count(usage.get("prompt_tokens")),
-                completion_tokens=_count(usage.get("completion_tokens")),
-            ),
+            usage=_usage(response),
             finish_reason=str(choice.get("finish_reason") or "stop"),
         )
 
     def _error(self, response: httpx.Response) -> ProviderError:
         status = response.status_code
-        message = _message(response)
+        message = self._redact(_message(response))
         if status == 429 and _zero_limit(response):
             # A limit of 0 never resets: the account has no access to this API or model yet
             # (e.g. a plan that still has to be activated). Waiting would wait forever.
             return ProviderRejected(self.name, 429, f"the account's limit is 0. {message}".strip())
         if status == 402 or (status == 429 and _QUOTA_WORDS.search(message)):
-            return QuotaExhausted(self.name, _reset_time(response, self.clock()))
+            now = self.clock()
+            wait = _retry_after(response, message)
+            # Without a hint the pause is long: the same key would only be refused again.
+            return QuotaExhausted(
+                self.name, now + timedelta(seconds=DEFAULT_QUOTA_PAUSE if wait is None else wait)
+            )
         if status == 429:
             return RateLimited(self.name, _retry_after(response, message))
         if status in (408, 409) or status >= 500:
             return ProviderUnavailable(self.name, status, message)
         return ProviderRejected(self.name, status, message)
+
+    def _redact(self, text: str) -> str:
+        """A provider may echo the key it was sent ("invalid key sk-..."): never keep one."""
+        for key in self.keys:
+            if key and key in text:
+                text = text.replace(key, "<key>")
+        return text
+
+
+def _usage(response: httpx.Response) -> Usage:
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    usage = data.get("usage") if isinstance(data, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    return Usage(
+        prompt_tokens=_count(usage.get("prompt_tokens")),
+        completion_tokens=_count(usage.get("completion_tokens")),
+    )
 
 
 def _count(value: Any) -> int:
@@ -273,22 +318,52 @@ def _message(response: httpx.Response) -> str:
 
 
 def _retry_after(response: httpx.Response, message: str) -> float | None:
-    header = response.headers.get("retry-after")
+    """Seconds to wait, from (in this order) `Retry-After` (seconds or an HTTP date), the
+    message ("try again in 1.5s"), or the reset time of a rate limit that has run out."""
+    header = response.headers.get("retry-after", "").strip()
     if header:
         try:
             return max(0.0, float(header))
         except ValueError:
             pass
+        try:
+            when = parsedate_to_datetime(header)
+        except (TypeError, ValueError):
+            when = None
+        if when is not None:
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=UTC)
+            return max(0.0, (when - datetime.now(UTC)).total_seconds())
     found = _RETRY_IN.search(message)
     if found:
         value = float(found[1])
         return value / 1000 if found[2].lower() == "ms" else value
-    return None
+    waits = []
+    for what in ("requests", "tokens"):  # OpenAI and Groq style: x-ratelimit-reset-requests
+        if response.headers.get(f"x-ratelimit-remaining-{what}", "").strip() == "0":
+            wait = _duration(response.headers.get(f"x-ratelimit-reset-{what}", ""))
+            if wait is not None:
+                waits.append(wait)
+    return max(waits) if waits else None
 
 
-def _reset_time(response: httpx.Response, now: datetime) -> datetime | None:
-    seconds = _retry_after(response, _message(response))
-    return now + timedelta(seconds=seconds) if seconds is not None else None
+_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")
+
+
+def _duration(text: str) -> float | None:
+    """ "2m52.8s", "5.1s", "250ms", "1h0m0s" -> seconds."""
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    parts = _DURATION_PART.findall(text)
+    if not parts or "".join(n + u for n, u in parts) != text:
+        return None
+    scale = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
+    return sum(float(n) * scale[u] for n, u in parts)
 
 
 def _zero_limit(response: httpx.Response) -> bool:
