@@ -250,3 +250,41 @@ def test_blank_retry_note_falls_back_to_the_default(store: Store) -> None:
     desman("retry", f"{task_id[:8]}/0", "--note", "  ")
     feedback = store.last_feedback(sub_id)
     assert feedback is not None and feedback.text == "retry requested by operator"
+
+
+# ── Paused work (found on a real provider run) ───────────────────────────────
+
+
+def test_cancel_a_task_paused_by_a_provider_limit(store: Store) -> None:
+    task_id = store.create_task(chain("fetch", "analyse"))
+    claimed = store.claim("w")
+    assert claimed is not None and claimed.lease_token is not None
+    store.record_failure(
+        claimed.id,
+        S.RUNNING,
+        Actor.EXECUTOR,
+        FailureKind.LIMIT,
+        lease=claimed.lease_token,
+        reason="429",
+        paused_until="2999-01-01T00:00:00.000Z",  # far from over
+    )
+    assert store.get_subtask(claimed.id).status is S.PAUSED
+    result = desman("cancel", task_id[:8], "--note", "not needed")
+    assert result.exit_code == 0, result.output
+    assert [s.status for s in store.list_subtasks(task_id)] == [S.CANCELLED, S.CANCELLED]
+    assert store.get_subtask(claimed.id).paused_until is None
+    assert check_history(store.conn, task_id) == []
+
+
+def test_cancel_reports_a_race_instead_of_crashing(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_id = store.create_task(chain("a"))
+
+    def raced(self: Store, task_id: str, reason: str) -> list[Any]:
+        raise StaleStateError("subtask x is running, expected ready")
+
+    monkeypatch.setattr(Store, "cancel_task", raced)
+    result = desman("cancel", task_id[:8])
+    assert result.exit_code == 1 and "changed meanwhile, try again" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)

@@ -10,14 +10,20 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TypeVar
 
 import click
+import httpx
 from rich.text import Text
 
 from desman import providers, ui, wizard
 from desman.config import ConfigError, ConfigManager, open_config
+from desman.core import calls, db
+from desman.llm import check
+from desman.llm.openai_compat import key_id
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -43,6 +49,16 @@ def run_wizard(manager: ConfigManager) -> None:
         ui.out("")
         ui.warn("Configuration cancelled; nothing was saved.")
         raise SystemExit(1) from None
+
+
+def db_option(command: F) -> F:
+    return click.option(
+        "--db",
+        "db_path",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=None,
+        help="Database file with the call log (default: the usual one).",
+    )(command)
 
 
 def json_option(command: F) -> F:
@@ -140,22 +156,34 @@ def keys(ctx: click.Context) -> None:
 
 @keys.command("list")
 @json_option
-def keys_list(as_json: bool = False) -> None:
-    """How many keys each provider has."""
+@db_option
+def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
+    """How many keys each provider has, and what each spent in the last 24 hours."""
     config = load_config().load()
+    spent = {u.key_id: u for u in _usage(db_path, timedelta(hours=24))}
     rows: list[dict[str, Any]] = []
     for p in providers.CLOUD:
         assert p.key_env is not None
+        keys = []
+        for i, k in enumerate(config.keys(p.key_env), 1):
+            u = spent.get(key_id(k.value))
+            keys.append(
+                {
+                    "n": i,
+                    "value": providers.mask(k.value),
+                    "label": providers.label(k.label),
+                    "key_id": key_id(k.value),
+                    "calls_24h": u.calls if u else 0,
+                    "tokens_24h": (u.prompt_tokens + u.completion_tokens) if u else 0,
+                }
+            )
         rows.append(
             {
                 "provider": p.id,
                 "name": p.name,
                 "env": p.key_env,
                 "ready": p.is_ready(config),
-                "keys": [
-                    {"n": i, "value": providers.mask(k.value), "label": providers.label(k.label)}
-                    for i, k in enumerate(config.keys(p.key_env), 1)
-                ],
+                "keys": keys,
             }
         )
     if as_json:
@@ -163,16 +191,155 @@ def keys_list(as_json: bool = False) -> None:
         return
     total = sum(len(r["keys"]) for r in rows)
     with_keys = [r for r in rows if r["keys"]]
-    table = ui.table("provider", "#", "key", "label", title="API keys")
+    table = ui.table("provider", "#", "key", "label", "calls 24h", "tokens 24h", title="API keys")
     for r in rows:
         if not r["keys"]:
-            table.add_row(Text(r["name"], style="muted"), "", Text("-", style="muted"), "")
+            table.add_row(Text(r["name"], style="muted"), "", Text("-", style="muted"), "", "", "")
         for k in r["keys"]:
             name = r["name"] if k["n"] == 1 else ""
-            table.add_row(name, str(k["n"]), k["value"], k["label"])
+            table.add_row(
+                name,
+                str(k["n"]),
+                k["value"],
+                k["label"],
+                str(k["calls_24h"]),
+                f"{k['tokens_24h']:,}",
+            )
     ui.out(table)
     ui.out("")
-    ui.note(f"{total} key(s) from {len(with_keys)} of {len(rows)} providers.")
+    ui.note(
+        f"{total} key(s) from {len(with_keys)} of {len(rows)} providers. "
+        "`desman keys check` tests them (no tokens spent), `desman usage` shows totals."
+    )
+
+
+@keys.command("check")
+@click.argument("provider", required=False)
+@json_option
+def keys_check(provider: str | None, as_json: bool) -> None:
+    """Ask each provider whether its keys work and what limits it reports. Spends no tokens."""
+    config = load_config().load()
+    targets = (
+        [_provider(provider)] if provider else [p for p in providers.CLOUD if p.is_ready(config)]
+    )
+    if not targets:
+        raise click.ClickException("no keys to check: add one with `desman keys add PROVIDER`")
+    results = []
+    with httpx.Client() as client:
+        for p in targets:
+            if not p.is_ready(config):
+                raise click.ClickException(f"{p.name} is not configured")
+            results += check.check(config, p, client)
+    if as_json:
+        click.echo(json.dumps([asdict(r) for r in results], indent=2, default=str))
+    else:
+        table = ui.table("provider", "#", "status", "models", "default model")
+        for r in results:
+            p = providers.find(r.provider)
+            status = (
+                Text("ok", style="good")
+                if r.ok
+                else Text(f"failed ({r.http_status or 'no reply'})", style="bad")
+            )
+            default = (
+                ""
+                if r.default_model_listed is None
+                else Text(
+                    p.default_model + ("" if r.default_model_listed else " (not listed)"),
+                    style="good" if r.default_model_listed else "warn",
+                )
+            )
+            table.add_row(p.name, str(r.number), status, str(r.models or ""), default)
+        ui.out(table)
+        ui.out("")
+        for r in results:
+            name = f"{providers.find(r.provider).name} #{r.number}"
+            if not r.ok:
+                ui.warn(f"{name}: {r.detail}")
+            if r.limits:
+                ui.note(f"{name}: " + ", ".join(f"{k}: {v}" for k, v in r.limits.items()))
+        for p in targets:
+            ui.note(f"{p.name} limits and quotas: {p.limits_url}")
+    if not all(r.ok for r in results):
+        raise SystemExit(1)
+
+
+# ── desman usage ────────────────────────────────────────────────────────────
+
+
+@click.command()
+@click.option(
+    "--since",
+    default="24h",
+    show_default=True,
+    help="Window: e.g. 30m, 24h, 7d, or 'all'.",
+)
+@json_option
+@db_option
+def usage(since: str, as_json: bool, db_path: Path | None) -> None:
+    """Model calls and tokens spent, per provider and key (from the call log)."""
+    window = _window(since)
+    config = load_config().load()
+    names = {}
+    for p in providers.CLOUD:
+        for i, k in enumerate(config.keys(p.key_env or ""), 1):
+            names[key_id(k.value)] = f"#{i} {providers.mask(k.value)}"
+    rows = _usage(db_path, window)
+    if as_json:
+        out = [{**asdict(u), "key": names.get(u.key_id or "", "removed key")} for u in rows]
+        click.echo(json.dumps(out, indent=2))
+        return
+    if not rows:
+        ui.note(f"No model calls {'yet' if window is None else 'in the last ' + since}.")
+        return
+    table = ui.table(
+        "provider",
+        "key",
+        "calls",
+        "failed",
+        "limited",
+        "tokens in",
+        "tokens out",
+        "last call",
+        title=f"Usage ({'all time' if window is None else 'last ' + since})",
+    )
+    for u in rows:
+        table.add_row(
+            u.provider,
+            names.get(u.key_id or "", "removed key"),
+            str(u.calls),
+            Text(str(u.failed), style="bad" if u.failed else "muted"),
+            Text(str(u.limited), style="warn" if u.limited else "muted"),
+            f"{u.prompt_tokens:,}",
+            f"{u.completion_tokens:,}",
+            (u.last_at or "")[:16].replace("T", " "),
+        )
+    ui.out(table)
+    for u in rows:
+        if u.limits:
+            shown = ", ".join(f"{k.removeprefix('x-ratelimit-')}: {v}" for k, v in u.limits.items())
+            ui.note(f"{u.provider} {names.get(u.key_id or '', '')}: {shown}")
+
+
+def _window(since: str) -> timedelta | None:
+    if since == "all":
+        return None
+    units = {"m": 60, "h": 3600, "d": 86400}
+    number, unit = since[:-1], since[-1:]
+    if unit not in units or not number.isdigit() or int(number) == 0:
+        raise click.BadParameter("use e.g. 30m, 24h, 7d or all", param_hint="--since")
+    return timedelta(seconds=int(number) * units[unit])
+
+
+def _usage(db_path: Path | None, window: timedelta | None) -> list[calls.KeyUsage]:
+    path = db_path or db.default_db_path()
+    if not path.exists():
+        return []
+    conn = db.open_db(path)
+    try:
+        return calls.usage(conn, datetime.now(UTC) - window if window else None)
+    finally:
+        conn.close()
 
 
 def _provider(name: str) -> providers.Provider:

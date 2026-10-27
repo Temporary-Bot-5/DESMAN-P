@@ -12,10 +12,10 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__
+from desman import __version__, ui
 from desman.agents import llm_executor, llm_reviewer
-from desman.config_cli import config, keys, load_config, run_wizard
-from desman.core import db
+from desman.config_cli import config, keys, load_config, run_wizard, usage
+from desman.core import calls, db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
 from desman.core.models import Priority, SubtaskSpec, TaskSpec
@@ -24,8 +24,10 @@ from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.info import print_project_info
+from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
+from desman.llm.openai_compat import OpenAICompatible
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -82,6 +84,7 @@ def help(ctx: click.Context) -> None:
 
 cli.add_command(config)
 cli.add_command(keys)
+cli.add_command(usage)
 
 
 @cli.command("init-db")
@@ -182,6 +185,18 @@ def json_option(command: F) -> F:
 
 def run_options(command: F) -> F:
     command = click.option(
+        "--model",
+        default=None,
+        help="Model to use (default: the provider's free-tier default, see `desman keys check`).",
+    )(command)
+    command = click.option(
+        "--provider",
+        "provider_name",
+        default=None,
+        help="Provider to use, e.g. groq (default: the first configured one in the preference "
+        "order). All its keys are used in turn.",
+    )(command)
+    command = click.option(
         "--fake-llm",
         "fake_script",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -228,6 +243,8 @@ def run(
     spec_path: Path | None,
     priority: str | None,
     fake_script: Path | None,
+    provider_name: str | None,
+    model: str | None,
     wait: bool,
     lease_seconds: int,
     db_path: Path | None,
@@ -244,12 +261,13 @@ def run(
     spec = _load_spec(goal, spec_path)
     if priority is not None:
         spec = spec.model_copy(update={"priority": int(Priority[priority.upper()])})
-    llm = _provider(fake_script)  # before creating anything: fail fast without a provider
+    llm = _provider(fake_script, provider_name, model, as_json)  # fail fast, before any task
     path = db_path or db.default_db_path()
     try:
         store = Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
+    _record_calls(llm, store)
     try:
         task_id = store.create_task(spec)
         if not as_json:
@@ -269,6 +287,8 @@ def run(
 def resume(
     task: str,
     fake_script: Path | None,
+    provider_name: str | None,
+    model: str | None,
     wait: bool,
     lease_seconds: int,
     db_path: Path | None,
@@ -280,8 +300,9 @@ def resume(
     otherwise when its lease expires. Finished subtasks are never redone. Same exit codes as
     `run`.
     """
-    llm = _provider(fake_script)
+    llm = _provider(fake_script, provider_name, model, as_json)
     store = open_existing(db_path)
+    _record_calls(llm, store)
     try:
         task_id = _find(store, task)
         _drive(store, llm, task_id, wait, lease_seconds, as_json)
@@ -352,16 +373,31 @@ def _load_spec(goal: str | None, spec_path: Path | None) -> TaskSpec:
         raise click.ClickException(f"{spec_path}: not a valid task spec:\n{e}") from e
 
 
-def _provider(fake_script: Path | None) -> LLM:
-    if fake_script is None:
-        raise click.ClickException(
-            "no LLM provider yet: real providers arrive with ROADMAP 2.2. "
-            "Pass --fake-llm SCRIPT.json to run with a scripted fake."
-        )
+def _provider(
+    fake_script: Path | None, provider_name: str | None, model: str | None, as_json: bool
+) -> LLM:
+    if fake_script is not None:
+        if provider_name is not None or model is not None:
+            raise click.UsageError("--fake-llm replaces the provider: drop --provider/--model")
+        try:
+            return FakeLLM.from_file(fake_script, sleep=time.sleep)  # latency is real
+        except (ValidationError, ValueError) as e:
+            raise click.ClickException(f"{fake_script}: not a valid fake LLM script:\n{e}") from e
+    config = load_config().load()
     try:
-        return FakeLLM.from_file(fake_script, sleep=time.sleep)  # latency and timeouts are real
-    except (ValidationError, ValueError) as e:
-        raise click.ClickException(f"{fake_script}: not a valid fake LLM script:\n{e}") from e
+        llm, choice = router.build(config, provider_name, model)
+    except router.NoProvider as e:
+        raise click.ClickException(str(e)) from e
+    if not as_json:
+        keys = len(llm.keys)
+        ui.note(f"Using {choice.provider.name} · {choice.model} ({keys} key{'s' * (keys != 1)})")
+    return llm
+
+
+def _record_calls(llm: LLM, store: Store) -> None:
+    """Every real model call goes to model_calls (`desman usage`)."""
+    if isinstance(llm, OpenAICompatible):
+        llm.on_call = calls.recorder(store.conn)
 
 
 def _find(store: Store, task: str) -> str:
@@ -563,7 +599,10 @@ def cancel(task: str, note: str, db_path: Path | None, as_json: bool) -> None:
     store = open_existing(db_path)
     try:
         task_id = _find(store, task)
-        cancelled = store.cancel_task(task_id, reason=note)
+        try:
+            cancelled = store.cancel_task(task_id, reason=note)
+        except StaleStateError as e:  # a run changed it meanwhile: nothing was cancelled
+            raise click.ClickException(f"it changed meanwhile, try again: {e}") from e
         status = store.task_status(task_id)
     finally:
         store.conn.close()

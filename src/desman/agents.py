@@ -1,8 +1,8 @@
 """Minimal LLM-backed executor and reviewer, so `desman run` can drive a task end to end.
 
-Deliberately simple: one prompt each, and the reply must be a bare JSON object. Phase 2 makes
-them robust (2.3 structured output with repair, 2.8 reviewer, 2.9 varied retries); the contract
-with the coordinator stays the same.
+Deliberately simple: one prompt each, and the reply must hold a JSON object (bare, fenced in
+```json, or with a sentence around it). Phase 2 makes them robust (2.3 repair request, 2.8
+reviewer, 2.9 varied retries); the contract with the coordinator stays the same.
 
 Prompts start with "Execute subtask" and "Review subtask", so a fake script can route on them:
 `FakeLLM().on("Execute", ...).on("Review", ...)`, or `"routes"` in a JSON script.
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any, NoReturn
 
 from desman.core.coordinator import Executor, Failure, Review, Reviewer, Success, Work
@@ -84,14 +85,31 @@ def _request(system: str, heading: str, payload: dict[str, Any]) -> Request:
     )
 
 
+_FENCE = re.compile(r"```[ \t]*(?:json|JSON)?[ \t]*\n(.*?)\n?[ \t]*```", re.S)
+
+
 def _json_object(text: str) -> dict[str, Any] | None:
-    """The reply as a JSON object, or None. Strict JSON only: Python's parser also accepts NaN,
-    Infinity and overflowing numbers such as 1e999, which no JSON store accepts."""
-    try:
-        value = json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float)
-    except ValueError:  # JSONDecodeError is one
-        return None
-    return value if isinstance(value, dict) else None
+    """The reply as a JSON object, or None.
+
+    Models often wrap the object in a ```json fence or add a sentence around it, so after the
+    whole reply these are tried: each fenced block, then the span from the first `{` to the
+    last `}`. Strict JSON only: Python's parser also accepts NaN, Infinity and overflowing
+    numbers such as 1e999, which no JSON store accepts.
+    """
+    candidates = [text, *_FENCE.findall(text)]
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        candidates.append(text[start : end + 1])
+    for candidate in candidates:
+        try:
+            value = json.loads(
+                candidate, parse_constant=_reject_constant, parse_float=_finite_float
+            )
+        except ValueError:  # JSONDecodeError is one
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
 
 
 def _reject_constant(name: str) -> NoReturn:

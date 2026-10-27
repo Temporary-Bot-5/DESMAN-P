@@ -731,8 +731,10 @@ class Store:
                                AND to_status IS NOT NULL AND seq > ?)"""
             )
             params.append(expected_version)
-        if src is S.PAUSED:
-            where.append("resume_status = ?")  # resume where it stopped
+        if src is S.PAUSED and actor is not Actor.HUMAN:
+            # The scheduler resumes where it stopped, once the pause is over. The operator may
+            # decide at any time (cancel a paused task, retry it now).
+            where.append("resume_status = ?")
             where.append("(paused_until IS NULL OR paused_until <= ?)")
             params += [dst.value, now]
 
@@ -744,7 +746,7 @@ class Store:
             params,
         ).fetchone()
         if row is None:
-            self._raise_stale(subtask_id, src, dst, lease, now, expected_version)
+            self._raise_stale(subtask_id, src, dst, lease, now, expected_version, actor)
         subtask = Subtask.from_row(row)
 
         audit_details = dict(details or {})
@@ -798,6 +800,7 @@ class Store:
         lease: str | None,
         now: str,
         expected_version: int | None = None,
+        actor: Actor | None = None,
     ) -> NoReturn:
         current = self.get_subtask(subtask_id)
         if current.status is not src:
@@ -819,6 +822,8 @@ class Store:
                 f"subtask {subtask_id} is leased to {current.lease_owner} "
                 f"until {current.lease_until} (now {now})"
             )
+        if src is S.PAUSED and actor is Actor.HUMAN:  # nothing else could have stopped it
+            raise StaleStateError(f"subtask {subtask_id} changed meanwhile (wanted -> {dst})")
         if current.resume_status is not dst:
             raise StaleStateError(
                 f"subtask {subtask_id} paused to resume as {current.resume_status}, not {dst}"
