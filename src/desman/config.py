@@ -13,11 +13,61 @@ import click
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
 
+def project_root() -> Path | None:
+    """The source checkout DESMAN runs from (src/desman/config.py -> repo), or None when it is
+    installed as a package and there is no project folder to keep the config in."""
+    root = Path(__file__).resolve().parents[2]
+    return (
+        root if (root / "pyproject.toml").is_file() and (root / "src" / "desman").is_dir() else None
+    )
+
+
 def default_config_path() -> Path:
-    """Config file location: $DESMAN_CONFIG_DIR/config.json or ~/.config/desman/config.json."""
+    """Config file location, first that applies:
+
+    1. $DESMAN_CONFIG_DIR/config.json;
+    2. config.json in the project folder (a source checkout); `.gitignore` keeps it out of git;
+    3. ~/.config/desman/config.json for an installed package.
+    """
     config_dir = os.environ.get(CONFIG_DIR_ENV)
-    base = Path(config_dir) if config_dir else Path.home() / ".config" / "desman"
+    if config_dir:
+        return Path(config_dir) / "config.json"
+    root = project_root()
+    base = root if root is not None else home_config_dir()
     return base / "config.json"
+
+
+def home_config_dir() -> Path:
+    return Path.home() / ".config" / "desman"
+
+
+def open_config() -> ConfigManager:
+    """The ConfigManager the CLI uses. A checkout that used to keep its config in the home
+    directory moves it into the project folder once, so saved keys are not lost."""
+    path = default_config_path()
+    old = home_config_dir() / "config.json"
+    if path != old and not path.exists() and old.is_file() and CONFIG_DIR_ENV not in os.environ:
+        adopt_config(old, path)
+    return ConfigManager(path)
+
+
+def adopt_config(old: Path, new: Path) -> None:
+    """Move `old` to `new` (0600). A config already at `new` wins and `old` is left alone."""
+    data = old.read_bytes()
+    try:
+        fd = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:  # created meanwhile, e.g. by another `desman`
+        return
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        new.unlink(missing_ok=True)
+        raise
+    old.unlink()
+    click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
 class ConfigManager:

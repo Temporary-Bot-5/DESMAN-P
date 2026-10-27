@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from desman import __version__
 from desman.agents import llm_executor, llm_reviewer
-from desman.config import ConfigManager, default_config_path, reconfigure, run_initial_config
+from desman.config import open_config, reconfigure, run_initial_config
 from desman.core import db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
@@ -66,7 +66,7 @@ def cli(ctx: click.Context) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
     if ctx.invoked_subcommand is None:
         # Bare `desman` is the interactive entry point: configure on first run, then show info.
-        config_manager = ConfigManager(default_config_path())
+        config_manager = open_config()
         if not config_manager.is_configured():
             run_initial_config(config_manager)
         print_project_info(config_manager)
@@ -83,7 +83,7 @@ def help(ctx: click.Context) -> None:
 @cli.command()
 def config() -> None:
     """Run/re-run DESMAN configuration."""
-    reconfigure(ConfigManager(default_config_path()))
+    reconfigure(open_config())
 
 
 @cli.command("init-db")

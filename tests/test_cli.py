@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
-from desman import __version__
+from desman import __version__, config
 from desman.cli import cli
-from desman.config import ConfigManager, default_config_path
+from desman.config import (
+    CONFIG_DIR_ENV,
+    ConfigManager,
+    default_config_path,
+    open_config,
+    project_root,
+)
 
 
 def test_default_config_path_honours_env(isolated_config: Path) -> None:
@@ -170,3 +178,81 @@ def test_local_setting_can_be_cleared() -> None:
     result = CliRunner().invoke(cli, ["config"], input=answers)
     assert result.exit_code == 0, result.output
     assert "OLLAMA_HOST" not in ConfigManager(default_config_path()).get_local_settings()
+
+
+# ── Config location (hotfix/config-in-project) ───────────────────────────────
+
+
+def test_config_lives_in_the_project_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(CONFIG_DIR_ENV)
+    root = project_root()
+    assert root is not None and (root / "pyproject.toml").is_file()  # tests run from a checkout
+    assert default_config_path() == root / "config.json"
+
+
+def test_installed_package_falls_back_to_the_home_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(CONFIG_DIR_ENV)
+    monkeypatch.setattr(config, "project_root", lambda: None)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert default_config_path() == tmp_path / ".config" / "desman" / "config.json"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_git_ignores_the_config_and_its_temp_files() -> None:
+    root = project_root()
+    assert root is not None
+    if not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+    names = ["config.json", ".config.json.0123456789ab.tmp"]
+    done = subprocess.run(
+        ["git", "-C", str(root), "check-ignore", "--no-index", *names],
+        capture_output=True,
+        text=True,
+    )
+    assert done.stdout.split() == names, done.stderr
+
+
+def checkout_with_home_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+    """A checkout at tmp_path/project and a config saved under the old home location."""
+    monkeypatch.delenv(CONFIG_DIR_ENV)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(config, "project_root", lambda: project)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    old = tmp_path / "home" / ".config" / "desman" / "config.json"
+    old.parent.mkdir(parents=True)
+    ConfigManager(old).save_config(
+        {"api_keys": {"GROQ_API_KEY": "gsk_old"}, "permissions": {"shell_execution": True}}
+    )
+    return old, project / "config.json"
+
+
+def test_home_config_moves_into_the_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    old, new = checkout_with_home_config(monkeypatch, tmp_path)
+    manager = open_config()
+    assert manager.config_path == new and not old.exists()
+    assert manager.is_configured()
+    assert manager.get_api_keys() == {"GROQ_API_KEY": "gsk_old"}
+    assert manager.get_permissions() == {"shell_execution": True}
+    if os.name == "posix":
+        assert stat.S_IMODE(new.stat().st_mode) == 0o600
+    result = CliRunner().invoke(
+        cli, ["config"], input=wizard("1", "1", "Y", "3", "", *NO_PERMISSIONS)
+    )
+    assert result.exit_code == 0, result.output
+    assert open_config().get_api_keys() == {"GROQ_API_KEY": "gsk_old"}
+
+
+def test_checkout_config_wins_over_the_home_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    old, new = checkout_with_home_config(monkeypatch, tmp_path)
+    ConfigManager(new).save_config({"api_keys": {"GROQ_API_KEY": "gsk_new"}})
+    assert open_config().get_api_keys() == {"GROQ_API_KEY": "gsk_new"}
+    assert old.exists()  # left for the user, never merged or overwritten
+    config.adopt_config(old, new)  # even if the new file appears after the check
+    assert ConfigManager(new).get_api_keys() == {"GROQ_API_KEY": "gsk_new"} and old.exists()

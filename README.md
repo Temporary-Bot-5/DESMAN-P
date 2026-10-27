@@ -31,8 +31,10 @@ desman config   # reconfigure (language, providers, API keys, agent permissions)
 desman help
 ```
 
-Configuration is stored in `~/.config/desman/config.json` (override the directory with
-`DESMAN_CONFIG_DIR`).
+Configuration, API keys included, is stored in `config.json` in the project folder, readable by
+the owner only and ignored by git. An installed package (no project folder) uses
+`~/.config/desman/config.json`; `DESMAN_CONFIG_DIR` overrides both. Git ignores the file,
+but a plain copy or archive of the folder does not: leave `config.json` out when you share it.
 
 ## Development
 
