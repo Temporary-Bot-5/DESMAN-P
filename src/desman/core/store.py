@@ -116,24 +116,54 @@ class Store:
     def find_task(self, prefix: str) -> sqlite3.Row:
         """The task whose id is `prefix` or starts with it (at least MIN_ID_PREFIX characters),
         as typed by an operator."""
+        return self._find_by_prefix("tasks", "task", prefix)
+
+    def find_subtask(self, ref: str) -> Subtask:
+        """A subtask as an operator names it: "<task id or prefix>/<seq>" (as `desman status`
+        numbers them) or its own id or unique prefix."""
+        task_part, slash, seq = ref.rpartition("/")
+        if slash:
+            if not seq.isdigit():
+                raise NotFoundError(f"subtask {ref!r}: expected <task>/<number>")
+            task_id = self.find_task(task_part)["id"]
+            row = self.conn.execute(
+                "SELECT * FROM subtasks WHERE task_id = ? AND seq = ?", (task_id, int(seq))
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"task {task_id} has no subtask {seq}")
+            return Subtask.from_row(row)
+        return Subtask.from_row(self._find_by_prefix("subtasks", "subtask", ref))
+
+    def short_id(self, task_id: str, minimum: int = 8) -> str:
+        """The shortest prefix (at least `minimum` characters) naming only this task."""
+        for length in range(min(minimum, len(task_id)), len(task_id)):
+            prefix = task_id[:length]
+            count = self.conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE substr(id, 1, ?) = ?", (length, prefix)
+            ).fetchone()[0]
+            if count == 1:
+                return prefix
+        return task_id
+
+    def _find_by_prefix(self, table: str, kind: str, prefix: str) -> sqlite3.Row:
         exact: sqlite3.Row | None = self.conn.execute(
-            "SELECT * FROM tasks WHERE id = ?", (prefix,)
+            f"SELECT * FROM {table} WHERE id = ?", (prefix,)
         ).fetchone()
         if exact is not None:
             return exact
         if len(prefix) < MIN_ID_PREFIX:
             raise NotFoundError(
-                f"task {prefix!r} not found (give at least {MIN_ID_PREFIX} characters)"
+                f"{kind} {prefix!r} not found (give at least {MIN_ID_PREFIX} characters)"
             )
         rows = self.conn.execute(
-            "SELECT * FROM tasks WHERE substr(id, 1, ?) = ? ORDER BY created_at LIMIT 6",
+            f"SELECT * FROM {table} WHERE substr(id, 1, ?) = ? ORDER BY created_at LIMIT 6",
             (len(prefix), prefix),
         ).fetchall()
         if not rows:
-            raise NotFoundError(f"task {prefix!r} not found")
+            raise NotFoundError(f"{kind} {prefix!r} not found")
         if len(rows) > 1:
             shown = ", ".join(r["id"] for r in rows[:5]) + (", …" if len(rows) > 5 else "")
-            raise AmbiguousIdError(f"task id {prefix!r} is ambiguous: {shown}")
+            raise AmbiguousIdError(f"{kind} id {prefix!r} is ambiguous: {shown}")
         row: sqlite3.Row = rows[0]
         return row
 
@@ -257,9 +287,13 @@ class Store:
         paused_until: str | None = None,
         details: dict[str, Any] | None = None,
         action: str = "transition",
+        expected_version: int | None = None,
     ) -> Subtask:
         """Move a subtask from `src` to `dst` if it is still in `src`.
 
+        - With `expected_version` (from `status_version()`), also only if its status has not
+          changed at all since: a subtask that left `src` and came back is a different situation
+          (e.g. a newer escalation), and a decision taken on the old one must not apply to it.
         - Leaving RUNNING as the executor requires `lease`, the token from `claim()`: an executor
           whose claim expired cannot touch a later claim, even one taken under the same name.
         - `attempts` replaces the failure counters in the same update; a human sending the
@@ -281,7 +315,18 @@ class Store:
                 paused_until=paused_until,
                 details=details,
                 action=action,
+                expected_version=expected_version,
             )
+
+    def status_version(self, subtask_id: str) -> int:
+        """Grows with every status change of the subtask (the audit seq of the latest one)."""
+        row = self.conn.execute(
+            """SELECT COALESCE(MAX(seq), 0) FROM audit_log
+               WHERE subtask_id = ? AND to_status IS NOT NULL""",
+            (subtask_id,),
+        ).fetchone()
+        version: int = row[0]
+        return version
 
     def record_failure(
         self,
@@ -632,6 +677,7 @@ class Store:
         details: dict[str, Any] | None = None,
         action: str = "transition",
         abandoned_lease: bool = False,
+        expected_version: int | None = None,
     ) -> Subtask:
         """Compare-and-swap status change plus audit entry. Needs a transaction.
 
@@ -679,6 +725,12 @@ class Store:
         if src is S.RUNNING and actor is Actor.SCHEDULER and not abandoned_lease:
             where.append("lease_until < ?")  # never take a live lease away
             params.append(now)
+        if expected_version is not None:
+            where.append(
+                """NOT EXISTS (SELECT 1 FROM audit_log WHERE subtask_id = subtasks.id
+                               AND to_status IS NOT NULL AND seq > ?)"""
+            )
+            params.append(expected_version)
         if src is S.PAUSED:
             where.append("resume_status = ?")  # resume where it stopped
             where.append("(paused_until IS NULL OR paused_until <= ?)")
@@ -692,7 +744,7 @@ class Store:
             params,
         ).fetchone()
         if row is None:
-            self._raise_stale(subtask_id, src, dst, lease, now)
+            self._raise_stale(subtask_id, src, dst, lease, now, expected_version)
         subtask = Subtask.from_row(row)
 
         audit_details = dict(details or {})
@@ -739,12 +791,23 @@ class Store:
         return latest if escalated_from and escalated_from[0] == S.REVIEW.value else None
 
     def _raise_stale(
-        self, subtask_id: str, src: SubtaskStatus, dst: SubtaskStatus, lease: str | None, now: str
+        self,
+        subtask_id: str,
+        src: SubtaskStatus,
+        dst: SubtaskStatus,
+        lease: str | None,
+        now: str,
+        expected_version: int | None = None,
     ) -> NoReturn:
         current = self.get_subtask(subtask_id)
         if current.status is not src:
             raise StaleStateError(
                 f"subtask {subtask_id} is {current.status}, expected {src} (wanted -> {dst})"
+            )
+        if expected_version is not None and self.status_version(subtask_id) > expected_version:
+            raise StaleStateError(
+                f"subtask {subtask_id} changed since version {expected_version} "
+                f"(now {self.status_version(subtask_id)}), although it is {src} again"
             )
         if src is S.RUNNING and lease is not None and current.lease_token != lease:
             raise StaleStateError(

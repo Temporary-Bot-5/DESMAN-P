@@ -20,9 +20,9 @@ from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
 from desman.core.models import Priority, SubtaskSpec, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
-from desman.core.report import TaskReport, task_report, task_summaries
-from desman.core.states import TaskStatus
-from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+from desman.core.report import TaskReport, inbox, task_report, task_summaries
+from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
+from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.info import print_project_info
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
@@ -390,6 +390,7 @@ def _drive(
     except ScriptExhausted as e:
         raise click.ClickException(f"fake LLM script ran out: {e}") from e
     report = task_report(store, task_id)
+    short = store.short_id(task_id)
     if as_json:
         out = {"run": _run_summary(result), "task": report.model_dump(mode="json")}
         click.echo(json.dumps(out, ensure_ascii=False, indent=2))
@@ -398,7 +399,7 @@ def _drive(
         if result.paused_until:
             click.echo(
                 f"Paused by a provider limit until {result.paused_until}. "
-                f"Continue with: desman resume {task_id[:8]}"
+                f"Continue with: desman resume {short}"
             )
     raise SystemExit(_exit_code(report.status, paused=result.paused_until is not None))
 
@@ -450,3 +451,189 @@ def _print_report(report: TaskReport) -> None:
 def _one_line(text: str, limit: int) -> str:
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+# ── Operator decisions (a minimal subset of ROADMAP 5.1) ─────────────────────
+
+
+@cli.command("inbox")
+@db_option
+@json_option
+def inbox_command(db_path: Path | None, as_json: bool) -> None:
+    """List subtasks waiting for the operator (needs_human, failed), with the reason."""
+    store = open_existing(db_path)
+    try:
+        items = inbox(store)
+    finally:
+        store.conn.close()
+    if as_json:
+        click.echo(
+            json.dumps([i.model_dump(mode="json") for i in items], ensure_ascii=False, indent=2)
+        )
+        return
+    if not items:
+        click.echo("Nothing is waiting for you.")
+        return
+    for item in items:
+        click.echo(
+            f"{item.ref:<12} {item.status:<11}  {_one_line(item.description, 50)}"
+            f"  [{_one_line(item.goal, 40)}]"
+        )
+        if item.reason:
+            click.echo(f"{'':<12} {_one_line(item.reason, 110)}")
+    click.echo("Decide with: desman retry|accept|fail <ref> [--note TEXT]")
+
+
+def if_version_option(command: F) -> F:
+    return click.option(
+        "--if-version",
+        type=int,
+        default=None,
+        help="Act only if the subtask has not changed since `inbox --json` showed this version.",
+    )(command)
+
+
+@cli.command()
+@click.argument("subtask")
+@click.option(
+    "--note", default=None, help="Guidance for the next attempt (passed to the executor)."
+)
+@if_version_option
+@db_option
+@json_option
+def retry(
+    subtask: str, note: str | None, if_version: int | None, db_path: Path | None, as_json: bool
+) -> None:
+    """Send SUBTASK back to work with a fresh attempt budget.
+
+    Works on a subtask waiting for you or one marked failed (its dependents are unblocked).
+    Continue the task with `desman resume`.
+
+    SUBTASK is "<task>/<number>" as `desman status` and `inbox` show it, or its id.
+    """
+    reason = (note or "").strip() or "retry requested by operator"
+    _decide(subtask, SubtaskStatus.READY, reason, "operator_retry", if_version, db_path, as_json)
+
+
+@cli.command()
+@click.argument("subtask")
+@click.option("--note", default=None, help="Why it is acceptable.")
+@if_version_option
+@db_option
+@json_option
+def accept(
+    subtask: str, note: str | None, if_version: int | None, db_path: Path | None, as_json: bool
+) -> None:
+    """Mark SUBTASK done as it is (its latest result is kept only if it was under review).
+
+    SUBTASK is "<task>/<number>" as `desman status` and `inbox` show it, or its id.
+    """
+    reason = (note or "").strip() or "accepted by operator"
+    _decide(subtask, SubtaskStatus.DONE, reason, "operator_accept", if_version, db_path, as_json)
+
+
+@cli.command()
+@click.argument("subtask")
+@click.option("--note", required=True, help="Why it failed (recorded in the audit log).")
+@if_version_option
+@db_option
+@json_option
+def fail(
+    subtask: str, note: str, if_version: int | None, db_path: Path | None, as_json: bool
+) -> None:
+    """Give up on SUBTASK: it becomes failed and everything depending on it is blocked.
+
+    `desman retry` brings it back later.
+
+    SUBTASK is "<task>/<number>" as `desman status` and `inbox` show it, or its id.
+    """
+    if not note.strip():
+        raise click.BadParameter("say why it failed", param_hint="--note")
+    _decide(
+        subtask, SubtaskStatus.FAILED, note.strip(), "operator_fail", if_version, db_path, as_json
+    )
+
+
+@cli.command()
+@click.argument("task")
+@click.option("--note", default="cancelled by operator", show_default=True)
+@db_option
+@json_option
+def cancel(task: str, note: str, db_path: Path | None, as_json: bool) -> None:
+    """Cancel TASK: every subtask not finished yet stops. A running one notices at its next
+    heartbeat."""
+    store = open_existing(db_path)
+    try:
+        task_id = _find(store, task)
+        cancelled = store.cancel_task(task_id, reason=note)
+        status = store.task_status(task_id)
+    finally:
+        store.conn.close()
+    if as_json:
+        out = {"task_id": task_id, "status": status.value, "cancelled": [s.id for s in cancelled]}
+        click.echo(json.dumps(out, indent=2))
+    else:
+        click.echo(f"Task {task_id}: {len(cancelled)} subtask(s) cancelled, task is {status}")
+
+
+def _decide(
+    ref: str,
+    target: SubtaskStatus,
+    note: str,
+    action: str,
+    if_version: int | None,
+    db_path: Path | None,
+    as_json: bool,
+) -> None:
+    store = open_existing(db_path)
+    try:
+        try:
+            with db.read_snapshot(store.conn):  # the status and its version, read together
+                sub = store.find_subtask(ref)
+                version = store.status_version(sub.id)
+        except LookupError as e:
+            raise click.ClickException(str(e)) from e
+        if if_version is not None and if_version != version:
+            raise click.ClickException(
+                f"[{sub.seq}] changed since version {if_version} (now {version}, {sub.status}): "
+                "look again with `desman inbox`"
+            )
+        if target not in allowed_targets(sub.status, Actor.HUMAN):
+            options = sorted(s.value for s in allowed_targets(sub.status, Actor.HUMAN))
+            raise click.ClickException(
+                f"[{sub.seq}] is {sub.status}: the operator can move it to "
+                f"{', '.join(options) if options else 'nothing'}, not {target}"
+            )
+        try:
+            # Not just "still in that status": unchanged since we looked (a retry that
+            # re-escalated meanwhile is a newer situation the operator has not seen).
+            moved = store.transition(
+                sub.id,
+                sub.status,
+                target,
+                Actor.HUMAN,
+                reason=note,
+                action=action,
+                expected_version=version,
+            )
+        except StaleStateError as e:
+            raise click.ClickException(f"it changed meanwhile, look again: {e}") from e
+        status = store.task_status(sub.task_id)
+        short = store.short_id(sub.task_id)
+    finally:
+        store.conn.close()
+    if as_json:
+        out = {
+            "subtask_id": sub.id,
+            "task_id": sub.task_id,
+            "from": sub.status.value,
+            "to": moved.status.value,
+            "task_status": status.value,
+        }
+        click.echo(json.dumps(out, indent=2))
+        return
+    click.echo(f"[{sub.seq}] {_one_line(sub.description, 60)}: {sub.status} -> {moved.status}")
+    if status is TaskStatus.ACTIVE:
+        click.echo(f"Task is active again. Continue with: desman resume {short}")
+    else:
+        click.echo(f"Task is {status}.")
