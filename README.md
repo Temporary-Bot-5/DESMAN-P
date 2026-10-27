@@ -26,13 +26,24 @@ gradually improve its own components under human supervision.
 uv venv -p python3.12 .venv
 uv pip install -e ".[dev]"
 
-desman          # first run: configuration wizard, then project info
-desman config   # reconfigure (language, providers, API keys, agent permissions)
+desman                        # first run: configuration wizard, then project info
+desman config                 # providers, API keys (several per provider), permissions
+desman config show            # what is configured, API keys masked
+desman config reset           # delete the configuration, keys included
+desman keys                   # how many keys each provider has
+desman keys add groq          # add a key (asked for, hidden); --label, --stdin
+desman keys remove groq 2     # remove key #2 (or --all)
+desman keys import keys.txt   # add keys from a file (JSON or NAME=value lines)
+desman keys check             # are the keys accepted, what limits are reported (no tokens)
+desman usage                  # calls and tokens spent per provider and key (--since 7d)
+desman run "GOAL"             # on a real model; --provider groq --model ...
 desman help
 ```
 
-Configuration is stored in `~/.config/desman/config.json` (override the directory with
-`DESMAN_CONFIG_DIR`).
+Configuration, API keys included, is stored in `config.json` in the project folder, readable by
+the owner only and ignored by git. An installed package (no project folder) uses
+`~/.config/desman/config.json`; `DESMAN_CONFIG_DIR` overrides both. Git ignores the file,
+but a plain copy or archive of the folder does not: leave `config.json` out when you share it.
 
 ## Development
 

@@ -1,13 +1,15 @@
-"""Project info display."""
+"""What bare `desman` shows: the banner, the state of the setup and the commands."""
 
 from __future__ import annotations
 
-import click
+from rich.console import Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
-from desman import __author__, __version__
-from desman.config import ConfigManager, style_dim, style_interactive, style_primary
+from desman import __author__, __version__, providers, ui
+from desman.config import ConfigManager
 
-# ASCII Art Banner
 BANNER = """████░░█████░█████░█░░░█░█████░█░░░█
 █░░░█░█░░░░░█░░░░░██░██░█░░░█░██░░█
 █░░░█░█████░█████░█░█░█░█████░█░█░█
@@ -16,64 +18,62 @@ BANNER = """████░░█████░█████░█░░░�
 
 TAGLINE = "Decentralized Self-Evolving Modular Agents Network"
 
+COMMANDS = {
+    "en": [
+        ('desman run "GOAL"', "plan and run a task"),
+        ("desman list / status", "tasks and their progress"),
+        ("desman inbox", "what waits for your decision"),
+        ("desman keys", "API keys per provider"),
+        ("desman config", "providers, keys, permissions"),
+        ("desman help", "all commands"),
+    ],
+    "ru": [
+        ('desman run "ЦЕЛЬ"', "спланировать и выполнить задачу"),
+        ("desman list / status", "задачи и их ход"),
+        ("desman inbox", "что ждёт вашего решения"),
+        ("desman keys", "API-ключи по провайдерам"),
+        ("desman config", "провайдеры, ключи, разрешения"),
+        ("desman help", "все команды"),
+    ],
+}
 
 TEXTS = {
-    "en": {
-        "author": "Author",
-        "version": "Version",
-        "description": "Description",
-        "desc_body": "DESMAN is a multimodal weak agent framework requiring multiple API keys for different providers or local models.",
-        "commands": "Commands",
-        "cmd_config": "desman config     - Configure / reconfigure DESMAN",
-        "cmd_help": "desman help       - Show this help",
-        "config_path": "Config",
-        "start_prompt": "Start? [Enter/Control+C]",
-    },
-    "ru": {
-        "author": "Автор",
-        "version": "Версия",
-        "description": "Описание",
-        "desc_body": "DESMAN — мультимодальная структура слабых агентов, требующая множества API ключей для разных провайдеров или локальных моделей.",
-        "commands": "Команды",
-        "cmd_config": "desman config     - Настроить/переконфигурировать DESMAN",
-        "cmd_help": "desman help       - Показать эту справку",
-        "config_path": "Конфиг",
-        "start_prompt": "Начать? [Enter/Control+C]",
-    },
+    "en": {"ready": "{n} provider(s) ready", "none": "no provider ready: run `desman config`"},
+    "ru": {"ready": "готово провайдеров: {n}", "none": "нет готовых провайдеров: `desman config`"},
 }
 
 
 def print_project_info(config_manager: ConfigManager) -> None:
-    """Print project information with ASCII banner."""
-    t = TEXTS.get(config_manager.get_language(), TEXTS["en"])
+    config = config_manager.load()
+    lang = config.language
+    t = TEXTS[lang]
 
-    # ASCII Banner
-    click.echo(style_primary(BANNER))
-    click.echo()
-    click.echo(style_primary(TAGLINE))
-    click.echo()
+    ui.out(Text(BANNER, style="accent"))
+    ui.out(Text(TAGLINE, style="bold"))
+    ui.out(Text(f"v{__version__} · {__author__}; AI", style="muted"))
+    ui.out("")
 
-    # Info
-    click.echo(f"{style_interactive(t['author'] + ':')} {__author__}; AI")
-    click.echo(f"{style_interactive(t['version'] + ':')} {__version__}")
-    click.echo()
-    click.echo(style_interactive(t["description"] + ":"))
-    click.echo(f"  {t['desc_body']}")
-    click.echo()
-    click.echo(style_interactive(t["commands"] + ":"))
-    click.echo(f"  {style_dim(t['cmd_config'])}")
-    click.echo(f"  {style_dim(t['cmd_help'])}")
-    click.echo()
-    click.echo(
-        f"{style_interactive(t['config_path'] + ':')} {style_dim(str(config_manager.config_path))}"
+    ready = providers.ready(config)
+    status = (
+        Text("● ", style="good") + Text(t["ready"].format(n=len(ready)))
+        if ready
+        else Text("● ", style="warn") + Text(t["none"], style="warn")
     )
-    click.echo()
+    if ready:
+        status.append("  " + ", ".join(p.name for p in ready), style="muted")
 
-    # Start prompt - wait for Enter
-    click.echo(style_interactive(t["start_prompt"]))
-    try:
-        input()
-    except (EOFError, KeyboardInterrupt):
-        click.echo()
-        click.echo(style_dim("Aborted."))
-        raise SystemExit(0) from None
+    commands = Table.grid(padding=(0, 3))
+    commands.add_column(style="key", no_wrap=True)
+    commands.add_column(style="muted")
+    for cmd, what in COMMANDS[lang]:
+        commands.add_row(cmd, what)
+
+    ui.out(
+        Panel(
+            Group(status, Text(""), commands),
+            border_style="accent",
+            padding=(1, 2),
+            expand=False,
+        )
+    )
+    ui.note(f"config: {config_manager.config_path}")
