@@ -48,6 +48,11 @@ src/desman/
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
+└── llm/
+    ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
+                   #   FailureKind (the coordinator maps them; agents just let them propagate)
+    └── fake.py    # FakeLLM: scripted steps (replies, garbage, timeouts, 429, quota, 5xx, 4xx),
+                   #   routes by prompt, JSON scripts, seeded chaos. All model tests use it.
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it
