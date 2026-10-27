@@ -1,25 +1,11 @@
 """Project info display."""
-import json
-from pathlib import Path
+
+from __future__ import annotations
 
 import click
 
-from desman import __version__, __author__
-
-CONFIG_FILE = Path.home() / ".config" / "desman" / "config.json"
-
-
-def get_configured_language() -> str:
-    """Get language from config file."""
-    if not CONFIG_FILE.exists():
-        return "en"
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        return config.get("language", "en")
-    except (json.JSONDecodeError, OSError):
-        return "en"
-
+from desman import __author__, __version__
+from desman.config import ConfigManager, style_dim, style_interactive, style_primary
 
 # ASCII Art Banner
 BANNER = """████░░█████░█████░█░░░█░█████░█░░░█
@@ -57,28 +43,9 @@ TEXTS = {
 }
 
 
-# Color constants matching config.py (RGB tuples for true color)
-PRIMARY = (0, 238, 255)      # #00EEFF
-INTERACTIVE = (0, 255, 153)  # #00ff99
-DIM = (136, 136, 136)        # #888888
-
-
-def style_primary(text: str) -> str:
-    return click.style(text, fg=PRIMARY)
-
-
-def style_interactive(text: str) -> str:
-    return click.style(text, fg=INTERACTIVE, bold=True)
-
-
-def style_dim(text: str) -> str:
-    return click.style(text, fg=DIM)
-
-
-def print_project_info() -> None:
+def print_project_info(config_manager: ConfigManager) -> None:
     """Print project information with ASCII banner."""
-    lang = get_configured_language()
-    t = TEXTS[lang]
+    t = TEXTS.get(config_manager.get_language(), TEXTS["en"])
 
     # ASCII Banner
     click.echo(style_primary(BANNER))
@@ -87,17 +54,19 @@ def print_project_info() -> None:
     click.echo()
 
     # Info
-    click.echo(f"{style_interactive(t['author'] + ':')} Temporary Bot 5; AI")
+    click.echo(f"{style_interactive(t['author'] + ':')} {__author__}; AI")
     click.echo(f"{style_interactive(t['version'] + ':')} {__version__}")
     click.echo()
-    click.echo(style_interactive(t['description'] + ":"))
+    click.echo(style_interactive(t["description"] + ":"))
     click.echo(f"  {t['desc_body']}")
     click.echo()
-    click.echo(style_interactive(t['commands'] + ":"))
+    click.echo(style_interactive(t["commands"] + ":"))
     click.echo(f"  {style_dim(t['cmd_config'])}")
     click.echo(f"  {style_dim(t['cmd_help'])}")
     click.echo()
-    click.echo(f"{style_interactive(t['config_path'] + ':')} {style_dim(str(CONFIG_FILE))}")
+    click.echo(
+        f"{style_interactive(t['config_path'] + ':')} {style_dim(str(config_manager.config_path))}"
+    )
     click.echo()
 
     # Start prompt - wait for Enter
@@ -107,4 +76,4 @@ def print_project_info() -> None:
     except (EOFError, KeyboardInterrupt):
         click.echo()
         click.echo(style_dim("Aborted."))
-        raise SystemExit(0)
+        raise SystemExit(0) from None

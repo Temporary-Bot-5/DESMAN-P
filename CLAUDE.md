@@ -2,18 +2,21 @@
 
 ## Project Context
 
-DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving network of small AI agents. Read `PROJECT_PLAN.md` for the full specification.
+DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving network of small AI agents.
+
+- `PROJECT_PLAN.md` — full specification (authoritative on goals and principles)
+- `ROADMAP.md` — ordered task chain; work proceeds one task (≈ one PR) at a time. Tick the box when a task is done.
+- `docs/adr/` — architecture decisions. Read `0001-core-rewrite.md` before touching the core.
 
 **Key constraints:**
-- Zero budget - free-tier LLM APIs only (Gemini, Groq, OpenRouter, Cloudflare Workers AI, etc.)
-- No local GPU - all inference via cloud APIs
+- Zero budget - free-tier LLM APIs (local models via Ollama/llama.cpp are an optional extra)
 - Every provider is unreliable and rate-limited
 - Must handle intermittent execution (sessions stop/start)
 - Human control is mandatory - no silent self-modification
 
 ## Architecture Principles (from PROJECT_PLAN.md)
 
-1. **Durable state first** - SQLite/file-based persistence for all tasks, subtasks, artifacts, logs
+1. **Durable state first** - SQLite persistence for all tasks, subtasks, artifacts, logs
 2. **Resumability** - Every nontrivial task = checkpoints; crash → resume from last valid checkpoint
 3. **Fault tolerance** - Detect stale tasks via leases/timeouts; reassign safely; avoid duplicate side effects
 4. **Prioritization/preemption** - Explicit priority levels; critical tasks interrupt lower-priority work
@@ -22,83 +25,45 @@ DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving 
 7. **Controlled self-evolution** - Propose → test in isolation → compare → record → approve → apply; all reversible via git
 8. **Budget awareness** - Degrade gracefully; pause when quotas exhausted
 
-## Current Phase: Single-Agent Execution Loop (Milestone 1)
+## Current State
 
-**Goal:** Reliable single-agent loop that can create, execute, checkpoint, resume, and audit a task.
-
-**Do NOT build yet:**
-- Multiple executors / swarms
-- Model routing (single provider first)
-- Priority preemption
-- Fault injection tests
-- Self-improvement workflow
-- Web UI
-
-## Code Style & Conventions
-
-- Python 3.11+, type hints required (mypy strict)
-- Pydantic v2 for all data models
-- SQLAlchemy 2.x for ORM
-- Click for CLI, Rich for output
-- httpx + tenacity for resilient HTTP
-- anyio for async (not asyncio directly)
-- Ruff for linting/format, pytest for tests
-
-## Directory Structure
+The old core was removed (still in git history at `3d10a5e`). What remains:
 
 ```
 src/desman/
-├── core/           # Task store, scheduler, coordinator
-│   ├── models.py   # SQLAlchemy models (Task, Subtask, Artifact, AuditLog)
-│   ├── store.py    # TaskStore class - all DB operations
-│   └── scheduler.py# Scheduler/Coordinator - assigns, leases, retries
-├── runtime/        # Agent runtime
-│   ├── executor.py # Executor - runs one bounded subtask
-│   └── planner.py  # Planner - decomposes goal into task graph
-├── review/         # Reviewer/Validator
-│   └── validator.py
-├── router/         # Model Router (Phase 2)
-├── tools/          # Tool Registry (Phase 1: file ops, code exec sandbox, search)
-└── evolution/      # Improvement Analyst (Phase 3)
+├── cli.py      # Click entry point: `desman`, `desman config`, `desman help`
+├── config.py   # ConfigManager + bilingual (en/ru) setup wizard
+└── info.py     # Banner / project info
 ```
 
-## Database Schema (Initial)
+The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the
+current phase (no multiple workers, routing, preemption or self-improvement before their phase).
 
-**Task:** id, goal, priority, status, created_at, updated_at, parent_task_id
-**Subtask:** id, task_id, description, inputs_json, dependencies_json, acceptance_criteria, status, priority, lease_until, executor_id, checkpoint_json, created_at, updated_at
-**Artifact:** id, subtask_id, type, content_json, path, created_at
-**AuditLog:** id, entity_type, entity_id, action, details_json, timestamp
+## Configuration
 
-## Implementation Order (Smallest Milestones)
+- Single source: `~/.config/desman/config.json` via `ConfigManager` (`language`, `api_keys`,
+  `local_settings`, `permissions`). Override the directory with `DESMAN_CONFIG_DIR`.
+- No `.env`. Do not add a second configuration path.
+- `permissions` are set by the human only. Agents must never write them; they become the
+  upper bound of the tool policy.
+- Subcommands must stay non-interactive; only bare `desman` and `desman config` may prompt.
 
-1. **Task Store** - SQLAlchemy models + TaskStore CRUD + migrations (alembic or raw SQL)
-2. **Planner** - Takes goal → returns list of Subtask specs (no LLM yet, can be template-based)
-3. **Executor** - Claims subtask → does bounded work → writes artifact → updates checkpoint
-3. **Reviewer** - Validates artifact against acceptance criteria → accept/retry/escalate
-4. **Coordinator** - Main loop: pick ready subtask → lease → dispatch executor → review → repeat
-5. **CLI** - `desman run <goal>`, `desman status`, `desman resume <task_id>`
-6. **Checkpoint/Resume** - Executor saves checkpoint every N steps; on restart, continue from checkpoint
+## Code Style & Conventions (ADR 0001)
 
-## LLM Integration (When Ready)
-
-- Model Router selects provider based on task type, availability, rate limits
-- Start with ONE provider (e.g., Gemini free tier or OpenRouter free models)
-- Implement: request throttling, exponential backoff, provider fallback, response caching
-- Never send secrets/private code to free APIs
-- Log every model call with prompt hash, response hash, tokens, latency, cost estimate
-
-## Tool Registry (Phase 1)
-
-Permitted tools (sandboxed):
-- File read/write (restricted to workspace/)
-- Code execution in isolated subprocess (timeout, no network, limited fs)
-- Web search (via API)
-- Simple utilities (json, text processing)
+- Python 3.11+ (dev on 3.12), type hints everywhere, `mypy --strict`
+- **Synchronous** code. No asyncio/anyio. Concurrency later = separate worker processes.
+- Storage: stdlib `sqlite3`, explicit SQL, numbered migrations, WAL + busy_timeout
+- Pydantic v2 for all contracts (specs, LLM responses, review verdicts)
+- Click for CLI; `click.style` helpers from `config.py` for colours
+- `httpx` for LLM calls (OpenAI-compatible protocol), no `openai` SDK
+- Ruff for lint/format, pytest for tests
+- Keep dependencies minimal: adding one needs a reason (ADR if non-trivial)
 
 ## Testing Requirements
 
-- Unit tests for each component (store, planner, executor, reviewer)
-- Integration test: full loop with simulated LLM (mock)
+- Every task in ROADMAP lands with tests
+- Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
+- LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
 - Idempotency test: re-run same subtask → no duplicate side effects
 
@@ -116,23 +81,12 @@ Permitted tools (sandboxed):
 
 ```bash
 # Setup
-pip install -e ".[dev]"
+uv venv -p python3.12 .venv && uv pip install -e ".[dev]"
 pre-commit install
 
-# Run tests
-pytest -v
-
-# Lint/format
-ruff check src tests
-ruff format src tests
-mypy src
-
-# Run CLI (when available)
-python -m desman --help
+# Checks (same as CI)
+ruff check .
+ruff format --check .
+mypy
+pytest
 ```
-
-## References
-
-- `PROJECT_PLAN.md` - Full specification (authoritative)
-- `README.md` - Quick reference
-- `pyproject.toml` - Dependencies and tool config

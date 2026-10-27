@@ -1,9 +1,22 @@
 """Configuration management for DESMAN."""
+
+from __future__ import annotations
+
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import click
+
+CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
+
+
+def default_config_path() -> Path:
+    """Config file location: $DESMAN_CONFIG_DIR/config.json or ~/.config/desman/config.json."""
+    config_dir = os.environ.get(CONFIG_DIR_ENV)
+    base = Path(config_dir) if config_dir else Path.home() / ".config" / "desman"
+    return base / "config.json"
 
 
 class ConfigManager:
@@ -15,15 +28,16 @@ class ConfigManager:
 
     def is_configured(self) -> bool:
         """Check if DESMAN is configured."""
-        return self.config_path.exists() and self._load_config().get("configured", False)
+        return bool(self._load_config().get("configured", False))
 
     def _load_config(self) -> dict[str, Any]:
         """Load configuration from file."""
         if not self.config_path.exists():
             return {"configured": False}
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(self.config_path, encoding="utf-8") as f:
+                data: dict[str, Any] = json.load(f)
+                return data
         except (json.JSONDecodeError, OSError):
             return {"configured": False}
 
@@ -35,30 +49,30 @@ class ConfigManager:
 
     def get_api_keys(self) -> dict[str, str]:
         """Get stored API keys."""
-        config = self._load_config()
-        return config.get("api_keys", {})
+        api_keys: dict[str, str] = self._load_config().get("api_keys", {})
+        return api_keys
 
     def get_permissions(self) -> dict[str, bool]:
         """Get agent permissions."""
-        config = self._load_config()
-        return config.get("permissions", {})
+        permissions: dict[str, bool] = self._load_config().get("permissions", {})
+        return permissions
 
     def get_language(self) -> str:
         """Get configured language."""
-        config = self._load_config()
-        return config.get("language", "en")
+        language: str = self._load_config().get("language", "en")
+        return language
 
     def get_local_settings(self) -> dict[str, str]:
         """Get local provider settings."""
-        config = self._load_config()
-        return config.get("local_settings", {})
+        local_settings: dict[str, str] = self._load_config().get("local_settings", {})
+        return local_settings
 
 
 # ─── Color constants (RGB tuples for true color) ───
-PRIMARY = (0, 238, 255)      # #00EEFF - Cyan - main color
-WARNING = (255, 0, 0)        # #ff0000 - Red - warnings
+PRIMARY = (0, 238, 255)  # #00EEFF - Cyan - main color
+WARNING = (255, 0, 0)  # #ff0000 - Red - warnings
 INTERACTIVE = (0, 255, 153)  # #00ff99 - Green - interactive elements
-DIM = (136, 136, 136)        # #888888 - Dim text
+DIM = (136, 136, 136)  # #888888 - Dim text
 
 
 def style_primary(text: str) -> str:
@@ -86,9 +100,9 @@ def style_error(text: str) -> str:
 
 
 # ─── Language strings ───
-TEXTS = {
+TEXTS: dict[str, dict[str, Any]] = {
     "en": {
-        "welcome_title": "DESMAN-P+Human — Configuration",
+        "welcome_title": "DESMAN(P) — Configuration",
         "welcome_subtitle": "Multimodal Weak Agent Framework",
         "language_prompt": "Select language / Выберите язык:",
         # Step 1 (now after mode selection for API/both)
@@ -125,19 +139,57 @@ TEXTS = {
             "or llama.cpp is installed and a model is pulled."
         ),
         "step3_api_providers": [
-            {"name": "NVIDIA NIM", "env": "NVIDIA_API_KEY", "url": "https://build.nvidia.com/explore/discover"},
-            {"name": "Google AI Studio", "env": "GOOGLE_API_KEY", "url": "https://aistudio.google.com/apikey"},
+            {
+                "name": "NVIDIA NIM",
+                "env": "NVIDIA_API_KEY",
+                "url": "https://build.nvidia.com/explore/discover",
+            },
+            {
+                "name": "Google AI Studio",
+                "env": "GOOGLE_API_KEY",
+                "url": "https://aistudio.google.com/apikey",
+            },
             {"name": "GROQ", "env": "GROQ_API_KEY", "url": "https://console.groq.com/keys"},
-            {"name": "Mistral AI", "env": "MISTRAL_API_KEY", "url": "https://console.mistral.ai/api-keys/"},
-            {"name": "Cloudflare Workers AI", "env": "CLOUDFLARE_API_TOKEN", "url": "https://dash.cloudflare.com/profile/api-tokens"},
-            {"name": "Cohere", "env": "COHERE_API_KEY", "url": "https://dashboard.cohere.com/api-keys"},
+            {
+                "name": "Mistral AI",
+                "env": "MISTRAL_API_KEY",
+                "url": "https://console.mistral.ai/api-keys/",
+            },
+            {
+                "name": "Cloudflare Workers AI",
+                "env": "CLOUDFLARE_API_TOKEN",
+                "url": "https://dash.cloudflare.com/profile/api-tokens",
+            },
+            {
+                "name": "Cohere",
+                "env": "COHERE_API_KEY",
+                "url": "https://dashboard.cohere.com/api-keys",
+            },
             {"name": "Aion Labs", "env": "AION_API_KEY", "url": "https://aionlabs.ai/"},
-            {"name": "OpenRouter", "env": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/keys"},
-            {"name": "Vercel AI Gateway", "env": "VERCEL_AI_GATEWAY_KEY", "url": "https://vercel.com/dashboard/stores/ai-gateway"},
+            {
+                "name": "OpenRouter",
+                "env": "OPENROUTER_API_KEY",
+                "url": "https://openrouter.ai/keys",
+            },
+            {
+                "name": "Vercel AI Gateway",
+                "env": "VERCEL_AI_GATEWAY_KEY",
+                "url": "https://vercel.com/dashboard/stores/ai-gateway",
+            },
         ],
         "step3_local_providers": [
-            {"name": "Ollama", "env": "OLLAMA_HOST", "url": "https://ollama.com", "default": "http://localhost:11434"},
-            {"name": "llama.cpp", "env": "LLAMA_CPP_PATH", "url": "https://github.com/ggerganov/llama.cpp", "default": ""},
+            {
+                "name": "Ollama",
+                "env": "OLLAMA_HOST",
+                "url": "https://ollama.com",
+                "default": "http://localhost:11434",
+            },
+            {
+                "name": "llama.cpp",
+                "env": "LLAMA_CPP_PATH",
+                "url": "https://github.com/ggerganov/llama.cpp",
+                "default": "",
+            },
         ],
         "step3_select_prompt": "Enter provider numbers to configure (comma-separated), or press Enter to skip:",
         "step3_key_prompt": "API key for {name} ({env}):",
@@ -149,7 +201,7 @@ TEXTS = {
         "aborted": "Configuration aborted.",
     },
     "ru": {
-        "welcome_title": "DESMAN-P+Human — Настройка",
+        "welcome_title": "DESMAN(P) — Настройка",
         "welcome_subtitle": "Мультимодальная структура слабых агентов",
         "language_prompt": "Select language / Выберите язык:",
         # Step 1
@@ -186,19 +238,57 @@ TEXTS = {
             "Ollama (ollama.com) или llama.cpp и загружена хотя бы одна модель."
         ),
         "step3_api_providers": [
-            {"name": "NVIDIA NIM", "env": "NVIDIA_API_KEY", "url": "https://build.nvidia.com/explore/discover"},
-            {"name": "Google AI Studio", "env": "GOOGLE_API_KEY", "url": "https://aistudio.google.com/apikey"},
+            {
+                "name": "NVIDIA NIM",
+                "env": "NVIDIA_API_KEY",
+                "url": "https://build.nvidia.com/explore/discover",
+            },
+            {
+                "name": "Google AI Studio",
+                "env": "GOOGLE_API_KEY",
+                "url": "https://aistudio.google.com/apikey",
+            },
             {"name": "GROQ", "env": "GROQ_API_KEY", "url": "https://console.groq.com/keys"},
-            {"name": "Mistral AI", "env": "MISTRAL_API_KEY", "url": "https://console.mistral.ai/api-keys/"},
-            {"name": "Cloudflare Workers AI", "env": "CLOUDFLARE_API_TOKEN", "url": "https://dash.cloudflare.com/profile/api-tokens"},
-            {"name": "Cohere", "env": "COHERE_API_KEY", "url": "https://dashboard.cohere.com/api-keys"},
+            {
+                "name": "Mistral AI",
+                "env": "MISTRAL_API_KEY",
+                "url": "https://console.mistral.ai/api-keys/",
+            },
+            {
+                "name": "Cloudflare Workers AI",
+                "env": "CLOUDFLARE_API_TOKEN",
+                "url": "https://dash.cloudflare.com/profile/api-tokens",
+            },
+            {
+                "name": "Cohere",
+                "env": "COHERE_API_KEY",
+                "url": "https://dashboard.cohere.com/api-keys",
+            },
             {"name": "Aion Labs", "env": "AION_API_KEY", "url": "https://aionlabs.ai/"},
-            {"name": "OpenRouter", "env": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/keys"},
-            {"name": "Vercel AI Gateway", "env": "VERCEL_AI_GATEWAY_KEY", "url": "https://vercel.com/dashboard/stores/ai-gateway"},
+            {
+                "name": "OpenRouter",
+                "env": "OPENROUTER_API_KEY",
+                "url": "https://openrouter.ai/keys",
+            },
+            {
+                "name": "Vercel AI Gateway",
+                "env": "VERCEL_AI_GATEWAY_KEY",
+                "url": "https://vercel.com/dashboard/stores/ai-gateway",
+            },
         ],
         "step3_local_providers": [
-            {"name": "Ollama", "env": "OLLAMA_HOST", "url": "https://ollama.com", "default": "http://localhost:11434"},
-            {"name": "llama.cpp", "env": "LLAMA_CPP_PATH", "url": "https://github.com/ggerganov/llama.cpp", "default": ""},
+            {
+                "name": "Ollama",
+                "env": "OLLAMA_HOST",
+                "url": "https://ollama.com",
+                "default": "http://localhost:11434",
+            },
+            {
+                "name": "llama.cpp",
+                "env": "LLAMA_CPP_PATH",
+                "url": "https://github.com/ggerganov/llama.cpp",
+                "default": "",
+            },
         ],
         "step3_select_prompt": "Введите номера провайдеров для настройки (через запятую), или Enter для пропуска:",
         "step3_key_prompt": "API-ключ для {name} ({env}):",
@@ -213,14 +303,15 @@ TEXTS = {
 
 
 def get_text(lang: str, key: str) -> str:
-    return TEXTS.get(lang, TEXTS["en"]).get(key, key)
+    text: str = TEXTS.get(lang, TEXTS["en"]).get(key, key)
+    return text
 
 
 def select_language() -> str:
     """Prompt user to select language."""
     click.echo()
     click.echo(style_primary("═" * 60))
-    click.echo(style_primary("  DESMAN-P+Human — Configuration"))
+    click.echo(style_primary("  DESMAN(P) — Configuration"))
     click.echo(style_primary("  Multimodal Weak Agent Framework"))
     click.echo(style_primary("═" * 60))
     click.echo()
@@ -252,7 +343,9 @@ def confirm_step(lang: str, message: str) -> bool:
         click.echo(style_error("Please enter Y or N"))
 
 
-def _run_provider_selection(config_manager: ConfigManager, lang: str, t: dict) -> tuple[dict, dict]:
+def _run_provider_selection(
+    config_manager: ConfigManager, lang: str, t: dict[str, Any]
+) -> tuple[dict[str, str], dict[str, str]]:
     """Run provider selection and return (api_keys, local_settings)."""
     # Mode selection
     click.echo(style_interactive(t["step3_mode_prompt"]))
@@ -261,14 +354,16 @@ def _run_provider_selection(config_manager: ConfigManager, lang: str, t: dict) -
     click.echo()
 
     while True:
-        mode_choice = click.prompt(style_interactive("Choice [1/2/3]"), default="1", show_default=False)
+        mode_choice = click.prompt(
+            style_interactive("Choice [1/2/3]"), default="1", show_default=False
+        )
         if mode_choice in ("1", "2", "3"):
             break
         click.echo(style_error("Please enter 1, 2, or 3"))
 
     mode = int(mode_choice)  # 1=api, 2=local, 3=both
-    api_keys = {}
-    local_settings = {}
+    api_keys: dict[str, str] = {}
+    local_settings: dict[str, str] = {}
 
     if mode in (1, 3):
         # Step 1: Data Privacy (only for API/both modes)
@@ -298,7 +393,9 @@ def _run_provider_selection(config_manager: ConfigManager, lang: str, t: dict) -
                 if 0 <= idx < len(api_providers):
                     p = api_providers[idx]
                     key = click.prompt(
-                        style_interactive(t["step3_key_prompt"].format(name=p["name"], env=p["env"])),
+                        style_interactive(
+                            t["step3_key_prompt"].format(name=p["name"], env=p["env"])
+                        ),
                         default="",
                         show_default=False,
                         hide_input=True,
@@ -320,10 +417,14 @@ def _run_provider_selection(config_manager: ConfigManager, lang: str, t: dict) -
             click.echo()
 
             default_val = p.get("default", "")
-            current = config_manager._load_config().get("local_settings", {}).get(p["env"], "")
+            current = config_manager.get_local_settings().get(p["env"], "")
             default_val = current or default_val
             val = click.prompt(
-                style_interactive(t["step3_local_prompt"].format(name=p["name"], env=p["env"], default=default_val or "none")),
+                style_interactive(
+                    t["step3_local_prompt"].format(
+                        name=p["name"], env=p["env"], default=default_val or "none"
+                    )
+                ),
                 default=default_val,
                 show_default=True,
             )
@@ -345,7 +446,7 @@ def _prompt_yes_no(prompt_text: str) -> bool:
         click.echo(style_error("Please enter Y or N"))
 
 
-def _run_permissions_step(lang: str, t: dict) -> dict:
+def _run_permissions_step(lang: str, t: dict[str, Any]) -> dict[str, bool]:
     """Run permissions step and return permissions dict."""
     click.echo()
     click.echo(style_primary(f"━━━ {t['step2_title']} ━━━"))
@@ -353,7 +454,7 @@ def _run_permissions_step(lang: str, t: dict) -> dict:
     click.echo(t["step2_body"])
     click.echo()
 
-    permissions = {}
+    permissions: dict[str, bool] = {}
     permissions["admin_rights"] = _prompt_yes_no(f"  [?] {t['step2_perm_admin']} [Y/N]")
     permissions["fs_outside_access"] = _prompt_yes_no(f"  [?] {t['step2_perm_fs']} [Y/N]")
     permissions["network_access"] = _prompt_yes_no(f"  [?] {t['step2_perm_net']} [Y/N]")
@@ -414,7 +515,7 @@ def reconfigure(config_manager: ConfigManager) -> None:
 
     click.echo()
     click.echo(style_primary("═" * 60))
-    click.echo(style_primary("  DESMAN-P+Human — Reconfiguration"))
+    click.echo(style_primary("  DESMAN(P) — Reconfiguration"))
     click.echo(style_primary("═" * 60))
     click.echo()
 
