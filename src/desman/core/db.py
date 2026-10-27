@@ -166,6 +166,16 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         OR (SELECT from_status FROM audit_log l WHERE l.subtask_id = subtasks.id
               AND l.to_status = 'needs_human' ORDER BY l.seq DESC LIMIT 1) = 'review');
     """,
+    # 3 — every audit entry belongs to an existing task, and its subtask (if any) to that task
+    """
+    CREATE TRIGGER audit_log_needs_task BEFORE INSERT ON audit_log
+        WHEN NEW.task_id IS NULL OR NOT EXISTS (SELECT 1 FROM tasks WHERE id = NEW.task_id)
+        BEGIN SELECT RAISE(ABORT, 'audit entry must name an existing task'); END;
+    CREATE TRIGGER audit_log_subtask_in_task BEFORE INSERT ON audit_log
+        WHEN NEW.subtask_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM subtasks WHERE id = NEW.subtask_id AND task_id = NEW.task_id)
+        BEGIN SELECT RAISE(ABORT, 'audit entry subtask must belong to its task'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)
@@ -212,6 +222,20 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         conn.execute("ROLLBACK")
         raise
     conn.execute("COMMIT")
+
+
+@contextmanager
+def read_snapshot(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Consistent reads: every SELECT inside sees the same committed state (one WAL snapshot),
+    without blocking writers. Inside an open transaction it adds nothing."""
+    if conn.in_transaction:
+        yield conn
+        return
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    finally:
+        conn.execute("COMMIT")
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -282,6 +306,22 @@ def expected_schema() -> dict[str, list[str]]:
         reference.close()
 
 
+def expected_triggers() -> set[str]:
+    """Trigger names the migrations produce (they carry invariants such as append-only audit)."""
+    reference = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        for script in MIGRATIONS:
+            for statement in _split_sql(script):
+                reference.execute(statement)
+        return _triggers(reference)
+    finally:
+        reference.close()
+
+
+def _triggers(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+
+
 def _columns(conn: sqlite3.Connection) -> dict[str, list[str]]:
     tables = [
         r[0]
@@ -293,7 +333,7 @@ def _columns(conn: sqlite3.Connection) -> dict[str, list[str]]:
 
 
 def verify_schema(conn: sqlite3.Connection) -> None:
-    """Refuse databases whose columns differ from the current schema.
+    """Refuse databases whose columns or triggers differ from the current schema.
 
     Happens with a database created by an unreleased development revision whose migration was
     later changed; failing here with a clear message beats a KeyError deep inside a task run.
@@ -309,6 +349,8 @@ def verify_schema(conn: sqlite3.Connection) -> None:
             problems.append(f"{table}: missing {', '.join(missing)}")
         if extra := sorted(set(have) - set(columns)):
             problems.append(f"{table}: unexpected {', '.join(extra)}")
+    if missing_triggers := sorted(expected_triggers() - _triggers(conn)):
+        problems.append(f"missing triggers {', '.join(missing_triggers)}")
     if problems:
         raise SchemaMismatchError(
             f"database schema does not match v{schema_version(conn)} ({'; '.join(problems)}). "

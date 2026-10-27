@@ -207,7 +207,7 @@ class Coordinator:
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
         except StaleStateError:
-            events.append(f"lost lease {subtask.id}")
+            self._discard(subtask, "lease lost during execution", events)
             return
         except ProviderError as e:  # agents may let these propagate: the error knows its kind
             outcome = self._provider_failure(e)
@@ -233,10 +233,11 @@ class Coordinator:
                     reason=outcome.reason,
                     paused_until=outcome.paused_until,
                     policy=self.policy,
+                    action="execution_failed",
                 )
                 events.append(f"{outcome.kind} {subtask.id} -> {moved.status}")
-        except StaleStateError:
-            events.append(f"lost lease {subtask.id}")  # e.g. cancelled while running
+        except StaleStateError:  # e.g. cancelled while running
+            self._discard(subtask, f"lease lost before {type(outcome).__name__.lower()}", events)
 
     def _review(self, subtask: Subtask, events: list[str]) -> bool:
         review: Review | Failure
@@ -250,6 +251,9 @@ class Coordinator:
             review = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"
             )
+        verdict: dict[str, Any] = {}
+        if isinstance(review, Review):
+            verdict = {"verdict": review.verdict.value, "feedback": review.feedback}
         try:
             if isinstance(review, Failure):
                 # Counts against the subtask's budget, so a reviewer that keeps failing cannot
@@ -263,10 +267,17 @@ class Coordinator:
                     reason=review.reason,
                     paused_until=review.paused_until,
                     policy=self.policy,
+                    action="review_failed",
                 )
             elif review.verdict is Verdict.ACCEPT:
                 moved = self.store.transition(
-                    subtask.id, S.REVIEW, S.DONE, Actor.REVIEWER, reason=review.feedback or None
+                    subtask.id,
+                    S.REVIEW,
+                    S.DONE,
+                    Actor.REVIEWER,
+                    reason=review.feedback or None,
+                    details=verdict,
+                    action="verdict",
                 )
             elif review.verdict is Verdict.RETRY:
                 moved = self.store.record_failure(
@@ -276,6 +287,8 @@ class Coordinator:
                     FailureKind.QUALITY,
                     reason=review.feedback or "rejected by reviewer",
                     policy=self.policy,
+                    details=verdict,
+                    action="verdict",
                 )
             elif review.verdict is Verdict.ESCALATE:
                 moved = self.store.transition(
@@ -284,11 +297,20 @@ class Coordinator:
                     S.NEEDS_HUMAN,
                     Actor.REVIEWER,
                     reason=review.feedback or "escalated by reviewer",
+                    details=verdict,
+                    action="verdict",
                 )
         except StaleStateError:
             return False  # another reviewer got there first
         events.append(f"reviewed {subtask.id} -> {moved.status}")
         return True
+
+    def _discard(self, subtask: Subtask, why: str, events: list[str]) -> None:
+        """The executor's work is thrown away: say so in the history, not just in `events`."""
+        events.append(f"lost lease {subtask.id}")
+        self.store.note(
+            subtask.id, Actor.EXECUTOR, "work_discarded", {"reason": why, "owner": self.owner}
+        )
 
     def _provider_failure(self, error: ProviderError) -> Failure:
         until = error.paused_until(self.store.clock())

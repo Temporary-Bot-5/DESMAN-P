@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from conftest import FakeClock
 from desman.core import db
+from desman.core.audit import check_history
 from desman.core.coordinator import (
     Coordinator,
     Executor,
@@ -23,7 +24,7 @@ from desman.core.coordinator import (
 )
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy
-from desman.core.states import Actor, SubtaskStatus, TaskStatus
+from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
 
 S = SubtaskStatus
@@ -310,10 +311,23 @@ def test_loop_always_terminates(store: Store, clock: FakeClock, seed: int) -> No
         return Review(verdict=Verdict.ACCEPT)
 
     task_id = store.create_task(random_task(rng))
-    result = coordinator(store, clock, chaotic_executor, chaotic_reviewer).run(
-        task_id, wait_for_pauses=True, max_ticks=500
-    )
+    loop = coordinator(store, clock, chaotic_executor, chaotic_reviewer)
+    result = loop.run(task_id, wait_for_pauses=True, max_ticks=500)
     assert result.status is not TaskStatus.ACTIVE
+    assert check_history(store.conn, task_id) == []  # D7: the log explains the outcome
+
+    # The operator steps in, at random, until the task is finished one way or another.
+    for _ in range(20):
+        if result.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            break
+        if rng.random() < 0.05:
+            store.cancel_task(task_id, reason="operator gives up")
+        for sub in store.list_subtasks(task_id):
+            if sub.status in (S.NEEDS_HUMAN, S.FAILED) and rng.random() < 0.8:
+                target = rng.choice(sorted(allowed_targets(sub.status, Actor.HUMAN)))
+                store.transition(sub.id, sub.status, target, Actor.HUMAN, reason="operator")
+        result = loop.run(task_id, wait_for_pauses=True, max_ticks=500)
+        assert check_history(store.conn, task_id) == []
 
 
 # ── Review fixes (PR #6) ─────────────────────────────────────────────────────

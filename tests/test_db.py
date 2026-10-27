@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -14,6 +15,7 @@ from click.testing import CliRunner
 
 from desman.cli import cli
 from desman.core import db
+from desman.core.audit import check_history, history
 from desman.core.states import SubtaskStatus
 from desman.core.store import Store
 
@@ -206,14 +208,95 @@ def test_strict_types(conn: sqlite3.Connection) -> None:
 
 
 def test_audit_log_is_append_only(conn: sqlite3.Connection) -> None:
-    conn.execute("INSERT INTO audit_log (actor, action) VALUES ('human', 'test')")
-    conn.execute("INSERT INTO audit_log (actor, action) VALUES ('human', 'test2')")
+    task_id = add_task(conn)
+    for action in ("test", "test2"):
+        conn.execute(
+            "INSERT INTO audit_log (task_id, actor, action) VALUES (?, 'human', ?)",
+            (task_id, action),
+        )
     seqs = [r["seq"] for r in conn.execute("SELECT seq FROM audit_log ORDER BY seq")]
     assert seqs == [1, 2]
     with pytest.raises(sqlite3.IntegrityError, match="append-only"):
         conn.execute("UPDATE audit_log SET action = 'x'")
     with pytest.raises(sqlite3.IntegrityError, match="append-only"):
         conn.execute("DELETE FROM audit_log")
+
+
+def test_audit_entries_must_belong_to_a_task(conn: sqlite3.Connection) -> None:
+    task_id, other = add_task(conn), add_task(conn)
+    subtask = add_subtask(conn, task_id)
+    insert = (
+        "INSERT INTO audit_log (task_id, subtask_id, actor, action) VALUES (?, ?, 'human', 'x')"
+    )
+    conn.execute(insert, (task_id, subtask))
+    conn.execute(insert, (task_id, None))
+    with pytest.raises(sqlite3.IntegrityError, match="existing task"):
+        conn.execute(insert, (None, None))
+    with pytest.raises(sqlite3.IntegrityError, match="existing task"):
+        conn.execute(insert, ("no-such-task", None))
+    with pytest.raises(sqlite3.IntegrityError):  # either trigger may fire first
+        conn.execute(insert, (None, subtask))
+    with pytest.raises(sqlite3.IntegrityError, match="belong to its task"):
+        conn.execute(insert, (other, subtask))
+    with pytest.raises(sqlite3.IntegrityError, match="belong to its task"):
+        conn.execute(insert, (task_id, "no-such-subtask"))
+
+
+def test_v2_database_upgrades_and_keeps_its_history(tmp_path: Path) -> None:
+    path = tmp_path / "v2.db"
+    old = _db_at_version(path, 2)
+    task_id = add_task(old)
+    old.execute("INSERT INTO audit_log (actor, action) VALUES ('human', 'legacy, no task')")
+    old.execute(
+        "INSERT INTO audit_log (task_id, actor, action) VALUES (?, 'human', 'old')", (task_id,)
+    )
+    old.close()
+    conn = db.open_db(path)
+    assert [r[0] for r in conn.execute("SELECT action FROM audit_log ORDER BY seq")] == [
+        "legacy, no task",
+        "old",
+    ]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO audit_log (actor, action) VALUES ('human', 'new')")
+    conn.close()
+
+
+def test_legacy_entries_without_task_id_stay_in_the_task_history(tmp_path: Path) -> None:
+    # Before migration 3 nothing forced task_id; the log is append-only, so such rows are found
+    # through their subtask rather than backfilled.
+    path = tmp_path / "v2.db"
+    old = _db_at_version(path, 2)
+    task_id = add_task(old)
+    subtask = add_subtask(old, task_id, status="ready")
+    old.execute(
+        "INSERT INTO audit_log (task_id, actor, action, details_json) "
+        "VALUES (?, 'human', 'task_created', ?)",
+        (task_id, json.dumps({"subtasks": [subtask]})),
+    )
+    old.execute(
+        "INSERT INTO audit_log (subtask_id, actor, action, from_status, to_status) "
+        "VALUES (?, 'scheduler', 'dependencies_met', 'pending', 'ready')",
+        (subtask,),
+    )
+    old.close()
+    conn = db.open_db(path)
+    entries = history(conn, task_id)
+    assert [(e.action, e.task_id) for e in entries] == [
+        ("task_created", task_id),
+        ("dependencies_met", task_id),
+    ]
+    assert check_history(conn, task_id) == []
+    assert len(Store(conn).audit_log(task_id)) == 2
+    conn.close()
+
+
+def test_database_missing_a_trigger_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "t.db"
+    conn = db.open_db(path)
+    conn.execute("DROP TRIGGER audit_log_no_delete")
+    conn.close()
+    with pytest.raises(db.SchemaMismatchError, match="missing triggers audit_log_no_delete"):
+        db.open_db(path)
 
 
 def test_python_and_sql_timestamps_share_format(conn: sqlite3.Connection) -> None:
