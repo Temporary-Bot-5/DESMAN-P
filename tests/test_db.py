@@ -15,6 +15,7 @@ from click.testing import CliRunner
 from desman.cli import cli
 from desman.core import db
 from desman.core.states import SubtaskStatus
+from desman.core.store import Store
 
 
 @pytest.fixture
@@ -83,8 +84,8 @@ def test_failed_migration_leaves_database_untouched(monkeypatch: pytest.MonkeyPa
     conn = db.connect(":memory:")
     with pytest.raises(sqlite3.OperationalError):
         db.migrate(conn)
-    # Migration 1 committed, migration 2 rolled back completely.
-    assert db.schema_version(conn) == 1
+    # The real migrations committed, the broken one rolled back completely.
+    assert db.schema_version(conn) == len(broken) - 1
     assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'extra'").fetchone() is None
 
 
@@ -307,3 +308,69 @@ def test_connect_waits_for_lock_when_switching_to_wal(tmp_path: Path) -> None:
 
     assert "error" not in outcome, outcome.get("error")
     assert outcome["mode"] == "wal"
+
+
+# ── Upgrades and schema drift ────────────────────────────────────────────────
+
+
+def _db_at_version(path: Path, version: int) -> sqlite3.Connection:
+    """A database as an older DESMAN with only the first `version` migrations would leave it."""
+    conn = db.connect(path)
+    for v, script in enumerate(db.MIGRATIONS[:version], start=1):
+        with db.transaction(conn):
+            for statement in db._split_sql(script):
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {v}")
+    return conn
+
+
+def test_v1_database_upgrades_and_backfills_accepted_attempt(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    old = _db_at_version(path, 1)
+    task_id = add_task(old)
+    reviewed = add_subtask(old, task_id, 0, status="done")
+    by_hand = add_subtask(old, task_id, 1, status="done")
+    for subtask_id in (reviewed, by_hand):
+        for attempt in (1, 2):
+            old.execute(
+                "INSERT INTO artifacts (id, subtask_id, attempt, kind) VALUES (?, ?, ?, 'result')",
+                (new_id(), subtask_id, attempt),
+            )
+    old.execute(
+        "INSERT INTO audit_log (subtask_id, actor, action, from_status, to_status) "
+        "VALUES (?, 'reviewer', 'transition', 'review', 'done')",
+        (reviewed,),
+    )
+    old.executemany(
+        "INSERT INTO audit_log (subtask_id, actor, action, from_status, to_status) VALUES (?, ?, 'transition', ?, ?)",
+        [
+            (by_hand, "executor", "running", "needs_human"),
+            (by_hand, "human", "needs_human", "done"),
+        ],
+    )
+    old.close()
+
+    conn = db.open_db(path)  # migrates to the current version and verifies
+    accepted = dict(conn.execute("SELECT id, accepted_attempt FROM subtasks").fetchall())
+    assert accepted == {reviewed: 2, by_hand: None}
+    store = Store(conn)
+    assert store.get_subtask(reviewed).accepted_attempt == 2  # rows convert fine after upgrade
+    conn.close()
+
+
+def test_drifted_development_database_is_refused_clearly(tmp_path: Path) -> None:
+    path = tmp_path / "drift.db"
+    conn = db.open_db(path)
+    # Simulate a database from a revision whose migration 1 lacked a column added later.
+    conn.execute("ALTER TABLE artifacts DROP COLUMN path")
+    conn.close()
+    with pytest.raises(db.SchemaMismatchError, match="artifacts: missing path"):
+        db.open_db(path)
+    result = CliRunner().invoke(cli, ["init-db", "--db", str(path)])
+    assert result.exit_code != 0
+    assert "development revision" in result.output
+
+
+def test_current_schema_verifies(conn: sqlite3.Connection) -> None:
+    db.verify_schema(conn)
+    assert "accepted_attempt" in db.expected_schema()["subtasks"]

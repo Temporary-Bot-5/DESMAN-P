@@ -53,7 +53,8 @@ def init_db(db_path: Path | None) -> None:
     conn = db.connect(path)
     try:
         applied = db.migrate(conn)
-    except db.SchemaVersionError as e:
+        db.verify_schema(conn)
+    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
     finally:
         conn.close()
