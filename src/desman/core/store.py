@@ -501,42 +501,64 @@ class Store:
         return subtask
 
     def recover_expired(
-        self, policy: RetryPolicy | None = None, *, task_id: str | None = None
+        self,
+        policy: RetryPolicy | None = None,
+        *,
+        task_id: str | None = None,
+        abandoned: Callable[[str], bool] | None = None,
     ) -> list[Subtask]:
-        """Requeue RUNNING subtasks whose lease ran out: their executor is presumed dead.
+        """Requeue RUNNING subtasks whose executor is gone: the lease ran out, or `abandoned`
+        says its owner no longer exists (e.g. a process on this machine that was killed).
 
-        Each expiry counts as a transient failure, so a subtask that keeps killing its executor
+        Each recovery counts as a transient failure, so a subtask that keeps killing its executor
         ends up with the operator instead of looping forever. The checkpoint is kept, so the next
         executor resumes from it. `policy` is charged to every subtask recovered, so pass
-        `task_id` when the policy belongs to one task's run.
+        `task_id` when the policy belongs to one task's run. `abandoned` must only answer True
+        when it is certain: a live executor that loses its lease has its work discarded.
         """
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         recovered: list[Subtask] = []
         with db.transaction(self.conn):
             now = self._now()
             rows = self.conn.execute(
-                f"""SELECT * FROM subtasks WHERE status = 'running' AND lease_until < ? {scope}
+                f"""SELECT * FROM subtasks WHERE status = 'running' {scope}
                     ORDER BY lease_until""",
-                (now, *params),
+                params,
             ).fetchall()
             for row in rows:
-                expired = Subtask.from_row(row)
-                decision = decide(FailureKind.TRANSIENT, expired.attempts, policy)
+                stuck = Subtask.from_row(row)
+                expired = stuck.lease_until is not None and stuck.lease_until < now
+                gone = (
+                    not expired
+                    and abandoned is not None
+                    and stuck.lease_owner is not None
+                    and abandoned(stuck.lease_owner)
+                )
+                if not (expired or gone):
+                    continue
+                decision = decide(FailureKind.TRANSIENT, stuck.attempts, policy)
+                why = (
+                    f"lease expired at {stuck.lease_until}"
+                    if expired
+                    else f"lease owner {stuck.lease_owner} is gone"
+                )
                 recovered.append(
                     self._apply(
-                        expired.id,
+                        stuck.id,
                         S.RUNNING,
                         decision.status,
                         Actor.SCHEDULER,
-                        lease=None,
+                        # Taking a live lease: only this exact one (compare-and-swap on the token).
+                        lease=stuck.lease_token if gone else None,
                         attempts=decision.attempts,
-                        reason=f"lease expired at {expired.lease_until}: {decision.reason}",
+                        reason=f"{why}: {decision.reason}",
                         paused_until=None,
                         details={
                             "failure": FailureKind.TRANSIENT.value,
-                            "lease": expired.lease_token,
+                            "lease": stuck.lease_token,
                         },
-                        action="lease_expired",
+                        action="lease_expired" if expired else "lease_abandoned",
+                        abandoned_lease=gone,
                     )
                 )
         return recovered
@@ -586,10 +608,15 @@ class Store:
         return [Subtask.from_row(r) for r in rows]
 
     def sweep(
-        self, policy: RetryPolicy | None = None, *, task_id: str | None = None
+        self,
+        policy: RetryPolicy | None = None,
+        *,
+        task_id: str | None = None,
+        abandoned: Callable[[str], bool] | None = None,
     ) -> tuple[list[Subtask], list[Subtask]]:
         """Scheduler housekeeping: (requeued or escalated expired leases, resumed pauses)."""
-        return self.recover_expired(policy, task_id=task_id), self.resume_due(task_id=task_id)
+        recovered = self.recover_expired(policy, task_id=task_id, abandoned=abandoned)
+        return recovered, self.resume_due(task_id=task_id)
 
     def _apply(
         self,
@@ -604,8 +631,12 @@ class Store:
         paused_until: str | None = None,
         details: dict[str, Any] | None = None,
         action: str = "transition",
+        abandoned_lease: bool = False,
     ) -> Subtask:
         """Compare-and-swap status change plus audit entry. Needs a transaction.
+
+        `abandoned_lease` lets the scheduler take back the live lease `lease` because its owner
+        is gone; only recover_expired sets it, after asking its `abandoned` predicate.
 
         Every status change except claiming goes through here, including the ones the store makes
         on its own (readiness, blocking, unblocking): one place checks the state machine, keeps
@@ -645,7 +676,7 @@ class Store:
         if src is S.RUNNING and lease is not None:
             where.append("lease_token = ?")
             params.append(lease)
-        if src is S.RUNNING and actor is Actor.SCHEDULER:
+        if src is S.RUNNING and actor is Actor.SCHEDULER and not abandoned_lease:
             where.append("lease_until < ?")  # never take a live lease away
             params.append(now)
         if src is S.PAUSED:
