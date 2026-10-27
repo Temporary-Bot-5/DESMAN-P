@@ -40,3 +40,4 @@ DESMAN_API-Keys/
 **/secrets*
 config.json
 .config.json.*.tmp
+.config.json.lock

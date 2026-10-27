@@ -12,6 +12,7 @@ from typing import Any
 from rich.panel import Panel
 from rich.text import Text
 
+from desman import config as config_module
 from desman import providers, ui
 from desman.config import Config, ConfigManager, Permissions
 from desman.providers import Provider
@@ -43,6 +44,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "label_q": "Label for this key (optional, e.g. 'second account')",
         "added": "Key added to {name}.",
         "duplicate": "{name} already has this key.",
+        "bad_label": "That label looks like a key, so it was left out: a label is a name.",
         "action_q": "{name}",
         "add_key": "Add a key",
         "remove_key": "Remove a key",
@@ -94,6 +96,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "label_q": "Метка ключа (необязательно, например «второй аккаунт»)",
         "added": "Ключ добавлен к {name}.",
         "duplicate": "У {name} уже есть этот ключ.",
+        "bad_label": "Метка похожа на ключ, поэтому не сохранена: метка — это название.",
         "action_q": "{name}",
         "add_key": "Добавить ключ",
         "remove_key": "Удалить ключ",
@@ -131,6 +134,7 @@ class _Session:
 
 def run(manager: ConfigManager) -> None:
     """The whole wizard. Raises ui.Cancelled when the user leaves; nothing is saved then."""
+    seen = manager.snapshot()
     saved = manager.load()  # a broken file stops here: it is never written over
     ui.header(TEXTS["en"]["title"], TEXTS["en"]["subtitle"])
     lang = ui.select(
@@ -144,7 +148,7 @@ def run(manager: ConfigManager) -> None:
 
     _providers_menu(session)
     config.permissions = _permissions(config.permissions, t)
-    manager.save(config)
+    manager.save_if_unchanged(config, seen)  # a `keys add` meanwhile is not lost
 
     ui.out("")
     ui.ok(t["saved"].format(path=manager.config_path))
@@ -220,7 +224,7 @@ def _show_keys(config: Config, p: Provider) -> None:
     keys = config.keys(p.key_env)
     rows = ui.table("#", p.key_env, "label")
     for i, k in enumerate(keys, 1):
-        rows.add_row(str(i), providers.mask(k.value), k.label)
+        rows.add_row(str(i), providers.mask(k.value), providers.label(k.label))
     if keys:
         ui.out(rows)
 
@@ -245,6 +249,9 @@ def _add_key(s: _Session, p: Provider) -> None:
     if not value:
         return
     label = ui.text(t["label_q"]) if s.config.keys(p.key_env) else ""
+    if config_module.looks_like_secret(label) or (label and label in value):
+        ui.warn(t["bad_label"])
+        label = ""
     if s.config.add_key(p.key_env, value, label):
         ui.ok(t["added"].format(name=p.name))
     else:
@@ -258,7 +265,8 @@ def _remove_key(s: _Session, p: Provider) -> None:
     assert p.key_env is not None
     keys = s.config.keys(p.key_env)
     choices = [
-        ui.Choice(f"#{i} {providers.mask(k.value)}", i - 1, k.label) for i, k in enumerate(keys, 1)
+        ui.Choice(f"#{i} {providers.mask(k.value)}", i - 1, providers.label(k.label))
+        for i, k in enumerate(keys, 1)
     ]
     choices.append(ui.Choice(s.t["back"], None))
     index = ui.select(s.t["which_key"], choices)

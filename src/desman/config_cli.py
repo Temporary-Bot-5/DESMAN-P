@@ -37,6 +37,8 @@ def load_config() -> ConfigManager:
 def run_wizard(manager: ConfigManager) -> None:
     try:
         wizard.run(manager)
+    except ConfigError as e:
+        raise click.ClickException(f"config {e}; run `desman config` again") from e
     except (ui.Cancelled, click.Abort):
         ui.out("")
         ui.warn("Configuration cancelled; nothing was saved.")
@@ -118,8 +120,11 @@ def config_reset(yes: bool) -> None:
         if not ui.confirm(f"Delete {what}?", default=False):
             ui.note("Kept.")
             raise SystemExit(1)
+    target = path.resolve() if path.is_symlink() else None
     manager.delete()
     ui.ok(f"Deleted {path}. Run `desman config` to set DESMAN up again.")
+    if target is not None and target.exists():
+        ui.warn(f"It was a link: only the link is gone, {target} is left as it was.")
 
 
 # ── desman keys ─────────────────────────────────────────────────────────────
@@ -148,7 +153,7 @@ def keys_list(as_json: bool = False) -> None:
                 "env": p.key_env,
                 "ready": p.is_ready(config),
                 "keys": [
-                    {"n": i, "value": providers.mask(k.value), "label": k.label}
+                    {"n": i, "value": providers.mask(k.value), "label": providers.label(k.label)}
                     for i, k in enumerate(config.keys(p.key_env), 1)
                 ],
             }
@@ -189,19 +194,22 @@ def keys_add(provider: str, label: str, from_stdin: bool) -> None:
     p = _provider(provider)
     assert p.key_env is not None
     manager = load_config()
-    config = manager.load()
     if from_stdin:
         value = sys.stdin.readline().strip()
-    else:
+    else:  # asked before the lock is taken: nobody waits while the user types
         ui.note(f"Get a key: {p.url}")
         value = ui.secret(f"API key for {p.name} ({p.key_env}), hidden")
     if not value:
         raise click.UsageError("no key given")
-    if not config.add_key(p.key_env, value, label):
+    with manager.edit() as config:
+        try:
+            added = config.add_key(p.key_env, value, label)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="--label") from e
+        n = len(config.keys(p.key_env))
+    if not added:
         ui.warn(f"{p.name} already has this key; nothing changed.")
         return
-    manager.save(config)
-    n = len(config.keys(p.key_env))
     ui.ok(f"Added {providers.mask(value)} to {p.name} (key #{n}, {n} in total).")
     missing = [s for s in p.settings if not s.default and not config.settings.get(s.env)]
     for s in missing:
@@ -216,26 +224,24 @@ def keys_remove(provider: str, number: int | None, remove_all: bool) -> None:
     """Remove key NUMBER (as `desman keys` lists it) of PROVIDER, or --all of them."""
     p = _provider(provider)
     assert p.key_env is not None
-    manager = load_config()
-    config = manager.load()
-    count = len(config.keys(p.key_env))
     if remove_all == (number is not None):
         raise click.UsageError("give a key NUMBER or --all")
-    if count == 0:
-        raise click.ClickException(f"{p.name} has no keys")
-    if remove_all:
-        config.api_keys.pop(p.key_env, None)
-        removed = count
-    else:
-        assert number is not None
-        try:
-            config.remove_key(p.key_env, number - 1)
-        except IndexError:
-            raise click.BadParameter(
-                f"{p.name} has {count} key(s): pick 1 to {count}", param_hint="NUMBER"
-            ) from None
-        removed = 1
-    manager.save(config)
+    with load_config().edit() as config:
+        count = len(config.keys(p.key_env))
+        if count == 0:
+            raise click.ClickException(f"{p.name} has no keys")
+        if remove_all:
+            config.api_keys.pop(p.key_env, None)
+            removed = count
+        else:
+            assert number is not None
+            try:
+                config.remove_key(p.key_env, number - 1)
+            except IndexError:
+                raise click.BadParameter(
+                    f"{p.name} has {count} key(s): pick 1 to {count}", param_hint="NUMBER"
+                ) from None
+            removed = 1
     ui.ok(f"Removed {removed} key(s) from {p.name}; {count - removed} left.")
 
 
@@ -248,20 +254,20 @@ def keys_import(file: Path) -> None:
         pairs = providers.parse_key_file(file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as e:
         raise click.ClickException(f"cannot read {file}: {e}") from e
+    if not pairs:
+        raise click.ClickException(f"no keys found in {file}")
     manager = load_config()
-    config = manager.load()
     added: dict[str, int] = {}
     already: dict[str, int] = {}
     unknown: list[str] = []
-    for env, value in pairs:
-        p = providers.by_key_env(env)
-        if p is None:
-            unknown.append(env)
-            continue
-        bucket = added if config.add_key(env, value) else already
-        bucket[p.name] = bucket.get(p.name, 0) + 1
-    if added:
-        manager.save(config)
+    with manager.edit() as config:
+        for env, value in pairs:
+            p = providers.by_key_env(env)
+            if p is None:
+                unknown.append(env)
+                continue
+            bucket = added if config.add_key(env, value) else already
+            bucket[p.name] = bucket.get(p.name, 0) + 1
     table = ui.table("provider", "added", "already saved", title=f"Imported from {file.name}")
     for name in sorted(set(added) | set(already)):
         table.add_row(name, str(added.get(name, 0)), str(already.get(name, 0)))
@@ -269,8 +275,6 @@ def keys_import(file: Path) -> None:
     ui.out("")
     if unknown:
         ui.warn(f"skipped names no provider uses: {', '.join(dict.fromkeys(unknown))}")
-    if not pairs:
-        raise click.ClickException(f"no keys found in {file}")
     ui.ok(f"{sum(added.values())} key(s) added, {sum(already.values())} already saved.")
     if added:
         ui.note(f"The keys are now in {manager.config_path}; {file} can be deleted.")

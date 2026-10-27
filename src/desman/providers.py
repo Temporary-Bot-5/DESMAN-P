@@ -107,6 +107,13 @@ def ready(config: Config) -> list[Provider]:
     return [p for p in CLOUD if p.is_ready(config)]
 
 
+def label(text: str) -> str:
+    """A key's label for display: as is, unless it looks like a key itself."""
+    from desman.config import looks_like_secret
+
+    return mask(text) if looks_like_secret(text) else text
+
+
 def mask(secret: str) -> str:
     """Enough to tell keys apart, never enough to use one: a short key shows nothing."""
     if len(secret) < 20:
@@ -114,8 +121,12 @@ def mask(secret: str) -> str:
     return f"{secret[:4]}…{secret[-4:]}"
 
 
-_PAIR = re.compile(r"""["']?([A-Za-z][A-Za-z0-9_]*)["']?\s*[:=]\s*["']([^"'\n]+)["']""")
-_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^\s#\"']+)\s*$")
+# From the start of a line: `"NAME": "value"`, `NAME = 'value'`, `export NAME=value`. A quoted
+# value may be followed by anything (a comma, a comment); an unquoted one by a `# comment`.
+_PAIR = re.compile(
+    r"""^\s*[{,]?\s*(?:export\s+)?["']?([A-Za-z][A-Za-z0-9_]*)["']?\s*[:=]\s*["']([^"'\n]+)["']"""
+)
+_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^\s#\"']+)\s*(?:#.*)?$")
 
 
 def parse_key_file(text: str) -> list[tuple[str, str]]:
@@ -134,8 +145,11 @@ def parse_key_file(text: str) -> list[tuple[str, str]]:
         return pairs
     pairs = []
     for line in text.splitlines():
-        found = _PAIR.findall(line) or _LINE.findall(line)
-        pairs += [(env, value.strip()) for env, value in found if value.strip()]
+        if line.lstrip().startswith(("#", "//")):  # a disabled key stays disabled
+            continue
+        found = _PAIR.match(line) or _LINE.match(line)
+        if found and found[2].strip():
+            pairs.append((found[1], found[2].strip()))
     return pairs
 
 
@@ -148,7 +162,7 @@ def describe(config: Config) -> dict[str, Any]:
         if p.key_env is not None:
             row["key_env"] = p.key_env
             row["keys"] = [
-                {"value": mask(k.value), "label": k.label} for k in config.keys(p.key_env)
+                {"value": mask(k.value), "label": label(k.label)} for k in config.keys(p.key_env)
             ]
         row["settings"] = {s.env: config.settings.get(s.env) or None for s in p.settings}
         row["ready"] = p.is_ready(config) if not p.local else None

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,7 +13,7 @@ from click.testing import CliRunner, Result
 
 from desman import providers
 from desman.cli import cli
-from desman.config import ConfigManager, default_config_path
+from desman.config import CONFIG_DIR_ENV, ApiKey, ConfigError, ConfigManager, default_config_path
 from helpers import flat_keys, make_config
 
 GROQ = "gsk_" + "g" * 48 + "AbCd"
@@ -131,7 +134,8 @@ def test_config_reset() -> None:
 
     done = desman("config", "reset", input="y\n")
     assert done.exit_code == 0, done.output
-    assert not path.exists() and list(path.parent.iterdir()) == []
+    # Only the lock is left: deleting a lock file others may hold would defeat it.
+    assert [f.name for f in path.parent.iterdir()] == [".config.json.lock"]
     assert "nothing to delete" in desman("config", "reset", "--yes").output
 
 
@@ -143,3 +147,92 @@ def test_reset_is_the_way_out_of_a_broken_config() -> None:
     result = desman("config", "reset", input="y\n")
     assert result.exit_code == 0 and "it does not load" in result.output
     assert not path.exists()
+
+
+# ── Review regressions (PR #17) ──────────────────────────────────────────────
+
+
+def test_concurrent_key_adds_both_survive(tmp_path: Path) -> None:
+    """Many `keys add` processes at once: each one's key is kept (read-modify-write locked)."""
+    env = {**os.environ, CONFIG_DIR_ENV: str(default_config_path().parent)}
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-m", "desman", "keys", "add", "groq", "--stdin"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            env=env,
+        )
+        for _ in range(8)
+    ]
+    for i, proc in enumerate(procs):
+        assert proc.stdin is not None
+        proc.stdin.write(f"gsk_concurrent_{i}\n".encode())
+        proc.stdin.close()
+    assert [proc.wait(timeout=60) for proc in procs] == [0] * 8
+    values = sorted(k.value for k in saved().load().keys("GROQ_API_KEY"))
+    assert values == sorted(f"gsk_concurrent_{i}" for i in range(8))
+
+
+def test_wizard_does_not_write_over_a_change_made_meanwhile() -> None:
+    manager = saved()
+    manager.save(make_config(api_keys={"GROQ_API_KEY": "gsk_a"}))
+    seen = manager.snapshot()
+    with manager.edit() as config:  # e.g. `desman keys add` while the wizard is open
+        config.add_key("GROQ_API_KEY", "gsk_b")
+    with pytest.raises(ConfigError, match="changed while this was open"):
+        manager.save_if_unchanged(make_config(), seen)
+    assert flat_keys(saved().load()) == {"GROQ_API_KEY": ["gsk_a", "gsk_b"]}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('# GROQ_API_KEY="retired"\nGOOGLE_API_KEY=active', [("GOOGLE_API_KEY", "active")]),
+        (
+            "GROQ_API_KEY=active # primary\nGOOGLE_API_KEY=other",
+            [("GROQ_API_KEY", "active"), ("GOOGLE_API_KEY", "other")],
+        ),
+        ('// "GROQ_API_KEY": "old",\n  "GROQ_API_KEY": "new",', [("GROQ_API_KEY", "new")]),
+        (
+            '{"GROQ_API_KEY": "a"\n"NVIDIA_API_KEY": "b"}',
+            [("GROQ_API_KEY", "a"), ("NVIDIA_API_KEY", "b")],
+        ),
+        ('note: GROQ_API_KEY="in prose"', []),
+    ],
+)
+def test_key_file_comments(text: str, expected: list[tuple[str, str]]) -> None:
+    assert providers.parse_key_file(text) == expected
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symlinks")
+def test_reset_of_a_linked_config_keeps_the_target(tmp_path: Path) -> None:
+    target = tmp_path / "dotfiles" / "desman.json"
+    target.parent.mkdir()
+    ConfigManager(target).save(make_config(api_keys={"GROQ_API_KEY": GROQ}))
+    link = default_config_path()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    result = desman("config", "reset", "--yes")
+    assert result.exit_code == 0, result.output
+    assert not link.is_symlink() and target.exists()
+    assert "only the link is gone" in result.output
+
+
+def test_a_label_that_looks_like_a_key_is_refused_and_masked() -> None:
+    result = desman("keys", "add", "groq", "--label", GROQ_2, "--stdin", input=GROQ)
+    assert result.exit_code == 2 and "looks like a key" in result.output
+    assert not default_config_path().exists() or saved().load().api_keys == {}
+    assert desman("keys", "add", "groq", "--label", "gsk", "--stdin", input=GROQ).exit_code == 2
+
+    # A label written by hand into the file is masked on display.
+    saved().save(make_config())
+    with saved().edit() as config:
+        config.api_keys["GROQ_API_KEY"] = [ApiKey(value=GROQ, label=GROQ_2)]
+    for args in (
+        ["keys"],
+        ["keys", "list", "--json"],
+        ["config", "show"],
+        ["config", "show", "--json"],
+    ):
+        output = desman(*args).output
+        assert GROQ_2[4:-4] not in output, args

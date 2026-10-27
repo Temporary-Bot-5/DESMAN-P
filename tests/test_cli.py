@@ -189,7 +189,7 @@ def test_git_ignores_the_config_and_its_temp_files() -> None:
     assert root is not None
     if not (root / ".git").exists():
         pytest.skip("not a git checkout")
-    names = ["config.json", ".config.json.0123456789ab.tmp"]
+    names = ["config.json", ".config.json.0123456789ab.tmp", ".config.json.lock"]
     done = subprocess.run(
         ["git", "-C", str(root), "check-ignore", "--no-index", *names],
         capture_output=True,

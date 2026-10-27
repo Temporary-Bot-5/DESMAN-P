@@ -8,8 +8,15 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
 
 import click
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, ValidationError
@@ -80,6 +87,12 @@ SCHEMA_VERSION = 2
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
 
 
+def looks_like_secret(text: str) -> bool:
+    """A long word without spaces: how keys look, and how labels ("work", "second account")
+    do not. Labels are shown unmasked, so such a label is refused, and masked if found."""
+    return len(text) >= 16 and not any(c.isspace() for c in text)
+
+
 class ConfigError(Exception):
     """config.json exists but cannot be used. Never treated as "not configured": the wizard
     would then write over the keys in it."""
@@ -128,12 +141,15 @@ class Config(BaseModel):
     def add_key(self, env: str, value: str, label: str = "") -> bool:
         """Append a key; False (and nothing changes) if this provider already has it."""
         value = value.strip()
+        label = label.strip()
         if not value:
             raise ValueError("an API key cannot be empty")
+        if looks_like_secret(label) or (label and label in value):
+            raise ValueError("the label looks like a key; a label is a name, like 'work'")
         current = self.api_keys.setdefault(env, [])
         if any(k.value == value for k in current):
             return False
-        current.append(ApiKey(value=value, label=label.strip()))
+        current.append(ApiKey(value=value, label=label))
         return True
 
     def remove_key(self, env: str, index: int) -> ApiKey:
@@ -255,14 +271,51 @@ class ConfigManager:
 
     def delete(self) -> bool:
         """Remove the config (keys included) and any temp file a crashed save left behind.
-        False if there was nothing to remove. A symlinked config loses its target: the keys
-        are what is being deleted."""
-        removed = False
-        target = self.config_path.resolve() if self.config_path.is_symlink() else self.config_path
-        for path in [target, self.config_path]:
-            if path.is_symlink() or path.exists():
-                path.unlink()
-                removed = True
-        for stray in target.parent.glob(f".{target.name}.*.tmp"):
-            stray.unlink(missing_ok=True)
-        return removed
+        False if there was nothing to remove. A symlinked config loses only the link: its
+        target may be a shared dotfile, and is the user's to delete."""
+        with self.locked():
+            removed = self.config_path.is_symlink() or self.config_path.exists()
+            if removed:
+                self.config_path.unlink()
+            for stray in self.config_path.parent.glob(f".{self.config_path.name}.*.tmp"):
+                stray.unlink(missing_ok=True)
+            return removed
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        """Hold the config's lock: other DESMAN processes that change it wait meanwhile.
+        Advisory (flock on a lock file next to it); a no-op where flock does not exist."""
+        lock_path = self.config_path.parent / f".{self.config_path.name}.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)  # releases the lock
+
+    @contextmanager
+    def edit(self) -> Iterator[Config]:
+        """Load, let the caller change, save: all under the lock, so two commands that add
+        keys at the same time both keep theirs. Nothing is saved if the block raises."""
+        with self.locked():
+            config = self.load()
+            yield config
+            self.save(config)
+
+    def snapshot(self) -> str | None:
+        """The file's text as it is now (None if there is no file), to detect later changes."""
+        try:
+            return self.config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
+    def save_if_unchanged(self, config: Config, seen: str | None) -> None:
+        """Save, unless the file changed since `seen` was taken (another command wrote it
+        while, say, the wizard was open). Raises ConfigError then; nothing is written."""
+        with self.locked():
+            if self.snapshot() != seen:
+                raise ConfigError(
+                    self.config_path, "it changed while this was open; nothing was saved"
+                )
+            self.save(config)
