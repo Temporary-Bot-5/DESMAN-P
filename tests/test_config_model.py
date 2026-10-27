@@ -129,3 +129,34 @@ def test_wizard_asks_for_the_cloudflare_account_id() -> None:
     assert config.api_keys == {"CLOUDFLARE_API_TOKEN": CLOUDFLARE}
     assert config.settings == {"CLOUDFLARE_ACCOUNT_ID": "acc123"}
     assert [p.id for p in providers.ready(config)] == ["cloudflare"]
+
+
+# ── Review regressions (PR #16) ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        {"AI_GATEWAY_API_KEY": "vck_new", "VERCEL_AI_GATEWAY_KEY": "vck_old"},
+        {"VERCEL_AI_GATEWAY_KEY": "vck_old", "AI_GATEWAY_API_KEY": "vck_new"},
+    ],
+)
+def test_upgrade_keeps_the_key_under_the_new_name(keys: dict[str, str]) -> None:
+    config = ConfigManager(write({"api_keys": keys, "version": "0.1.0"})).load()
+    assert config.api_keys == {"AI_GATEWAY_API_KEY": "vck_new"}
+
+
+def test_a_rejected_key_is_not_quoted_in_the_error() -> None:
+    key = "sk-" + "q" * 20 + "W3e4"  # short enough that pydantic would quote it whole
+    write({"schema_version": 1, "api_keys": {"GROQ_API_KEY": [key]}})
+    result = desman("config", "show")
+    assert result.exit_code == 1 and "api_keys.GROQ_API_KEY" in result.output
+    assert "q" * 20 not in result.output
+
+
+def test_unknown_settings_are_masked_too() -> None:
+    ConfigManager(default_config_path()).save(Config(settings={"GROQ_KEY": GROQ}))
+    for args in (["config", "show"], ["config", "show", "--json"]):
+        result = desman(*args)
+        assert result.exit_code == 0 and GROQ not in result.output, args
+    assert "unknown setting GROQ_KEY=gsk_…Z9x1" in desman("config", "show").output

@@ -114,5 +114,6 @@ def describe(config: Config) -> dict[str, Any]:
         "providers": rows,
         # Saved under a name no provider uses (typo, or a provider not supported yet).
         "unknown_keys": {k: mask(v) for k, v in config.api_keys.items() if k not in known},
-        "unknown_settings": {k: v for k, v in config.settings.items() if k not in known},
+        # Masked too: nothing says a value saved under an unknown name is not a secret.
+        "unknown_settings": {k: mask(v) for k, v in config.settings.items() if k not in known},
     }

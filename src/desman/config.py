@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import click
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, ValidationError
 
 from desman import providers
 
@@ -128,7 +128,12 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         data["settings"] = data.pop("local_settings", {})
         keys = data.get("api_keys")
         if isinstance(keys, dict):
-            data["api_keys"] = {_RENAMED_KEYS.get(k, k): v for k, v in keys.items()}
+            keys = dict(keys)
+            for old, new in _RENAMED_KEYS.items():
+                value = keys.pop(old, None)
+                if value is not None and new not in keys:  # a key under the new name wins
+                    keys[new] = value
+            data["api_keys"] = keys
         data["schema_version"] = 1
     return data
 
@@ -159,7 +164,14 @@ class ConfigManager:
             raise ConfigError(self.config_path, "not a JSON object")
         try:
             return Config.model_validate(upgrade(data))
-        except ValueError as e:  # pydantic's ValidationError is one
+        except ValidationError as e:
+            # Pydantic's own message quotes the rejected value, which may be a key.
+            problems = "; ".join(
+                f"{'.'.join(map(str, err['loc'])) or 'file'}: {err['msg']}"
+                for err in e.errors(include_input=False, include_url=False)
+            )
+            raise ConfigError(self.config_path, problems) from e
+        except ValueError as e:  # from upgrade(): about schema_version only
             raise ConfigError(self.config_path, str(e)) from e
 
     def is_configured(self) -> bool:
