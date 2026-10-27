@@ -6,7 +6,8 @@ The database is the only place where task state lives (PROJECT_PLAN: "durable st
   lock up front (`BEGIN IMMEDIATE`) so concurrent workers queue on `busy_timeout` instead of
   failing halfway through.
 - WAL lets readers (`desman status`) work while a worker writes.
-- Migrations are append-only: never edit a released one, add the next number instead.
+- Migrations are append-only: once a migration is on `master` never edit it, add the next
+  number instead.
 - Timestamps are UTC ISO-8601 strings with millisecond precision (`now_iso()`), so they compare
   correctly as text inside SQL.
 """
@@ -40,9 +41,14 @@ def default_db_path() -> Path:
     return base / "desman.db"
 
 
+def to_iso(moment: datetime) -> str:
+    """Format an aware datetime in the database timestamp format."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
 def now_iso() -> str:
     """Current UTC time in the database timestamp format."""
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return to_iso(datetime.now(UTC))
 
 
 MIGRATIONS: Final[tuple[str, ...]] = (
@@ -68,8 +74,10 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         status              TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
                                 'pending', 'ready', 'running', 'review', 'done', 'paused',
                                 'needs_human', 'failed', 'blocked', 'cancelled')),
-        -- Lease: present exactly while an executor holds the subtask.
+        -- Lease: present exactly while an executor holds the subtask. The token is new for
+        -- every claim, so a stalled executor cannot act on a later claim (even under its name).
         lease_owner         TEXT,
+        lease_token         TEXT,
         lease_until         TEXT,
         -- Pause: where to resume and not before when.
         resume_status       TEXT CHECK (resume_status IN ('ready', 'review')),
@@ -80,8 +88,13 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         created_at          TEXT NOT NULL DEFAULT {_NOW_SQL},
         updated_at          TEXT NOT NULL DEFAULT {_NOW_SQL},
         UNIQUE (task_id, seq),
-        CHECK ((status = 'running') = (lease_owner IS NOT NULL AND lease_until IS NOT NULL)),
-        CHECK ((status = 'paused') = (resume_status IS NOT NULL))
+        CHECK (CASE WHEN status = 'running'
+                    THEN lease_owner IS NOT NULL AND lease_token IS NOT NULL
+                         AND lease_until IS NOT NULL
+                    ELSE lease_owner IS NULL AND lease_token IS NULL AND lease_until IS NULL END),
+        CHECK (CASE WHEN status = 'paused'
+                    THEN resume_status IS NOT NULL
+                    ELSE resume_status IS NULL AND paused_until IS NULL END)
     ) STRICT;
     CREATE INDEX ix_subtasks_status_priority ON subtasks (status, priority DESC, created_at);
     CREATE INDEX ix_subtasks_task ON subtasks (task_id, seq);
