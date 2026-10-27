@@ -29,6 +29,8 @@ S = SubtaskStatus
 Clock = Callable[[], datetime]
 
 DEFAULT_LEASE_SECONDS = 300
+DEFAULT_PAUSE_SECONDS = 60
+"""Pause used when a provider hits its limits without saying when they reset."""
 
 
 class StaleStateError(RuntimeError):
@@ -64,9 +66,9 @@ class Store:
     def create_task(self, spec: TaskSpec, actor: Actor = Actor.HUMAN) -> str:
         """Store a task and its subtask graph; returns the task id."""
         task_id = _new_id()
-        now = self._now()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
+            now = self._now()  # after the lock: creation order matches commit order
             self.conn.execute(
                 "INSERT INTO tasks (id, goal, priority, created_at) VALUES (?, ?, ?, ?)",
                 (task_id, spec.goal, spec.priority, now),
@@ -138,9 +140,10 @@ class Store:
         """
         check_transition(S.READY, S.RUNNING, Actor.EXECUTOR)
         lease_token = _new_id()
-        lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         with db.transaction(self.conn):
+            # Times are taken after the write lock is held: waiting for it must not eat the lease.
+            lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
             self._promote_ready()
             row = self.conn.execute(
                 f"""UPDATE subtasks
@@ -183,7 +186,9 @@ class Store:
           whose claim expired cannot touch a later claim, even one taken under the same name.
         - `attempts` replaces the failure counters in the same update; a human sending the
           subtask back to READY resets them (a fresh budget is the point of a restart).
-        - Resuming from PAUSED goes back where the subtask stopped and not before `paused_until`.
+        - The scheduler can only take RUNNING away from an executor whose lease has expired.
+        - A pause without `paused_until` lasts DEFAULT_PAUSE_SECONDS. Resuming from PAUSED goes
+          back where the subtask stopped and not before `paused_until`.
         - Lease and pause fields follow the status. Claiming (-> RUNNING) goes through `claim()`.
         """
         with db.transaction(self.conn):
@@ -230,6 +235,132 @@ class Store:
                 details={"failure": kind.value},
             )
 
+    # ── Leases and recovery ──────────────────────────────────────────────────
+
+    def heartbeat(
+        self,
+        subtask_id: str,
+        lease: str,
+        *,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> Subtask:
+        """Extend the lease and, optionally, save a checkpoint in the same update.
+
+        Works while the claim is still this executor's (token matches), even if the deadline has
+        just passed and nobody has requeued the subtask yet. Once it was requeued or reclaimed,
+        raises StaleStateError: the executor must stop and drop its work.
+        """
+        sets = ["lease_until = ?", "updated_at = ?"]
+        if checkpoint is not None:
+            sets.append("checkpoint_json = ?")
+        with db.transaction(self.conn):
+            # Deadline from after the write lock is acquired, or a slow lock wait could commit
+            # an already expired lease that recover_expired() would immediately take away.
+            lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
+            params: list[Any] = [lease_until, self._now()]
+            if checkpoint is not None:
+                params.append(json.dumps(checkpoint, ensure_ascii=False))
+            row = self.conn.execute(
+                f"""UPDATE subtasks SET {", ".join(sets)}
+                    WHERE id = ? AND status = 'running' AND lease_token = ? RETURNING *""",
+                (*params, subtask_id, lease),
+            ).fetchone()
+            if row is None:
+                self._raise_stale(subtask_id, S.RUNNING, S.RUNNING, lease, self._now())
+            subtask = Subtask.from_row(row)
+            if checkpoint is not None:
+                # Plain heartbeats are not audited (too frequent). Checkpoints are, with their
+                # content: the column only keeps the latest one, the audit log keeps them all.
+                self._audit(
+                    Actor.EXECUTOR,
+                    "checkpoint",
+                    subtask=subtask,
+                    details={"owner": subtask.lease_owner, "checkpoint": checkpoint},
+                )
+        return subtask
+
+    def recover_expired(self, policy: RetryPolicy | None = None) -> list[Subtask]:
+        """Requeue RUNNING subtasks whose lease ran out: their executor is presumed dead.
+
+        Each expiry counts as a transient failure, so a subtask that keeps killing its executor
+        ends up with the operator instead of looping forever. The checkpoint is kept, so the next
+        executor resumes from it.
+        """
+        recovered: list[Subtask] = []
+        with db.transaction(self.conn):
+            now = self._now()
+            rows = self.conn.execute(
+                """SELECT * FROM subtasks WHERE status = 'running' AND lease_until < ?
+                   ORDER BY lease_until""",
+                (now,),
+            ).fetchall()
+            for row in rows:
+                expired = Subtask.from_row(row)
+                decision = decide(FailureKind.TRANSIENT, expired.attempts, policy)
+                recovered.append(
+                    self._apply(
+                        expired.id,
+                        S.RUNNING,
+                        decision.status,
+                        Actor.SCHEDULER,
+                        lease=None,
+                        attempts=decision.attempts,
+                        reason=f"lease expired at {expired.lease_until}: {decision.reason}",
+                        paused_until=None,
+                        details={
+                            "failure": FailureKind.TRANSIENT.value,
+                            "lease": expired.lease_token,
+                        },
+                    )
+                )
+        return recovered
+
+    def resume_due(self) -> list[Subtask]:
+        """Resume PAUSED subtasks whose pause is over, back to where each one stopped."""
+        resumed: list[Subtask] = []
+        with db.transaction(self.conn):
+            now = self._now()
+            rows = self.conn.execute(
+                """SELECT id, resume_status FROM subtasks
+                   WHERE status = 'paused' AND (paused_until IS NULL OR paused_until <= ?)
+                   ORDER BY paused_until""",
+                (now,),
+            ).fetchall()
+            for row in rows:
+                resumed.append(
+                    self._apply(
+                        row["id"],
+                        S.PAUSED,
+                        SubtaskStatus(row["resume_status"]),
+                        Actor.SCHEDULER,
+                        lease=None,
+                        attempts=None,
+                        reason="pause over",
+                        paused_until=None,
+                        details=None,
+                    )
+                )
+        return resumed
+
+    def pending_reviews(self, limit: int = 10) -> list[Subtask]:
+        """Subtasks waiting for a verdict, most urgent first.
+
+        Review needs no lease: it only reads the submitted result, and the verdict is a
+        compare-and-swap from REVIEW. If a reviewer dies, the subtask simply stays here and is
+        reviewed again without re-running the work.
+        """
+        rows = self.conn.execute(
+            """SELECT * FROM subtasks WHERE status = 'review'
+               ORDER BY priority DESC, updated_at, seq LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [Subtask.from_row(r) for r in rows]
+
+    def sweep(self, policy: RetryPolicy | None = None) -> tuple[list[Subtask], list[Subtask]]:
+        """Scheduler housekeeping: (requeued or escalated expired leases, resumed pauses)."""
+        return self.recover_expired(policy), self.resume_due()
+
     def _apply(
         self,
         subtask_id: str,
@@ -256,6 +387,8 @@ class Store:
         if src is S.RUNNING:
             sets += ["lease_owner = NULL", "lease_token = NULL", "lease_until = NULL"]
         if dst is S.PAUSED:
+            if paused_until is None:
+                paused_until = db.to_iso(self.clock() + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
             sets += ["resume_status = ?", "paused_until = ?"]
             params += [(S.READY if src is S.RUNNING else S.REVIEW).value, paused_until]
         if src is S.PAUSED:
@@ -271,6 +404,9 @@ class Store:
         if src is S.RUNNING and lease is not None:
             where.append("lease_token = ?")
             params.append(lease)
+        if src is S.RUNNING and actor is Actor.SCHEDULER:
+            where.append("lease_until < ?")  # never take a live lease away
+            params.append(now)
         if src is S.PAUSED:
             where.append("resume_status = ?")  # resume where it stopped
             where.append("(paused_until IS NULL OR paused_until <= ?)")
@@ -318,6 +454,11 @@ class Store:
             raise StaleStateError(
                 f"subtask {subtask_id}: lease {lease} is no longer valid "
                 f"(now held by {current.lease_owner})"
+            )
+        if src is S.RUNNING:
+            raise StaleStateError(
+                f"subtask {subtask_id} is leased to {current.lease_owner} "
+                f"until {current.lease_until} (now {now})"
             )
         if current.resume_status is not dst:
             raise StaleStateError(

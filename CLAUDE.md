@@ -41,6 +41,7 @@ src/desman/
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
     └── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
                    #        record_failure (retry policy applied atomically)
+                   #        heartbeat/checkpoint, recover_expired, resume_due, sweep
 ```
 
 Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a
