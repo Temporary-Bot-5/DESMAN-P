@@ -147,7 +147,7 @@ def test_run_with_undecodable_spec(tmp_path: Path) -> None:
 def test_run_without_provider_fails_fast() -> None:
     result = desman("run", "g")
     assert result.exit_code == 1
-    assert "no LLM provider yet" in result.output and "--fake-llm" in result.output
+    assert "no provider is configured" in result.output and "desman keys add" in result.output
     assert not db.default_db_path().exists()
 
 
@@ -217,7 +217,7 @@ def test_resume_and_status_errors(tmp_path: Path) -> None:
     desman("run", "g", "--fake-llm", script(tmp_path, ["{}"]))
     assert "not found" in desman("status", "zzzzzz").output
     assert "not found" in desman("resume", "zzzzzz", "--fake-llm", script(tmp_path, [])).output
-    assert "no LLM provider" in desman("resume", only_task()).output
+    assert "no provider is configured" in desman("resume", only_task()).output
 
 
 # ── status and list ──────────────────────────────────────────────────────────

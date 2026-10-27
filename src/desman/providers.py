@@ -32,6 +32,14 @@ class Provider:
     key_env: str | None = None  # the secret, kept in api_keys; None for local providers
     settings: tuple[Setting, ...] = field(default=())
     local: bool = False
+    # OpenAI-compatible endpoint; {NAME} is filled from settings (Cloudflare's account id).
+    base_url: str = ""
+    # A model the free tier serves. Free lineups change: `desman run --model` overrides it.
+    default_model: str = ""
+    limits_url: str = ""  # the provider's page on rate limits and quotas
+
+    def endpoint(self, config: Config) -> str:
+        return self.base_url.format(**config.settings).rstrip("/")
 
     def is_ready(self, config: Config) -> bool:
         """Everything it needs is configured."""
@@ -41,26 +49,101 @@ class Provider:
 
 
 CLOUD = (
-    Provider("nvidia", "NVIDIA NIM", "https://build.nvidia.com/explore/discover", "NVIDIA_API_KEY"),
-    Provider("google", "Google AI Studio", "https://aistudio.google.com/apikey", "GOOGLE_API_KEY"),
-    Provider("groq", "GROQ", "https://console.groq.com/keys", "GROQ_API_KEY"),
-    Provider("mistral", "Mistral AI", "https://console.mistral.ai/api-keys/", "MISTRAL_API_KEY"),
+    Provider(
+        "nvidia",
+        "NVIDIA NIM",
+        "https://build.nvidia.com/explore/discover",
+        "NVIDIA_API_KEY",
+        base_url="https://integrate.api.nvidia.com/v1",
+        default_model="nvidia/llama-3.1-nemotron-70b-instruct",
+        limits_url="https://docs.api.nvidia.com/nim/docs/api-limits",
+    ),
+    Provider(
+        "google",
+        "Google AI Studio",
+        "https://aistudio.google.com/apikey",
+        "GOOGLE_API_KEY",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        default_model="gemini-3.5-flash-lite",
+        limits_url="https://ai.google.dev/gemini-api/docs/rate-limits",
+    ),
+    Provider(
+        "groq",
+        "GROQ",
+        "https://console.groq.com/keys",
+        "GROQ_API_KEY",
+        base_url="https://api.groq.com/openai/v1",
+        default_model="openai/gpt-oss-20b",
+        limits_url="https://console.groq.com/docs/rate-limits",
+    ),
+    Provider(
+        "mistral",
+        "Mistral AI",
+        "https://console.mistral.ai/api-keys/",
+        "MISTRAL_API_KEY",
+        base_url="https://api.mistral.ai/v1",
+        default_model="mistral-small-latest",
+        limits_url="https://admin.mistral.ai/plateforme/limits",
+    ),
     Provider(
         "cloudflare",
         "Cloudflare Workers AI",
         "https://dash.cloudflare.com/profile/api-tokens",
         "CLOUDFLARE_API_TOKEN",
         settings=(Setting("CLOUDFLARE_ACCOUNT_ID", "Account ID"),),
+        base_url="https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+        default_model="@cf/meta/llama-3.1-8b-instruct",
+        limits_url="https://developers.cloudflare.com/workers-ai/platform/limits/",
     ),
-    Provider("cohere", "Cohere", "https://dashboard.cohere.com/api-keys", "COHERE_API_KEY"),
-    Provider("aion", "Aion Labs", "https://aionlabs.ai/", "AION_API_KEY"),
-    Provider("openrouter", "OpenRouter", "https://openrouter.ai/keys", "OPENROUTER_API_KEY"),
+    Provider(
+        "cohere",
+        "Cohere",
+        "https://dashboard.cohere.com/api-keys",
+        "COHERE_API_KEY",
+        base_url="https://api.cohere.ai/compatibility/v1",
+        default_model="command-r7b-12-2024",
+        limits_url="https://docs.cohere.com/docs/rate-limits",
+    ),
+    Provider(
+        "aion",
+        "Aion Labs",
+        "https://aionlabs.ai/",
+        "AION_API_KEY",
+        base_url="https://api.aionlabs.ai/v1",
+        default_model="aion-labs/aion-3.0-mini",
+        limits_url="https://aionlabs.ai/",
+    ),
+    Provider(
+        "openrouter",
+        "OpenRouter",
+        "https://openrouter.ai/keys",
+        "OPENROUTER_API_KEY",
+        base_url="https://openrouter.ai/api/v1",
+        default_model="nvidia/nemotron-3.5-lightning:free",
+        limits_url="https://openrouter.ai/docs/api-reference/limits",
+    ),
     Provider(
         "vercel",
         "Vercel AI Gateway",
         "https://vercel.com/dashboard/ai-gateway",
         "AI_GATEWAY_API_KEY",
+        base_url="https://ai-gateway.vercel.sh/v1",
+        default_model="google/gemini-2.5-flash-lite",
+        limits_url="https://vercel.com/docs/ai-gateway/pricing",
     ),
+)
+
+# Tried in this order when no --provider is given: generous free tiers first.
+PREFERENCE = (
+    "groq",
+    "google",
+    "mistral",
+    "openrouter",
+    "nvidia",
+    "cohere",
+    "aion",
+    "cloudflare",
+    "vercel",
 )
 
 LOCAL = (

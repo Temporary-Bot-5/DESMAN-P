@@ -176,6 +176,31 @@ MIGRATIONS: Final[tuple[str, ...]] = (
             SELECT 1 FROM subtasks WHERE id = NEW.subtask_id AND task_id = NEW.task_id)
         BEGIN SELECT RAISE(ABORT, 'audit entry subtask must belong to its task'); END;
     """,
+    # 4 — every call to a model provider (ROADMAP 2.4): usage per provider and key, limits seen
+    f"""
+    CREATE TABLE model_calls (
+        seq                INTEGER PRIMARY KEY AUTOINCREMENT,
+        at                 TEXT NOT NULL DEFAULT {_NOW_SQL},
+        provider           TEXT NOT NULL,
+        model              TEXT NOT NULL,
+        key_id             TEXT,      -- fingerprint of the key, never the key
+        task_id            TEXT,
+        subtask_id         TEXT,
+        prompt_hash        TEXT NOT NULL,
+        response_hash      TEXT,
+        prompt_tokens      INTEGER NOT NULL DEFAULT 0 CHECK (prompt_tokens >= 0),
+        completion_tokens  INTEGER NOT NULL DEFAULT 0 CHECK (completion_tokens >= 0),
+        latency_ms         INTEGER NOT NULL CHECK (latency_ms >= 0),
+        http_status        INTEGER,
+        error_kind         TEXT,      -- NULL: the call succeeded
+        error              TEXT,
+        limits_json        TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(limits_json))
+    ) STRICT;
+    CREATE INDEX ix_model_calls_provider ON model_calls (provider, at);
+    CREATE INDEX ix_model_calls_key ON model_calls (key_id, at);
+    CREATE TRIGGER model_calls_no_update BEFORE UPDATE ON model_calls
+        BEGIN SELECT RAISE(ABORT, 'model_calls is append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

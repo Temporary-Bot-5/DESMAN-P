@@ -34,6 +34,9 @@ desman keys                   # how many keys each provider has
 desman keys add groq          # add a key (asked for, hidden); --label, --stdin
 desman keys remove groq 2     # remove key #2 (or --all)
 desman keys import keys.txt   # add keys from a file (JSON or NAME=value lines)
+desman keys check             # are the keys accepted, what limits are reported (no tokens)
+desman usage                  # calls and tokens spent per provider and key (--since 7d)
+desman run "GOAL"             # on a real model; --provider groq --model ...
 desman help
 ```
 

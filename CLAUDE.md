@@ -57,14 +57,19 @@ src/desman/
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
     ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
                    #   every status change was recorded (D7)
+    ├── calls.py   # model_calls log (per provider/key usage, limits seen); `desman usage`
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
 └── llm/
     ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
                    #   FailureKind (the coordinator maps them; agents just let them propagate)
-    └── fake.py    # FakeLLM: scripted steps (replies, garbage, timeouts, 429, quota, 5xx, 4xx),
+    ├── fake.py    # FakeLLM: scripted steps (replies, garbage, timeouts, 429, quota, 5xx, 4xx),
                    #   routes by prompt, JSON scripts, seeded chaos. All model tests use it.
+    ├── openai_compat.py # HTTP client for every cloud provider: typed errors, key rotation,
+                   #   CallRecord per attempt (hashes and key fingerprint, never the key)
+    ├── router.py  # provider/model for a run (--provider, PREFERENCE), built from the config
+    └── check.py   # `desman keys check`: is a key accepted, limits reported; spends no tokens
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it
@@ -115,6 +120,7 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 
 - Every task in ROADMAP lands with tests
 - Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
+  (HTTP goes through `httpx.MockTransport`)
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
   except in lock-contention tests and the subprocess crash tests (`tests/test_crash.py`)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)

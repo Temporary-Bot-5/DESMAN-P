@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from conftest import FakeClock
-from desman.agents import llm_executor, llm_reviewer
+from desman.agents import _json_object, llm_executor, llm_reviewer
 from desman.core.context import build_context
 from desman.core.coordinator import Coordinator, Failure, Success, Work
 from desman.core.models import SubtaskSpec, TaskSpec
@@ -81,7 +81,7 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
 
 
 def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path: Path) -> None:
-    llm = FakeLLM(garbage("fenced"), garbage("not_object"), '{"ok": 1}')
+    llm = FakeLLM(garbage("prose"), garbage("not_object"), '{"ok": 1}')
     execute = llm_executor(llm)
     store.create_task(one_step())
     claimed = store.claim("w")
@@ -171,3 +171,32 @@ def test_task_text_naming_the_other_role_does_not_misroute(store: Store, clock: 
         task_id
     )
     assert result.status is TaskStatus.DONE
+
+
+# ── JSON inside a reply (seen on Gemini, found on a real provider run) ─────────
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (garbage("fenced").text, {"answer": 42}),
+        (garbage("wrapped").text, {"answer": 42}),
+        ('```\n{"a": 1}\n```', {"a": 1}),
+        ('Result:\n```JSON\n{\n "a": [1, 2]\n}\n```\nDone.', {"a": [1, 2]}),
+        ('```json\n[1]\n```\n```json\n{"second": true}\n```', {"second": True}),
+    ],
+)
+def test_json_is_found_inside_a_reply(reply: str, expected: dict[str, Any]) -> None:
+    assert _json_object(reply) == expected
+
+
+@pytest.mark.parametrize(
+    "name", ["empty", "prose", "truncated", "trailing_comma", "single_quotes", "not_object"]
+)
+def test_what_is_not_json_stays_a_failure(name: str) -> None:
+    assert _json_object(garbage(name).text) is None
+
+
+def test_strictness_holds_inside_a_fence() -> None:
+    assert _json_object('```json\n{"v": NaN}\n```') is None
+    assert _json_object('note {"v": 1e999} end') is None
