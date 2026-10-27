@@ -13,10 +13,27 @@ import click
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
 
+def project_root() -> Path | None:
+    """The source checkout DESMAN runs from (src/desman/config.py -> repo), or None when it is
+    installed as a package and there is no project folder to keep the config in."""
+    root = Path(__file__).resolve().parents[2]
+    return (
+        root if (root / "pyproject.toml").is_file() and (root / "src" / "desman").is_dir() else None
+    )
+
+
 def default_config_path() -> Path:
-    """Config file location: $DESMAN_CONFIG_DIR/config.json or ~/.config/desman/config.json."""
+    """Config file location, first that applies:
+
+    1. $DESMAN_CONFIG_DIR/config.json;
+    2. config.json in the project folder (a source checkout); `.gitignore` keeps it out of git;
+    3. ~/.config/desman/config.json for an installed package.
+    """
     config_dir = os.environ.get(CONFIG_DIR_ENV)
-    base = Path(config_dir) if config_dir else Path.home() / ".config" / "desman"
+    if config_dir:
+        return Path(config_dir) / "config.json"
+    root = project_root()
+    base = root if root is not None else Path.home() / ".config" / "desman"
     return base / "config.json"
 
 
