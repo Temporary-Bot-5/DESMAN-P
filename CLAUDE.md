@@ -31,10 +31,18 @@ The old core was removed (still in git history at `3d10a5e`). What remains:
 
 ```
 src/desman/
-├── cli.py      # Click entry point: `desman`, `desman config`, `desman help`
-├── config.py   # ConfigManager + bilingual (en/ru) setup wizard
-└── info.py     # Banner / project info
+├── cli.py         # Click entry point: `desman`, `desman config`, `desman help`, `desman init-db`
+├── config.py      # ConfigManager + bilingual (en/ru) setup wizard
+├── info.py        # Banner / project info
+└── core/
+    ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
+    ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently)
+    └── db.py      # sqlite3 connection, transactions, append-only migrations
 ```
+
+Database: `~/.local/share/desman/desman.db` (override with `DESMAN_DATA_DIR`). Never edit a
+released migration in `db.MIGRATIONS`; append a new one. Keep the `subtasks.status` CHECK in
+sync with `SubtaskStatus` (a test enforces it).
 
 The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the
 current phase (no multiple workers, routing, preemption or self-improvement before their phase).
