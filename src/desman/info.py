@@ -45,7 +45,7 @@ TEXTS = {
 
 def print_project_info(config_manager: ConfigManager) -> None:
     """Print project information with ASCII banner."""
-    t = TEXTS.get(config_manager.get_language(), TEXTS["en"])
+    t = TEXTS.get(config_manager.load().language, TEXTS["en"])
 
     # ASCII Banner
     click.echo(style_primary(BANNER))

@@ -6,9 +6,12 @@ import json
 import os
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import click
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+
+from desman import providers
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
@@ -70,41 +73,108 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
+SCHEMA_VERSION = 1
+
+# Renamed to the provider's own variable name (schema 0 -> 1).
+_RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
+
+
+class ConfigError(Exception):
+    """config.json exists but cannot be used. Never treated as "not configured": the wizard
+    would then write over the keys in it."""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(f"{path}: {reason}")
+        self.path = path
+
+
+class Permissions(BaseModel):
+    """Set by the human in `desman config` only; the upper bound of what agents may do."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    admin_rights: StrictBool = False
+    fs_outside_access: StrictBool = False
+    network_access: StrictBool = False
+    shell_execution: StrictBool = False
+
+
+class Config(BaseModel):
+    """The whole of config.json."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    configured: StrictBool = False
+    language: Literal["en", "ru"] = "en"
+    permissions: Permissions = Field(default_factory=Permissions)
+    api_keys: dict[str, StrictStr] = Field(default_factory=dict)  # secrets
+    settings: dict[str, StrictStr] = Field(default_factory=dict)  # not secret: hosts, account ids
+
+
+def upgrade(data: dict[str, Any]) -> dict[str, Any]:
+    """Bring a parsed config.json up to SCHEMA_VERSION. Schema 0 is the file written before
+    there was a schema_version (it had `version: "0.1.0"` and `local_settings`)."""
+    version = data.get("schema_version", 0)
+    if not isinstance(version, int) or isinstance(version, bool) or version < 0:
+        raise ValueError(f"schema_version must be a whole number, not {version!r}")
+    if version > SCHEMA_VERSION:
+        raise ValueError(
+            f"schema_version {version} is newer than this DESMAN understands ({SCHEMA_VERSION})"
+        )
+    data = dict(data)
+    if version == 0:
+        data.pop("version", None)
+        data["settings"] = data.pop("local_settings", {})
+        keys = data.get("api_keys")
+        if isinstance(keys, dict):
+            data["api_keys"] = {_RENAMED_KEYS.get(k, k): v for k, v in keys.items()}
+        data["schema_version"] = 1
+    return data
+
+
 class ConfigManager:
-    """Manages DESMAN configuration."""
+    """Reads and writes config.json."""
 
     def __init__(self, config_path: Path) -> None:
         self.config_path = config_path
         # Only a directory we create gets 0700; an existing one (maybe chosen by the user via
-        # DESMAN_CONFIG_DIR) is left alone. The file itself is always 0600 (save_config).
+        # DESMAN_CONFIG_DIR) is left alone. The file itself is always 0600 (save).
         self.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-    def is_configured(self) -> bool:
-        """Check if DESMAN is configured."""
-        return bool(self._load_config().get("configured", False))
-
-    def _load_config(self) -> dict[str, Any]:
-        """Load configuration from file."""
-        if not self.config_path.exists():
-            return {"configured": False}
+    def load(self) -> Config:
+        """The saved config; an unconfigured one when there is no file. Raises ConfigError
+        when the file cannot be read, is not JSON or does not fit the schema."""
         try:
-            with open(self.config_path, encoding="utf-8") as f:
-                data: dict[str, Any] = json.load(f)
-                return data
-        except (json.JSONDecodeError, OSError):
-            return {"configured": False}
+            text = self.config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return Config()
+        except (OSError, UnicodeDecodeError) as e:
+            raise ConfigError(self.config_path, f"cannot read it ({e})") from e
+        try:
+            data = json.loads(text)
+        except ValueError as e:
+            raise ConfigError(self.config_path, f"not valid JSON ({e})") from e
+        if not isinstance(data, dict):
+            raise ConfigError(self.config_path, "not a JSON object")
+        try:
+            return Config.model_validate(upgrade(data))
+        except ValueError as e:  # pydantic's ValidationError is one
+            raise ConfigError(self.config_path, str(e)) from e
 
-    def save_config(self, config: dict[str, Any]) -> None:
+    def is_configured(self) -> bool:
+        return self.load().configured
+
+    def save(self, config: Config) -> None:
         """Save configuration atomically, readable by the owner only (it holds API keys).
 
-        Written to a private temporary file and renamed over the old one: a crash or a
-        serialisation error never leaves a half-written or world-readable config behind.
-        A symlinked config (e.g. into a dotfiles directory) is updated at its target, so the link
-        stays. The old file is made private before it is replaced, so another hard link to it
-        does not keep the previous keys readable by others.
+        Written to a private temporary file and renamed over the old one: a crash never
+        leaves a half-written or world-readable config behind. A symlinked config (e.g. into
+        a dotfiles directory) is updated at its target, so the link stays. The old file is
+        made private before it is replaced, so another hard link to it does not keep the
+        previous keys readable by others.
         """
-        config["configured"] = True
-        text = json.dumps(config, indent=2, ensure_ascii=False)
+        text = config.model_copy(update={"configured": True}).model_dump_json(indent=2)
         target = self.config_path.resolve() if self.config_path.is_symlink() else self.config_path
         tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -119,26 +189,6 @@ class ConfigManager:
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
-
-    def get_api_keys(self) -> dict[str, str]:
-        """Get stored API keys."""
-        api_keys: dict[str, str] = self._load_config().get("api_keys", {})
-        return api_keys
-
-    def get_permissions(self) -> dict[str, bool]:
-        """Get agent permissions."""
-        permissions: dict[str, bool] = self._load_config().get("permissions", {})
-        return permissions
-
-    def get_language(self) -> str:
-        """Get configured language."""
-        language: str = self._load_config().get("language", "en")
-        return language
-
-    def get_local_settings(self) -> dict[str, str]:
-        """Get local provider settings."""
-        local_settings: dict[str, str] = self._load_config().get("local_settings", {})
-        return local_settings
 
 
 # ─── Color constants (RGB tuples for true color) ───
@@ -211,59 +261,6 @@ TEXTS: dict[str, dict[str, Any]] = {
             "Local models run on your hardware. Ensure Ollama (ollama.com) "
             "or llama.cpp is installed and a model is pulled."
         ),
-        "step3_api_providers": [
-            {
-                "name": "NVIDIA NIM",
-                "env": "NVIDIA_API_KEY",
-                "url": "https://build.nvidia.com/explore/discover",
-            },
-            {
-                "name": "Google AI Studio",
-                "env": "GOOGLE_API_KEY",
-                "url": "https://aistudio.google.com/apikey",
-            },
-            {"name": "GROQ", "env": "GROQ_API_KEY", "url": "https://console.groq.com/keys"},
-            {
-                "name": "Mistral AI",
-                "env": "MISTRAL_API_KEY",
-                "url": "https://console.mistral.ai/api-keys/",
-            },
-            {
-                "name": "Cloudflare Workers AI",
-                "env": "CLOUDFLARE_API_TOKEN",
-                "url": "https://dash.cloudflare.com/profile/api-tokens",
-            },
-            {
-                "name": "Cohere",
-                "env": "COHERE_API_KEY",
-                "url": "https://dashboard.cohere.com/api-keys",
-            },
-            {"name": "Aion Labs", "env": "AION_API_KEY", "url": "https://aionlabs.ai/"},
-            {
-                "name": "OpenRouter",
-                "env": "OPENROUTER_API_KEY",
-                "url": "https://openrouter.ai/keys",
-            },
-            {
-                "name": "Vercel AI Gateway",
-                "env": "VERCEL_AI_GATEWAY_KEY",
-                "url": "https://vercel.com/dashboard/stores/ai-gateway",
-            },
-        ],
-        "step3_local_providers": [
-            {
-                "name": "Ollama",
-                "env": "OLLAMA_HOST",
-                "url": "https://ollama.com",
-                "default": "http://localhost:11434",
-            },
-            {
-                "name": "llama.cpp",
-                "env": "LLAMA_CPP_PATH",
-                "url": "https://github.com/ggerganov/llama.cpp",
-                "default": "",
-            },
-        ],
         "step3_select_prompt": "Enter provider numbers to configure (comma-separated), or press Enter to skip:",
         "step3_key_prompt": "API key for {name} ({env}):",
         "step3_key_keep": "[saved: Enter keeps it, '-' deletes it]",
@@ -311,59 +308,6 @@ TEXTS: dict[str, dict[str, Any]] = {
             "Локальные модели запускаются на вашем железе. Убедитесь, что установлен "
             "Ollama (ollama.com) или llama.cpp и загружена хотя бы одна модель."
         ),
-        "step3_api_providers": [
-            {
-                "name": "NVIDIA NIM",
-                "env": "NVIDIA_API_KEY",
-                "url": "https://build.nvidia.com/explore/discover",
-            },
-            {
-                "name": "Google AI Studio",
-                "env": "GOOGLE_API_KEY",
-                "url": "https://aistudio.google.com/apikey",
-            },
-            {"name": "GROQ", "env": "GROQ_API_KEY", "url": "https://console.groq.com/keys"},
-            {
-                "name": "Mistral AI",
-                "env": "MISTRAL_API_KEY",
-                "url": "https://console.mistral.ai/api-keys/",
-            },
-            {
-                "name": "Cloudflare Workers AI",
-                "env": "CLOUDFLARE_API_TOKEN",
-                "url": "https://dash.cloudflare.com/profile/api-tokens",
-            },
-            {
-                "name": "Cohere",
-                "env": "COHERE_API_KEY",
-                "url": "https://dashboard.cohere.com/api-keys",
-            },
-            {"name": "Aion Labs", "env": "AION_API_KEY", "url": "https://aionlabs.ai/"},
-            {
-                "name": "OpenRouter",
-                "env": "OPENROUTER_API_KEY",
-                "url": "https://openrouter.ai/keys",
-            },
-            {
-                "name": "Vercel AI Gateway",
-                "env": "VERCEL_AI_GATEWAY_KEY",
-                "url": "https://vercel.com/dashboard/stores/ai-gateway",
-            },
-        ],
-        "step3_local_providers": [
-            {
-                "name": "Ollama",
-                "env": "OLLAMA_HOST",
-                "url": "https://ollama.com",
-                "default": "http://localhost:11434",
-            },
-            {
-                "name": "llama.cpp",
-                "env": "LLAMA_CPP_PATH",
-                "url": "https://github.com/ggerganov/llama.cpp",
-                "default": "",
-            },
-        ],
         "step3_select_prompt": "Введите номера провайдеров для настройки (через запятую), или Enter для пропуска:",
         "step3_key_prompt": "API-ключ для {name} ({env}):",
         "step3_key_keep": "[сохранён: Enter — оставить, '-' — удалить]",
@@ -418,11 +362,9 @@ def confirm_step(lang: str, message: str) -> bool:
         click.echo(style_error("Please enter Y or N"))
 
 
-def _run_provider_selection(
-    config_manager: ConfigManager, lang: str, t: dict[str, Any]
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Run provider selection and return (api_keys, local_settings)."""
-    # Mode selection
+def _run_provider_selection(config: Config, lang: str, t: dict[str, Any]) -> Config:
+    """Ask for providers. Starts from what is saved: keys and settings that are not re-entered
+    stay. Enter keeps a saved value, '-' deletes it."""
     click.echo(style_interactive(t["step3_mode_prompt"]))
     for i, opt in enumerate(t["step3_mode_options"], 1):
         click.echo(f"  {style_interactive(f'[{i}]')} {opt}")
@@ -437,9 +379,8 @@ def _run_provider_selection(
         click.echo(style_error("Please enter 1, 2, or 3"))
 
     mode = int(mode_choice)  # 1=api, 2=local, 3=both
-    # Start from what is saved: reconfiguring must not lose keys that are not re-entered.
-    api_keys: dict[str, str] = dict(config_manager.get_api_keys())
-    local_settings: dict[str, str] = dict(config_manager.get_local_settings())
+    api_keys = dict(config.api_keys)
+    settings = dict(config.settings)
 
     if mode in (1, 3):
         # Step 1: Data Privacy (only for API/both modes)
@@ -449,70 +390,67 @@ def _run_provider_selection(
         click.echo(t["step1_body"])
         confirm_step(lang, t["step1_confirm"])
 
-        # Cloud API providers
         click.echo()
         click.echo(style_warning(t["step3_api_warning"]))
         click.echo()
         click.echo(style_interactive("Available cloud providers:"))
         click.echo()
-
-        api_providers = t["step3_api_providers"]
-        for i, p in enumerate(api_providers, 1):
-            click.echo(f"  {style_interactive(f'[{i}]')} {style_primary(p['name'])}")
+        for i, provider in enumerate(providers.CLOUD, 1):
+            click.echo(f"  {style_interactive(f'[{i}]')} {style_primary(provider.name)}")
+            click.echo(f"      {style_dim(provider.url)}")
         click.echo()
 
         click.echo(style_interactive(t["step3_select_prompt"]))
         selection = click.prompt("", default="", show_default=False)
-        if selection.strip():
-            indices = [int(x.strip()) - 1 for x in selection.split(",") if x.strip().isdigit()]
-            for idx in indices:
-                if 0 <= idx < len(api_providers):
-                    p = api_providers[idx]
-                    prompt = t["step3_key_prompt"].format(name=p["name"], env=p["env"])
-                    if p["env"] in api_keys:
-                        prompt += " " + t["step3_key_keep"]
-                    key = click.prompt(
-                        style_interactive(prompt),
-                        default="",
-                        show_default=False,
-                        hide_input=True,
-                    ).strip()
-                    if key == "-":
-                        api_keys.pop(p["env"], None)
-                    elif key:
-                        api_keys[p["env"]] = key
+        for part in selection.split(","):
+            idx = int(part) - 1 if part.strip().isdigit() else -1
+            if not 0 <= idx < len(providers.CLOUD):
+                continue
+            provider = providers.CLOUD[idx]
+            assert provider.key_env is not None
+            prompt = t["step3_key_prompt"].format(name=provider.name, env=provider.key_env)
+            if provider.key_env in api_keys:
+                prompt += " " + t["step3_key_keep"]
+            key = click.prompt(
+                style_interactive(prompt), default="", show_default=False, hide_input=True
+            ).strip()
+            if key == "-":
+                api_keys.pop(provider.key_env, None)
+            elif key:
+                api_keys[provider.key_env] = key
+            for setting in provider.settings:
+                _prompt_setting(settings, provider.name, setting.env, setting.default, t)
 
     if mode in (2, 3):
-        # Local providers
         click.echo()
         click.echo(style_primary(t["step3_local_info"]))
         click.echo()
         click.echo(style_interactive("Local provider settings:"))
         click.echo()
-
-        local_providers = t["step3_local_providers"]
-        for i, p in enumerate(local_providers, 1):
-            click.echo(f"  {style_interactive(f'[{i}]')} {style_primary(p['name'])}")
+        for i, provider in enumerate(providers.LOCAL, 1):
+            click.echo(f"  {style_interactive(f'[{i}]')} {style_primary(provider.name)}")
             click.echo()
+            for setting in provider.settings:
+                _prompt_setting(settings, provider.name, setting.env, setting.default, t)
 
-            default_val = p.get("default", "")
-            current = config_manager.get_local_settings().get(p["env"], "")
-            default_val = current or default_val
-            val = click.prompt(
-                style_interactive(
-                    t["step3_local_prompt"].format(
-                        name=p["name"], env=p["env"], default=default_val or "none"
-                    )
-                ),
-                default=default_val,
-                show_default=True,
-            )
-            if val.strip() == "-":
-                local_settings.pop(p["env"], None)
-            elif val.strip():
-                local_settings[p["env"]] = val.strip()
+    return config.model_copy(update={"api_keys": api_keys, "settings": settings})
 
-    return api_keys, local_settings
+
+def _prompt_setting(
+    settings: dict[str, str], name: str, env: str, default: str, t: dict[str, Any]
+) -> None:
+    current = settings.get(env, "") or default
+    val = click.prompt(
+        style_interactive(
+            t["step3_local_prompt"].format(name=name, env=env, default=current or "none")
+        ),
+        default=current,
+        show_default=True,
+    ).strip()
+    if val == "-":
+        settings.pop(env, None)
+    elif val:
+        settings[env] = val
 
 
 def _prompt_yes_no(prompt_text: str) -> bool:
@@ -527,20 +465,19 @@ def _prompt_yes_no(prompt_text: str) -> bool:
         click.echo(style_error("Please enter Y or N"))
 
 
-def _run_permissions_step(lang: str, t: dict[str, Any]) -> dict[str, bool]:
-    """Run permissions step and return permissions dict."""
+def _run_permissions_step(lang: str, t: dict[str, Any]) -> Permissions:
+    """Ask for each permission; Enter means no."""
     click.echo()
     click.echo(style_primary(f"━━━ {t['step2_title']} ━━━"))
     click.echo()
     click.echo(t["step2_body"])
     click.echo()
-
-    permissions: dict[str, bool] = {}
-    permissions["admin_rights"] = _prompt_yes_no(f"  [?] {t['step2_perm_admin']} [Y/N]")
-    permissions["fs_outside_access"] = _prompt_yes_no(f"  [?] {t['step2_perm_fs']} [Y/N]")
-    permissions["network_access"] = _prompt_yes_no(f"  [?] {t['step2_perm_net']} [Y/N]")
-    permissions["shell_execution"] = _prompt_yes_no(f"  [?] {t['step2_perm_shell']} [Y/N]")
-    return permissions
+    return Permissions(
+        admin_rights=_prompt_yes_no(f"  [?] {t['step2_perm_admin']} [Y/N]"),
+        fs_outside_access=_prompt_yes_no(f"  [?] {t['step2_perm_fs']} [Y/N]"),
+        network_access=_prompt_yes_no(f"  [?] {t['step2_perm_net']} [Y/N]"),
+        shell_execution=_prompt_yes_no(f"  [?] {t['step2_perm_shell']} [Y/N]"),
+    )
 
 
 def run_initial_config(config_manager: ConfigManager, force: bool = False) -> None:
@@ -548,77 +485,35 @@ def run_initial_config(config_manager: ConfigManager, force: bool = False) -> No
     if not force and config_manager.is_configured():
         click.echo(get_text("en", "already_configured"))
         return
-
-    # Language selection (every time)
-    lang = select_language()
-    t = TEXTS[lang]
-
-    # Welcome
-    click.echo()
-    click.echo(style_primary("═" * 60))
-    click.echo(style_primary(f"  {t['welcome_title']}"))
-    click.echo(style_primary(f"  {t['welcome_subtitle']}"))
-    click.echo(style_primary("═" * 60))
-    click.echo()
-
-    # Step 3: Model Providers (mode selection first)
-    click.echo(style_primary(f"━━━ {t['step3_title']} ━━━"))
-    click.echo()
-
-    api_keys, local_settings = _run_provider_selection(config_manager, lang, t)
-
-    # Step 2: Permissions
-    permissions = _run_permissions_step(lang, t)
-
-    # Save
-    config = {
-        "configured": True,
-        "language": lang,
-        "permissions": permissions,
-        "api_keys": api_keys,
-        "local_settings": local_settings,
-        "version": "0.1.0",
-    }
-    config_manager.save_config(config)
-
-    click.echo()
-    click.echo(style_success(f"✅ {t['complete_title']}!"))
-    click.echo(f"{style_primary(t['config_path'])}: {config_manager.config_path}")
-    click.echo()
-    click.echo(t["complete_msg"])
+    _wizard(config_manager, title=None)
 
 
 def reconfigure(config_manager: ConfigManager) -> None:
-    """Run reconfiguration - language selection every time."""
-    # Language selection (every time)
-    lang = select_language()
+    """Run the wizard again, starting from the saved configuration."""
+    _wizard(config_manager, title="DESMAN(P) — Reconfiguration")
+
+
+def _wizard(config_manager: ConfigManager, title: str | None) -> None:
+    saved = config_manager.load()  # a broken file stops here: it is never written over
+    lang = select_language()  # every time
     t = TEXTS[lang]
 
     click.echo()
     click.echo(style_primary("═" * 60))
-    click.echo(style_primary("  DESMAN(P) — Reconfiguration"))
+    click.echo(style_primary(f"  {title or t['welcome_title']}"))
+    if title is None:
+        click.echo(style_primary(f"  {t['welcome_subtitle']}"))
     click.echo(style_primary("═" * 60))
     click.echo()
 
     # Step 3: Model Providers (mode selection first)
     click.echo(style_primary(f"━━━ {t['step3_title']} ━━━"))
     click.echo()
-
-    api_keys, local_settings = _run_provider_selection(config_manager, lang, t)
-
-    # Step 2: Permissions
-    permissions = _run_permissions_step(lang, t)
-
-    # Save
-    config = {
-        "configured": True,
-        "language": lang,
-        "permissions": permissions,
-        "api_keys": api_keys,
-        "local_settings": local_settings,
-        "version": "0.1.0",
-    }
-    config_manager.save_config(config)
+    config = _run_provider_selection(saved, lang, t)
+    config = config.model_copy(
+        update={"language": lang, "permissions": _run_permissions_step(lang, t)}
+    )
+    config_manager.save(config)
 
     click.echo()
     click.echo(style_success(f"✅ {t['complete_title']}!"))
