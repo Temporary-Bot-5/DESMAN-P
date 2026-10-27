@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,9 @@ class ConfigManager:
 
     def __init__(self, config_path: Path) -> None:
         self.config_path = config_path
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        # Only a directory we create gets 0700; an existing one (maybe chosen by the user via
+        # DESMAN_CONFIG_DIR) is left alone. The file itself is always 0600 (save_config).
+        self.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     def is_configured(self) -> bool:
         """Check if DESMAN is configured."""
@@ -42,10 +45,30 @@ class ConfigManager:
             return {"configured": False}
 
     def save_config(self, config: dict[str, Any]) -> None:
-        """Save configuration to file."""
+        """Save configuration atomically, readable by the owner only (it holds API keys).
+
+        Written to a private temporary file and renamed over the old one: a crash or a
+        serialisation error never leaves a half-written or world-readable config behind.
+        A symlinked config (e.g. into a dotfiles directory) is updated at its target, so the link
+        stays. The old file is made private before it is replaced, so another hard link to it
+        does not keep the previous keys readable by others.
+        """
         config["configured"] = True
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        text = json.dumps(config, indent=2, ensure_ascii=False)
+        target = self.config_path.resolve() if self.config_path.is_symlink() else self.config_path
+        tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            if target.exists():
+                os.chmod(target, 0o600)  # the old inode, shared by any other hard link
+            os.replace(tmp, target)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def get_api_keys(self) -> dict[str, str]:
         """Get stored API keys."""
@@ -193,7 +216,8 @@ TEXTS: dict[str, dict[str, Any]] = {
         ],
         "step3_select_prompt": "Enter provider numbers to configure (comma-separated), or press Enter to skip:",
         "step3_key_prompt": "API key for {name} ({env}):",
-        "step3_local_prompt": "Setting for {name} ({env}) [current: {default}]:",
+        "step3_key_keep": "[saved: Enter keeps it, '-' deletes it]",
+        "step3_local_prompt": "Setting for {name} ({env}) [current: {default}; '-' clears it]:",
         "complete_title": "Configuration Complete",
         "complete_msg": "DESMAN is ready. Run `desman` to start.",
         "config_path": "Config saved to",
@@ -292,7 +316,8 @@ TEXTS: dict[str, dict[str, Any]] = {
         ],
         "step3_select_prompt": "Введите номера провайдеров для настройки (через запятую), или Enter для пропуска:",
         "step3_key_prompt": "API-ключ для {name} ({env}):",
-        "step3_local_prompt": "Настройка {name} ({env}) [текущее: {default}]:",
+        "step3_key_keep": "[сохранён: Enter — оставить, '-' — удалить]",
+        "step3_local_prompt": "Настройка {name} ({env}) [текущее: {default}; '-' — очистить]:",
         "complete_title": "Настройка завершена",
         "complete_msg": "DESMAN готов. Запустите `desman` для старта.",
         "config_path": "Конфиг сохранён в",
@@ -362,8 +387,9 @@ def _run_provider_selection(
         click.echo(style_error("Please enter 1, 2, or 3"))
 
     mode = int(mode_choice)  # 1=api, 2=local, 3=both
-    api_keys: dict[str, str] = {}
-    local_settings: dict[str, str] = {}
+    # Start from what is saved: reconfiguring must not lose keys that are not re-entered.
+    api_keys: dict[str, str] = dict(config_manager.get_api_keys())
+    local_settings: dict[str, str] = dict(config_manager.get_local_settings())
 
     if mode in (1, 3):
         # Step 1: Data Privacy (only for API/both modes)
@@ -392,16 +418,19 @@ def _run_provider_selection(
             for idx in indices:
                 if 0 <= idx < len(api_providers):
                     p = api_providers[idx]
+                    prompt = t["step3_key_prompt"].format(name=p["name"], env=p["env"])
+                    if p["env"] in api_keys:
+                        prompt += " " + t["step3_key_keep"]
                     key = click.prompt(
-                        style_interactive(
-                            t["step3_key_prompt"].format(name=p["name"], env=p["env"])
-                        ),
+                        style_interactive(prompt),
                         default="",
                         show_default=False,
                         hide_input=True,
-                    )
-                    if key.strip():
-                        api_keys[p["env"]] = key.strip()
+                    ).strip()
+                    if key == "-":
+                        api_keys.pop(p["env"], None)
+                    elif key:
+                        api_keys[p["env"]] = key
 
     if mode in (2, 3):
         # Local providers
@@ -428,7 +457,9 @@ def _run_provider_selection(
                 default=default_val,
                 show_default=True,
             )
-            if val.strip():
+            if val.strip() == "-":
+                local_settings.pop(p["env"], None)
+            elif val.strip():
                 local_settings[p["env"]] = val.strip()
 
     return api_keys, local_settings
