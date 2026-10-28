@@ -129,7 +129,9 @@ class Config(BaseModel):
 
     schema_version: Literal[2] = 2
     configured: StrictBool = False
-    language: Literal["en", "ru"] = "en"
+    language: Literal[
+        "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
+    ] = "en"
     permissions: Permissions = Field(default_factory=Permissions)
     # Secrets, by the provider's variable name; in the order they are tried.
     api_keys: dict[str, list[ApiKey]] = Field(default_factory=dict)

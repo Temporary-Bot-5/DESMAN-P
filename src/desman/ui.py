@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, TypeVar
 
 import click
+from rich.cells import cell_len
 from rich.console import Console, RenderableType
 from rich.panel import Panel
 from rich.table import Table
@@ -134,7 +135,7 @@ def select(question: str, items: Sequence[Choice | Heading], default: Any = None
     choices = [c for c in items if isinstance(c, Choice)]
     if not choices:
         raise ValueError("nothing to choose from")
-    width = max(len(c.label) for c in choices)  # hints line up in a column
+    width = max(cell_len(c.label) for c in choices)  # hints line up in a column
     if interactive():
         import questionary
 
@@ -145,7 +146,7 @@ def select(question: str, items: Sequence[Choice | Heading], default: Any = None
                 continue
             q_items.append(
                 questionary.Choice(
-                    title=[("", item.label.ljust(width))]
+                    title=[("", _pad(item.label, width))]
                     + ([("class:hint", f"  {item.hint}")] if item.hint else []),
                     value=sum(
                         isinstance(q, questionary.Choice)
@@ -174,7 +175,7 @@ def select(question: str, items: Sequence[Choice | Heading], default: Any = None
             out(Text(f"  ── {item.title}", style="muted"))
             continue
         number += 1
-        line = Text(f"  {number:>2}  ", style="key") + Text(item.label.ljust(width))
+        line = Text(f"  {number:>2}  ", style="key") + Text(_pad(item.label, width))
         if item.hint:
             line += Text(f"  {item.hint}", style="muted")
         out(line)
@@ -184,6 +185,11 @@ def select(question: str, items: Sequence[Choice | Heading], default: Any = None
         if raw.isdigit() and 1 <= int(raw) <= len(choices):
             return choices[int(raw) - 1].value
         error(t("enter a number from 1 to {n}", n=len(choices)))
+
+
+def _pad(text: str, width: int) -> str:
+    """`text` padded to `width` terminal cells (CJK characters take two)."""
+    return text + " " * max(0, width - cell_len(text))
 
 
 def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:

@@ -631,4 +631,4 @@ CLICK: dict[str, Forms] = {
     "Unknown standard stream '{name}'": "Неизвестный стандартный поток '{name}'",
 }
 
-CATALOG = Catalog("Русский", plural, MESSAGES, CLICK)
+CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)

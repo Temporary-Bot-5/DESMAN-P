@@ -43,7 +43,8 @@ src/desman/
 ├── providers.py   # known model providers, readiness, key masking, key-file parsing
 ├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise)
 ├── i18n.py        # t()/tn(): messages, command help and Click's own text in the configured
-│                  #   language (ADR 0002); catalogs in locales/ (ru.py)
+│                  #   language (ADR 0002); catalogs in locales/ (ru, zh, es, pt, de, fr, ja,
+│                  #   ko, pl, tr, uk, hi)
 ├── info.py        # Banner / project info
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
@@ -119,7 +120,8 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
   Prompts must keep working without a terminal (numbered fallback) so tests can drive them.
   `--json` output stays plain `json.dumps`.
 - Every human-facing string goes through `i18n.t()` / `tn()` with a literal English text, and
-  gets a Russian translation in `locales/ru.py` (`tests/test_i18n.py` fails otherwise). Not
+  gets a translation in every catalog in `locales/` (12 languages; a plural needs each of the
+  language's forms; `tests/test_i18n.py` lists what is missing). Not
   translated: `--json` output, audit entries and reasons stored in the DB, prompts to models,
   messages raised in `core/`.
 - `httpx` for LLM calls (OpenAI-compatible protocol), no `openai` SDK
