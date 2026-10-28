@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}，版本 {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "创建数据库或应用待执行的迁移。可以重复运行。",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "显示任务 TASK 的完整历史（任务 id 或其唯一前缀）。\n\n按顺序列出每次状态变化、审核结论、检查点和被丢弃的工作。如果历史无法解释当前状态，退出码为 1。",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "为目标 GOAL（或根据 --spec）创建任务并执行。\n\n不使用 --spec 时，计划只有一个子任务：目标本身（LLM 规划器见 ROADMAP 2.7）。退出码：0 完成，3 等待操作员，4 暂停（提供商限额），5 failed 或 cancelled，6 仍在别处运行。",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "从中断处继续任务 TASK：崩溃、暂停或操作员做出决定之后。\n\n本机上崩溃的运行留下的工作会立即收回，否则等其租约到期。已完成的子任务不会重做。退出码与 `run` 相同。",
     "Show TASK and its subtasks. Same exit codes as `run`.": "显示任务 TASK 及其子任务。退出码与 `run` 相同。",
     "List tasks, newest first.": "列出任务，最新的在前。",
@@ -246,6 +245,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "即使相同请求已有被接受的回复，也重新询问模型（默认此类回复会复用 7 天，可在 resume 时节省配额）。",
     "yes": "是",
     "no": "否",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "为目标 GOAL（或根据 --spec）创建任务并执行。\n\n模型把 GOAL 拆分为子任务；如果失败，目标本身就是唯一的子任务（见 --plan）。退出码：0 完成，3 等待操作员，4 暂停（提供商限额），5 failed 或 cancelled，6 仍在别处运行。",
+    "--plan is for GOAL: a --spec is already a plan": "--plan 用于 GOAL：--spec 本身已经是计划",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL 如何变成子任务：llm 让模型制定计划（默认；失败时使用模板），template 让目标本身成为唯一的子任务（使用 --fake-llm 时的默认值）。",
+    "Planning…": "正在制定计划…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "模型没有制定出计划，因此目标本身是唯一的子任务：{error}",
 }
 
 CLICK: dict[str, Forms] = {

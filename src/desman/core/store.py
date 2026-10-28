@@ -72,8 +72,11 @@ class Store:
 
     # ── Tasks ────────────────────────────────────────────────────────────────
 
-    def create_task(self, spec: TaskSpec, actor: Actor = Actor.HUMAN) -> str:
-        """Store a task and its subtask graph; returns the task id."""
+    def create_task(
+        self, spec: TaskSpec, actor: Actor = Actor.HUMAN, details: dict[str, Any] | None = None
+    ) -> str:
+        """Store a task and its subtask graph; returns the task id. `details` go into the
+        `task_created` audit entry (e.g. how the plan was made)."""
         task_id = _new_id()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
@@ -108,7 +111,12 @@ class Store:
                 actor,
                 "task_created",
                 task_id=task_id,
-                details={"goal": spec.goal, "priority": spec.priority, "subtasks": ids},
+                details={
+                    "goal": spec.goal,
+                    "priority": spec.priority,
+                    "subtasks": ids,
+                    **(details or {}),
+                },
             )
             self._promote_ready()
         return task_id

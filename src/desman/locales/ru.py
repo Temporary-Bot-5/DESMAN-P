@@ -32,15 +32,6 @@ MESSAGES: dict[str, Forms] = {
         "По порядку: каждая смена статуса, вердикт ревьюера, checkpoint и выброшенная работа. "
         "Код выхода 1, если история не объясняет текущее состояние."
     ),
-    "Create a task for GOAL (or from --spec) and work on it.\n\n"
-    "Without --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n"
-    "2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n"
-    "5 failed or cancelled, 6 still in progress elsewhere.": (
-        "Создать задачу для цели GOAL (или из --spec) и выполнить её.\n\n"
-        "Без --spec план — одна подзадача, равная цели (LLM-планировщик — ROADMAP 2.7). "
-        "Коды выхода: 0 — готово, 3 — ждёт оператора, 4 — пауза (лимит провайдера), "
-        "5 — failed или cancelled, 6 — ещё выполняется в другом месте."
-    ),
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\n"
     "Work a crashed run left behind is taken back at once if that run was on this machine,\n"
     "otherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n"
@@ -508,6 +499,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Спрашивать модель, даже если на такой же запрос уже есть принятый ответ (по умолчанию он используется повторно 7 дней, это экономит квоту при resume).",
     "yes": "да",
     "no": "нет",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Создать задачу для цели GOAL (или из --spec) и выполнить её.\n\nМодель разбивает GOAL на подзадачи; если не получилось, единственной подзадачей становится сама цель (см. --plan). Коды выхода: 0 — готово, 3 — ждёт оператора, 4 — пауза (лимит провайдера), 5 — failed или cancelled, 6 — ещё выполняется в другом месте.",
+    "--plan is for GOAL: a --spec is already a plan": "--plan относится к GOAL: --spec уже и есть план",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Как GOAL превращается в подзадачи: llm просит модель составить план (по умолчанию; если не вышло, берётся шаблон), template делает саму цель единственной подзадачей (по умолчанию с --fake-llm).",
+    "Planning…": "Составляю план…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не составила план, поэтому единственная подзадача — сама цель: {error}",
 }
 
 CLICK: dict[str, Forms] = {

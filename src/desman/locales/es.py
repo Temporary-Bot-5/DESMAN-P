@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}, versión {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "Crea la base de datos o aplica las migraciones pendientes. Se puede ejecutar varias veces.",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "Muestra el historial completo de TASK (su id o un prefijo único de él).\n\nCada cambio de estado, veredicto del revisor, checkpoint y trabajo descartado, en orden. Sale con 1 si el historial no explica el estado actual.",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Crea una tarea para GOAL (o desde --spec) y trabaja en ella.\n\nSin --spec el plan es una sola subtarea: el propio objetivo (el planificador LLM es ROADMAP 2.7). Códigos de salida: 0 hecha, 3 esperando al operador, 4 en pausa (límite del proveedor), 5 failed o cancelled, 6 aún en curso en otro lugar.",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "Continúa TASK donde se detuvo: tras un fallo, una pausa o las decisiones del operador.\n\nEl trabajo que dejó una ejecución caída se recupera de inmediato si fue en esta máquina; si no, cuando vence su lease. Las subtareas terminadas nunca se rehacen. Mismos códigos de salida que `run`.",
     "Show TASK and its subtasks. Same exit codes as `run`.": "Muestra TASK y sus subtareas. Mismos códigos de salida que `run`.",
     "List tasks, newest first.": "Lista las tareas, las más recientes primero.",
@@ -273,6 +272,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Preguntar al modelo aunque la misma petición ya tenga una respuesta aceptada (por defecto esa respuesta se reutiliza durante 7 días, lo que ahorra cuota al reanudar).",
     "yes": "sí",
     "no": "no",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Crea una tarea para GOAL (o desde --spec) y trabaja en ella.\n\nEl modelo divide GOAL en subtareas; si no puede, el propio objetivo es la única subtarea (ver --plan). Códigos de salida: 0 hecha, 3 esperando al operador, 4 en pausa (límite del proveedor), 5 failed o cancelled, 6 aún en curso en otro lugar.",
+    "--plan is for GOAL: a --spec is already a plan": "--plan es para GOAL: un --spec ya es un plan",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Cómo GOAL se convierte en subtareas: llm pide un plan al modelo (por defecto; si falla, se usa la plantilla), template hace del propio objetivo la única subtarea (por defecto con --fake-llm).",
+    "Planning…": "Planificando…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "El modelo no hizo un plan, así que el objetivo es la única subtarea: {error}",
 }
 
 CLICK: dict[str, Forms] = {
