@@ -12,8 +12,9 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, ui
+from desman import __version__, i18n, ui
 from desman.agents import llm_executor, llm_reviewer
+from desman.config import ConfigError, open_config
 from desman.config_cli import config, keys, load_config, run_wizard, usage
 from desman.core import calls, db
 from desman.core.audit import AuditEntry, check_history, history
@@ -23,6 +24,7 @@ from desman.core.owner import current_owner, owner_is_gone
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
+from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
 from desman.llm.base import LLM
@@ -54,15 +56,48 @@ def open_existing(db_path: Path | None) -> Store:
     """The store for commands that read tasks: they never create an empty database."""
     path = db_path or db.default_db_path()
     if not path.exists():
-        raise click.ClickException(f"no database at {path} (nothing has run yet?)")
+        raise click.ClickException(t("no database at {path} (nothing has run yet?)", path=path))
     try:
         return Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
 
 
-@click.group(invoke_without_command=True)
-@click.version_option(__version__, prog_name="desman")
+class DesmanGroup(click.Group):
+    """The root command: switches to the configured language before Click reads the
+    arguments, so help and Click's own errors are translated too."""
+
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        i18n.set_language(_configured_language())
+        i18n.translate_commands(self)
+        return super().main(*args, **kwargs)
+
+
+def _configured_language() -> str:
+    """The language from the config; English if there is none or it does not load (the
+    command itself then reports the broken file)."""
+    try:
+        return open_config().load().language
+    except (ConfigError, OSError):
+        return "en"
+
+
+def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    # Not click.version_option: it fixes its message at import, before the language is known.
+    if value and not ctx.resilient_parsing:
+        click.echo(t("{prog}, version {version}", prog="desman", version=__version__))
+        ctx.exit()
+
+
+@click.group(cls=DesmanGroup, invoke_without_command=True)
+@click.option(
+    "--version",
+    is_flag=True,
+    expose_value=False,
+    is_eager=True,
+    callback=_print_version,
+    help="Show the version and exit.",
+)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
@@ -100,7 +135,15 @@ def init_db(db_path: Path | None) -> None:
         raise click.ClickException(str(e)) from e
     finally:
         conn.close()
-    click.echo(f"{path}: schema v{db.SCHEMA_VERSION} ({applied} migration(s) applied)")
+    click.echo(
+        tn(
+            applied,
+            "{path}: schema v{version} ({n} migration applied)",
+            "{path}: schema v{version} ({n} migrations applied)",
+            path=path,
+            version=db.SCHEMA_VERSION,
+        )
+    )
 
 
 @cli.command()
@@ -136,12 +179,12 @@ def audit(task: str, db_path: Path | None, as_json: bool) -> None:
         }
         click.echo(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        click.echo(f"Task {task_id}  {status.value}")
-        click.echo(f"Goal: {row['goal']}")
+        click.echo(t("Task {id}  {status}", id=task_id, status=status.value))
+        click.echo(t("Goal: {goal}", goal=row["goal"]))
         for entry in entries:
             click.echo(_format_entry(entry, labels))
     if problems:
-        click.echo("History is incomplete:", err=True)
+        click.echo(t("History is incomplete:"), err=True)
         for problem in problems:
             click.echo(f"  {problem}", err=True)
         raise SystemExit(1)
@@ -257,7 +300,7 @@ def run(
     5 failed or cancelled, 6 still in progress elsewhere.
     """
     if (goal is None) == (spec_path is None):
-        raise click.UsageError("give either GOAL or --spec, not both")
+        raise click.UsageError(t("give either GOAL or --spec, not both"))
     spec = _load_spec(goal, spec_path)
     if priority is not None:
         spec = spec.model_copy(update={"priority": int(Priority[priority.upper()])})
@@ -271,8 +314,14 @@ def run(
     try:
         task_id = store.create_task(spec)
         if not as_json:
-            count = len(spec.subtasks)
-            click.echo(f"Task {task_id} created ({count} subtask{'s' if count != 1 else ''})")
+            click.echo(
+                tn(
+                    len(spec.subtasks),
+                    "Task {id} created ({n} subtask)",
+                    "Task {id} created ({n} subtasks)",
+                    id=task_id,
+                )
+            )
             sys.stdout.flush()  # visible before any work starts, even through a pipe
         _drive(store, llm, task_id, wait, lease_seconds, as_json)
     finally:
@@ -362,7 +411,7 @@ def _load_spec(goal: str | None, spec_path: Path | None) -> TaskSpec:
     if spec_path is None:
         assert goal is not None
         if not goal.strip():
-            raise click.UsageError("GOAL is empty")
+            raise click.UsageError(t("GOAL is empty"))
         return TaskSpec(
             goal=goal,
             subtasks=[SubtaskSpec(description=goal, acceptance_criteria=TEMPLATE_CRITERIA)],
@@ -370,7 +419,9 @@ def _load_spec(goal: str | None, spec_path: Path | None) -> TaskSpec:
     try:
         return TaskSpec.model_validate_json(spec_path.read_text(encoding="utf-8"))
     except (ValidationError, UnicodeDecodeError) as e:
-        raise click.ClickException(f"{spec_path}: not a valid task spec:\n{e}") from e
+        raise click.ClickException(
+            t("{path}: not a valid task spec:\n{error}", path=spec_path, error=e)
+        ) from e
 
 
 def _provider(
@@ -378,19 +429,28 @@ def _provider(
 ) -> LLM:
     if fake_script is not None:
         if provider_name is not None or model is not None:
-            raise click.UsageError("--fake-llm replaces the provider: drop --provider/--model")
+            raise click.UsageError(t("--fake-llm replaces the provider: drop --provider/--model"))
         try:
             return FakeLLM.from_file(fake_script, sleep=time.sleep)  # latency is real
         except (ValidationError, ValueError) as e:
-            raise click.ClickException(f"{fake_script}: not a valid fake LLM script:\n{e}") from e
+            raise click.ClickException(
+                t("{path}: not a valid fake LLM script:\n{error}", path=fake_script, error=e)
+            ) from e
     config = load_config().load()
     try:
         llm, choice = router.build(config, provider_name, model)
     except router.NoProvider as e:
         raise click.ClickException(str(e)) from e
     if not as_json:
-        keys = len(llm.keys)
-        ui.note(f"Using {choice.provider.name} · {choice.model} ({keys} key{'s' * (keys != 1)})")
+        ui.note(
+            tn(
+                len(llm.keys),
+                "Using {provider} · {model} ({n} key)",
+                "Using {provider} · {model} ({n} keys)",
+                provider=choice.provider.name,
+                model=choice.model,
+            )
+        )
     return llm
 
 
@@ -422,7 +482,7 @@ def _drive(
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)
     except ScriptExhausted as e:
-        raise click.ClickException(f"fake LLM script ran out: {e}") from e
+        raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
     report = task_report(store, task_id)
     short = store.short_id(task_id)
     if as_json:
@@ -432,8 +492,11 @@ def _drive(
         _print_report(report)
         if result.paused_until:
             click.echo(
-                f"Paused by a provider limit until {result.paused_until}. "
-                f"Continue with: desman resume {short}"
+                t(
+                    "Paused by a provider limit until {until}. Continue with: desman resume {ref}",
+                    until=result.paused_until,
+                    ref=short,
+                )
             )
     raise SystemExit(_exit_code(report.status, paused=result.paused_until is not None))
 
@@ -464,19 +527,35 @@ def _has_paused(report: TaskReport) -> bool:
 
 
 def _print_report(report: TaskReport) -> None:
-    click.echo(f"Task {report.id}  {report.status}  ({report.done}/{report.total} done)")
-    click.echo(f"Goal: {_one_line(report.goal, 200)}")
+    click.echo(
+        t(
+            "Task {id}  {status}  ({done}/{total} done)",
+            id=report.id,
+            status=report.status,
+            done=report.done,
+            total=report.total,
+        )
+    )
+    click.echo(t("Goal: {goal}", goal=_one_line(report.goal, 200)))
     for sub in report.subtasks:
         line = f"  [{sub.seq}] {sub.status:<11}  {_one_line(sub.description, 60)}"
         notes = []
         if sub.depends_on:
-            notes.append(f"after {', '.join(str(d) for d in sub.depends_on)}")
+            notes.append(t("after {deps}", deps=", ".join(str(d) for d in sub.depends_on)))
         if sub.attempts.quality or sub.attempts.transient:
-            notes.append(f"attempts q{sub.attempts.quality}/t{sub.attempts.transient}")
+            notes.append(
+                t(
+                    "attempts q{quality}/t{transient}",
+                    quality=sub.attempts.quality,
+                    transient=sub.attempts.transient,
+                )
+            )
         if sub.lease_owner:
-            notes.append(f"held by {sub.lease_owner} until {sub.lease_until}")
+            notes.append(
+                t("held by {owner} until {until}", owner=sub.lease_owner, until=sub.lease_until)
+            )
         if sub.paused_until:
-            notes.append(f"paused until {sub.paused_until}")
+            notes.append(t("paused until {until}", until=sub.paused_until))
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
             notes.append(_one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
@@ -506,7 +585,7 @@ def inbox_command(db_path: Path | None, as_json: bool) -> None:
         )
         return
     if not items:
-        click.echo("Nothing is waiting for you.")
+        click.echo(t("Nothing is waiting for you."))
         return
     for item in items:
         click.echo(
@@ -515,7 +594,7 @@ def inbox_command(db_path: Path | None, as_json: bool) -> None:
         )
         if item.reason:
             click.echo(f"{'':<12} {_one_line(item.reason, 110)}")
-    click.echo("Decide with: desman retry|accept|fail <ref> [--note TEXT]")
+    click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
 
 
 def if_version_option(command: F) -> F:
@@ -582,7 +661,7 @@ def fail(
     SUBTASK is "<task>/<number>" as `desman status` and `inbox` show it, or its id.
     """
     if not note.strip():
-        raise click.BadParameter("say why it failed", param_hint="--note")
+        raise click.BadParameter(t("say why it failed"), param_hint="--note")
     _decide(
         subtask, SubtaskStatus.FAILED, note.strip(), "operator_fail", if_version, db_path, as_json
     )
@@ -602,7 +681,9 @@ def cancel(task: str, note: str, db_path: Path | None, as_json: bool) -> None:
         try:
             cancelled = store.cancel_task(task_id, reason=note)
         except StaleStateError as e:  # a run changed it meanwhile: nothing was cancelled
-            raise click.ClickException(f"it changed meanwhile, try again: {e}") from e
+            raise click.ClickException(
+                t("it changed meanwhile, try again: {error}", error=e)
+            ) from e
         status = store.task_status(task_id)
     finally:
         store.conn.close()
@@ -610,7 +691,15 @@ def cancel(task: str, note: str, db_path: Path | None, as_json: bool) -> None:
         out = {"task_id": task_id, "status": status.value, "cancelled": [s.id for s in cancelled]}
         click.echo(json.dumps(out, indent=2))
     else:
-        click.echo(f"Task {task_id}: {len(cancelled)} subtask(s) cancelled, task is {status}")
+        click.echo(
+            tn(
+                len(cancelled),
+                "Task {id}: {n} subtask cancelled, task is {status}",
+                "Task {id}: {n} subtasks cancelled, task is {status}",
+                id=task_id,
+                status=status,
+            )
+        )
 
 
 def _decide(
@@ -632,14 +721,25 @@ def _decide(
             raise click.ClickException(str(e)) from e
         if if_version is not None and if_version != version:
             raise click.ClickException(
-                f"[{sub.seq}] changed since version {if_version} (now {version}, {sub.status}): "
-                "look again with `desman inbox`"
+                t(
+                    "[{seq}] changed since version {seen} (now {version}, {status}): "
+                    "look again with `desman inbox`",
+                    seq=sub.seq,
+                    seen=if_version,
+                    version=version,
+                    status=sub.status,
+                )
             )
         if target not in allowed_targets(sub.status, Actor.HUMAN):
             options = sorted(s.value for s in allowed_targets(sub.status, Actor.HUMAN))
             raise click.ClickException(
-                f"[{sub.seq}] is {sub.status}: the operator can move it to "
-                f"{', '.join(options) if options else 'nothing'}, not {target}"
+                t(
+                    "[{seq}] is {status}: the operator can move it to {options}, not {target}",
+                    seq=sub.seq,
+                    status=sub.status,
+                    options=", ".join(options) if options else t("nothing"),
+                    target=target,
+                )
             )
         try:
             # Not just "still in that status": unchanged since we looked (a retry that
@@ -654,7 +754,9 @@ def _decide(
                 expected_version=version,
             )
         except StaleStateError as e:
-            raise click.ClickException(f"it changed meanwhile, look again: {e}") from e
+            raise click.ClickException(
+                t("it changed meanwhile, look again: {error}", error=e)
+            ) from e
         status = store.task_status(sub.task_id)
         short = store.short_id(sub.task_id)
     finally:
@@ -671,6 +773,6 @@ def _decide(
         return
     click.echo(f"[{sub.seq}] {_one_line(sub.description, 60)}: {sub.status} -> {moved.status}")
     if status is TaskStatus.ACTIVE:
-        click.echo(f"Task is active again. Continue with: desman resume {short}")
+        click.echo(t("Task is active again. Continue with: desman resume {ref}", ref=short))
     else:
-        click.echo(f"Task is {status}.")
+        click.echo(t("Task is {status}.", status=status))

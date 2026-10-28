@@ -22,6 +22,7 @@ from rich.text import Text
 from desman import providers, ui, wizard
 from desman.config import ConfigError, ConfigManager, open_config
 from desman.core import calls, db
+from desman.i18n import t, tn
 from desman.llm import check
 from desman.llm.openai_compat import key_id
 
@@ -35,7 +36,10 @@ def load_config() -> ConfigManager:
         manager.load()
     except ConfigError as e:
         raise click.ClickException(
-            f"config {e}\nFix the file, or run `desman config reset` to start over."
+            t(
+                "config {error}\nFix the file, or run `desman config reset` to start over.",
+                error=e,
+            )
         ) from e
     return manager
 
@@ -44,10 +48,10 @@ def run_wizard(manager: ConfigManager) -> None:
     try:
         wizard.run(manager)
     except ConfigError as e:
-        raise click.ClickException(f"config {e}; run `desman config` again") from e
+        raise click.ClickException(t("config {error}; run `desman config` again", error=e)) from e
     except (ui.Cancelled, click.Abort):
         ui.out("")
-        ui.warn("Configuration cancelled; nothing was saved.")
+        ui.warn(t("Configuration cancelled; nothing was saved."))
         raise SystemExit(1) from None
 
 
@@ -86,23 +90,23 @@ def config_show(as_json: bool) -> None:
         click.echo(json.dumps({"path": str(manager.config_path), **out}, indent=2))
         return
 
-    ui.out(Text("Config  ", style="muted") + Text(str(manager.config_path)))
+    ui.out(Text(t("Config") + "  ", style="muted") + Text(str(manager.config_path)))
     if not out["configured"]:
-        ui.warn("Not configured yet: run `desman config`.")
-    ui.out(Text("Language  ", style="muted") + Text(out["language"]))
+        ui.warn(t("Not configured yet: run `desman config`."))
+    ui.out(Text(t("Language") + "  ", style="muted") + Text(out["language"]))
     granted = [name for name, on in out["permissions"].items() if on]
-    ui.out(Text("Permissions  ", style="muted") + Text(", ".join(granted) or "none"))
+    ui.out(Text(t("Permissions") + "  ", style="muted") + Text(", ".join(granted) or t("none")))
     if out["permissions"]["admin_rights"]:
-        ui.warn("WARNING: admin_rights is on: agents may act with elevated privileges.")
+        ui.warn(t("WARNING: admin_rights is on: agents may act with elevated privileges."))
 
-    rows = ui.table("provider", "status", "keys", "settings", title="Providers")
+    rows = ui.table(t("provider"), t("status"), t("keys"), t("settings"), title=t("Providers"))
     for row in out["providers"]:
         if row["local"]:
-            status = Text("local", style="muted")
+            status = Text(t("local"), style="muted")
         elif row["ready"]:
-            status = Text("ready", style="good")
+            status = Text(t("ready"), style="good")
         else:
-            status = Text("not set", style="muted")
+            status = Text(t("not set"), style="muted")
         keys = "  ".join(
             k["value"] + (f" ({k['label']})" if k["label"] else "") for k in row.get("keys", [])
         )
@@ -113,9 +117,15 @@ def config_show(as_json: bool) -> None:
     ui.out("")
     ui.out(rows)
     for env, values in out["unknown_keys"].items():
-        ui.warn(f"unknown key {env}={', '.join(values)} (no provider uses this name)")
+        ui.warn(
+            t(
+                "unknown key {env}={values} (no provider uses this name)",
+                env=env,
+                values=", ".join(values),
+            )
+        )
     for env, value in out["unknown_settings"].items():
-        ui.warn(f"unknown setting {env}={value}")
+        ui.warn(t("unknown setting {env}={value}", env=env, value=value))
 
 
 @config.command("reset")
@@ -125,22 +135,29 @@ def config_reset(yes: bool) -> None:
     manager = open_config()  # a broken file can be reset too: that is the way out
     path = manager.config_path
     if not (path.exists() or path.is_symlink()):
-        ui.note(f"No configuration at {path}; nothing to delete.")
+        ui.note(t("No configuration at {path}; nothing to delete.", path=path))
         return
     if not yes:
         try:
             count = sum(len(v) for v in manager.load().api_keys.values())
-            what = f"{path} and the {count} API key(s) in it"
+            question = tn(
+                count,
+                "Delete {path} and the {n} API key in it?",
+                "Delete {path} and the {n} API keys in it?",
+                path=path,
+            )
         except ConfigError:
-            what = f"{path} (it does not load)"
-        if not ui.confirm(f"Delete {what}?", default=False):
-            ui.note("Kept.")
+            question = t("Delete {path} (it does not load)?", path=path)
+        if not ui.confirm(question, default=False):
+            ui.note(t("Kept."))
             raise SystemExit(1)
     target = path.resolve() if path.is_symlink() else None
     manager.delete()
-    ui.ok(f"Deleted {path}. Run `desman config` to set DESMAN up again.")
+    ui.ok(t("Deleted {path}. Run `desman config` to set DESMAN up again.", path=path))
     if target is not None and target.exists():
-        ui.warn(f"It was a link: only the link is gone, {target} is left as it was.")
+        ui.warn(
+            t("It was a link: only the link is gone, {target} is left as it was.", target=target)
+        )
 
 
 # ── desman keys ─────────────────────────────────────────────────────────────
@@ -191,7 +208,15 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
         return
     total = sum(len(r["keys"]) for r in rows)
     with_keys = [r for r in rows if r["keys"]]
-    table = ui.table("provider", "#", "key", "label", "calls 24h", "tokens 24h", title="API keys")
+    table = ui.table(
+        t("provider"),
+        "#",
+        t("key"),
+        t("label"),
+        t("calls 24h"),
+        t("tokens 24h"),
+        title=t("API keys"),
+    )
     for r in rows:
         if not r["keys"]:
             table.add_row(Text(r["name"], style="muted"), "", Text("-", style="muted"), "", "", "")
@@ -208,8 +233,15 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
     ui.out(table)
     ui.out("")
     ui.note(
-        f"{total} key(s) from {len(with_keys)} of {len(rows)} providers. "
-        "`desman keys check` tests them (no tokens spent), `desman usage` shows totals."
+        tn(
+            total,
+            "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them "
+            "(no tokens spent), `desman usage` shows totals.",
+            "{n} keys from {with_keys} of {providers} providers. `desman keys check` tests them "
+            "(no tokens spent), `desman usage` shows totals.",
+            with_keys=len(with_keys),
+            providers=len(rows),
+        )
     )
 
 
@@ -223,29 +255,31 @@ def keys_check(provider: str | None, as_json: bool) -> None:
         [_provider(provider)] if provider else [p for p in providers.CLOUD if p.is_ready(config)]
     )
     if not targets:
-        raise click.ClickException("no keys to check: add one with `desman keys add PROVIDER`")
+        raise click.ClickException(t("no keys to check: add one with `desman keys add PROVIDER`"))
     results = []
     with httpx.Client() as client:
         for p in targets:
             if not p.is_ready(config):
-                raise click.ClickException(f"{p.name} is not configured")
+                raise click.ClickException(t("{name} is not configured", name=p.name))
             results += check.check(config, p, client)
     if as_json:
         click.echo(json.dumps([asdict(r) for r in results], indent=2, default=str))
     else:
-        table = ui.table("provider", "#", "status", "models", "default model")
+        table = ui.table(t("provider"), "#", t("status"), t("models"), t("default model"))
         for r in results:
             p = providers.find(r.provider)
             status = (
-                Text("ok", style="good")
+                Text(t("ok"), style="good")
                 if r.ok
-                else Text(f"failed ({r.http_status or 'no reply'})", style="bad")
+                else Text(
+                    t("failed ({status})", status=r.http_status or t("no reply")), style="bad"
+                )
             )
             default = (
                 ""
                 if r.default_model_listed is None
                 else Text(
-                    p.default_model + ("" if r.default_model_listed else " (not listed)"),
+                    p.default_model + ("" if r.default_model_listed else " " + t("(not listed)")),
                     style="good" if r.default_model_listed else "warn",
                 )
             )
@@ -259,7 +293,7 @@ def keys_check(provider: str | None, as_json: bool) -> None:
             if r.limits:
                 ui.note(f"{name}: " + ", ".join(f"{k}: {v}" for k, v in r.limits.items()))
         for p in targets:
-            ui.note(f"{p.name} limits and quotas: {p.limits_url}")
+            ui.note(t("{name} limits and quotas: {url}", name=p.name, url=p.limits_url))
     if not all(r.ok for r in results):
         raise SystemExit(1)
 
@@ -290,23 +324,27 @@ def usage(since: str, as_json: bool, db_path: Path | None) -> None:
         click.echo(json.dumps(out, indent=2))
         return
     if not rows:
-        ui.note(f"No model calls {'yet' if window is None else 'in the last ' + since}.")
+        ui.note(
+            t("No model calls yet.")
+            if window is None
+            else t("No model calls in the last {since}.", since=since)
+        )
         return
     table = ui.table(
-        "provider",
-        "key",
-        "calls",
-        "failed",
-        "limited",
-        "tokens in",
-        "tokens out",
-        "last call",
-        title=f"Usage ({'all time' if window is None else 'last ' + since})",
+        t("provider"),
+        t("key"),
+        t("calls"),
+        t("failed"),
+        t("limited"),
+        t("tokens in"),
+        t("tokens out"),
+        t("last call"),
+        title=t("Usage (all time)") if window is None else t("Usage (last {since})", since=since),
     )
     for u in rows:
         table.add_row(
             u.provider,
-            names.get(u.key_id or "", "removed key"),
+            names.get(u.key_id or "", t("removed key")),
             str(u.calls),
             Text(str(u.failed), style="bad" if u.failed else "muted"),
             Text(str(u.limited), style="warn" if u.limited else "muted"),
@@ -327,7 +365,7 @@ def _window(since: str) -> timedelta | None:
     units = {"m": 60, "h": 3600, "d": 86400}
     number, unit = since[:-1], since[-1:]
     if unit not in units or not number.isdigit() or int(number) == 0:
-        raise click.BadParameter("use e.g. 30m, 24h, 7d or all", param_hint="--since")
+        raise click.BadParameter(t("use e.g. 30m, 24h, 7d or all"), param_hint="--since")
     return timedelta(seconds=int(number) * units[unit])
 
 
@@ -348,7 +386,9 @@ def _provider(name: str) -> providers.Provider:
     except providers.UnknownProvider as e:
         raise click.BadParameter(str(e), param_hint="PROVIDER") from e
     if p.key_env is None:
-        raise click.BadParameter(f"{p.name} is local and has no API key", param_hint="PROVIDER")
+        raise click.BadParameter(
+            t("{name} is local and has no API key", name=p.name), param_hint="PROVIDER"
+        )
     return p
 
 
@@ -364,10 +404,10 @@ def keys_add(provider: str, label: str, from_stdin: bool) -> None:
     if from_stdin:
         value = sys.stdin.readline().strip()
     else:  # asked before the lock is taken: nobody waits while the user types
-        ui.note(f"Get a key: {p.url}")
-        value = ui.secret(f"API key for {p.name} ({p.key_env}), hidden")
+        ui.note(t("Get a key: {url}", url=p.url))
+        value = ui.secret(t("API key for {name} ({env}), hidden", name=p.name, env=p.key_env))
     if not value:
-        raise click.UsageError("no key given")
+        raise click.UsageError(t("no key given"))
     with manager.edit() as config:
         try:
             added = config.add_key(p.key_env, value, label)
@@ -375,12 +415,26 @@ def keys_add(provider: str, label: str, from_stdin: bool) -> None:
             raise click.BadParameter(str(e), param_hint="--label") from e
         n = len(config.keys(p.key_env))
     if not added:
-        ui.warn(f"{p.name} already has this key; nothing changed.")
+        ui.warn(t("{name} already has this key; nothing changed.", name=p.name))
         return
-    ui.ok(f"Added {providers.mask(value)} to {p.name} (key #{n}, {n} in total).")
+    ui.ok(
+        t(
+            "Added {key} to {name} (key #{number}, {number} in total).",
+            key=providers.mask(value),
+            name=p.name,
+            number=n,
+        )
+    )
     missing = [s for s in p.settings if not s.default and not config.settings.get(s.env)]
     for s in missing:
-        ui.warn(f"{p.name} also needs {s.label} ({s.env}): set it in `desman config`.")
+        ui.warn(
+            t(
+                "{name} also needs {label} ({env}): set it in `desman config`.",
+                name=p.name,
+                label=s.label,
+                env=s.env,
+            )
+        )
 
 
 @keys.command("remove")
@@ -392,11 +446,11 @@ def keys_remove(provider: str, number: int | None, remove_all: bool) -> None:
     p = _provider(provider)
     assert p.key_env is not None
     if remove_all == (number is not None):
-        raise click.UsageError("give a key NUMBER or --all")
+        raise click.UsageError(t("give a key NUMBER or --all"))
     with load_config().edit() as config:
         count = len(config.keys(p.key_env))
         if count == 0:
-            raise click.ClickException(f"{p.name} has no keys")
+            raise click.ClickException(t("{name} has no keys", name=p.name))
         if remove_all:
             config.api_keys.pop(p.key_env, None)
             removed = count
@@ -406,10 +460,24 @@ def keys_remove(provider: str, number: int | None, remove_all: bool) -> None:
                 config.remove_key(p.key_env, number - 1)
             except IndexError:
                 raise click.BadParameter(
-                    f"{p.name} has {count} key(s): pick 1 to {count}", param_hint="NUMBER"
+                    tn(
+                        count,
+                        "{name} has {n} key: pick 1",
+                        "{name} has {n} keys: pick 1 to {n}",
+                        name=p.name,
+                    ),
+                    param_hint="NUMBER",
                 ) from None
             removed = 1
-    ui.ok(f"Removed {removed} key(s) from {p.name}; {count - removed} left.")
+    ui.ok(
+        tn(
+            removed,
+            "Removed {n} key from {name}; {left} left.",
+            "Removed {n} keys from {name}; {left} left.",
+            name=p.name,
+            left=count - removed,
+        )
+    )
 
 
 @keys.command("import")
@@ -420,9 +488,9 @@ def keys_import(file: Path) -> None:
     try:
         pairs = providers.parse_key_file(file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as e:
-        raise click.ClickException(f"cannot read {file}: {e}") from e
+        raise click.ClickException(t("cannot read {file}: {error}", file=file, error=e)) from e
     if not pairs:
-        raise click.ClickException(f"no keys found in {file}")
+        raise click.ClickException(t("no keys found in {file}", file=file))
     manager = load_config()
     added: dict[str, int] = {}
     already: dict[str, int] = {}
@@ -435,13 +503,36 @@ def keys_import(file: Path) -> None:
                 continue
             bucket = added if config.add_key(env, value) else already
             bucket[p.name] = bucket.get(p.name, 0) + 1
-    table = ui.table("provider", "added", "already saved", title=f"Imported from {file.name}")
+    table = ui.table(
+        t("provider"),
+        t("added"),
+        t("already saved"),
+        title=t("Imported from {file}", file=file.name),
+    )
     for name in sorted(set(added) | set(already)):
         table.add_row(name, str(added.get(name, 0)), str(already.get(name, 0)))
     ui.out(table)
     ui.out("")
     if unknown:
-        ui.warn(f"skipped names no provider uses: {', '.join(dict.fromkeys(unknown))}")
-    ui.ok(f"{sum(added.values())} key(s) added, {sum(already.values())} already saved.")
+        ui.warn(
+            t(
+                "skipped names no provider uses: {names}",
+                names=", ".join(dict.fromkeys(unknown)),
+            )
+        )
+    ui.ok(
+        tn(
+            sum(added.values()),
+            "{n} key added, {already} already saved.",
+            "{n} keys added, {already} already saved.",
+            already=sum(already.values()),
+        )
+    )
     if added:
-        ui.note(f"The keys are now in {manager.config_path}; {file} can be deleted.")
+        ui.note(
+            t(
+                "The keys are now in {path}; {file} can be deleted.",
+                path=manager.config_path,
+                file=file,
+            )
+        )

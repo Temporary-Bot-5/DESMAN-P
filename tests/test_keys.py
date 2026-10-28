@@ -40,7 +40,7 @@ def test_add_list_remove() -> None:
     listed = desman("keys")
     assert listed.exit_code == 0, listed.output
     assert "gsk_…AbCd" in listed.output and "gsk_…EfGh" in listed.output
-    assert "2 key(s) from 1 of" in listed.output
+    assert "2 keys from 1 of" in listed.output
     assert not saved().is_configured()  # adding a key is not running the wizard
     rows = {r["provider"]: r for r in json.loads(desman("keys", "list", "--json").output)}
     assert [k["label"] for k in rows["groq"]["keys"]] == ["", "work"]
@@ -94,13 +94,13 @@ def test_import_tolerates_the_usual_slips(tmp_path: Path) -> None:
     saved().save(make_config(api_keys={"GROQ_API_KEY": GROQ}))
     result = desman("keys", "import", keys_file)
     assert result.exit_code == 0, result.output
-    assert "2 key(s) added, 1 already saved" in result.output
+    assert "2 keys added, 1 already saved" in result.output
     assert "skipped names no provider uses: SOMETHING_ELSE" in result.output
     for secret in (GROQ, GROQ_2, NVIDIA):
         assert secret[4:-4] not in result.output
     assert flat_keys(saved().load()) == {"GROQ_API_KEY": [GROQ, GROQ_2], "NVIDIA_API_KEY": NVIDIA}
     again = desman("keys", "import", keys_file)
-    assert "0 key(s) added, 3 already saved" in again.output
+    assert "0 keys added, 3 already saved" in again.output
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_config_reset() -> None:
 
     kept = desman("config", "reset", input="n\n")
     assert kept.exit_code == 1 and path.exists()
-    assert "and the 1 API key(s) in it" in kept.output
+    assert "and the 1 API key in it" in kept.output
 
     done = desman("config", "reset", input="y\n")
     assert done.exit_code == 0, done.output

@@ -13,121 +13,24 @@ from rich.panel import Panel
 from rich.text import Text
 
 from desman import config as config_module
-from desman import providers, ui
+from desman import i18n, providers, ui
 from desman.config import Config, ConfigManager, Permissions
+from desman.i18n import t, tn
 from desman.providers import Provider
 
-TEXTS: dict[str, dict[str, str]] = {
-    "en": {
-        "title": "DESMAN(P) — Configuration",
-        "subtitle": "Decentralized Self-Evolving Modular Agents Network",
-        "language": "Language",
-        "providers": "Model providers",
-        "providers_q": "Pick a provider to add keys or change settings",
-        "providers_note": (
-            "Several providers and several keys per provider are fine: pick one, then the next."
-        ),
-        "done": "Done — continue",
-        "keys_n": "{n} keys",
-        "key_1": "1 key",
-        "no_key": "no key",
-        "needs": "needs {what}",
-        "local": "local",
-        "unset": "not set",
-        "privacy_title": "Data privacy",
-        "privacy_body": (
-            "Cloud models receive your prompts, context and data: they leave your machine and "
-            "are processed by the provider."
-        ),
-        "privacy_q": "I understand my data will be processed by third parties",
-        "key_q": "API key for {name} ({env}), hidden; Enter to cancel",
-        "label_q": "Label for this key (optional, e.g. 'second account')",
-        "added": "Key added to {name}.",
-        "duplicate": "{name} already has this key.",
-        "bad_label": "That label looks like a key, so it was left out: a label is a name.",
-        "action_q": "{name}",
-        "add_key": "Add a key",
-        "remove_key": "Remove a key",
-        "set": "Set {label} ({env})",
-        "back": "Back",
-        "which_key": "Which key?",
-        "removed": "Key removed from {name}.",
-        "setting_q": "{label} for {name} ({env}); '-' clears it",
-        "get_key": "Get a key: {url}",
-        "permissions": "Agent permissions",
-        "permissions_body": (
-            "This is prototype software and agents can act unexpectedly. Grant only what you "
-            "accept the risks of. Everything is off unless you turn it on."
-        ),
-        "permissions_q": "Allow agents to",
-        "perm_admin_rights": "act with administrator / root privileges",
-        "perm_fs_outside_access": "touch files outside the DESMAN workspace",
-        "perm_network_access": "use the network beyond model providers",
-        "perm_shell_execution": "run shell commands",
-        "admin_warning": "admin_rights is on: agents may act with elevated privileges.",
-        "saved": "Configuration saved to {path}",
-        "next": 'Next: `desman config show` to review, `desman run "..."` to start.',
-        "no_cloud": "No cloud key yet: cloud models will not work until you add one.",
-    },
-    "ru": {
-        "title": "DESMAN(P) — Настройка",
-        "subtitle": "Децентрализованная самоэволюционирующая модульная сеть агентов",
-        "language": "Язык",
-        "providers": "Провайдеры моделей",
-        "providers_q": "Выберите провайдера, чтобы добавить ключи или изменить настройки",
-        "providers_note": (
-            "Можно настроить несколько провайдеров и несколько ключей у каждого: выберите "
-            "одного, потом следующего."
-        ),
-        "done": "Готово — дальше",
-        "keys_n": "ключей: {n}",
-        "key_1": "1 ключ",
-        "no_key": "нет ключа",
-        "needs": "нужен {what}",
-        "local": "локальный",
-        "unset": "не задано",
-        "privacy_title": "Приватность данных",
-        "privacy_body": (
-            "Облачные модели получают ваши промпты, контекст и данные: они покидают ваш "
-            "компьютер и обрабатываются провайдером."
-        ),
-        "privacy_q": "Я понимаю, что мои данные обработают третьи стороны",
-        "key_q": "API-ключ для {name} ({env}), ввод скрыт; Enter — отмена",
-        "label_q": "Метка ключа (необязательно, например «второй аккаунт»)",
-        "added": "Ключ добавлен к {name}.",
-        "duplicate": "У {name} уже есть этот ключ.",
-        "bad_label": "Метка похожа на ключ, поэтому не сохранена: метка — это название.",
-        "action_q": "{name}",
-        "add_key": "Добавить ключ",
-        "remove_key": "Удалить ключ",
-        "set": "Задать {label} ({env})",
-        "back": "Назад",
-        "which_key": "Какой ключ?",
-        "removed": "Ключ удалён у {name}.",
-        "setting_q": "{label} для {name} ({env}); '-' — очистить",
-        "get_key": "Получить ключ: {url}",
-        "permissions": "Разрешения агентов",
-        "permissions_body": (
-            "Это прототип, агенты могут действовать неожиданно. Давайте только то, риски чего "
-            "принимаете. Всё выключено, пока вы не включите."
-        ),
-        "permissions_q": "Разрешить агентам",
-        "perm_admin_rights": "действовать с правами администратора / root",
-        "perm_fs_outside_access": "работать с файлами вне рабочей папки DESMAN",
-        "perm_network_access": "выходить в сеть помимо провайдеров моделей",
-        "perm_shell_execution": "выполнять shell-команды",
-        "admin_warning": "admin_rights включён: агенты могут действовать с повышенными правами.",
-        "saved": "Настройки сохранены в {path}",
-        "next": 'Дальше: `desman config show` — проверить, `desman run "..."` — запустить.',
-        "no_cloud": "Облачных ключей пока нет: облачные модели не заработают, пока не добавите.",
-    },
-}
+
+def _permission_labels() -> dict[str, str]:
+    return {
+        "admin_rights": t("act with administrator / root privileges"),
+        "fs_outside_access": t("touch files outside the DESMAN workspace"),
+        "network_access": t("use the network beyond model providers"),
+        "shell_execution": t("run shell commands"),
+    }
 
 
 class _Session:
-    def __init__(self, config: Config, t: dict[str, str]) -> None:
+    def __init__(self, config: Config) -> None:
         self.config = config
-        self.t = t
         # Accepted before if a cloud key was already saved; otherwise asked once, on first add.
         self.privacy_ok = any(config.keys(p.key_env or "") for p in providers.CLOUD)
 
@@ -136,49 +39,55 @@ def run(manager: ConfigManager) -> None:
     """The whole wizard. Raises ui.Cancelled when the user leaves; nothing is saved then."""
     seen = manager.snapshot()
     saved = manager.load()  # a broken file stops here: it is never written over
-    ui.header(TEXTS["en"]["title"], TEXTS["en"]["subtitle"])
+    ui.header(
+        t("DESMAN(P) — Configuration"), t("Decentralized Self-Evolving Modular Agents Network")
+    )
     lang = ui.select(
         "Language / Язык",
-        [ui.Choice("English", "en"), ui.Choice("Русский", "ru")],
+        [ui.Choice(catalog.name, code) for code, catalog in i18n.CATALOGS.items()],
         default=saved.language,
     )
-    t = TEXTS[lang]
+    i18n.set_language(lang)  # the rest of the wizard, and of this command, in that language
     config = saved.model_copy(deep=True, update={"language": lang, "configured": True})
-    session = _Session(config, t)
+    session = _Session(config)
 
     _providers_menu(session)
-    config.permissions = _permissions(config.permissions, t)
+    config.permissions = _permissions(config.permissions)
     manager.save_if_unchanged(config, seen)  # a `keys add` meanwhile is not lost
 
     ui.out("")
-    ui.ok(t["saved"].format(path=manager.config_path))
+    ui.ok(t("Configuration saved to {path}", path=manager.config_path))
     if not providers.ready(config):
-        ui.warn(t["no_cloud"])
+        ui.warn(t("No cloud key yet: cloud models will not work until you add one."))
     if config.permissions.admin_rights:
-        ui.warn(t["admin_warning"])
-    ui.note(t["next"])
+        ui.warn(t("admin_rights is on: agents may act with elevated privileges."))
+    ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
 
 
-def _status(config: Config, p: Provider, t: dict[str, str]) -> str:
+def _status(config: Config, p: Provider) -> str:
     if p.local:
         values = [config.settings.get(s.env) or s.default for s in p.settings]
-        return " ".join(v for v in values if v) or t["unset"]
+        return " ".join(v for v in values if v) or t("not set")
     n = len(config.keys(p.key_env or ""))
     if n == 0:
-        return t["no_key"]
-    count = t["key_1"] if n == 1 else t["keys_n"].format(n=n)
+        return t("no key")
+    count = tn(n, "{n} key", "{n} keys")
     missing = [s.label for s in p.settings if not s.default and not config.settings.get(s.env)]
-    return f"{count} · {t['needs'].format(what=', '.join(missing))}" if missing else f"{count} ✓"
+    if missing:
+        return f"{count} · {t('needs {what}', what=', '.join(missing))}"
+    return f"{count} ✓"
 
 
 def _providers_menu(s: _Session) -> None:
-    ui.section(s.t["providers"])
-    ui.note(s.t["providers_note"])
+    ui.section(t("Model providers"))
+    ui.note(t("Several providers and several keys per provider are fine: pick one, then the next."))
     last: Provider | None = None
     while True:
-        choices = [ui.Choice(p.name, p, _status(s.config, p, s.t)) for p in providers.PROVIDERS]
-        choices.append(ui.Choice(s.t["done"], None))
-        picked = ui.select(s.t["providers_q"], choices, default=last)
+        choices = [ui.Choice(p.name, p, _status(s.config, p)) for p in providers.PROVIDERS]
+        choices.append(ui.Choice(t("Done — continue"), None))
+        picked = ui.select(
+            t("Pick a provider to add keys or change settings"), choices, default=last
+        )
         if picked is None:
             return
         last = picked
@@ -189,25 +98,24 @@ def _providers_menu(s: _Session) -> None:
 
 
 def _provider_menu(s: _Session, p: Provider) -> None:
-    t = s.t
     while True:
         _show_keys(s.config, p)
         actions: list[ui.Choice] = []
         if p.key_env is not None:
-            actions.append(ui.Choice(t["add_key"], "add"))
+            actions.append(ui.Choice(t("Add a key"), "add"))
             if s.config.keys(p.key_env):
-                actions.append(ui.Choice(t["remove_key"], "remove"))
+                actions.append(ui.Choice(t("Remove a key"), "remove"))
         for setting in p.settings:
             current = s.config.settings.get(setting.env) or setting.default
             actions.append(
                 ui.Choice(
-                    t["set"].format(label=setting.label, env=setting.env),
+                    t("Set {label} ({env})", label=setting.label, env=setting.env),
                     setting,
-                    current or t["unset"],
+                    current or t("not set"),
                 )
             )
-        actions.append(ui.Choice(t["back"], None))
-        action = ui.select(t["action_q"].format(name=p.name), actions)
+        actions.append(ui.Choice(t("Back"), None))
+        action = ui.select(p.name, actions)
         if action is None:
             return
         if action == "add":
@@ -230,32 +138,43 @@ def _show_keys(config: Config, p: Provider) -> None:
 
 
 def _add_key(s: _Session, p: Provider) -> None:
-    t = s.t
     assert p.key_env is not None
     if not s.privacy_ok:
         ui.out(
             Panel(
-                Text(t["privacy_body"]),
-                title=t["privacy_title"],
+                Text(
+                    t(
+                        "Cloud models receive your prompts, context and data: they leave your machine and are processed by the provider."
+                    )
+                ),
+                title=t("Data privacy"),
                 title_align="left",
                 border_style="warn",
             )
         )
-        if not ui.confirm(t["privacy_q"], default=False):
+        if not ui.confirm(
+            t("I understand my data will be processed by third parties"), default=False
+        ):
             return
         s.privacy_ok = True
-    ui.note(t["get_key"].format(url=p.url))
-    value = ui.secret(t["key_q"].format(name=p.name, env=p.key_env))
+    ui.note(t("Get a key: {url}", url=p.url))
+    value = ui.secret(
+        t("API key for {name} ({env}), hidden; Enter to cancel", name=p.name, env=p.key_env)
+    )
     if not value:
         return
-    label = ui.text(t["label_q"]) if s.config.keys(p.key_env) else ""
+    label = (
+        ui.text(t("Label for this key (optional, e.g. 'second account')"))
+        if s.config.keys(p.key_env)
+        else ""
+    )
     if config_module.looks_like_secret(label) or (label and label in value):
-        ui.warn(t["bad_label"])
+        ui.warn(t("That label looks like a key, so it was left out: a label is a name."))
         label = ""
     if s.config.add_key(p.key_env, value, label):
-        ui.ok(t["added"].format(name=p.name))
+        ui.ok(t("Key added to {name}.", name=p.name))
     else:
-        ui.warn(t["duplicate"].format(name=p.name))
+        ui.warn(t("{name} already has this key.", name=p.name))
     for setting in p.settings:
         if not setting.default and not s.config.settings.get(setting.env):
             _set(s, p, setting)
@@ -268,18 +187,24 @@ def _remove_key(s: _Session, p: Provider) -> None:
         ui.Choice(f"#{i} {providers.mask(k.value)}", i - 1, providers.label(k.label))
         for i, k in enumerate(keys, 1)
     ]
-    choices.append(ui.Choice(s.t["back"], None))
-    index = ui.select(s.t["which_key"], choices)
+    choices.append(ui.Choice(t("Back"), None))
+    index = ui.select(t("Which key?"), choices)
     if index is None:
         return
     s.config.remove_key(p.key_env, index)
-    ui.ok(s.t["removed"].format(name=p.name))
+    ui.ok(t("Key removed from {name}.", name=p.name))
 
 
 def _set(s: _Session, p: Provider, setting: Any) -> None:
     current = s.config.settings.get(setting.env) or setting.default
     value = ui.text(
-        s.t["setting_q"].format(label=setting.label, name=p.name, env=setting.env), current
+        t(
+            "{label} for {name} ({env}); '-' clears it",
+            label=setting.label,
+            name=p.name,
+            env=setting.env,
+        ),
+        current,
     )
     if value == "-":
         s.config.settings.pop(setting.env, None)
@@ -287,13 +212,18 @@ def _set(s: _Session, p: Provider, setting: Any) -> None:
         s.config.settings[setting.env] = value
 
 
-def _permissions(current: Permissions, t: dict[str, str]) -> Permissions:
-    ui.section(t["permissions"])
-    ui.note(t["permissions_body"])
+def _permissions(current: Permissions) -> Permissions:
+    ui.section(t("Agent permissions"))
+    ui.note(
+        t(
+            "This is prototype software and agents can act unexpectedly. Grant only what you accept the risks of. Everything is off unless you turn it on."
+        )
+    )
     names = list(Permissions.model_fields)
+    labels = _permission_labels()
     granted = ui.checkbox(
-        t["permissions_q"],
-        [ui.Choice(t[f"perm_{name}"], name) for name in names],
+        t("Allow agents to"),
+        [ui.Choice(labels[name], name) for name in names],
         checked={name for name in names if getattr(current, name)},
     )
     return Permissions(**{name: name in granted for name in names})
