@@ -495,10 +495,15 @@ class Store:
         ]
 
     def last_feedback(self, subtask_id: str) -> Feedback | None:
-        """Why the subtask was last sent back to READY by the reviewer or the operator."""
+        """Why the subtask was last sent back to READY: by the reviewer, the operator, or a
+        quality failure of the executor itself (e.g. an unusable reply, which no reviewer saw).
+        Interruptions are not feedback: they say nothing about the work."""
         rows = self.conn.execute(
             """SELECT actor, details_json FROM audit_log
-               WHERE subtask_id = ? AND to_status = 'ready' AND actor IN ('reviewer', 'human')
+               WHERE subtask_id = ? AND to_status = 'ready'
+                 AND (actor IN ('reviewer', 'human')
+                      OR (actor = 'executor'
+                          AND json_extract(details_json, '$.failure') = 'quality'))
                ORDER BY seq DESC LIMIT 1""",
             (subtask_id,),
         ).fetchall()

@@ -91,10 +91,11 @@ def llm_executor(llm: LLM, other: LLM | None = None) -> Executor:
             "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
         }
         model, system, temperature = llm, EXECUTOR_SYSTEM, 0.0
-        if context.strategy is Strategy.REPHRASE:
+        if context.strategy is Strategy.OTHER_MODEL and other is not None:
+            model = other
+        elif context.strategy in (Strategy.REPHRASE, Strategy.OTHER_MODEL):
+            # Without another model to ask, the best one can do differently is rephrase.
             system, temperature = EXECUTOR_SYSTEM_REPHRASED, REPHRASE_TEMPERATURE
-        elif context.strategy is Strategy.OTHER_MODEL:
-            model = other or llm
         try:
             # An error report is not cached: the next task asking the same may succeed.
             result = _ask(

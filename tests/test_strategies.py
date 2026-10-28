@@ -187,3 +187,36 @@ def test_run_switches_provider_for_the_fourth_attempt(
     finally:
         conn.close()
     assert strategies[-1] == ("rephrase" if pinned else "other_model")
+
+
+def test_a_coordinator_without_another_model_never_claims_a_switch(
+    store: Store, clock: FakeClock
+) -> None:
+    main = FakeLLM().on("Execute", '{"v": 1}', '{"v": 2}', '{"v": 3}', '{"v": 4}')
+    main.on("Review", REJECT, REJECT, REJECT, ACCEPT)
+    task_id = store.create_task(one_step())
+    # The defaults: no strategies given, no other LLM.
+    coordinator = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    assert coordinator.run(task_id).status is TaskStatus.DONE
+    started = [
+        e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
+    ]
+    assert started == ["first", "feedback", "rephrase", "rephrase"]
+    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED
+
+
+def test_an_unusable_reply_is_feedback_for_the_next_attempt(store: Store, clock: FakeClock) -> None:
+    from desman.llm.fake import ServerError, garbage
+
+    prose = garbage("prose")
+    main = FakeLLM().on("Execute", prose, prose, ServerError(status=503), '{"v": 1}')
+    main.on("Review", ACCEPT)
+    task_id = store.create_task(one_step())
+    coordinator = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    assert coordinator.run(task_id).status is TaskStatus.DONE
+    second_try = json.loads(executions(main)[-1].prompt.partition(":\n")[2])
+    # The interruption in between is not feedback; the unusable reply before it is.
+    assert second_try["feedback_on_previous_attempt"] == (
+        "unusable reply: The reply is not a JSON object."
+    )
+    assert second_try["attempt"] == 2

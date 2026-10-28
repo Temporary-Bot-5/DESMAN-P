@@ -16,6 +16,7 @@ driven by real LLM-backed agents.
 
 from __future__ import annotations
 
+import functools
 import json
 import time
 from collections.abc import Callable
@@ -74,6 +75,9 @@ class Failure(BaseModel):
 
 
 Outcome = Success | Failure
+
+ONE_MODEL: Callable[[int], Strategy] = functools.partial(strategy_for, other_model=False)
+"""The coordinator's default: no other model to switch to, so none is claimed in the audit."""
 
 ERROR_TYPE = "error"
 """A result `{"type": "error", "reason": ...}` is the executor saying it could not do the work."""
@@ -146,7 +150,7 @@ class Coordinator:
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
         abandoned: Callable[[str], bool] | None = None,
-        strategies: Callable[[int], Strategy] = strategy_for,
+        strategies: Callable[[int], Strategy] = ONE_MODEL,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -161,8 +165,9 @@ class Coordinator:
         """Tells whether a lease owner is certainly gone, so its work is taken back at once
         instead of after the lease expires (see core/owner.py)."""
         self.strategies = strategies
-        """Attempt number -> strategy. The executor's owner narrows it to what it can do (e.g.
-        no other provider to switch to), so the audit records what each attempt really was."""
+        """Attempt number -> strategy. The executor's owner says what it can do: by default
+        there is no other model to switch to, so the audit never claims a switch that did not
+        happen; pass `strategy_for` when the executor has one."""
         self.sleep = sleep
 
     def run(

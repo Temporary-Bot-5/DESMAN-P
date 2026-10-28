@@ -51,7 +51,7 @@ class Feedback(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    source: str  # "reviewer" or "human"
+    source: str  # "reviewer", "human" or "executor" (its own failed attempt)
     text: str
 
 
