@@ -321,6 +321,10 @@ def test_yes_and_no_never_share_a_first_letter(code: str) -> None:
         ("en", "y", False),
         ("de", "y", False),
         ("de", "n", True),
+        ("tr", "HAYIR", True),
+        ("tr", "hayır", True),
+        ("tr", "EVET", False),
+        ("en", "YES", False),
     ],
 )
 def test_confirmations_take_the_languages_own_answers(code: str, answer: str, kept: bool) -> None:
