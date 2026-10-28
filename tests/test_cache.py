@@ -170,3 +170,13 @@ def test_a_second_run_reuses_accepted_replies_unless_told_not_to(
     assert len(sent) == 2  # the same questions: answered from the cache
     assert run("--no-cache").exit_code == 0
     assert len(sent) == 4
+
+
+def test_reuse_does_not_extend_a_replys_life(conn: sqlite3.Connection, clock: FakeClock) -> None:
+    llm, fake = cached(conn, clock, '{"answer": 1}', '{"answer": 2}')
+    complete_json(llm, ask(), Answer, heading="Ask")  # day 0
+    clock.advance(timedelta(days=6).total_seconds())
+    assert complete_json(llm, ask(), Answer, heading="Ask") == Answer(answer=1)  # a hit
+    clock.advance(timedelta(days=2).total_seconds())  # day 8: the day-0 reply has expired
+    assert complete_json(llm, ask(), Answer, heading="Ask") == Answer(answer=2)
+    assert len(fake.calls) == 2

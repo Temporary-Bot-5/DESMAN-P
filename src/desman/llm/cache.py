@@ -10,7 +10,8 @@ passed its schema. A reply that turned out unusable is never cached, or asking a
 return the same garbage until the attempts ran out. Entries older than `TTL` are ignored and
 pruned: free models change behind the same name.
 
-Lives in the task database (`response_cache`), next to the call log.
+Lives in the task database (`response_cache`), next to the call log. Replies are kept as text,
+like the results of subtasks in `artifacts`; the database file is private (0600).
 """
 
 from __future__ import annotations
@@ -82,8 +83,10 @@ class Cached:
             self.conn.execute(
                 "DELETE FROM response_cache WHERE created_at < ?", (db.to_iso(now - TTL),)
             )
+            # IGNORE: a hit accepted again keeps its first date, so TTL counts from when the
+            # model wrote the reply, not from its latest reuse.
             self.conn.execute(
-                "INSERT OR REPLACE INTO response_cache (key, provider, model, text, "
+                "INSERT OR IGNORE INTO response_cache (key, provider, model, text, "
                 "finish_reason, prompt_tokens, completion_tokens, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
