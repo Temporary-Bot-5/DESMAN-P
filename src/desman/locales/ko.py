@@ -249,6 +249,7 @@ MESSAGES: dict[str, Forms] = {
     "unknown language {name!r} (known: {codes})": "알 수 없는 언어 {name!r} (알려진 언어: {codes})",
     "interface language": "인터페이스 언어",
     "(Y/N)": "(Y/N)",
+    "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "같은 요청에 이미 수락된 응답이 있어도 모델에 다시 묻습니다 (기본적으로 그런 응답은 7일 동안 재사용되어 resume 시 할당량을 아낍니다).",
 }
 
 CLICK: dict[str, Forms] = {

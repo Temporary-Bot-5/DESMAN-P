@@ -201,6 +201,20 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER model_calls_no_update BEFORE UPDATE ON model_calls
         BEGIN SELECT RAISE(ABORT, 'model_calls is append-only'); END;
     """,
+    # 5 — replies the caller accepted, by request (ROADMAP 2.6): a resume does not pay twice
+    """
+    CREATE TABLE response_cache (
+        key                TEXT PRIMARY KEY,  -- sha256 of provider, model, messages, parameters
+        provider           TEXT NOT NULL,
+        model              TEXT NOT NULL,
+        text               TEXT NOT NULL,
+        finish_reason      TEXT NOT NULL,
+        prompt_tokens      INTEGER NOT NULL CHECK (prompt_tokens >= 0),
+        completion_tokens  INTEGER NOT NULL CHECK (completion_tokens >= 0),
+        created_at         TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX ix_response_cache_created ON response_cache (created_at);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -76,6 +76,8 @@ src/desman/
                    #   CallRecord per attempt (hashes and key fingerprint, never the key)
     ├── structured.py # complete_json(): JSON from a reply, validated by a Pydantic schema,
                    #   one repair request showing the model its errors, then StructuredOutputError
+    ├── cache.py   # Cached: accepted replies by exact request (response_cache, 7 days);
+                   #   complete_json() accepts, garbage is never kept; --no-cache skips it
     ├── router.py  # provider/model for a run (--provider, PREFERENCE), built from the config
                    #   Backoff: quick blips (5xx, drops, limits ≤10 s) retried before they cost an
                    #   attempt; slow failures never (a lease is not renewed while waiting)

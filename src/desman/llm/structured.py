@@ -8,6 +8,9 @@ its own reply and what was wrong with it; a second failure raises `StructuredOut
 Only one repair: every call spends free quota, and a model that fails twice in a row is better
 served by the retry policy (another attempt, later another strategy, ROADMAP 2.9).
 
+A reply that fits is kept by `llm.cache.Cached` (when the LLM is one), so the same request
+asked again is answered without a call; an unusable reply is never kept.
+
 The repair message starts with the original heading ("Execute subtask (repair):"), so prompt
 routes of a fake (`FakeLLM().on("Execute", ...)`) serve it from the same queue.
 """
@@ -22,6 +25,7 @@ from typing import Any, NoReturn, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from desman.llm.base import LLM, Completion, Message, Request
+from desman.llm.cache import Cached
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -48,6 +52,7 @@ def complete_json(llm: LLM, request: Request, schema: type[T], *, heading: str) 
     reply = llm.complete(request)
     value, problem = _validate(reply, schema)
     if value is not None:
+        _accept(llm, request, reply)
         return value
     repair = request.model_copy(
         update={
@@ -67,8 +72,15 @@ def complete_json(llm: LLM, request: Request, schema: type[T], *, heading: str) 
     second = llm.complete(repair)
     value, problem = _validate(second, schema)
     if value is not None:
+        _accept(llm, repair, second)
         return value
     raise StructuredOutputError(problem, second)
+
+
+def _accept(llm: LLM, request: Request, reply: Completion) -> None:
+    """A reply that fits the schema is worth keeping (`llm.cache`); an unusable one never."""
+    if isinstance(llm, Cached):
+        llm.accept(request, reply)
 
 
 def _validate(reply: Completion, schema: type[T]) -> tuple[T, str] | tuple[None, str]:
