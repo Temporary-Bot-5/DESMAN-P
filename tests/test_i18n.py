@@ -262,3 +262,43 @@ def test_bad_options_and_choices_are_reported_in_russian() -> None:
 @pytest.mark.parametrize("module", ["desman.locales.ru", "desman.i18n", "desman.cli"])
 def test_each_module_imports_first_in_a_fresh_process(module: str) -> None:
     subprocess.run([sys.executable, "-c", f"import {module}"], check=True, timeout=60)
+
+
+# ── desman language ──────────────────────────────────────────────────────────
+
+
+def test_language_lists_and_switches_without_the_wizard() -> None:
+    configure("en")
+    listed = desman("language")
+    assert listed.exit_code == 0, listed.output
+    assert "日本語" in listed.output and "Switch with `desman language CODE`." in listed.output
+    assert any(line.startswith("en") and "✓" in line for line in listed.output.splitlines())
+    switched = desman("language", "ru")
+    assert switched.exit_code == 0 and "Язык интерфейса: Русский." in switched.output
+    assert open_config().load().language == "ru"
+    assert "Использование:" in desman("--help").output
+    by_name = desman("language", "Deutsch")  # the language's own name works too
+    assert by_name.exit_code == 0 and open_config().load().language == "de"
+
+
+def test_language_keeps_the_rest_of_the_config() -> None:
+    open_config().save(
+        Config(language="en", configured=True, settings={"OLLAMA_HOST": "http://box:1"})
+    )
+    assert desman("language", "pl").exit_code == 0
+    config = open_config().load()
+    assert (config.language, config.configured) == ("pl", True)
+    assert config.settings == {"OLLAMA_HOST": "http://box:1"}
+
+
+def test_an_unknown_language_is_refused() -> None:
+    configure("en")
+    result = desman("language", "xx")
+    assert result.exit_code == 2 and "unknown language 'xx'" in result.output
+    assert open_config().load().language == "en"
+
+
+def test_confirmations_read_y_slash_n() -> None:
+    open_config().save(Config(language="en", configured=True))
+    result = CliRunner().invoke(cli, ["config", "reset"], input="n\n")
+    assert "(Y/N)" in result.output and "[y/N]" not in result.output

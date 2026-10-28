@@ -240,6 +240,15 @@ MESSAGES: dict[str, Forms] = {
     "Configuration saved to {path}": "설정을 {path}에 저장했습니다",
     'Next: `desman config show` to review, `desman run "..."` to start.': '다음: `desman config show`로 확인, `desman run "..."`으로 시작.',
     "No cloud key yet: cloud models will not work until you add one.": "아직 클라우드 키가 없습니다: 키를 추가할 때까지 클라우드 모델은 동작하지 않습니다.",
+    "Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name).": "인터페이스 언어를 표시하거나 LANGUAGE(ko 같은 코드 또는 언어 이름)로 바꿉니다.",
+    "code": "코드",
+    "language": "언어",
+    "Languages": "언어",
+    "Switch with `desman language CODE`.": "바꾸기: `desman language 코드`.",
+    "Language set to {name}.": "인터페이스 언어를 {name}(으)로 설정했습니다.",
+    "unknown language {name!r} (known: {codes})": "알 수 없는 언어 {name!r} (알려진 언어: {codes})",
+    "interface language": "인터페이스 언어",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {

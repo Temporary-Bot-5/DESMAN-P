@@ -19,7 +19,7 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import providers, ui, wizard
+from desman import i18n, providers, ui, wizard
 from desman.config import Config, ConfigError, ConfigManager, open_config
 from desman.core import calls, db
 from desman.i18n import t, tn
@@ -163,6 +163,46 @@ def config_reset(yes: bool) -> None:
         ui.warn(
             t("It was a link: only the link is gone, {target} is left as it was.", target=target)
         )
+
+
+# ── desman language ─────────────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("name", metavar="LANGUAGE", required=False)
+def language(name: str | None) -> None:
+    """Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name)."""
+    manager = load_config()
+    if name is None:
+        current = manager.load().language
+        table = ui.table(t("code"), t("language"), "", title=t("Languages"))
+        for code, catalog in i18n.CATALOGS.items():
+            mark = Text("✓", style="good") if code == current else ""
+            table.add_row(code, catalog.name, mark)
+        ui.out(table)
+        ui.out("")
+        ui.note(t("Switch with `desman language CODE`."))
+        return
+    code = _language_code(name)
+    with manager.edit() as config:
+        config.language = code  # type: ignore[assignment]  # a key of CATALOGS: a valid code
+    i18n.set_language(code)  # the confirmation already in the new language
+    ui.ok(t("Language set to {name}.", name=i18n.CATALOGS[code].name))
+
+
+def _language_code(name: str) -> str:
+    wanted = name.strip().casefold()
+    for code, catalog in i18n.CATALOGS.items():
+        if wanted in (code, catalog.name.casefold()):
+            return code
+    raise click.BadParameter(
+        t(
+            "unknown language {name!r} (known: {codes})",
+            name=name,
+            codes=", ".join(i18n.CATALOGS),
+        ),
+        param_hint="LANGUAGE",
+    )
 
 
 # ── desman keys ─────────────────────────────────────────────────────────────
