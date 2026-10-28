@@ -457,13 +457,15 @@ def _provider(
                 t("{name} is a paid provider: every call is billed.", name=choice.provider.name)
             )
             ui.warn(providers.untested_note())
-    return llm
+    # Blips are retried here; the fake is not wrapped: its scripts test the retry policy.
+    return router.Backoff(llm)
 
 
 def _record_calls(llm: LLM, store: Store) -> None:
     """Every real model call goes to model_calls (`desman usage`)."""
-    if isinstance(llm, OpenAICompatible):
-        llm.on_call = calls.recorder(store.conn)
+    client = llm.inner if isinstance(llm, router.Backoff) else llm
+    if isinstance(client, OpenAICompatible):
+        client.on_call = calls.recorder(store.conn)
 
 
 def _find(store: Store, task: str) -> str:

@@ -7,6 +7,8 @@ refused or limited). Fallback across providers and per-role models are ROADMAP 4
 
 from __future__ import annotations
 
+import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -15,6 +17,14 @@ import httpx
 from desman import providers
 from desman.config import Config
 from desman.i18n import t
+from desman.llm.base import (
+    LLM,
+    Completion,
+    ProviderTimeout,
+    ProviderUnavailable,
+    RateLimited,
+    Request,
+)
 from desman.llm.openai_compat import CallRecord, OpenAICompatible
 from desman.providers import Provider
 
@@ -99,3 +109,69 @@ def build(
         paid=chosen.paid,
     )
     return llm, Choice(chosen, use)
+
+
+# ── Backoff ──────────────────────────────────────────────────────────────────
+
+ATTEMPTS = 3
+"""Calls per request: the first one and up to two repeats after a blip."""
+BASE_DELAY = 1.0
+MAX_DELAY = 8.0
+SHORT_LIMIT = 10.0
+"""A rate limit that asks to wait this long or less is waited out here; a longer one becomes a
+pause of the subtask (the coordinator's business)."""
+QUICK_FAILURE = 10.0
+"""Only a failure that came back within this many seconds is retried. A slow one (a timeout,
+a 504 after a long wait) is not: repeating it could outlast the subtask's lease, which nobody
+renews while the executor waits on the model."""
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)  # looked up at call time, so tests replace it
+
+
+class Backoff:
+    """Repeats a call that failed for a passing reason, before it costs the subtask anything.
+
+    A 5xx or a dropped connection that came back quickly is retried after 1s, then 2s (each
+    delay jittered to between half and all of it, capped at MAX_DELAY), up to ATTEMPTS calls
+    in all; a rate limit of SHORT_LIMIT seconds or less is waited out. Anything else (refused
+    key, quota, a long limit, a slow failure such as a timeout) and the last failure propagate
+    unchanged: the retry policy decides then. So a call takes at most about ATTEMPTS ×
+    QUICK_FAILURE + the waits longer than it did before: far less than a lease.
+    """
+
+    def __init__(
+        self,
+        llm: LLM,
+        *,
+        attempts: int = ATTEMPTS,
+        sleep: Callable[[float], None] | None = None,
+        jitter: Callable[[], float] = random.random,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.inner = llm
+        self.name = llm.name
+        self.attempts = attempts
+        self.sleep = sleep
+        self.jitter = jitter
+        self.monotonic = monotonic
+
+    def complete(self, request: Request) -> Completion:
+        for attempt in range(1, self.attempts + 1):
+            started = self.monotonic()
+            try:
+                return self.inner.complete(request)
+            except (ProviderTimeout, ProviderUnavailable):
+                if attempt == self.attempts or self.monotonic() - started > QUICK_FAILURE:
+                    raise
+                delay = min(MAX_DELAY, BASE_DELAY * 2 ** (attempt - 1))
+                delay *= 0.5 + self.jitter() / 2
+            except RateLimited as e:
+                if attempt == self.attempts or e.retry_after is None:
+                    raise
+                if e.retry_after > SHORT_LIMIT:
+                    raise
+                delay = e.retry_after
+            (self.sleep or _sleep)(delay)
+        raise AssertionError("unreachable")  # pragma: no cover
