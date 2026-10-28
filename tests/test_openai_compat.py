@@ -544,3 +544,36 @@ def test_limits_group_headers_by_limit() -> None:
     assert not found[0].exhausted_for_good
     assert calls.Limit("req-minute", "0", "0", None).exhausted_for_good
     assert not calls.Limit("x", "0", "n/a", None).exhausted_for_good
+
+
+def test_a_key_with_a_zero_limit_is_set_aside_for_the_next() -> None:
+    used: list[str] = []
+    zero = {"x-ratelimit-limit-req-minute": "0", "x-ratelimit-remaining-req-minute": "0"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        used.append(request.headers["authorization"])
+        if request.headers["authorization"] == f"Bearer {KEY_A}":
+            return httpx.Response(429, headers=zero)
+        return reply()
+
+    llm, _ = client(handler, [KEY_A, KEY_B])
+    llm.complete(REQUEST)
+    llm.complete(REQUEST)
+    assert used == [f"Bearer {KEY_A}", f"Bearer {KEY_B}", f"Bearer {KEY_B}"]  # A not again
+
+
+def test_a_zero_limit_seen_before_a_success_is_history() -> None:
+    ConfigManager(default_config_path()).save(make_config(api_keys={"MISTRAL_API_KEY": "mk"}))
+    conn = db.open_db()
+    record = calls.recorder(conn)
+    zero = {"x-ratelimit-limit-req-minute": "0", "x-ratelimit-remaining-req-minute": "0"}
+    record(
+        CallRecord("mistral", "m", key_id("mk"), "p", None, 0, 0, 5, 429, "permanent", "x", zero)
+    )
+    record(CallRecord("mistral", "m", key_id("mk"), "p", "r", 3, 2, 5, 200, None, None))
+    [u] = calls.usage(conn)
+    conn.close()
+    assert u.limits == zero and not u.limits_current
+    shown = desman("usage").output
+    assert "the limit is 0" not in shown
+    assert "Grey rows come from an earlier call" in shown

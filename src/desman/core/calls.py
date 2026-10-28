@@ -55,6 +55,8 @@ class KeyUsage:
     last_at: str | None
     last_error: str | None
     limits: dict[str, str]  # the rate-limit headers of the latest call that had any
+    limits_current: bool = True
+    """The limits came with the key's latest call: no call has been made since without them."""
 
 
 def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUsage]:
@@ -77,12 +79,12 @@ def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUs
     out = []
     for r in rows:
         last = conn.execute(
-            "SELECT error FROM model_calls WHERE provider = ? AND key_id IS ? "
+            "SELECT seq, error FROM model_calls WHERE provider = ? AND key_id IS ? "
             "ORDER BY seq DESC LIMIT 1",
             (r["provider"], r["key_id"]),
         ).fetchone()
         limits = conn.execute(
-            "SELECT limits_json FROM model_calls WHERE provider = ? AND key_id IS ? "
+            "SELECT seq, limits_json FROM model_calls WHERE provider = ? AND key_id IS ? "
             "AND limits_json != '{}' ORDER BY seq DESC LIMIT 1",
             (r["provider"], r["key_id"]),
         ).fetchone()
@@ -98,6 +100,7 @@ def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUs
                 last_at=r["last_at"],
                 last_error=last["error"] if last else None,
                 limits=json.loads(limits["limits_json"]) if limits else {},
+                limits_current=bool(limits) and limits["seq"] == last["seq"],
             )
         )
     return out

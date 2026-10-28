@@ -333,9 +333,15 @@ MESSAGES: dict[str, Forms] = {
     "resets in": "сброс через",
     "Limits reported with the latest call": "Лимиты из последнего ответа провайдера",
     "{key}: the limit is 0, so this account has no access to the API yet (a free plan may "
-    "need activating on the provider's site). DESMAN does not retry it.": (
+    "need activating on the provider's site). DESMAN sets such a key aside and tries the "
+    "provider's other keys.": (
         "{key}: лимит равен 0, у этого аккаунта пока нет доступа к API (бесплатный план, "
-        "возможно, нужно активировать на сайте провайдера). DESMAN не повторяет такие вызовы."
+        "возможно, нужно активировать на сайте провайдера). DESMAN откладывает такой ключ и "
+        "пробует другие ключи провайдера."
+    ),
+    "Grey rows come from an earlier call: later calls with that key sent no limits.": (
+        "Серые строки — из более раннего вызова: следующие вызовы с этим ключом лимитов не "
+        "присылали."
     ),
     "use e.g. 30m, 24h, 7d or all": "например 30m, 24h, 7d или all",
     "{name} is local and has no API key": "{name} — локальный провайдер, API-ключа у него нет",

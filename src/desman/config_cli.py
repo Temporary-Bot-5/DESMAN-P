@@ -401,36 +401,51 @@ def _print_limits(lines: list[Line]) -> None:
         title=t("Limits reported with the latest call"),
     )
     blocked = []
+    older = False
     for provider, label, u in lines:
         if u is None or not u.limits:
             continue
         found, other = calls.limits(u.limits)
+        # Limits from an earlier call (later ones sent none) are history, not the key's state.
+        row_style = "" if u.limits_current else "muted"
+        older = older or not u.limits_current
         first = True
         for limit in found:
             left = f"{limit.remaining or '?'} / {limit.limit or '?'}"
-            style = "bad" if limit.exhausted_for_good else ""
+            bad = limit.exhausted_for_good and u.limits_current
             table.add_row(
                 provider if first else "",
                 label if first else "",
                 limit.name,
-                Text(left, style=style),
+                Text(left, style="bad" if bad else row_style),
                 limit.reset or "",
+                style=row_style,
             )
             first = False
-            if limit.exhausted_for_good:
+            if bad:
                 blocked.append(f"{provider} {label}")
         for header, value in other.items():
-            table.add_row(provider if first else "", label if first else "", header, value, "")
+            table.add_row(
+                provider if first else "",
+                label if first else "",
+                header,
+                value,
+                "",
+                style=row_style,
+            )
             first = False
     if not table.rows:
         return
     ui.out("")
     ui.out(table)
+    if older:
+        ui.note(t("Grey rows come from an earlier call: later calls with that key sent no limits."))
     for who in dict.fromkeys(blocked):
         ui.warn(
             t(
                 "{key}: the limit is 0, so this account has no access to the API yet (a free plan "
-                "may need activating on the provider's site). DESMAN does not retry it.",
+                "may need activating on the provider's site). DESMAN sets such a key aside and "
+                "tries the provider's other keys.",
                 key=who,
             )
         )
