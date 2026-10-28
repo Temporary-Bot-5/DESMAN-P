@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import ast
+import functools
 import importlib
 import inspect
 import json
 import string
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from click.testing import CliRunner, Result
@@ -18,11 +19,12 @@ from click.testing import CliRunner, Result
 from desman import i18n, providers
 from desman.cli import cli
 from desman.config import Config, open_config
-from desman.locales import ru
+from desman.locales import CLICK_DEVELOPER_ONLY, ru
 
 SOURCE = Path(__file__).parent.parent / "src" / "desman"
 
 
+@functools.cache
 def source_messages() -> dict[str, str | None]:
     """Every message the source passes to t() or tn() (singular → plural), plus command help."""
     found: dict[str, str | None] = {}
@@ -70,15 +72,24 @@ def configure(language: str) -> None:
 # ── The catalog ──────────────────────────────────────────────────────────────
 
 
-def test_every_message_has_a_russian_translation() -> None:
-    missing = sorted(set(source_messages()) - set(ru.MESSAGES))
-    assert missing == []
+TRANSLATED = {code: c for code, c in i18n.CATALOGS.items() if code != "en"}
 
 
-def test_no_translation_is_left_over() -> None:
-    assert sorted(set(ru.MESSAGES) - set(source_messages())) == []
+def test_every_language_is_a_config_choice() -> None:
+    assert set(get_args(Config.model_fields["language"].annotation)) == set(i18n.CATALOGS)
 
 
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_every_message_has_a_translation(code: str) -> None:
+    assert sorted(set(source_messages()) - set(TRANSLATED[code].messages)) == []
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_no_translation_is_left_over(code: str) -> None:
+    assert sorted(set(TRANSLATED[code].messages) - set(source_messages())) == []
+
+
+@functools.cache
 def click_messages() -> dict[str, str | None]:
     """What the installed Click passes to gettext/ngettext in the modules i18n patches."""
     found: dict[str, str | None] = {}
@@ -95,34 +106,57 @@ def click_messages() -> dict[str, str | None]:
     return found
 
 
-@pytest.mark.parametrize(
-    ("catalog", "plurals"),
-    [(ru.MESSAGES, source_messages), (ru.CLICK, click_messages)],
-    ids=["ours", "click"],
-)
-def test_translations_keep_the_fields(
-    catalog: dict[str, i18n.Forms], plurals: Callable[[], dict[str, str | None]]
-) -> None:
-    plural_of = plurals()
-    for source, translated in catalog.items():
+@pytest.mark.parametrize("code", TRANSLATED)
+@pytest.mark.parametrize("which", ["messages", "click"])
+def test_translations_keep_the_fields(code: str, which: str) -> None:
+    catalog = TRANSLATED[code]
+    plural_of = source_messages() if which == "messages" else click_messages()
+    for source, translated in getattr(catalog, which).items():
         forms = (translated,) if isinstance(translated, str) else translated
         expected = fields(source) | fields(plural_of.get(source) or "")
         for form in forms:
-            # A form may leave a field out ("pick 1" needs no {n}), never invent one.
+            # A form may leave a field out ("pick 1" needs no {n}), never invent one; a
+            # language with one form uses the plural's fields (Click passes both).
             assert fields(form) <= expected | {"n"}, source
 
 
-def test_everything_click_says_is_translated() -> None:
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_everything_click_says_is_translated(code: str) -> None:
     # Fails when a Click release adds or rewords a message: translate the new text (keep the
-    # old one too, older Click versions still use it).
-    assert sorted(set(click_messages()) - set(ru.CLICK)) == []
+    # old one too, older Click versions still use it). Mistakes in command definitions are
+    # left to the reference catalog (ru).
+    needed = set(click_messages())
+    if code != "ru":
+        needed -= CLICK_DEVELOPER_ONLY
+    assert sorted(needed - set(TRANSLATED[code].click)) == []
 
 
-def test_plural_messages_have_every_russian_form() -> None:
-    for singular, plural in source_messages().items():
-        if plural is not None:
-            forms = ru.MESSAGES[singular]
-            assert isinstance(forms, tuple) and len(forms) == 3, singular
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_plural_messages_have_every_form_of_the_language(code: str) -> None:
+    catalog = TRANSLATED[code]
+    plurals = {**source_messages(), **click_messages()}
+    for table in (catalog.messages, catalog.click):
+        for singular, translated in table.items():
+            if plurals.get(singular) is not None:
+                assert isinstance(translated, tuple), (code, singular)
+                assert len(translated) == catalog.forms, (code, singular)
+            else:
+                assert isinstance(translated, str), (code, singular)
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_plural_rule_picks_an_existing_form(code: str) -> None:
+    catalog = TRANSLATED[code]
+    assert {catalog.plural(n) for n in range(200)} == set(range(catalog.forms))
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_no_translation_is_empty(code: str) -> None:
+    catalog = TRANSLATED[code]
+    for table in (catalog.messages, catalog.click):
+        for source, translated in table.items():
+            forms = (translated,) if isinstance(translated, str) else translated
+            assert all(form.strip() for form in forms), (code, source)
 
 
 @pytest.mark.parametrize(

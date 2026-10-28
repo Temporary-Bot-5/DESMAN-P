@@ -14,8 +14,9 @@ Translated, besides our own messages:
 Not translated: `--json` output, the audit log and model prompts. They are data, read by
 programs and by models, and stay the same whatever the operator's language.
 
-Adding a language: a `locales/<code>.py` with `CATALOG`, its code in `CATALOGS` and in
-`Config.language`. A test checks that every message in the source has a translation.
+Adding a language: a `locales/<code>.py` with `CATALOG` (plural rule and number of forms
+included), its code in `CATALOGS` and in `Config.language`. Tests check every catalog: each
+message of the source translated, the same `{fields}`, every plural form of the language.
 """
 
 from __future__ import annotations
@@ -26,14 +27,46 @@ from collections.abc import Iterator
 
 import click
 
-from desman.locales import Catalog, Forms, english_plural, ru
+from desman.locales import (
+    Catalog,
+    Forms,
+    de,
+    english_plural,
+    es,
+    fr,
+    hi,
+    ja,
+    ko,
+    pl,
+    pt,
+    ru,
+    tr,
+    uk,
+    zh,
+)
 
 __all__ = ["CATALOGS", "Catalog", "Forms", "language", "set_language", "t", "tn"]
 
 ENGLISH = Catalog("English", english_plural, {})
 
 
-CATALOGS: dict[str, Catalog] = {"en": ENGLISH, "ru": ru.CATALOG}
+# The language menu shows them in this order: English, Russian, then by how many people use
+# the language on a personal computer.
+CATALOGS: dict[str, Catalog] = {
+    "en": ENGLISH,
+    "ru": ru.CATALOG,
+    "zh": zh.CATALOG,
+    "es": es.CATALOG,
+    "pt": pt.CATALOG,
+    "de": de.CATALOG,
+    "fr": fr.CATALOG,
+    "ja": ja.CATALOG,
+    "ko": ko.CATALOG,
+    "pl": pl.CATALOG,
+    "tr": tr.CATALOG,
+    "uk": uk.CATALOG,
+    "hi": hi.CATALOG,
+}
 _current: Catalog = ENGLISH
 
 
