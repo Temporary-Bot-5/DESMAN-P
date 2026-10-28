@@ -3,7 +3,7 @@
 Main menu: providers numbered in `providers.PROVIDERS` order (free, paid, local, under section
 headings that take no number), then Done. A provider without
 keys goes straight to the key prompt; one with keys opens its menu: 1 add, 2 remove, then its
-settings, then Back. Permissions follow: four y/N questions, Enter keeps the current value.
+settings, then Back. Permissions follow: four Y/N questions, Enter keeps the current value.
 """
 
 from __future__ import annotations

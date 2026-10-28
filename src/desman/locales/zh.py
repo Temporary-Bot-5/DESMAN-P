@@ -234,6 +234,15 @@ MESSAGES: dict[str, Forms] = {
     "Configuration saved to {path}": "配置已保存到 {path}",
     'Next: `desman config show` to review, `desman run "..."` to start.': '下一步：`desman config show` 检查配置，`desman run "..."` 开始运行。',
     "No cloud key yet: cloud models will not work until you add one.": "还没有云端密钥：添加之前云端模型无法使用。",
+    "Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name).": "显示界面语言，或切换到 LANGUAGE（代码如 zh，或语言名称）。",
+    "code": "代码",
+    "language": "语言",
+    "Languages": "语言",
+    "Switch with `desman language CODE`.": "切换：`desman language 代码`。",
+    "Language set to {name}.": "界面语言已设为 {name}。",
+    "unknown language {name!r} (known: {codes})": "未知语言 {name!r}（已知：{codes}）",
+    "interface language": "界面语言",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {

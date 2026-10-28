@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from desman import __version__, i18n, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import ConfigError, open_config
-from desman.config_cli import config, keys, load_config, run_wizard, usage
+from desman.config_cli import config, keys, language, load_config, run_wizard, usage
 from desman.core import calls, db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
@@ -120,6 +120,7 @@ def help(ctx: click.Context) -> None:
 cli.add_command(config)
 cli.add_command(keys)
 cli.add_command(usage)
+cli.add_command(language)
 
 
 @cli.command("init-db")
