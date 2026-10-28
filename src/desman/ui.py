@@ -230,11 +230,16 @@ def confirm(question: str, default: bool = False) -> bool:
         raw = raw.strip().lower()
         if not raw:
             return default
-        if raw in ("y", "yes", "д", "да"):
+        if raw in _answers("y", "yes", t("yes")):
             return True
-        if raw in ("n", "no", "н", "нет"):
+        if raw in _answers("n", "no", t("no")):
             return False
         error(t("enter y or n"))
+
+
+def _answers(*words: str) -> set[str]:
+    """Each word and its first letter, in lower case: y, yes, and the language's own (ja, j)."""
+    return {form for word in words for form in (word.casefold(), word.casefold()[:1]) if form}
 
 
 def text(question: str, default: str = "") -> str:

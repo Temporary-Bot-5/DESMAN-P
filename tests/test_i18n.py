@@ -302,3 +302,35 @@ def test_confirmations_read_y_slash_n() -> None:
     open_config().save(Config(language="en", configured=True))
     result = CliRunner().invoke(cli, ["config", "reset"], input="n\n")
     assert "(Y/N)" in result.output and "[y/N]" not in result.output
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_yes_and_no_never_share_a_first_letter(code: str) -> None:
+    messages = TRANSLATED[code].messages
+    yes, no = str(messages["yes"]).casefold(), str(messages["no"]).casefold()
+    assert yes[:1] != no[:1] and yes[:1] not in "n" and no[:1] not in "y"
+
+
+@pytest.mark.parametrize(
+    ("code", "answer", "kept"),
+    [
+        ("ru", "д", False),
+        ("ru", "нет", True),
+        ("de", "j", False),
+        ("pl", "tak", False),
+        ("en", "y", False),
+        ("de", "y", False),
+        ("de", "n", True),
+    ],
+)
+def test_confirmations_take_the_languages_own_answers(code: str, answer: str, kept: bool) -> None:
+    open_config().save(Config(language=code, configured=True))  # type: ignore[arg-type]
+    result = CliRunner().invoke(cli, ["config", "reset"], input=f"{answer}\n")
+    assert open_config().config_path.exists() is kept, result.output
+
+
+def test_the_language_question_favours_no_language() -> None:
+    result = CliRunner().invoke(cli, ["config"], input="\n")
+    assert "Language" in result.output and "Язык" not in result.output
+    configure("ru")
+    assert "Язык" in CliRunner().invoke(cli, ["config"], input="\n").output

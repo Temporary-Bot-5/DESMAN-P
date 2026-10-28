@@ -243,6 +243,8 @@ MESSAGES: dict[str, Forms] = {
     "unknown language {name!r} (known: {codes})": "未知语言 {name!r}（已知：{codes}）",
     "interface language": "界面语言",
     "(Y/N)": "(Y/N)",
+    "yes": "是",
+    "no": "否",
 }
 
 CLICK: dict[str, Forms] = {
