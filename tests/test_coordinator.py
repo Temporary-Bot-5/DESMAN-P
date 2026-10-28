@@ -426,3 +426,47 @@ def test_bad_provider_deadline_does_not_crash_the_loop(store: Store, clock: Fake
     task_id = store.create_task(chain("a"))
     co = coordinator(store, clock, bad_deadline, policy=RetryPolicy(max_transient=2))
     assert co.run(task_id).status is TaskStatus.NEEDS_HUMAN
+
+
+# ── Error reports (ROADMAP 2.8) ──────────────────────────────────────────────
+
+
+def test_an_error_report_is_a_failed_attempt_never_a_result(store: Store, clock: FakeClock) -> None:
+    reviewed: list[dict[str, Any] | None] = []
+
+    def gives_up(work: Work) -> Success:
+        return Success(content={"type": "error", "reason": "no access to the data"})
+
+    def records(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        reviewed.append(artifact)
+        return Review(verdict=Verdict.ACCEPT)
+
+    task_id = store.create_task(chain("a"))
+    result = coordinator(store, clock, executor=gives_up, reviewer=records).run(task_id)
+    assert result.status is TaskStatus.NEEDS_HUMAN  # the quality budget ran out
+    [sub] = store.list_subtasks(task_id)
+    assert reviewed == [] and store.latest_artifact(sub.id) is None  # nothing to accept
+    reasons = [r["details_json"] for r in store.audit_log(task_id) if r["actor"] == "executor"]
+    assert any("executor reported an error: no access to the data" in r for r in reasons)
+    assert check_history(store.conn, task_id) == []
+
+
+def test_an_accepted_error_report_is_overruled(store: Store, clock: FakeClock) -> None:
+    # However it got stored, an error artifact is sent back even if the reviewer accepts it.
+    task_id = store.create_task(chain("a"))
+    claimed = store.claim("w")
+    assert claimed is not None and claimed.lease_token is not None
+    store.submit(claimed.id, claimed.lease_token, {"type": "error", "message": "gave up"})
+    calls = 0
+
+    def fixed(work: Work) -> Success:
+        nonlocal calls
+        calls += 1
+        assert work.context.feedback is not None
+        assert "gave up" in work.context.feedback.text and "overruled" in work.context.feedback.text
+        return Success(content={"ok": 1})
+
+    assert coordinator(store, clock, executor=fixed).run(task_id).status is TaskStatus.DONE
+    [sub] = store.list_subtasks(task_id)
+    assert calls == 1 and sub.attempts == Attempts(quality=1)
+    assert store.latest_artifact(sub.id) == {"ok": 1}

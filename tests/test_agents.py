@@ -18,6 +18,7 @@ from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
 from desman.core.store import Store
 from desman.core.workspace import Workspace
+from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, garbage
 from desman.llm.structured import json_object as _json_object
 
@@ -96,7 +97,8 @@ def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path
     )
     first, second = execute(work), execute(work)
     assert isinstance(first, Failure) and first.kind is FailureKind.QUALITY
-    assert "not a JSON object" in first.reason and "after a repair request" in first.reason
+    assert first.reason == "unusable reply: The reply is not a JSON object."
+    assert garbage("truncated").text[:20] not in first.reason  # the reply may echo a secret
     assert isinstance(second, Success) and second.content == {"ok": 1}
     assert len(llm.calls) == 4
 
@@ -233,3 +235,59 @@ def test_repair_request_shows_the_reply_and_the_problem(store: Store, clock: Fak
     assert repair.prompt.startswith("Review subtask (repair):\n")
     assert "- verdict: Input should be 'accept', 'retry' or 'escalate'" in repair.prompt
     assert "- feedback: Input should be a valid string" in repair.prompt
+
+
+# ── Reviewer feedback (ROADMAP 2.8) ──────────────────────────────────────────
+
+
+def test_retry_feedback_reaches_the_next_attempt(store: Store, clock: FakeClock) -> None:
+    llm = (
+        FakeLLM()
+        .on("Execute", '{"text": "draft"}', '{"text": "Title\\ndraft"}')
+        .on(
+            "Review",
+            '{"verdict": "retry"}',  # no feedback: not a usable verdict
+            '{"verdict": "retry", "feedback": "1. add a title"}',
+            '{"verdict": "accept"}',
+        )
+    )
+    task_id = store.create_task(one_step())
+    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
+        task_id
+    )
+    assert result.status is TaskStatus.DONE
+    repair = next(r.prompt for r in llm.calls if r.prompt.startswith("Review subtask (repair)"))
+    assert 'a "retry" verdict needs feedback' in repair
+    executions = [payload(r.prompt)[1] for r in llm.calls if r.prompt.startswith("Execute")]
+    assert executions[0]["feedback_on_previous_attempt"] is None
+    assert executions[1]["feedback_on_previous_attempt"] == "1. add a title"
+    assert executions[1]["attempt"] == 2
+
+
+def test_the_executor_may_say_it_cannot_do_the_work(store: Store, clock: FakeClock) -> None:
+    llm = FakeLLM().on("Execute", '{"type": "error", "reason": "needs a login"}', repeat_last=True)
+    task_id = store.create_task(one_step())
+    reviewer = llm_reviewer(FakeLLM())  # never asked: there is nothing to review
+    result = Coordinator(store, llm_executor(llm), reviewer, sleep=clock.sleep).run(task_id)
+    assert result.status is TaskStatus.NEEDS_HUMAN
+    assert '"type": "error"' in llm.calls[0].messages[0].content  # the way out is offered
+
+
+def test_an_error_report_is_not_cached(store: Store, tmp_path: Path) -> None:
+    # A source that was down for one task may be up for the next one asking the same.
+    fake = FakeLLM('{"type": "error", "reason": "down"}', '{"ok": 1}', '{"ok": 2}')
+    execute = llm_executor(Cached(fake, store.conn, "m"))
+    store.create_task(one_step())
+    claimed = store.claim("w")
+    assert claimed is not None
+    work = Work(
+        subtask=claimed,
+        context=build_context(claimed, [], None),
+        heartbeat=no_heartbeat,
+        workspace=Workspace(tmp_path, claimed.task_id),
+    )
+    results = [execute(work) for _ in range(3)]
+    # The coordinator turns the report into a failed attempt; here it is just not kept.
+    assert results[0] == Success(content={"type": "error", "reason": "down"})
+    assert results[1] == results[2] == Success(content={"ok": 1})  # this one is kept
+    assert len(fake.calls) == 2

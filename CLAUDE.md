@@ -36,7 +36,8 @@ src/desman/
 ├── cli.py         # Click entry point: `desman`, `config`, `help`, `init-db`, and the task
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
-├── agents.py      # Minimal LLM executor/reviewer (JSON replies) behind `desman run`
+├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
+│                  #   `{"type": "error"}` = can't do it (never accepted, see coordinator)
 ├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
 ├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import`,

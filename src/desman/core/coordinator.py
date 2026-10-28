@@ -75,6 +75,20 @@ class Failure(BaseModel):
 
 Outcome = Success | Failure
 
+ERROR_TYPE = "error"
+"""A result `{"type": "error", "reason": ...}` is the executor saying it could not do the work."""
+REASON_EXCERPT = 300
+
+
+def is_error_report(content: dict[str, Any] | None) -> bool:
+    """An artifact that reports a failure instead of a result: never accepted (ROADMAP 2.8)."""
+    return content is not None and content.get("type") == ERROR_TYPE
+
+
+def _error_reason(content: dict[str, Any]) -> str:
+    reason = content.get("reason") or content.get("message") or "no reason given"
+    return f"executor reported an error: {str(reason)[:REASON_EXCERPT]}"
+
 
 class Verdict(StrEnum):
     ACCEPT = "accept"
@@ -236,6 +250,9 @@ class Coordinator:
                 kind=FailureKind.TRANSIENT, reason=f"executor raised {type(e).__name__}: {e}"
             )
 
+        if isinstance(outcome, Success) and is_error_report(outcome.content):
+            # Not a result: a failed attempt, never something a reviewer could accept.
+            outcome = Failure(kind=FailureKind.QUALITY, reason=_error_reason(outcome.content))
         try:
             if isinstance(outcome, Success):
                 self.store.submit(subtask.id, lease, outcome.content)
@@ -258,8 +275,9 @@ class Coordinator:
 
     def _review(self, subtask: Subtask, events: list[str]) -> bool:
         review: Review | Failure
+        artifact = self.store.latest_artifact(subtask.id)
         try:
-            returned = self.reviewer(subtask, self.store.latest_artifact(subtask.id))
+            returned = self.reviewer(subtask, artifact)
             # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
         except ProviderError as e:
@@ -267,6 +285,17 @@ class Coordinator:
         except (Exception, ValidationError) as e:
             review = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"
+            )
+        if (
+            isinstance(review, Review)
+            and review.verdict is Verdict.ACCEPT
+            and is_error_report(artifact)
+        ):
+            # Whatever the reviewer says: an error report is not a result.
+            assert artifact is not None
+            review = Review(
+                verdict=Verdict.RETRY,
+                feedback=f"{_error_reason(artifact)} (accepted by the reviewer, overruled)",
             )
         verdict: dict[str, Any] = {}
         if isinstance(review, Review):

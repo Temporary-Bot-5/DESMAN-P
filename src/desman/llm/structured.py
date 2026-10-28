@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Callable
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -44,15 +45,25 @@ class StructuredOutputError(ValueError):
         self.reply = reply
 
 
-def complete_json(llm: LLM, request: Request, schema: type[T], *, heading: str) -> T:
+def complete_json(
+    llm: LLM,
+    request: Request,
+    schema: type[T],
+    *,
+    heading: str,
+    keep: Callable[[T], bool] = lambda value: True,
+) -> T:
     """Ask `llm` and return its reply validated as `schema`, repairing it once if needed.
 
-    Provider errors propagate untouched: they are not the reply's fault.
+    A valid reply is cached unless `keep(value)` says it is not worth reusing (e.g. a reply
+    that reports a failure: asked again later, the model may succeed). Provider errors
+    propagate untouched: they are not the reply's fault.
     """
     reply = llm.complete(request)
     value, problem = _validate(reply, schema)
     if value is not None:
-        _accept(llm, request, reply)
+        if keep(value):
+            _accept(llm, request, reply)
         return value
     repair = request.model_copy(
         update={
@@ -72,7 +83,8 @@ def complete_json(llm: LLM, request: Request, schema: type[T], *, heading: str) 
     second = llm.complete(repair)
     value, problem = _validate(second, schema)
     if value is not None:
-        _accept(llm, repair, second)
+        if keep(value):
+            _accept(llm, repair, second)
         return value
     raise StructuredOutputError(problem, second)
 
