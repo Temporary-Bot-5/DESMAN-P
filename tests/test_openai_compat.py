@@ -661,3 +661,19 @@ def test_a_zero_limit_seen_before_a_success_is_history() -> None:
     shown = desman("usage").output
     assert "the limit is 0" not in shown
     assert "Grey rows come from an earlier call" in shown
+
+
+def test_a_paid_key_out_of_money_lets_the_next_key_pay() -> None:
+    used: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        used.append(request.headers["authorization"])
+        if request.headers["authorization"] == f"Bearer {KEY_A}":
+            return httpx.Response(402, json={"error": {"message": "Insufficient Balance"}})
+        return reply()
+
+    llm, _ = client(handler, [KEY_A, KEY_B])
+    llm.paid = True
+    llm.complete(REQUEST)
+    llm.complete(REQUEST)
+    assert used == [f"Bearer {KEY_A}", f"Bearer {KEY_B}", f"Bearer {KEY_B}"]  # A not again
