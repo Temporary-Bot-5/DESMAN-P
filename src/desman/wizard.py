@@ -1,4 +1,4 @@
-"""The interactive `desman config` wizard (bilingual en/ru).
+"""The interactive `desman config` wizard, in the configured language (`desman.i18n`).
 
 Language, then a provider menu that stays open until "Done": pick a provider, add or remove
 its keys (several per provider are fine) or change its settings, pick the next one. Then the
@@ -43,7 +43,7 @@ def run(manager: ConfigManager) -> None:
         t("DESMAN(P) — Configuration"), t("Decentralized Self-Evolving Modular Agents Network")
     )
     lang = ui.select(
-        "Language / Язык",
+        t("Language"),
         [ui.Choice(catalog.name, code) for code, catalog in i18n.CATALOGS.items()],
         default=saved.language,
     )

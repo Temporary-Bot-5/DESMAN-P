@@ -250,6 +250,8 @@ MESSAGES: dict[str, Forms] = {
     "interface language": "インターフェースの言語",
     "(Y/N)": "(Y/N)",
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "同じリクエストに受け入れ済みの応答があってもモデルに問い合わせます（既定ではその応答を 7 日間再利用し、resume 時のクォータを節約します）。",
+    "yes": "はい",
+    "no": "いいえ",
 }
 
 CLICK: dict[str, Forms] = {

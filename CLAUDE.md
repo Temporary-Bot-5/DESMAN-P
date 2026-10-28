@@ -40,7 +40,7 @@ src/desman/
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
 ├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import`,
 │                  #   `language [CODE]`, `usage`
-├── wizard.py      # en/ru setup wizard: provider menu loop, permissions
+├── wizard.py      # setup wizard (language, provider menu loop, permissions)
 ├── providers.py   # known model providers, readiness, key masking, key-file parsing
 ├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise)
 ├── i18n.py        # t()/tn(): messages, command help and Click's own text in the configured

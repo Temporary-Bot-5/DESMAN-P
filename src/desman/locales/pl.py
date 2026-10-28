@@ -287,6 +287,8 @@ MESSAGES: dict[str, Forms] = {
     "interface language": "język interfejsu",
     "(Y/N)": "(Y/N)",
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Pytaj model nawet wtedy, gdy to samo zapytanie ma już zaakceptowaną odpowiedź (domyślnie jest ona używana ponownie przez 7 dni, co oszczędza limit przy wznowieniu).",
+    "yes": "tak",
+    "no": "nie",
 }
 
 CLICK: dict[str, Forms] = {

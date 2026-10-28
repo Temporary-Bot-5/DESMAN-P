@@ -271,6 +271,8 @@ MESSAGES: dict[str, Forms] = {
     "interface language": "इंटरफ़ेस की भाषा",
     "(Y/N)": "(Y/N)",
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "मॉडल से फिर पूछें, भले ही उसी अनुरोध का स्वीकार किया गया उत्तर पहले से हो (डिफ़ॉल्ट रूप से ऐसा उत्तर 7 दिन तक फिर से इस्तेमाल होता है, जिससे resume पर कोटा बचता है)।",
+    "yes": "हाँ",
+    "no": "नहीं",
 }
 
 CLICK: dict[str, Forms] = {
