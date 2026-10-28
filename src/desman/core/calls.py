@@ -55,6 +55,8 @@ class KeyUsage:
     last_at: str | None
     last_error: str | None
     limits: dict[str, str]  # the rate-limit headers of the latest call that had any
+    limits_current: bool = True
+    """The limits came with the key's latest call: no call has been made since without them."""
 
 
 def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUsage]:
@@ -77,12 +79,12 @@ def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUs
     out = []
     for r in rows:
         last = conn.execute(
-            "SELECT error FROM model_calls WHERE provider = ? AND key_id IS ? "
+            "SELECT seq, error FROM model_calls WHERE provider = ? AND key_id IS ? "
             "ORDER BY seq DESC LIMIT 1",
             (r["provider"], r["key_id"]),
         ).fetchone()
         limits = conn.execute(
-            "SELECT limits_json FROM model_calls WHERE provider = ? AND key_id IS ? "
+            "SELECT seq, limits_json FROM model_calls WHERE provider = ? AND key_id IS ? "
             "AND limits_json != '{}' ORDER BY seq DESC LIMIT 1",
             (r["provider"], r["key_id"]),
         ).fetchone()
@@ -98,6 +100,48 @@ def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUs
                 last_at=r["last_at"],
                 last_error=last["error"] if last else None,
                 limits=json.loads(limits["limits_json"]) if limits else {},
+                limits_current=bool(limits) and limits["seq"] == last["seq"],
             )
         )
     return out
+
+
+@dataclass(frozen=True)
+class Limit:
+    """One rate limit as a provider reported it: e.g. requests, 998 of 1000 left, reset in 2m."""
+
+    name: str
+    remaining: str | None
+    limit: str | None
+    reset: str | None
+
+    @property
+    def exhausted_for_good(self) -> bool:
+        """A limit of 0: the account has no access at all (e.g. Mistral's free plan before
+        activation), waiting will not help."""
+        return self.limit is not None and _number(self.limit) == 0
+
+
+def limits(headers: dict[str, str]) -> tuple[list[Limit], dict[str, str]]:
+    """The `x-ratelimit-{limit,remaining,reset}-<name>` headers grouped by limit, in the order
+    the provider sent them, and whatever else did not fit that pattern."""
+    found: dict[str, dict[str, str]] = {}
+    other: dict[str, str] = {}
+    for header, value in headers.items():
+        name = header.lower().removeprefix("x-ratelimit-")
+        kind, _, limit = name.partition("-")
+        if kind in ("limit", "remaining", "reset") and limit:
+            found.setdefault(limit, {})[kind] = value
+        else:
+            other[header] = value
+    return [
+        Limit(name, parts.get("remaining"), parts.get("limit"), parts.get("reset"))
+        for name, parts in found.items()
+    ], other
+
+
+def _number(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None

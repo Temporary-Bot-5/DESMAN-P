@@ -20,7 +20,7 @@ import httpx
 from rich.text import Text
 
 from desman import providers, ui, wizard
-from desman.config import ConfigError, ConfigManager, open_config
+from desman.config import Config, ConfigError, ConfigManager, open_config
 from desman.core import calls, db
 from desman.i18n import t, tn
 from desman.llm import check
@@ -335,6 +335,7 @@ def usage(since: str, as_json: bool, db_path: Path | None) -> None:
             else t("No model calls in the last {since}.", since=since)
         )
         return
+    lines = _usage_lines(config, rows)
     table = ui.table(
         t("provider"),
         t("key"),
@@ -346,10 +347,13 @@ def usage(since: str, as_json: bool, db_path: Path | None) -> None:
         t("last call"),
         title=t("Usage (all time)") if window is None else t("Usage (last {since})", since=since),
     )
-    for u in rows:
+    for provider, label, u in lines:
+        if u is None:  # a configured key with no calls in the window
+            table.add_row(provider, label, Text("0", style="muted"), *[Text("-", "muted")] * 5)
+            continue
         table.add_row(
-            u.provider,
-            names.get(u.key_id or "", t("removed key")),
+            provider,
+            label,
             str(u.calls),
             Text(str(u.failed), style="bad" if u.failed else "muted"),
             Text(str(u.limited), style="warn" if u.limited else "muted"),
@@ -358,10 +362,98 @@ def usage(since: str, as_json: bool, db_path: Path | None) -> None:
             (u.last_at or "")[:16].replace("T", " "),
         )
     ui.out(table)
-    for u in rows:
-        if u.limits:
-            shown = ", ".join(f"{k.removeprefix('x-ratelimit-')}: {v}" for k, v in u.limits.items())
-            ui.note(f"{u.provider} {names.get(u.key_id or '', '')}: {shown}")
+    if any(u is not None and u.key_id not in names for _, _, u in lines):
+        ui.note(
+            t(
+                '"removed": calls in this period went through a key that is no longer in the config '
+                "(deleted or replaced). The characters in brackets start its fingerprint."
+            )
+        )
+    _print_limits(lines)
+
+
+Line = tuple[str, str, calls.KeyUsage | None]
+
+
+def _usage_lines(config: Config, rows: list[calls.KeyUsage]) -> list[Line]:
+    """Every key of each provider that made calls, in `desman keys` order (keys without calls
+    included), then the keys that were removed since."""
+    lines: list[Line] = []
+    known = [p.id for p in providers.CLOUD]
+    for pid in [*known, *sorted({u.provider for u in rows} - set(known))]:
+        logged = {u.key_id: u for u in rows if u.provider == pid}
+        if not logged:
+            continue
+        configured = []
+        if pid in known:
+            p = providers.find(pid)
+            for i, k in enumerate(config.keys(p.key_env or ""), 1):
+                configured.append(key_id(k.value))
+                lines.append((pid, f"#{i} {providers.mask(k.value)}", logged.get(key_id(k.value))))
+        for kid, u in logged.items():
+            if kid not in configured:
+                lines.append((pid, t("removed ({id}…)", id=(kid or "?")[:4]), u))
+    return lines
+
+
+def _print_limits(lines: list[Line]) -> None:
+    table = ui.table(
+        t("provider"),
+        t("key"),
+        t("limit"),
+        t("left"),
+        t("resets in"),
+        title=t("Limits reported with the latest call"),
+    )
+    blocked = []
+    older = False
+    for provider, label, u in lines:
+        if u is None or not u.limits:
+            continue
+        found, other = calls.limits(u.limits)
+        # Limits from an earlier call (later ones sent none) are history, not the key's state.
+        row_style = "" if u.limits_current else "muted"
+        older = older or not u.limits_current
+        first = True
+        for limit in found:
+            left = f"{limit.remaining or '?'} / {limit.limit or '?'}"
+            bad = limit.exhausted_for_good and u.limits_current
+            table.add_row(
+                provider if first else "",
+                label if first else "",
+                limit.name,
+                Text(left, style="bad" if bad else row_style),
+                limit.reset or "",
+                style=row_style,
+            )
+            first = False
+            if bad:
+                blocked.append(f"{provider} {label}")
+        for header, value in other.items():
+            table.add_row(
+                provider if first else "",
+                label if first else "",
+                header,
+                value,
+                "",
+                style=row_style,
+            )
+            first = False
+    if not table.rows:
+        return
+    ui.out("")
+    ui.out(table)
+    if older:
+        ui.note(t("Grey rows come from an earlier call: later calls with that key sent no limits."))
+    for who in dict.fromkeys(blocked):
+        ui.warn(
+            t(
+                "{key}: the limit is 0, so this account has no access to the API yet (a free plan "
+                "may need activating on the provider's site). DESMAN sets such a key aside and "
+                "tries the provider's other keys.",
+                key=who,
+            )
+        )
 
 
 def _window(since: str) -> timedelta | None:

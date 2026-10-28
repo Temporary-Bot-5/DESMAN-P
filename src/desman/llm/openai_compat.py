@@ -142,7 +142,9 @@ class OpenAICompatible:
             try:
                 return self._attempt(i, model, body, prompt_hash)
             except ProviderRejected as e:
-                if e.status not in (401, 403):
+                # 401/403: the key is refused; a 429 rejection is a limit of 0 (an account
+                # without access). Both belong to this key: set it aside, try the next one.
+                if e.status not in (401, 403, 429):
                     raise  # the request is wrong, not the key: another key will not help
                 self._refused.add(i)
                 self._refusal = e
