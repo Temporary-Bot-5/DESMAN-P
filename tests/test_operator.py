@@ -175,7 +175,7 @@ def test_cancel(store: Store) -> None:
     task_id, _ = escalated(store, chain("a", "b"))
     result = desman("cancel", task_id[:8], "--note", "not needed")
     assert result.exit_code == 0, result.output
-    assert "2 subtask(s) cancelled, task is cancelled" in result.output
+    assert "2 subtasks cancelled, task is cancelled" in result.output
     assert store.task_status(task_id) is TaskStatus.CANCELLED
     again = json.loads(desman("cancel", task_id[:8], "--json").output)
     assert again["cancelled"] == [] and again["status"] == "cancelled"

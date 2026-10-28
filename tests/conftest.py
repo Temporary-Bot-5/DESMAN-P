@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from desman import i18n
 from desman.config import CONFIG_DIR_ENV
 from desman.core import db
 from desman.core.db import DATA_DIR_ENV
@@ -21,6 +22,14 @@ def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(CONFIG_DIR_ENV, str(config_dir))
     monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path / "data"))
     return config_dir
+
+
+@pytest.fixture(autouse=True)
+def english() -> Iterator[None]:
+    """Every test starts and ends in English (the wizard and the CLI switch the language)."""
+    i18n.set_language("en")
+    yield
+    i18n.set_language("en")
 
 
 class FakeClock:

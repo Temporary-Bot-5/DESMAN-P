@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from desman.i18n import t
+
 if TYPE_CHECKING:
     from desman.config import Config
 
@@ -177,7 +179,7 @@ def find(name: str) -> Provider:
         if wanted in (p.id, p.name.lower(), (p.key_env or "").lower()):
             return p
     known = ", ".join(p.id for p in PROVIDERS)
-    raise UnknownProvider(f"unknown provider {name!r} (known: {known})")
+    raise UnknownProvider(t("unknown provider {name!r} (known: {known})", name=name, known=known))
 
 
 def by_key_env(env: str) -> Provider | None:

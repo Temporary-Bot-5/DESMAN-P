@@ -20,6 +20,8 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
+from desman.i18n import t
+
 T = TypeVar("T")
 
 ACCENT = "#00EEFF"
@@ -142,7 +144,7 @@ def select(question: str, choices: Sequence[Choice], default: Any = None) -> Any
             choices=q_choices,
             default=q_choices[start],
             qmark="›",
-            instruction="(↑/↓, Enter)",
+            instruction=t("(↑/↓, Enter)"),
             style=_style(),
         ).ask()
         if answer is None:
@@ -160,7 +162,7 @@ def select(question: str, choices: Sequence[Choice], default: Any = None) -> Any
         raw = click.prompt("  ›", default=str(start), show_default=False).strip()
         if raw.isdigit() and 1 <= int(raw) <= len(choices):
             return choices[int(raw) - 1].value
-        error(f"enter a number from 1 to {len(choices)}")
+        error(t("enter a number from 1 to {n}", n=len(choices)))
 
 
 def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:
@@ -175,7 +177,7 @@ def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set
                 for i, c in enumerate(choices)
             ],
             qmark="›",
-            instruction="(Space toggles, Enter confirms)",
+            instruction=t("(Space toggles, Enter confirms)"),
             style=_style(),
         ).ask()
         if answer is None:
@@ -203,7 +205,7 @@ def confirm(question: str, default: bool = False) -> bool:
             return True
         if raw in ("n", "no", "н", "нет"):
             return False
-        error("enter y or n")
+        error(t("enter y or n"))
 
 
 def text(question: str, default: str = "") -> str:

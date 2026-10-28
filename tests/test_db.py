@@ -315,10 +315,10 @@ def test_init_db_cli_is_idempotent(tmp_path: Path) -> None:
     runner = CliRunner()
     first = runner.invoke(cli, ["init-db"])
     assert first.exit_code == 0, first.output
-    assert f"({db.SCHEMA_VERSION} migration(s) applied)" in first.output
+    assert f"({db.SCHEMA_VERSION} migrations applied)" in first.output
     assert (tmp_path / "data" / "desman.db").exists()
     second = runner.invoke(cli, ["init-db"])
-    assert "(0 migration(s) applied)" in second.output
+    assert "(0 migrations applied)" in second.output
 
 
 def test_init_db_cli_refuses_newer_schema(tmp_path: Path) -> None:

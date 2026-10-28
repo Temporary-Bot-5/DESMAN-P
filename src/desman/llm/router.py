@@ -14,6 +14,7 @@ import httpx
 
 from desman import providers
 from desman.config import Config
+from desman.i18n import t
 from desman.llm.openai_compat import CallRecord, OpenAICompatible
 from desman.providers import Provider
 
@@ -30,19 +31,32 @@ def choose(config: Config, wanted: str | None = None) -> Provider:
         except providers.UnknownProvider as e:
             raise NoProvider(str(e)) from e
         if provider.local:
-            raise NoProvider(f"{provider.name} is local: local models are not supported yet")
-        if not provider.is_ready(config):
             raise NoProvider(
-                f"{provider.name} is not configured: add a key with "
-                f"`desman keys add {provider.id}`"
-                + (" and set its settings in `desman config`" if provider.settings else "")
+                t("{name} is local: local models are not supported yet", name=provider.name)
+            )
+        if not provider.is_ready(config):
+            if provider.settings:
+                raise NoProvider(
+                    t(
+                        "{name} is not configured: add a key with `desman keys add {id}` and set "
+                        "its settings in `desman config`",
+                        name=provider.name,
+                        id=provider.id,
+                    )
+                )
+            raise NoProvider(
+                t(
+                    "{name} is not configured: add a key with `desman keys add {id}`",
+                    name=provider.name,
+                    id=provider.id,
+                )
             )
         return provider
     ready = {p.id: p for p in providers.ready(config)}
     for pid in providers.PREFERENCE:
         if pid in ready:
             return ready[pid]
-    raise NoProvider("no provider is configured: add a key with `desman keys add PROVIDER`")
+    raise NoProvider(t("no provider is configured: add a key with `desman keys add PROVIDER`"))
 
 
 @dataclass(frozen=True)
