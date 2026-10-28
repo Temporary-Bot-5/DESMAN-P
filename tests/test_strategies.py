@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 from typing import Any
 
@@ -37,12 +38,15 @@ ACCEPT = '{"verdict": "accept"}'
 
 def test_each_attempt_number_has_its_strategy() -> None:
     assert [strategy_for(n) for n in range(1, 7)] == [
-        S.FIRST, S.FEEDBACK, S.REPHRASE, S.OTHER_MODEL, S.OTHER_MODEL, S.OTHER_MODEL
+        S.FIRST, S.FEEDBACK, S.REPHRASE, S.OTHER_MODEL, S.DECOMPOSE, S.DECOMPOSE
     ]  # fmt: skip
     # Nothing to switch to: rephrase again rather than claim another model was used.
     assert [strategy_for(n, other_model=False) for n in range(1, 6)] == [
-        S.FIRST, S.FEEDBACK, S.REPHRASE, S.REPHRASE, S.REPHRASE
+        S.FIRST, S.FEEDBACK, S.REPHRASE, S.REPHRASE, S.DECOMPOSE
     ]  # fmt: skip
+    # A subtask that may not be split repeats its fourth strategy.
+    assert strategy_for(5, split=False) is S.OTHER_MODEL
+    assert strategy_for(5, other_model=False, split=False) is S.REPHRASE
 
 
 def one_step() -> TaskSpec:
@@ -56,7 +60,7 @@ def run(store: Store, clock: FakeClock, main: FakeLLM, other: FakeLLM | None, **
         llm_executor(main, other),
         llm_reviewer(main),
         sleep=clock.sleep,
-        strategies=lambda n: strategy_for(n, other_model=other is not None),
+        strategies=functools.partial(strategy_for, other_model=other is not None),
         **kw,
     )
     assert coordinator.run(task_id).status is TaskStatus.DONE

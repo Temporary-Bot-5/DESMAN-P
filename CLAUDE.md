@@ -38,7 +38,8 @@ src/desman/
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
 │                  #   `{"type": "error"}` = can't do it (never accepted, see coordinator)
-├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure
+├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure;
+│                  #   decomposer(): splits a subtask whose retries failed (2–4 parts)
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
 ├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import`,
 │                  #   `language [CODE]`, `usage`
@@ -52,7 +53,8 @@ src/desman/
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently);
-    │              #   Strategy per attempt number (feedback, rephrase, other model), audited
+    │              #   Strategy per attempt number (feedback, rephrase, other model, decompose →
+    │              #   combine), audited as attempt_started; Store.decompose() makes the parts
     ├── db.py      # sqlite3 connection, transactions, append-only migrations
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
     ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),

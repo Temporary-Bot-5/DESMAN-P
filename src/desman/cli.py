@@ -33,7 +33,7 @@ from desman.llm.base import LLM
 from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.llm.openai_compat import OpenAICompatible
-from desman.planner import Planned, plan, template_plan
+from desman.planner import Planned, decomposer, plan, template_plan
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -562,6 +562,7 @@ def _drive(
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=other is not None),
+        decomposer=decomposer(llm),
     )
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)
@@ -627,6 +628,8 @@ def _print_report(report: TaskReport) -> None:
     for sub in report.subtasks:
         line = f"  [{sub.seq}] {sub.status:<11}  {_one_line(sub.description, 60)}"
         notes = []
+        if sub.part_of is not None:
+            notes.append(t("part of {seq}", seq=sub.part_of))
         if sub.depends_on:
             notes.append(t("after {deps}", deps=", ".join(str(d) for d in sub.depends_on)))
         if sub.attempts.quality or sub.attempts.transient:

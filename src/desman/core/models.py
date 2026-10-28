@@ -80,6 +80,8 @@ class Subtask(BaseModel):
     checkpoint: dict[str, Any] | None
     attempts: Attempts
     accepted_attempt: int | None = None
+    parent_id: str | None = None
+    """Set on the parts of a subtask that was split (`Store.decompose`)."""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -100,4 +102,5 @@ class Subtask(BaseModel):
             checkpoint=json.loads(row["checkpoint_json"]) if row["checkpoint_json"] else None,
             attempts=Attempts(quality=row["attempts_quality"], transient=row["attempts_transient"]),
             accepted_attempt=row["accepted_attempt"],
+            parent_id=row["parent_id"],
         )

@@ -278,6 +278,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "योजना बनाई जा रही है…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "मॉडल ने योजना नहीं बनाई, इसलिए स्वयं लक्ष्य ही एकमात्र उप-कार्य है: {error}",
     "Retries may also use {provider} · {model}": "पुनः प्रयासों में {provider} · {model} भी इस्तेमाल हो सकता है",
+    "part of {seq}": "{seq} का भाग",
 }
 
 CLICK: dict[str, Forms] = {

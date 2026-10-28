@@ -251,6 +251,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "正在制定计划…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "模型没有制定出计划，因此目标本身是唯一的子任务：{error}",
     "Retries may also use {provider} · {model}": "重试时也可能使用 {provider} · {model}",
+    "part of {seq}": "属于 {seq}",
 }
 
 CLICK: dict[str, Forms] = {

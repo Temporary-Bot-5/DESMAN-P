@@ -22,7 +22,7 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
-from desman.core.models import Subtask, TaskSpec
+from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.states import transition as check_transition
@@ -454,6 +454,77 @@ class Store:
                 ),
             )
         return subtask
+
+    def decompose(self, subtask_id: str, lease: str, parts: list[SubtaskSpec]) -> list[Subtask]:
+        """Split a running subtask into `parts` (ROADMAP 2.9b), atomically: RUNNING -> PENDING.
+
+        The parts get the subtask's inputs, priority and dependencies (plus their own
+        `depends_on`, indices into `parts`); the subtask then depends on all of them, so it runs
+        again, to combine their results, once they are done. One level only: a part cannot be
+        split, nor a subtask twice. Returns the parts.
+        """
+        TaskSpec(goal="split", subtasks=parts)  # the same graph checks as a task
+        if len(parts) < 2:
+            raise ValueError("a split needs at least two parts")
+        with db.transaction(self.conn):
+            parent = self.get_subtask(subtask_id)
+            if parent.parent_id is not None or self.parts(subtask_id):
+                raise ValueError(f"subtask {subtask_id} cannot be split again")
+            inherited = self.dependencies(subtask_id)
+            first_seq = (
+                1
+                + self.conn.execute(
+                    "SELECT MAX(seq) FROM subtasks WHERE task_id = ?", (parent.task_id,)
+                ).fetchone()[0]
+            )
+            ids = [_new_id() for _ in parts]
+            parent = self._apply(
+                subtask_id,
+                S.RUNNING,
+                S.PENDING,
+                Actor.EXECUTOR,
+                lease=lease,
+                details={"parts": ids},
+                action="decomposed",
+            )
+            now = self._now()
+            for offset, (part_id, part) in enumerate(zip(ids, parts, strict=True)):
+                self.conn.execute(
+                    """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
+                                             inputs_json, priority, parent_id, created_at,
+                                             updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        part_id,
+                        parent.task_id,
+                        first_seq + offset,
+                        part.description,
+                        part.acceptance_criteria,
+                        json.dumps({**parent.inputs, **part.inputs}, ensure_ascii=False),
+                        parent.priority if part.priority is None else part.priority,
+                        subtask_id,
+                        now,
+                        now,
+                    ),
+                )
+                deps = [*inherited, *(ids[i] for i in part.depends_on)]
+                self.conn.executemany(
+                    "INSERT INTO subtask_deps (subtask_id, depends_on) VALUES (?, ?)",
+                    [(part_id, dep) for dep in deps],
+                )
+            self.conn.executemany(
+                "INSERT INTO subtask_deps (subtask_id, depends_on) VALUES (?, ?)",
+                [(subtask_id, part_id) for part_id in ids],
+            )
+            self._promote_ready()
+        return [self.get_subtask(part_id) for part_id in ids]
+
+    def parts(self, subtask_id: str) -> list[str]:
+        """Ids of the parts a subtask was split into, in order (empty if it was not split)."""
+        rows = self.conn.execute(
+            "SELECT id FROM subtasks WHERE parent_id = ? ORDER BY seq", (subtask_id,)
+        )
+        return [row[0] for row in rows]
 
     def artifacts(self, subtask_id: str) -> list[sqlite3.Row]:
         """All artifacts of a subtask, oldest attempt first."""

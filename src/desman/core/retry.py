@@ -18,6 +18,7 @@ operator's call. When the operator sends it back to READY the store resets the c
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,9 +35,9 @@ class FailureKind(StrEnum):
 class RetryPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    max_attempts: int = Field(default=4, ge=1)
+    max_attempts: int = Field(default=5, ge=1)
     """Total attempts allowed before quality failures escalate to the operator: by default one
-    of each `Strategy`."""
+    of each `Strategy` up to the split; the attempt that combines the parts is the fifth too."""
     max_transient: int = Field(default=5, ge=1)
     """Interruptions tolerated before escalating (a subtask that keeps crashing its executor)."""
 
@@ -49,19 +50,31 @@ class Strategy(StrEnum):
     FEEDBACK = "feedback"  # the same model again, told what the reviewer found wrong
     REPHRASE = "rephrase"  # the instructions worded differently, at a higher temperature
     OTHER_MODEL = "other_model"  # another model or provider (with the feedback)
+    DECOMPOSE = "decompose"  # split into smaller subtasks instead of trying again (no execution)
+    COMBINE = "combine"  # a split subtask, once its parts are done: the result from theirs
 
 
-def strategy_for(attempt: int, *, other_model: bool = True) -> Strategy:
-    """The strategy of attempt number `attempt` (1 is the first try). Later attempts keep using
-    another model; splitting the subtask comes in ROADMAP 2.9b. Without `other_model` (nothing
-    to switch to) those attempts are rephrased instead."""
+def strategy_for(attempt: int, *, other_model: bool = True, split: bool = True) -> Strategy:
+    """The strategy of attempt number `attempt` (1 is the first try): first, feedback, rephrase,
+    other model, then decompose. Without `other_model` (nothing to switch to) the fourth attempt
+    is rephrased; when the subtask may not be split (`split`), later attempts repeat the fourth
+    one. COMBINE is not picked by number: it is what a split subtask does next."""
     if attempt <= 1:
         return Strategy.FIRST
     if attempt == 2:
         return Strategy.FEEDBACK
+    if attempt >= 5 and split:
+        return Strategy.DECOMPOSE
     if attempt == 3 or not other_model:
         return Strategy.REPHRASE
     return Strategy.OTHER_MODEL
+
+
+class Strategies(Protocol):
+    """Attempt number -> strategy, like `strategy_for`; `split` says whether this subtask may
+    still be split (the coordinator knows, the caller who narrows the choice does not)."""
+
+    def __call__(self, attempt: int, *, split: bool = True) -> Strategy: ...
 
 
 class Attempts(BaseModel):

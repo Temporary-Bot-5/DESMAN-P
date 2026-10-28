@@ -9,16 +9,20 @@ Planning never stops a task from starting. When the model fails (provider error,
 is still wrong after the repair), the template plan is used: one subtask, the goal itself. The
 reason is shown to the operator and kept in the audit (`task_created`, `plan`).
 
-The prompt starts with "Plan task", so a fake script can route on it.
+`decomposer()` splits one subtask the same way when its retries keep failing (ROADMAP 2.9b).
+
+The prompts start with "Plan task" and "Split subtask", so a fake script can route on them.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, Field, StringConstraints, ValidationError, model_validator
 
+from desman.core.coordinator import Decomposer, Work
 from desman.core.models import Priority, SubtaskSpec, TaskSpec
 from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
@@ -133,3 +137,77 @@ def plan(llm: LLM, goal: str, priority: int = Priority.NORMAL) -> Planned:
     except ProviderError as e:
         return Planned(template_plan(goal, priority), "template", f"{type(e).__name__}: {e}")
     return Planned(reply.spec(goal, priority), "llm")
+
+
+# ── Splitting a subtask (ROADMAP 2.9b) ───────────────────────────────────────
+
+SPLIT = "Split subtask"
+"""Prompt heading: fake scripts route on it."""
+MAX_PARTS = 4
+
+SPLITTER_SYSTEM = (
+    "A subtask failed review several times. Split it into smaller parts that are easier to get "
+    f"right: at least 2, at most {MAX_PARTS}. Each part is done by one model call that sees "
+    "only that part's description, its acceptance criteria, the subtask's inputs and the "
+    "results of the parts it depends on, so every description must make sense on its own. "
+    "Afterwards the subtask's result is built from the parts' results; the feedback says what "
+    "went wrong so far. Reply with a single JSON object: "
+    '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
+    'done", "depends_on": [indices of earlier parts, counting from 0]}]}.'
+)
+
+
+class Split(BaseModel):
+    """What the splitting model must reply."""
+
+    subtasks: list[PlannedSubtask] = Field(min_length=2, max_length=MAX_PARTS)
+
+    @model_validator(mode="after")
+    def _is_a_valid_graph(self) -> Self:
+        try:
+            self.parts()
+        except ValidationError as e:
+            reasons = (str(error.get("ctx", {}).get("error", error["msg"])) for error in e.errors())
+            raise ValueError("; ".join(reasons)) from None
+        return self
+
+    def parts(self) -> list[SubtaskSpec]:
+        spec = TaskSpec(
+            goal="split",
+            subtasks=[
+                SubtaskSpec(
+                    description=sub.description,
+                    acceptance_criteria=sub.acceptance_criteria,
+                    depends_on=sub.depends_on,
+                )
+                for sub in self.subtasks
+            ],
+        )
+        return spec.subtasks
+
+
+def decomposer(llm: LLM) -> Decomposer:
+    """Splits a subtask the model's way; None (the coordinator retries normally) when the reply
+    stays unusable. Provider errors propagate: the coordinator pauses or retries as usual."""
+
+    def split(work: Work) -> list[SubtaskSpec] | None:
+        context = work.context
+        payload = {
+            "subtask": context.description,
+            "acceptance_criteria": context.acceptance_criteria,
+            "inputs": context.inputs,
+            "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
+        }
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        request = Request(
+            messages=[
+                Message(role="system", content=SPLITTER_SYSTEM),
+                Message(role="user", content=f"{SPLIT}:\n{body}"),
+            ]
+        )
+        try:
+            return complete_json(llm, request, Split, heading=SPLIT).parts()
+        except StructuredOutputError:
+            return None
+
+    return split

@@ -27,6 +27,8 @@ class SubtaskReport(BaseModel):
     status: SubtaskStatus
     attempts: Attempts
     depends_on: list[int]
+    part_of: int | None = None
+    """For a part of a split subtask (ROADMAP 2.9b): the subtask's seq."""
     lease_owner: str | None
     lease_until: str | None
     paused_until: str | None
@@ -66,6 +68,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     status=sub.status,
                     attempts=sub.attempts,
                     depends_on=sorted(seq_of[d] for d in store.dependencies(sub.id)),
+                    part_of=None if sub.parent_id is None else seq_of[sub.parent_id],
                     lease_owner=sub.lease_owner,
                     lease_until=sub.lease_until,
                     paused_until=sub.paused_until,
