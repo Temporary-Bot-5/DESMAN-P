@@ -476,3 +476,71 @@ def test_keys_check_needs_a_real_answer(
     assert result.exit_code == 1
     [check] = json.loads(result.output)
     assert not check["ok"] and "could not be verified" in check["detail"]
+
+
+# ── `desman usage` readability (owner's report) ─────────────────────────────
+
+
+def test_usage_lists_every_key_names_removed_ones_and_reads_limits() -> None:
+    ConfigManager(default_config_path()).save(
+        make_config(
+            api_keys={
+                "GROQ_API_KEY": [{"value": KEY_A}, {"value": KEY_B}],
+                "MISTRAL_API_KEY": "mstr_key",
+            }
+        )
+    )
+    conn = db.open_db()
+    record = calls.recorder(conn)
+    groq_limits = {
+        "x-ratelimit-limit-requests": "1000",
+        "x-ratelimit-remaining-requests": "998",
+        "x-ratelimit-reset-requests": "2m52.8s",
+        "x-ratelimit-limit-tokens": "8000",
+        "x-ratelimit-remaining-tokens": "7319",
+        "retry-after": "3",
+    }
+    record(CallRecord("groq", "m", key_id(KEY_A), "p", "r", 10, 5, 5, 200, None, None, groq_limits))
+    record(CallRecord("groq", "m", "0123456789ab", "p", None, 0, 0, 5, 401, "permanent", "x"))
+    mistral_limits = {"x-ratelimit-limit-req-minute": "0", "x-ratelimit-remaining-req-minute": "0"}
+    record(
+        CallRecord(
+            "mistral",
+            "m",
+            key_id("mstr_key"),
+            "p",
+            None,
+            0,
+            0,
+            5,
+            429,
+            "permanent",
+            "rate limited",
+            mistral_limits,
+        )
+    )
+    conn.close()
+
+    shown = desman("usage").output
+    lines = shown.splitlines()
+    usage_table = lines[: next(i for i, line in enumerate(lines) if line.startswith("Limits"))]
+    groq = [line for line in usage_table if line.startswith("groq")]
+    assert [line.split()[1] for line in groq] == ["#1", "#2", "removed"]
+    assert groq[1].split()[3] == "0"  # the second key: listed, no calls
+    assert "removed (0123…)" in groq[2] and "no longer in the config" in shown
+    assert any("requests" in line and "998 / 1000" in line and "2m52.8s" in line for line in lines)
+    assert any("tokens" in line and "7319 / 8000" in line for line in lines)
+    assert any("retry-after" in line and "3" in line for line in lines)  # not a limit: as is
+    assert "the limit is 0, so this account has no access" in shown
+    assert KEY_A not in shown and KEY_B not in shown
+
+
+def test_limits_group_headers_by_limit() -> None:
+    found, other = calls.limits(
+        {"X-RateLimit-Limit-Tokens": "10", "x-ratelimit-remaining-tokens": "4", "via": "edge"}
+    )
+    assert found == [calls.Limit("tokens", "4", "10", None)]
+    assert other == {"via": "edge"}
+    assert not found[0].exhausted_for_good
+    assert calls.Limit("req-minute", "0", "0", None).exhausted_for_good
+    assert not calls.Limit("x", "0", "n/a", None).exhausted_for_good

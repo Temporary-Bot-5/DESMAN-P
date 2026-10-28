@@ -319,10 +319,24 @@ MESSAGES: dict[str, Forms] = {
     "calls": "вызовы",
     "failed": "ошибки",
     "limited": "лимиты",
-    "tokens in": "токены на входе",
-    "tokens out": "токены на выходе",
-    "last call": "последний вызов",
-    "removed key": "удалённый ключ",
+    "tokens in": "вх. токены",
+    "tokens out": "вых. токены",
+    "last call": "последний",
+    "removed ({id}…)": "удалён ({id}…)",
+    '"removed": calls in this period went through a key that is no longer in the config '
+    "(deleted or replaced). The characters in brackets start its fingerprint.": (
+        "«Удалён»: вызовы за этот период шли через ключ, которого уже нет в настройках "
+        "(его удалили или заменили). В скобках — начало его отпечатка."
+    ),
+    "limit": "лимит",
+    "left": "осталось",
+    "resets in": "сброс через",
+    "Limits reported with the latest call": "Лимиты из последнего ответа провайдера",
+    "{key}: the limit is 0, so this account has no access to the API yet (a free plan may "
+    "need activating on the provider's site). DESMAN does not retry it.": (
+        "{key}: лимит равен 0, у этого аккаунта пока нет доступа к API (бесплатный план, "
+        "возможно, нужно активировать на сайте провайдера). DESMAN не повторяет такие вызовы."
+    ),
     "use e.g. 30m, 24h, 7d or all": "например 30m, 24h, 7d или all",
     "{name} is local and has no API key": "{name} — локальный провайдер, API-ключа у него нет",
     "Get a key: {url}": "Получить ключ: {url}",

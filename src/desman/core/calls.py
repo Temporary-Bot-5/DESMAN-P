@@ -101,3 +101,44 @@ def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUs
             )
         )
     return out
+
+
+@dataclass(frozen=True)
+class Limit:
+    """One rate limit as a provider reported it: e.g. requests, 998 of 1000 left, reset in 2m."""
+
+    name: str
+    remaining: str | None
+    limit: str | None
+    reset: str | None
+
+    @property
+    def exhausted_for_good(self) -> bool:
+        """A limit of 0: the account has no access at all (e.g. Mistral's free plan before
+        activation), waiting will not help."""
+        return self.limit is not None and _number(self.limit) == 0
+
+
+def limits(headers: dict[str, str]) -> tuple[list[Limit], dict[str, str]]:
+    """The `x-ratelimit-{limit,remaining,reset}-<name>` headers grouped by limit, in the order
+    the provider sent them, and whatever else did not fit that pattern."""
+    found: dict[str, dict[str, str]] = {}
+    other: dict[str, str] = {}
+    for header, value in headers.items():
+        name = header.lower().removeprefix("x-ratelimit-")
+        kind, _, limit = name.partition("-")
+        if kind in ("limit", "remaining", "reset") and limit:
+            found.setdefault(limit, {})[kind] = value
+        else:
+            other[header] = value
+    return [
+        Limit(name, parts.get("remaining"), parts.get("limit"), parts.get("reset"))
+        for name, parts in found.items()
+    ], other
+
+
+def _number(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
