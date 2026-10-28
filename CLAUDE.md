@@ -76,6 +76,7 @@ src/desman/
     ├── structured.py # complete_json(): JSON from a reply, validated by a Pydantic schema,
                    #   one repair request showing the model its errors, then StructuredOutputError
     ├── router.py  # provider/model for a run (--provider, PREFERENCE), built from the config
+                   #   Backoff: blips (5xx, timeouts, limits ≤10 s) retried before they cost an attempt
     └── check.py   # `desman keys check`: is a key accepted, limits reported; spends no tokens
 ```
 

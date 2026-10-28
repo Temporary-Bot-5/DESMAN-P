@@ -267,13 +267,13 @@ class OpenAICompatible:
             return ProviderRejected(self.name, 402, f"the balance is used up. {message}".strip())
         if status == 402 or (status == 429 and _QUOTA_WORDS.search(message)):
             now = self.clock()
-            wait = _retry_after(response, message)
+            wait = _retry_after(response, message, now)
             # Without a hint the pause is long: the same key would only be refused again.
             return QuotaExhausted(
                 self.name, now + timedelta(seconds=DEFAULT_QUOTA_PAUSE if wait is None else wait)
             )
         if status == 429:
-            return RateLimited(self.name, _retry_after(response, message))
+            return RateLimited(self.name, _retry_after(response, message, self.clock()))
         if status in (408, 409) or status >= 500:
             return ProviderUnavailable(self.name, status, message)
         return ProviderRejected(self.name, status, message)
@@ -333,34 +333,87 @@ def _message(response: httpx.Response) -> str:
     return str(text)[:200].strip()
 
 
-def _retry_after(response: httpx.Response, message: str) -> float | None:
-    """Seconds to wait, from (in this order) `Retry-After` (seconds or an HTTP date), the
-    message ("try again in 1.5s"), or the reset time of a rate limit that has run out."""
+def _retry_after(response: httpx.Response, message: str, now: datetime) -> float | None:
+    """Seconds to wait, from (in this order) `Retry-After` (seconds or an HTTP date), Google's
+    `RetryInfo` in the body, the message ("try again in 1.5s"), or the reset time of a rate
+    limit that has run out (`x-ratelimit-reset[-name]` next to a `remaining` of 0)."""
     header = response.headers.get("retry-after", "").strip()
     if header:
         try:
             return max(0.0, float(header))
         except ValueError:
             pass
-        try:
-            when = parsedate_to_datetime(header)
-        except (TypeError, ValueError):
-            when = None
+        when = _moment(header)
         if when is not None:
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=UTC)
-            return max(0.0, (when - datetime.now(UTC)).total_seconds())
+            return max(0.0, (when - now).total_seconds())
+    delay = _retry_info(response)
+    if delay is not None:
+        return delay
     found = _RETRY_IN.search(message)
     if found:
         value = float(found[1])
         return value / 1000 if found[2].lower() == "ms" else value
+    headers = {k.lower(): v.strip() for k, v in response.headers.items()}
     waits = []
-    for what in ("requests", "tokens"):  # OpenAI and Groq style: x-ratelimit-reset-requests
-        if response.headers.get(f"x-ratelimit-remaining-{what}", "").strip() == "0":
-            wait = _duration(response.headers.get(f"x-ratelimit-reset-{what}", ""))
-            if wait is not None:
-                waits.append(wait)
+    for name, remaining in headers.items():
+        # x-ratelimit-remaining-requests (OpenAI, Groq), x-ratelimit-remaining (OpenRouter)...
+        if not name.startswith("x-ratelimit-remaining") or remaining != "0":
+            continue
+        reset = headers.get(name.replace("remaining", "reset", 1), "")
+        wait = _reset_in(reset, now)
+        if wait is not None:
+            waits.append(wait)
     return max(waits) if waits else None
+
+
+def _retry_info(response: httpx.Response) -> float | None:
+    """Google: {"error": {"details": [{"@type": "...RetryInfo", "retryDelay": "52s"}]}}."""
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    if isinstance(data, list) and data:
+        data = data[0]
+    error = data.get("error") if isinstance(data, dict) else None
+    details = error.get("details") if isinstance(error, dict) else None
+    for detail in details if isinstance(details, list) else []:
+        if isinstance(detail, dict) and str(detail.get("@type", "")).endswith("RetryInfo"):
+            delay = detail.get("retryDelay")
+            if isinstance(delay, str):
+                return _duration(delay)
+    return None
+
+
+def _reset_in(value: str, now: datetime) -> float | None:
+    """A reset header as seconds from `now`: a duration ("2m52.8s", "30"), a Unix time in
+    seconds or milliseconds (OpenRouter), or a date."""
+    try:
+        number = float(value)
+    except ValueError:
+        if (duration := _duration(value)) is not None:
+            return duration
+        when = _moment(value)
+        return None if when is None else max(0.0, (when - now).total_seconds())
+    if number > 1e12:  # milliseconds since the epoch
+        number /= 1000
+    if number > 1e9:  # seconds since the epoch (2001 onwards): a moment, not a duration
+        return max(0.0, number - now.timestamp())
+    return _duration(value)
+
+
+def _moment(text: str) -> datetime | None:
+    """An HTTP date or an ISO 8601 time, timezone-aware (UTC if it names none)."""
+    when: datetime | None
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        try:
+            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if when is not None and when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when
 
 
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")

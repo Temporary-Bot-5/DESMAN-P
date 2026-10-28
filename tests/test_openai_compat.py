@@ -19,6 +19,7 @@ from desman.core import calls, db
 from desman.core.retry import FailureKind
 from desman.llm import check, router
 from desman.llm.base import (
+    Completion,
     Message,
     ProviderRejected,
     ProviderTimeout,
@@ -26,6 +27,7 @@ from desman.llm.base import (
     QuotaExhausted,
     RateLimited,
     Request,
+    Usage,
 )
 from desman.llm.openai_compat import CallRecord, OpenAICompatible, key_id
 from helpers import make_config
@@ -423,12 +425,12 @@ def test_tokens_of_an_unusable_reply_are_counted() -> None:
 
 
 def test_retry_after_as_an_http_date() -> None:
-    later = datetime.now(UTC) + timedelta(hours=1)
+    later = NOW + timedelta(hours=1)  # measured on the client's clock
     header = later.strftime("%a, %d %b %Y %H:%M:%S GMT")
     llm, _ = client(lambda r: httpx.Response(429, headers={"retry-after": header}))
     with pytest.raises(RateLimited) as raised:
         llm.complete(REQUEST)
-    assert raised.value.retry_after is not None and 3500 < raised.value.retry_after <= 3600
+    assert raised.value.retry_after == 3600
     past = "Tue, 01 Jan 2002 00:00:00 GMT"
     llm, _ = client(lambda r: httpx.Response(429, headers={"retry-after": past}))
     with pytest.raises(RateLimited) as raised:
@@ -677,3 +679,139 @@ def test_a_paid_key_out_of_money_lets_the_next_key_pay() -> None:
     llm.complete(REQUEST)
     llm.complete(REQUEST)
     assert used == [f"Bearer {KEY_A}", f"Bearer {KEY_B}", f"Bearer {KEY_B}"]  # A not again
+
+
+# ── 2.5: reset times and backoff ─────────────────────────────────────────────
+
+
+def test_openrouter_daily_quota_resets_at_its_epoch_milliseconds() -> None:
+    reset = NOW + timedelta(hours=7)
+    headers = {
+        "x-ratelimit-limit": "50",
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": str(int(reset.timestamp() * 1000)),
+    }
+    body = {"error": {"message": "Rate limit exceeded: free-models-per-day"}}
+    llm, _ = client(lambda r: httpx.Response(429, json=body, headers=headers))
+    with pytest.raises(QuotaExhausted) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.resets_at == reset  # not the default hour
+
+
+@pytest.mark.parametrize(
+    "reset",
+    [
+        str(int((NOW + timedelta(minutes=5)).timestamp())),  # Unix seconds
+        (NOW + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),  # ISO 8601
+        "300",  # seconds
+        "5m0s",  # Go-style duration
+    ],
+)
+def test_reset_header_forms(reset: str) -> None:
+    headers = {"x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": reset}
+    llm, _ = client(lambda r: httpx.Response(429, headers=headers))
+    with pytest.raises(RateLimited) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.retry_after == 300
+
+
+def test_google_retry_info_in_the_body() -> None:
+    body = [
+        {
+            "error": {
+                "code": 429,
+                "message": "You exceeded your current quota",
+                "details": [
+                    {"@type": "type.googleapis.com/google.rpc.QuotaFailure"},
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "52s"},
+                ],
+            }
+        }
+    ]
+    llm, _ = client(lambda r: httpx.Response(429, json=body))
+    with pytest.raises(QuotaExhausted) as raised:
+        llm.complete(REQUEST)
+    assert raised.value.resets_at == NOW + timedelta(seconds=52)
+
+
+class Scripted:
+    """An LLM that raises or answers from a list, one item per call."""
+
+    name = "scripted"
+
+    def __init__(self, *outcomes: Exception | str) -> None:
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def complete(self, request: Request) -> Completion:
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return Completion(
+            text=outcome, provider="x", model="m", usage=Usage(prompt_tokens=1, completion_tokens=1)
+        )
+
+
+def backoff(inner: Scripted) -> tuple[router.Backoff, list[float]]:
+    slept: list[float] = []
+    return router.Backoff(inner, sleep=slept.append, jitter=lambda: 1.0), slept
+
+
+def test_backoff_rides_out_blips() -> None:
+    inner = Scripted(ProviderUnavailable("x", 503), ProviderTimeout("x", 60), "ok")
+    llm, slept = backoff(inner)
+    assert llm.complete(REQUEST).text == "ok"
+    assert slept == [1.0, 2.0] and inner.calls == 3
+
+
+def test_backoff_gives_up_after_its_attempts() -> None:
+    inner = Scripted(*[ProviderUnavailable("x", 502)] * 3)
+    llm, slept = backoff(inner)
+    with pytest.raises(ProviderUnavailable):
+        llm.complete(REQUEST)
+    assert inner.calls == 3 and len(slept) == 2
+
+
+def test_backoff_jitter_stays_within_half_and_all_of_the_delay() -> None:
+    inner = Scripted(ProviderUnavailable("x", 503), "ok")
+    slept: list[float] = []
+    router.Backoff(inner, sleep=slept.append, jitter=lambda: 0.0).complete(REQUEST)
+    assert slept == [0.5]
+
+
+def test_backoff_waits_out_short_limits_only() -> None:
+    inner = Scripted(RateLimited("x", retry_after=3), "ok")
+    llm, slept = backoff(inner)
+    assert llm.complete(REQUEST).text == "ok" and slept == [3]
+    for error in (
+        RateLimited("x", retry_after=120),  # the subtask pauses instead
+        RateLimited("x"),  # no hint: the coordinator's default pause
+        QuotaExhausted("x", NOW),
+        ProviderRejected("x", 401),
+    ):
+        inner = Scripted(error)
+        llm, slept = backoff(inner)
+        with pytest.raises(type(error)):
+            llm.complete(REQUEST)
+        assert inner.calls == 1 and slept == []
+
+
+def test_a_server_blip_costs_the_subtask_nothing(
+    mock_http: Callable[[Handler], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ConfigManager(default_config_path()).save(make_config(api_keys={"GROQ_API_KEY": KEY_A}))
+    monkeypatch.setattr(router, "_sleep", lambda seconds: None)
+    replies = iter([httpx.Response(503, text="overloaded"), reply('{"answer": 42}')])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][-1]["content"]
+        return reply('{"verdict": "accept"}') if prompt.startswith("Review") else next(replies)
+
+    mock_http(handler)
+    result = desman("run", "g", "--json")
+    assert result.exit_code == 0, result.output
+    [sub] = json.loads(result.output)["task"]["subtasks"]
+    assert sub["attempts"] == {"quality": 0, "transient": 0}
+    usage = json.loads(desman("usage", "--json").output)
+    assert usage[0]["calls"] == 3 and usage[0]["failed"] == 1  # the blip is still logged
