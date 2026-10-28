@@ -12,6 +12,7 @@ import httpx
 import pytest
 from click.testing import CliRunner, Result
 
+from conftest import FakeClock
 from desman import providers
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
@@ -759,7 +760,7 @@ def backoff(inner: Scripted) -> tuple[router.Backoff, list[float]]:
 
 
 def test_backoff_rides_out_blips() -> None:
-    inner = Scripted(ProviderUnavailable("x", 503), ProviderTimeout("x", 60), "ok")
+    inner = Scripted(ProviderUnavailable("x", 503), ProviderTimeout("x", 5), "ok")
     llm, slept = backoff(inner)
     assert llm.complete(REQUEST).text == "ok"
     assert slept == [1.0, 2.0] and inner.calls == 3
@@ -815,3 +816,41 @@ def test_a_server_blip_costs_the_subtask_nothing(
     assert sub["attempts"] == {"quality": 0, "transient": 0}
     usage = json.loads(desman("usage", "--json").output)
     assert usage[0]["calls"] == 3 and usage[0]["failed"] == 1  # the blip is still logged
+
+
+def test_a_slow_failure_is_not_repeated() -> None:
+    # A timeout (or a 504) after a long wait: repeating it could outlast the lease.
+    clock = FakeClock()
+
+    class Slow(Scripted):
+        def complete(self, request: Request) -> Completion:
+            clock.sleep(60)
+            return super().complete(request)
+
+    inner = Slow(ProviderTimeout("x", 60), "ok")
+    slept: list[float] = []
+    llm = router.Backoff(inner, sleep=slept.append, monotonic=lambda: clock().timestamp())
+    with pytest.raises(ProviderTimeout):
+        llm.complete(REQUEST)
+    assert inner.calls == 1 and slept == []
+
+
+def test_a_short_limit_waited_out_frees_the_key() -> None:
+    # Integration with the real client on a fake clock: the key set aside for 3 s is usable
+    # again once Backoff has slept them.
+    clock = FakeClock()
+    responses = iter([httpx.Response(429, headers={"retry-after": "3"}), reply()])
+    records: list[CallRecord] = []
+    inner = OpenAICompatible(
+        "groq",
+        "https://api.example/v1",
+        [KEY_A],
+        "m",
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: next(responses))),
+        on_call=records.append,
+        clock=clock,
+    )
+    llm = router.Backoff(inner, sleep=clock.sleep, monotonic=lambda: clock().timestamp())
+    assert llm.complete(REQUEST).text == '{"ok": true}'
+    assert [r.http_status for r in records] == [429, 200]
+    assert clock() == datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=3)
