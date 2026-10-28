@@ -227,14 +227,25 @@ def confirm(question: str, default: bool = False) -> bool:
         return bool(answer)
     while True:  # Enter keeps the default
         raw = click.prompt(f"{question} {t('(Y/N)')}", default="", show_default=False)
-        raw = raw.strip().lower()
+        raw = _fold(raw.strip())
         if not raw:
             return default
-        if raw in ("y", "yes", "д", "да"):
+        if raw in _answers("y", "yes", t("yes")):
             return True
-        if raw in ("n", "no", "н", "нет"):
+        if raw in _answers("n", "no", t("no")):
             return False
         error(t("enter y or n"))
+
+
+def _answers(*words: str) -> set[str]:
+    """Each word and its first letter, folded: y, yes, and the language's own (ja, j)."""
+    return {form for word in words for form in (_fold(word), _fold(word)[:1]) if form}
+
+
+def _fold(text: str) -> str:
+    """Case-insensitive, and blind to the dot on Turkish i: HAYIR lowers to "hayir", while
+    the catalog writes "hayır"."""
+    return text.casefold().replace("i\u0307", "i").replace("ı", "i")
 
 
 def text(question: str, default: str = "") -> str:

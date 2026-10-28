@@ -249,6 +249,8 @@ MESSAGES: dict[str, Forms] = {
     "unknown language {name!r} (known: {codes})": "알 수 없는 언어 {name!r} (알려진 언어: {codes})",
     "interface language": "인터페이스 언어",
     "(Y/N)": "(Y/N)",
+    "yes": "예",
+    "no": "아니요",
 }
 
 CLICK: dict[str, Forms] = {
