@@ -51,7 +51,8 @@ src/desman/
 ├── info.py        # Banner / project info
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
-    ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently)
+    ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently);
+    │              #   Strategy per attempt number (feedback, rephrase, other model), audited
     ├── db.py      # sqlite3 connection, transactions, append-only migrations
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
     ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),

@@ -13,11 +13,13 @@ characters / 4, which is close enough for budgeting.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
 
 from desman.core.models import Subtask
+from desman.core.retry import Strategy, strategy_for
 
 CHARS_PER_TOKEN: Final = 4
 DEFAULT_BUDGET_TOKENS: Final = 4000
@@ -49,7 +51,7 @@ class Feedback(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    source: str  # "reviewer" or "human"
+    source: str  # "reviewer", "human" or "executor" (its own failed attempt)
     text: str
 
 
@@ -63,7 +65,9 @@ class Context(BaseModel):
     dependencies: list[DependencyContext]
     feedback: Feedback | None = None
     attempt: int = 1
-    """1 for the first try; grows with every quality retry (picks the retry strategy, ROADMAP 2.9)."""
+    """1 for the first try; grows with every quality retry."""
+    strategy: Strategy = Strategy.FIRST
+    """How this attempt should differ from the previous one (picked by the attempt number)."""
 
 
 def build_context(
@@ -71,7 +75,9 @@ def build_context(
     dependencies: list[DependencyResult],
     feedback: Feedback | None,
     budget_tokens: int = DEFAULT_BUDGET_TOKENS,
+    strategies: Callable[[int], Strategy] = strategy_for,
 ) -> Context:
+    attempt = subtask.attempts.quality + 1
     return Context(
         description=subtask.description,
         acceptance_criteria=subtask.acceptance_criteria,
@@ -79,7 +85,8 @@ def build_context(
         checkpoint=subtask.checkpoint,
         dependencies=fit_dependencies(dependencies, budget_tokens),
         feedback=feedback,
-        attempt=subtask.attempts.quality + 1,
+        attempt=attempt,
+        strategy=strategies(attempt),
     )
 
 

@@ -293,6 +293,7 @@ MESSAGES: dict[str, Forms] = {
     "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Як GOAL перетворюється на підзадачі: llm просить модель скласти план (типово; якщо не вийшло, береться шаблон), template робить саму мету єдиною підзадачею (типово з --fake-llm).",
     "Planning…": "Складаю план…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не склала план, тому єдина підзадача — сама мета: {error}",
+    "Retries may also use {provider} · {model}": "Повторні спроби можуть використовувати й {provider} · {model}",
 }
 
 CLICK: dict[str, Forms] = {

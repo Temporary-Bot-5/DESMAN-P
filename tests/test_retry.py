@@ -23,7 +23,7 @@ def run(kinds: list[FailureKind], policy: RetryPolicy | None = None) -> list[Sub
 
 
 def test_quality_failures_retry_then_escalate() -> None:
-    assert run([K.QUALITY] * 3) == [S.READY, S.READY, S.NEEDS_HUMAN]
+    assert run([K.QUALITY] * 4) == [S.READY, S.READY, S.READY, S.NEEDS_HUMAN]
 
 
 def test_single_attempt_policy_escalates_immediately() -> None:
@@ -60,7 +60,7 @@ def test_policy_never_gives_up_on_its_own(kind: FailureKind) -> None:
 def test_counters_and_reason() -> None:
     decision = decide(K.QUALITY, Attempts(quality=1))
     assert decision.attempts == Attempts(quality=2)
-    assert "2/3" in decision.reason
+    assert "2/4" in decision.reason
 
 
 def test_policy_validation() -> None:

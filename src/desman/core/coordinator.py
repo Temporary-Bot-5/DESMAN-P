@@ -16,6 +16,7 @@ driven by real LLM-backed agents.
 
 from __future__ import annotations
 
+import functools
 import json
 import time
 from collections.abc import Callable
@@ -29,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from desman.core import db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.models import Subtask
-from desman.core.retry import FailureKind, RetryPolicy
+from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
@@ -74,6 +75,9 @@ class Failure(BaseModel):
 
 
 Outcome = Success | Failure
+
+ONE_MODEL: Callable[[int], Strategy] = functools.partial(strategy_for, other_model=False)
+"""The coordinator's default: no other model to switch to, so none is claimed in the audit."""
 
 ERROR_TYPE = "error"
 """A result `{"type": "error", "reason": ...}` is the executor saying it could not do the work."""
@@ -146,6 +150,7 @@ class Coordinator:
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
         abandoned: Callable[[str], bool] | None = None,
+        strategies: Callable[[int], Strategy] = ONE_MODEL,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -159,6 +164,10 @@ class Coordinator:
         self.abandoned = abandoned
         """Tells whether a lease owner is certainly gone, so its work is taken back at once
         instead of after the lease expires (see core/owner.py)."""
+        self.strategies = strategies
+        """Attempt number -> strategy. The executor's owner says what it can do: by default
+        there is no other model to switch to, so the audit never claims a switch that did not
+        happen; pass `strategy_for` when the executor has one."""
         self.sleep = sleep
 
     def run(
@@ -229,6 +238,13 @@ class Coordinator:
                 self.store.dependency_results(subtask.id),
                 self.store.last_feedback(subtask.id),
                 self.context_budget_tokens,
+                self.strategies,
+            )
+            self.store.note(
+                subtask.id,
+                Actor.EXECUTOR,
+                "attempt_started",
+                {"attempt": context.attempt, "strategy": context.strategy.value},
             )
             workspace = Workspace(self.workspaces, subtask.task_id)
             returned = self.executor(
