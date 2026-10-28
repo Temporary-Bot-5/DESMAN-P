@@ -25,6 +25,7 @@ def _commands() -> list[tuple[str, str]]:
         ("desman inbox", t("what waits for your decision")),
         ("desman keys", t("API keys per provider")),
         ("desman config", t("providers, keys, permissions")),
+        ("desman language", t("interface language")),
         ("desman help", t("all commands")),
     ]
 

@@ -261,6 +261,14 @@ MESSAGES: dict[str, Forms] = {
     "Configuration saved to {path}": "Configuración guardada en {path}",
     'Next: `desman config show` to review, `desman run "..."` to start.': 'Siguiente: `desman config show` para revisar, `desman run "..."` para empezar.',
     "No cloud key yet: cloud models will not work until you add one.": "Aún no hay claves en la nube: los modelos en la nube no funcionarán hasta que añadas una.",
+    "Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name).": "Muestra los idiomas de la interfaz o cambia a LANGUAGE (un código como es, o su nombre).",
+    "code": "código",
+    "language": "idioma",
+    "Languages": "Idiomas",
+    "Switch with `desman language CODE`.": "Cambia con `desman language CÓDIGO`.",
+    "Language set to {name}.": "Idioma de la interfaz: {name}.",
+    "unknown language {name!r} (known: {codes})": "idioma desconocido {name!r} (conocidos: {codes})",
+    "interface language": "idioma de la interfaz",
 }
 
 CLICK: dict[str, Forms] = {

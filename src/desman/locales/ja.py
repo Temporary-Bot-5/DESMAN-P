@@ -240,6 +240,14 @@ MESSAGES: dict[str, Forms] = {
     "Configuration saved to {path}": "設定を {path} に保存しました",
     'Next: `desman config show` to review, `desman run "..."` to start.': '次へ: `desman config show` で確認、`desman run "..."` で開始。',
     "No cloud key yet: cloud models will not work until you add one.": "クラウドのキーがまだありません: 追加するまでクラウドのモデルは使えません。",
+    "Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name).": "インターフェースの言語を表示するか、LANGUAGE（ja などのコード、または言語名）に切り替えます。",
+    "code": "コード",
+    "language": "言語",
+    "Languages": "言語",
+    "Switch with `desman language CODE`.": "切り替え: `desman language コード`。",
+    "Language set to {name}.": "インターフェースの言語を {name} にしました。",
+    "unknown language {name!r} (known: {codes})": "不明な言語 {name!r}（既知: {codes}）",
+    "interface language": "インターフェースの言語",
 }
 
 CLICK: dict[str, Forms] = {

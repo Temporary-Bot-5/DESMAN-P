@@ -496,6 +496,14 @@ MESSAGES: dict[str, Forms] = {
     "No cloud key yet: cloud models will not work until you add one.": (
         "Облачных ключей пока нет: облачные модели не заработают, пока не добавите."
     ),
+    "Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name).": "Показать языки интерфейса или переключиться на LANGUAGE (код, например ru, или название).",
+    "code": "код",
+    "language": "язык",
+    "Languages": "Языки",
+    "Switch with `desman language CODE`.": "Переключить: `desman language КОД`.",
+    "Language set to {name}.": "Язык интерфейса: {name}.",
+    "unknown language {name!r} (known: {codes})": "неизвестный язык {name!r} (известны: {codes})",
+    "interface language": "язык интерфейса",
 }
 
 CLICK: dict[str, Forms] = {

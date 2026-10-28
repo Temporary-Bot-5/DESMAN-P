@@ -242,6 +242,14 @@ MESSAGES: dict[str, Forms] = {
     "Configuration saved to {path}": "Yapılandırma {path} konumuna kaydedildi",
     'Next: `desman config show` to review, `desman run "..."` to start.': 'Sonraki adım: gözden geçirmek için `desman config show`, başlamak için `desman run "..."`.',
     "No cloud key yet: cloud models will not work until you add one.": "Henüz bulut anahtarı yok: bir tane ekleyene kadar bulut modelleri çalışmaz.",
+    "Show the interface languages, or switch to LANGUAGE (a code such as ru, or its name).": "Arayüz dillerini gösterir veya LANGUAGE diline geçer (tr gibi bir kod ya da dilin adı).",
+    "code": "kod",
+    "language": "dil",
+    "Languages": "Diller",
+    "Switch with `desman language CODE`.": "Değiştirmek için: `desman language KOD`.",
+    "Language set to {name}.": "Arayüz dili: {name}.",
+    "unknown language {name!r} (known: {codes})": "bilinmeyen dil {name!r} (bilinenler: {codes})",
+    "interface language": "arayüz dili",
 }
 
 CLICK: dict[str, Forms] = {

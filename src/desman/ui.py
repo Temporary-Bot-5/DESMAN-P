@@ -219,13 +219,14 @@ def confirm(question: str, default: bool = False) -> bool:
     if interactive():
         import questionary
 
-        answer = questionary.confirm(question, default=default, qmark="›", style=_style()).ask()
+        answer = questionary.confirm(
+            question, default=default, qmark="›", instruction="(Y/N) ", style=_style()
+        ).ask()
         if answer is None:
             raise Cancelled
         return bool(answer)
-    hint = "[Y/n]" if default else "[y/N]"
-    while True:
-        raw = click.prompt(f"{question} {hint}", default="", show_default=False).strip().lower()
+    while True:  # Enter keeps the default
+        raw = click.prompt(f"{question} (Y/N)", default="", show_default=False).strip().lower()
         if not raw:
             return default
         if raw in ("y", "yes", "д", "да"):
