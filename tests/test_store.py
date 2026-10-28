@@ -97,6 +97,13 @@ def test_create_task_is_audited(store: Store) -> None:
     assert created["subtasks"] == [s.id for s in store.list_subtasks(task_id)]
 
 
+def test_extra_creation_details_never_replace_the_tasks_own(store: Store) -> None:
+    task_id = store.create_task(spec(sub("a")), details={"plan": "llm", "subtasks": ["forged"]})
+    created = json.loads(store.audit_log(task_id)[0]["details_json"])
+    assert created["plan"] == "llm"
+    assert created["subtasks"] == [s.id for s in store.list_subtasks(task_id)]
+
+
 # ── Readiness and claim ──────────────────────────────────────────────────────
 
 

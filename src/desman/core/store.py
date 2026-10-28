@@ -111,11 +111,11 @@ class Store:
                 actor,
                 "task_created",
                 task_id=task_id,
-                details={
+                details={  # extra details never replace the task's own fields
+                    **(details or {}),
                     "goal": spec.goal,
                     "priority": spec.priority,
                     "subtasks": ids,
-                    **(details or {}),
                 },
             )
             self._promote_ready()

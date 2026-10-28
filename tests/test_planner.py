@@ -48,13 +48,25 @@ def test_the_models_plan_becomes_the_task_graph() -> None:
 
 
 def test_a_broken_graph_gets_the_repair_request_with_the_reason() -> None:
-    llm = FakeLLM(reply(sub("a", 1), sub("b", 0)), reply(sub("a"), sub("b", 0)))
+    llm = FakeLLM(reply(sub("a", 1), sub("b", 0), sub("c", 1)), reply(sub("a"), sub("b", 0)))
     planned = plan(llm, "g")
     assert planned.source == "llm"
     assert [s.depends_on for s in planned.spec.subtasks] == [[], [0]]
     repair = llm.calls[1].prompt
     assert repair.startswith(f"{PLAN} (repair):")
-    assert "dependency cycle among subtasks [0, 1]" in repair
+    assert "- (object): Value error, dependency cycle among subtasks [0, 1, 2]\n" in repair
+
+
+def test_work_nothing_uses_feeds_the_final_subtask() -> None:
+    # "a" and "b" are independent; without the added edges "summary" would never see "a".
+    llm = FakeLLM(reply(sub("a"), sub("b"), sub("c", 1), sub("summary", 2)))
+    assert [s.depends_on for s in plan(llm, "g").spec.subtasks] == [[], [], [1], [2, 0]]
+
+
+def test_the_last_subtask_must_be_the_final_one() -> None:
+    llm = FakeLLM(reply(sub("a", 1), sub("b")), reply(sub("b"), sub("a", 0)))
+    assert plan(llm, "g").source == "llm"
+    assert "subtasks [0] depend on it" in llm.calls[1].prompt
 
 
 def test_bad_indices_and_empty_texts_are_rejected() -> None:
@@ -75,6 +87,7 @@ def test_a_reply_that_stays_wrong_falls_back_to_the_template() -> None:
     assert planned.source == "template"
     assert planned.error is not None and planned.error.startswith("StructuredOutputError:")
     assert planned.details() == {"plan": "template", "plan_error": planned.error}
+    assert garbage("prose").text[:20] not in planned.error  # the reply may echo a secret
     [only] = planned.spec.subtasks
     assert only.description == "the goal" and only.acceptance_criteria == TEMPLATE_CRITERIA
     assert planned.spec.priority == Priority.LOW

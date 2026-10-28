@@ -56,14 +56,27 @@ class Plan(BaseModel):
 
     @model_validator(mode="after")
     def _is_a_valid_graph(self) -> Self:
+        last = len(self.subtasks) - 1
+        users = [i for i, sub in enumerate(self.subtasks) if last in sub.depends_on]
+        if users:
+            raise ValueError(
+                f"the last subtask must produce the final result, but subtasks {users} depend on it"
+            )
         try:
             self.spec("goal")
         except ValidationError as e:
             # The reason, without the input (a repair request lists messages, not values).
-            raise ValueError("; ".join(error["msg"] for error in e.errors())) from None
+            reasons = (str(error.get("ctx", {}).get("error", error["msg"])) for error in e.errors())
+            raise ValueError("; ".join(reasons)) from None
         return self
 
     def spec(self, goal: str, priority: int = Priority.NORMAL) -> TaskSpec:
+        """The task graph. A subtask sees only the results of its own dependencies, so the last
+        one is made to depend on every result nothing else uses: no work is left out of the
+        final result."""
+        last = len(self.subtasks) - 1
+        used = {dep for sub in self.subtasks for dep in sub.depends_on}
+        unused = [i for i in range(last) if i not in used]
         return TaskSpec(
             goal=goal,
             priority=priority,
@@ -71,9 +84,9 @@ class Plan(BaseModel):
                 SubtaskSpec(
                     description=sub.description,
                     acceptance_criteria=sub.acceptance_criteria,
-                    depends_on=sub.depends_on,
+                    depends_on=sub.depends_on + unused if i == last else sub.depends_on,
                 )
-                for sub in self.subtasks
+                for i, sub in enumerate(self.subtasks)
             ],
         )
 
@@ -112,6 +125,11 @@ def plan(llm: LLM, goal: str, priority: int = Priority.NORMAL) -> Planned:
     )
     try:
         reply = complete_json(llm, request, Plan, heading=PLAN)
-    except (ProviderError, StructuredOutputError) as e:
+    except StructuredOutputError as e:
+        # The problem only: the reply itself may echo anything (it is in the call log).
+        return Planned(
+            template_plan(goal, priority), "template", f"{type(e).__name__}: {e.problem}"
+        )
+    except ProviderError as e:
         return Planned(template_plan(goal, priority), "template", f"{type(e).__name__}: {e}")
     return Planned(reply.spec(goal, priority), "llm")
