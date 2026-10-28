@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from desman.i18n import Catalog, Forms
+from desman.locales import Catalog, Forms
 
 
 def plural(n: int) -> int:
@@ -21,6 +21,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Show help for commands.": "Показать справку по командам.",
     "Show the version and exit.": "Показать версию и выйти.",
+    "{prog}, version {version}": "{prog}, версия {version}",
     "Create the database or apply pending migrations. Safe to re-run.": (
         "Создать базу данных или применить новые миграции. Можно запускать повторно."
     ),
@@ -510,6 +511,76 @@ CLICK: dict[str, Forms] = {
     "Error: invalid input": "Ошибка: неверный ввод",
     "Repeat for confirmation": "Повторите для подтверждения",
     "Error: The two entered values do not match.": "Ошибка: введённые значения не совпадают.",
+    # Errors
+    "No such option: {name}": "Нет такой опции: {name}",  # Click < 8.4
+    "Choose from:\n\t{choices}": "Выберите из:\n\t{choices}",
+    "Positional arguments": "Позиционные аргументы",
+    "(dynamic)": "(вычисляется)",
+    "unknown error": "неизвестная ошибка",
+    "Could not open file {filename!r}: {message}": "Не удалось открыть файл {filename!r}: {message}",
+    "Argument {name!r} takes {nargs} values.": "Аргумент {name!r} принимает {nargs} значения.",
+    "Takes {nargs} values but 1 was given.": (
+        "Принимает {nargs} значения, а передано 1.",
+        "Принимает {nargs} значения, а передано {len}.",
+        "Принимает {nargs} значения, а передано {len}.",
+    ),
+    "{len_type} values are required, but {len_value} was given.": (
+        "Нужно значений: {len_type}, а передано {len_value}.",
+        "Нужно значений: {len_type}, а передано {len_value}.",
+        "Нужно значений: {len_type}, а передано {len_value}.",
+    ),
+    "{value!r} does not match the format {format}.": (
+        "{value!r} не соответствует формату {format}.",
+        "{value!r} не соответствует форматам {formats}.",
+        "{value!r} не соответствует форматам {formats}.",
+    ),
+    "{value!r} is not a valid boolean.": "{value!r} — не логическое значение.",
+    "{value!r} is not a valid boolean. Recognized values: {states}": (
+        "{value!r} — не логическое значение. Допустимые значения: {states}"
+    ),
+    "{value!r} is not a valid UUID.": "{value!r} — недопустимый UUID.",
+    "{name} {filename!r} is not executable.": "{name} {filename!r} нельзя выполнить.",
+    "Invalid start character for option ({option})": (
+        "Недопустимый первый символ опции ({option})"
+    ),
+    # Deprecation notices
+    "(Deprecated) {text}": "(Устарело) {text}",
+    "{text} {deprecated_message}": "{text} {deprecated_message}",
+    "DeprecationWarning: The command {name!r} is deprecated.": (
+        "DeprecationWarning: команда {name!r} устарела."
+    ),
+    "DeprecationWarning: The command {name!r} is deprecated.{extra_message}": (
+        "DeprecationWarning: команда {name!r} устарела.{extra_message}"
+    ),
+    "DeprecationWarning: The {param_type} {name!r} is deprecated.{extra_message}": (
+        "DeprecationWarning: {param_type} {name!r} устарел(а).{extra_message}"
+    ),
+    # Prompts (Click < 8.4 spellings first)
+    "Error: The value you entered was invalid.": "Ошибка: введено недопустимое значение.",
+    "Error: {e.message}": "Ошибка: {e.message}",
+    "Press any key to continue...": "Нажмите любую клавишу, чтобы продолжить...",
+    "Do you want to continue?": "Продолжить?",
+    "Confirm the action without prompting.": "Подтвердить действие без вопроса.",
+    # Mistakes in the program's own command definitions: a developer sees these, not the
+    # operator, but a Russian page should not switch language on them either.
+    "Value must be an iterable.": "Значение должно быть итерируемым.",
+    "Could not determine name for option with declarations {decls!r}": (
+        "Не удалось определить имя опции с объявлениями {decls!r}"
+    ),
+    "No options defined but a name was passed ({name}). Did you mean to declare an argument "
+    "instead? Did you mean to pass '--{name}'?": (
+        "Опции не объявлены, но передано имя ({name}). Может быть, нужен аргумент? Или '--{name}'?"
+    ),
+    "Arguments take exactly one parameter declaration, got {length}: {decls}.": (
+        "У аргумента должно быть ровно одно объявление, получено {length}: {decls}."
+    ),
+    "Name '{name}' defined twice": "Имя '{name}' объявлено дважды",
+    "Boolean option {decl!r} cannot use the same flag for true/false.": (
+        "Логическая опция {decl!r} не может использовать один флаг для true и false."
+    ),
+    "Choice({choices})": "Choice({choices})",
+    "Unknown color {colour!r}": "Неизвестный цвет {colour!r}",
+    "Unknown standard stream '{name}'": "Неизвестный стандартный поток '{name}'",
 }
 
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK)

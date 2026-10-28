@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import inspect
 import json
 import string
+import subprocess
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -74,15 +79,43 @@ def test_no_translation_is_left_over() -> None:
     assert sorted(set(ru.MESSAGES) - set(source_messages())) == []
 
 
-@pytest.mark.parametrize("catalog", [ru.MESSAGES, ru.CLICK], ids=["ours", "click"])
-def test_translations_keep_the_fields(catalog: dict[str, i18n.Forms]) -> None:
-    plurals = source_messages()
+def click_messages() -> dict[str, str | None]:
+    """What the installed Click passes to gettext/ngettext in the modules i18n patches."""
+    found: dict[str, str | None] = {}
+    for name in i18n.CLICK_MODULES:
+        tree = ast.parse(inspect.getsource(importlib.import_module(name)))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            args = [a.value if isinstance(a, ast.Constant) else None for a in node.args]
+            if node.func.id == "_" and args and isinstance(args[0], str):
+                found[args[0]] = None
+            elif node.func.id == "ngettext" and len(args) > 1 and isinstance(args[0], str):
+                found[args[0]] = args[1] if isinstance(args[1], str) else None
+    return found
+
+
+@pytest.mark.parametrize(
+    ("catalog", "plurals"),
+    [(ru.MESSAGES, source_messages), (ru.CLICK, click_messages)],
+    ids=["ours", "click"],
+)
+def test_translations_keep_the_fields(
+    catalog: dict[str, i18n.Forms], plurals: Callable[[], dict[str, str | None]]
+) -> None:
+    plural_of = plurals()
     for source, translated in catalog.items():
         forms = (translated,) if isinstance(translated, str) else translated
-        expected = fields(source) | fields(plurals.get(source) or "")
+        expected = fields(source) | fields(plural_of.get(source) or "")
         for form in forms:
             # A form may leave a field out ("pick 1" needs no {n}), never invent one.
-            assert fields(form) <= expected | {"n", "nargs", "possibilities", "choices"}, source
+            assert fields(form) <= expected | {"n"}, source
+
+
+def test_everything_click_says_is_translated() -> None:
+    # Fails when a Click release adds or rewords a message: translate the new text (keep the
+    # old one too, older Click versions still use it).
+    assert sorted(set(click_messages()) - set(ru.CLICK)) == []
 
 
 def test_plural_messages_have_every_russian_form() -> None:
@@ -174,3 +207,23 @@ def test_the_wizard_switches_the_language_for_the_rest_of_the_command() -> None:
     assert result.exit_code == 0, result.output
     assert "Настройки сохранены в" in result.output
     assert "DESMAN(P) — Configuration" in result.output  # asked in English before the choice
+
+
+def test_version_follows_the_language() -> None:
+    configure("ru")
+    assert ", версия " in desman("--version").output
+    configure("en")
+    assert ", version " in desman("--version").output
+
+
+def test_bad_options_and_choices_are_reported_in_russian() -> None:
+    configure("ru")
+    bogus = desman("--bogus").output
+    assert "Ошибка: Нет такой опции" in bogus and "No such" not in bogus
+    choice = desman("run", "x", "--priority", "invalid").output
+    assert "Недопустимое значение" in choice and "'invalid' — не одно из:" in choice
+
+
+@pytest.mark.parametrize("module", ["desman.locales.ru", "desman.i18n", "desman.cli"])
+def test_each_module_imports_first_in_a_fresh_process(module: str) -> None:
+    subprocess.run([sys.executable, "-c", f"import {module}"], check=True, timeout=60)

@@ -22,40 +22,18 @@ from __future__ import annotations
 
 import inspect
 import sys
-from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterator
 
 import click
 
-Forms = str | tuple[str, ...]
+from desman.locales import Catalog, Forms, english_plural, ru
 
-
-@dataclass(frozen=True)
-class Catalog:
-    name: str
-    """The language's own name, for the language menu."""
-    plural: Callable[[int], int]
-    """Which plural form (index into a tuple in `messages`) a count takes."""
-    messages: Mapping[str, Forms]
-    """Our messages: English text (singular form for plurals) → translation."""
-    click: Mapping[str, Forms] = field(default_factory=dict)
-    """Click's own messages, by Click's English text."""
-
-
-def english_plural(n: int) -> int:
-    return 0 if n == 1 else 1
-
+__all__ = ["CATALOGS", "Catalog", "Forms", "language", "set_language", "t", "tn"]
 
 ENGLISH = Catalog("English", english_plural, {})
 
 
-def _catalogs() -> dict[str, Catalog]:
-    from desman.locales import ru
-
-    return {"en": ENGLISH, "ru": ru.CATALOG}
-
-
-CATALOGS: dict[str, Catalog] = _catalogs()
+CATALOGS: dict[str, Catalog] = {"en": ENGLISH, "ru": ru.CATALOG}
 _current: Catalog = ENGLISH
 
 

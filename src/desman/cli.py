@@ -82,8 +82,22 @@ def _configured_language() -> str:
         return "en"
 
 
+def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    # Not click.version_option: it fixes its message at import, before the language is known.
+    if value and not ctx.resilient_parsing:
+        click.echo(t("{prog}, version {version}", prog="desman", version=__version__))
+        ctx.exit()
+
+
 @click.group(cls=DesmanGroup, invoke_without_command=True)
-@click.version_option(__version__, prog_name="desman")
+@click.option(
+    "--version",
+    is_flag=True,
+    expose_value=False,
+    is_eager=True,
+    callback=_print_version,
+    help="Show the version and exit.",
+)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
