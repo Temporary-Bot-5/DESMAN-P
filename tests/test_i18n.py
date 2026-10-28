@@ -180,7 +180,8 @@ def test_click_errors_and_messages_are_translated() -> None:
     assert "Ошибка: Нет такой команды 'statuss'. Может быть, 'status'?" in result.output
     assert "укажите либо GOAL, либо --spec" in desman("run").output
     assert "нет базы данных" in desman("list").output
-    assert "0 ключей у 0 из 9 провайдеров" in desman("keys").output
+    cloud = len(providers.CLOUD)
+    assert f"0 ключей у 0 из {cloud} провайдеров" in desman("keys").output
 
 
 def test_json_output_does_not_depend_on_the_language() -> None:

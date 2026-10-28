@@ -1,6 +1,7 @@
 """The `desman config` wizard, driven through its numbered fallback (no terminal in tests).
 
-Main menu: providers 1..11 in `providers.PROVIDERS` order, then 12 = Done. A provider without
+Main menu: providers numbered in `providers.PROVIDERS` order (free, paid, local, under section
+headings that take no number), then Done. A provider without
 keys goes straight to the key prompt; one with keys opens its menu: 1 add, 2 remove, then its
 settings, then Back. Permissions follow: four y/N questions, Enter keeps the current value.
 """
@@ -135,3 +136,25 @@ def test_first_run_of_bare_desman_opens_the_wizard() -> None:
     assert result.exit_code == 0, result.output
     assert json.loads(default_config_path().read_text(encoding="utf-8"))["configured"]
     assert "Decentralized Self-Evolving Modular Agents Network" in result.output
+
+
+def test_free_and_paid_providers_are_listed_apart() -> None:
+    result = wizard("1", DONE, *KEEP_PERMISSIONS)
+    assert result.exit_code == 0, result.output
+    out = result.output
+    free, paid, local = (
+        out.index("── Free tier"),
+        out.index("── Paid: billed per use"),
+        out.index("── Local"),
+    )
+    assert free < out.index("GROQ") < paid < out.index("OpenAI") < local < out.index("Ollama")
+
+
+def test_a_paid_key_needs_its_own_consent() -> None:
+    declined = wizard("1", menu("openai"), "y", "n", DONE, *KEEP_PERMISSIONS)  # privacy, cost
+    assert declined.exit_code == 0, declined.output
+    assert "Every call to OpenAI is billed to your account" in declined.output
+    assert saved().load().api_keys == {}
+    accepted = wizard("1", menu("openai"), "y", "y", "sk-paid", DONE, *KEEP_PERMISSIONS)
+    assert accepted.exit_code == 0, accepted.output
+    assert flat_keys(saved().load()) == {"OPENAI_API_KEY": "sk-paid"}

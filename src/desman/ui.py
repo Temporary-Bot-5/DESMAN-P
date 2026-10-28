@@ -122,27 +122,43 @@ class Choice:
     hint: str = ""
 
 
-def select(question: str, choices: Sequence[Choice], default: Any = None) -> Any:
-    """One of `choices` by value."""
+@dataclass(frozen=True)
+class Heading:
+    """A section title between choices; it cannot be picked and takes no number."""
+
+    title: str
+
+
+def select(question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
+    """One of the choices among `items` by value."""
+    choices = [c for c in items if isinstance(c, Choice)]
     if not choices:
         raise ValueError("nothing to choose from")
     width = max(len(c.label) for c in choices)  # hints line up in a column
     if interactive():
         import questionary
 
-        q_choices = [
-            questionary.Choice(
-                title=[("", c.label.ljust(width))]
-                + ([("class:hint", f"  {c.hint}")] if c.hint else []),
-                value=i,
+        q_items: list[Any] = []
+        for item in items:
+            if isinstance(item, Heading):
+                q_items.append(questionary.Separator(f"── {item.title}"))
+                continue
+            q_items.append(
+                questionary.Choice(
+                    title=[("", item.label.ljust(width))]
+                    + ([("class:hint", f"  {item.hint}")] if item.hint else []),
+                    value=sum(
+                        isinstance(q, questionary.Choice)
+                        and not isinstance(q, questionary.Separator)
+                        for q in q_items
+                    ),
+                )
             )
-            for i, c in enumerate(choices)
-        ]
         start = next((i for i, c in enumerate(choices) if c.value == default), 0)
         answer = questionary.select(
             question,
-            choices=q_choices,
-            default=q_choices[start],
+            choices=q_items,
+            default=next(q for q in q_items if getattr(q, "value", None) == start),
             qmark="›",
             instruction=t("(↑/↓, Enter)"),
             style=_style(),
@@ -152,10 +168,15 @@ def select(question: str, choices: Sequence[Choice], default: Any = None) -> Any
         return choices[answer].value
 
     out(Text(question, style="bold"))
-    for i, c in enumerate(choices, 1):
-        line = Text(f"  {i:>2}  ", style="key") + Text(c.label.ljust(width))
-        if c.hint:
-            line += Text(f"  {c.hint}", style="muted")
+    number = 0
+    for item in items:
+        if isinstance(item, Heading):
+            out(Text(f"  ── {item.title}", style="muted"))
+            continue
+        number += 1
+        line = Text(f"  {number:>2}  ", style="key") + Text(item.label.ljust(width))
+        if item.hint:
+            line += Text(f"  {item.hint}", style="muted")
         out(line)
     start = next((i for i, c in enumerate(choices, 1) if c.value == default), 1)
     while True:

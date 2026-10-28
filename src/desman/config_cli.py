@@ -113,7 +113,10 @@ def config_show(as_json: bool) -> None:
         if "keys" in row and not keys:
             keys = "-"
         settings = "  ".join(f"{env}={value or '-'}" for env, value in row["settings"].items())
-        rows.add_row(row["name"], status, keys, settings)
+        name = Text(row["name"])
+        if row["paid"]:
+            name.append(f" · {t('paid')}", style="warn")
+        rows.add_row(name, status, keys, settings)
     ui.out("")
     ui.out(rows)
     for env, values in out["unknown_keys"].items():
@@ -199,6 +202,7 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
                 "provider": p.id,
                 "name": p.name,
                 "env": p.key_env,
+                "paid": p.paid,
                 "ready": p.is_ready(config),
                 "keys": keys,
             }
@@ -218,10 +222,11 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
         title=t("API keys"),
     )
     for r in rows:
+        shown = r["name"] + (f" · {t('paid')}" if r["paid"] else "")
         if not r["keys"]:
-            table.add_row(Text(r["name"], style="muted"), "", Text("-", style="muted"), "", "", "")
+            table.add_row(Text(shown, style="muted"), "", Text("-", style="muted"), "", "", "")
         for k in r["keys"]:
-            name = r["name"] if k["n"] == 1 else ""
+            name = shown if k["n"] == 1 else ""
             table.add_row(
                 name,
                 str(k["n"]),
@@ -425,6 +430,14 @@ def keys_add(provider: str, label: str, from_stdin: bool) -> None:
             number=n,
         )
     )
+    if p.paid:
+        ui.warn(
+            t(
+                "{name} is billed per use; DESMAN uses it only with `desman run --provider {id}`.",
+                name=p.name,
+                id=p.id,
+            )
+        )
     missing = [s for s in p.settings if not s.default and not config.settings.get(s.env)]
     for s in missing:
         ui.warn(

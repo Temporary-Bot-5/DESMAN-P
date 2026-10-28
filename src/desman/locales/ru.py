@@ -246,6 +246,19 @@ MESSAGES: dict[str, Forms] = {
         "{name} не настроен: добавьте ключ через `desman keys add {id}` и заполните его "
         "настройки в `desman config`"
     ),
+    "only paid providers are configured ({names}), and DESMAN never picks a paid one by "
+    "itself: choose it with --provider, e.g. --provider {id}": (
+        "настроены только платные провайдеры ({names}), а платного DESMAN сам не выбирает: "
+        "укажите его через --provider, например --provider {id}"
+    ),
+    "{name} is a paid provider: every call is billed.": (
+        "{name} — платный провайдер: каждый вызов оплачивается."
+    ),
+    "{name} is billed per use; DESMAN uses it only with `desman run --provider {id}`.": (
+        "{name} оплачивается за использование; DESMAN использует его только с "
+        "`desman run --provider {id}`."
+    ),
+    "paid": "платный",
     "unknown provider {name!r} (known: {known})": "неизвестный провайдер {name!r} (известны: {known})",
     # ── config / keys / usage ────────────────────────────────────────────────
     "config {error}\nFix the file, or run `desman config reset` to start over.": (
@@ -387,6 +400,18 @@ MESSAGES: dict[str, Forms] = {
     "enter a number from 1 to {n}": "введите число от 1 до {n}",
     "enter y or n": "введите y или n (д или н)",
     # ── Wizard ───────────────────────────────────────────────────────────────
+    "Free tier": "Бесплатные",
+    "Paid: billed per use": "Платные: оплата за использование",
+    "Local": "Локальные",
+    "Paid provider": "Платный провайдер",
+    "Every call to {name} is billed to your account. DESMAN never picks a paid provider by "
+    "itself: it is used only with `desman run --provider {id}`. Set a spending limit in the "
+    "provider's console.": (
+        "Каждый вызов {name} оплачивается с вашего счёта. Сам DESMAN платного провайдера "
+        "никогда не выбирает: он используется только с `desman run --provider {id}`. "
+        "Задайте лимит расходов в консоли провайдера."
+    ),
+    "I understand that calls to {name} cost money": "Я понимаю, что вызовы {name} платные",
     "DESMAN(P) — Configuration": "DESMAN(P) — Настройка",
     "Model providers": "Провайдеры моделей",
     "Pick a provider to add keys or change settings": (

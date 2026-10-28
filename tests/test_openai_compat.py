@@ -17,7 +17,7 @@ from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import calls, db
 from desman.core.retry import FailureKind
-from desman.llm import router
+from desman.llm import check, router
 from desman.llm.base import (
     Message,
     ProviderRejected,
@@ -226,9 +226,9 @@ def test_router_choice() -> None:
     assert choice.model == "@cf/x" and llm.model == "@cf/x"
 
 
-def test_every_preferred_provider_exists_and_is_complete() -> None:
-    ids = {p.id for p in providers.CLOUD}
-    assert set(providers.PREFERENCE) == ids
+def test_every_free_provider_is_preferred_and_no_paid_one_is() -> None:
+    assert set(providers.PREFERENCE) == {p.id for p in providers.FREE}
+    assert all(p.paid for p in providers.PAID) and not any(p.paid for p in providers.FREE)
     for p in providers.CLOUD:
         assert p.base_url.startswith("https://") and p.default_model and p.limits_url
 
@@ -476,3 +476,85 @@ def test_keys_check_needs_a_real_answer(
     assert result.exit_code == 1
     [check] = json.loads(result.output)
     assert not check["ok"] and "could not be verified" in check["detail"]
+
+
+# ── Paid providers ───────────────────────────────────────────────────────────
+
+ANTHROPIC_KEY = "sk-ant-" + "c" * 40
+
+
+def test_paid_providers_are_never_chosen_by_themselves() -> None:
+    config = make_config(api_keys={"OPENAI_API_KEY": "sk-paid"})
+    with pytest.raises(router.NoProvider, match="only paid providers.*--provider openai"):
+        router.choose(config)
+    assert router.choose(config, "openai").id == "openai"  # by name: yes
+    both = make_config(api_keys={"OPENAI_API_KEY": "sk-paid", "COHERE_API_KEY": "co"})
+    assert router.choose(both).id == "cohere"  # the free one, though OpenAI comes first in lists
+
+
+def test_anthropic_requests_follow_its_rules(mock_http: Callable[[Handler], None]) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return reply()
+
+    mock_http(handler)
+    config = make_config(api_keys={"ANTHROPIC_API_KEY": ANTHROPIC_KEY})
+    llm, choice = router.build(config, "anthropic")
+    assert choice.model == "claude-haiku-5-5"
+    llm.complete(REQUEST)
+    [sent] = seen
+    assert str(sent.url) == "https://api.anthropic.com/v1/chat/completions"
+    assert sent.headers["authorization"] == f"Bearer {ANTHROPIC_KEY}"
+    assert sent.headers["x-api-key"] == ANTHROPIC_KEY
+    assert sent.headers["anthropic-version"] == "2023-06-01"
+    body = json.loads(sent.content)
+    assert "temperature" not in body  # Claude 4.7+ rejects anything but its default
+    assert body["max_tokens"] == 4096  # a request without one gets the provider's default
+    llm.complete(REQUEST.model_copy(update={"max_tokens": 50}))
+    assert json.loads(seen[-1].content)["max_tokens"] == 50
+
+
+def test_a_paid_account_out_of_money_goes_to_a_person() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, json={"error": {"message": "Insufficient Balance"}})
+
+    llm, _ = client(handler)
+    llm.paid = True
+    with pytest.raises(ProviderRejected, match="balance is used up") as caught:
+        llm.complete(REQUEST)
+    assert caught.value.kind is FailureKind.PERMANENT
+
+
+def test_running_on_a_paid_provider_says_so(mock_http: Callable[[Handler], None]) -> None:
+    ConfigManager(default_config_path()).save(make_config(api_keys={"DEEPSEEK_API_KEY": "sk-ds"}))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][-1]["content"]
+        return reply('{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}')
+
+    mock_http(handler)
+    refused = desman("run", "g")
+    assert refused.exit_code == 1 and "--provider deepseek" in refused.output
+    result = desman("run", "g", "--provider", "deepseek")
+    assert result.exit_code == 0, result.output
+    assert "DeepSeek is a paid provider: every call is billed." in result.output
+    shown = desman("config", "show").output
+    assert "DeepSeek · paid" in shown and "GROQ · paid" not in shown
+
+
+def test_key_check_sends_the_providers_own_headers() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": [{"id": "claude-haiku-5-5"}]})
+
+    config = make_config(api_keys={"ANTHROPIC_API_KEY": ANTHROPIC_KEY})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        [result] = check.check(config, providers.find("anthropic"), http)
+    assert result.ok and result.default_model_listed
+    assert str(seen[0].url) == "https://api.anthropic.com/v1/models"
+    assert seen[0].headers["x-api-key"] == ANTHROPIC_KEY
+    assert seen[0].headers["anthropic-version"] == "2023-06-01"

@@ -451,6 +451,10 @@ def _provider(
                 model=choice.model,
             )
         )
+        if choice.provider.paid:
+            ui.warn(
+                t("{name} is a paid provider: every call is billed.", name=choice.provider.name)
+            )
     return llm
 
 

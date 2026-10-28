@@ -92,6 +92,10 @@ class OpenAICompatible:
         on_call: Callable[[CallRecord], None] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
+        auth: Sequence[tuple[str, str]] = (("Authorization", "Bearer {key}"),),
+        send_temperature: bool = True,
+        max_tokens: int | None = None,
+        paid: bool = False,
     ) -> None:
         if not keys:
             raise ValueError(f"{provider}: no API key")
@@ -108,16 +112,22 @@ class OpenAICompatible:
         self._quota: set[int] = set()  # aside for a used-up quota, not a rate limit
         self._refused: set[int] = set()  # key indexes the provider refused
         self._refusal: ProviderRejected | None = None  # the latest, with the provider's words
+        self.auth = tuple(auth)
+        self.send_temperature = send_temperature
+        self.max_tokens = max_tokens
+        self.paid = paid
 
     def complete(self, request: Request) -> Completion:
         model = request.model or self.model
         body: dict[str, Any] = {
             "model": model,
             "messages": [m.model_dump() for m in request.messages],
-            "temperature": request.temperature,
         }
-        if request.max_tokens is not None:
-            body["max_tokens"] = request.max_tokens
+        if self.send_temperature:
+            body["temperature"] = request.temperature
+        max_tokens = request.max_tokens if request.max_tokens is not None else self.max_tokens
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         prompt_hash = text_hash(json.dumps(body["messages"], ensure_ascii=False))
 
         now = self.clock()
@@ -201,7 +211,7 @@ class OpenAICompatible:
             response = self.client.post(
                 f"{self.base_url}/chat/completions",
                 json=body,
-                headers={"Authorization": f"Bearer {key}"},
+                headers={name: value.format(key=key) for name, value in self.auth},
                 timeout=self.timeout,
             )
         except httpx.TimeoutException:
@@ -249,6 +259,9 @@ class OpenAICompatible:
             # A limit of 0 never resets: the account has no access to this API or model yet
             # (e.g. a plan that still has to be activated). Waiting would wait forever.
             return ProviderRejected(self.name, 429, f"the account's limit is 0. {message}".strip())
+        if status == 402 and self.paid:
+            # A paid account out of money: no reset to wait for, a person has to top it up.
+            return ProviderRejected(self.name, 402, f"the balance is used up. {message}".strip())
         if status == 402 or (status == 429 and _QUOTA_WORDS.search(message)):
             now = self.clock()
             wait = _retry_after(response, message)
