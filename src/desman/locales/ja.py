@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}、バージョン {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "データベースを作成するか、未適用のマイグレーションを適用します。何度実行しても安全です。",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "TASK の全履歴を表示します（タスクの id またはその一意な先頭部分）。\n\nステータスの変化、レビュアーの判定、チェックポイント、破棄された作業をすべて順番に表示します。履歴が現在の状態を説明できない場合は終了コード 1 で終了します。",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL（または --spec）からタスクを作成し、実行します。\n\n--spec がない場合、計画はサブタスク 1 つ（ゴールそのもの）です（LLM プランナーは ROADMAP 2.7）。終了コード: 0 完了、3 オペレーター待ち、4 一時停止（プロバイダーの制限）、5 failed または cancelled、6 別の場所でまだ実行中。",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "停止したところから TASK を再開します: クラッシュ、一時停止、オペレーターの判断のあとなど。\n\nこのマシン上でクラッシュした実行が残した作業はすぐに引き取り、それ以外はリースの期限切れ後に引き取ります。完了したサブタスクはやり直しません。終了コードは `run` と同じです。",
     "Show TASK and its subtasks. Same exit codes as `run`.": "TASK とそのサブタスクを表示します。終了コードは `run` と同じです。",
     "List tasks, newest first.": "タスクを新しい順に一覧表示します。",
@@ -252,6 +251,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "同じリクエストに受け入れ済みの応答があってもモデルに問い合わせます（既定ではその応答を 7 日間再利用し、resume 時のクォータを節約します）。",
     "yes": "はい",
     "no": "いいえ",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL（または --spec）からタスクを作成し、実行します。\n\nモデルが GOAL をサブタスクに分割します。できなかった場合はゴールそのものが唯一のサブタスクになります（--plan を参照）。終了コード: 0 完了、3 オペレーター待ち、4 一時停止（プロバイダーの制限）、5 failed または cancelled、6 別の場所でまだ実行中。",
+    "--plan is for GOAL: a --spec is already a plan": "--plan は GOAL 用です: --spec はすでに計画です",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL をサブタスクにする方法: llm はモデルに計画を作らせます（既定。失敗したらテンプレートを使用）、template はゴールそのものを唯一のサブタスクにします（--fake-llm 使用時の既定）。",
+    "Planning…": "計画中…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "モデルが計画を作れなかったため、ゴールそのものが唯一のサブタスクです: {error}",
 }
 
 CLICK: dict[str, Forms] = {

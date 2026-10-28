@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}, sürüm {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "Veritabanını oluşturur veya bekleyen geçişleri uygular. Tekrar çalıştırmak güvenlidir.",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "TASK görevinin tüm geçmişini gösterir (görev id'si veya id'nin benzersiz bir başlangıcı).\n\nHer durum değişikliği, gözden geçiren kararı, checkpoint ve atılan iş sırasıyla. Geçmiş mevcut durumu açıklamıyorsa 1 koduyla çıkar.",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL için (veya --spec ile) bir görev oluşturur ve üzerinde çalışır.\n\n--spec olmadan plan tek bir alt görevdir: hedefin kendisi (LLM planlayıcı ROADMAP 2.7'de). Çıkış kodları: 0 tamamlandı, 3 operatörü bekliyor, 4 duraklatıldı (sağlayıcı sınırı), 5 failed veya cancelled, 6 başka bir yerde hâlâ sürüyor.",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "TASK görevine kaldığı yerden devam eder: çökme, duraklatma veya operatör kararlarından sonra.\n\nÇöken bir çalıştırmanın bıraktığı iş, bu makinedeyse hemen, değilse kirası dolunca geri alınır. Biten alt görevler asla yeniden yapılmaz. Çıkış kodları `run` ile aynıdır.",
     "Show TASK and its subtasks. Same exit codes as `run`.": "TASK görevini ve alt görevlerini gösterir. Çıkış kodları `run` ile aynıdır.",
     "List tasks, newest first.": "Görevleri listeler, en yenisi önce.",
@@ -254,6 +253,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Aynı isteğin kabul edilmiş bir yanıtı olsa bile modele sor (varsayılan olarak bu yanıt 7 gün yeniden kullanılır, bu da devam ederken kota tasarrufu sağlar).",
     "yes": "evet",
     "no": "hayır",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL için (veya --spec ile) bir görev oluşturur ve üzerinde çalışır.\n\nModel GOAL'ı alt görevlere böler; bölemezse tek alt görev hedefin kendisidir (bkz. --plan). Çıkış kodları: 0 tamamlandı, 3 operatörü bekliyor, 4 duraklatıldı (sağlayıcı sınırı), 5 failed veya cancelled, 6 başka bir yerde hâlâ sürüyor.",
+    "--plan is for GOAL: a --spec is already a plan": "--plan GOAL içindir: --spec zaten bir plandır",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL'ın alt görevlere dönüşmesi: llm modelden bir plan ister (varsayılan; başarısız olursa şablon kullanılır), template hedefin kendisini tek alt görev yapar (--fake-llm ile varsayılan).",
+    "Planning…": "Planlanıyor…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "Model bir plan yapamadı, bu yüzden tek alt görev hedefin kendisi: {error}",
 }
 
 CLICK: dict[str, Forms] = {

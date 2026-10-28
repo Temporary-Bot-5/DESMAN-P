@@ -37,6 +37,7 @@ src/desman/
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # Minimal LLM executor/reviewer (JSON replies) behind `desman run`
+├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
 ├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import`,
 │                  #   `language [CODE]`, `usage`

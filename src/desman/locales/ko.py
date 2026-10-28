@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}, 버전 {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "데이터베이스를 만들거나 대기 중인 마이그레이션을 적용합니다. 여러 번 실행해도 안전합니다.",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "TASK의 전체 기록을 표시합니다 (작업 id 또는 고유한 id 접두어).\n\n모든 상태 변경, 검토자 판정, 체크포인트, 버려진 작업을 순서대로 보여 줍니다. 기록이 현재 상태를 설명하지 못하면 종료 코드 1로 끝납니다.",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL(또는 --spec)로 작업을 만들고 실행합니다.\n\n--spec이 없으면 계획은 하위 작업 하나, 즉 목표 자체입니다 (LLM 플래너는 ROADMAP 2.7). 종료 코드: 0 완료, 3 운영자 대기, 4 일시 중지(공급자 한도), 5 failed 또는 cancelled, 6 다른 곳에서 아직 진행 중.",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "멈춘 곳에서 TASK를 이어서 실행합니다: 충돌, 일시 중지 또는 운영자의 결정 이후.\n\n이 컴퓨터에서 충돌한 실행이 남긴 작업은 즉시 회수하고, 그렇지 않으면 리스가 만료될 때 회수합니다. 완료된 하위 작업은 다시 하지 않습니다. 종료 코드는 `run`과 같습니다.",
     "Show TASK and its subtasks. Same exit codes as `run`.": "TASK와 그 하위 작업을 표시합니다. 종료 코드는 `run`과 같습니다.",
     "List tasks, newest first.": "작업 목록을 최신순으로 표시합니다.",
@@ -252,6 +251,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "같은 요청에 이미 수락된 응답이 있어도 모델에 다시 묻습니다 (기본적으로 그런 응답은 7일 동안 재사용되어 resume 시 할당량을 아낍니다).",
     "yes": "예",
     "no": "아니요",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL(또는 --spec)로 작업을 만들고 실행합니다.\n\n모델이 GOAL을 하위 작업으로 나눕니다. 실패하면 목표 자체가 유일한 하위 작업이 됩니다 (--plan 참고). 종료 코드: 0 완료, 3 운영자 대기, 4 일시 중지(공급자 한도), 5 failed 또는 cancelled, 6 다른 곳에서 아직 진행 중.",
+    "--plan is for GOAL: a --spec is already a plan": "--plan은 GOAL용입니다: --spec은 이미 계획입니다",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL을 하위 작업으로 만드는 방법: llm은 모델에게 계획을 요청합니다 (기본값, 실패하면 템플릿 사용), template은 목표 자체를 유일한 하위 작업으로 만듭니다 (--fake-llm 사용 시 기본값).",
+    "Planning…": "계획 세우는 중…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "모델이 계획을 세우지 못해 목표 자체가 유일한 하위 작업입니다: {error}",
 }
 
 CLICK: dict[str, Forms] = {

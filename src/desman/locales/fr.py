@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}, version {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "Crée la base de données ou applique les migrations en attente. Peut être relancé sans risque.",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "Affiche tout l'historique de TASK (son id ou un préfixe unique de celui-ci).\n\nChaque changement d'état, verdict du relecteur, checkpoint et travail abandonné, dans l'ordre. Quitte avec 1 si l'historique n'explique pas l'état actuel.",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Crée une tâche pour GOAL (ou depuis --spec) et la traite.\n\nSans --spec, le plan est une seule sous-tâche : l'objectif lui-même (le planificateur LLM est ROADMAP 2.7). Codes de sortie : 0 terminée, 3 en attente de l'opérateur, 4 en pause (limite du fournisseur), 5 failed ou cancelled, 6 encore en cours ailleurs.",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "Reprend TASK là où elle s'est arrêtée : après un plantage, une pause ou les décisions de l'opérateur.\n\nLe travail laissé par une exécution plantée est repris aussitôt si elle tournait sur cette machine, sinon à l'expiration de son bail. Les sous-tâches terminées ne sont jamais refaites. Mêmes codes de sortie que `run`.",
     "Show TASK and its subtasks. Same exit codes as `run`.": "Affiche TASK et ses sous-tâches. Mêmes codes de sortie que `run`.",
     "List tasks, newest first.": "Liste les tâches, les plus récentes d'abord.",
@@ -273,6 +272,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Interroger le modèle même si la même requête a déjà une réponse acceptée (par défaut, elle est réutilisée pendant 7 jours, ce qui économise le quota lors d'une reprise).",
     "yes": "oui",
     "no": "non",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Crée une tâche pour GOAL (ou depuis --spec) et la traite.\n\nLe modèle découpe GOAL en sous-tâches ; s'il n'y parvient pas, l'objectif lui-même est la seule sous-tâche (voir --plan). Codes de sortie : 0 terminée, 3 en attente de l'opérateur, 4 en pause (limite du fournisseur), 5 failed ou cancelled, 6 encore en cours ailleurs.",
+    "--plan is for GOAL: a --spec is already a plan": "--plan concerne GOAL : un --spec est déjà un plan",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Comment GOAL devient des sous-tâches : llm demande un plan au modèle (par défaut ; en cas d'échec, le modèle type est utilisé), template fait de l'objectif lui-même la seule sous-tâche (par défaut avec --fake-llm).",
+    "Planning…": "Planification…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "Le modèle n'a pas fait de plan, l'objectif est donc la seule sous-tâche : {error}",
 }
 
 CLICK: dict[str, Forms] = {

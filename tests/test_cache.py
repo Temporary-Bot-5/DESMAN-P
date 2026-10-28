@@ -146,6 +146,8 @@ def test_a_second_run_reuses_accepted_replies_unless_told_not_to(
         prompt = json.loads(request.content)["messages"][-1]["content"]
         sent.append(prompt.split(":")[0])
         text = '{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}'
+        if prompt.startswith("Plan"):
+            text = '{"subtasks": [{"description": "d", "acceptance_criteria": "c"}]}'
         return httpx.Response(
             200,
             json={
@@ -165,11 +167,11 @@ def test_a_second_run_reuses_accepted_replies_unless_told_not_to(
         return CliRunner().invoke(cli, ["run", "same goal", *extra])
 
     assert run().exit_code == 0
-    assert sent == ["Execute subtask", "Review subtask"]
+    assert sent == ["Plan task", "Execute subtask", "Review subtask"]
     assert run().exit_code == 0
-    assert len(sent) == 2  # the same questions: answered from the cache
+    assert len(sent) == 3  # the same questions, the plan too: answered from the cache
     assert run("--no-cache").exit_code == 0
-    assert len(sent) == 4
+    assert len(sent) == 6
 
 
 def test_reuse_does_not_extend_a_replys_life(conn: sqlite3.Connection, clock: FakeClock) -> None:

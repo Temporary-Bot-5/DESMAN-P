@@ -263,7 +263,7 @@ def test_run_on_a_real_provider_logs_its_calls(mock_http: Callable[[Handler], No
         return reply('{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}')
 
     mock_http(handler)
-    result = desman("run", "answer the question")
+    result = desman("run", "answer the question", "--plan", "template")
     assert result.exit_code == 0, result.output
     assert "Using GROQ · openai/gpt-oss-20b (1 key)" in result.output
 
@@ -810,7 +810,7 @@ def test_a_server_blip_costs_the_subtask_nothing(
         return reply('{"verdict": "accept"}') if prompt.startswith("Review") else next(replies)
 
     mock_http(handler)
-    result = desman("run", "g", "--json")
+    result = desman("run", "g", "--plan", "template", "--json")
     assert result.exit_code == 0, result.output
     [sub] = json.loads(result.output)["task"]["subtasks"]
     assert sub["attempts"] == {"quality": 0, "transient": 0}

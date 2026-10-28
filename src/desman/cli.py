@@ -19,7 +19,7 @@ from desman.config_cli import config, keys, language, load_config, run_wizard, u
 from desman.core import calls, db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
-from desman.core.models import Priority, SubtaskSpec, TaskSpec
+from desman.core.models import Priority, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
@@ -31,6 +31,7 @@ from desman.llm.base import LLM
 from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.llm.openai_compat import OpenAICompatible
+from desman.planner import Planned, plan, template_plan
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -40,7 +41,6 @@ EXIT_NEEDS_HUMAN = 3
 EXIT_PAUSED = 4
 EXIT_STOPPED = 5  # failed or cancelled
 EXIT_ACTIVE = 6  # still in progress (someone holds a lease, or nobody has run it)
-TEMPLATE_CRITERIA = "The result fully achieves the stated goal."
 
 
 def db_option(command: F) -> F:
@@ -286,6 +286,15 @@ def run_options(command: F) -> F:
     default=None,
     help="Overrides the priority (default: normal, or the spec's).",
 )
+@click.option(
+    "--plan",
+    "plan_mode",
+    type=click.Choice(["llm", "template"]),
+    default=None,
+    help="How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, "
+    "the template is used), template makes the goal itself the only subtask (the default "
+    "with --fake-llm).",
+)
 @run_options
 @db_option
 @json_option
@@ -293,6 +302,7 @@ def run(
     goal: str | None,
     spec_path: Path | None,
     priority: str | None,
+    plan_mode: str | None,
     fake_script: Path | None,
     provider_name: str | None,
     model: str | None,
@@ -304,15 +314,18 @@ def run(
 ) -> None:
     """Create a task for GOAL (or from --spec) and work on it.
 
-    Without --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP
-    2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),
+    The model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask
+    (see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),
     5 failed or cancelled, 6 still in progress elsewhere.
     """
     if (goal is None) == (spec_path is None):
         raise click.UsageError(t("give either GOAL or --spec, not both"))
-    spec = _load_spec(goal, spec_path)
-    if priority is not None:
-        spec = spec.model_copy(update={"priority": int(Priority[priority.upper()])})
+    if spec_path is not None and plan_mode is not None:
+        raise click.UsageError(t("--plan is for GOAL: a --spec is already a plan"))
+    if goal is not None and not goal.strip():
+        raise click.UsageError(t("GOAL is empty"))
+    spec = _load_spec(spec_path) if spec_path is not None else None
+    level = None if priority is None else int(Priority[priority.upper()])
     llm = _provider(fake_script, provider_name, model, as_json)  # fail fast, before any task
     path = db_path or db.default_db_path()
     try:
@@ -321,7 +334,16 @@ def run(
         raise click.ClickException(str(e)) from e
     llm = _attach(llm, store, cache=not no_cache)
     try:
-        task_id = store.create_task(spec)
+        planned: Planned | None = None
+        if spec is None:
+            assert goal is not None
+            by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
+            planned = _plan(llm, goal, level, by_model=by_model, as_json=as_json)
+            spec = planned.spec
+        elif level is not None:
+            spec = spec.model_copy(update={"priority": level})
+        details = planned.details() if planned else None
+        task_id = store.create_task(spec, details=details)
         if not as_json:
             click.echo(
                 tn(
@@ -332,7 +354,7 @@ def run(
                 )
             )
             sys.stdout.flush()  # visible before any work starts, even through a pipe
-        _drive(store, llm, task_id, wait, lease_seconds, as_json)
+        _drive(store, llm, task_id, wait, lease_seconds, as_json, details)
     finally:
         store.conn.close()
 
@@ -417,15 +439,28 @@ def list_tasks(status_filter: str | None, limit: int, db_path: Path | None, as_j
         )
 
 
-def _load_spec(goal: str | None, spec_path: Path | None) -> TaskSpec:
-    if spec_path is None:
-        assert goal is not None
-        if not goal.strip():
-            raise click.UsageError(t("GOAL is empty"))
-        return TaskSpec(
-            goal=goal,
-            subtasks=[SubtaskSpec(description=goal, acceptance_criteria=TEMPLATE_CRITERIA)],
+def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json: bool) -> Planned:
+    level = Priority.NORMAL if priority is None else priority
+    if not by_model:
+        return Planned(template_plan(goal, level), "template")
+    if not as_json:
+        ui.note(t("Planning…"))
+        sys.stdout.flush()
+    try:
+        planned = plan(llm, goal, level)
+    except ScriptExhausted as e:
+        raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
+    if planned.error is not None and not as_json:
+        ui.warn(
+            t(
+                "The model did not make a plan, so the goal is the only subtask: {error}",
+                error=planned.error,
+            )
         )
+    return planned
+
+
+def _load_spec(spec_path: Path) -> TaskSpec:
     try:
         return TaskSpec.model_validate_json(spec_path.read_text(encoding="utf-8"))
     except (ValidationError, UnicodeDecodeError) as e:
@@ -489,7 +524,13 @@ def _find(store: Store, task: str) -> str:
 
 
 def _drive(
-    store: Store, llm: LLM, task_id: str, wait: bool, lease_seconds: int, as_json: bool
+    store: Store,
+    llm: LLM,
+    task_id: str,
+    wait: bool,
+    lease_seconds: int,
+    as_json: bool,
+    plan_details: dict[str, Any] | None = None,
 ) -> None:
     coordinator = Coordinator(
         store,
@@ -506,7 +547,10 @@ def _drive(
     report = task_report(store, task_id)
     short = store.short_id(task_id)
     if as_json:
-        out = {"run": _run_summary(result), "task": report.model_dump(mode="json")}
+        out: dict[str, Any] = {"run": _run_summary(result)}
+        if plan_details is not None:
+            out["plan"] = plan_details
+        out["task"] = report.model_dump(mode="json")
         click.echo(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         _print_report(report)

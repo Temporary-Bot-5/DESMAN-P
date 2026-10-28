@@ -16,7 +16,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}, संस्करण {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "डेटाबेस बनाएँ या बाकी माइग्रेशन लागू करें। दोबारा चलाना सुरक्षित है।",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "TASK का पूरा इतिहास दिखाएँ (उसकी id या id का कोई अनोखा शुरुआती हिस्सा)।\n\nहर स्थिति परिवर्तन, समीक्षक का निर्णय, checkpoint और छोड़ा गया काम, क्रम से। अगर इतिहास वर्तमान स्थिति को नहीं समझाता, तो कोड 1 के साथ बाहर निकलता है।",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL के लिए (या --spec से) एक कार्य बनाएँ और उस पर काम करें।\n\n--spec के बिना योजना में एक ही उप-कार्य होता है: स्वयं लक्ष्य (LLM योजनाकार ROADMAP 2.7 में है)। निकास कोड: 0 पूरा, 3 ऑपरेटर की प्रतीक्षा, 4 रुका हुआ (प्रदाता की सीमा), 5 failed या cancelled, 6 अभी कहीं और चल रहा है।",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "TASK को वहीं से जारी रखें जहाँ वह रुका था: क्रैश, विराम या ऑपरेटर के निर्णयों के बाद।\n\nइस मशीन पर क्रैश हुए रन का छोड़ा काम तुरंत वापस लिया जाता है, नहीं तो उसकी लीज़ समाप्त होने पर। पूरे हो चुके उप-कार्य कभी दोबारा नहीं किए जाते। निकास कोड `run` जैसे ही हैं।",
     "Show TASK and its subtasks. Same exit codes as `run`.": "TASK और उसके उप-कार्य दिखाएँ। निकास कोड `run` जैसे ही हैं।",
     "List tasks, newest first.": "कार्यों की सूची, सबसे नए पहले।",
@@ -273,6 +272,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "मॉडल से फिर पूछें, भले ही उसी अनुरोध का स्वीकार किया गया उत्तर पहले से हो (डिफ़ॉल्ट रूप से ऐसा उत्तर 7 दिन तक फिर से इस्तेमाल होता है, जिससे resume पर कोटा बचता है)।",
     "yes": "हाँ",
     "no": "नहीं",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "GOAL के लिए (या --spec से) एक कार्य बनाएँ और उस पर काम करें।\n\nमॉडल GOAL को उप-कार्यों में बाँटता है; न बाँट पाए तो स्वयं लक्ष्य ही एकमात्र उप-कार्य होता है (--plan देखें)। निकास कोड: 0 पूरा, 3 ऑपरेटर की प्रतीक्षा, 4 रुका हुआ (प्रदाता की सीमा), 5 failed या cancelled, 6 अभी कहीं और चल रहा है।",
+    "--plan is for GOAL: a --spec is already a plan": "--plan GOAL के लिए है: --spec पहले से ही एक योजना है",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL उप-कार्यों में कैसे बदलता है: llm मॉडल से योजना माँगता है (डिफ़ॉल्ट; विफल होने पर टेम्पलेट इस्तेमाल होता है), template स्वयं लक्ष्य को एकमात्र उप-कार्य बनाता है (--fake-llm के साथ डिफ़ॉल्ट)।",
+    "Planning…": "योजना बनाई जा रही है…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "मॉडल ने योजना नहीं बनाई, इसलिए स्वयं लक्ष्य ही एकमात्र उप-कार्य है: {error}",
 }
 
 CLICK: dict[str, Forms] = {

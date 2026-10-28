@@ -21,7 +21,6 @@ MESSAGES: dict[str, Forms] = {
     "{prog}, version {version}": "{prog}, версія {version}",
     "Create the database or apply pending migrations. Safe to re-run.": "Створити базу даних або застосувати нові міграції. Можна запускати повторно.",
     "Show the full history of TASK (its id or a unique prefix of it).\n\nEvery status change, reviewer verdict, checkpoint and discarded piece of work, in order.\nExits with 1 if the history does not account for the current state.": "Показати всю історію задачі TASK (її id або унікальний початок id).\n\nПо порядку: кожна зміна статусу, вердикт рецензента, checkpoint і відкинута робота. Код виходу 1, якщо історія не пояснює поточний стан.",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nWithout --spec the plan is a single subtask: the goal itself (the LLM planner is ROADMAP\n2.7). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Створити задачу для мети GOAL (або з --spec) і виконати її.\n\nБез --spec план — одна підзадача, що дорівнює меті (LLM-планувальник — ROADMAP 2.7). Коди виходу: 0 — готово, 3 — чекає оператора, 4 — пауза (ліміт провайдера), 5 — failed або cancelled, 6 — ще виконується деінде.",
     "Continue TASK where it stopped: after a crash, a pause or the operator's decisions.\n\nWork a crashed run left behind is taken back at once if that run was on this machine,\notherwise when its lease expires. Finished subtasks are never redone. Same exit codes as\n`run`.": "Продовжити задачу TASK з місця зупинки: після збою, паузи або рішень оператора.\n\nРоботу запуску, що впав на цій машині, забираємо одразу, інакше — коли спливе його оренда. Готові підзадачі не переробляються. Коди виходу ті самі, що в `run`.",
     "Show TASK and its subtasks. Same exit codes as `run`.": "Показати задачу TASK та її підзадачі. Коди виходу ті самі, що в `run`.",
     "List tasks, newest first.": "Список задач, нові зверху.",
@@ -289,6 +288,11 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Питати модель, навіть якщо на такий самий запит уже є прийнята відповідь (типово вона використовується повторно 7 днів, це економить квоту під час resume).",
     "yes": "так",
     "no": "ні",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Створити задачу для мети GOAL (або з --spec) і виконати її.\n\nМодель розбиває GOAL на підзадачі; якщо не вдалося, єдиною підзадачею стає сама мета (див. --plan). Коди виходу: 0 — готово, 3 — чекає оператора, 4 — пауза (ліміт провайдера), 5 — failed або cancelled, 6 — ще виконується деінде.",
+    "--plan is for GOAL: a --spec is already a plan": "--plan стосується GOAL: --spec уже і є план",
+    "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Як GOAL перетворюється на підзадачі: llm просить модель скласти план (типово; якщо не вийшло, береться шаблон), template робить саму мету єдиною підзадачею (типово з --fake-llm).",
+    "Planning…": "Складаю план…",
+    "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не склала план, тому єдина підзадача — сама мета: {error}",
 }
 
 CLICK: dict[str, Forms] = {
