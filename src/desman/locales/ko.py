@@ -248,6 +248,7 @@ MESSAGES: dict[str, Forms] = {
     "Language set to {name}.": "인터페이스 언어를 {name}(으)로 설정했습니다.",
     "unknown language {name!r} (known: {codes})": "알 수 없는 언어 {name!r} (알려진 언어: {codes})",
     "interface language": "인터페이스 언어",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {

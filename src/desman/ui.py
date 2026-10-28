@@ -220,13 +220,14 @@ def confirm(question: str, default: bool = False) -> bool:
         import questionary
 
         answer = questionary.confirm(
-            question, default=default, qmark="›", instruction="(Y/N) ", style=_style()
+            question, default=default, qmark="›", instruction=t("(Y/N)") + " ", style=_style()
         ).ask()
         if answer is None:
             raise Cancelled
         return bool(answer)
     while True:  # Enter keeps the default
-        raw = click.prompt(f"{question} (Y/N)", default="", show_default=False).strip().lower()
+        raw = click.prompt(f"{question} {t('(Y/N)')}", default="", show_default=False)
+        raw = raw.strip().lower()
         if not raw:
             return default
         if raw in ("y", "yes", "д", "да"):

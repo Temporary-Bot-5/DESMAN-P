@@ -504,6 +504,7 @@ MESSAGES: dict[str, Forms] = {
     "Language set to {name}.": "Язык интерфейса: {name}.",
     "unknown language {name!r} (known: {codes})": "неизвестный язык {name!r} (известны: {codes})",
     "interface language": "язык интерфейса",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {

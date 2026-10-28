@@ -248,6 +248,7 @@ MESSAGES: dict[str, Forms] = {
     "Language set to {name}.": "インターフェースの言語を {name} にしました。",
     "unknown language {name!r} (known: {codes})": "不明な言語 {name!r}（既知: {codes}）",
     "interface language": "インターフェースの言語",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {

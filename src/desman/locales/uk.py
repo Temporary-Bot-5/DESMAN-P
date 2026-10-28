@@ -285,6 +285,7 @@ MESSAGES: dict[str, Forms] = {
     "Language set to {name}.": "Мова інтерфейсу: {name}.",
     "unknown language {name!r} (known: {codes})": "невідома мова {name!r} (відомі: {codes})",
     "interface language": "мова інтерфейсу",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {

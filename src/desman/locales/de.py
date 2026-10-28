@@ -269,6 +269,7 @@ MESSAGES: dict[str, Forms] = {
     "Language set to {name}.": "Sprache der Oberfläche: {name}.",
     "unknown language {name!r} (known: {codes})": "unbekannte Sprache {name!r} (bekannt: {codes})",
     "interface language": "Sprache der Oberfläche",
+    "(Y/N)": "(Y/N)",
 }
 
 CLICK: dict[str, Forms] = {
