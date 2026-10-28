@@ -182,3 +182,13 @@ def test_reuse_does_not_extend_a_replys_life(conn: sqlite3.Connection, clock: Fa
     clock.advance(timedelta(days=2).total_seconds())  # day 8: the day-0 reply has expired
     assert complete_json(llm, ask(), Answer, heading="Ask") == Answer(answer=2)
     assert len(fake.calls) == 2
+
+
+def test_a_reply_not_worth_keeping_is_asked_again(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    llm, fake = cached(conn, clock, '{"answer": 0}', '{"answer": 1}')
+    keep = lambda value: value.answer != 0  # noqa: E731 (e.g. an error report)
+    assert complete_json(llm, ask(), Answer, heading="Ask", keep=keep) == Answer(answer=0)
+    assert complete_json(llm, ask(), Answer, heading="Ask", keep=keep) == Answer(answer=1)
+    assert len(fake.calls) == 2

@@ -18,6 +18,7 @@ from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
 from desman.core.store import Store
 from desman.core.workspace import Workspace
+from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, garbage
 from desman.llm.structured import json_object as _json_object
 
@@ -270,3 +271,23 @@ def test_the_executor_may_say_it_cannot_do_the_work(store: Store, clock: FakeClo
     result = Coordinator(store, llm_executor(llm), reviewer, sleep=clock.sleep).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
     assert '"type": "error"' in llm.calls[0].messages[0].content  # the way out is offered
+
+
+def test_an_error_report_is_not_cached(store: Store, tmp_path: Path) -> None:
+    # A source that was down for one task may be up for the next one asking the same.
+    fake = FakeLLM('{"type": "error", "reason": "down"}', '{"ok": 1}', '{"ok": 2}')
+    execute = llm_executor(Cached(fake, store.conn, "m"))
+    store.create_task(one_step())
+    claimed = store.claim("w")
+    assert claimed is not None
+    work = Work(
+        subtask=claimed,
+        context=build_context(claimed, [], None),
+        heartbeat=no_heartbeat,
+        workspace=Workspace(tmp_path, claimed.task_id),
+    )
+    results = [execute(work) for _ in range(3)]
+    # The coordinator turns the report into a failed attempt; here it is just not kept.
+    assert results[0] == Success(content={"type": "error", "reason": "down"})
+    assert results[1] == results[2] == Success(content={"ok": 1})  # this one is kept
+    assert len(fake.calls) == 2

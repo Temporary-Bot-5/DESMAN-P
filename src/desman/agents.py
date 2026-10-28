@@ -16,6 +16,7 @@ Prompts start with "Execute subtask" and "Review subtask", so a fake script can 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Annotated, Any, Self, TypeVar
 
 from pydantic import BaseModel, RootModel, StringConstraints, model_validator
@@ -28,6 +29,7 @@ from desman.core.coordinator import (
     Success,
     Verdict,
     Work,
+    is_error_report,
 )
 from desman.core.models import Subtask
 from desman.core.retry import FailureKind
@@ -73,7 +75,15 @@ def llm_executor(llm: LLM) -> Executor:
             "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
         }
         try:
-            result = _ask(llm, EXECUTOR_SYSTEM, EXECUTE, prompt, _Result)
+            # An error report is not cached: the next task asking the same may succeed.
+            result = _ask(
+                llm,
+                EXECUTOR_SYSTEM,
+                EXECUTE,
+                prompt,
+                _Result,
+                keep=lambda r: not is_error_report(r.root),
+            )
         except StructuredOutputError as e:
             # The problem only: the reply may echo anything (it is in the call log).
             return Failure(kind=FailureKind.QUALITY, reason=f"unusable reply: {e.problem}")
@@ -114,7 +124,14 @@ class _Result(RootModel[dict[str, Any]]):
     """An executor's result: any JSON object (subtasks have no result schema yet)."""
 
 
-def _ask(llm: LLM, system: str, heading: str, payload: dict[str, Any], schema: type[T]) -> T:
+def _ask(
+    llm: LLM,
+    system: str,
+    heading: str,
+    payload: dict[str, Any],
+    schema: type[T],
+    keep: Callable[[T], bool] = lambda value: True,
+) -> T:
     body = json.dumps(payload, ensure_ascii=False, indent=2)
     request = Request(
         messages=[
@@ -122,4 +139,4 @@ def _ask(llm: LLM, system: str, heading: str, payload: dict[str, Any], schema: t
             Message(role="user", content=f"{heading}:\n{body}"),
         ]
     )
-    return complete_json(llm, request, schema, heading=heading)
+    return complete_json(llm, request, schema, heading=heading, keep=keep)
