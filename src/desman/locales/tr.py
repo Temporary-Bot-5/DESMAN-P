@@ -251,6 +251,7 @@ MESSAGES: dict[str, Forms] = {
     "unknown language {name!r} (known: {codes})": "bilinmeyen dil {name!r} (bilinenler: {codes})",
     "interface language": "arayüz dili",
     "(Y/N)": "(Y/N)",
+    "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Aynı isteğin kabul edilmiş bir yanıtı olsa bile modele sor (varsayılan olarak bu yanıt 7 gün yeniden kullanılır, bu da devam ederken kota tasarrufu sağlar).",
     "yes": "evet",
     "no": "hayır",
 }

@@ -28,6 +28,7 @@ from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
 from desman.llm.base import LLM
+from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.llm.openai_compat import OpenAICompatible
 
@@ -229,6 +230,12 @@ def json_option(command: F) -> F:
 
 def run_options(command: F) -> F:
     command = click.option(
+        "--no-cache",
+        is_flag=True,
+        help="Ask the model even when the same request already has an accepted reply "
+        "(by default such a reply is reused for 7 days, which saves quota on a resume).",
+    )(command)
+    command = click.option(
         "--model",
         default=None,
         help="Model to use (default: the provider's free-tier default, see `desman keys check`).",
@@ -293,6 +300,7 @@ def run(
     lease_seconds: int,
     db_path: Path | None,
     as_json: bool,
+    no_cache: bool,
 ) -> None:
     """Create a task for GOAL (or from --spec) and work on it.
 
@@ -311,7 +319,7 @@ def run(
         store = Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
-    _record_calls(llm, store)
+    llm = _attach(llm, store, cache=not no_cache)
     try:
         task_id = store.create_task(spec)
         if not as_json:
@@ -343,6 +351,7 @@ def resume(
     lease_seconds: int,
     db_path: Path | None,
     as_json: bool,
+    no_cache: bool,
 ) -> None:
     """Continue TASK where it stopped: after a crash, a pause or the operator's decisions.
 
@@ -352,7 +361,7 @@ def resume(
     """
     llm = _provider(fake_script, provider_name, model, as_json)
     store = open_existing(db_path)
-    _record_calls(llm, store)
+    llm = _attach(llm, store, cache=not no_cache)
     try:
         task_id = _find(store, task)
         _drive(store, llm, task_id, wait, lease_seconds, as_json)
@@ -461,11 +470,14 @@ def _provider(
     return router.Backoff(llm)
 
 
-def _record_calls(llm: LLM, store: Store) -> None:
-    """Every real model call goes to model_calls (`desman usage`)."""
+def _attach(llm: LLM, store: Store, *, cache: bool) -> LLM:
+    """A real provider logs every call (`desman usage`) and keeps accepted replies (`llm.cache`)
+    in the task database. The fake does neither: its scripts count every call."""
     client = llm.inner if isinstance(llm, router.Backoff) else llm
-    if isinstance(client, OpenAICompatible):
-        client.on_call = calls.recorder(store.conn)
+    if not isinstance(client, OpenAICompatible):
+        return llm
+    client.on_call = calls.recorder(store.conn)
+    return Cached(llm, store.conn, client.model) if cache else llm
 
 
 def _find(store: Store, task: str) -> str:

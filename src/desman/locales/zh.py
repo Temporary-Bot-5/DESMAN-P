@@ -243,6 +243,7 @@ MESSAGES: dict[str, Forms] = {
     "unknown language {name!r} (known: {codes})": "未知语言 {name!r}（已知：{codes}）",
     "interface language": "界面语言",
     "(Y/N)": "(Y/N)",
+    "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "即使相同请求已有被接受的回复，也重新询问模型（默认此类回复会复用 7 天，可在 resume 时节省配额）。",
     "yes": "是",
     "no": "否",
 }

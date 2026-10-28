@@ -270,6 +270,7 @@ MESSAGES: dict[str, Forms] = {
     "unknown language {name!r} (known: {codes})": "idioma desconocido {name!r} (conocidos: {codes})",
     "interface language": "idioma de la interfaz",
     "(Y/N)": "(Y/N)",
+    "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Preguntar al modelo aunque la misma petición ya tenga una respuesta aceptada (por defecto esa respuesta se reutiliza durante 7 días, lo que ahorra cuota al reanudar).",
     "yes": "sí",
     "no": "no",
 }

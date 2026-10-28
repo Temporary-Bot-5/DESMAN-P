@@ -481,6 +481,24 @@ def test_v3_database_with_history_upgrades_to_the_call_log(tmp_path: Path) -> No
     conn.close()
 
 
+def test_v4_database_with_a_call_log_upgrades_to_the_response_cache(tmp_path: Path) -> None:
+    path = tmp_path / "v4.db"
+    old = _db_at_version(path, 4)
+    task_id = add_task(old)
+    old.execute(
+        "INSERT INTO model_calls (provider, model, prompt_hash, latency_ms) "
+        "VALUES ('groq', 'm', 'h', 5)"
+    )
+    old.close()
+
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    assert conn.execute("SELECT id FROM tasks").fetchone()[0] == task_id
+    assert conn.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0] == 1  # log kept
+    assert conn.execute("SELECT COUNT(*) FROM response_cache").fetchone()[0] == 0
+    conn.close()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="file modes")
 def test_a_new_database_is_private(tmp_path: Path) -> None:
     old_umask = os.umask(0o022)
