@@ -154,6 +154,7 @@ def test_a_paid_key_needs_its_own_consent() -> None:
     declined = wizard("1", menu("openai"), "y", "n", DONE, *KEEP_PERMISSIONS)  # privacy, cost
     assert declined.exit_code == 0, declined.output
     assert "Every call to OpenAI is billed to your account" in declined.output
+    assert "Paid providers are not tested in the prototype" in declined.output
     assert saved().load().api_keys == {}
     accepted = wizard("1", menu("openai"), "y", "y", "sk-paid", DONE, *KEEP_PERMISSIONS)
     assert accepted.exit_code == 0, accepted.output

@@ -259,6 +259,9 @@ MESSAGES: dict[str, Forms] = {
         "`desman run --provider {id}`."
     ),
     "paid": "платный",
+    "Paid providers are not tested in the prototype: they will be tested outside it.": (
+        "Платные провайдеры в прототипе не тестировались: их проверят уже вне прототипа."
+    ),
     "unknown provider {name!r} (known: {known})": "неизвестный провайдер {name!r} (известны: {known})",
     # ── config / keys / usage ────────────────────────────────────────────────
     "config {error}\nFix the file, or run `desman config reset` to start over.": (

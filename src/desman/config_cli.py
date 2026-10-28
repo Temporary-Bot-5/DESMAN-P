@@ -119,6 +119,8 @@ def config_show(as_json: bool) -> None:
         rows.add_row(name, status, keys, settings)
     ui.out("")
     ui.out(rows)
+    if any(row["paid"] and row["ready"] for row in out["providers"]):
+        ui.warn(providers.untested_note())
     for env, values in out["unknown_keys"].items():
         ui.warn(
             t(
@@ -530,6 +532,7 @@ def keys_add(provider: str, label: str, from_stdin: bool) -> None:
                 id=p.id,
             )
         )
+        ui.warn(providers.untested_note())
     missing = [s for s in p.settings if not s.default and not config.settings.get(s.env)]
     for s in missing:
         ui.warn(

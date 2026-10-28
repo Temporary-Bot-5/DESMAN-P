@@ -182,6 +182,7 @@ def _add_key(s: _Session, p: Provider) -> None:
                 border_style="warn",
             )
         )
+        ui.warn(providers.untested_note())
         if not ui.confirm(t("I understand that calls to {name} cost money", name=p.name)):
             return
     ui.note(t("Get a key: {url}", url=p.url))

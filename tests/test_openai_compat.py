@@ -540,8 +540,10 @@ def test_running_on_a_paid_provider_says_so(mock_http: Callable[[Handler], None]
     result = desman("run", "g", "--provider", "deepseek")
     assert result.exit_code == 0, result.output
     assert "DeepSeek is a paid provider: every call is billed." in result.output
+    assert "not tested in the prototype" in result.output
     shown = desman("config", "show").output
     assert "DeepSeek · paid" in shown and "GROQ · paid" not in shown
+    assert "not tested in the prototype" in shown
 
 
 def test_key_check_sends_the_providers_own_headers() -> None:

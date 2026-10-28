@@ -148,7 +148,8 @@ FREE = (
 )
 
 # Billed per use. The default models are the cheapest current ones; check them with
-# `desman keys check` (lineups change) and set a spending limit in each console.
+# `desman keys check` (lineups change) and set a spending limit in each console. Not tested
+# against the real APIs in the prototype (owner's decision): `untested_note()` says so in the CLI.
 PAID = (
     Provider(
         "openai",
@@ -202,6 +203,11 @@ PAID = (
 )
 
 CLOUD = FREE + PAID
+
+
+def untested_note() -> str:
+    return t("Paid providers are not tested in the prototype: they will be tested outside it.")
+
 
 # Tried in this order when no --provider is given: generous free tiers first. Paid providers
 # are never on it: they are used only when asked for by name.
