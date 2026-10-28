@@ -92,8 +92,10 @@ def test_executor_failures_and_submissions_are_labelled(store: Store, clock: Fak
         "task_created",
         "dependencies_met",
         "claim",
+        "attempt_started",
         "execution_failed",
         "claim",
+        "attempt_started",
         "submit",
         "verdict",
     ]
@@ -227,7 +229,9 @@ def test_audit_shows_the_history(db_file: tuple[Path, str]) -> None:
     assert lines[0] == f"Task {task_id}  done"
     assert lines[1] == "Goal: g"
     body = lines[2:]
-    assert len(body) == 8  # one line per entry, even with a newline in the description
+    assert len(body) == 10  # one line per entry, even with a newline in the description
+    started = [line for line in body if "attempt_started" in line]
+    assert "strategy=first" in started[0] and "strategy=feedback" in started[1]
     assert "verdict" in body[-1] and "review -> done" in body[-1]
     assert any("verdict=retry" in line and "x" * 79 + "…" in line for line in body)
     assert not any("feedback=  " in line or line.endswith("feedback=") for line in body)

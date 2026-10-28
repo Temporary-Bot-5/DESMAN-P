@@ -326,18 +326,18 @@ def reject(store: Store) -> Subtask:
 
 def test_repeated_rejections_escalate_to_human(store: Store) -> None:
     task_id = store.create_task(spec(sub("a")))
-    assert reject(store).status is S.READY
-    assert reject(store).status is S.READY
-    third = reject(store)
-    assert third.status is S.NEEDS_HUMAN
-    assert third.attempts == Attempts(quality=3)
+    for _ in range(3):
+        assert reject(store).status is S.READY
+    last_try = reject(store)
+    assert last_try.status is S.NEEDS_HUMAN
+    assert last_try.attempts == Attempts(quality=4)
     last = json.loads(store.audit_log(task_id)[-1]["details_json"])
     assert last["failure"] == "quality" and "retries exhausted" in last["reason"]
 
 
 def test_human_restart_resets_attempts(store: Store) -> None:
     store.create_task(spec(sub("a")))
-    for _ in range(3):
+    for _ in range(4):
         escalated = reject(store)
     restarted = store.transition(escalated.id, S.NEEDS_HUMAN, S.READY, A.HUMAN)
     assert restarted.attempts == Attempts()
@@ -719,7 +719,7 @@ def test_cancelled_subtask_blocks_dependents_for_good(store: Store) -> None:
 
 def test_needs_human_task_status(store: Store) -> None:
     task_id = store.create_task(spec(sub("a"), sub("b", 0)))
-    reject(store), reject(store)
+    reject(store), reject(store), reject(store)
     assert store.task_status(task_id) is TaskStatus.ACTIVE
     reject(store)
     assert store.task_status(task_id) is TaskStatus.NEEDS_HUMAN

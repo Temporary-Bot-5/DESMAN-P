@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from desman.core import db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.models import Subtask
-from desman.core.retry import FailureKind, RetryPolicy
+from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
@@ -146,6 +146,7 @@ class Coordinator:
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
         abandoned: Callable[[str], bool] | None = None,
+        strategies: Callable[[int], Strategy] = strategy_for,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -159,6 +160,9 @@ class Coordinator:
         self.abandoned = abandoned
         """Tells whether a lease owner is certainly gone, so its work is taken back at once
         instead of after the lease expires (see core/owner.py)."""
+        self.strategies = strategies
+        """Attempt number -> strategy. The executor's owner narrows it to what it can do (e.g.
+        no other provider to switch to), so the audit records what each attempt really was."""
         self.sleep = sleep
 
     def run(
@@ -229,6 +233,13 @@ class Coordinator:
                 self.store.dependency_results(subtask.id),
                 self.store.last_feedback(subtask.id),
                 self.context_budget_tokens,
+                self.strategies,
+            )
+            self.store.note(
+                subtask.id,
+                Actor.EXECUTOR,
+                "attempt_started",
+                {"attempt": context.attempt, "strategy": context.strategy.value},
             )
             workspace = Workspace(self.workspaces, subtask.task_id)
             returned = self.executor(

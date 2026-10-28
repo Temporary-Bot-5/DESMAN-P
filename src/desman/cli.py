@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import sys
 import time
@@ -22,6 +23,7 @@ from desman.core.coordinator import Coordinator, RunResult
 from desman.core.models import Priority, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
+from desman.core.retry import strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.i18n import t, tn
@@ -326,13 +328,13 @@ def run(
         raise click.UsageError(t("GOAL is empty"))
     spec = _load_spec(spec_path) if spec_path is not None else None
     level = None if priority is None else int(Priority[priority.upper()])
-    llm = _provider(fake_script, provider_name, model, as_json)  # fail fast, before any task
+    llm, other = _provider(fake_script, provider_name, model, as_json)  # fail fast
     path = db_path or db.default_db_path()
     try:
         store = Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
-    llm = _attach(llm, store, cache=not no_cache)
+    llm, other = _attach(llm, store, cache=not no_cache), _attach_other(other, store, no_cache)
     try:
         planned: Planned | None = None
         if spec is None:
@@ -354,7 +356,7 @@ def run(
                 )
             )
             sys.stdout.flush()  # visible before any work starts, even through a pipe
-        _drive(store, llm, task_id, wait, lease_seconds, as_json, details)
+        _drive(store, llm, other, task_id, wait, lease_seconds, as_json, details)
     finally:
         store.conn.close()
 
@@ -381,12 +383,12 @@ def resume(
     otherwise when its lease expires. Finished subtasks are never redone. Same exit codes as
     `run`.
     """
-    llm = _provider(fake_script, provider_name, model, as_json)
+    llm, other = _provider(fake_script, provider_name, model, as_json)
     store = open_existing(db_path)
-    llm = _attach(llm, store, cache=not no_cache)
+    llm, other = _attach(llm, store, cache=not no_cache), _attach_other(other, store, no_cache)
     try:
         task_id = _find(store, task)
-        _drive(store, llm, task_id, wait, lease_seconds, as_json)
+        _drive(store, llm, other, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
 
@@ -471,12 +473,14 @@ def _load_spec(spec_path: Path) -> TaskSpec:
 
 def _provider(
     fake_script: Path | None, provider_name: str | None, model: str | None, as_json: bool
-) -> LLM:
+) -> tuple[LLM, LLM | None]:
+    """The LLM of the run and, for retries with another model (ROADMAP 2.9), another free
+    provider. Only when the provider was not chosen by hand: --provider/--model mean that one."""
     if fake_script is not None:
         if provider_name is not None or model is not None:
             raise click.UsageError(t("--fake-llm replaces the provider: drop --provider/--model"))
         try:
-            return FakeLLM.from_file(fake_script, sleep=time.sleep)  # latency is real
+            return FakeLLM.from_file(fake_script, sleep=time.sleep), None  # latency is real
         except (ValidationError, ValueError) as e:
             raise click.ClickException(
                 t("{path}: not a valid fake LLM script:\n{error}", path=fake_script, error=e)
@@ -501,8 +505,20 @@ def _provider(
                 t("{name} is a paid provider: every call is billed.", name=choice.provider.name)
             )
             ui.warn(providers.untested_note())
+    alternative = None
+    if provider_name is None and model is None:
+        alternative = router.alternative(config, choice)
+    if alternative is not None and not as_json:
+        ui.note(
+            t(
+                "Retries may also use {provider} · {model}",
+                provider=alternative[1].provider.name,
+                model=alternative[1].model,
+            )
+        )
     # Blips are retried here; the fake is not wrapped: its scripts test the retry policy.
-    return router.Backoff(llm)
+    other = router.Backoff(alternative[0]) if alternative is not None else None
+    return router.Backoff(llm), other
 
 
 def _attach(llm: LLM, store: Store, *, cache: bool) -> LLM:
@@ -513,6 +529,10 @@ def _attach(llm: LLM, store: Store, *, cache: bool) -> LLM:
         return llm
     client.on_call = calls.recorder(store.conn)
     return Cached(llm, store.conn, client.model) if cache else llm
+
+
+def _attach_other(other: LLM | None, store: Store, no_cache: bool) -> LLM | None:
+    return None if other is None else _attach(other, store, cache=not no_cache)
 
 
 def _find(store: Store, task: str) -> str:
@@ -526,6 +546,7 @@ def _find(store: Store, task: str) -> str:
 def _drive(
     store: Store,
     llm: LLM,
+    other: LLM | None,
     task_id: str,
     wait: bool,
     lease_seconds: int,
@@ -534,11 +555,13 @@ def _drive(
 ) -> None:
     coordinator = Coordinator(
         store,
-        llm_executor(llm),
+        llm_executor(llm, other),
         llm_reviewer(llm),
         owner=current_owner(),
         lease_seconds=lease_seconds,
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
+        # Without another provider, "other model" attempts are rephrased instead (and audited so).
+        strategies=functools.partial(strategy_for, other_model=other is not None),
     )
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)

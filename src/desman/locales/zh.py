@@ -250,6 +250,7 @@ MESSAGES: dict[str, Forms] = {
     "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL 如何变成子任务：llm 让模型制定计划（默认；失败时使用模板），template 让目标本身成为唯一的子任务（使用 --fake-llm 时的默认值）。",
     "Planning…": "正在制定计划…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "模型没有制定出计划，因此目标本身是唯一的子任务：{error}",
+    "Retries may also use {provider} · {model}": "重试时也可能使用 {provider} · {model}",
 }
 
 CLICK: dict[str, Forms] = {

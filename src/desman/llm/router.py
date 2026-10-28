@@ -1,8 +1,10 @@
 """Which provider and model a run uses, built from the config (ROADMAP 2.2).
 
-One provider per run for now: the one asked for, or the first ready one in
-`providers.PREFERENCE` (free tiers only: a paid provider is used only when asked for). All its keys are used (the client moves to the next key when one is
-refused or limited). Fallback across providers and per-role models are ROADMAP 4.5.
+One provider per run: the one asked for, or the first ready one in `providers.PREFERENCE`
+(free tiers only: a paid provider is used only when asked for). All its keys are used (the
+client moves to the next key when one is refused or limited). A retry with another model
+(ROADMAP 2.9) uses `alternative()`: the next ready free provider. Fallback across providers on
+failures and per-role models are ROADMAP 4.5.
 """
 
 from __future__ import annotations
@@ -93,7 +95,33 @@ def build(
     on_call: Callable[[CallRecord], None] | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[OpenAICompatible, Choice]:
-    chosen = choose(config, provider)
+    return _build(config, choose(config, provider), model, on_call=on_call, client=client)
+
+
+def alternative(
+    config: Config,
+    current: Choice,
+    *,
+    on_call: Callable[[CallRecord], None] | None = None,
+    client: httpx.Client | None = None,
+) -> tuple[OpenAICompatible, Choice] | None:
+    """Another provider for a retry that should not repeat the same model: the first ready
+    free one after `current` in the preference order (never a paid one). None if there is none."""
+    ready = {p.id: p for p in providers.ready(config) if not p.paid}
+    for pid in providers.PREFERENCE:
+        if pid in ready and pid != current.provider.id:
+            return _build(config, ready[pid], None, on_call=on_call, client=client)
+    return None
+
+
+def _build(
+    config: Config,
+    chosen: Provider,
+    model: str | None,
+    *,
+    on_call: Callable[[CallRecord], None] | None,
+    client: httpx.Client | None,
+) -> tuple[OpenAICompatible, Choice]:
     assert chosen.key_env is not None
     use = model or chosen.default_model
     llm = OpenAICompatible(

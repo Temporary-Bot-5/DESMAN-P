@@ -3,7 +3,7 @@
 Failures are classified, because retrying only helps for some of them:
 
 - QUALITY    the work was done badly (reviewer rejected it, output did not parse). Retry, each time
-             differently (the attempt number picks the strategy), up to `max_attempts`.
+             differently (the attempt number picks the `Strategy`), up to `max_attempts`.
 - TRANSIENT  the attempt was interrupted (network, 5xx, timeout, executor crashed). Retry; this
              says nothing about the subtask itself, so it has its own, larger budget.
 - LIMIT      a provider's rate limit or quota is exhausted. Retrying now only burns resources:
@@ -34,10 +34,34 @@ class FailureKind(StrEnum):
 class RetryPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    max_attempts: int = Field(default=3, ge=1)
-    """Total attempts allowed before quality failures escalate to the operator."""
+    max_attempts: int = Field(default=4, ge=1)
+    """Total attempts allowed before quality failures escalate to the operator: by default one
+    of each `Strategy`."""
     max_transient: int = Field(default=5, ge=1)
     """Interruptions tolerated before escalating (a subtask that keeps crashing its executor)."""
+
+
+class Strategy(StrEnum):
+    """How an attempt differs from the one before it (ROADMAP 2.9). Repeating a rejected attempt
+    the same way mostly repeats the mistake."""
+
+    FIRST = "first"
+    FEEDBACK = "feedback"  # the same model again, told what the reviewer found wrong
+    REPHRASE = "rephrase"  # the instructions worded differently, at a higher temperature
+    OTHER_MODEL = "other_model"  # another model or provider (with the feedback)
+
+
+def strategy_for(attempt: int, *, other_model: bool = True) -> Strategy:
+    """The strategy of attempt number `attempt` (1 is the first try). Later attempts keep using
+    another model; splitting the subtask comes in ROADMAP 2.9b. Without `other_model` (nothing
+    to switch to) those attempts are rephrased instead."""
+    if attempt <= 1:
+        return Strategy.FIRST
+    if attempt == 2:
+        return Strategy.FEEDBACK
+    if attempt == 3 or not other_model:
+        return Strategy.REPHRASE
+    return Strategy.OTHER_MODEL
 
 
 class Attempts(BaseModel):

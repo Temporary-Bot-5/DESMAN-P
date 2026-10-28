@@ -7,7 +7,12 @@ one repair request (`llm.structured`).
 The executor may answer `{"type": "error", "reason": ...}` when it cannot do the work: the
 coordinator counts that as a failed attempt, never as a result. The reviewer must give concrete
 feedback with `retry` and `escalate` (a verdict without it gets the repair request); the
-feedback is shown to the next attempt. Varied retries come in 2.9.
+feedback is shown to the next attempt.
+
+Each attempt of the executor follows the strategy its number picks (`core.retry.Strategy`): the
+first try and the one with the reviewer's feedback use the instructions below as they are; a
+rephrased attempt gets them worded differently at a higher temperature; "other model" asks the
+`other` LLM (another provider), when there is one.
 
 Prompts start with "Execute subtask" and "Review subtask", so a fake script can route on them:
 `FakeLLM().on("Execute", ...).on("Review", ...)`, or `"routes"` in a JSON script.
@@ -32,7 +37,7 @@ from desman.core.coordinator import (
     is_error_report,
 )
 from desman.core.models import Subtask
-from desman.core.retry import FailureKind
+from desman.core.retry import FailureKind, Strategy
 from desman.llm.base import LLM, Message, Request
 from desman.llm.structured import StructuredOutputError, complete_json
 
@@ -48,6 +53,15 @@ EXECUTOR_SYSTEM = (
     'it. If you cannot do the subtask, reply {"type": "error", "reason": "why"} instead of '
     "pretending: such a reply is never taken as a result."
 )
+EXECUTOR_SYSTEM_REPHRASED = (
+    "Earlier attempts at this subtask were rejected. Start again from scratch rather than "
+    "patching them: read the subtask and its acceptance criteria, then the feedback, and check "
+    "each criterion before answering. Your whole reply must be one JSON object with the result. "
+    "When the subtask cannot be done, the JSON object is "
+    '{"type": "error", "reason": "why"}; never present a guess as a result.'
+)
+REPHRASE_TEMPERATURE = 0.7
+"""A rephrased attempt also samples differently: at 0 the model tends to repeat itself."""
 REVIEWER_SYSTEM = (
     "You check whether a subtask's result meets its acceptance criteria. Reply with a single JSON "
     'object: {"verdict": "accept" | "retry" | "escalate", "feedback": "..."}. '
@@ -59,7 +73,9 @@ REVIEWER_SYSTEM = (
 )
 
 
-def llm_executor(llm: LLM) -> Executor:
+def llm_executor(llm: LLM, other: LLM | None = None) -> Executor:
+    """`other` serves the attempts whose strategy is another model (if None, `llm` does)."""
+
     def execute(work: Work) -> Success | Failure:
         context = work.context
         prompt = {
@@ -74,15 +90,21 @@ def llm_executor(llm: LLM) -> Executor:
             "attempt": context.attempt,
             "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
         }
+        model, system, temperature = llm, EXECUTOR_SYSTEM, 0.0
+        if context.strategy is Strategy.REPHRASE:
+            system, temperature = EXECUTOR_SYSTEM_REPHRASED, REPHRASE_TEMPERATURE
+        elif context.strategy is Strategy.OTHER_MODEL:
+            model = other or llm
         try:
             # An error report is not cached: the next task asking the same may succeed.
             result = _ask(
-                llm,
-                EXECUTOR_SYSTEM,
+                model,
+                system,
                 EXECUTE,
                 prompt,
                 _Result,
                 keep=lambda r: not is_error_report(r.root),
+                temperature=temperature,
             )
         except StructuredOutputError as e:
             # The problem only: the reply may echo anything (it is in the call log).
@@ -131,12 +153,14 @@ def _ask(
     payload: dict[str, Any],
     schema: type[T],
     keep: Callable[[T], bool] = lambda value: True,
+    temperature: float = 0.0,
 ) -> T:
     body = json.dumps(payload, ensure_ascii=False, indent=2)
     request = Request(
         messages=[
             Message(role="system", content=system),
             Message(role="user", content=f"{heading}:\n{body}"),
-        ]
+        ],
+        temperature=temperature,
     )
     return complete_json(llm, request, schema, heading=heading, keep=keep)

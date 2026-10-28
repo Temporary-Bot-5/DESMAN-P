@@ -258,6 +258,7 @@ MESSAGES: dict[str, Forms] = {
     "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "GOAL'ın alt görevlere dönüşmesi: llm modelden bir plan ister (varsayılan; başarısız olursa şablon kullanılır), template hedefin kendisini tek alt görev yapar (--fake-llm ile varsayılan).",
     "Planning…": "Planlanıyor…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Model bir plan yapamadı, bu yüzden tek alt görev hedefin kendisi: {error}",
+    "Retries may also use {provider} · {model}": "Yeniden denemeler {provider} · {model} da kullanabilir",
 }
 
 CLICK: dict[str, Forms] = {
