@@ -1,7 +1,7 @@
 """Which provider and model a run uses, built from the config (ROADMAP 2.2).
 
 One provider per run for now: the one asked for, or the first ready one in
-`providers.PREFERENCE`. All its keys are used (the client moves to the next key when one is
+`providers.PREFERENCE` (free tiers only: a paid provider is used only when asked for). All its keys are used (the client moves to the next key when one is
 refused or limited). Fallback across providers and per-role models are ROADMAP 4.5.
 """
 
@@ -56,6 +56,16 @@ def choose(config: Config, wanted: str | None = None) -> Provider:
     for pid in providers.PREFERENCE:
         if pid in ready:
             return ready[pid]
+    paid = [p for p in providers.ready(config) if p.paid]
+    if paid:
+        raise NoProvider(
+            t(
+                "only paid providers are configured ({names}), and DESMAN never picks a paid one "
+                "by itself: choose it with --provider, e.g. --provider {id}",
+                names=", ".join(p.name for p in paid),
+                id=paid[0].id,
+            )
+        )
     raise NoProvider(t("no provider is configured: add a key with `desman keys add PROVIDER`"))
 
 
@@ -83,5 +93,9 @@ def build(
         use,
         client=client,
         on_call=on_call,
+        auth=chosen.auth,
+        send_temperature=chosen.send_temperature,
+        max_tokens=chosen.max_tokens,
+        paid=chosen.paid,
     )
     return llm, Choice(chosen, use)

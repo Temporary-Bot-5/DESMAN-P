@@ -12,7 +12,7 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, i18n, ui
+from desman import __version__, i18n, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import ConfigError, open_config
 from desman.config_cli import config, keys, load_config, run_wizard, usage
@@ -451,6 +451,11 @@ def _provider(
                 model=choice.model,
             )
         )
+        if choice.provider.paid:
+            ui.warn(
+                t("{name} is a paid provider: every call is billed.", name=choice.provider.name)
+            )
+            ui.warn(providers.untested_note())
     return llm
 
 

@@ -39,6 +39,18 @@ class Provider:
     # A model the free tier serves. Free lineups change: `desman run --model` overrides it.
     default_model: str = ""
     limits_url: str = ""  # the provider's page on rate limits and quotas
+    # Billed per use, no free tier: never chosen automatically (only with --provider).
+    paid: bool = False
+    # How the key is sent; {key} is replaced by it.
+    auth: tuple[tuple[str, str], ...] = (("Authorization", "Bearer {key}"),)
+    # False for providers that reject a temperature the model does not support (Claude 4.7+
+    # accepts only the default): it is left out of the request.
+    send_temperature: bool = True
+    # Sent when a request sets no max_tokens, for providers that need one.
+    max_tokens: int | None = None
+
+    def headers(self, key: str) -> dict[str, str]:
+        return {name: value.format(key=key) for name, value in self.auth}
 
     def endpoint(self, config: Config) -> str:
         return self.base_url.format(**config.settings).rstrip("/")
@@ -50,7 +62,7 @@ class Provider:
         return all(config.settings.get(s.env) for s in self.settings if not s.default)
 
 
-CLOUD = (
+FREE = (
     Provider(
         "nvidia",
         "NVIDIA NIM",
@@ -135,7 +147,70 @@ CLOUD = (
     ),
 )
 
-# Tried in this order when no --provider is given: generous free tiers first.
+# Billed per use. The default models are the cheapest current ones; check them with
+# `desman keys check` (lineups change) and set a spending limit in each console. Not tested
+# against the real APIs in the prototype (owner's decision): `untested_note()` says so in the CLI.
+PAID = (
+    Provider(
+        "openai",
+        "OpenAI",
+        "https://platform.openai.com/api-keys",
+        "OPENAI_API_KEY",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-6-luna",
+        limits_url="https://platform.openai.com/settings/organization/limits",
+        paid=True,
+    ),
+    Provider(
+        "anthropic",
+        "Anthropic (Claude)",
+        "https://platform.claude.com/settings/keys",
+        "ANTHROPIC_API_KEY",
+        # The OpenAI-compatible layer of the Claude API.
+        base_url="https://api.anthropic.com/v1",
+        default_model="claude-haiku-5-5",
+        limits_url="https://platform.claude.com/docs/en/api/rate-limits",
+        paid=True,
+        # Bearer for chat completions; x-api-key and a version for the native /models.
+        auth=(
+            ("Authorization", "Bearer {key}"),
+            ("x-api-key", "{key}"),
+            ("anthropic-version", "2023-06-01"),
+        ),
+        send_temperature=False,
+        max_tokens=4096,
+    ),
+    Provider(
+        "deepseek",
+        "DeepSeek",
+        "https://platform.deepseek.com/api_keys",
+        "DEEPSEEK_API_KEY",
+        base_url="https://api.deepseek.com",
+        default_model="deepseek-flash",
+        limits_url="https://api-docs.deepseek.com/quick_start/rate_limit",
+        paid=True,
+    ),
+    Provider(
+        "xai",
+        "xAI (Grok)",
+        "https://console.x.ai",
+        "XAI_API_KEY",
+        base_url="https://api.x.ai/v1",
+        default_model="grok-4.3",
+        limits_url="https://docs.x.ai/docs/models",
+        paid=True,
+    ),
+)
+
+CLOUD = FREE + PAID
+
+
+def untested_note() -> str:
+    return t("Paid providers are not tested in the prototype: they will be tested outside it.")
+
+
+# Tried in this order when no --provider is given: generous free tiers first. Paid providers
+# are never on it: they are used only when asked for by name.
 PREFERENCE = (
     "groq",
     "google",
@@ -243,7 +318,7 @@ def describe(config: Config) -> dict[str, Any]:
     known = {p.key_env for p in PROVIDERS} | {s.env for p in PROVIDERS for s in p.settings}
     rows = []
     for p in PROVIDERS:
-        row: dict[str, Any] = {"id": p.id, "name": p.name, "local": p.local}
+        row: dict[str, Any] = {"id": p.id, "name": p.name, "local": p.local, "paid": p.paid}
         if p.key_env is not None:
             row["key_env"] = p.key_env
             row["keys"] = [

@@ -49,7 +49,7 @@ def _check_key(
     timeout: float,
 ) -> KeyCheck:
     base = provider.endpoint(config)
-    headers = {"Authorization": f"Bearer {key}"}
+    headers = provider.headers(key)
     result = partial(KeyCheck, provider.id, number, key_id(key))
     try:
         if provider.id == "openrouter":

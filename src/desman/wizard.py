@@ -83,7 +83,15 @@ def _providers_menu(s: _Session) -> None:
     ui.note(t("Several providers and several keys per provider are fine: pick one, then the next."))
     last: Provider | None = None
     while True:
-        choices = [ui.Choice(p.name, p, _status(s.config, p)) for p in providers.PROVIDERS]
+        # Same order as providers.PROVIDERS (free, paid, local), so the numbers stay stable.
+        choices: list[ui.Choice | ui.Heading] = []
+        for title, group in (
+            (t("Free tier"), providers.FREE),
+            (t("Paid: billed per use"), providers.PAID),
+            (t("Local"), providers.LOCAL),
+        ):
+            choices.append(ui.Heading(title))
+            choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
         choices.append(ui.Choice(t("Done — continue"), None))
         picked = ui.select(
             t("Pick a provider to add keys or change settings"), choices, default=last
@@ -157,6 +165,26 @@ def _add_key(s: _Session, p: Provider) -> None:
         ):
             return
         s.privacy_ok = True
+    if p.paid and not s.config.keys(p.key_env):
+        ui.out(
+            Panel(
+                Text(
+                    t(
+                        "Every call to {name} is billed to your account. DESMAN never picks a paid "
+                        "provider by itself: it is used only with `desman run --provider {id}`. "
+                        "Set a spending limit in the provider's console.",
+                        name=p.name,
+                        id=p.id,
+                    )
+                ),
+                title=t("Paid provider"),
+                title_align="left",
+                border_style="warn",
+            )
+        )
+        ui.warn(providers.untested_note())
+        if not ui.confirm(t("I understand that calls to {name} cost money", name=p.name)):
+            return
     ui.note(t("Get a key: {url}", url=p.url))
     value = ui.secret(
         t("API key for {name} ({env}), hidden; Enter to cancel", name=p.name, env=p.key_env)

@@ -9,7 +9,9 @@ DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving 
 - `docs/adr/` — architecture decisions. Read `0001-core-rewrite.md` before touching the core.
 
 **Key constraints:**
-- Zero budget - free-tier LLM APIs (local models via Ollama/llama.cpp are an optional extra)
+- Zero budget by default - free-tier LLM APIs (local models via Ollama/llama.cpp are an optional
+  extra). Paid providers (`providers.PAID`) exist but are never chosen automatically: only by
+  name (`--provider`), never add one to `PREFERENCE`
 - Every provider is unreliable and rate-limited
 - Must handle intermittent execution (sessions stop/start)
 - Human control is mandatory - no silent self-modification
