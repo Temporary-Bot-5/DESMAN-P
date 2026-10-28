@@ -1,8 +1,9 @@
 """Minimal LLM-backed executor and reviewer, so `desman run` can drive a task end to end.
 
 Deliberately simple: one prompt each, and the reply must hold a JSON object (bare, fenced in
-```json, or with a sentence around it). Phase 2 makes them robust (2.3 repair request, 2.8
-reviewer, 2.9 varied retries); the contract with the coordinator stays the same.
+```json, or with a sentence around it) that fits the role's schema; a reply that does not gets
+one repair request (`llm.structured`). Phase 2 makes them smarter (2.8 reviewer, 2.9 varied
+retries); the contract with the coordinator stays the same.
 
 Prompts start with "Execute subtask" and "Review subtask", so a fake script can route on them:
 `FakeLLM().on("Execute", ...).on("Review", ...)`, or `"routes"` in a JSON script.
@@ -11,14 +12,21 @@ Prompts start with "Execute subtask" and "Review subtask", so a fake script can 
 from __future__ import annotations
 
 import json
-import math
-import re
-from typing import Any, NoReturn
+from typing import Any, TypeVar
+
+from pydantic import BaseModel, RootModel
 
 from desman.core.coordinator import Executor, Failure, Review, Reviewer, Success, Work
 from desman.core.models import Subtask
 from desman.core.retry import FailureKind
 from desman.llm.base import LLM, Message, Request
+from desman.llm.structured import StructuredOutputError, complete_json
+
+T = TypeVar("T", bound=BaseModel)
+
+EXECUTE = "Execute subtask"
+REVIEW = "Review subtask"
+"""Prompt headings: fake scripts route on them."""
 
 EXECUTOR_SYSTEM = (
     "You complete one subtask of a larger task. Reply with a single JSON object holding the "
@@ -46,14 +54,11 @@ def llm_executor(llm: LLM) -> Executor:
             "attempt": context.attempt,
             "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
         }
-        reply = llm.complete(_request(EXECUTOR_SYSTEM, "Execute subtask", prompt))
-        content = _json_object(reply.text)
-        if content is None:
-            return Failure(
-                kind=FailureKind.QUALITY,
-                reason=f"reply is not a JSON object: {reply.text[:120]!r}",
-            )
-        return Success(content=content)
+        try:
+            result = _ask(llm, EXECUTOR_SYSTEM, EXECUTE, prompt, _Result)
+        except StructuredOutputError as e:
+            return Failure(kind=FailureKind.QUALITY, reason=str(e))
+        return Success(content=result.root)
 
     return execute
 
@@ -65,59 +70,23 @@ def llm_reviewer(llm: LLM) -> Reviewer:
             "acceptance_criteria": subtask.acceptance_criteria,
             "result": artifact,
         }
-        reply = llm.complete(_request(REVIEWER_SYSTEM, "Review subtask", prompt))
-        verdict = _json_object(reply.text)
-        if verdict is None:
-            # Not the work's fault: the coordinator counts it as an interrupted review.
-            raise ValueError(f"reviewer reply is not a JSON object: {reply.text[:120]!r}")
-        return Review.model_validate(verdict)
+        # A StructuredOutputError is not the work's fault: the coordinator counts it as an
+        # interrupted review, so the work is reviewed again, not redone.
+        return _ask(llm, REVIEWER_SYSTEM, REVIEW, prompt, Review)
 
     return review
 
 
-def _request(system: str, heading: str, payload: dict[str, Any]) -> Request:
+class _Result(RootModel[dict[str, Any]]):
+    """An executor's result: any JSON object (subtasks have no result schema yet)."""
+
+
+def _ask(llm: LLM, system: str, heading: str, payload: dict[str, Any], schema: type[T]) -> T:
     body = json.dumps(payload, ensure_ascii=False, indent=2)
-    return Request(
+    request = Request(
         messages=[
             Message(role="system", content=system),
             Message(role="user", content=f"{heading}:\n{body}"),
         ]
     )
-
-
-_FENCE = re.compile(r"```[ \t]*(?:json|JSON)?[ \t]*\n(.*?)\n?[ \t]*```", re.S)
-
-
-def _json_object(text: str) -> dict[str, Any] | None:
-    """The reply as a JSON object, or None.
-
-    Models often wrap the object in a ```json fence or add a sentence around it, so after the
-    whole reply these are tried: each fenced block, then the span from the first `{` to the
-    last `}`. Strict JSON only: Python's parser also accepts NaN, Infinity and overflowing
-    numbers such as 1e999, which no JSON store accepts.
-    """
-    candidates = [text, *_FENCE.findall(text)]
-    start, end = text.find("{"), text.rfind("}")
-    if 0 <= start < end:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
-        try:
-            value = json.loads(
-                candidate, parse_constant=_reject_constant, parse_float=_finite_float
-            )
-        except ValueError:  # JSONDecodeError is one
-            continue
-        if isinstance(value, dict):
-            return value
-    return None
-
-
-def _reject_constant(name: str) -> NoReturn:
-    raise ValueError(f"{name} is not JSON")
-
-
-def _finite_float(text: str) -> float:
-    value = float(text)
-    if not math.isfinite(value):
-        raise ValueError(f"{text} does not fit a finite number")
-    return value
+    return complete_json(llm, request, schema, heading=heading)

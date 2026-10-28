@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from conftest import FakeClock
-from desman.agents import _json_object, llm_executor, llm_reviewer
+from desman.agents import llm_executor, llm_reviewer
 from desman.core.context import build_context
 from desman.core.coordinator import Coordinator, Failure, Success, Work
 from desman.core.models import SubtaskSpec, TaskSpec
@@ -19,6 +19,7 @@ from desman.core.states import TaskStatus
 from desman.core.store import Store
 from desman.core.workspace import Workspace
 from desman.llm.fake import FakeLLM, garbage
+from desman.llm.structured import json_object as _json_object
 
 
 def no_heartbeat(checkpoint: dict[str, Any] | None = None) -> None:
@@ -81,7 +82,8 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
 
 
 def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path: Path) -> None:
-    llm = FakeLLM(garbage("prose"), garbage("not_object"), '{"ok": 1}')
+    # Each call: a reply, then (if unusable) one repair request.
+    llm = FakeLLM(garbage("prose"), garbage("not_object"), garbage("truncated"), '{"ok": 1}')
     execute = llm_executor(llm)
     store.create_task(one_step())
     claimed = store.claim("w")
@@ -92,19 +94,25 @@ def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path
         heartbeat=no_heartbeat,
         workspace=Workspace(tmp_path, claimed.task_id),
     )
-    outcomes = [execute(work) for _ in range(3)]
-    first, second, third = outcomes
+    first, second = execute(work), execute(work)
     assert isinstance(first, Failure) and first.kind is FailureKind.QUALITY
-    assert "not a JSON object" in first.reason
-    assert isinstance(second, Failure) and second.kind is FailureKind.QUALITY
-    assert isinstance(third, Success) and third.content == {"ok": 1}
+    assert "not a JSON object" in first.reason and "after a repair request" in first.reason
+    assert isinstance(second, Success) and second.content == {"ok": 1}
+    assert len(llm.calls) == 4
 
 
 def test_unusable_verdict_is_an_interrupted_review(store: Store, clock: FakeClock) -> None:
     llm = (
         FakeLLM()
         .on("Execute", '{"ok": 1}')
-        .on("Review", garbage("prose"), '{"verdict": "maybe"}', '{"verdict": "accept"}')
+        .on(
+            "Review",
+            garbage("prose"),
+            '{"verdict": "maybe"}',  # the repair fails too: one interrupted review
+            '{"verdict": "maybe"}',
+            garbage("not_object"),  # and again
+            '{"verdict": "accept"}',
+        )
     )
     task_id = store.create_task(one_step())
     result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
@@ -127,7 +135,7 @@ def test_non_finite_numbers_are_a_quality_failure(
 ) -> None:
     llm = (
         FakeLLM()
-        .on("Execute", reply, '{"ok": 1}')
+        .on("Execute", reply, reply, '{"ok": 1}')
         .on("Review", '{"verdict": "accept"}', repeat_last=True)
     )
     task_id = store.create_task(one_step())
@@ -200,3 +208,28 @@ def test_what_is_not_json_stays_a_failure(name: str) -> None:
 def test_strictness_holds_inside_a_fence() -> None:
     assert _json_object('```json\n{"v": NaN}\n```') is None
     assert _json_object('note {"v": 1e999} end') is None
+
+
+# ── Repair request (2.3) ───────────────────────────────────────────────────────
+
+
+def test_repair_request_shows_the_reply_and_the_problem(store: Store, clock: FakeClock) -> None:
+    llm = (
+        FakeLLM()
+        .on("Execute", '{"ok": 1}')
+        .on("Review", '{"verdict": "maybe", "feedback": 3}', '{"verdict": "accept"}')
+    )
+    task_id = store.create_task(one_step())
+    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
+        task_id
+    )
+    assert result.status is TaskStatus.DONE
+    [sub] = store.list_subtasks(task_id)
+    assert (sub.attempts.quality, sub.attempts.transient) == (0, 0)  # repaired in place
+    first, repair = (r for r in llm.calls if r.prompt.startswith("Review"))
+    assert repair.messages[: len(first.messages)] == first.messages
+    assert [m.role for m in repair.messages[len(first.messages) :]] == ["assistant", "user"]
+    assert repair.messages[-2].content == '{"verdict": "maybe", "feedback": 3}'
+    assert repair.prompt.startswith("Review subtask (repair):\n")
+    assert "- verdict: Input should be 'accept', 'retry' or 'escalate'" in repair.prompt
+    assert "- feedback: Input should be a valid string" in repair.prompt
