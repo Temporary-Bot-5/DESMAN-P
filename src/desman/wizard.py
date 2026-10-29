@@ -104,39 +104,10 @@ def _providers_menu(s: _Session) -> None:
         if picked is None:
             return
         last = picked
-        if picked.opt_in:
-            _opt_in(s, picked)
-        elif picked.key_env is None or s.config.keys(picked.key_env):
+        if picked.key_env is None or s.config.keys(picked.key_env):
             _provider_menu(s, picked)
         else:  # nothing to choose yet: straight to the key
             _add_key(s, picked)
-
-
-def _opt_in(s: _Session, p: Provider) -> None:
-    """An unofficial engine (DuckDuckGo): the risks first, then the human says yes or no."""
-    [setting] = p.settings
-    ui.out(
-        Panel(
-            Text(
-                t(
-                    "{name} has no official search API: DESMAN would read its results page the "
-                    "way a browser does. This is unofficial: it can stop working when the page "
-                    "changes, too many searches get a captcha or block your address for a while, "
-                    "and {name}'s terms may not allow it. DESMAN searches at most once every 5 "
-                    "seconds and stops when refused.",
-                    name=p.name,
-                )
-            ),
-            title=t("Unofficial search"),
-            title_align="left",
-            border_style="warn",
-        )
-    )
-    on = ui.confirm(
-        t("Use {name} for web search?", name=p.name),
-        default=s.config.settings.get(setting.env) == "on",
-    )
-    s.config.settings[setting.env] = "on" if on else "off"
 
 
 def _provider_menu(s: _Session, p: Provider) -> None:

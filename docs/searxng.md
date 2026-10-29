@@ -52,11 +52,9 @@ Without Docker, see SearXNG's own
 
 ## Other ways to search the whole web
 
-Both are set in `desman config` under *Web search*, and are tried after SearXNG:
+**Tavily**: an API with free monthly searches; needs a free account and its key
+(`desman keys add tavily`). Set in `desman config` under *Web search*; tried after SearXNG.
 
-- **Tavily**: an API with free monthly searches; needs a free account and its key
-  (`desman keys add tavily`).
-- **DuckDuckGo**: no account, no key, nothing to run. DESMAN reads DuckDuckGo's results page the
-  way a browser does. This is unofficial: it can break when the page changes, too many searches
-  get a captcha or a temporary block, and DuckDuckGo's terms may not allow it. Off until you turn
-  it on; at most one search every 5 seconds.
+DESMAN does not read search engines' pages meant for people (DuckDuckGo, Google, ...): they
+refuse programs, and getting around that is not something DESMAN does. SearXNG asks them in
+the way their operators allow.

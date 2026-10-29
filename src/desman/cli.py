@@ -26,7 +26,7 @@ from desman.core.policy import Access, PolicyError, Role, default_policy, switch
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.retry import strategy_for
 from desman.core.sandbox import Sandbox
-from desman.core.search import DuckDuckGo, SearXNG, Tavily, client, open_sources
+from desman.core.search import SearXNG, Tavily, client, open_sources
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.tools import builtin_registry
@@ -641,8 +641,6 @@ def _web(config: Config, store: Store) -> Web:
             engines.append(SearXNG(config.settings["SEARXNG_URL"], http))
         elif p.id == "tavily" and p.key_env is not None:
             engines.append(Tavily([k.value for k in config.keys(p.key_env)], http))
-        elif p.id == "duckduckgo":
-            engines.append(DuckDuckGo(http))
     return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 

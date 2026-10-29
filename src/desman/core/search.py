@@ -1,34 +1,28 @@
 """Search engines for `web_search` (ROADMAP 3.5; core/web.py runs them).
 
-Three ways in, none of which needs a paid service:
+Two ways in, neither of which needs a paid service:
 
 1. Open sources, no setup: Wikipedia, Stack Overflow (Stack Exchange), arXiv and GitHub have
    official APIs that answer without a key (with small per-address quotas). Not the whole web,
    but where most answers an agent needs are.
-2. The human's own SearXNG: a metasearch server running on their machine (docs/searxng.md) that
-   asks the big engines itself. No key, no account. Or Tavily, with a free key.
-3. DuckDuckGo's HTML results page, read like a browser would. Unofficial: there is no API, the
-   page can change, too many searches get a captcha, and its terms may not allow it. So it is
-   off until the human turns it on, searches at most once every few seconds, and says plainly
-   when it is refused instead of retrying.
+2. The whole web through the human's own SearXNG: a metasearch server running on their machine
+   (docs/searxng.md) that asks the big engines itself. No key, no account. Or Tavily, with a
+   free key.
+
+Only official APIs and the human's own server: DESMAN never reads a search engine's pages
+meant for people, which they refuse to robots.
 """
 
 from __future__ import annotations
 
-import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Sequence
-from html.parser import HTMLParser
+from collections.abc import Sequence
 from typing import Any, Final
-from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from desman.core.web import TIMEOUT, USER_AGENT, SearchEngine, SearchResult, WebError, html_text
-
-DUCKDUCKGO_INTERVAL: Final = 5.0
-"""Seconds between two DuckDuckGo searches of this process at least."""
 
 
 def client() -> httpx.Client:
@@ -133,91 +127,6 @@ class Tavily:
                 continue
             return parse_results(response, "Tavily")
         raise WebError(problem)
-
-
-class _DuckDuckGoPage(HTMLParser):
-    """Results of html.duckduckgo.com: links `a.result__a`, text `.result__snippet`."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.results: list[dict[str, str]] = []
-        self._field: str | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        classes = (dict(attrs).get("class") or "").split()
-        if tag == "a" and "result__a" in classes:
-            self.results.append(
-                {"title": "", "url": _target(dict(attrs).get("href") or ""), "snippet": ""}
-            )
-            self._field = "title"
-        elif "result__snippet" in classes and self.results:
-            self._field = "snippet"
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("a", "td", "div"):
-            self._field = None
-
-    def handle_data(self, data: str) -> None:
-        if self._field is not None:
-            self.results[-1][self._field] += data
-
-
-def _target(href: str) -> str:
-    """The real URL of a result: DuckDuckGo links through //duckduckgo.com/l/?uddg=<url>."""
-    parts = urlsplit(href)
-    if parts.path == "/l/":
-        return parse_qs(parts.query).get("uddg", [""])[0]
-    if parts.path.startswith("/y.js"):  # an ad
-        return ""
-    return href
-
-
-class DuckDuckGo:
-    """DuckDuckGo's results page for browsers without JavaScript. Unofficial (module docs)."""
-
-    name = "duckduckgo"
-    URL: Final = "https://html.duckduckgo.com/html/"
-
-    def __init__(
-        self,
-        http: httpx.Client,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        self.http = http
-        self.clock = clock
-        self.sleep = sleep
-        self._last: float | None = None
-
-    def search(
-        self, query: str, max_results: int, language: str | None = None
-    ) -> list[SearchResult]:
-        if self._last is not None:
-            self.sleep(max(0.0, self._last + DUCKDUCKGO_INTERVAL - self.clock()))
-        self._last = self.clock()
-        try:
-            response = self.http.post(self.URL, data={"q": query}, timeout=TIMEOUT)
-        except httpx.HTTPError as e:
-            raise WebError(f"DuckDuckGo cannot be reached: {type(e).__name__}") from e
-        page = response.text
-        if response.status_code in (202, 403, 429) or "anomaly" in page:
-            raise WebError(
-                "DuckDuckGo asks to prove this is not a robot (too many searches): try again "
-                "later, or use another source"
-            )
-        if response.status_code != 200:
-            raise WebError(f"DuckDuckGo answered HTTP {response.status_code}")
-        parser = _DuckDuckGoPage()
-        parser.feed(page)
-        found = [
-            SearchResult(title=r["title"].strip(), url=r["url"], snippet=r["snippet"].strip())
-            for r in parser.results
-            if r["url"].startswith(("http://", "https://"))
-        ]
-        if not found and "result__a" not in page and "no-results" not in page:
-            raise WebError("DuckDuckGo's page was not understood (it may have changed)")
-        return found[:max_results]
 
 
 # ── Open sources: official APIs, no key ─────────────────────────────────────

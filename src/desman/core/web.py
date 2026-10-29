@@ -2,8 +2,7 @@
 
 - Search (core/search.py) needs no setup for open sources (Wikipedia, Stack Overflow, arXiv,
   GitHub: keyless official APIs). The whole web needs an engine the human chose: their own
-  SearXNG server, a Tavily key, or DuckDuckGo's results page (unofficial, opt-in); they are
-  tried in that order, the next one when one fails.
+  SearXNG server or a Tavily key; they are tried in that order, the next one when one fails.
 - Fetching is GET only, http(s) only, to public addresses only: the host is resolved, every
   address must be global (no localhost, LAN, link-local cloud metadata), and the connection goes
   to the checked address itself, so a DNS answer cannot change between the check and the

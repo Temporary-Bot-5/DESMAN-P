@@ -52,8 +52,6 @@ class Provider:
     max_tokens: int | None = None
     # A web search engine for the web_search tool (core/search.py), not a model provider.
     search: bool = False
-    # Off until the human turns it on: its one setting must be "on" (unofficial DuckDuckGo).
-    opt_in: bool = False
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -63,8 +61,6 @@ class Provider:
 
     def is_ready(self, config: Config) -> bool:
         """Everything it needs is configured."""
-        if self.opt_in:
-            return all(config.settings.get(s.env) == "on" for s in self.settings)
         if self.key_env is not None and not config.keys(self.key_env):
             return False
         return all(config.settings.get(s.env) for s in self.settings if not s.default)
@@ -267,14 +263,6 @@ SEARCH = (
         "TAVILY_API_KEY",
         limits_url="https://docs.tavily.com/documentation/api-credits",
         search=True,
-    ),
-    Provider(
-        "duckduckgo",
-        "DuckDuckGo",
-        "https://duckduckgo.com",
-        settings=(Setting("DUCKDUCKGO_SEARCH", "on/off"),),
-        search=True,
-        opt_in=True,
     ),
 )
 
