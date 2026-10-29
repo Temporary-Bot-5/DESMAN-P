@@ -1,7 +1,9 @@
 """The web for executors (ROADMAP 3.5): `web_search` and `web_fetch`, behind `network_access`.
 
-- Search goes to a free engine the human configured: Tavily (an API key, free monthly credits)
-  or a SearXNG server (its URL, no key). Without one, `web_search` is not offered.
+- Search (core/search.py) needs no setup for open sources (Wikipedia, Stack Overflow, arXiv,
+  GitHub: keyless official APIs). The whole web needs an engine the human chose: their own
+  SearXNG server, a Tavily key, or DuckDuckGo's results page (unofficial, opt-in); they are
+  tried in that order, the next one when one fails.
 - Fetching is GET only, http(s) only, to public addresses only: the host is resolved, every
   address must be global (no localhost, LAN, link-local cloud metadata), and the connection goes
   to the checked address itself, so a DNS answer cannot change between the check and the
@@ -24,15 +26,15 @@ import json
 import re
 import socket
 import sqlite3
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from typing import Any, Final, Protocol
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from desman.core import db
 
@@ -74,81 +76,23 @@ class SearchResult(BaseModel):
 
     title: str = ""
     url: str
-    snippet: str = Field(default="", validation_alias="content")
+    snippet: str = Field(default="", validation_alias=AliasChoices("snippet", "content"))
+    """`content` in the JSON of Tavily and SearXNG."""
 
 
-class _Results(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    results: list[SearchResult] = []
+SOURCES: Final = ("web", "wikipedia", "stackoverflow", "arxiv", "github")
+"""What web_search can search: "web" through the engines, the others through their own APIs."""
 
 
 class SearchEngine(Protocol):
     name: str
 
-    def search(self, query: str, max_results: int) -> list[SearchResult]:
-        """Raises WebError when the engine cannot answer."""
+    def search(
+        self, query: str, max_results: int, language: str | None = None
+    ) -> list[SearchResult]:
+        """Raises WebError when the engine cannot answer. `language` (e.g. "ru") is a hint
+        that engines may ignore."""
         ...
-
-
-class Tavily:
-    """https://tavily.com: free monthly credits, one per basic search. Keys are tried in order:
-    one that is refused or out of credits gives way to the next."""
-
-    name = "tavily"
-    URL: Final = "https://api.tavily.com/search"
-
-    def __init__(self, keys: Sequence[str], client: httpx.Client) -> None:
-        self.keys = list(keys)
-        self.client = client
-
-    def search(self, query: str, max_results: int) -> list[SearchResult]:
-        problem = "no Tavily key"
-        for key in self.keys:
-            try:
-                response = self.client.post(
-                    self.URL,
-                    json={"query": query, "max_results": max_results, "search_depth": "basic"},
-                    headers={"Authorization": f"Bearer {key}"},
-                    timeout=TIMEOUT,
-                )
-            except httpx.HTTPError as e:
-                raise WebError(f"search failed: {type(e).__name__}") from e
-            if response.status_code in (401, 403, 429, 432, 433):  # bad key, limit, no credits
-                problem = f"Tavily refused the search (HTTP {response.status_code})"
-                continue
-            return _parse_results(response, "Tavily")
-        raise WebError(problem)
-
-
-class SearXNG:
-    """A SearXNG server (self-hosted, or one that allows the JSON format)."""
-
-    name = "searxng"
-
-    def __init__(self, url: str, client: httpx.Client) -> None:
-        self.url = url.rstrip("/")
-        self.client = client
-
-    def search(self, query: str, max_results: int) -> list[SearchResult]:
-        try:
-            response = self.client.get(
-                f"{self.url}/search",
-                params={"q": query, "format": "json"},
-                timeout=TIMEOUT,
-            )
-        except httpx.HTTPError as e:
-            raise WebError(f"search failed: {type(e).__name__}") from e
-        return _parse_results(response, "SearXNG")[:max_results]
-
-
-def _parse_results(response: httpx.Response, engine: str) -> list[SearchResult]:
-    if response.status_code != 200:
-        raise WebError(f"{engine} answered HTTP {response.status_code}")
-    try:
-        return _Results.model_validate_json(response.content).results
-    except ValidationError as e:
-        raise WebError(f"{engine} sent an answer that is not a list of results") from e
 
 
 # ── Fetching ─────────────────────────────────────────────────────────────────
@@ -387,26 +331,50 @@ def _key(kind: str, request: str) -> str:
 class Web:
     """The web as the tools see it: what the human configured, plus the cache."""
 
-    engine: SearchEngine | None = None
+    engines: list[SearchEngine] = field(default_factory=list)
+    """For the whole web, in the order they are tried."""
+    sources: dict[str, SearchEngine] = field(default_factory=dict)
+    """The other SOURCES, by name."""
     fetcher: Fetcher | None = None
     cache: WebCache | None = None
 
-    def search(self, query: str, max_results: int) -> dict[str, Any]:
-        if self.engine is None:
-            raise WebError("no search engine is configured")
-        request = f"{self.engine.name}\0{max_results}\0{query}"
+    def search(
+        self, query: str, max_results: int, source: str = "web", language: str | None = None
+    ) -> dict[str, Any]:
+        if source == "web":
+            engines = self.engines
+        else:
+            engines = [self.sources[source]] if source in self.sources else []
+        if not engines:
+            others = ", ".join(self.sources) or "none"
+            what = (
+                "no search engine for the whole web is set up"
+                if source == "web"
+                else f"the source {source!r} is not available"
+            )
+            raise WebError(f"{what}; sources available: {others}")
+        request = f"{source}\0{language}\0{max_results}\0{query}"
         cached = self.cache.get("search", request) if self.cache else None
         if cached is not None:
             return cached
-        results = self.engine.search(query, max_results)
-        body = {
-            "query": query,
-            "results": [r.model_dump() for r in results[:max_results]],
-            "untrusted": UNTRUSTED,
-        }
-        if self.cache:
-            self.cache.put("search", request, body)
-        return body
+        problems = []
+        for engine in engines:
+            try:
+                results = engine.search(query, max_results, language)
+            except WebError as e:  # the next engine may answer
+                problems.append(f"{engine.name}: {e}")
+                continue
+            body = {
+                "query": query,
+                "source": source,
+                "engine": engine.name,
+                "results": [r.model_dump() for r in results[:max_results]],
+                "untrusted": UNTRUSTED,
+            }
+            if self.cache:
+                self.cache.put("search", request, body)
+            return body
+        raise WebError("; ".join(problems))
 
     def page(self, url: str) -> dict[str, Any]:
         """The whole text of a page (cut by MAX_BYTES only), from the cache when it is there."""
@@ -426,11 +394,3 @@ class Web:
         if self.cache:
             self.cache.put("page", url, body)
         return body
-
-    def unavailable_search(self) -> str | None:
-        if self.engine is None:
-            return (
-                "no search engine is configured (a Tavily key: `desman keys add tavily`, or a "
-                "SearXNG server URL in `desman config`)"
-            )
-        return None

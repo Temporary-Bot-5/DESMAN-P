@@ -50,8 +50,10 @@ class Provider:
     send_temperature: bool = True
     # Sent when a request sets no max_tokens, for providers that need one.
     max_tokens: int | None = None
-    # A web search engine for the web_search tool (core/web.py), not a model provider.
+    # A web search engine for the web_search tool (core/search.py), not a model provider.
     search: bool = False
+    # Off until the human turns it on: its one setting must be "on" (unofficial DuckDuckGo).
+    opt_in: bool = False
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -61,6 +63,8 @@ class Provider:
 
     def is_ready(self, config: Config) -> bool:
         """Everything it needs is configured."""
+        if self.opt_in:
+            return all(config.settings.get(s.env) == "on" for s in self.settings)
         if self.key_env is not None and not config.keys(self.key_env):
             return False
         return all(config.settings.get(s.env) for s in self.settings if not s.default)
@@ -246,8 +250,16 @@ LOCAL = (
 
 PROVIDERS = CLOUD + LOCAL
 
-# Free search engines for web_search (ROADMAP 3.5), tried in this order.
+# Engines for searching the whole web with web_search (ROADMAP 3.5), tried in this order; the
+# open sources (Wikipedia, Stack Overflow, arXiv, GitHub) need no entry: they need no setup.
 SEARCH = (
+    Provider(
+        "searxng",
+        "SearXNG",
+        "https://docs.searxng.org",
+        settings=(Setting("SEARXNG_URL", "URL"),),
+        search=True,
+    ),
     Provider(
         "tavily",
         "Tavily",
@@ -257,11 +269,12 @@ SEARCH = (
         search=True,
     ),
     Provider(
-        "searxng",
-        "SearXNG",
-        "https://docs.searxng.org",
-        settings=(Setting("SEARXNG_URL", "URL"),),
+        "duckduckgo",
+        "DuckDuckGo",
+        "https://duckduckgo.com",
+        settings=(Setting("DUCKDUCKGO_SEARCH", "on/off"),),
         search=True,
+        opt_in=True,
     ),
 )
 

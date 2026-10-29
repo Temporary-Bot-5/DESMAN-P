@@ -299,7 +299,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "частина {seq}",
     "web search": "вебпошук",
     "Web search (for the web_search tool)": "Вебпошук (для інструмента web_search)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access увімкнено, але пошукову систему не налаштовано: web_search залишається вимкненим (web_fetch працює). Додайте її в `desman config`.",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} не має офіційного API пошуку: DESMAN читатиме сторінку результатів так, як це робить браузер. Це неофіційний спосіб: він може перестати працювати, коли сторінка зміниться, часті пошуки призводять до капчі або тимчасового блокування вашої адреси, а правила {name} можуть це забороняти. DESMAN шукає не частіше ніж раз на 5 секунд і зупиняється у разі відмови.",
+    "Unofficial search": "Неофіційний пошук",
+    "Use {name} for web search?": "Використовувати {name} для вебпошуку?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG — пошукова система, яку ви запускаєте самі: вона сама опитує Google, Bing, DuckDuckGo та інші, без ключів і облікових записів. Як запустити: {doc}",
+    "SearXNG answers: web search works.": "SearXNG відповідає: вебпошук працює.",
+    "SearXNG at {url} cannot be used yet: {problem}": "SearXNG за адресою {url} поки що недоступний: {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access увімкнено, але пошукову систему для всього інтернету не налаштовано: web_search шукає лише у Вікіпедії, Stack Overflow, arXiv і GitHub. Додайте її в `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {

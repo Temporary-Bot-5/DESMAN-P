@@ -264,7 +264,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "{seq} parçası",
     "web search": "web araması",
     "Web search (for the web_search tool)": "Web araması (web_search aracı için)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access açık, ancak yapılandırılmış bir arama motoru yok: web_search kapalı kalıyor (web_fetch çalışıyor). `desman config` içinden bir tane ekleyin.",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} için resmi bir arama API'si yok: DESMAN sonuç sayfasını bir tarayıcı gibi okur. Bu resmi değildir: sayfa değiştiğinde çalışmayı bırakabilir, çok fazla arama captcha'ya veya adresinizin geçici olarak engellenmesine yol açar ve {name} koşulları buna izin vermeyebilir. DESMAN en fazla 5 saniyede bir arama yapar ve reddedildiğinde durur.",
+    "Unofficial search": "Resmi olmayan arama",
+    "Use {name} for web search?": "Web araması için {name} kullanılsın mı?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG kendiniz çalıştırdığınız bir arama motorudur: sizin yerinize Google, Bing, DuckDuckGo ve diğerlerine sorar, anahtar veya hesap gerekmez. Nasıl başlatılır: {doc}",
+    "SearXNG answers: web search works.": "SearXNG yanıt veriyor: web araması çalışıyor.",
+    "SearXNG at {url} cannot be used yet: {problem}": "{url} adresindeki SearXNG henüz kullanılamıyor: {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access açık, ancak tüm web için bir arama motoru ayarlanmamış: web_search yalnızca Wikipedia, Stack Overflow, arXiv ve GitHub'da arar. `desman config` içinden bir tane ekleyin.",
 }
 
 CLICK: dict[str, Forms] = {

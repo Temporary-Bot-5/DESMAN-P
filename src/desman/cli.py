@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import click
-import httpx
 from pydantic import ValidationError
 
 from desman import __version__, i18n, providers, ui
@@ -27,10 +26,11 @@ from desman.core.policy import Access, PolicyError, Role, default_policy, switch
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.retry import strategy_for
 from desman.core.sandbox import Sandbox
+from desman.core.search import DuckDuckGo, SearXNG, Tavily, client, open_sources
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.tools import builtin_registry
-from desman.core.web import SearchEngine, SearXNG, Tavily, Web, WebCache
+from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
@@ -618,8 +618,9 @@ def _executor_access(as_json: bool) -> Access:
     if permissions.network_access and not providers.search_engines(load_config().load()):
         ui.warn(
             t(
-                "network_access is on, but no search engine is configured: web_search stays "
-                "off (web_fetch works). Add one in `desman config`."
+                "network_access is on, but no engine for the whole web is set up: web_search "
+                "covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman "
+                "config`."
             ),
             stderr=as_json,
         )
@@ -631,16 +632,18 @@ def _executor_access(as_json: bool) -> Access:
 
 
 def _web(config: Config, store: Store) -> Web:
-    """The web tools' view of the config: the first search engine configured, the cache."""
-    engine: SearchEngine | None = None
+    """The web tools' view of the config: the open sources, the engines the human set up (in
+    `providers.SEARCH` order), the cache."""
+    http = client()
+    engines: list[SearchEngine] = []
     for p in providers.search_engines(config):
-        if p.id == "tavily" and p.key_env is not None:
-            engine = Tavily([k.value for k in config.keys(p.key_env)], httpx.Client())
-        elif p.id == "searxng":
-            engine = SearXNG(config.settings["SEARXNG_URL"], httpx.Client())
-        if engine is not None:
-            break
-    return Web(engine=engine, cache=WebCache(store.conn, store.clock))
+        if p.id == "searxng":
+            engines.append(SearXNG(config.settings["SEARXNG_URL"], http))
+        elif p.id == "tavily" and p.key_env is not None:
+            engines.append(Tavily([k.value for k in config.keys(p.key_env)], http))
+        elif p.id == "duckduckgo":
+            engines.append(DuckDuckGo(http))
+    return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 
 def _run_summary(result: RunResult) -> dict[str, Any]:

@@ -510,7 +510,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "часть {seq}",
     "web search": "веб-поиск",
     "Web search (for the web_search tool)": "Веб-поиск (для инструмента web_search)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access включён, но поисковик не настроен: web_search остаётся выключенным (web_fetch работает). Добавьте его в `desman config`.",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "У {name} нет официального API поиска: DESMAN будет читать страницу результатов так же, как браузер. Это неофициальный способ: он может перестать работать при изменении страницы, частые поиски приводят к капче или временной блокировке вашего адреса, а правила {name} могут это запрещать. DESMAN ищет не чаще раза в 5 секунд и прекращает при отказе.",
+    "Unofficial search": "Неофициальный поиск",
+    "Use {name} for web search?": "Использовать {name} для веб-поиска?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG — поисковик, который вы запускаете сами: он сам опрашивает Google, Bing, DuckDuckGo и другие, без ключей и аккаунтов. Как запустить: {doc}",
+    "SearXNG answers: web search works.": "SearXNG отвечает: веб-поиск работает.",
+    "SearXNG at {url} cannot be used yet: {problem}": "SearXNG по адресу {url} пока недоступен: {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access включён, но поисковик для всего интернета не настроен: web_search ищет только в Википедии, Stack Overflow, arXiv и GitHub. Добавьте его в `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {

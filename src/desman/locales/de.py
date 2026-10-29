@@ -283,7 +283,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "Teil von {seq}",
     "web search": "Websuche",
     "Web search (for the web_search tool)": "Websuche (für das Werkzeug web_search)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access ist an, aber keine Suchmaschine ist eingerichtet: web_search bleibt aus (web_fetch funktioniert). Richten Sie eine in `desman config` ein.",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} hat keine offizielle Such-API: DESMAN würde die Ergebnisseite so lesen wie ein Browser. Das ist inoffiziell: Es kann aufhören zu funktionieren, wenn sich die Seite ändert, zu viele Suchen führen zu einem Captcha oder einer vorübergehenden Sperre Ihrer Adresse, und die Nutzungsbedingungen von {name} erlauben es möglicherweise nicht. DESMAN sucht höchstens alle 5 Sekunden einmal und hört auf, wenn es abgewiesen wird.",
+    "Unofficial search": "Inoffizielle Suche",
+    "Use {name} for web search?": "{name} für die Websuche verwenden?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG ist eine Suchmaschine, die Sie selbst betreiben: Sie fragt Google, Bing, DuckDuckGo und andere für Sie ab, ohne Schlüssel oder Konten. So starten Sie eine: {doc}",
+    "SearXNG answers: web search works.": "SearXNG antwortet: Die Websuche funktioniert.",
+    "SearXNG at {url} cannot be used yet: {problem}": "SearXNG unter {url} ist noch nicht nutzbar: {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access ist an, aber keine Suchmaschine für das ganze Web ist eingerichtet: web_search durchsucht nur Wikipedia, Stack Overflow, arXiv und GitHub. Richten Sie eine in `desman config` ein.",
 }
 
 CLICK: dict[str, Forms] = {

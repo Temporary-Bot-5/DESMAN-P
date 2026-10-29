@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +9,6 @@ import httpx
 import pytest
 
 from conftest import FakeClock
-from desman import providers
 from desman.agents import TOOLS_INSTRUCTIONS
 from desman.core import web as web_module
 from desman.core.policy import Permission, executor_access
@@ -23,15 +21,12 @@ from desman.core.web import (
     UNTRUSTED,
     Fetcher,
     SearchResult,
-    SearXNG,
-    Tavily,
     Web,
     WebCache,
     WebError,
     html_text,
 )
 from desman.core.workspace import Workspace
-from helpers import make_config
 
 PUBLIC = "93.184.216.34"
 PAGE = """<html><head><title>A  page</title><style>p {color: red}</style>
@@ -189,51 +184,6 @@ def test_a_big_page_is_read_only_in_part(monkeypatch: pytest.MonkeyPatch) -> Non
     assert page.cut and page.text == "x" * 100
 
 
-# ── Search engines ───────────────────────────────────────────────────────────
-
-RESULTS = {"results": [{"title": "T", "url": "https://example.org", "content": "snippet"}]}
-
-
-def test_tavily_tries_the_next_key_when_one_is_refused() -> None:
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.headers["authorization"])
-        if request.headers["authorization"] == "Bearer used-up":
-            return httpx.Response(432, json={"detail": "plan limit"})
-        assert json.loads(request.content)["query"] == "desman"
-        return httpx.Response(200, json=RESULTS)
-
-    engine = Tavily(["used-up", "fresh"], httpx.Client(transport=httpx.MockTransport(handler)))
-    found = engine.search("desman", 5)
-    assert [r.model_dump() for r in found] == [
-        {"title": "T", "url": "https://example.org", "snippet": "snippet"}
-    ]
-    assert seen == ["Bearer used-up", "Bearer fresh"]
-
-
-def test_tavily_without_a_working_key_says_so() -> None:
-    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(401)))
-    with pytest.raises(WebError, match="HTTP 401"):
-        Tavily(["bad"], client).search("q", 5)
-
-
-def test_searxng_is_asked_for_json() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/search"
-        assert request.url.params["format"] == "json" and request.url.params["q"] == "q"
-        return httpx.Response(200, json=RESULTS)
-
-    engine = SearXNG("http://search.local/", httpx.Client(transport=httpx.MockTransport(handler)))
-    assert [r.url for r in engine.search("q", 5)] == ["https://example.org"]
-
-
-def test_an_engine_answering_garbage_is_an_error() -> None:
-    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<")))
-    with pytest.raises(WebError, match="not a list of results"):
-        SearXNG("http://search.local", client).search("q", 5)
-
-
 # ── Cache ────────────────────────────────────────────────────────────────────
 
 
@@ -243,7 +193,9 @@ class CountingEngine:
     def __init__(self) -> None:
         self.queries: list[str] = []
 
-    def search(self, query: str, max_results: int) -> list[SearchResult]:
+    def search(
+        self, query: str, max_results: int, language: str | None = None
+    ) -> list[SearchResult]:
         self.queries.append(query)
         return [SearchResult(url=f"https://example.org/{len(self.queries)}")]
 
@@ -251,7 +203,7 @@ class CountingEngine:
 def test_answers_are_cached_for_a_day(store: Store, clock: FakeClock) -> None:
     engine = CountingEngine()
     site = Site({"https://example.org/doc": html()})
-    w = Web(engine=engine, fetcher=fetcher(site), cache=WebCache(store.conn, clock))
+    w = Web(engines=[engine], fetcher=fetcher(site), cache=WebCache(store.conn, clock))
     first = w.search("q", 3)
     assert w.search("q", 3) == first and engine.queries == ["q"]
     assert w.page("https://example.org/doc") == w.page("https://example.org/doc")
@@ -280,21 +232,47 @@ def offered(box: Toolbox) -> list[str]:
 
 def test_the_web_needs_the_humans_network_access(tmp_path: Path) -> None:
     site = Site({"https://example.org/doc": html()})
-    box = toolbox(tmp_path, Web(engine=CountingEngine(), fetcher=fetcher(site)))
+    box = toolbox(tmp_path, Web(engines=[CountingEngine()], fetcher=fetcher(site)))
     assert "web_fetch" not in offered(box) and "web_search" not in offered(box)
     refused = box.call(ToolCall(tool="web_fetch", args={"url": "https://example.org/doc"}))
     assert not refused.ok and "network_access" in (refused.error or "")
     assert site.requests == []
 
 
-def test_search_is_offered_only_with_an_engine(tmp_path: Path) -> None:
-    without = toolbox(tmp_path, Web(), Permission.NETWORK)
-    assert "web_fetch" in offered(without) and "web_search" not in offered(without)
-    refused = without.call(ToolCall(tool="web_search", args={"query": "q"}))
-    assert "no search engine" in (refused.error or "")
-    with_engine = toolbox(tmp_path, Web(engine=CountingEngine()), Permission.NETWORK)
-    found = with_engine.call(ToolCall(tool="web_search", args={"query": "q"}))
-    assert found.ok and found.output["untrusted"] == UNTRUSTED
+def test_search_goes_to_the_source_asked_for(tmp_path: Path) -> None:
+    wiki, engine = CountingEngine(), CountingEngine()
+    sources_only = toolbox(tmp_path, Web(sources={"wikipedia": wiki}), Permission.NETWORK)
+    assert {"web_fetch", "web_search"} <= set(offered(sources_only))
+    refused = sources_only.call(ToolCall(tool="web_search", args={"query": "q"}))
+    assert "no search engine for the whole web" in (refused.error or "")
+    assert "wikipedia" in (refused.error or "")  # what the model can use instead
+    found = sources_only.call(
+        ToolCall(tool="web_search", args={"query": "q", "source": "wikipedia", "language": "ru"})
+    )
+    assert found.ok and found.output["untrusted"] == UNTRUSTED and wiki.queries == ["q"]
+    bad = sources_only.call(ToolCall(tool="web_search", args={"query": "q", "source": "x"}))
+    assert not bad.ok and "bad arguments" in (bad.error or "")
+
+    whole = toolbox(tmp_path, Web(engines=[engine]), Permission.NETWORK)
+    assert whole.call(ToolCall(tool="web_search", args={"query": "q"})).ok
+    assert engine.queries == ["q"]
+
+
+class FailingEngine:
+    name = "failing"
+
+    def search(
+        self, query: str, max_results: int, language: str | None = None
+    ) -> list[SearchResult]:
+        raise WebError("down")
+
+
+def test_the_next_engine_answers_when_one_fails() -> None:
+    backup = CountingEngine()
+    found = Web(engines=[FailingEngine(), backup]).search("q", 3)
+    assert found["engine"] == "counting" and backup.queries == ["q"]
+    with pytest.raises(WebError, match="failing: down; failing: down"):
+        Web(engines=[FailingEngine(), FailingEngine()]).search("q", 3)
 
 
 def test_a_long_page_is_read_in_parts_and_marked_untrusted(tmp_path: Path) -> None:
@@ -322,7 +300,7 @@ def test_fetch_errors_go_back_to_the_model(tmp_path: Path) -> None:
 
 def test_the_web_tools_have_a_call_budget(tmp_path: Path) -> None:
     engine = CountingEngine()
-    box = toolbox(tmp_path, Web(engine=engine), Permission.NETWORK)
+    box = toolbox(tmp_path, Web(engines=[engine]), Permission.NETWORK)
     results = [
         box.call(ToolCall(tool="web_search", args={"query": f"q{i}"})) for i in range(MAX_CALLS + 1)
     ]
@@ -333,29 +311,3 @@ def test_the_web_tools_have_a_call_budget(tmp_path: Path) -> None:
 
 def test_the_executor_is_told_web_text_is_not_instructions() -> None:
     assert '"untrusted"' in TOOLS_INSTRUCTIONS and "never" in TOOLS_INSTRUCTIONS
-
-
-# ── Configuration ────────────────────────────────────────────────────────────
-
-
-def test_search_engines_come_from_the_config() -> None:
-    assert providers.search_engines(make_config()) == []
-    config = make_config(
-        api_keys={"TAVILY_API_KEY": "tvly-" + "k" * 30}, settings={"SEARXNG_URL": "http://s"}
-    )
-    assert [p.id for p in providers.search_engines(config)] == ["tavily", "searxng"]
-    assert providers.find_keyed("tavily").search and providers.by_key_env("TAVILY_API_KEY")
-    with pytest.raises(providers.UnknownProvider):
-        providers.find("tavily")  # never a model provider
-
-
-def test_a_run_uses_the_first_configured_engine(store: Store) -> None:
-    from desman.cli import _web
-
-    assert _web(make_config(), store).engine is None
-    both = make_config(
-        api_keys={"TAVILY_API_KEY": "tvly-" + "k" * 30}, settings={"SEARXNG_URL": "http://s"}
-    )
-    assert isinstance(_web(both, store).engine, Tavily)
-    searxng = _web(make_config(settings={"SEARXNG_URL": "http://s"}), store)
-    assert isinstance(searxng.engine, SearXNG) and searxng.cache is not None

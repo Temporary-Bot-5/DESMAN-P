@@ -256,7 +256,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "属于 {seq}",
     "web search": "网络搜索",
     "Web search (for the web_search tool)": "网络搜索（供 web_search 工具使用）",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access 已开启，但尚未配置搜索引擎：web_search 保持关闭（web_fetch 可用）。请在 `desman config` 中添加一个。",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} 没有官方搜索 API：DESMAN 会像浏览器一样读取其结果页面。这是非官方方式：页面改版后可能失效，搜索过多会触发验证码或暂时封禁你的地址，而且 {name} 的条款可能不允许。DESMAN 最多每 5 秒搜索一次，被拒绝时即停止。",
+    "Unofficial search": "非官方搜索",
+    "Use {name} for web search?": "使用 {name} 进行网络搜索？",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG 是你自己运行的搜索引擎：它替你查询 Google、Bing、DuckDuckGo 等，无需密钥或账户。启动方法：{doc}",
+    "SearXNG answers: web search works.": "SearXNG 已响应：网络搜索可用。",
+    "SearXNG at {url} cannot be used yet: {problem}": "{url} 上的 SearXNG 暂时无法使用：{problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access 已开启，但尚未设置面向整个网络的搜索引擎：web_search 只能搜索维基百科、Stack Overflow、arXiv 和 GitHub。请在 `desman config` 中添加一个。",
 }
 
 CLICK: dict[str, Forms] = {

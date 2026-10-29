@@ -283,7 +283,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "parte de {seq}",
     "web search": "búsqueda web",
     "Web search (for the web_search tool)": "Búsqueda web (para la herramienta web_search)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access está activado, pero no hay ningún buscador configurado: web_search sigue desactivado (web_fetch funciona). Añade uno en `desman config`.",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} no tiene una API de búsqueda oficial: DESMAN leería su página de resultados como lo hace un navegador. Esto no es oficial: puede dejar de funcionar cuando cambie la página, demasiadas búsquedas provocan un captcha o un bloqueo temporal de tu dirección, y los términos de {name} pueden no permitirlo. DESMAN busca como mucho una vez cada 5 segundos y se detiene si es rechazado.",
+    "Unofficial search": "Búsqueda no oficial",
+    "Use {name} for web search?": "¿Usar {name} para la búsqueda web?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG es un buscador que ejecutas tú mismo: consulta Google, Bing, DuckDuckGo y otros por ti, sin claves ni cuentas. Cómo poner uno en marcha: {doc}",
+    "SearXNG answers: web search works.": "SearXNG responde: la búsqueda web funciona.",
+    "SearXNG at {url} cannot be used yet: {problem}": "SearXNG en {url} todavía no se puede usar: {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access está activado, pero no hay ningún buscador para toda la web: web_search solo busca en Wikipedia, Stack Overflow, arXiv y GitHub. Añade uno en `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {

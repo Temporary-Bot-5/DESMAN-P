@@ -283,7 +283,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "partie de {seq}",
     "web search": "recherche web",
     "Web search (for the web_search tool)": "Recherche web (pour l'outil web_search)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access est activé, mais aucun moteur de recherche n'est configuré : web_search reste désactivé (web_fetch fonctionne). Ajoutez-en un dans `desman config`.",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} n'a pas d'API de recherche officielle : DESMAN lirait sa page de résultats comme le fait un navigateur. C'est non officiel : cela peut cesser de fonctionner quand la page change, trop de recherches déclenchent un captcha ou un blocage temporaire de votre adresse, et les conditions de {name} peuvent l'interdire. DESMAN fait au plus une recherche toutes les 5 secondes et s'arrête en cas de refus.",
+    "Unofficial search": "Recherche non officielle",
+    "Use {name} for web search?": "Utiliser {name} pour la recherche web ?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG est un moteur de recherche que vous faites tourner vous-même : il interroge Google, Bing, DuckDuckGo et d'autres pour vous, sans clé ni compte. Pour en lancer un : {doc}",
+    "SearXNG answers: web search works.": "SearXNG répond : la recherche web fonctionne.",
+    "SearXNG at {url} cannot be used yet: {problem}": "SearXNG à l'adresse {url} n'est pas encore utilisable : {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access est activé, mais aucun moteur pour tout le web n'est configuré : web_search ne cherche que dans Wikipédia, Stack Overflow, arXiv et GitHub. Ajoutez-en un dans `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {

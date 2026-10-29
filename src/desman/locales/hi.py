@@ -283,7 +283,13 @@ MESSAGES: dict[str, Forms] = {
     "part of {seq}": "{seq} का भाग",
     "web search": "वेब खोज",
     "Web search (for the web_search tool)": "वेब खोज (web_search टूल के लिए)",
-    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access चालू है, लेकिन कोई सर्च इंजन सेट नहीं है: web_search बंद रहता है (web_fetch काम करता है)। `desman config` में एक जोड़ें।",
+    "{name} has no official search API: DESMAN would read its results page the way a browser does. This is unofficial: it can stop working when the page changes, too many searches get a captcha or block your address for a while, and {name}'s terms may not allow it. DESMAN searches at most once every 5 seconds and stops when refused.": "{name} का कोई आधिकारिक सर्च API नहीं है: DESMAN उसके परिणाम पेज को वैसे ही पढ़ेगा जैसे ब्राउज़र पढ़ता है। यह अनौपचारिक तरीका है: पेज बदलने पर यह काम करना बंद कर सकता है, बहुत ज़्यादा खोजों पर कैप्चा आ सकता है या आपका पता कुछ समय के लिए ब्लॉक हो सकता है, और {name} की शर्तें इसकी अनुमति नहीं दे सकतीं। DESMAN हर 5 सेकंड में अधिकतम एक बार खोजता है और मना किए जाने पर रुक जाता है।",
+    "Unofficial search": "अनौपचारिक खोज",
+    "Use {name} for web search?": "वेब खोज के लिए {name} का उपयोग करें?",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG एक सर्च इंजन है जिसे आप खुद चलाते हैं: यह बिना कुंजी या खाते के आपकी ओर से Google, Bing, DuckDuckGo और अन्य से पूछता है। इसे कैसे शुरू करें: {doc}",
+    "SearXNG answers: web search works.": "SearXNG जवाब दे रहा है: वेब खोज काम करती है।",
+    "SearXNG at {url} cannot be used yet: {problem}": "{url} पर SearXNG अभी उपयोग नहीं किया जा सकता: {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access चालू है, लेकिन पूरे वेब के लिए कोई सर्च इंजन सेट नहीं है: web_search केवल Wikipedia, Stack Overflow, arXiv और GitHub में खोजता है। `desman config` में एक जोड़ें।",
 }
 
 CLICK: dict[str, Forms] = {
