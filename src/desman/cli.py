@@ -16,7 +16,7 @@ from desman import __version__, i18n, providers, runs, ui
 from desman.chat import Chat
 from desman.config import ConfigError, open_config
 from desman.config_cli import config, keys, language, load_config, run_wizard, usage
-from desman.core import db
+from desman.core import calls, db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import RunResult
 from desman.core.models import Priority, TaskSpec
@@ -457,7 +457,8 @@ def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json:
         ui.note(t("Planning…"))
         sys.stdout.flush()
     try:
-        planned = plan(llm, goal, level)
+        with calls.for_(calls.Purpose(calls.Role.PLANNER)):  # before the task exists
+            planned = plan(llm, goal, level)
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
     if planned.error is not None and not as_json:

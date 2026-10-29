@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import click
@@ -123,6 +124,7 @@ def coordinator(
     *,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     http: httpx.Client | None = None,
+    watch: Callable[[], None] | None = None,
 ) -> Coordinator:
     return Coordinator(
         store,
@@ -136,4 +138,5 @@ def coordinator(
         decomposer=decomposer(models.llm),
         access=access,
         tools=builtin_registry(web=web(config, store, http)),
+        watch=watch,
     )

@@ -29,7 +29,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from desman.core import db
+from desman.core import calls, db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.effects import Effects
 from desman.core.models import Subtask, SubtaskSpec
@@ -163,6 +163,7 @@ class Coordinator:
         strategies: Strategies = ONE_MODEL,
         decomposer: Decomposer | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        watch: Callable[[], None] | None = None,
     ) -> None:
         self.store = store
         self.executor = executor
@@ -187,6 +188,10 @@ class Coordinator:
         self.decomposer = decomposer
         """Without one, subtasks are never split."""
         self.sleep = sleep
+        self.watch = watch
+        """Called whenever the task may look different (housekeeping, a claim, an execution, a
+        review), so progress can be shown while `run()` works. It reads the state itself; the
+        model calls in between are watched through `calls.watching`."""
 
     def run(
         self, task_id: str, *, wait_for_pauses: bool = False, max_ticks: int = 10_000
@@ -230,15 +235,27 @@ class Coordinator:
         events += [f"recovered {s.id}" for s in recovered]
         events += [f"resumed {s.id}" for s in resumed]
         progressed = bool(recovered or resumed)
+        if progressed:
+            self._changed()
 
         for subtask in self.store.pending_reviews(task_id=task_id):
             progressed |= self._review(subtask, events)
+            self._changed()
 
         claimed = self.store.claim(self.owner, task_id=task_id, lease_seconds=self.lease_seconds)
         if claimed is not None:
+            self._changed()
             self._execute(claimed, events)
+            self._changed()
             progressed = True
         return progressed
+
+    def _changed(self) -> None:
+        if self.watch is not None:
+            self.watch()
+
+    def _for(self, role: calls.Role, subtask: Subtask) -> calls.Purpose:
+        return calls.Purpose(role, task_id=subtask.task_id, subtask_id=subtask.id)
 
     def _execute(self, subtask: Subtask, events: list[str]) -> None:
         lease = subtask.lease_token
@@ -286,7 +303,8 @@ class Coordinator:
                 )
                 work = work.model_copy(update={"context": context})
                 self._started(subtask, context)
-            returned = self.executor(work)
+            with calls.for_(self._for(calls.Role.EXECUTOR, subtask)):
+                returned = self.executor(work)
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
@@ -357,7 +375,8 @@ class Coordinator:
         provider error propagates to `_execute`, as from the executor."""
         assert self.decomposer is not None
         subtask = work.subtask
-        parts = self.decomposer(work)
+        with calls.for_(self._for(calls.Role.DECOMPOSER, subtask)):
+            parts = self.decomposer(work)
         if parts:
             try:
                 created = self.store.decompose(subtask.id, lease, parts)
@@ -375,7 +394,8 @@ class Coordinator:
         review: Review | Failure
         artifact = self.store.latest_artifact(subtask.id)
         try:
-            returned = self.reviewer(subtask, artifact)
+            with calls.for_(self._for(calls.Role.REVIEWER, subtask)):
+                returned = self.reviewer(subtask, artifact)
             # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
         except ProviderError as e:

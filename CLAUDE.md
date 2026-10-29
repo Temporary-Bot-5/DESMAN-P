@@ -62,6 +62,8 @@ src/desman/
 │                  #   retell() a task's outcome. Prompts "Chat turn", "Retell task"
 ├── runs.py        # A run put together from the config (models, executor access, web tools,
 │                  #   coordinator), shared by `run`/`resume` and the chat
+├── live.py        # Live progress of a chat task: subtask bar, a line per module (role, calls,
+│                  #   tokens, limits left, state); redrawn on coordinator steps and calls
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently);
@@ -82,7 +84,8 @@ src/desman/
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
     ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
                    #   every status change was recorded (D7)
-    ├── calls.py   # model_calls log (per provider/key usage, limits seen); `desman usage`
+    ├── calls.py   # model_calls log (per provider/key usage, limits seen); `desman usage`;
+    │              #   calls.for_(Purpose) attributes calls (role, task/subtask or session)
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
     ├── tools.py   # Tool registry: Tool (args schema, Permission), Registry, built-in file
