@@ -527,6 +527,15 @@ def test_v6_database_with_running_work_upgrades_to_the_effect_journal(tmp_path: 
     store.conn.close()
 
 
+def test_v7_database_upgrades_to_the_web_cache(tmp_path: Path) -> None:
+    path = tmp_path / "v7.db"
+    _db_at_version(path, 7).close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    assert conn.execute("SELECT COUNT(*) FROM web_cache").fetchone()[0] == 0
+    conn.close()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="file modes")
 def test_a_new_database_is_private(tmp_path: Path) -> None:
     old_umask = os.umask(0o022)

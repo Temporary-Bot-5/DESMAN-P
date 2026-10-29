@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from desman import __version__, i18n, providers, ui
 from desman.agents import llm_executor, llm_reviewer
-from desman.config import ConfigError, open_config
+from desman.config import Config, ConfigError, open_config
 from desman.config_cli import config, keys, language, load_config, run_wizard, usage
 from desman.core import calls, db
 from desman.core.audit import AuditEntry, check_history, history
@@ -26,8 +26,11 @@ from desman.core.policy import Access, PolicyError, Role, default_policy, switch
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.retry import strategy_for
 from desman.core.sandbox import Sandbox
+from desman.core.search import SearXNG, Tavily, client, open_sources
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
+from desman.core.tools import builtin_registry
+from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
@@ -569,6 +572,7 @@ def _drive(
         strategies=functools.partial(strategy_for, other_model=other is not None),
         decomposer=decomposer(llm),
         access=access,
+        tools=builtin_registry(web=_web(load_config().load(), store)),
     )
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)
@@ -611,11 +615,33 @@ def _executor_access(as_json: bool) -> Access:
                 ),
                 stderr=as_json,
             )
+    if permissions.network_access and not providers.search_engines(load_config().load()):
+        ui.warn(
+            t(
+                "network_access is on, but no engine for the whole web is set up: web_search "
+                "covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman "
+                "config`."
+            ),
+            stderr=as_json,
+        )
     try:
         policy = default_policy()
     except PolicyError as e:
         raise click.ClickException(t("Cannot use the tool policy: {error}", error=e)) from e
     return Access(policy, Role.EXECUTOR, switched_on(permissions.model_dump()))
+
+
+def _web(config: Config, store: Store) -> Web:
+    """The web tools' view of the config: the open sources, the engines the human set up (in
+    `providers.SEARCH` order), the cache."""
+    http = client()
+    engines: list[SearchEngine] = []
+    for p in providers.search_engines(config):
+        if p.id == "searxng":
+            engines.append(SearXNG(config.settings["SEARXNG_URL"], http))
+        elif p.id == "tavily" and p.key_env is not None:
+            engines.append(Tavily([k.value for k in config.keys(p.key_env)], http))
+    return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 
 def _run_summary(result: RunResult) -> dict[str, Any]:

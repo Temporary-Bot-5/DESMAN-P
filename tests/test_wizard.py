@@ -1,7 +1,8 @@
 """The `desman config` wizard, driven through its numbered fallback (no terminal in tests).
 
-Main menu: providers numbered in `providers.PROVIDERS` order (free, paid, local, under section
-headings that take no number), then Done. A provider without
+Main menu: providers numbered in `providers.PROVIDERS` order (free, paid, local), then the search
+engines (`providers.SEARCH`), under section
+headings that take no number, then Done. A provider without
 keys goes straight to the key prompt; one with keys opens its menu: 1 add, 2 remove, then its
 settings, then Back. Permissions follow: four Y/N questions, Enter keeps the current value.
 """
@@ -17,12 +18,12 @@ from desman.cli import cli
 from desman.config import ConfigManager, Permissions, default_config_path
 from helpers import flat_keys, make_config
 
-DONE = str(len(providers.PROVIDERS) + 1)
+DONE = str(len(providers.PROVIDERS + providers.SEARCH) + 1)
 KEEP_PERMISSIONS = ("", "", "", "")
 
 
 def menu(provider_id: str) -> str:
-    return str(1 + [p.id for p in providers.PROVIDERS].index(provider_id))
+    return str(1 + [p.id for p in providers.PROVIDERS + providers.SEARCH].index(provider_id))
 
 
 def wizard(*answers: str) -> Result:

@@ -116,6 +116,8 @@ def config_show(as_json: bool) -> None:
         name = Text(row["name"])
         if row["paid"]:
             name.append(f" · {t('paid')}", style="warn")
+        if row["search"]:
+            name.append(f" · {t('web search')}", style="muted")
         rows.add_row(name, status, keys, settings)
     ui.out("")
     ui.out(rows)
@@ -224,7 +226,7 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
     config = load_config().load()
     spent = {u.key_id: u for u in _usage(db_path, timedelta(hours=24))}
     rows: list[dict[str, Any]] = []
-    for p in providers.CLOUD:
+    for p in providers.CLOUD + tuple(s for s in providers.SEARCH if s.key_env is not None):
         assert p.key_env is not None
         keys = []
         for i, k in enumerate(config.keys(p.key_env), 1):
@@ -245,6 +247,7 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
                 "name": p.name,
                 "env": p.key_env,
                 "paid": p.paid,
+                "search": p.search,
                 "ready": p.is_ready(config),
                 "keys": keys,
             }
@@ -265,6 +268,8 @@ def keys_list(as_json: bool = False, db_path: Path | None = None) -> None:
     )
     for r in rows:
         shown = r["name"] + (f" · {t('paid')}" if r["paid"] else "")
+        if r["search"]:
+            shown += f" · {t('web search')}"
         if not r["keys"]:
             table.add_row(Text(shown, style="muted"), "", Text("-", style="muted"), "", "", "")
         for k in r["keys"]:
@@ -299,7 +304,9 @@ def keys_check(provider: str | None, as_json: bool) -> None:
     """Ask each provider whether its keys work and what limits it reports. Spends no tokens."""
     config = load_config().load()
     targets = (
-        [_provider(provider)] if provider else [p for p in providers.CLOUD if p.is_ready(config)]
+        [_provider(provider, search=False)]
+        if provider
+        else [p for p in providers.CLOUD if p.is_ready(config)]
     )
     if not targets:
         raise click.ClickException(t("no keys to check: add one with `desman keys add PROVIDER`"))
@@ -519,9 +526,10 @@ def _usage(db_path: Path | None, window: timedelta | None) -> list[calls.KeyUsag
         conn.close()
 
 
-def _provider(name: str) -> providers.Provider:
+def _provider(name: str, *, search: bool = True) -> providers.Provider:
+    """A provider with keys; with `search`, a web search engine too."""
     try:
-        p = providers.find(name)
+        p = providers.find_keyed(name) if search else providers.find(name)
     except providers.UnknownProvider as e:
         raise click.BadParameter(str(e), param_hint="PROVIDER") from e
     if p.key_env is None:

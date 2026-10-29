@@ -8,7 +8,9 @@
 [roles.executor]
 # run_command also needs the human's shell_execution switch, and runs only in the sandbox
 # (src/desman/core/sandbox.py); without a working sandbox it is never offered.
-tools = ["read_file", "write_file", "list_files", "run_command"]
+# web_search and web_fetch also need the human's network_access switch; web_search also a
+# search engine (a Tavily key or a SearXNG server).
+tools = ["read_file", "write_file", "list_files", "run_command", "web_search", "web_fetch"]
 
 # The planner and the reviewer use no tools yet.
 [roles.planner]

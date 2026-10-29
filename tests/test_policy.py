@@ -59,7 +59,7 @@ def write(path: Path, text: str) -> Path:
 
 def test_the_shipped_policy_gives_tools_to_the_executor_only() -> None:
     policy = default_policy()
-    executor = {"read_file", "write_file", "list_files", "run_command"}
+    executor = {"read_file", "write_file", "list_files", "run_command", "web_search", "web_fetch"}
     assert policy.tools_for(Role.EXECUTOR) == executor
     assert policy.tools_for(Role.PLANNER) == policy.tools_for(Role.REVIEWER) == frozenset()
     assert POLICY_PATH.name == "policy.toml" and POLICY_PATH.parent.name == "desman"

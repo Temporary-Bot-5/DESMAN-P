@@ -81,6 +81,10 @@ src/desman/
     │              #   refusals audited (tool_refused), admin calls marked elevated
     ├── effects.py # Call journal (D6): intent → run → result per tool call; a rerun of an
     │              #   interrupted execution replays results (from its checkpoint) instead of acting
+    ├── web.py     # web_search and web_fetch: GET only, public addresses only (checked, then
+    │              #   connected to), text only, limits, web_cache; results marked untrusted
+    ├── search.py  # Search engines: open sources (Wikipedia, Stack Overflow, arXiv, GitHub; no
+    │              #   key), the human's SearXNG, Tavily. Official APIs only, never pages for people
     ├── sandbox.py # Generated code runs only under bwrap: no network, only /usr (read-only) and
     │              #   the workspace, cleared env, rlimits, timeout; unavailable → nothing runs
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables

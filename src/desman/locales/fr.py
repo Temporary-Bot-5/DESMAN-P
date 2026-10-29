@@ -281,6 +281,12 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "Le modèle n'a pas fait de plan, l'objectif est donc la seule sous-tâche : {error}",
     "Retries may also use {provider} · {model}": "Les nouvelles tentatives peuvent aussi utiliser {provider} · {model}",
     "part of {seq}": "partie de {seq}",
+    "web search": "recherche web",
+    "Web search (for the web_search tool)": "Recherche web (pour l'outil web_search)",
+    "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo and others for you, without keys or accounts. How to start one: {doc}": "SearXNG est un moteur de recherche que vous faites tourner vous-même : il interroge Google, Bing, DuckDuckGo et d'autres pour vous, sans clé ni compte. Pour en lancer un : {doc}",
+    "SearXNG answers: web search works.": "SearXNG répond : la recherche web fonctionne.",
+    "SearXNG at {url} cannot be used yet: {problem}": "SearXNG à l'adresse {url} n'est pas encore utilisable : {problem}",
+    "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access est activé, mais aucun moteur pour tout le web n'est configuré : web_search ne cherche que dans Wikipédia, Stack Overflow, arXiv et GitHub. Ajoutez-en un dans `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {
