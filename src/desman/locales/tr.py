@@ -239,6 +239,7 @@ MESSAGES: dict[str, Forms] = {
     "use the network beyond model providers": "model sağlayıcıları dışında ağı kullanmak",
     "run shell commands": "kabuk komutları çalıştırmak",
     "admin_rights is on: agents may act with elevated privileges.": "admin_rights açık: ajanlar yükseltilmiş yetkilerle çalışabilir.",
+    "shell_execution is on, but there is no sandbox to run commands in ({reason}): run_command stays off.": "shell_execution açık, ancak komutları çalıştıracak bir sanal alan yok ({reason}): run_command kapalı kalıyor.",
     "Configuration saved to {path}": "Yapılandırma {path} konumuna kaydedildi",
     'Next: `desman config show` to review, `desman run "..."` to start.': 'Sonraki adım: gözden geçirmek için `desman config show`, başlamak için `desman run "..."`.',
     "No cloud key yet: cloud models will not work until you add one.": "Henüz bulut anahtarı yok: bir tane ekleyene kadar bulut modelleri çalışmaz.",

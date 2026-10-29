@@ -237,6 +237,7 @@ MESSAGES: dict[str, Forms] = {
     "use the network beyond model providers": "モデルプロバイダー以外のネットワークを使う",
     "run shell commands": "シェルコマンドを実行する",
     "admin_rights is on: agents may act with elevated privileges.": "admin_rights が有効です: エージェントが昇格した権限で動作する可能性があります。",
+    "shell_execution is on, but there is no sandbox to run commands in ({reason}): run_command stays off.": "shell_execution はオンですが、コマンドを実行するサンドボックスがありません（{reason}）。run_command はオフのままです。",
     "Configuration saved to {path}": "設定を {path} に保存しました",
     'Next: `desman config show` to review, `desman run "..."` to start.': '次へ: `desman config show` で確認、`desman run "..."` で開始。',
     "No cloud key yet: cloud models will not work until you add one.": "クラウドのキーがまだありません: 追加するまでクラウドのモデルは使えません。",

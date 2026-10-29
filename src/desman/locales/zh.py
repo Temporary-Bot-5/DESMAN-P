@@ -231,6 +231,7 @@ MESSAGES: dict[str, Forms] = {
     "use the network beyond model providers": "访问模型提供商以外的网络",
     "run shell commands": "运行 shell 命令",
     "admin_rights is on: agents may act with elevated privileges.": "admin_rights 已开启：智能体可能以提升的权限执行操作。",
+    "shell_execution is on, but there is no sandbox to run commands in ({reason}): run_command stays off.": "shell_execution 已开启，但没有可运行命令的沙箱（{reason}）：run_command 保持关闭。",
     "Configuration saved to {path}": "配置已保存到 {path}",
     'Next: `desman config show` to review, `desman run "..."` to start.': '下一步：`desman config show` 检查配置，`desman run "..."` 开始运行。',
     "No cloud key yet: cloud models will not work until you add one.": "还没有云端密钥：添加之前云端模型无法使用。",

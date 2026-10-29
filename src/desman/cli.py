@@ -25,6 +25,7 @@ from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.retry import strategy_for
+from desman.core.sandbox import Sandbox
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.i18n import t, tn
@@ -599,6 +600,17 @@ def _executor_access(as_json: bool) -> Access:
     permissions = load_config().load().permissions
     if permissions.admin_rights:  # at every run, not only when it was turned on
         ui.warn(t("admin_rights is on: agents may act with elevated privileges."), stderr=as_json)
+    if permissions.shell_execution:
+        problem = Sandbox().unavailable()
+        if problem is not None:  # the switch alone would look like commands can run
+            ui.warn(
+                t(
+                    "shell_execution is on, but there is no sandbox to run commands in "
+                    "({reason}): run_command stays off.",
+                    reason=problem,
+                ),
+                stderr=as_json,
+            )
     try:
         policy = default_policy()
     except PolicyError as e:

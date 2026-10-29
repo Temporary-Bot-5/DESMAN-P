@@ -41,6 +41,12 @@ desman run "GOAL"             # on a real model; --provider groq --model ...
 desman help
 ```
 
+Agents run code only in a sandbox, and only after you turn on `shell_execution` in
+`desman config`. The sandbox is [bubblewrap](https://github.com/containers/bubblewrap)
+(Linux): `sudo apt install bubblewrap`. Without it, or where the system forbids unprivileged
+user namespaces (Ubuntu 24.04+: `kernel.apparmor_restrict_unprivileged_userns`), agents cannot
+run code at all, and `desman run` says so.
+
 Configuration, API keys included, is stored in `config.json` in the project folder, readable by
 the owner only and ignored by git. An installed package (no project folder) uses
 `~/.config/desman/config.json`; `DESMAN_CONFIG_DIR` overrides both. Git ignores the file,

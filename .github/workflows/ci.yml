@@ -18,8 +18,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      - name: Sandbox for generated code (bubblewrap; Ubuntu forbids user namespaces by default)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
       - run: pytest
+        env:
+          DESMAN_REQUIRE_SANDBOX: "1"
