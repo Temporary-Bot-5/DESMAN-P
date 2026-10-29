@@ -286,6 +286,7 @@ MESSAGES: dict[str, Forms] = {
     "the new session": "新しいセッション",
     "Which session?": "どのセッションにしますか？",
     "Switched to the session of {when}.": "{when} のセッションに切り替えました。",
+    "earlier sessions…": "それ以前のセッション…",
 }
 
 CLICK: dict[str, Forms] = {

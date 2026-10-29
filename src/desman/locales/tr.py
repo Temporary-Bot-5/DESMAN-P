@@ -288,6 +288,7 @@ MESSAGES: dict[str, Forms] = {
     "the new session": "yeni oturum",
     "Which session?": "Hangi oturum?",
     "Switched to the session of {when}.": "{when} tarihli oturuma geçildi.",
+    "earlier sessions…": "daha eski oturumlar…",
 }
 
 CLICK: dict[str, Forms] = {

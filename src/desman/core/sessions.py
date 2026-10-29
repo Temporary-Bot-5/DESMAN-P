@@ -109,8 +109,8 @@ class Sessions:
         ).fetchall()
         return [Message.model_validate(dict(r)) for r in reversed(rows)]
 
-    def recent(self, limit: int = 20) -> list[SessionInfo]:
-        """Sessions, the one written to last first."""
+    def recent(self, limit: int = 20, offset: int = 0) -> list[SessionInfo]:
+        """Sessions, the one written to last first; `offset` skips that many."""
         rows = self.conn.execute(
             """
             SELECT s.id, s.created_at, MAX(m.at) AS last_at, COUNT(m.seq) AS messages,
@@ -120,9 +120,9 @@ class Sessions:
             FROM sessions s JOIN messages m ON m.session_id = s.id
             GROUP BY s.id
             ORDER BY MAX(m.seq) DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         ).fetchall()
         return [SessionInfo.model_validate(dict(r)) for r in rows]
 

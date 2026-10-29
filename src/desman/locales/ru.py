@@ -540,6 +540,7 @@ MESSAGES: dict[str, Forms] = {
     "the new session": "новая сессия",
     "Which session?": "Какая сессия?",
     "Switched to the session of {when}.": "Переключились на сессию от {when}.",
+    "earlier sessions…": "более ранние сессии…",
 }
 
 CLICK: dict[str, Forms] = {

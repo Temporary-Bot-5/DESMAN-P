@@ -24,6 +24,9 @@ SHOWN_ON_RETURN = 6
 """How many of the last messages are shown when a session is continued or switched to."""
 
 LISTED_SESSIONS = 20
+"""Sessions per page of `/sessions`; the last choice of a full page leads to earlier ones."""
+
+_EARLIER = "earlier"  # not a session id: those are uuid hex
 
 
 def _commands() -> dict[str, str]:
@@ -45,14 +48,14 @@ class Chat:
     def run(self) -> None:
         self._greet()
         while (line := self.read()) is not None:
-            line = line.strip()
-            if not line:
+            command = line.strip()
+            if not command:
                 continue
-            if line.startswith("/"):
-                if not self._command(line):
+            if command.startswith("/"):
+                if not self._command(command):
                     return
                 continue
-            self._message(line)
+            self._message(line)  # kept as typed: indentation may matter (code, a list)
 
     # ── Messages ─────────────────────────────────────────────────────────────
 
@@ -121,32 +124,42 @@ class Chat:
         ui.ok(t("New session: it starts with your next message."))
 
     def _choose_session(self) -> None:
-        recent = self.sessions.recent(limit=LISTED_SESSIONS)
-        if not recent:
-            ui.note(t("No sessions yet: the first starts with your first message."))
-            return
-        choices = [
-            ui.Choice(
-                label=f"{_when(s.last_at)}  {_shorten(s.opening) or '…'}",
-                value=s.id,
-                hint=tn(s.messages, "{n} message", "{n} messages")
-                + (" · " + t("current") if s.id == self.session_id else ""),
-            )
-            for s in recent
-        ]
-        if self.session_id is None:
-            choices.insert(0, ui.Choice(label=t("the new session"), value=None, hint=t("current")))
-        try:
-            chosen = ui.select(t("Which session?"), choices, default=self.session_id)
-        except (ui.Cancelled, click.Abort):
-            return
+        offset = 0
+        while True:
+            page = self.sessions.recent(limit=LISTED_SESSIONS + 1, offset=offset)
+            if not page and offset == 0:
+                ui.note(t("No sessions yet: the first starts with your first message."))
+                return
+            more, page = len(page) > LISTED_SESSIONS, page[:LISTED_SESSIONS]
+            choices = [
+                ui.Choice(
+                    label=f"{_when(s.last_at)}  {_shorten(s.opening) or '…'}",
+                    value=s.id,
+                    hint=tn(s.messages, "{n} message", "{n} messages")
+                    + (" · " + t("current") if s.id == self.session_id else ""),
+                )
+                for s in page
+            ]
+            if self.session_id is None and offset == 0:
+                choices.insert(
+                    0, ui.Choice(label=t("the new session"), value=None, hint=t("current"))
+                )
+            if more:  # every session stays reachable, a page at a time
+                choices.append(ui.Choice(label=t("earlier sessions…"), value=_EARLIER))
+            try:
+                chosen = ui.select(t("Which session?"), choices, default=self.session_id)
+            except (ui.Cancelled, click.Abort):
+                return
+            if chosen != _EARLIER:
+                break
+            offset += LISTED_SESSIONS
         if chosen == self.session_id:
             return
         self.session_id = chosen
         if chosen is None:
             ui.ok(t("New session: it starts with your next message."))
             return
-        last_at = next(s.last_at for s in recent if s.id == chosen)
+        last_at = next(s.last_at for s in page if s.id == chosen)
         ui.ok(t("Switched to the session of {when}.", when=_when(last_at)))
         self._show_last()
 

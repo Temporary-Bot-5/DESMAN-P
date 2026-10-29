@@ -311,6 +311,7 @@ MESSAGES: dict[str, Forms] = {
     "the new session": "la sesión nueva",
     "Which session?": "¿Qué sesión?",
     "Switched to the session of {when}.": "Cambiado a la sesión del {when}.",
+    "earlier sessions…": "sesiones anteriores…",
 }
 
 CLICK: dict[str, Forms] = {

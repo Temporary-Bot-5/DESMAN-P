@@ -173,3 +173,22 @@ def test_subcommands_and_help_do_not_open_the_chat() -> None:
     assert result.exit_code == 0 and "Usage" in result.output
     assert "New session" not in result.output
     assert not db.default_db_path().exists()
+
+
+def test_a_message_is_kept_as_typed() -> None:
+    configured()
+    chat("    return answer  ")
+    [info] = stored().recent()
+    assert info.opening == "    return answer  "
+
+
+def test_every_session_stays_reachable_page_by_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("desman.chat.LISTED_SESSIONS", 2)
+    configured()
+    chat("oldest", "/new", "middle", "/new", "newest")
+    # Page 1: newest (current), middle, "earlier sessions…" (3); page 2: oldest (1).
+    result = chat("/sessions", "3", "1", "back to the oldest")
+    assert "earlier sessions…" in result.output
+    assert "Switched to the session" in result.output
+    assert [s.opening for s in stored().recent()] == ["oldest", "newest", "middle"]
+    assert [s.opening for s in stored().recent(limit=1, offset=2)] == ["middle"]

@@ -311,6 +311,7 @@ MESSAGES: dict[str, Forms] = {
     "the new session": "नया सत्र",
     "Which session?": "कौन-सा सत्र?",
     "Switched to the session of {when}.": "{when} के सत्र पर स्विच किया।",
+    "earlier sessions…": "पुराने सत्र…",
 }
 
 CLICK: dict[str, Forms] = {

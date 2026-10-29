@@ -280,6 +280,7 @@ MESSAGES: dict[str, Forms] = {
     "the new session": "新会话",
     "Which session?": "哪个会话？",
     "Switched to the session of {when}.": "已切换到 {when} 的会话。",
+    "earlier sessions…": "更早的会话…",
 }
 
 CLICK: dict[str, Forms] = {
