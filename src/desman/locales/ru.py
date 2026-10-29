@@ -514,6 +514,32 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG отвечает: веб-поиск работает.",
     "SearXNG at {url} cannot be used yet: {problem}": "SearXNG по адресу {url} пока недоступен: {problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access включён, но поисковик для всего интернета не настроен: web_search ищет только в Википедии, Stack Overflow, arXiv и GitHub. Добавьте его в `desman config`.",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "команды чата",
+    "start a new session": "начать новую сессию",
+    "earlier sessions; pick one to continue it": "прошлые сессии; выберите, чтобы продолжить",
+    "leave the chat (Ctrl+D does too)": "выйти из чата (или Ctrl+D)",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': 'Сохранено в сессии. Здесь пока никто не отвечает: собеседник появится в следующей версии. А пока задачу запускает `desman run "ЦЕЛЬ"`.',
+    "New session. /help lists the chat's commands.": "Новая сессия. /help — команды чата.",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "Продолжаем сессию от {when} ({n} сообщение). /new начинает другую, /help — команды чата.",
+        "Продолжаем сессию от {when} ({n} сообщения). /new начинает другую, /help — команды чата.",
+        "Продолжаем сессию от {when} ({n} сообщений). /new начинает другую, /help — команды чата.",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "неизвестная команда {name}: /help — команды чата",
+    "Anything else you write is a message.": "Всё остальное — сообщение.",
+    "This session is new already.": "Эта сессия и так новая.",
+    "New session: it starts with your next message.": "Новая сессия: она начнётся с вашего следующего сообщения.",
+    "No sessions yet: the first starts with your first message.": "Сессий пока нет: первая начнётся с вашего первого сообщения.",
+    "{n} message": (
+        "{n} сообщение",
+        "{n} сообщения",
+        "{n} сообщений",
+    ),
+    "current": "текущая",
+    "the new session": "новая сессия",
+    "Which session?": "Какая сессия?",
+    "Switched to the session of {when}.": "Переключились на сессию от {when}.",
 }
 
 CLICK: dict[str, Forms] = {

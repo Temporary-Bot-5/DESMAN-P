@@ -260,6 +260,26 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG 已响应：网络搜索可用。",
     "SearXNG at {url} cannot be used yet: {problem}": "{url} 上的 SearXNG 暂时无法使用：{problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access 已开启，但尚未设置面向整个网络的搜索引擎：web_search 只能搜索维基百科、Stack Overflow、arXiv 和 GitHub。请在 `desman config` 中添加一个。",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "聊天命令",
+    "start a new session": "开始新会话",
+    "earlier sessions; pick one to continue it": "以前的会话；选择一个继续",
+    "leave the chat (Ctrl+D does too)": "离开聊天（也可按 Ctrl+D）",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': '已保存到会话。这里暂时没有人回答：对话者将在后续版本中加入。在此之前，`desman run "目标"` 可以运行任务。',
+    "New session. /help lists the chat's commands.": "新会话。/help 列出聊天命令。",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "继续 {when} 的会话（{n} 条消息）。/new 开始另一个，/help 列出聊天命令。",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "未知命令 {name}：/help 列出聊天命令",
+    "Anything else you write is a message.": "其他输入都是消息。",
+    "This session is new already.": "这已经是新会话了。",
+    "New session: it starts with your next message.": "新会话：从你的下一条消息开始。",
+    "No sessions yet: the first starts with your first message.": "还没有会话：第一个会话从你的第一条消息开始。",
+    "{n} message": ("{n} 条消息",),
+    "current": "当前",
+    "the new session": "新会话",
+    "Which session?": "哪个会话？",
+    "Switched to the session of {when}.": "已切换到 {when} 的会话。",
 }
 
 CLICK: dict[str, Forms] = {

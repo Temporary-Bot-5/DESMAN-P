@@ -266,6 +266,26 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG가 응답합니다: 웹 검색이 작동합니다.",
     "SearXNG at {url} cannot be used yet: {problem}": "{url}의 SearXNG는 아직 사용할 수 없습니다: {problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access가 켜져 있지만 웹 전체를 검색할 엔진이 설정되지 않았습니다: web_search는 Wikipedia, Stack Overflow, arXiv, GitHub만 검색합니다. `desman config`에서 추가하세요.",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "채팅 명령",
+    "start a new session": "새 세션 시작",
+    "earlier sessions; pick one to continue it": "이전 세션; 하나를 골라 이어서 진행",
+    "leave the chat (Ctrl+D does too)": "채팅 나가기 (Ctrl+D도 가능)",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': '세션에 저장했습니다. 아직 여기서는 아무도 답하지 않습니다: 대화 상대는 이후 버전에서 추가됩니다. 그동안은 `desman run "목표"`로 작업을 실행하세요.',
+    "New session. /help lists the chat's commands.": "새 세션입니다. /help로 채팅 명령을 볼 수 있습니다.",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "{when} 세션을 이어갑니다(메시지 {n}개). /new는 다른 세션을 시작하고, /help는 채팅 명령을 보여 줍니다.",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "알 수 없는 명령 {name}: /help로 채팅 명령을 볼 수 있습니다",
+    "Anything else you write is a message.": "그 밖에 입력한 내용은 모두 메시지입니다.",
+    "This session is new already.": "이미 새 세션입니다.",
+    "New session: it starts with your next message.": "새 세션: 다음 메시지부터 시작됩니다.",
+    "No sessions yet: the first starts with your first message.": "아직 세션이 없습니다: 첫 메시지와 함께 첫 세션이 시작됩니다.",
+    "{n} message": ("메시지 {n}개",),
+    "current": "현재",
+    "the new session": "새 세션",
+    "Which session?": "어느 세션으로 할까요?",
+    "Switched to the session of {when}.": "{when} 세션으로 전환했습니다.",
 }
 
 CLICK: dict[str, Forms] = {

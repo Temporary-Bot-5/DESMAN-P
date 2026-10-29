@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from desman import __version__, i18n, providers, ui
 from desman.agents import llm_executor, llm_reviewer
+from desman.chat import Chat
 from desman.config import Config, ConfigError, open_config
 from desman.config_cli import config, keys, language, load_config, run_wizard, usage
 from desman.core import calls, db
@@ -27,6 +28,7 @@ from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.retry import strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
+from desman.core.sessions import Sessions
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.tools import builtin_registry
@@ -110,11 +112,20 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
 def cli(ctx: click.Context) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
     if ctx.invoked_subcommand is None:
-        # Bare `desman` is the interactive entry point: configure on first run, then show info.
+        # Bare `desman` is the interactive entry point (ADR 0003): configure on first run,
+        # then the banner and the chat.
         config_manager = load_config()
         if not config_manager.is_configured():
             run_wizard(config_manager)
         print_project_info(config_manager)
+        try:
+            conn = db.open_db()
+        except (db.SchemaVersionError, db.SchemaMismatchError) as e:
+            raise click.ClickException(str(e)) from e
+        try:
+            Chat(Sessions(conn)).run()
+        finally:
+            conn.close()
 
 
 @cli.command()

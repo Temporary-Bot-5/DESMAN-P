@@ -266,6 +266,26 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG が応答しました：ウェブ検索は使えます。",
     "SearXNG at {url} cannot be used yet: {problem}": "{url} の SearXNG はまだ使えません：{problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access はオンですが、ウェブ全体を検索するエンジンが設定されていません：web_search は Wikipedia、Stack Overflow、arXiv、GitHub だけを検索します。`desman config` で追加してください。",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "チャットのコマンド",
+    "start a new session": "新しいセッションを始める",
+    "earlier sessions; pick one to continue it": "以前のセッション。選ぶと続きから再開します",
+    "leave the chat (Ctrl+D does too)": "チャットを終了（Ctrl+D でも可）",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': 'セッションに保存しました。ここではまだ誰も答えません：対話役は今後のバージョンで加わります。それまでは `desman run "ゴール"` でタスクを実行できます。',
+    "New session. /help lists the chat's commands.": "新しいセッションです。/help でチャットのコマンドを表示します。",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "{when} のセッションを続けます（{n} 件のメッセージ）。/new で別のセッション、/help でチャットのコマンドを表示します。",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "不明なコマンド {name}：/help でチャットのコマンドを表示します",
+    "Anything else you write is a message.": "それ以外の入力はすべてメッセージになります。",
+    "This session is new already.": "このセッションはすでに新しいものです。",
+    "New session: it starts with your next message.": "新しいセッション：次のメッセージから始まります。",
+    "No sessions yet: the first starts with your first message.": "まだセッションはありません：最初のメッセージで最初のセッションが始まります。",
+    "{n} message": ("{n} 件のメッセージ",),
+    "current": "現在",
+    "the new session": "新しいセッション",
+    "Which session?": "どのセッションにしますか？",
+    "Switched to the session of {when}.": "{when} のセッションに切り替えました。",
 }
 
 CLICK: dict[str, Forms] = {
