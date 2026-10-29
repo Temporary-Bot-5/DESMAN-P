@@ -104,9 +104,9 @@ anywhere else; `claim()` is the one other writer. Give each audit entry a meanin
 record events that change no status (e.g. discarded work) with `Store.note()`. Contracts crossing a boundary (executor /
 reviewer results, provider data) are Pydantic models validated where they enter.
 
-The core is rebuilt following `ROADMAP.md` phase by phase (0–3, then C — chat, then 4–5). Do
-not jump ahead of the current phase (no chat, multiple workers, routing, preemption or
-self-improvement before their phase).
+The core is rebuilt following `ROADMAP.md` phase by phase (0–3, then C — chat, then 4–5, then
+G — desman-global). Do not jump ahead of the current phase (no chat, multiple workers, routing,
+preemption, self-improvement or network features before their phase).
 
 ## Configuration
 

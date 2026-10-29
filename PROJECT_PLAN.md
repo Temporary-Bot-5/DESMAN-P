@@ -32,6 +32,24 @@ DESMAN(P) is meant to be simple and approachable for most people, not only for d
 - The chat is a front end to the same task machinery, not a separate system: every request goes through the task graph, retries, review, and audit like any other work.
 - A graphical interface and an installer come later, after the chat and the core are stable.
 
+## desman-global
+
+The long-term goal: what DESMAN does on one machine, done by a network of DESMAN instances on machines anywhere in the world. It comes after the prototype (ROADMAP phase G) and is opt-in.
+
+- **Donated modules.** With desman-global turned on (a separate option, the last step of configuration, with its own commands), the person chooses which modules (API keys, local models) and which accumulated memory to donate to **DESMAN-EVOLUTION**. Without it, the instance takes no part in evolution, gets no updates from it, and cannot contact other instances.
+- **Registry and clusters.** Each instance registers in a shared registry and advertises what it can do. When enough free modules are available, they are assembled into a cluster run by an operator (one of the nodes, like the coordinator on one machine); the cluster receives its task from a global operator.
+- **Hierarchy of authority.** For now the only global operator is the owner's instance on the owner's server, directing the owner's test machines. Later DESMAN may appoint operators itself. Authority is a signed chain from a root key: a node acts only on signed assignments and tasks.
+- **Bug reports.** A person reports a bug in the chat; the agent sends it to global memory after the person sees and confirms what will be sent.
+- **People, too.** DESMAN evolves together with people, so global users can message each other (a simple messenger, contacts by mutual consent). This is between people; agents still communicate only through structured records.
+
+Safety rules specific to the network:
+
+- An API key never leaves its owner's machine: a donated key means that machine makes the calls and returns results.
+- Updates are signed by the global operator and installed only after the person confirms them; they can be rolled back.
+- Tasks from the network are untrusted: they run only in the sandbox, under a narrower policy, with no access to the person's files, network, or memory beyond what was donated. The person's own tasks come first.
+- Nothing leaves the machine without the person's choice; messages from other people are data, never instructions to the agent.
+- Communication starts simple: a central HTTP registry that nodes poll, no peer-to-peer networking or message brokers.
+
 ## Mandatory design principles
 
 1. **Durable state first.**  
@@ -125,7 +143,7 @@ A successful early DESMAN(P) prototype should demonstrate that it can:
 
 The project begins with a portable, cross-platform development environment: a repository, Python-based runtime, SQLite-backed task store, configuration files, CLI commands, workspace directory, logs, and tests. The first milestone is not self-evolution; it is a reliable single-agent execution loop that can create, execute, checkpoint, resume, and audit a task.
 
-Only after that foundation works should the project add tools and security, then the chat for people, then multiple executors, model routing, priority preemption, fault injection tests, and finally a tightly constrained self-improvement workflow.
+Only after that foundation works should the project add tools and security, then the chat for people, then multiple executors, model routing, priority preemption, fault injection tests, and a tightly constrained self-improvement workflow. desman-global (the network of instances) comes last, on top of all of that.
 
 ## Instruction for AI assistants working on DESMAN(P)
 
