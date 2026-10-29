@@ -164,7 +164,7 @@ def test_the_fifth_attempt_splits_and_the_parent_combines(store: Store, clock: F
     [split] = [r for r in llm.calls if r.prompt.startswith(SPLIT)]
     assert "1. too vague" in split.prompt and str(MAX_PARTS) in split.messages[0].content
     combine = [r for r in llm.calls if r.prompt.startswith("Execute")][-1]
-    assert combine.messages[0].content == EXECUTOR_SYSTEM_COMBINE
+    assert combine.messages[0].content.startswith(EXECUTOR_SYSTEM_COMBINE)
     payload = json.loads(combine.prompt.partition(":\n")[2])
     assert [d["subtask"] for d in payload["results_of_dependencies"]] == [
         "first half",

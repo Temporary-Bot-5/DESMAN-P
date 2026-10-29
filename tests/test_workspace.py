@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,6 +16,7 @@ from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
+from desman.core.tools import ToolCall, ToolResult
 from desman.core.workspace import (
     PathEscapeError,
     Workspace,
@@ -255,6 +257,10 @@ def accept(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
     return Review(verdict=Verdict.ACCEPT)
 
 
+def write(work: Work, path: str, content: str) -> ToolResult:
+    return work.tools.call(ToolCall(tool="write_file", args={"path": path, "content": content}))
+
+
 def one_step() -> TaskSpec:
     return TaskSpec(goal="g", subtasks=[SubtaskSpec(description="a", acceptance_criteria="ok")])
 
@@ -263,8 +269,9 @@ def test_executor_writes_into_its_task_directory(
     store: Store, clock: FakeClock, tmp_path: Path
 ) -> None:
     def executor(work: Work) -> Success:
-        work.workspace.write("out/report.md", "# done")
-        return Success(content={"files": work.workspace.files()})
+        assert write(work, "out/report.md", "# done").ok
+        listed = work.tools.call(ToolCall(tool="list_files"))
+        return Success(content=listed.output)
 
     task_id = store.create_task(one_step())
     other_id = store.create_task(one_step())
@@ -279,7 +286,7 @@ def test_executor_writes_into_its_task_directory(
 
 def test_coordinator_defaults_to_the_data_directory(store: Store, clock: FakeClock) -> None:
     def executor(work: Work) -> Success:
-        work.workspace.write("x.txt", "x")
+        assert write(work, "x.txt", "x").ok
         return Success(content={})
 
     task_id = store.create_task(one_step())
@@ -287,14 +294,14 @@ def test_coordinator_defaults_to_the_data_directory(store: Store, clock: FakeClo
     assert (default_workspace_root() / task_id / "x.txt").is_file()
 
 
-def test_forbidden_path_is_a_quality_failure(
+def test_forbidden_path_is_refused_and_the_model_can_correct_it(
     store: Store, clock: FakeClock, tmp_path: Path
 ) -> None:
-    # The model asked for a bad path: a different attempt may do better, so it is retried.
-    paths = iter(["../../.bashrc", "notes.txt"])
-
+    # The model asked for a bad path: it is told why, in the same attempt, and may try again.
     def executor(work: Work) -> Success:
-        work.workspace.write(next(paths), "x")
+        refused = write(work, "../../.bashrc", "x")
+        assert not refused.ok and refused.error is not None and "'..'" in refused.error
+        assert write(work, "notes.txt", "x").ok
         return Success(content={})
 
     task_id = store.create_task(one_step())
@@ -303,10 +310,18 @@ def test_forbidden_path_is_a_quality_failure(
     assert result.status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
     assert sub.status is SubtaskStatus.DONE
-    assert sub.attempts.quality == 1
-    assert any("path refused" in event or "quality" in event for event in result.events)
+    assert sub.attempts.quality == 0
     assert not (tmp_path / ".bashrc").exists()
     assert (root / task_id / "notes.txt").is_file()
+    calls = [
+        json.loads(row["details_json"])
+        for row in store.audit_log(task_id)
+        if row["action"] == "tool_called"
+    ]
+    assert [(c["args"]["path"], c["ok"]) for c in calls] == [
+        ("../../.bashrc", False),
+        ("notes.txt", True),
+    ]
 
 
 # ── Review regressions (PR #8) ───────────────────────────────────────────────
@@ -359,7 +374,7 @@ def test_workspaces_live_next_to_the_store_database(clock: FakeClock, tmp_path: 
         store = Store(conn, clock=clock)
 
         def executor(work: Work) -> Success:
-            work.workspace.write("x.txt", "x")
+            assert write(work, "x.txt", "x").ok
             return Success(content={})
 
         task_id = store.create_task(one_step())

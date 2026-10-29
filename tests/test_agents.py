@@ -17,6 +17,7 @@ from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
 from desman.core.store import Store
+from desman.core.tools import Toolbox
 from desman.core.workspace import Workspace
 from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, garbage
@@ -93,7 +94,7 @@ def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path
         subtask=claimed,
         context=build_context(claimed, [], None),
         heartbeat=no_heartbeat,
-        workspace=Workspace(tmp_path, claimed.task_id),
+        tools=Toolbox(Workspace(tmp_path, claimed.task_id)),
     )
     first, second = execute(work), execute(work)
     assert isinstance(first, Failure) and first.kind is FailureKind.QUALITY
@@ -284,7 +285,7 @@ def test_an_error_report_is_not_cached(store: Store, tmp_path: Path) -> None:
         subtask=claimed,
         context=build_context(claimed, [], None),
         heartbeat=no_heartbeat,
-        workspace=Workspace(tmp_path, claimed.task_id),
+        tools=Toolbox(Workspace(tmp_path, claimed.task_id)),
     )
     results = [execute(work) for _ in range(3)]
     # The coordinator turns the report into a failed attempt; here it is just not kept.
