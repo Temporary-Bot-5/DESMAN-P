@@ -10,12 +10,14 @@ subtask's `Toolbox`, which
   bounded by the human's permissions), and records every refusal;
 - checks the subtask's lease before running anything, so work whose lease was lost has no more
   effects (StaleStateError propagates, the coordinator discards the work);
-- records every call in the audit, with long arguments cut short (file contents are not copied
-  into the history).
+- records every call in the audit, with long arguments cut short; arguments a tool declares
+  `private` (file contents) are recorded only by their size, since a workspace file may hold a
+  secret and the history is shown to anyone who looks at the task.
 
 A call that is the model's mistake (unknown tool, bad arguments, a path outside the workspace,
 a missing file) comes back as a failed `ToolResult` the model can read and correct, not as an
-exception. Anything else (a full disk, a bug) propagates and interrupts the attempt.
+exception. Anything else (a full disk, a bug) is recorded as a failed call and propagates,
+interrupting the attempt.
 
 Tool outputs are plain JSON, sized for a model's context.
 """
@@ -76,6 +78,8 @@ class Tool(Generic[A]):
     run: Callable[[A, Workspace], Any]
     """Returns plain JSON. Raises PathEscapeError, FileNotFoundError, NotADirectoryError,
     IsADirectoryError or ToolError for a call that is the caller's mistake."""
+    private: frozenset[str] = frozenset()
+    """Arguments kept out of the audit (only their size is recorded)."""
 
     def spec(self) -> dict[str, Any]:
         """How the tool is shown to a model."""
@@ -149,7 +153,8 @@ class Toolbox:
 
     def call(self, call: ToolCall) -> ToolResult:
         tool = self.registry.get(call.tool)
-        summary = {"tool": call.tool, "args": summarize(call.args)}
+        private = tool.private if tool is not None else frozenset()
+        summary = {"tool": call.tool, "args": summarize(call.args, private)}
         if tool is None:
             return self._failed(summary, f"unknown tool {call.tool!r}; available: {self._names()}")
         if tool.permission is not Permission.WORKSPACE:
@@ -164,6 +169,8 @@ class Toolbox:
         except ValidationError as e:
             return self._failed(summary, f"bad arguments for {call.tool!r}: {_problems(e)}")
         self.guard()
+        if tool.permission is Permission.ADMIN:
+            summary["elevated"] = True  # admin_rights is on: every such action stands out
         try:
             output = tool.run(args, self.workspace)
         except (
@@ -174,8 +181,10 @@ class Toolbox:
             IsADirectoryError,
         ) as e:
             return self._failed(summary, f"{type(e).__name__}: {e}")
-        if tool.permission is Permission.ADMIN:
-            summary["elevated"] = True  # admin_rights is on: every such action stands out
+        except Exception as e:
+            # Not the model's mistake, but the attempted call must stay in the history.
+            self.record("tool_called", {**summary, "ok": False, "crashed": type(e).__name__})
+            raise
         self.record("tool_called", {**summary, "ok": True})
         return ToolResult(ok=True, output=output)
 
@@ -188,8 +197,11 @@ class Toolbox:
         return ", ".join(tool.name for tool in self.available()) or "none"
 
 
-def summarize(value: Any) -> Any:
-    """`value` with long strings cut, for the audit."""
+def summarize(value: Any, private: frozenset[str] = frozenset()) -> Any:
+    """`value` with long strings cut, for the audit. The `private` keys of a top-level dict are
+    replaced by their size."""
+    if isinstance(value, dict) and private:
+        return {str(k): _size(v) if k in private else summarize(v) for k, v in value.items()}
     if isinstance(value, str):
         return value if len(value) <= AUDIT_TEXT else f"{value[:AUDIT_TEXT]}…[{len(value)} chars]"
     if isinstance(value, dict):
@@ -197,6 +209,10 @@ def summarize(value: Any) -> Any:
     if isinstance(value, list):
         return [summarize(v) for v in value]
     return value
+
+
+def _size(value: Any) -> str:
+    return f"[{len(value)} chars]" if isinstance(value, str) else "[hidden]"
 
 
 def _problems(error: ValidationError) -> str:
@@ -214,6 +230,9 @@ class _Args(BaseModel):
 
 class ReadFileArgs(_Args):
     path: str = Field(description="Relative to the workspace, '/'-separated.")
+    offset: int = Field(
+        default=0, ge=0, description="First character to return (to read past a cut)."
+    )
 
 
 class WriteFileArgs(_Args):
@@ -222,7 +241,7 @@ class WriteFileArgs(_Args):
 
 
 class ListFilesArgs(_Args):
-    pass
+    offset: int = Field(default=0, ge=0, description="Index of the first path to list.")
 
 
 def _read_file(args: ReadFileArgs, workspace: Workspace) -> dict[str, Any]:
@@ -230,14 +249,19 @@ def _read_file(args: ReadFileArgs, workspace: Workspace) -> dict[str, Any]:
         text = workspace.read_text(args.path)
     except UnicodeDecodeError as e:
         raise ToolError(f"{args.path!r} is not a UTF-8 text file") from e
-    if len(text) <= MAX_READ_CHARS:
+    if args.offset == 0 and len(text) <= MAX_READ_CHARS:
         return {"path": args.path, "content": text}
-    return {
+    end = args.offset + MAX_READ_CHARS
+    read: dict[str, Any] = {
         "path": args.path,
-        "content": text[:MAX_READ_CHARS],
-        "truncated": True,
+        "content": text[args.offset : end],
+        "offset": args.offset,
         "chars": len(text),
     }
+    if end < len(text):
+        read["truncated"] = True
+        read["next_offset"] = end
+    return read
 
 
 def _write_file(args: WriteFileArgs, workspace: Workspace) -> dict[str, Any]:
@@ -247,16 +271,19 @@ def _write_file(args: WriteFileArgs, workspace: Workspace) -> dict[str, Any]:
 
 def _list_files(args: ListFilesArgs, workspace: Workspace) -> dict[str, Any]:
     files = workspace.files()
-    listed: dict[str, Any] = {"files": files[:MAX_LISTED_FILES]}
-    if len(files) > MAX_LISTED_FILES:
-        listed["more"] = len(files) - MAX_LISTED_FILES
+    end = args.offset + MAX_LISTED_FILES
+    listed: dict[str, Any] = {"files": files[args.offset : end]}
+    if len(files) > end:
+        listed["more"] = len(files) - end
+        listed["next_offset"] = end
     return listed
 
 
 READ_FILE: Final = Tool(
     name="read_file",
     description="Read a text file of the task's workspace. Returns {path, content}; a long "
-    "file is cut (truncated: true, chars: its full length).",
+    "file is cut (truncated: true, chars: its full length, next_offset: pass it as offset to "
+    "read on).",
     args=ReadFileArgs,
     permission=Permission.WORKSPACE,
     run=_read_file,
@@ -268,10 +295,12 @@ WRITE_FILE: Final = Tool(
     args=WriteFileArgs,
     permission=Permission.WORKSPACE,
     run=_write_file,
+    private=frozenset({"content"}),
 )
 LIST_FILES: Final = Tool(
     name="list_files",
-    description="List the files of the task's workspace. Returns {files: [path, ...]}.",
+    description="List the files of the task's workspace. Returns {files: [path, ...]}; a "
+    "long list is cut (more: how many are left, next_offset: pass it as offset to go on).",
     args=ListFilesArgs,
     permission=Permission.WORKSPACE,
     run=_list_files,

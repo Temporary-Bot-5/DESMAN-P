@@ -18,7 +18,6 @@ on, every run warns about it and every call of a tool that needs it is audited a
 
 from __future__ import annotations
 
-import functools
 import tomllib
 from collections.abc import Iterable, Mapping
 from enum import StrEnum
@@ -93,12 +92,12 @@ def load_policy(path: Path = POLICY_PATH, known_tools: Iterable[str] | None = No
     return policy
 
 
-@functools.cache
 def default_policy() -> Policy:
-    """The shipped policy, read once (a broken one raises PolicyError every time)."""
+    """The shipped policy, read on every call: the file is small, and an edit (a tool taken
+    away) must hold from the next run on, not from the next restart."""
     from desman.core.tools import builtin_registry
 
-    return load_policy(known_tools=builtin_registry().names)
+    return load_policy(POLICY_PATH, known_tools=builtin_registry().names)
 
 
 def switched_on(permissions: Mapping[str, Any]) -> frozenset[Permission]:

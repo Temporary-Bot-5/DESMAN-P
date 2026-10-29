@@ -158,21 +158,63 @@ def test_long_and_binary_files_are_handled(ws: Workspace, monkeypatch: pytest.Mo
     assert box.call(call("read_file", path="long.txt")).output == {
         "path": "long.txt",
         "content": "01234",
+        "offset": 0,
+        "chars": 10,
         "truncated": True,
+        "next_offset": 5,
+    }
+    # The rest of a long file is reachable.
+    assert box.call(call("read_file", path="long.txt", offset=5)).output == {
+        "path": "long.txt",
+        "content": "56789",
+        "offset": 5,
         "chars": 10,
     }
+    assert box.call(call("read_file", path="long.txt", offset=-1)).ok is False
     binary = box.call(call("read_file", path="blob.bin"))
     assert binary.error is not None and "not a UTF-8 text file" in binary.error
-    assert box.call(call("list_files")).output == {"files": ["blob.bin"], "more": 1}
+    assert box.call(call("list_files")).output == {
+        "files": ["blob.bin"],
+        "more": 1,
+        "next_offset": 1,
+    }
+    assert box.call(call("list_files", offset=1)).output == {"files": ["long.txt"]}
 
 
 def test_the_audit_keeps_arguments_short(ws: Workspace) -> None:
     record = Recorder()
-    Toolbox(ws, record=record).call(call("write_file", path="big.txt", content="x" * 5000))
+    Toolbox(ws, record=record).call(call("read_file", path="p" * 5000))
     [(_, details)] = record.entries
-    content = details["args"]["content"]
-    assert content.startswith("x" * AUDIT_TEXT) and content.endswith("…[5000 chars]")
-    assert details == {"tool": "write_file", "args": details["args"], "ok": True}
+    path = details["args"]["path"]
+    assert path.startswith("p" * AUDIT_TEXT) and path.endswith("…[5000 chars]")
+
+
+def test_file_contents_never_reach_the_audit(ws: Workspace) -> None:
+    record = Recorder()
+    secret = "API_KEY=sk-live-0123456789"
+    Toolbox(ws, record=record).call(call("write_file", path="env.txt", content=secret))
+    [(_, details)] = record.entries
+    assert details == {
+        "tool": "write_file",
+        "args": {"path": "env.txt", "content": f"[{len(secret)} chars]"},
+        "ok": True,
+    }
+
+
+def test_a_crashing_tool_is_still_audited(ws: Workspace) -> None:
+    def crash(args: _NoArgs, workspace: Workspace) -> None:
+        raise OSError("disk full")
+
+    record = Recorder()
+    registry = Registry([Tool("crash", "Crash.", _NoArgs, Permission.WORKSPACE, crash)])
+    policy = Policy(roles={Role.EXECUTOR: RolePolicy(tools=["crash"])})
+    with pytest.raises(OSError):
+        Toolbox(ws, registry, access=Access(policy, Role.EXECUTOR), record=record).call(
+            call("crash")
+        )
+    assert record.entries == [
+        ("tool_called", {"tool": "crash", "args": {}, "ok": False, "crashed": "OSError"})
+    ]
 
 
 def test_nothing_runs_once_the_lease_is_lost(ws: Workspace) -> None:

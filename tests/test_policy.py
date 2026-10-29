@@ -64,6 +64,16 @@ def test_the_shipped_policy_gives_the_file_tools_to_the_executor_only() -> None:
     assert POLICY_PATH.name == "policy.toml" and POLICY_PATH.parent.name == "desman"
 
 
+def test_a_policy_edit_holds_without_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write(tmp_path / "policy.toml", '[roles.executor]\ntools = ["read_file"]\n')
+    monkeypatch.setattr("desman.core.policy.POLICY_PATH", path)
+    assert default_policy().tools_for(Role.EXECUTOR) == {"read_file"}
+    write(path, "[roles.executor]\ntools = []\n")  # the human takes the tool away
+    assert default_policy().tools_for(Role.EXECUTOR) == frozenset()
+
+
 # ── Loading ──────────────────────────────────────────────────────────────────
 
 
