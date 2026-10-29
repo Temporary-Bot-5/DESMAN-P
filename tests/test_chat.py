@@ -111,7 +111,7 @@ def test_messages_are_kept_and_the_chat_continues_the_last_session() -> None:
     configured()
     first = chat("find cheap flights to Lisbon", "/exit", "never read")
     assert "New session" in first.output
-    assert "Saved in the session" in first.output
+    assert "no model is ready to answer" in first.output
     [info] = stored().recent()
     assert info.opening == "find cheap flights to Lisbon" and info.messages == 1
 

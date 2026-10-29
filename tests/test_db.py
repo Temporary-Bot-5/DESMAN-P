@@ -551,6 +551,24 @@ def test_v8_database_with_tasks_upgrades_to_chat_sessions(tmp_path: Path) -> Non
     conn.close()
 
 
+def test_v9_database_with_a_session_upgrades_to_tasks_of_sessions(tmp_path: Path) -> None:
+    path = tmp_path / "v9.db"
+    old = _db_at_version(path, 9)
+    task_id = add_task(old)
+    session_id = Sessions(old).add(None, Role.USER, "find flights").session_id
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    # Tasks of `desman run` belong to no session.
+    assert (
+        conn.execute("SELECT session_id FROM tasks WHERE id = ?", (task_id,)).fetchone()[0] is None
+    )
+    with pytest.raises(sqlite3.IntegrityError):  # only a session that exists
+        conn.execute("UPDATE tasks SET session_id = 'nope' WHERE id = ?", (task_id,))
+    conn.execute("UPDATE tasks SET session_id = ? WHERE id = ?", (session_id, task_id))
+    conn.close()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="file modes")
 def test_a_new_database_is_private(tmp_path: Path) -> None:
     old_umask = os.umask(0o022)

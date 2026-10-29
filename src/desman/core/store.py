@@ -77,17 +77,23 @@ class Store:
     # ── Tasks ────────────────────────────────────────────────────────────────
 
     def create_task(
-        self, spec: TaskSpec, actor: Actor = Actor.HUMAN, details: dict[str, Any] | None = None
+        self,
+        spec: TaskSpec,
+        actor: Actor = Actor.HUMAN,
+        details: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Store a task and its subtask graph; returns the task id. `details` go into the
-        `task_created` audit entry (e.g. how the plan was made)."""
+        `task_created` audit entry (e.g. how the plan was made); `session_id` is the chat
+        session that asked for it."""
         task_id = _new_id()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
             now = self._now()  # after the lock: creation order matches commit order
             self.conn.execute(
-                "INSERT INTO tasks (id, goal, priority, created_at) VALUES (?, ?, ?, ?)",
-                (task_id, spec.goal, spec.priority, now),
+                "INSERT INTO tasks (id, goal, priority, created_at, session_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (task_id, spec.goal, spec.priority, now, session_id),
             )
             for seq, (subtask_id, sub) in enumerate(zip(ids, spec.subtasks, strict=True)):
                 self.conn.execute(
@@ -117,6 +123,7 @@ class Store:
                 task_id=task_id,
                 details={  # extra details never replace the task's own fields
                     **(details or {}),
+                    **({"session": session_id} if session_id is not None else {}),
                     "goal": spec.goal,
                     "priority": spec.priority,
                     "subtasks": ids,
@@ -540,6 +547,20 @@ class Store:
         row = self.conn.execute(
             "SELECT content_json FROM artifacts WHERE subtask_id = ? ORDER BY attempt DESC LIMIT 1",
             (subtask_id,),
+        ).fetchone()
+        content: dict[str, Any] | None = json.loads(row[0]) if row else None
+        return content
+
+    def final_result(self, task_id: str) -> dict[str, Any] | None:
+        """The accepted result of the task's last subtask (the planner makes it produce the
+        result of the goal); None until it is done, or when it was accepted without one."""
+        row = self.conn.execute(
+            """SELECT a.content_json FROM subtasks s
+               JOIN artifacts a ON a.subtask_id = s.id AND a.attempt = s.accepted_attempt
+               WHERE s.id = (SELECT id FROM subtasks
+                             WHERE task_id = ? AND parent_id IS NULL ORDER BY seq DESC LIMIT 1)
+                 AND s.status = 'done'""",
+            (task_id,),
         ).fetchone()
         content: dict[str, Any] | None = json.loads(row[0]) if row else None
         return content
