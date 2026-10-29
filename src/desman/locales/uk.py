@@ -297,6 +297,9 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не склала план, тому єдина підзадача — сама мета: {error}",
     "Retries may also use {provider} · {model}": "Повторні спроби можуть використовувати й {provider} · {model}",
     "part of {seq}": "частина {seq}",
+    "web search": "вебпошук",
+    "Web search (for the web_search tool)": "Вебпошук (для інструмента web_search)",
+    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access увімкнено, але пошукову систему не налаштовано: web_search залишається вимкненим (web_fetch працює). Додайте її в `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {

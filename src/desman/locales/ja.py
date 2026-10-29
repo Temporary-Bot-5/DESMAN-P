@@ -260,6 +260,9 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "モデルが計画を作れなかったため、ゴールそのものが唯一のサブタスクです: {error}",
     "Retries may also use {provider} · {model}": "再試行では {provider} · {model} も使うことがあります",
     "part of {seq}": "{seq} の一部",
+    "web search": "ウェブ検索",
+    "Web search (for the web_search tool)": "ウェブ検索（web_search ツール用）",
+    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access はオンですが、検索エンジンが設定されていません：web_search はオフのままです（web_fetch は使えます）。`desman config` で追加してください。",
 }
 
 CLICK: dict[str, Forms] = {

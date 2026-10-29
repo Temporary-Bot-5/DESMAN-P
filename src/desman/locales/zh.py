@@ -254,6 +254,9 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "模型没有制定出计划，因此目标本身是唯一的子任务：{error}",
     "Retries may also use {provider} · {model}": "重试时也可能使用 {provider} · {model}",
     "part of {seq}": "属于 {seq}",
+    "web search": "网络搜索",
+    "Web search (for the web_search tool)": "网络搜索（供 web_search 工具使用）",
+    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access 已开启，但尚未配置搜索引擎：web_search 保持关闭（web_fetch 可用）。请在 `desman config` 中添加一个。",
 }
 
 CLICK: dict[str, Forms] = {

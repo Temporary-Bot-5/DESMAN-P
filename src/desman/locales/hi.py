@@ -281,6 +281,9 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "मॉडल ने योजना नहीं बनाई, इसलिए स्वयं लक्ष्य ही एकमात्र उप-कार्य है: {error}",
     "Retries may also use {provider} · {model}": "पुनः प्रयासों में {provider} · {model} भी इस्तेमाल हो सकता है",
     "part of {seq}": "{seq} का भाग",
+    "web search": "वेब खोज",
+    "Web search (for the web_search tool)": "वेब खोज (web_search टूल के लिए)",
+    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access चालू है, लेकिन कोई सर्च इंजन सेट नहीं है: web_search बंद रहता है (web_fetch काम करता है)। `desman config` में एक जोड़ें।",
 }
 
 CLICK: dict[str, Forms] = {

@@ -281,6 +281,9 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "El modelo no hizo un plan, así que el objetivo es la única subtarea: {error}",
     "Retries may also use {provider} · {model}": "Los reintentos también pueden usar {provider} · {model}",
     "part of {seq}": "parte de {seq}",
+    "web search": "búsqueda web",
+    "Web search (for the web_search tool)": "Búsqueda web (para la herramienta web_search)",
+    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access está activado, pero no hay ningún buscador configurado: web_search sigue desactivado (web_fetch funciona). Añade uno en `desman config`.",
 }
 
 CLICK: dict[str, Forms] = {

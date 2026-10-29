@@ -262,6 +262,9 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "Model bir plan yapamadı, bu yüzden tek alt görev hedefin kendisi: {error}",
     "Retries may also use {provider} · {model}": "Yeniden denemeler {provider} · {model} da kullanabilir",
     "part of {seq}": "{seq} parçası",
+    "web search": "web araması",
+    "Web search (for the web_search tool)": "Web araması (web_search aracı için)",
+    "network_access is on, but no search engine is configured: web_search stays off (web_fetch works). Add one in `desman config`.": "network_access açık, ancak yapılandırılmış bir arama motoru yok: web_search kapalı kalıyor (web_fetch çalışıyor). `desman config` içinden bir tane ekleyin.",
 }
 
 CLICK: dict[str, Forms] = {

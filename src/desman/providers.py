@@ -1,4 +1,6 @@
 """The model providers DESMAN knows: what each needs from `config.json`, and which are ready.
+The web search engines of the `web_search` tool (`SEARCH`) are configured the same way, but are
+never asked for a model.
 
 One list for the wizard, `desman config show`, `desman keys` and the router (2.2+). Variable
 names follow each provider's own documentation, so a key copied from its console goes under the
@@ -48,6 +50,8 @@ class Provider:
     send_temperature: bool = True
     # Sent when a request sets no max_tokens, for providers that need one.
     max_tokens: int | None = None
+    # A web search engine for the web_search tool (core/web.py), not a model provider.
+    search: bool = False
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -242,6 +246,25 @@ LOCAL = (
 
 PROVIDERS = CLOUD + LOCAL
 
+# Free search engines for web_search (ROADMAP 3.5), tried in this order.
+SEARCH = (
+    Provider(
+        "tavily",
+        "Tavily",
+        "https://app.tavily.com",
+        "TAVILY_API_KEY",
+        limits_url="https://docs.tavily.com/documentation/api-credits",
+        search=True,
+    ),
+    Provider(
+        "searxng",
+        "SearXNG",
+        "https://docs.searxng.org",
+        settings=(Setting("SEARXNG_URL", "URL"),),
+        search=True,
+    ),
+)
+
 
 class UnknownProvider(LookupError):
     pass
@@ -257,8 +280,22 @@ def find(name: str) -> Provider:
     raise UnknownProvider(t("unknown provider {name!r} (known: {known})", name=name, known=known))
 
 
+def find_keyed(name: str) -> Provider:
+    """Like `find`, but also a search engine: what `desman keys` manages keys for."""
+    wanted = name.strip().lower()
+    for p in SEARCH:
+        if wanted in (p.id, p.name.lower(), (p.key_env or "").lower()):
+            return p
+    return find(name)
+
+
 def by_key_env(env: str) -> Provider | None:
-    return next((p for p in CLOUD if p.key_env == env), None)
+    return next((p for p in CLOUD + SEARCH if p.key_env is not None and p.key_env == env), None)
+
+
+def search_engines(config: Config) -> list[Provider]:
+    """The search engines that are configured, in the order they are tried."""
+    return [p for p in SEARCH if p.is_ready(config)]
 
 
 def ready(config: Config) -> list[Provider]:
@@ -315,10 +352,17 @@ def parse_key_file(text: str) -> list[tuple[str, str]]:
 
 def describe(config: Config) -> dict[str, Any]:
     """The config with every secret masked: what `desman config show` prints."""
-    known = {p.key_env for p in PROVIDERS} | {s.env for p in PROVIDERS for s in p.settings}
+    every = PROVIDERS + SEARCH
+    known = {p.key_env for p in every} | {s.env for p in every for s in p.settings}
     rows = []
-    for p in PROVIDERS:
-        row: dict[str, Any] = {"id": p.id, "name": p.name, "local": p.local, "paid": p.paid}
+    for p in every:
+        row: dict[str, Any] = {
+            "id": p.id,
+            "name": p.name,
+            "local": p.local,
+            "paid": p.paid,
+            "search": p.search,
+        }
         if p.key_env is not None:
             row["key_env"] = p.key_env
             row["keys"] = [

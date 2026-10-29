@@ -65,7 +65,7 @@ def run(manager: ConfigManager) -> None:
 
 
 def _status(config: Config, p: Provider) -> str:
-    if p.local:
+    if p.key_env is None:
         values = [config.settings.get(s.env) or s.default for s in p.settings]
         return " ".join(v for v in values if v) or t("not set")
     n = len(config.keys(p.key_env or ""))
@@ -83,12 +83,14 @@ def _providers_menu(s: _Session) -> None:
     ui.note(t("Several providers and several keys per provider are fine: pick one, then the next."))
     last: Provider | None = None
     while True:
-        # Same order as providers.PROVIDERS (free, paid, local), so the numbers stay stable.
+        # Same order as providers.PROVIDERS (free, paid, local), then the search engines, so
+        # the numbers stay stable.
         choices: list[ui.Choice | ui.Heading] = []
         for title, group in (
             (t("Free tier"), providers.FREE),
             (t("Paid: billed per use"), providers.PAID),
             (t("Local"), providers.LOCAL),
+            (t("Web search (for the web_search tool)"), providers.SEARCH),
         ):
             choices.append(ui.Heading(title))
             choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
@@ -99,7 +101,7 @@ def _providers_menu(s: _Session) -> None:
         if picked is None:
             return
         last = picked
-        if picked.local or s.config.keys(picked.key_env or ""):
+        if picked.key_env is None or s.config.keys(picked.key_env):
             _provider_menu(s, picked)
         else:  # nothing to choose yet: straight to the key
             _add_key(s, picked)

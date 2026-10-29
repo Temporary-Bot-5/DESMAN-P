@@ -238,6 +238,16 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         CHECK ((state = 'started') = (result_json IS NULL AND finished_at IS NULL))
     ) STRICT, WITHOUT ROWID;
     """,
+    # 8 — answers of the web tools (ROADMAP 3.5), kept a day: a page read twice is fetched once
+    """
+    CREATE TABLE web_cache (
+        key         TEXT PRIMARY KEY,  -- sha256 of the kind and the request (query or URL)
+        kind        TEXT NOT NULL CHECK (kind IN ('search', 'page')),
+        body_json   TEXT NOT NULL CHECK (json_valid(body_json)),
+        created_at  TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX ix_web_cache_created ON web_cache (created_at);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)
