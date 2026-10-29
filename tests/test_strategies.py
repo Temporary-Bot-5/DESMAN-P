@@ -15,6 +15,7 @@ from desman.agents import (
     EXECUTOR_SYSTEM,
     EXECUTOR_SYSTEM_REPHRASED,
     REPHRASE_TEMPERATURE,
+    TOOLS_INSTRUCTIONS,
     llm_executor,
     llm_reviewer,
 )
@@ -78,10 +79,14 @@ def test_every_attempt_differs_from_the_one_before(store: Store, clock: FakeCloc
     task_id = run(store, clock, main, other)
 
     first, feedback, rephrased = executions(main)
-    assert first.messages[0].content == feedback.messages[0].content == EXECUTOR_SYSTEM
+    assert (
+        first.messages[0].content
+        == feedback.messages[0].content
+        == EXECUTOR_SYSTEM + TOOLS_INSTRUCTIONS
+    )
     assert first.temperature == feedback.temperature == 0.0
     assert json.loads(feedback.prompt.partition(":\n")[2])["feedback_on_previous_attempt"]
-    assert rephrased.messages[0].content == EXECUTOR_SYSTEM_REPHRASED
+    assert rephrased.messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS
     assert rephrased.temperature == REPHRASE_TEMPERATURE
     [switched] = executions(other)  # the fourth attempt went to the other model
     assert "1. wrong" in switched.prompt
@@ -102,7 +107,7 @@ def test_without_another_model_the_audit_says_rephrase(store: Store, clock: Fake
     main.on("Review", REJECT, REJECT, REJECT, ACCEPT)
     task_id = run(store, clock, main, None)
     assert len(executions(main)) == 4
-    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED
+    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS
     started = [
         e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
     ]
@@ -206,7 +211,7 @@ def test_a_coordinator_without_another_model_never_claims_a_switch(
         e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
     ]
     assert started == ["first", "feedback", "rephrase", "rephrase"]
-    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED
+    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS
 
 
 def test_an_unusable_reply_is_feedback_for_the_next_attempt(store: Store, clock: FakeClock) -> None:

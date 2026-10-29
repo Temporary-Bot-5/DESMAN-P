@@ -38,6 +38,7 @@ src/desman/
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
 │                  #   `{"type": "error"}` = can't do it (never accepted, see coordinator)
+│                  #   executor acts only via `{"tool_calls": [...]}` (≤8 rounds per attempt)
 ├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure;
 │                  #   decomposer(): splits a subtask whose retries failed (2–4 parts)
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
@@ -71,6 +72,8 @@ src/desman/
     ├── calls.py   # model_calls log (per provider/key usage, limits seen); `desman usage`
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
+    ├── tools.py   # Tool registry: Tool (args schema, Permission), Registry, built-in file
+    │              #   tools; Toolbox per subtask (only granted tools, lease guard, audit)
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
 └── llm/
     ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
@@ -91,7 +94,8 @@ src/desman/
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it
 (override the directory with `DESMAN_DATA_DIR`). Never touch files on an agent's behalf except
-through `Workspace`. Never edit a
+through `Workspace`, and let executors act only through tool calls (`Work.tools`): a new
+capability is a new `Tool` with the permission it needs, never a direct call in an agent. Never edit a
 migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
 backfill if needed) and test upgrading a database built with the previous migrations. Keep the `subtasks.status` CHECK in
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,

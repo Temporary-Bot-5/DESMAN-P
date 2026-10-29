@@ -11,7 +11,8 @@ and ends in NEEDS_HUMAN, and blocked dependents are settled immediately. The one
 is a provider pause; by default the coordinator returns instead of sleeping through it.
 
 Executor and reviewer are plain callables, so the loop is tested with scripted fakes and later
-driven by real LLM-backed agents.
+driven by real LLM-backed agents. An executor acts on nothing itself: it asks for tool calls
+through `Work.tools` (core/tools.py), which checks, guards and audits each one.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from __future__ import annotations
 import functools
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -33,6 +34,7 @@ from desman.core.models import Subtask, SubtaskSpec
 from desman.core.retry import FailureKind, RetryPolicy, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
+from desman.core.tools import Permission, Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import ProviderError
 
@@ -119,9 +121,9 @@ class Work(BaseModel):
     heartbeat: Callable[[dict[str, Any] | None], None]
     """Call during long work; pass a checkpoint to save progress. Raises StaleStateError if the
     lease was lost: stop and drop the work."""
-    workspace: Workspace
-    """The task's own directory; the only place files may be read or written. A path that
-    escapes it raises PathEscapeError, which counts as a bad attempt (quality failure)."""
+    tools: Toolbox
+    """The only way to act: tool calls on the task's own workspace (and, once granted, more).
+    A refused or mistaken call comes back as a failed ToolResult; every call is audited."""
 
 
 Executor = Callable[[Work], Outcome]
@@ -152,6 +154,8 @@ class Coordinator:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
+        tools: Registry | None = None,
+        granted: Iterable[Permission] = (),
         abandoned: Callable[[str], bool] | None = None,
         strategies: Strategies = ONE_MODEL,
         decomposer: Decomposer | None = None,
@@ -165,6 +169,11 @@ class Coordinator:
         self.lease_seconds = lease_seconds
         self.context_budget_tokens = context_budget_tokens
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
+        self.tools = tools
+        """The registry executors may call into; the built-in tools by default."""
+        self.granted = frozenset(granted)
+        """Permissions beyond the workspace given to tools (3.2 derives them from the human's
+        settings); none by default."""
         self.abandoned = abandoned
         """Tells whether a lease owner is certainly gone, so its work is taken back at once
         instead of after the lease expires (see core/owner.py)."""
@@ -253,8 +262,12 @@ class Coordinator:
                 strategy,
             )
             self._started(subtask, context)
-            workspace = Workspace(self.workspaces, subtask.task_id)
-            work = Work(subtask=subtask, context=context, heartbeat=heartbeat, workspace=workspace)
+            work = Work(
+                subtask=subtask,
+                context=context,
+                heartbeat=heartbeat,
+                tools=self._toolbox(subtask, heartbeat),
+            )
             if strategy is Strategy.DECOMPOSE:
                 if self._decompose(work, lease, events):
                     return
@@ -303,6 +316,20 @@ class Coordinator:
                 events.append(f"{outcome.kind} {subtask.id} -> {moved.status}")
         except StaleStateError:  # e.g. cancelled while running
             self._discard(subtask, f"lease lost before {type(outcome).__name__.lower()}", events)
+
+    def _toolbox(
+        self, subtask: Subtask, heartbeat: Callable[[dict[str, Any] | None], None]
+    ) -> Toolbox:
+        def record(action: str, details: dict[str, Any]) -> None:
+            self.store.note(subtask.id, Actor.EXECUTOR, action, details)
+
+        return Toolbox(
+            Workspace(self.workspaces, subtask.task_id),
+            self.tools,
+            granted=self.granted,
+            record=record,
+            guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
+        )
 
     def _started(self, subtask: Subtask, context: Context) -> None:
         self.store.note(
