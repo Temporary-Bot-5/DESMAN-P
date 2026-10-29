@@ -20,7 +20,7 @@ from __future__ import annotations
 import functools
 import json
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -31,10 +31,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from desman.core import db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.models import Subtask, SubtaskSpec
+from desman.core.policy import Access
 from desman.core.retry import FailureKind, RetryPolicy, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
-from desman.core.tools import Permission, Registry, Toolbox
+from desman.core.tools import Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import ProviderError
 
@@ -155,7 +156,7 @@ class Coordinator:
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
         tools: Registry | None = None,
-        granted: Iterable[Permission] = (),
+        access: Access | None = None,
         abandoned: Callable[[str], bool] | None = None,
         strategies: Strategies = ONE_MODEL,
         decomposer: Decomposer | None = None,
@@ -171,9 +172,9 @@ class Coordinator:
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
         self.tools = tools
         """The registry executors may call into; the built-in tools by default."""
-        self.granted = frozenset(granted)
-        """Permissions beyond the workspace given to tools (3.2 derives them from the human's
-        settings); none by default."""
+        self.access = access
+        """What the executor may use: its tool policy within the human's permissions. By
+        default the shipped policy with every switch off (the workspace tools only)."""
         self.abandoned = abandoned
         """Tells whether a lease owner is certainly gone, so its work is taken back at once
         instead of after the lease expires (see core/owner.py)."""
@@ -326,7 +327,7 @@ class Coordinator:
         return Toolbox(
             Workspace(self.workspaces, subtask.task_id),
             self.tools,
-            granted=self.granted,
+            access=self.access,
             record=record,
             guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
         )

@@ -77,6 +77,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "GOAL is empty": "GOAL jest pusty",
     "{path}: not a valid task spec:\n{error}": "{path}: to nie jest poprawny opis zadania:\n{error}",
+    "Cannot use the tool policy: {error}": "Nie można użyć polityki narzędzi: {error}",
     "--fake-llm replaces the provider: drop --provider/--model": "--fake-llm zastępuje dostawcę: usuń --provider/--model",
     "{path}: not a valid fake LLM script:\n{error}": "{path}: to nie jest poprawny scenariusz udawanego LLM:\n{error}",
     "Using {provider} · {model} ({n} key)": (

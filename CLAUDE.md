@@ -76,7 +76,9 @@ src/desman/
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
     ├── tools.py   # Tool registry: Tool (args schema, Permission), Registry, built-in file
-    │              #   tools; Toolbox per subtask (only granted tools, lease guard, audit)
+    │              #   tools; Toolbox per subtask (only allowed tools, lease guard, audit)
+    ├── policy.py  # Access = role's tools in `src/desman/policy.toml` ∩ human's `permissions`;
+    │              #   refusals audited (tool_refused), admin calls marked elevated
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
 └── llm/
     ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
@@ -122,8 +124,9 @@ preemption, self-improvement or network features before their phase).
 - The file is the `Config` model; a schema change bumps `schema_version` and adds a step to
   `upgrade()`. A file that does not load is a `ConfigError`, never "unconfigured".
 - Never print or log an API key; show it through `providers.mask()`.
-- `permissions` are set by the human only. Agents must never write them; they become the
-  upper bound of the tool policy.
+- `permissions` are set by the human only. Agents must never write them; they are the
+  upper bound of the tool policy (`src/desman/policy.toml`, which is code: changed by people
+  through git, never by an agent).
 - Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
   (confirmation, `--yes` skips it) and `keys add` (the hidden key; `--stdin` for scripts) may
   prompt. A key is never accepted as a command-line argument.

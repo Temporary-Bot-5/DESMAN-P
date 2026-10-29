@@ -1,0 +1,16 @@
+# Which tools each role may use (ROADMAP 3.2; see src/desman/core/policy.py).
+#
+# Set by people only and reviewed like code: agents cannot reach this file. The human's
+# permissions in config.json (`desman config`) are the upper bound: a tool that needs the
+# network, a shell, files outside the workspace or admin rights stays refused while its switch
+# is off, whatever this file says. A tool not listed for a role is refused to that role.
+
+[roles.executor]
+tools = ["read_file", "write_file", "list_files"]
+
+# The planner and the reviewer use no tools yet.
+[roles.planner]
+tools = []
+
+[roles.reviewer]
+tools = []

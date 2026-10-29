@@ -66,6 +66,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {id} created ({n} subtask)": ("已创建任务 {id}（{n} 个子任务）",),
     "GOAL is empty": "GOAL 为空",
     "{path}: not a valid task spec:\n{error}": "{path}：不是有效的任务描述：\n{error}",
+    "Cannot use the tool policy: {error}": "无法使用工具策略：{error}",
     "--fake-llm replaces the provider: drop --provider/--model": "--fake-llm 会替代提供商：请去掉 --provider/--model",
     "{path}: not a valid fake LLM script:\n{error}": "{path}：不是有效的模拟 LLM 脚本：\n{error}",
     "Using {provider} · {model} ({n} key)": ("正在使用 {provider} · {model}（{n} 个密钥）",),

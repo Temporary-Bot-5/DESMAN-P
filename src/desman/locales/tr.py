@@ -66,6 +66,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {id} created ({n} subtask)": ("{id} görevi oluşturuldu ({n} alt görev)",),
     "GOAL is empty": "GOAL boş",
     "{path}: not a valid task spec:\n{error}": "{path}: geçerli bir görev tanımı değil:\n{error}",
+    "Cannot use the tool policy: {error}": "Araç politikası kullanılamıyor: {error}",
     "--fake-llm replaces the provider: drop --provider/--model": "--fake-llm sağlayıcının yerini alır: --provider/--model seçeneklerini kaldırın",
     "{path}: not a valid fake LLM script:\n{error}": "{path}: geçerli bir sahte LLM senaryosu değil:\n{error}",
     "Using {provider} · {model} ({n} key)": ("{provider} · {model} kullanılıyor ({n} anahtar)",),
