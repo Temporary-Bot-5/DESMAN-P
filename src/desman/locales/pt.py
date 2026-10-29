@@ -287,6 +287,31 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG responde: a pesquisa na web funciona.",
     "SearXNG at {url} cannot be used yet: {problem}": "SearXNG em {url} ainda não pode ser usado: {problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access está ativado, mas nenhum mecanismo para a web inteira está configurado: web_search busca só na Wikipédia, Stack Overflow, arXiv e GitHub. Adicione um em `desman config`.",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "os comandos do chat",
+    "start a new session": "começar uma nova sessão",
+    "earlier sessions; pick one to continue it": "sessões anteriores; escolha uma para continuá-la",
+    "leave the chat (Ctrl+D does too)": "sair do chat (Ctrl+D também)",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': 'Salvo na sessão. Ninguém responde aqui ainda: o interlocutor chega em uma versão futura. Enquanto isso, `desman run "OBJETIVO"` executa uma tarefa.',
+    "New session. /help lists the chat's commands.": "Nova sessão. /help lista os comandos do chat.",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "Continuando a sessão de {when} ({n} mensagem). /new começa outra, /help lista os comandos do chat.",
+        "Continuando a sessão de {when} ({n} mensagens). /new começa outra, /help lista os comandos do chat.",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "comando desconhecido {name}: /help lista os comandos do chat",
+    "Anything else you write is a message.": "Todo o resto que você escrever é uma mensagem.",
+    "This session is new already.": "Esta sessão já é nova.",
+    "New session: it starts with your next message.": "Nova sessão: ela começa com a sua próxima mensagem.",
+    "No sessions yet: the first starts with your first message.": "Ainda não há sessões: a primeira começa com a sua primeira mensagem.",
+    "{n} message": (
+        "{n} mensagem",
+        "{n} mensagens",
+    ),
+    "current": "atual",
+    "the new session": "a nova sessão",
+    "Which session?": "Qual sessão?",
+    "Switched to the session of {when}.": "Mudou para a sessão de {when}.",
+    "earlier sessions…": "sessões anteriores…",
 }
 
 CLICK: dict[str, Forms] = {

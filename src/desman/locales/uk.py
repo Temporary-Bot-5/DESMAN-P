@@ -303,6 +303,33 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG відповідає: вебпошук працює.",
     "SearXNG at {url} cannot be used yet: {problem}": "SearXNG за адресою {url} поки що недоступний: {problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access увімкнено, але пошукову систему для всього інтернету не налаштовано: web_search шукає лише у Вікіпедії, Stack Overflow, arXiv і GitHub. Додайте її в `desman config`.",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "команди чату",
+    "start a new session": "почати нову сесію",
+    "earlier sessions; pick one to continue it": "попередні сесії; виберіть, щоб продовжити",
+    "leave the chat (Ctrl+D does too)": "вийти з чату (або Ctrl+D)",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': 'Збережено в сесії. Тут поки ніхто не відповідає: співрозмовник з\'явиться в наступній версії. А поки задачу запускає `desman run "МЕТА"`.',
+    "New session. /help lists the chat's commands.": "Нова сесія. /help — команди чату.",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "Продовжуємо сесію від {when} ({n} повідомлення). /new починає іншу, /help — команди чату.",
+        "Продовжуємо сесію від {when} ({n} повідомлення). /new починає іншу, /help — команди чату.",
+        "Продовжуємо сесію від {when} ({n} повідомлень). /new починає іншу, /help — команди чату.",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "невідома команда {name}: /help — команди чату",
+    "Anything else you write is a message.": "Усе інше — повідомлення.",
+    "This session is new already.": "Ця сесія й так нова.",
+    "New session: it starts with your next message.": "Нова сесія: вона почнеться з вашого наступного повідомлення.",
+    "No sessions yet: the first starts with your first message.": "Сесій поки немає: перша почнеться з вашого першого повідомлення.",
+    "{n} message": (
+        "{n} повідомлення",
+        "{n} повідомлення",
+        "{n} повідомлень",
+    ),
+    "current": "поточна",
+    "the new session": "нова сесія",
+    "Which session?": "Яка сесія?",
+    "Switched to the session of {when}.": "Перемкнулися на сесію від {when}.",
+    "earlier sessions…": "раніші сесії…",
 }
 
 CLICK: dict[str, Forms] = {

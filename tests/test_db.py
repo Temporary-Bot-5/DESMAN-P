@@ -18,6 +18,7 @@ from click.testing import CliRunner
 from desman.cli import cli
 from desman.core import db
 from desman.core.audit import check_history, history
+from desman.core.sessions import Kind, Role, Sessions
 from desman.core.states import SubtaskStatus
 from desman.core.store import Store
 
@@ -533,6 +534,20 @@ def test_v7_database_upgrades_to_the_web_cache(tmp_path: Path) -> None:
     conn = db.open_db(path)
     assert db.schema_version(conn) == db.SCHEMA_VERSION
     assert conn.execute("SELECT COUNT(*) FROM web_cache").fetchone()[0] == 0
+    conn.close()
+
+
+def test_v8_database_with_tasks_upgrades_to_chat_sessions(tmp_path: Path) -> None:
+    path = tmp_path / "v8.db"
+    old = _db_at_version(path, 8)
+    task_id = add_task(old)
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    sessions = Sessions(conn)
+    assert sessions.latest() is None
+    message = sessions.add(None, Role.DESMAN, "task created", kind=Kind.EVENT, task_id=task_id)
+    assert sessions.messages(message.session_id)[0].task_id == task_id
     conn.close()
 
 

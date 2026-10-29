@@ -248,6 +248,29 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ) STRICT;
     CREATE INDEX ix_web_cache_created ON web_cache (created_at);
     """,
+    # 9 — chat sessions (ROADMAP C.2, ADR 0003): what was said stays as it was said; a summary
+    # (C.6) is a new message, the originals are never changed or removed
+    f"""
+    CREATE TABLE sessions (
+        id          TEXT PRIMARY KEY,
+        created_at  TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+
+    CREATE TABLE messages (
+        seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id  TEXT NOT NULL REFERENCES sessions(id),
+        at          TEXT NOT NULL DEFAULT {_NOW_SQL},
+        role        TEXT NOT NULL CHECK (role IN ('user', 'interlocutor', 'desman')),
+        kind        TEXT NOT NULL CHECK (kind IN ('message', 'summary', 'event')),
+        text        TEXT NOT NULL,
+        task_id     TEXT REFERENCES tasks(id)
+    ) STRICT;
+    CREATE INDEX ix_messages_session ON messages (session_id, seq);
+    CREATE TRIGGER messages_no_update BEFORE UPDATE ON messages
+        BEGIN SELECT RAISE(ABORT, 'messages are append-only'); END;
+    CREATE TRIGGER messages_no_delete BEFORE DELETE ON messages
+        BEGIN SELECT RAISE(ABORT, 'messages are append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

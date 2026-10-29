@@ -268,6 +268,27 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG yanıt veriyor: web araması çalışıyor.",
     "SearXNG at {url} cannot be used yet: {problem}": "{url} adresindeki SearXNG henüz kullanılamıyor: {problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access açık, ancak tüm web için bir arama motoru ayarlanmamış: web_search yalnızca Wikipedia, Stack Overflow, arXiv ve GitHub'da arar. `desman config` içinden bir tane ekleyin.",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "sohbetin komutları",
+    "start a new session": "yeni bir oturum başlat",
+    "earlier sessions; pick one to continue it": "önceki oturumlar; devam etmek için birini seçin",
+    "leave the chat (Ctrl+D does too)": "sohbetten çık (Ctrl+D de olur)",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': 'Oturuma kaydedildi. Burada henüz kimse yanıt vermiyor: muhatap sonraki bir sürümde gelecek. Bu arada `desman run "HEDEF"` bir görev çalıştırır.',
+    "New session. /help lists the chat's commands.": "Yeni oturum. /help sohbetin komutlarını listeler.",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "{when} tarihli oturuma devam ediliyor ({n} mesaj). /new başka bir oturum başlatır, /help sohbetin komutlarını listeler.",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "bilinmeyen komut {name}: /help sohbetin komutlarını listeler",
+    "Anything else you write is a message.": "Yazdığınız diğer her şey bir mesajdır.",
+    "This session is new already.": "Bu oturum zaten yeni.",
+    "New session: it starts with your next message.": "Yeni oturum: bir sonraki mesajınızla başlar.",
+    "No sessions yet: the first starts with your first message.": "Henüz oturum yok: ilki ilk mesajınızla başlar.",
+    "{n} message": ("{n} mesaj",),
+    "current": "geçerli",
+    "the new session": "yeni oturum",
+    "Which session?": "Hangi oturum?",
+    "Switched to the session of {when}.": "{when} tarihli oturuma geçildi.",
+    "earlier sessions…": "daha eski oturumlar…",
 }
 
 CLICK: dict[str, Forms] = {

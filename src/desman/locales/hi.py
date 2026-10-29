@@ -287,6 +287,31 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG answers: web search works.": "SearXNG जवाब दे रहा है: वेब खोज काम करती है।",
     "SearXNG at {url} cannot be used yet: {problem}": "{url} पर SearXNG अभी उपयोग नहीं किया जा सकता: {problem}",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman config`.": "network_access चालू है, लेकिन पूरे वेब के लिए कोई सर्च इंजन सेट नहीं है: web_search केवल Wikipedia, Stack Overflow, arXiv और GitHub में खोजता है। `desman config` में एक जोड़ें।",
+    # ── Chat (ROADMAP C.2) ──────────────────────────────────────────────────
+    "the chat's commands": "चैट के कमांड",
+    "start a new session": "नया सत्र शुरू करें",
+    "earlier sessions; pick one to continue it": "पिछले सत्र; जारी रखने के लिए एक चुनें",
+    "leave the chat (Ctrl+D does too)": "चैट छोड़ें (Ctrl+D से भी)",
+    'Saved in the session. Nobody answers here yet: the interlocutor comes in a later version. Meanwhile `desman run "GOAL"` runs a task.': 'सत्र में सहेजा गया। यहाँ अभी कोई जवाब नहीं देता: वार्ताकार अगले संस्करण में आएगा। तब तक `desman run "लक्ष्य"` एक कार्य चलाता है।',
+    "New session. /help lists the chat's commands.": "नया सत्र। /help चैट के कमांड दिखाता है।",
+    "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
+        "{when} का सत्र जारी है ({n} संदेश)। /new दूसरा शुरू करता है, /help चैट के कमांड दिखाता है।",
+        "{when} का सत्र जारी है ({n} संदेश)। /new दूसरा शुरू करता है, /help चैट के कमांड दिखाता है।",
+    ),
+    "unknown command {name}: /help lists the chat's commands": "अज्ञात कमांड {name}: /help चैट के कमांड दिखाता है",
+    "Anything else you write is a message.": "आप जो कुछ और लिखते हैं, वह संदेश है।",
+    "This session is new already.": "यह सत्र पहले से नया है।",
+    "New session: it starts with your next message.": "नया सत्र: यह आपके अगले संदेश से शुरू होगा।",
+    "No sessions yet: the first starts with your first message.": "अभी कोई सत्र नहीं: पहला आपके पहले संदेश से शुरू होगा।",
+    "{n} message": (
+        "{n} संदेश",
+        "{n} संदेश",
+    ),
+    "current": "वर्तमान",
+    "the new session": "नया सत्र",
+    "Which session?": "कौन-सा सत्र?",
+    "Switched to the session of {when}.": "{when} के सत्र पर स्विच किया।",
+    "earlier sessions…": "पुराने सत्र…",
 }
 
 CLICK: dict[str, Forms] = {

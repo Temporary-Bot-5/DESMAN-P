@@ -36,7 +36,8 @@ The old core was removed (still in git history at `3d10a5e`). What remains:
 
 ```
 src/desman/
-├── cli.py         # Click entry point: `desman`, `config`, `help`, `init-db`, and the task
+├── cli.py         # Click entry point: `desman` (banner, then the chat), `config`, `help`,
+│                  #   `init-db`, and the task
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
 ├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
@@ -54,6 +55,8 @@ src/desman/
 │                  #   language (ADR 0002); catalogs in locales/ (ru, zh, es, pt, de, fr, ja,
 │                  #   ko, pl, tr, uk, hi)
 ├── info.py        # Banner / project info
+├── chat.py        # The chat of bare `desman`: continues the last session; /help, /new,
+│                  #   /sessions, /exit; messages saved (the interlocutor answers from C.3)
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently);
@@ -67,6 +70,8 @@ src/desman/
                    #        submit, task_status, cancel_task, failure propagation
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
                    #   fitted to a token budget, feedback on the previous attempt
+    ├── sessions.py # Chat sessions and messages (append-only: role, text, kind
+    │              #   message | summary | event, task link); a session starts with its first message
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
                    #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)

@@ -7,6 +7,7 @@ typing numbers. A cancelled prompt (Ctrl+C, Esc) raises `Cancelled`.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from collections.abc import Sequence
@@ -258,6 +259,26 @@ def text(question: str, default: str = "") -> str:
             raise Cancelled
         return str(answer).strip()
     return str(click.prompt(question, default=default, show_default=bool(default))).strip()
+
+
+def line() -> str | None:
+    """A line typed in the chat; None when the person leaves (Ctrl+D, Ctrl+C, end of input).
+
+    In a terminal, `readline` (where Python has it) gives line editing and ↑ for earlier lines.
+    Otherwise a line is read from stdin and no prompt is printed: the chat then runs line by
+    line, in pipes and in tests.
+    """
+    if interactive():
+        with contextlib.suppress(ImportError):  # no readline e.g. on Windows
+            import readline  # noqa: F401  (loading it is what gives input() editing)
+        try:
+            # \001 and \002 tell readline the colour codes take no room on the line.
+            return input("\001\033[1;38;2;0;238;255m\002›\001\033[0m\002 ")
+        except (EOFError, KeyboardInterrupt):
+            out("")
+            return None
+    raw = sys.stdin.readline()
+    return raw.rstrip("\r\n") if raw else None
 
 
 def secret(question: str) -> str:
