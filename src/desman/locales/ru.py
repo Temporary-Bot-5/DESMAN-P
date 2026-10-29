@@ -505,6 +505,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Составляю план…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не составила план, поэтому единственная подзадача — сама цель: {error}",
     "Retries may also use {provider} · {model}": "Повторные попытки могут использовать и {provider} · {model}",
+    "part of {seq}": "часть {seq}",
 }
 
 CLICK: dict[str, Forms] = {

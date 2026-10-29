@@ -278,6 +278,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Planification…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Le modèle n'a pas fait de plan, l'objectif est donc la seule sous-tâche : {error}",
     "Retries may also use {provider} · {model}": "Les nouvelles tentatives peuvent aussi utiliser {provider} · {model}",
+    "part of {seq}": "partie de {seq}",
 }
 
 CLICK: dict[str, Forms] = {

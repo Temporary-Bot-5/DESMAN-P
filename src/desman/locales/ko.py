@@ -257,6 +257,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "계획 세우는 중…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "모델이 계획을 세우지 못해 목표 자체가 유일한 하위 작업입니다: {error}",
     "Retries may also use {provider} · {model}": "재시도에는 {provider} · {model}도 사용될 수 있습니다",
+    "part of {seq}": "{seq}의 일부",
 }
 
 CLICK: dict[str, Forms] = {

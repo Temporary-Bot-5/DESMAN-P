@@ -29,8 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from desman.core import db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
-from desman.core.models import Subtask
-from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
+from desman.core.models import Subtask, SubtaskSpec
+from desman.core.retry import FailureKind, RetryPolicy, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
@@ -76,7 +76,7 @@ class Failure(BaseModel):
 
 Outcome = Success | Failure
 
-ONE_MODEL: Callable[[int], Strategy] = functools.partial(strategy_for, other_model=False)
+ONE_MODEL: Strategies = functools.partial(strategy_for, other_model=False)
 """The coordinator's default: no other model to switch to, so none is claimed in the audit."""
 
 ERROR_TYPE = "error"
@@ -125,6 +125,9 @@ class Work(BaseModel):
 
 
 Executor = Callable[[Work], Outcome]
+Decomposer = Callable[[Work], list[SubtaskSpec] | None]
+"""Splits the subtask of `Work` into smaller ones (ROADMAP 2.9b); None if it cannot. Provider
+errors propagate like the executor's."""
 Reviewer = Callable[[Subtask, dict[str, Any] | None], Review | Failure]
 
 
@@ -150,7 +153,8 @@ class Coordinator:
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
         abandoned: Callable[[str], bool] | None = None,
-        strategies: Callable[[int], Strategy] = ONE_MODEL,
+        strategies: Strategies = ONE_MODEL,
+        decomposer: Decomposer | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.store = store
@@ -168,6 +172,8 @@ class Coordinator:
         """Attempt number -> strategy. The executor's owner says what it can do: by default
         there is no other model to switch to, so the audit never claims a switch that did not
         happen; pass `strategy_for` when the executor has one."""
+        self.decomposer = decomposer
+        """Without one, subtasks are never split."""
         self.sleep = sleep
 
     def run(
@@ -233,23 +239,32 @@ class Coordinator:
 
         outcome: Outcome
         try:
+            attempt = subtask.attempts.quality + 1
+            if self.store.parts(subtask.id):
+                strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
+            else:
+                can_split = self.decomposer is not None and subtask.parent_id is None
+                strategy = self.strategies(attempt, split=can_split)
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
                 self.store.last_feedback(subtask.id),
                 self.context_budget_tokens,
-                self.strategies,
+                strategy,
             )
-            self.store.note(
-                subtask.id,
-                Actor.EXECUTOR,
-                "attempt_started",
-                {"attempt": context.attempt, "strategy": context.strategy.value},
-            )
+            self._started(subtask, context)
             workspace = Workspace(self.workspaces, subtask.task_id)
-            returned = self.executor(
-                Work(subtask=subtask, context=context, heartbeat=heartbeat, workspace=workspace)
-            )
+            work = Work(subtask=subtask, context=context, heartbeat=heartbeat, workspace=workspace)
+            if strategy is Strategy.DECOMPOSE:
+                if self._decompose(work, lease, events):
+                    return
+                # No usable split: try once more the way the attempt before did.
+                context = context.model_copy(
+                    update={"strategy": self.strategies(attempt, split=False)}
+                )
+                work = work.model_copy(update={"context": context})
+                self._started(subtask, context)
+            returned = self.executor(work)
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
@@ -288,6 +303,33 @@ class Coordinator:
                 events.append(f"{outcome.kind} {subtask.id} -> {moved.status}")
         except StaleStateError:  # e.g. cancelled while running
             self._discard(subtask, f"lease lost before {type(outcome).__name__.lower()}", events)
+
+    def _started(self, subtask: Subtask, context: Context) -> None:
+        self.store.note(
+            subtask.id,
+            Actor.EXECUTOR,
+            "attempt_started",
+            {"attempt": context.attempt, "strategy": context.strategy.value},
+        )
+
+    def _decompose(self, work: Work, lease: str, events: list[str]) -> bool:
+        """Split the subtask; False (recorded) if the decomposer could not. A lost lease or a
+        provider error propagates to `_execute`, as from the executor."""
+        assert self.decomposer is not None
+        subtask = work.subtask
+        parts = self.decomposer(work)
+        if parts:
+            try:
+                created = self.store.decompose(subtask.id, lease, parts)
+            except ValueError as e:  # not a valid graph of parts
+                reason = str(e)
+            else:
+                events.append(f"split {subtask.id} into {len(created)}")
+                return True
+        else:
+            reason = "the decomposer returned no parts"
+        self.store.note(subtask.id, Actor.EXECUTOR, "decomposition_failed", {"reason": reason})
+        return False
 
     def _review(self, subtask: Subtask, events: list[str]) -> bool:
         review: Review | Failure

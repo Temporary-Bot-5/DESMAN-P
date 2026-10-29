@@ -13,7 +13,6 @@ characters / 4, which is close enough for budgeting.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
@@ -75,8 +74,9 @@ def build_context(
     dependencies: list[DependencyResult],
     feedback: Feedback | None,
     budget_tokens: int = DEFAULT_BUDGET_TOKENS,
-    strategies: Callable[[int], Strategy] = strategy_for,
+    strategy: Strategy | None = None,
 ) -> Context:
+    """`strategy` defaults to the one the attempt number picks."""
     attempt = subtask.attempts.quality + 1
     return Context(
         description=subtask.description,
@@ -86,7 +86,7 @@ def build_context(
         dependencies=fit_dependencies(dependencies, budget_tokens),
         feedback=feedback,
         attempt=attempt,
-        strategy=strategies(attempt),
+        strategy=strategy or strategy_for(attempt),
     )
 
 

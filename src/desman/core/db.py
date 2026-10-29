@@ -215,6 +215,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ) STRICT;
     CREATE INDEX ix_response_cache_created ON response_cache (created_at);
     """,
+    # 6 — a subtask split into smaller ones (ROADMAP 2.9b) is their parent
+    """
+    ALTER TABLE subtasks ADD COLUMN parent_id TEXT REFERENCES subtasks(id) ON DELETE CASCADE;
+    CREATE INDEX ix_subtasks_parent ON subtasks (parent_id);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -12,7 +12,8 @@ feedback is shown to the next attempt.
 Each attempt of the executor follows the strategy its number picks (`core.retry.Strategy`): the
 first try and the one with the reviewer's feedback use the instructions below as they are; a
 rephrased attempt gets them worded differently at a higher temperature; "other model" asks the
-`other` LLM (another provider), when there is one.
+`other` LLM (another provider), when there is one; "combine" builds the result of a split
+subtask from its parts (the split itself is `planner.decomposer`).
 
 Prompts start with "Execute subtask" and "Review subtask", so a fake script can route on them:
 `FakeLLM().on("Execute", ...).on("Review", ...)`, or `"routes"` in a JSON script.
@@ -60,6 +61,10 @@ EXECUTOR_SYSTEM_REPHRASED = (
     "When the subtask cannot be done, the JSON object is "
     '{"type": "error", "reason": "why"}; never present a guess as a result.'
 )
+EXECUTOR_SYSTEM_COMBINE = (
+    EXECUTOR_SYSTEM + " This subtask was split into smaller parts, which are done: their "
+    "results are among the results of dependencies. Build this subtask's result from them."
+)
 REPHRASE_TEMPERATURE = 0.7
 """A rephrased attempt also samples differently: at 0 the model tends to repeat itself."""
 REVIEWER_SYSTEM = (
@@ -96,6 +101,8 @@ def llm_executor(llm: LLM, other: LLM | None = None) -> Executor:
         elif context.strategy in (Strategy.REPHRASE, Strategy.OTHER_MODEL):
             # Without another model to ask, the best one can do differently is rephrase.
             system, temperature = EXECUTOR_SYSTEM_REPHRASED, REPHRASE_TEMPERATURE
+        elif context.strategy is Strategy.COMBINE:
+            system = EXECUTOR_SYSTEM_COMBINE
         try:
             # An error report is not cached: the next task asking the same may succeed.
             result = _ask(

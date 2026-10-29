@@ -259,6 +259,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Planlanıyor…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Model bir plan yapamadı, bu yüzden tek alt görev hedefin kendisi: {error}",
     "Retries may also use {provider} · {model}": "Yeniden denemeler {provider} · {model} da kullanabilir",
+    "part of {seq}": "{seq} parçası",
 }
 
 CLICK: dict[str, Forms] = {

@@ -14,6 +14,7 @@ It never gives up on its own: FAILED is a human verdict.
 
     happy path         PENDING -> READY -> RUNNING -> REVIEW -> DONE
     retry / crash      RUNNING, REVIEW -> READY
+    split              RUNNING -> PENDING (waits for its new parts, then combines them)
     out of quota       RUNNING, REVIEW -> PAUSED -> READY | REVIEW   (attempt not spent)
     escalate           RUNNING, REVIEW -> NEEDS_HUMAN -(human)-> READY | DONE | FAILED
     revive             FAILED -(human)-> READY
@@ -92,6 +93,7 @@ TRANSITIONS: Final[Mapping[tuple[SubtaskStatus, SubtaskStatus], frozenset[Actor]
     (S.RUNNING, S.READY): frozenset({A.EXECUTOR, A.SCHEDULER}),  # retry / lease expired
     (S.RUNNING, S.PAUSED): frozenset({A.EXECUTOR}),  # provider limits
     (S.RUNNING, S.NEEDS_HUMAN): frozenset({A.EXECUTOR, A.SCHEDULER}),  # out of retries
+    (S.RUNNING, S.PENDING): frozenset({A.EXECUTOR}),  # split into parts it now depends on
     # Review
     (S.REVIEW, S.DONE): frozenset({A.REVIEWER}),
     (S.REVIEW, S.READY): frozenset({A.REVIEWER}),  # retry with feedback

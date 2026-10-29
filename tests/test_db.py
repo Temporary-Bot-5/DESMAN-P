@@ -499,6 +499,20 @@ def test_v4_database_with_a_call_log_upgrades_to_the_response_cache(tmp_path: Pa
     conn.close()
 
 
+def test_v5_database_with_tasks_upgrades_to_split_subtasks(tmp_path: Path) -> None:
+    path = tmp_path / "v5.db"
+    old = _db_at_version(path, 5)
+    task_id = add_task(old)
+    add_subtask(old, task_id)
+    old.close()
+
+    store = Store(db.open_db(path))
+    assert db.schema_version(store.conn) == db.SCHEMA_VERSION
+    [existing] = store.list_subtasks(task_id)
+    assert existing.parent_id is None and store.parts(existing.id) == []
+    store.conn.close()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="file modes")
 def test_a_new_database_is_private(tmp_path: Path) -> None:
     old_umask = os.umask(0o022)

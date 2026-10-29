@@ -294,6 +294,7 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Складаю план…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не склала план, тому єдина підзадача — сама мета: {error}",
     "Retries may also use {provider} · {model}": "Повторні спроби можуть використовувати й {provider} · {model}",
+    "part of {seq}": "частина {seq}",
 }
 
 CLICK: dict[str, Forms] = {

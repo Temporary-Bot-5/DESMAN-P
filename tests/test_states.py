@@ -183,7 +183,9 @@ def test_only_reviewer_or_human_marks_done() -> None:
 
 
 def test_allowed_targets() -> None:
-    assert allowed_targets(S.RUNNING, A.EXECUTOR) == {S.REVIEW, S.READY, S.PAUSED, S.NEEDS_HUMAN}
+    assert allowed_targets(S.RUNNING, A.EXECUTOR) == {
+        S.REVIEW, S.READY, S.PAUSED, S.NEEDS_HUMAN, S.PENDING  # the last one: split
+    }  # fmt: skip
     assert allowed_targets(S.RUNNING, A.SCHEDULER) == {S.READY, S.NEEDS_HUMAN}
     assert allowed_targets(S.PENDING, A.EXECUTOR) == frozenset()
 
