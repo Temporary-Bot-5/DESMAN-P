@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import timedelta
 from typing import Any
 
+import httpx
 import pytest
 from click.testing import CliRunner, Result
 
-from desman import runs
+from desman import chat as chat_module
+from desman import providers, runs
+from desman.chat import Chat
 from desman.cli import cli
-from desman.config import ConfigManager, default_config_path
+from desman.config import Config, ConfigManager, default_config_path
 from desman.core import db
 from desman.core.sessions import Kind, Message, Role, Sessions
 from desman.interlocutor import CHAT, RETELL, fit
@@ -217,3 +221,132 @@ def test_ctrl_c_stops_the_task_and_the_chat_goes_on(fake: FakeLLM) -> None:
     result = chat("find cheap flights to Lisbon", "hello?")
     assert "stopped" in result.output and "desman resume" in result.output
     assert "Still here." in result.output
+
+
+def test_a_task_settled_outside_the_chat_is_retold_once(
+    fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A decision in the terminal (or `desman resume`) after the chat: the next turn knows."""
+    escalate = '{"verdict": "escalate", "feedback": "Which dates? None were given."}'
+    fake.on(
+        CHAT,
+        TASK_TURN,
+        '{"type": "reply", "text": "Yes, see above."}',
+        '{"type": "reply", "text": "Ok."}',
+    )
+    worked(fake, review=escalate)
+    fake.on(RETELL, '{"text": "I need the dates."}', '{"text": "Accepted: it is done."}')
+    to_iso = db.to_iso
+    with monkeypatch.context() as earlier:  # the chat was a minute ago
+        earlier.setattr(db, "to_iso", lambda moment: to_iso(moment - timedelta(minutes=1)))
+        chat("find cheap flights to Lisbon")
+    [(subtask_id,)] = sqlite3.connect(db.default_db_path()).execute("SELECT id FROM subtasks")
+    accepted = CliRunner().invoke(cli, ["accept", subtask_id])
+    assert accepted.exit_code == 0, accepted.output
+
+    result = chat("so, any flights?", "thanks")
+    assert "is done" in result.output and "Accepted: it is done." in result.output
+    first, second = [payload(r) for r in calls(fake, RETELL)]
+    assert first["status"] == "needs_human" and second["status"] == "done"
+    assert len(calls(fake, RETELL)) == 2  # not again at "thanks"
+    asked = payload(calls(fake, CHAT)[1])["conversation"]
+    assert asked[-2:] == [
+        {"from": "you", "text": "Accepted: it is done."},
+        {"from": "person", "text": "so, any flights?"},
+    ]
+
+
+def test_a_task_still_moving_elsewhere_is_not_retold_yet(fake: FakeLLM) -> None:
+    def interrupted(_request: Request) -> str:
+        raise KeyboardInterrupt
+
+    fake.on(CHAT, TASK_TURN, '{"type": "reply", "text": "Still here."}')
+    fake.on("Plan task", PLAN).on("Execute subtask", interrupted)
+    chat("find cheap flights to Lisbon", "hello?")
+    assert calls(fake, RETELL) == []  # stopped: active, nothing settled to tell
+
+
+def test_a_pasted_key_is_cut_before_anything_keeps_it(fake: FakeLLM) -> None:
+    configured = "abcd1234efgh5678ijkl9012mnop"
+    ConfigManager(default_config_path()).save(
+        make_config(language="en", configured=True, api_keys={"GROQ_API_KEY": configured})
+    )
+    fake.on(CHAT, '{"type": "reply", "text": "Use desman keys add."}', TASK_TURN)
+    worked(fake).on(RETELL, '{"text": "Done."}')
+    pasted = "gsk_" + "Q" * 30
+    result = chat(f"my key is {pasted}, add it", f"and this one {configured} for flights")
+    assert "looked like an API key" in result.output
+    assert pasted not in result.output and configured not in result.output
+    stored = [m.text for m in conversation() if m.role is Role.USER]
+    assert stored == [
+        f"my key is {providers.REDACTED}, add it",
+        f"and this one {providers.REDACTED} for flights",
+    ]
+    for request in fake.calls:  # neither the interlocutor nor the planner saw one
+        text = request.prompt + "".join(m.content for m in request.messages)
+        assert pasted not in text and configured not in text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "commit 3d10a5e9c1f2b7a4d8e6f0c2b9a1d3e5f7a9c0b1 broke it",  # a hash: lower case hex
+        "see https://example.com/a/VeryLongPathSegment1234567890abcdef",  # part of a URL
+        "the word Supercalifragilistic is long but has no digits at all",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9Q",
+    ],
+)
+def test_ordinary_text_is_not_mistaken_for_a_key(text: str) -> None:
+    assert providers.redact_keys(text) == (text, 0)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["sk-or-v1-" + "a1" * 32, "AIzaSyD" + "x9" * 16, "Ab3dEf6hIj9kLm2nOp5rSt8vWx1yZa4c"],
+)
+def test_keys_are_recognised_by_their_shape(key: str) -> None:
+    assert providers.redact_keys(f"key: {key}.") == (f"key: {providers.REDACTED}.", 1)
+
+
+def test_the_models_are_rebuilt_when_the_config_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    llm = FakeLLM().on(CHAT, '{"type": "reply", "text": "Hi."}', repeat_last=True)
+    built: list[Config] = []
+
+    def models(config: Config, conn: sqlite3.Connection, **_: Any) -> runs.Models:
+        built.append(config)
+        return runs.Models(llm, None)
+
+    monkeypatch.setattr(runs, "models", models)
+    manager = ConfigManager(default_config_path())
+    manager.save(make_config(language="en", configured=True, api_keys={"GROQ_API_KEY": "old"}))
+    lines = iter(["hi", "again", "new key", None])
+
+    def read() -> str | None:
+        line = next(lines)
+        if line == "new key":  # replaced in another terminal meanwhile
+            manager.save(
+                make_config(language="en", configured=True, api_keys={"GROQ_API_KEY": "new"})
+            )
+        return line
+
+    Chat(Sessions(db.open_db(db.default_db_path())), read=read).run()
+    assert [c.keys("GROQ_API_KEY")[0].value for c in built] == ["old", "new"]
+
+
+def test_the_session_s_tasks_share_one_web_client_closed_with_the_chat(
+    fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made: list[httpx.Client] = []
+
+    def client() -> httpx.Client:
+        made.append(httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500))))
+        return made[-1]
+
+    monkeypatch.setattr(chat_module, "client", client)
+    fake.on(CHAT, TASK_TURN, repeat_last=True).on("Plan task", PLAN, repeat_last=True)
+    fake.on("Execute subtask", json.dumps(RESULT), repeat_last=True)
+    fake.on("Review subtask", ACCEPT, repeat_last=True).on(
+        RETELL, '{"text": "Done."}', repeat_last=True
+    )
+    chat("find flights", "and once more")
+    assert len(made) == 1 and made[0].is_closed

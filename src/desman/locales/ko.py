@@ -280,6 +280,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} waits for you.": "작업 {ref}이(가) 당신을 기다리고 있습니다.",
     "DESMAN commands cannot be run from the chat yet. In the terminal, `desman --help` lists them.": "아직 채팅에서는 DESMAN 명령을 실행할 수 없습니다. 터미널에서 `desman --help`가 명령 목록을 보여 줍니다.",
     "Your message is kept, but no model is ready to answer it. Add a key with `desman keys add PROVIDER` or set one up in `desman config`, then write again.": "메시지는 저장되었지만 답할 수 있는 모델이 없습니다. `desman keys add 제공자`로 키를 추가하거나 `desman config`에서 설정한 뒤 다시 쓰세요.",
+    "That looked like an API key, so it was cut from your message: keys are never kept in the chat or sent to a model. Add a key with `desman keys add PROVIDER`.": "API 키로 보여서 메시지에서 잘라냈습니다. 키는 채팅에 저장되지 않고 모델에도 보내지지 않습니다. `desman keys add 제공자`로 키를 추가하세요.",
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "작업 {ref}이(가) 제공자 한도로 {until}까지 일시 중지되었습니다. `desman resume {ref}`로 이어서 할 수 있습니다.",
     "Task {ref} is {status}.": "작업 {ref}: {status}.",
     "The model could not retell the result; here it is as it is:": "모델이 결과를 요약하지 못했습니다. 결과를 그대로 보여 드립니다:",

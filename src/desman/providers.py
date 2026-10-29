@@ -319,6 +319,38 @@ def mask(secret: str) -> str:
     return f"{secret[:4]}…{secret[-4:]}"
 
 
+REDACTED = "[key removed]"
+"""What stands for a key cut out of a chat message (stored and shown to models: not translated)."""
+
+# Keys by their providers' prefixes, and a key without one: 32 to 100 letters and digits mixing
+# upper and lower case and digits, alone as a word (hex hashes are lower case; base64 has +/=).
+_PREFIXED = re.compile(
+    r"(?<![\w-])(?:sk-|gsk_|AIza|hf_|tvly-|xai-|csk-|nvapi-|pplx-|r8_|ghp_|github_pat_|glpat-)"
+    r"[A-Za-z0-9_\-]{16,}"
+)
+_BARE = re.compile(
+    r"(?<![\w\-/+=.])(?=[a-z0-9]*[A-Z])(?=[A-Z0-9]*[a-z])(?=[A-Za-z]*[0-9])"
+    r"[A-Za-z0-9]{32,100}(?![\w\-/+=])"
+)
+
+
+def redact_keys(text: str, config: Config | None = None) -> tuple[str, int]:
+    """`text` with what looks like an API key replaced by REDACTED, and how many were cut: the
+    keys in `config` wherever they appear, and anything shaped like a key."""
+    found = 0
+    if config is not None:
+        for key in sorted(
+            {k.value for keys in config.api_keys.values() for k in keys}, key=len, reverse=True
+        ):
+            if key and key in text:
+                found += text.count(key)
+                text = text.replace(key, REDACTED)
+    for pattern in (_PREFIXED, _BARE):
+        text, n = pattern.subn(REDACTED, text)
+        found += n
+    return text, found
+
+
 # From the start of a line: `"NAME": "value"`, `NAME = 'value'`, `export NAME=value`. A quoted
 # value may be followed by anything (a comma, a comment); an unquoted one by a `# comment`.
 _PAIR = re.compile(

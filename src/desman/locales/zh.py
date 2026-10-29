@@ -274,6 +274,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} waits for you.": "任务 {ref} 正在等你处理。",
     "DESMAN commands cannot be run from the chat yet. In the terminal, `desman --help` lists them.": "暂时还不能在聊天中运行 DESMAN 命令。在终端中，`desman --help` 会列出它们。",
     "Your message is kept, but no model is ready to answer it. Add a key with `desman keys add PROVIDER` or set one up in `desman config`, then write again.": "你的消息已保存，但没有可用的模型来回答。请用 `desman keys add 提供商` 添加密钥，或在 `desman config` 中设置，然后再写一次。",
+    "That looked like an API key, so it was cut from your message: keys are never kept in the chat or sent to a model. Add a key with `desman keys add PROVIDER`.": "这看起来像 API 密钥，所以已从你的消息中删去：密钥从不保存在聊天中，也不会发送给模型。请用 `desman keys add 提供商` 添加密钥。",
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "任务 {ref} 因提供商限制暂停到 {until}。`desman resume {ref}` 可以继续。",
     "Task {ref} is {status}.": "任务 {ref}：{status}。",
     "The model could not retell the result; here it is as it is:": "模型无法复述结果；以下是原始结果：",

@@ -304,6 +304,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} waits for you.": "A tarefa {ref} espera por você.",
     "DESMAN commands cannot be run from the chat yet. In the terminal, `desman --help` lists them.": "Os comandos do DESMAN ainda não podem ser executados pelo chat. No terminal, `desman --help` os lista.",
     "Your message is kept, but no model is ready to answer it. Add a key with `desman keys add PROVIDER` or set one up in `desman config`, then write again.": "Sua mensagem foi guardada, mas nenhum modelo está pronto para respondê-la. Adicione uma chave com `desman keys add PROVEDOR` ou configure um em `desman config`, e escreva de novo.",
+    "That looked like an API key, so it was cut from your message: keys are never kept in the chat or sent to a model. Add a key with `desman keys add PROVIDER`.": "Isso parecia uma chave de API, por isso foi retirada da sua mensagem: chaves nunca são guardadas no chat nem enviadas a um modelo. Adicione uma chave com `desman keys add PROVEDOR`.",
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "A tarefa {ref} está pausada por um limite do provedor até {until}. `desman resume {ref}` a continua.",
     "Task {ref} is {status}.": "Tarefa {ref}: {status}.",
     "The model could not retell the result; here it is as it is:": "O modelo não conseguiu resumir o resultado; aqui está ele como é:",

@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 
 import click
+import httpx
 
 from desman import providers, ui
 from desman.agents import llm_executor, llm_reviewer
@@ -100,10 +101,11 @@ def executor_access(config: Config, *, stderr: bool = False) -> Access:
     return Access(policy, Role.EXECUTOR, switched_on(permissions.model_dump()))
 
 
-def web(config: Config, store: Store) -> Web:
+def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
     """The web tools' view of the config: the open sources, the engines the human set up (in
-    `providers.SEARCH` order), the cache."""
-    http = client()
+    `providers.SEARCH` order), the cache. The engines share `http`; a new client without it
+    (a one-task process), so a long-lived caller passes its own and closes it."""
+    http = client() if http is None else http
     engines: list[SearchEngine] = []
     for p in providers.search_engines(config):
         if p.id == "searxng":
@@ -120,6 +122,7 @@ def coordinator(
     config: Config,
     *,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    http: httpx.Client | None = None,
 ) -> Coordinator:
     return Coordinator(
         store,
@@ -132,5 +135,5 @@ def coordinator(
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
         decomposer=decomposer(models.llm),
         access=access,
-        tools=builtin_registry(web=web(config, store)),
+        tools=builtin_registry(web=web(config, store, http)),
     )

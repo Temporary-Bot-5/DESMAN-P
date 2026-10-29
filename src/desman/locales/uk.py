@@ -321,6 +321,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} waits for you.": "Задача {ref} чекає на вас.",
     "DESMAN commands cannot be run from the chat yet. In the terminal, `desman --help` lists them.": "Команди DESMAN із чату поки не запускаються. У терміналі їх список показує `desman --help`.",
     "Your message is kept, but no model is ready to answer it. Add a key with `desman keys add PROVIDER` or set one up in `desman config`, then write again.": "Повідомлення збережено, але відповісти на нього нікому: жодна модель не готова. Додайте ключ командою `desman keys add ПРОВАЙДЕР` або налаштуйте провайдера в `desman config` і напишіть знову.",
+    "That looked like an API key, so it was cut from your message: keys are never kept in the chat or sent to a model. Add a key with `desman keys add PROVIDER`.": "Це схоже на API-ключ, тому його вирізано з повідомлення: ключі не зберігаються в чаті й не надсилаються моделі. Додайте ключ командою `desman keys add ПРОВАЙДЕР`.",
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "Задачу {ref} призупинено лімітом провайдера до {until}. `desman resume {ref}` продовжить її.",
     "Task {ref} is {status}.": "Задача {ref}: {status}.",
     "The model could not retell the result; here it is as it is:": "Модель не змогла переказати результат; ось він як є:",

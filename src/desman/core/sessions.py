@@ -109,6 +109,23 @@ class Sessions:
         ).fetchall()
         return [Message.model_validate(dict(r)) for r in reversed(rows)]
 
+    def changed_tasks(self, session_id: str) -> list[str]:
+        """The session's tasks with audit entries newer than the last message about them: what
+        happened while the chat was not watching (`desman resume`, decisions in the terminal).
+        The messages are the marker, so a task is retold once for each change."""
+        rows = self.conn.execute(
+            """
+            SELECT t.id FROM tasks t
+            WHERE t.session_id = ?
+              AND (SELECT MAX(a.ts) FROM audit_log a WHERE a.task_id = t.id)
+                  > COALESCE((SELECT MAX(m.at) FROM messages m
+                              WHERE m.session_id = t.session_id AND m.task_id = t.id), '')
+            ORDER BY t.created_at, t.id
+            """,
+            (session_id,),
+        ).fetchall()
+        return [r["id"] for r in rows]
+
     def recent(self, limit: int = 20, offset: int = 0) -> list[SessionInfo]:
         """Sessions, the one written to last first; `offset` skips that many."""
         rows = self.conn.execute(

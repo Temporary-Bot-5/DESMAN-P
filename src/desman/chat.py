@@ -20,14 +20,16 @@ import json
 from collections.abc import Callable
 
 import click
+import httpx
 from rich.text import Text
 
-from desman import runs, ui
+from desman import providers, runs, ui
 from desman.config import Config, ConfigError, open_config
 from desman.core import db
-from desman.core.report import inbox, task_report
+from desman.core.report import TaskReport, inbox, task_report
+from desman.core.search import client
 from desman.core.sessions import Kind, Message, Role, Sessions
-from desman.core.states import TaskStatus
+from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
 from desman.interlocutor import Clarify, Interlocutor, NewTask, Reply, excerpt
@@ -63,31 +65,49 @@ class Chat:
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.read = read
         self.models: runs.Models | None = None
-        """Built at the first message that needs them (a key may be added meanwhile)."""
+        """Built at the first message that needs them, again when the config changes."""
+        self._models_for: Config | None = None
+        self._http: httpx.Client | None = None
+        """The web tools' client, shared by the session's tasks and closed with the chat."""
         latest = sessions.latest()
         self.session_id: str | None = latest.id if latest else None
 
     def run(self) -> None:
         self._greet()
-        while (line := self.read()) is not None:
-            command = line.strip()
-            if not command:
-                continue
-            if command.startswith("/"):
-                if not self._command(command):
-                    return
-                continue
-            self._message(line)  # kept as typed: indentation may matter (code, a list)
+        try:
+            while (line := self.read()) is not None:
+                command = line.strip()
+                if not command:
+                    continue
+                if command.startswith("/"):
+                    if not self._command(command):
+                        return
+                    continue
+                self._message(line)  # kept as typed: indentation may matter (code, a list)
+        finally:
+            if self._http is not None:
+                self._http.close()
 
     # ── Messages ─────────────────────────────────────────────────────────────
 
     def _message(self, text: str) -> None:
-        self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
         config = self._config()
+        text, cut = providers.redact_keys(text, config)
+        if cut:  # before anything keeps it: the history, a model, a task's goal
+            ui.warn(
+                t(
+                    "That looked like an API key, so it was cut from your message: keys are "
+                    "never kept in the chat or sent to a model. Add a key with `desman keys "
+                    "add PROVIDER`."
+                )
+            )
         models = None if config is None else self._models(config)
         if config is None or models is None:
+            self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
             return
         interlocutor = Interlocutor(models.llm, config.language)
+        self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
+        self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
         conversation = self.sessions.messages(self.session_id, last=HISTORY_MESSAGES)
         try:
             turn = interlocutor.turn(conversation)
@@ -124,9 +144,12 @@ class Chat:
             return None
 
     def _models(self, config: Config) -> runs.Models | None:
-        if self.models is None:
+        """The models for `config`: built anew when it changed (a key replaced meanwhile)."""
+        if self.models is None or config != self._models_for:
+            self.models, self._models_for = None, None
             try:
                 self.models = runs.models(config, self.sessions.conn)
+                self._models_for = config
             except router.NoProvider:
                 ui.warn(
                     t(
@@ -185,18 +208,32 @@ class Chat:
             task_id,
         )
         try:
-            result = runs.coordinator(self.store, models, config=config, access=access).run(task_id)
+            if self._http is None:
+                self._http = client()
+            runs.coordinator(self.store, models, config=config, access=access, http=self._http).run(
+                task_id
+            )
         except KeyboardInterrupt:
             self._event(
                 t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
             )
             return
-        self._outcome(task_id, ref, result.paused_until, interlocutor)
+        self._outcome(task_id, ref, interlocutor)
 
-    def _outcome(
-        self, task_id: str, ref: str, paused_until: str | None, interlocutor: Interlocutor
-    ) -> None:
+    def _catch_up(self, interlocutor: Interlocutor) -> None:
+        """Retell the session's tasks that changed while the chat was not watching them (a
+        `desman resume` or a decision in the terminal), once they have settled."""
+        if self.session_id is None:
+            return
+        for task_id in self.sessions.changed_tasks(self.session_id):
+            report = task_report(self.store, task_id)
+            if report.status is TaskStatus.ACTIVE and _paused_until(report) is None:
+                continue  # still moving (another terminal), or stopped: told when it settles
+            self._outcome(task_id, self.store.short_id(task_id), interlocutor)
+
+    def _outcome(self, task_id: str, ref: str, interlocutor: Interlocutor) -> None:
         report = task_report(self.store, task_id)
+        paused_until = _paused_until(report)
         waiting = [item for item in inbox(self.store) if item.task_id == task_id]
         if report.status is TaskStatus.DONE:
             self._event(t("Task {ref} is done.", ref=ref), task_id)
@@ -352,6 +389,21 @@ def _render(message: Message) -> Text:
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
         return Text(message.text, style="muted")
     return Text(message.text)
+
+
+def _paused_until(report: TaskReport) -> str | None:
+    """When the task can go on, if only paused work is left in it; otherwise None."""
+    if report.status is not TaskStatus.ACTIVE:
+        return None
+    moving = {SubtaskStatus.READY, SubtaskStatus.RUNNING, SubtaskStatus.REVIEW}
+    if any(s.status in moving for s in report.subtasks):
+        return None
+    pauses = [
+        s.paused_until
+        for s in report.subtasks
+        if s.status is SubtaskStatus.PAUSED and s.paused_until is not None
+    ]
+    return min(pauses) if pauses else None
 
 
 def _when(moment: str) -> str:

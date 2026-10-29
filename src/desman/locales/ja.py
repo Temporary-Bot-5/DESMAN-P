@@ -282,6 +282,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} waits for you.": "タスク {ref} はあなたの判断を待っています。",
     "DESMAN commands cannot be run from the chat yet. In the terminal, `desman --help` lists them.": "DESMAN のコマンドはまだチャットから実行できません。ターミナルでは `desman --help` が一覧を表示します。",
     "Your message is kept, but no model is ready to answer it. Add a key with `desman keys add PROVIDER` or set one up in `desman config`, then write again.": "メッセージは保存されましたが、応答できるモデルがありません。`desman keys add プロバイダー` でキーを追加するか、`desman config` で設定してから、もう一度書いてください。",
+    "That looked like an API key, so it was cut from your message: keys are never kept in the chat or sent to a model. Add a key with `desman keys add PROVIDER`.": "API キーのように見えたため、メッセージから取り除きました。キーはチャットに保存されず、モデルにも送られません。`desman keys add プロバイダー` でキーを追加してください。",
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "タスク {ref} はプロバイダーの制限により {until} まで一時停止中です。`desman resume {ref}` で再開できます。",
     "Task {ref} is {status}.": "タスク {ref}：{status}。",
     "The model could not retell the result; here it is as it is:": "モデルは結果を要約できませんでした。結果をそのまま示します：",
