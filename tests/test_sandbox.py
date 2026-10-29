@@ -18,7 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import FakeClock
-from desman import cli as cli_module
+from desman import runs as runs_module
 from desman.agents import llm_executor
 from desman.cli import EXIT_DONE, cli
 from desman.config import ConfigManager, default_config_path
@@ -359,7 +359,7 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
     ]
     script = tmp_path / "fake.json"
     script.write_text(json.dumps({"routes": routes}))
-    monkeypatch.setattr(cli_module, "Sandbox", missing)
+    monkeypatch.setattr(runs_module, "Sandbox", missing)
     warning = "shell_execution is on, but there is no sandbox to run commands in"
 
     def desman_run() -> str:

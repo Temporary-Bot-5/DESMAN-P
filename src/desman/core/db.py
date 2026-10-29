@@ -271,6 +271,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER messages_no_delete BEFORE DELETE ON messages
         BEGIN SELECT RAISE(ABORT, 'messages are append-only'); END;
     """,
+    # 10 — a task asked for in the chat (ROADMAP C.3) belongs to its session; NULL: `desman run`
+    """
+    ALTER TABLE tasks ADD COLUMN session_id TEXT REFERENCES sessions(id);
+    CREATE INDEX ix_tasks_session ON tasks (session_id);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

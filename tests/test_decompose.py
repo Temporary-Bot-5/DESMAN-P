@@ -85,6 +85,27 @@ def test_parts_take_over_the_subtasks_place(store: Store) -> None:
     assert check_history(store.conn, task_id) == []
 
 
+def test_the_final_result_is_the_last_subtasks_not_its_parts(store: Store) -> None:
+    """The chat retells `final_result` (ROADMAP C.3): a split last subtask's parts come after
+    it in order, but the result of the goal is the one it combines from them."""
+    task_id, _ = two_steps(store)
+    hard = store.claim("w")
+    assert hard is not None and hard.lease_token is not None
+    store.decompose(hard.id, hard.lease_token, [part("x"), part("y")])
+    for content in ({"x": 1}, {"y": 2}):
+        claimed = store.claim("w")
+        assert claimed is not None and claimed.lease_token is not None
+        store.submit(claimed.id, claimed.lease_token, content)
+        store.transition(claimed.id, S.REVIEW, S.DONE, Actor.REVIEWER)
+        assert store.final_result(task_id) is None  # the last subtask is not done yet
+    combined = store.claim("w")
+    assert combined is not None and combined.id == hard.id and combined.lease_token is not None
+    store.submit(hard.id, combined.lease_token, {"answer": 3})
+    assert store.final_result(task_id) is None  # under review: not accepted yet
+    store.transition(hard.id, S.REVIEW, S.DONE, Actor.REVIEWER)
+    assert store.final_result(task_id) == {"answer": 3}
+
+
 def test_only_one_level_and_at_least_two_parts(store: Store) -> None:
     two_steps(store)
     hard = store.claim("w")

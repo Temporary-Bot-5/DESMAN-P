@@ -56,7 +56,12 @@ src/desman/
 │                  #   ko, pl, tr, uk, hi)
 ├── info.py        # Banner / project info
 ├── chat.py        # The chat of bare `desman`: continues the last session; /help, /new,
-│                  #   /sessions, /exit; messages saved (the interlocutor answers from C.3)
+│                  #   /sessions, /exit; each message gets the interlocutor's turn; a task turn
+│                  #   runs a task of the session while the chat waits, then it is retold
+├── interlocutor.py # The interlocutor: Turn (reply | clarify | task | command), no tools;
+│                  #   retell() a task's outcome. Prompts "Chat turn", "Retell task"
+├── runs.py        # A run put together from the config (models, executor access, web tools,
+│                  #   coordinator), shared by `run`/`resume` and the chat
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently);

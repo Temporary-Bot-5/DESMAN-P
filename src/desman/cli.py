@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import json
 import sys
 import time
@@ -13,34 +12,25 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, i18n, providers, ui
-from desman.agents import llm_executor, llm_reviewer
+from desman import __version__, i18n, providers, runs, ui
 from desman.chat import Chat
-from desman.config import Config, ConfigError, open_config
+from desman.config import ConfigError, open_config
 from desman.config_cli import config, keys, language, load_config, run_wizard, usage
-from desman.core import calls, db
+from desman.core import db
 from desman.core.audit import AuditEntry, check_history, history
-from desman.core.coordinator import Coordinator, RunResult
+from desman.core.coordinator import RunResult
 from desman.core.models import Priority, TaskSpec
-from desman.core.owner import current_owner, owner_is_gone
-from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
+from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
-from desman.core.retry import strategy_for
-from desman.core.sandbox import Sandbox
-from desman.core.search import SearXNG, Tavily, client, open_sources
 from desman.core.sessions import Sessions
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
-from desman.core.tools import builtin_registry
-from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
 from desman.llm.base import LLM
-from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, ScriptExhausted
-from desman.llm.openai_compat import OpenAICompatible
-from desman.planner import Planned, decomposer, plan, template_plan
+from desman.planner import Planned, plan, template_plan
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -351,13 +341,13 @@ def run(
         store = Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
-    llm, other = _attach(llm, store, cache=not no_cache), _attach_other(other, store, no_cache)
+    models = _attach(llm, other, store, cache=not no_cache)
     try:
         planned: Planned | None = None
         if spec is None:
             assert goal is not None
             by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
-            planned = _plan(llm, goal, level, by_model=by_model, as_json=as_json)
+            planned = _plan(models.llm, goal, level, by_model=by_model, as_json=as_json)
             spec = planned.spec
         elif level is not None:
             spec = spec.model_copy(update={"priority": level})
@@ -373,7 +363,7 @@ def run(
                 )
             )
             sys.stdout.flush()  # visible before any work starts, even through a pipe
-        _drive(store, llm, other, access, task_id, wait, lease_seconds, as_json, details)
+        _drive(store, models, access, task_id, wait, lease_seconds, as_json, details)
     finally:
         store.conn.close()
 
@@ -403,10 +393,10 @@ def resume(
     llm, other = _provider(fake_script, provider_name, model, as_json)
     access = _executor_access(as_json)
     store = open_existing(db_path)
-    llm, other = _attach(llm, store, cache=not no_cache), _attach_other(other, store, no_cache)
+    models = _attach(llm, other, store, cache=not no_cache)
     try:
         task_id = _find(store, task)
-        _drive(store, llm, other, access, task_id, wait, lease_seconds, as_json)
+        _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
 
@@ -539,18 +529,15 @@ def _provider(
     return router.Backoff(llm), other
 
 
-def _attach(llm: LLM, store: Store, *, cache: bool) -> LLM:
-    """A real provider logs every call (`desman usage`) and keeps accepted replies (`llm.cache`)
-    in the task database. The fake does neither: its scripts count every call."""
-    client = llm.inner if isinstance(llm, router.Backoff) else llm
-    if not isinstance(client, OpenAICompatible):
-        return llm
-    client.on_call = calls.recorder(store.conn)
-    return Cached(llm, store.conn, client.model) if cache else llm
+def _attach(llm: LLM, other: LLM | None, store: Store, *, cache: bool) -> runs.Models:
+    return runs.Models(
+        runs.attach(llm, store.conn, cache=cache),
+        None if other is None else runs.attach(other, store.conn, cache=cache),
+    )
 
 
-def _attach_other(other: LLM | None, store: Store, no_cache: bool) -> LLM | None:
-    return None if other is None else _attach(other, store, cache=not no_cache)
+def _executor_access(as_json: bool) -> Access:
+    return runs.executor_access(load_config().load(), stderr=as_json)
 
 
 def _find(store: Store, task: str) -> str:
@@ -563,8 +550,7 @@ def _find(store: Store, task: str) -> str:
 
 def _drive(
     store: Store,
-    llm: LLM,
-    other: LLM | None,
+    models: runs.Models,
     access: Access,
     task_id: str,
     wait: bool,
@@ -572,18 +558,8 @@ def _drive(
     as_json: bool,
     plan_details: dict[str, Any] | None = None,
 ) -> None:
-    coordinator = Coordinator(
-        store,
-        llm_executor(llm, other),
-        llm_reviewer(llm),
-        owner=current_owner(),
-        lease_seconds=lease_seconds,
-        abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
-        # Without another provider, "other model" attempts are rephrased instead (and audited so).
-        strategies=functools.partial(strategy_for, other_model=other is not None),
-        decomposer=decomposer(llm),
-        access=access,
-        tools=builtin_registry(web=_web(load_config().load(), store)),
+    coordinator = runs.coordinator(
+        store, models, access, load_config().load(), lease_seconds=lease_seconds
     )
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)
@@ -608,51 +584,6 @@ def _drive(
                 )
             )
     raise SystemExit(_exit_code(report.status, paused=result.paused_until is not None))
-
-
-def _executor_access(as_json: bool) -> Access:
-    """What the executor's tools may do: the tool policy within the human's permissions."""
-    permissions = load_config().load().permissions
-    if permissions.admin_rights:  # at every run, not only when it was turned on
-        ui.warn(t("admin_rights is on: agents may act with elevated privileges."), stderr=as_json)
-    if permissions.shell_execution:
-        problem = Sandbox().unavailable()
-        if problem is not None:  # the switch alone would look like commands can run
-            ui.warn(
-                t(
-                    "shell_execution is on, but there is no sandbox to run commands in "
-                    "({reason}): run_command stays off.",
-                    reason=problem,
-                ),
-                stderr=as_json,
-            )
-    if permissions.network_access and not providers.search_engines(load_config().load()):
-        ui.warn(
-            t(
-                "network_access is on, but no engine for the whole web is set up: web_search "
-                "covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman "
-                "config`."
-            ),
-            stderr=as_json,
-        )
-    try:
-        policy = default_policy()
-    except PolicyError as e:
-        raise click.ClickException(t("Cannot use the tool policy: {error}", error=e)) from e
-    return Access(policy, Role.EXECUTOR, switched_on(permissions.model_dump()))
-
-
-def _web(config: Config, store: Store) -> Web:
-    """The web tools' view of the config: the open sources, the engines the human set up (in
-    `providers.SEARCH` order), the cache."""
-    http = client()
-    engines: list[SearchEngine] = []
-    for p in providers.search_engines(config):
-        if p.id == "searxng":
-            engines.append(SearXNG(config.settings["SEARXNG_URL"], http))
-        elif p.id == "tavily" and p.key_env is not None:
-            engines.append(Tavily([k.value for k in config.keys(p.key_env)], http))
-    return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 
 def _run_summary(result: RunResult) -> dict[str, Any]:

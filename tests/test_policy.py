@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner, Result
 from pydantic import BaseModel
 
-from desman import cli as cli_module
+from desman import runs as runs_module
 from desman.cli import EXIT_DONE, cli
 from desman.config import ConfigManager, Permissions, default_config_path
 from desman.core import db
@@ -214,7 +214,7 @@ def test_a_broken_policy_stops_the_run(tmp_path: Path, monkeypatch: pytest.Monke
     def broken() -> Policy:
         raise PolicyError("policy.toml: cannot read it (gone)")
 
-    monkeypatch.setattr(cli_module, "default_policy", broken)
+    monkeypatch.setattr(runs_module, "default_policy", broken)
     result = desman("run", "g", "--fake-llm", fake_script(tmp_path))
     assert result.exit_code == 1
     assert "Cannot use the tool policy: policy.toml: cannot read it (gone)" in result.output

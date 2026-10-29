@@ -198,7 +198,7 @@ def test_engines_come_from_the_config_in_order() -> None:
 
 
 def test_a_run_gets_the_open_sources_and_the_engines_set_up(store: Store) -> None:
-    from desman.cli import _web
+    from desman.runs import web as _web
 
     bare = _web(make_config(), store)
     assert bare.engines == [] and set(bare.sources) == {
