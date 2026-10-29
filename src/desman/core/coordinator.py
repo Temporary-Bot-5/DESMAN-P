@@ -12,7 +12,8 @@ is a provider pause; by default the coordinator returns instead of sleeping thro
 
 Executor and reviewer are plain callables, so the loop is tested with scripted fakes and later
 driven by real LLM-backed agents. An executor acts on nothing itself: it asks for tool calls
-through `Work.tools` (core/tools.py), which checks, guards and audits each one.
+through `Work.tools` (core/tools.py), which checks, guards, audits and journals each one, so
+that a rerun of an interrupted execution does not repeat them (core/effects.py).
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from desman.core import db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
+from desman.core.effects import Effects
 from desman.core.models import Subtask, SubtaskSpec
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, RetryPolicy, Strategies, Strategy, strategy_for
@@ -241,10 +243,16 @@ class Coordinator:
     def _execute(self, subtask: Subtask, events: list[str]) -> None:
         lease = subtask.lease_token
         assert lease is not None
+        journal = Effects(self.store, subtask.id, lease)  # a rerun replays, never repeats
 
         def heartbeat(checkpoint: dict[str, Any] | None = None) -> None:
             self.store.heartbeat(
-                subtask.id, lease, lease_seconds=self.lease_seconds, checkpoint=checkpoint
+                subtask.id,
+                lease,
+                lease_seconds=self.lease_seconds,
+                checkpoint=checkpoint,
+                # A run resuming from the checkpoint skips the calls before it: so does the replay.
+                effects=None if checkpoint is None else journal.position,
             )
 
         outcome: Outcome
@@ -267,7 +275,7 @@ class Coordinator:
                 subtask=subtask,
                 context=context,
                 heartbeat=heartbeat,
-                tools=self._toolbox(subtask, heartbeat),
+                tools=self._toolbox(subtask, journal, heartbeat),
             )
             if strategy is Strategy.DECOMPOSE:
                 if self._decompose(work, lease, events):
@@ -319,7 +327,10 @@ class Coordinator:
             self._discard(subtask, f"lease lost before {type(outcome).__name__.lower()}", events)
 
     def _toolbox(
-        self, subtask: Subtask, heartbeat: Callable[[dict[str, Any] | None], None]
+        self,
+        subtask: Subtask,
+        journal: Effects,
+        heartbeat: Callable[[dict[str, Any] | None], None],
     ) -> Toolbox:
         def record(action: str, details: dict[str, Any]) -> None:
             self.store.note(subtask.id, Actor.EXECUTOR, action, details)
@@ -330,6 +341,7 @@ class Coordinator:
             access=self.access,
             record=record,
             guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
+            journal=journal,
         )
 
     def _started(self, subtask: Subtask, context: Context) -> None:

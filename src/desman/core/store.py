@@ -28,6 +28,10 @@ from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, deriv
 from desman.core.states import transition as check_transition
 
 S = SubtaskStatus
+
+_EXECUTION_ENDED = """actor = 'executor' AND from_status = 'running'
+    AND (action IN ('submit', 'decomposed') OR json_extract(details_json, '$.failure') = 'quality')"""
+"""SQL condition on audit_log: the entry ended an execution with something to judge."""
 Clock = Callable[[], datetime]
 
 DEFAULT_LEASE_SECONDS = 300
@@ -593,8 +597,10 @@ class Store:
         *,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         checkpoint: dict[str, Any] | None = None,
+        effects: int | None = None,
     ) -> Subtask:
-        """Extend the lease and, optionally, save a checkpoint in the same update.
+        """Extend the lease and, optionally, save a checkpoint in the same update. `effects` is
+        how many tool calls the execution's journal had at the checkpoint (`effect_cursor`).
 
         Works while the claim is still this executor's (token matches), even if the deadline has
         just passed and nobody has requeued the subtask yet. Once it was requeued or reclaimed,
@@ -625,7 +631,11 @@ class Store:
                     Actor.EXECUTOR,
                     "checkpoint",
                     subtask=subtask,
-                    details={"owner": subtask.lease_owner, "checkpoint": checkpoint},
+                    details={
+                        "owner": subtask.lease_owner,
+                        "checkpoint": checkpoint,
+                        **({} if effects is None else {"effects": effects}),
+                    },
                 )
         return subtask
 
@@ -746,6 +756,114 @@ class Store:
         """Scheduler housekeeping: (requeued or escalated expired leases, resumed pauses)."""
         recovered = self.recover_expired(policy, task_id=task_id, abandoned=abandoned)
         return recovered, self.resume_due(task_id=task_id)
+
+    # ── Side effects (core/effects.py) ───────────────────────────────────────
+
+    def executions(self, subtask_id: str) -> int:
+        """How many executions of the subtask have ended with something to judge: a result, a
+        split or a quality failure. An interrupted one (crash, lost lease, provider error,
+        limits) has not ended: the next run continues it, so its effects are replayed."""
+        row = self.conn.execute(
+            f"SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND {_EXECUTION_ENDED}",
+            (subtask_id,),
+        ).fetchone()
+        count: int = row[0]
+        return count
+
+    def effect_cursor(self, subtask_id: str) -> int:
+        """Where the current execution's journal resumes: the number of calls it had at the
+        latest checkpoint of this execution (0 without one). The executor resumes from that
+        checkpoint and skips those calls, so the replay must skip them too."""
+        row = self.conn.execute(
+            f"""SELECT json_extract(details_json, '$.effects') FROM audit_log
+                WHERE subtask_id = :id AND action = 'checkpoint'
+                  AND seq > (SELECT COALESCE(MAX(seq), 0) FROM audit_log
+                             WHERE subtask_id = :id AND {_EXECUTION_ENDED})
+                ORDER BY seq DESC LIMIT 1""",
+            {"id": subtask_id},
+        ).fetchone()
+        cursor: int = row[0] if row is not None and row[0] is not None else 0
+        return cursor
+
+    def effects(self, subtask_id: str, execution: int) -> list[sqlite3.Row]:
+        """The journal of one execution, in call order."""
+        return self.conn.execute(
+            "SELECT * FROM effects WHERE subtask_id = ? AND execution = ? ORDER BY ordinal",
+            (subtask_id, execution),
+        ).fetchall()
+
+    def start_effect(
+        self, subtask_id: str, lease: str, execution: int, ordinal: int, tool: str, key: str
+    ) -> None:
+        """Record the intent to make call `ordinal` while the lease is still held. The calls the
+        journal had from `ordinal` on belonged to a run that went differently: they are dropped
+        (the audit keeps them)."""
+        with db.transaction(self.conn):
+            self._hold(subtask_id, lease)
+            self.conn.execute(
+                "DELETE FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal >= ?",
+                (subtask_id, execution, ordinal),
+            )
+            self.conn.execute(
+                """INSERT INTO effects (subtask_id, execution, ordinal, tool, key, lease_token,
+                                        state, started_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'started', ?)""",
+                (subtask_id, execution, ordinal, tool, key, lease, self._now()),
+            )
+
+    def adopt_effect(self, subtask_id: str, lease: str, execution: int, ordinal: int) -> None:
+        """Take over an interrupted call to run it again (the tool says that is safe)."""
+        with db.transaction(self.conn):
+            self._hold(subtask_id, lease)
+            self.conn.execute(
+                """UPDATE effects SET lease_token = ?, started_at = ?
+                   WHERE subtask_id = ? AND execution = ? AND ordinal = ? AND state = 'started'""",
+                (lease, self._now(), subtask_id, execution, ordinal),
+            )
+
+    def finish_effect(
+        self,
+        subtask_id: str,
+        lease: str,
+        execution: int,
+        ordinal: int,
+        result: dict[str, Any],
+        *,
+        interrupted: bool = False,
+    ) -> bool:
+        """Record what a started call returned. Not the lease's call any more (it was taken
+        over after the lease was lost): nothing changes and False is returned.
+
+        With `interrupted`, `lease` is the new holder's and the call is one an earlier run
+        started and never finished: `result` is what replays of it will return from now on."""
+        with db.transaction(self.conn):
+            if interrupted:
+                self._hold(subtask_id, lease)
+            row = self.conn.execute(
+                f"""UPDATE effects SET state = ?, result_json = ?, finished_at = ?
+                    WHERE subtask_id = ? AND execution = ? AND ordinal = ? AND state = 'started'
+                      {"" if interrupted else "AND lease_token = ?"}
+                    RETURNING 1""",
+                (
+                    "interrupted" if interrupted else "done",
+                    json.dumps(result, ensure_ascii=False),
+                    self._now(),
+                    subtask_id,
+                    execution,
+                    ordinal,
+                    *(() if interrupted else (lease,)),
+                ),
+            ).fetchone()
+        return row is not None
+
+    def _hold(self, subtask_id: str, lease: str) -> None:
+        """Raise StaleStateError unless `lease` still holds the subtask. Needs a transaction."""
+        held = self.conn.execute(
+            "SELECT 1 FROM subtasks WHERE id = ? AND status = 'running' AND lease_token = ?",
+            (subtask_id, lease),
+        ).fetchone()
+        if held is None:
+            self._raise_stale(subtask_id, S.RUNNING, S.RUNNING, lease, self._now())
 
     def _apply(
         self,

@@ -13,7 +13,9 @@ subtask's `Toolbox`, which
   effects (StaleStateError propagates, the coordinator discards the work);
 - records every call in the audit, with long arguments cut short; arguments a tool declares
   `private` (file contents) are recorded only by their size, since a workspace file may hold a
-  secret and the history is shown to anyone who looks at the task.
+  secret and the history is shown to anyone who looks at the task;
+- writes each call to its `Journal` (core/effects.py) before running it and its result after,
+  so a rerun of an interrupted execution gets the results back instead of acting twice (D6).
 
 A call that is the model's mistake (unknown tool, bad arguments, a path outside the workspace,
 a missing file) comes back as a failed `ToolResult` the model can read and correct, not as an
@@ -28,7 +30,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Annotated, Any, Final, Generic, TypeVar
+from typing import Annotated, Any, Final, Generic, Protocol, TypeVar
 
 from pydantic import (
     AfterValidator,
@@ -96,6 +98,10 @@ class Tool(Generic[A]):
     ready: Callable[[], str | None] = lambda: None
     """Why the tool cannot run on this machine (e.g. no sandbox), or None. A tool that is not
     ready is neither offered nor run, whatever the policy allows."""
+    repeatable: bool = False
+    """Running it again with the same arguments is harmless (reading, an atomic file write): a
+    call interrupted before its result was recorded is simply run again. Otherwise the model is
+    told the call was interrupted and its effects are unknown."""
 
     def spec(self) -> dict[str, Any]:
         """How the tool is shown to a model."""
@@ -140,6 +146,26 @@ Record = Callable[[str, dict[str, Any]], None]
 """Writes an audit entry for the subtask: (action, details)."""
 
 
+@dataclass(frozen=True)
+class Replayed:
+    result: ToolResult
+    interrupted: bool = False
+    """The call was started by an earlier run and never finished: it was not run again."""
+
+
+class Journal(Protocol):
+    """Where a Toolbox records its calls (core/effects.py)."""
+
+    def begin(self, tool: Tool[Any], args: BaseModel) -> Replayed | None:
+        """Before running a call: what to return instead of running it, or None to run it
+        (the intent is then recorded). Raises StaleStateError if the lease is lost."""
+        ...
+
+    def finish(self, result: ToolResult) -> None:
+        """After the call `begin` let run: its result, for replays."""
+        ...
+
+
 class Toolbox:
     """The tools one subtask may use, bound to its workspace, lease and audit."""
 
@@ -151,6 +177,7 @@ class Toolbox:
         access: Access | None = None,
         record: Record = lambda action, details: None,
         guard: Callable[[], None] = lambda: None,
+        journal: Journal | None = None,
     ) -> None:
         self.workspace = workspace
         self.registry = registry if registry is not None else builtin_registry()
@@ -159,6 +186,8 @@ class Toolbox:
         self.record = record
         self.guard = guard
         """Raises StaleStateError when the lease is lost: nothing runs after that."""
+        self.journal = journal
+        """None: effects are not journaled (a toolbox outside an execution, e.g. in tests)."""
 
     def available(self) -> list[Tool[Any]]:
         return [tool for tool in self.registry if self._refusal(tool) is None]
@@ -195,6 +224,14 @@ class Toolbox:
         self.guard()
         if tool.permission is Permission.ADMIN:
             summary["elevated"] = True  # admin_rights is on: every such action stands out
+        journal = self.journal
+        if journal is not None:
+            replayed = journal.begin(tool, args)
+            if replayed is not None:
+                if replayed.interrupted:
+                    summary["interrupted"] = True
+                self.record("tool_replayed", {**summary, "ok": replayed.result.ok})
+                return replayed.result
         try:
             output = tool.run(args, self.workspace)
         except (
@@ -204,13 +241,18 @@ class Toolbox:
             NotADirectoryError,
             IsADirectoryError,
         ) as e:
-            return self._failed(summary, f"{type(e).__name__}: {e}")
+            result = self._failed(summary, f"{type(e).__name__}: {e}")
         except Exception as e:
-            # Not the model's mistake, but the attempted call must stay in the history.
+            # Not the model's mistake, but the attempted call must stay in the history. The
+            # journal keeps it as started: a rerun learns it was interrupted.
             self.record("tool_called", {**summary, "ok": False, "crashed": type(e).__name__})
             raise
-        self.record("tool_called", {**summary, "ok": True})
-        return ToolResult(ok=True, output=output)
+        else:
+            self.record("tool_called", {**summary, "ok": True})
+            result = ToolResult(ok=True, output=output)
+        if journal is not None:
+            journal.finish(result)
+        return result
 
     def _failed(self, summary: dict[str, Any], error: str) -> ToolResult:
         error = error[:MAX_ERROR_CHARS]
@@ -311,6 +353,7 @@ READ_FILE: Final = Tool(
     args=ReadFileArgs,
     permission=Permission.WORKSPACE,
     run=_read_file,
+    repeatable=True,
 )
 WRITE_FILE: Final = Tool(
     name="write_file",
@@ -320,6 +363,7 @@ WRITE_FILE: Final = Tool(
     permission=Permission.WORKSPACE,
     run=_write_file,
     private=frozenset({"content"}),
+    repeatable=True,  # the file is replaced atomically, with the same content
 )
 LIST_FILES: Final = Tool(
     name="list_files",
@@ -328,6 +372,7 @@ LIST_FILES: Final = Tool(
     args=ListFilesArgs,
     permission=Permission.WORKSPACE,
     run=_list_files,
+    repeatable=True,
 )
 
 
