@@ -6,8 +6,8 @@ subtask's `Toolbox`, which
 
 - knows only the tools of its `Registry`; each tool declares a schema for its arguments (a
   Pydantic model, checked before the tool runs) and the permission it needs;
-- refuses a tool whose permission was not granted (3.2 decides what is granted; until then only
-  the task's own workspace is);
+- offers and runs only what its `Access` allows (core/policy.py: the tool policy of the role,
+  bounded by the human's permissions), and records every refusal;
 - checks the subtask's lease before running anything, so work whose lease was lost has no more
   effects (StaleStateError propagates, the coordinator discards the work);
 - records every call in the audit, with long arguments cut short (file contents are not copied
@@ -25,12 +25,14 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Annotated, Any, Final, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
+from desman.core.policy import Access, Permission, executor_access
 from desman.core.workspace import PathEscapeError, Workspace
+
+__all__ = ["Access", "Permission"]  # re-exported: tools are declared with a Permission
 
 A = TypeVar("A", bound=BaseModel)
 
@@ -43,18 +45,6 @@ AUDIT_TEXT: Final = 200
 """Characters of a string argument kept in the audit."""
 MAX_ERROR_CHARS: Final = 500
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
-
-
-class Permission(StrEnum):
-    """What a tool needs. The values are the human's switches in config.json (`permissions`),
-    which are the upper bound of what may be granted (3.2)."""
-
-    WORKSPACE = "workspace"
-    """The task's own directory: always granted."""
-    NETWORK = "network_access"
-    SHELL = "shell_execution"
-    FS_OUTSIDE = "fs_outside_access"
-    ADMIN = "admin_rights"
 
 
 class ToolCall(BaseModel):
@@ -138,19 +128,20 @@ class Toolbox:
         workspace: Workspace,
         registry: Registry | None = None,
         *,
-        granted: Iterable[Permission] = (),
+        access: Access | None = None,
         record: Record = lambda action, details: None,
         guard: Callable[[], None] = lambda: None,
     ) -> None:
         self.workspace = workspace
         self.registry = registry if registry is not None else builtin_registry()
-        self.granted = frozenset(granted) | {Permission.WORKSPACE}
+        self.access = access if access is not None else executor_access()
+        """The shipped policy for the executor, no switches on, by default."""
         self.record = record
         self.guard = guard
         """Raises StaleStateError when the lease is lost: nothing runs after that."""
 
     def available(self) -> list[Tool[Any]]:
-        return [tool for tool in self.registry if tool.permission in self.granted]
+        return [tool for tool in self.registry if self.access.refusal(tool) is None]
 
     def specs(self) -> list[dict[str, Any]]:
         """The tools to offer a model: only those it may use."""
@@ -161,14 +152,13 @@ class Toolbox:
         summary = {"tool": call.tool, "args": summarize(call.args)}
         if tool is None:
             return self._failed(summary, f"unknown tool {call.tool!r}; available: {self._names()}")
-        if tool.permission not in self.granted:
+        if tool.permission is not Permission.WORKSPACE:
+            summary["permission"] = tool.permission.value
+        refusal = self.access.refusal(tool)
+        if refusal is not None:
             # Never offered to the model, so asking for it is worth a separate entry.
-            self.record("tool_refused", {**summary, "permission": tool.permission.value})
-            return ToolResult(
-                ok=False,
-                error=f"tool {call.tool!r} needs permission {tool.permission.value!r}, "
-                "which is not granted",
-            )
+            self.record("tool_refused", {**summary, "reason": refusal})
+            return ToolResult(ok=False, error=f"refused: {refusal}")
         try:
             args = tool.args.model_validate(call.args)
         except ValidationError as e:
@@ -184,6 +174,8 @@ class Toolbox:
             IsADirectoryError,
         ) as e:
             return self._failed(summary, f"{type(e).__name__}: {e}")
+        if tool.permission is Permission.ADMIN:
+            summary["elevated"] = True  # admin_rights is on: every such action stands out
         self.record("tool_called", {**summary, "ok": True})
         return ToolResult(ok=True, output=output)
 

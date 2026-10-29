@@ -22,6 +22,7 @@ from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import Coordinator, RunResult
 from desman.core.models import Priority, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
+from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.retry import strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
@@ -329,6 +330,7 @@ def run(
     spec = _load_spec(spec_path) if spec_path is not None else None
     level = None if priority is None else int(Priority[priority.upper()])
     llm, other = _provider(fake_script, provider_name, model, as_json)  # fail fast
+    access = _executor_access(as_json)
     path = db_path or db.default_db_path()
     try:
         store = Store(db.open_db(path))
@@ -356,7 +358,7 @@ def run(
                 )
             )
             sys.stdout.flush()  # visible before any work starts, even through a pipe
-        _drive(store, llm, other, task_id, wait, lease_seconds, as_json, details)
+        _drive(store, llm, other, access, task_id, wait, lease_seconds, as_json, details)
     finally:
         store.conn.close()
 
@@ -384,11 +386,12 @@ def resume(
     `run`.
     """
     llm, other = _provider(fake_script, provider_name, model, as_json)
+    access = _executor_access(as_json)
     store = open_existing(db_path)
     llm, other = _attach(llm, store, cache=not no_cache), _attach_other(other, store, no_cache)
     try:
         task_id = _find(store, task)
-        _drive(store, llm, other, task_id, wait, lease_seconds, as_json)
+        _drive(store, llm, other, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
 
@@ -547,6 +550,7 @@ def _drive(
     store: Store,
     llm: LLM,
     other: LLM | None,
+    access: Access,
     task_id: str,
     wait: bool,
     lease_seconds: int,
@@ -563,6 +567,7 @@ def _drive(
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=other is not None),
         decomposer=decomposer(llm),
+        access=access,
     )
     try:
         result = coordinator.run(task_id, wait_for_pauses=wait)
@@ -587,6 +592,18 @@ def _drive(
                 )
             )
     raise SystemExit(_exit_code(report.status, paused=result.paused_until is not None))
+
+
+def _executor_access(as_json: bool) -> Access:
+    """What the executor's tools may do: the tool policy within the human's permissions."""
+    permissions = load_config().load().permissions
+    if permissions.admin_rights:  # at every run, not only when it was turned on
+        ui.warn(t("admin_rights is on: agents may act with elevated privileges."), stderr=as_json)
+    try:
+        policy = default_policy()
+    except PolicyError as e:
+        raise click.ClickException(t("Cannot use the tool policy: {error}", error=e)) from e
+    return Access(policy, Role.EXECUTOR, switched_on(permissions.model_dump()))
 
 
 def _run_summary(result: RunResult) -> dict[str, Any]:

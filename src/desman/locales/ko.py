@@ -66,6 +66,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {id} created ({n} subtask)": ("작업 {id}을(를) 만들었습니다 (하위 작업 {n}개)",),
     "GOAL is empty": "GOAL이 비어 있습니다",
     "{path}: not a valid task spec:\n{error}": "{path}: 올바른 작업 명세가 아닙니다:\n{error}",
+    "Cannot use the tool policy: {error}": "도구 정책을 사용할 수 없습니다: {error}",
     "--fake-llm replaces the provider: drop --provider/--model": "--fake-llm은 공급자를 대신합니다: --provider/--model을 빼세요",
     "{path}: not a valid fake LLM script:\n{error}": "{path}: 올바른 가짜 LLM 스크립트가 아닙니다:\n{error}",
     "Using {provider} · {model} ({n} key)": ("{provider} · {model} 사용 중 (키 {n}개)",),

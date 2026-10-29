@@ -16,11 +16,13 @@ from desman.core.audit import check_history
 from desman.core.context import build_context
 from desman.core.coordinator import Coordinator, Failure, Review, Success, Verdict, Work
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
+from desman.core.policy import Policy, Role, RolePolicy
 from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
 from desman.core.store import StaleStateError, Store
 from desman.core.tools import (
     AUDIT_TEXT,
+    Access,
     Permission,
     Registry,
     Tool,
@@ -93,18 +95,20 @@ def test_a_spec_declares_the_argument_schema() -> None:
 def test_only_granted_tools_are_offered_and_run(ws: Workspace) -> None:
     ran: list[str] = []
     registry = Registry([*builtin_registry(), fetch_tool(ran)])
+    policy = Policy(roles={Role.EXECUTOR: RolePolicy(tools=[*registry.names])})
     record = Recorder()
-    box = Toolbox(ws, registry, record=record)
+    box = Toolbox(ws, registry, access=Access(policy, Role.EXECUTOR), record=record)
     assert [s["name"] for s in box.specs()] == ["read_file", "write_file", "list_files"]
 
     refused = box.call(call("fetch"))
     assert not refused.ok and refused.error is not None and "network_access" in refused.error
     assert ran == []
-    assert record.entries == [
-        ("tool_refused", {"tool": "fetch", "args": {}, "permission": "network_access"})
-    ]
+    [(action, details)] = record.entries
+    assert action == "tool_refused"
+    assert details["permission"] == "network_access" and "not turned on" in details["reason"]
 
-    granted = Toolbox(ws, registry, granted=[Permission.NETWORK])
+    access = Access(policy, Role.EXECUTOR, [Permission.NETWORK])
+    granted = Toolbox(ws, registry, access=access)
     assert "fetch" in [s["name"] for s in granted.specs()]
     assert granted.call(call("fetch")).ok and ran == ["fetch"]
 

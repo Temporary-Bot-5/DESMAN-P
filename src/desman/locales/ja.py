@@ -66,6 +66,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {id} created ({n} subtask)": ("タスク {id} を作成しました（サブタスク {n} 件）",),
     "GOAL is empty": "GOAL が空です",
     "{path}: not a valid task spec:\n{error}": "{path}: 有効なタスク仕様ではありません:\n{error}",
+    "Cannot use the tool policy: {error}": "ツールポリシーを使用できません: {error}",
     "--fake-llm replaces the provider: drop --provider/--model": "--fake-llm はプロバイダーの代わりになります: --provider/--model を外してください",
     "{path}: not a valid fake LLM script:\n{error}": "{path}: 有効な偽 LLM スクリプトではありません:\n{error}",
     "Using {provider} · {model} ({n} key)": ("{provider} · {model} を使用中（キー {n} 個）",),

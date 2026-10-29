@@ -90,8 +90,9 @@ def ok(text: str) -> None:
     out(Text("✓ ", style="good") + Text(text))
 
 
-def warn(text: str) -> None:
-    out(Text("! ", style="bold warn") + Text(text, style="warn"))
+def warn(text: str, *, stderr: bool = False) -> None:
+    """`stderr` keeps stdout clean for machine output (`--json`)."""
+    console(stderr).print(Text("! ", style="bold warn") + Text(text, style="warn"))
 
 
 def error(text: str) -> None:

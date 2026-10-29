@@ -70,6 +70,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "GOAL is empty": "GOAL खाली है",
     "{path}: not a valid task spec:\n{error}": "{path}: मान्य कार्य विवरण नहीं है:\n{error}",
+    "Cannot use the tool policy: {error}": "टूल नीति का उपयोग नहीं किया जा सकता: {error}",
     "--fake-llm replaces the provider: drop --provider/--model": "--fake-llm प्रदाता की जगह लेता है: --provider/--model हटाएँ",
     "{path}: not a valid fake LLM script:\n{error}": "{path}: मान्य नकली LLM स्क्रिप्ट नहीं है:\n{error}",
     "Using {provider} · {model} ({n} key)": (

@@ -176,6 +176,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "GOAL is empty": "GOAL пустая",
     "{path}: not a valid task spec:\n{error}": "{path}: это не описание задачи:\n{error}",
+    "Cannot use the tool policy: {error}": "Не удаётся использовать политику инструментов: {error}",
     "--fake-llm replaces the provider: drop --provider/--model": (
         "--fake-llm заменяет провайдера: уберите --provider/--model"
     ),
