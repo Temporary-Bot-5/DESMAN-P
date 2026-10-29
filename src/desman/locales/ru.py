@@ -481,6 +481,7 @@ MESSAGES: dict[str, Forms] = {
     "admin_rights is on: agents may act with elevated privileges.": (
         "admin_rights включён: агенты могут действовать с повышенными правами."
     ),
+    "shell_execution is on, but there is no sandbox to run commands in ({reason}): run_command stays off.": "shell_execution включён, но песочницы для запуска команд нет ({reason}): run_command остаётся выключенным.",
     "Configuration saved to {path}": "Настройки сохранены в {path}",
     'Next: `desman config show` to review, `desman run "..."` to start.': (
         'Дальше: `desman config show` — проверить, `desman run "..."` — запустить.'

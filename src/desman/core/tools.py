@@ -7,7 +7,8 @@ subtask's `Toolbox`, which
 - knows only the tools of its `Registry`; each tool declares a schema for its arguments (a
   Pydantic model, checked before the tool runs) and the permission it needs;
 - offers and runs only what its `Access` allows (core/policy.py: the tool policy of the role,
-  bounded by the human's permissions), and records every refusal;
+  bounded by the human's permissions) and what can run here (`Tool.ready`: `run_command`
+  needs a working sandbox), and records every refusal;
 - checks the subtask's lease before running anything, so work whose lease was lost has no more
   effects (StaleStateError propagates, the coordinator discards the work);
 - records every call in the audit, with long arguments cut short; arguments a tool declares
@@ -29,9 +30,17 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Annotated, Any, Final, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+)
 
 from desman.core.policy import Access, Permission, executor_access
+from desman.core.sandbox import Limits, Sandbox
 from desman.core.workspace import PathEscapeError, Workspace
 
 __all__ = ["Access", "Permission"]  # re-exported: tools are declared with a Permission
@@ -46,6 +55,10 @@ MAX_LISTED_FILES: Final = 500
 AUDIT_TEXT: Final = 200
 """Characters of a string argument kept in the audit."""
 MAX_ERROR_CHARS: Final = 500
+MAX_RUN_SECONDS: Final = int(Limits().timeout)
+"""Longest `run_command`: well inside a lease (the lease is renewed just before the call)."""
+MAX_COMMAND_ARGS: Final = 64
+MAX_COMMAND_ARG_CHARS: Final = 100_000
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
@@ -80,6 +93,9 @@ class Tool(Generic[A]):
     IsADirectoryError or ToolError for a call that is the caller's mistake."""
     private: frozenset[str] = frozenset()
     """Arguments kept out of the audit (only their size is recorded)."""
+    ready: Callable[[], str | None] = lambda: None
+    """Why the tool cannot run on this machine (e.g. no sandbox), or None. A tool that is not
+    ready is neither offered nor run, whatever the policy allows."""
 
     def spec(self) -> dict[str, Any]:
         """How the tool is shown to a model."""
@@ -145,7 +161,15 @@ class Toolbox:
         """Raises StaleStateError when the lease is lost: nothing runs after that."""
 
     def available(self) -> list[Tool[Any]]:
-        return [tool for tool in self.registry if self.access.refusal(tool) is None]
+        return [tool for tool in self.registry if self._refusal(tool) is None]
+
+    def _refusal(self, tool: Tool[Any]) -> str | None:
+        refusal = self.access.refusal(tool)
+        if refusal is None:
+            problem = tool.ready()  # only asked for tools the role may use: it may cost a probe
+            if problem is not None:
+                refusal = f"{tool.name!r} cannot run here: {problem}"
+        return refusal
 
     def specs(self) -> list[dict[str, Any]]:
         """The tools to offer a model: only those it may use."""
@@ -159,7 +183,7 @@ class Toolbox:
             return self._failed(summary, f"unknown tool {call.tool!r}; available: {self._names()}")
         if tool.permission is not Permission.WORKSPACE:
             summary["permission"] = tool.permission.value
-        refusal = self.access.refusal(tool)
+        refusal = self._refusal(tool)
         if refusal is not None:
             # Never offered to the model, so asking for it is worth a separate entry.
             self.record("tool_refused", {**summary, "reason": refusal})
@@ -307,6 +331,75 @@ LIST_FILES: Final = Tool(
 )
 
 
-def builtin_registry() -> Registry:
-    """The tools every DESMAN has. A new registry each time: registering is not global."""
-    return Registry([READ_FILE, WRITE_FILE, LIST_FILES])
+# ── Running code: only in the sandbox ───────────────────────────────────────
+
+
+def _no_nul(value: str) -> str:
+    if "\0" in value:
+        raise ValueError("NUL characters are not allowed")
+    return value
+
+
+CommandArg = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=MAX_COMMAND_ARG_CHARS),
+    AfterValidator(_no_nul),
+]
+
+
+class RunCommandArgs(_Args):
+    command: list[CommandArg] = Field(
+        min_length=1,
+        max_length=MAX_COMMAND_ARGS,
+        description='Program and its arguments, not a shell line: ["python3", "main.py"]. '
+        'For pipes or redirection, run ["sh", "-c", "..."].',
+    )
+    stdin: Annotated[str, AfterValidator(_no_nul)] = Field(
+        default="", max_length=MAX_WRITE_CHARS, description="Text given to the program's input."
+    )
+    timeout: int = Field(
+        default=30, ge=1, le=MAX_RUN_SECONDS, description="Seconds before it is killed."
+    )
+
+
+def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
+    def run(args: RunCommandArgs, workspace: Workspace) -> dict[str, Any]:
+        outcome = sandbox.run(args.command, workspace.root, stdin=args.stdin, timeout=args.timeout)
+        result: dict[str, Any] = {
+            "exit_code": outcome.exit_code,
+            "stdout": outcome.stdout,
+            "stderr": outcome.stderr,
+        }
+        for flag in ("timed_out", "stdout_cut", "stderr_cut"):
+            if getattr(outcome, flag):
+                result[flag] = True
+        return result
+
+    return Tool(
+        name="run_command",
+        description="Run a program in an isolated sandbox: the task's workspace is the "
+        "working directory (/workspace, writable; files written there stay for later subtasks), "
+        "the system's programs (python3, sh, ...) are read-only, there is no network and no "
+        "other files. Time, memory, file size and processes are limited. Returns {exit_code, "
+        "stdout, stderr}; timed_out: true when it was killed (exit_code null), stdout_cut / "
+        "stderr_cut when output was cut (the start of stdout and the end of stderr are kept). "
+        "An exit code of 128+N means killed by signal N.",
+        args=RunCommandArgs,
+        permission=Permission.SHELL,
+        run=run,
+        private=frozenset({"stdin"}),
+        ready=sandbox.unavailable,
+    )
+
+
+def builtin_registry(sandbox: Sandbox | None = None) -> Registry:
+    """The tools every DESMAN has. A new registry each time: registering is not global.
+    Whether the sandbox works is checked only when `run_command` may be used."""
+    return Registry(
+        [
+            READ_FILE,
+            WRITE_FILE,
+            LIST_FILES,
+            run_command_tool(sandbox if sandbox is not None else Sandbox()),
+        ]
+    )

@@ -79,6 +79,8 @@ src/desman/
     │              #   tools; Toolbox per subtask (only allowed tools, lease guard, audit)
     ├── policy.py  # Access = role's tools in `src/desman/policy.toml` ∩ human's `permissions`;
     │              #   refusals audited (tool_refused), admin calls marked elevated
+    ├── sandbox.py # Generated code runs only under bwrap: no network, only /usr (read-only) and
+    │              #   the workspace, cleared env, rlimits, timeout; unavailable → nothing runs
     └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
 └── llm/
     ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
@@ -100,7 +102,8 @@ src/desman/
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it
 (override the directory with `DESMAN_DATA_DIR`). Never touch files on an agent's behalf except
 through `Workspace`, and let executors act only through tool calls (`Work.tools`): a new
-capability is a new `Tool` with the permission it needs, never a direct call in an agent. Never edit a
+capability is a new `Tool` with the permission it needs, never a direct call in an agent.
+Generated code runs only through `Sandbox` (the `run_command` tool), never with `subprocess` directly. Never edit a
 migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
 backfill if needed) and test upgrading a database built with the previous migrations. Keep the `subtasks.status` CHECK in
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,
@@ -155,7 +158,8 @@ preemption, self-improvement or network features before their phase).
 - Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
   (HTTP goes through `httpx.MockTransport`)
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
-  except in lock-contention tests and the subprocess crash tests (`tests/test_crash.py`)
+  except in lock-contention tests, the subprocess crash tests (`tests/test_crash.py`) and the
+  real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
 - Idempotency test: re-run same subtask → no duplicate side effects

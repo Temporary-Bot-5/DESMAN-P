@@ -78,7 +78,7 @@ def test_registry_refuses_duplicate_and_bad_names() -> None:
         registry.register(tools_module.READ_FILE)
     with pytest.raises(ValueError, match="bad tool name"):
         registry.register(Tool("Read File", "", _NoArgs, Permission.WORKSPACE, lambda a, w: {}))
-    assert registry.names == ["read_file", "write_file", "list_files"]
+    assert registry.names == ["read_file", "write_file", "list_files", "run_command"]
     assert builtin_registry() is not registry  # registering is never global
 
 

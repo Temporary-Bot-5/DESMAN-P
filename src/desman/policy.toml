@@ -6,7 +6,9 @@
 # is off, whatever this file says. A tool not listed for a role is refused to that role.
 
 [roles.executor]
-tools = ["read_file", "write_file", "list_files"]
+# run_command also needs the human's shell_execution switch, and runs only in the sandbox
+# (src/desman/core/sandbox.py); without a working sandbox it is never offered.
+tools = ["read_file", "write_file", "list_files", "run_command"]
 
 # The planner and the reviewer use no tools yet.
 [roles.planner]

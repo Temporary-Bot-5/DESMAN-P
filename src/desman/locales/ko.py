@@ -237,6 +237,7 @@ MESSAGES: dict[str, Forms] = {
     "use the network beyond model providers": "모델 공급자 외의 네트워크 사용",
     "run shell commands": "셸 명령 실행",
     "admin_rights is on: agents may act with elevated privileges.": "admin_rights가 켜져 있습니다: 에이전트가 높은 권한으로 동작할 수 있습니다.",
+    "shell_execution is on, but there is no sandbox to run commands in ({reason}): run_command stays off.": "shell_execution이 켜져 있지만 명령을 실행할 샌드박스가 없습니다({reason}). run_command는 꺼진 상태로 유지됩니다.",
     "Configuration saved to {path}": "설정을 {path}에 저장했습니다",
     'Next: `desman config show` to review, `desman run "..."` to start.': '다음: `desman config show`로 확인, `desman run "..."`으로 시작.',
     "No cloud key yet: cloud models will not work until you add one.": "아직 클라우드 키가 없습니다: 키를 추가할 때까지 클라우드 모델은 동작하지 않습니다.",

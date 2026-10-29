@@ -258,6 +258,7 @@ MESSAGES: dict[str, Forms] = {
     "use the network beyond model providers": "मॉडल प्रदाताओं के अलावा नेटवर्क इस्तेमाल करने की",
     "run shell commands": "shell कमांड चलाने की",
     "admin_rights is on: agents may act with elevated privileges.": "admin_rights चालू है: एजेंट बढ़े हुए अधिकारों के साथ काम कर सकते हैं।",
+    "shell_execution is on, but there is no sandbox to run commands in ({reason}): run_command stays off.": "shell_execution चालू है, लेकिन कमांड चलाने के लिए कोई सैंडबॉक्स नहीं है ({reason}): run_command बंद रहता है।",
     "Configuration saved to {path}": "कॉन्फ़िगरेशन {path} में सहेजा गया",
     'Next: `desman config show` to review, `desman run "..."` to start.': 'आगे: जाँचने के लिए `desman config show`, शुरू करने के लिए `desman run "..."`।',
     "No cloud key yet: cloud models will not work until you add one.": "अभी कोई क्लाउड कुंजी नहीं: जब तक आप एक नहीं जोड़ते, क्लाउड मॉडल काम नहीं करेंगे।",
