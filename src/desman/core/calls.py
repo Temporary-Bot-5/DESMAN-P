@@ -2,28 +2,82 @@
 
 Rows are written by the LLM client through `recorder()` and never changed. A key appears only
 as its fingerprint (`openai_compat.key_id`), so the log can be shared without leaking keys.
+
+A call is attributed to what it was made for by whoever makes it: the coordinator around its
+executor, reviewer and decomposer, the chat around the interlocutor and the planner (`for_`).
+The client itself knows nothing of tasks; the recorder reads the attribution when it writes.
+Whoever shows progress watches the calls as they are written (`watching`).
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 from desman.core import db
 from desman.llm.openai_compat import CallRecord
+
+
+class Role(StrEnum):
+    """What a call was made for. Keep in sync with the `model_calls.role` CHECK (a test does)."""
+
+    PLANNER = "planner"
+    EXECUTOR = "executor"
+    REVIEWER = "reviewer"
+    DECOMPOSER = "decomposer"
+    INTERLOCUTOR = "interlocutor"
+
+
+@dataclass(frozen=True)
+class Purpose:
+    role: Role | None
+    task_id: str | None = None
+    subtask_id: str | None = None
+    session_id: str | None = None
+    """The chat session of the interlocutor's own calls (and of planning a chat task)."""
+
+
+_UNATTRIBUTED = Purpose(None)  # e.g. `desman keys check`: no role, no task
+_purpose: ContextVar[Purpose | None] = ContextVar("purpose", default=None)
+_watchers: ContextVar[tuple[Callable[[], None], ...]] = ContextVar("watchers", default=())
+
+
+@contextmanager
+def for_(purpose: Purpose) -> Iterator[None]:
+    """Calls made inside are recorded as made for `purpose`."""
+    token = _purpose.set(purpose)
+    try:
+        yield
+    finally:
+        _purpose.reset(token)
+
+
+@contextmanager
+def watching(watcher: Callable[[], None]) -> Iterator[None]:
+    """`watcher` is called after each call recorded inside (it reads the log itself)."""
+    token = _watchers.set((*_watchers.get(), watcher))
+    try:
+        yield
+    finally:
+        _watchers.reset(token)
 
 
 def recorder(conn: sqlite3.Connection) -> Callable[[CallRecord], None]:
     """An `on_call` for `OpenAICompatible` that appends to model_calls."""
 
     def record(call: CallRecord) -> None:
+        purpose = _purpose.get() or _UNATTRIBUTED
         conn.execute(
             "INSERT INTO model_calls (provider, model, key_id, prompt_hash, response_hash, "
             "prompt_tokens, completion_tokens, latency_ms, http_status, error_kind, error, "
-            "limits_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "limits_json, error_type, role, task_id, subtask_id, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 call.provider,
                 call.model,
@@ -37,8 +91,15 @@ def recorder(conn: sqlite3.Connection) -> Callable[[CallRecord], None]:
                 call.error_kind,
                 call.error,
                 json.dumps(call.limits),
+                call.error_type,
+                None if purpose.role is None else purpose.role.value,
+                purpose.task_id,
+                purpose.subtask_id,
+                purpose.session_id,
             ),
         )
+        for watcher in _watchers.get():
+            watcher()
 
     return record
 
@@ -101,6 +162,67 @@ def usage(conn: sqlite3.Connection, since: datetime | None = None) -> list[KeyUs
                 last_error=last["error"] if last else None,
                 limits=json.loads(limits["limits_json"]) if limits else {},
                 limits_current=bool(limits) and limits["seq"] == last["seq"],
+            )
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class ModuleUse:
+    """One module (provider, model and key) as it worked on a task: what `desman` shows live."""
+
+    provider: str
+    model: str
+    key_id: str | None
+    """None: a model without a key (a local one)."""
+    calls: int
+    prompt_tokens: int
+    completion_tokens: int
+    role: Role | None
+    """Of its latest call: what it is doing now, or did last."""
+    subtask_id: str | None
+    error_type: str | None
+    """Of its latest call; None if that call succeeded."""
+    limits: dict[str, str]
+    """The rate-limit headers of its latest call that had any."""
+
+
+def modules(conn: sqlite3.Connection, task_id: str) -> list[ModuleUse]:
+    """The modules that made calls for the task, the first to start first."""
+    rows = conn.execute(
+        """
+        SELECT provider, model, key_id, COUNT(*) AS calls,
+               SUM(prompt_tokens) AS prompt_tokens, SUM(completion_tokens) AS completion_tokens,
+               MAX(seq) AS last_seq,
+               MAX(CASE WHEN limits_json != '{}' THEN seq END) AS limits_seq
+        FROM model_calls WHERE task_id = ?
+        GROUP BY provider, model, key_id
+        ORDER BY MIN(seq)
+        """,
+        (task_id,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        last = conn.execute(
+            "SELECT role, subtask_id, error_type FROM model_calls WHERE seq = ?", (r["last_seq"],)
+        ).fetchone()
+        limits = None
+        if r["limits_seq"] is not None:
+            limits = conn.execute(
+                "SELECT limits_json FROM model_calls WHERE seq = ?", (r["limits_seq"],)
+            ).fetchone()
+        out.append(
+            ModuleUse(
+                provider=r["provider"],
+                model=r["model"],
+                key_id=r["key_id"],
+                calls=r["calls"],
+                prompt_tokens=r["prompt_tokens"] or 0,
+                completion_tokens=r["completion_tokens"] or 0,
+                role=None if last["role"] is None else Role(last["role"]),
+                subtask_id=last["subtask_id"],
+                error_type=last["error_type"],
+                limits=json.loads(limits["limits_json"]) if limits else {},
             )
         )
     return out

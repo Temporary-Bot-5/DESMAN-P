@@ -276,6 +276,15 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE tasks ADD COLUMN session_id TEXT REFERENCES sessions(id);
     CREATE INDEX ix_tasks_session ON tasks (session_id);
     """,
+    # 11 — what a model call was for (ROADMAP C.4): the role that made it, the chat session of
+    # the interlocutor's own calls, and the error's class (a rate limit is not a used-up quota)
+    """
+    ALTER TABLE model_calls ADD COLUMN role TEXT
+        CHECK (role IN ('planner', 'executor', 'reviewer', 'decomposer', 'interlocutor'));
+    ALTER TABLE model_calls ADD COLUMN session_id TEXT REFERENCES sessions(id);
+    ALTER TABLE model_calls ADD COLUMN error_type TEXT;
+    CREATE INDEX ix_model_calls_task ON model_calls (task_id, seq);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 
 import click
 import httpx
@@ -25,7 +26,7 @@ from rich.text import Text
 
 from desman import providers, runs, ui
 from desman.config import Config, ConfigError, open_config
-from desman.core import db
+from desman.core import calls, db
 from desman.core.report import TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import Kind, Message, Role, Sessions
@@ -33,6 +34,7 @@ from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
 from desman.interlocutor import Clarify, Interlocutor, NewTask, Reply, excerpt
+from desman.live import Progress
 from desman.llm import router
 from desman.llm.base import ProviderError
 from desman.llm.structured import StructuredOutputError
@@ -110,7 +112,8 @@ class Chat:
         self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
         conversation = self.sessions.messages(self.session_id, last=HISTORY_MESSAGES)
         try:
-            turn = interlocutor.turn(conversation)
+            with self._for(calls.Role.INTERLOCUTOR):
+                turn = interlocutor.turn(conversation)
         except ProviderError as e:
             ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
             return
@@ -160,6 +163,10 @@ class Chat:
                 )
         return self.models
 
+    def _for(self, role: calls.Role) -> AbstractContextManager[None]:
+        """The model calls inside are the session's own (not any task's)."""
+        return calls.for_(calls.Purpose(role, session_id=self.session_id))
+
     def _say(self, text: str, task_id: str | None = None) -> None:
         assert self.session_id is not None
         message = self.sessions.add(self.session_id, Role.INTERLOCUTOR, text, task_id=task_id)
@@ -183,7 +190,8 @@ class Chat:
             ui.error(e.message)
             return
         ui.note(t("Planning…"))
-        planned = plan(models.llm, turn.goal)
+        with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
+            planned = plan(models.llm, turn.goal)
         if planned.error is not None:
             ui.warn(
                 t(
@@ -210,9 +218,18 @@ class Chat:
         try:
             if self._http is None:
                 self._http = client()
-            runs.coordinator(self.store, models, config=config, access=access, http=self._http).run(
-                task_id
-            )
+            with (
+                Progress(self.store, task_id, config) as progress,
+                calls.watching(progress.refresh),
+            ):
+                runs.coordinator(
+                    self.store,
+                    models,
+                    config=config,
+                    access=access,
+                    http=self._http,
+                    watch=progress.refresh,
+                ).run(task_id)
         except KeyboardInterrupt:
             self._event(
                 t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
@@ -277,7 +294,9 @@ class Chat:
             ],
         }
         try:
-            self._say(interlocutor.retell(outcome), task_id)
+            with self._for(calls.Role.INTERLOCUTOR):
+                retold = interlocutor.retell(outcome)
+            self._say(retold, task_id)
         except (ProviderError, StructuredOutputError):
             if result is not None:  # the work is not lost with the retelling
                 self._event(

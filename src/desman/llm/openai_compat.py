@@ -75,6 +75,8 @@ class CallRecord:
     error_kind: str | None  # None: success
     error: str | None
     limits: dict[str, str] = field(default_factory=dict)
+    error_type: str | None = None
+    """The error's class: `RateLimited` and `QuotaExhausted` are both of kind "limit"."""
 
 
 class OpenAICompatible:
@@ -205,6 +207,7 @@ class OpenAICompatible:
                     latency_ms=max(0, round((self.monotonic() - started) * 1000)),
                     http_status=response.status_code if response is not None else None,
                     error_kind=error.kind.value if error else None,
+                    error_type=type(error).__name__ if error else None,
                     error=str(error)[:300] if error else None,
                     limits=_limit_headers(response) if response is not None else {},
                 )

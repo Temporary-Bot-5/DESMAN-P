@@ -581,3 +581,25 @@ def test_a_new_database_is_private(tmp_path: Path) -> None:
     modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in (tmp_path / "data").iterdir()}
     assert modes and all(mode == 0o600 for mode in modes.values()), modes
     assert stat.S_IMODE((tmp_path / "data").stat().st_mode) == 0o700
+
+
+def test_v10_database_with_a_call_log_upgrades_to_attributed_calls(tmp_path: Path) -> None:
+    path = tmp_path / "v10.db"
+    old = _db_at_version(path, 10)
+    task_id = add_task(old)
+    old.execute(
+        "INSERT INTO model_calls (provider, model, task_id, prompt_hash, latency_ms) "
+        "VALUES ('groq', 'm', ?, 'h', 5)",
+        (task_id,),
+    )
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    row = conn.execute("SELECT task_id, role, session_id, error_type FROM model_calls").fetchone()
+    assert tuple(row) == (task_id, None, None, None)  # the old calls stay, unattributed
+    with pytest.raises(sqlite3.IntegrityError):  # only the known roles
+        conn.execute(
+            "INSERT INTO model_calls (provider, model, prompt_hash, latency_ms, role) "
+            "VALUES ('groq', 'm', 'h', 5, 'chef')"
+        )
+    conn.close()
