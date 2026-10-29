@@ -14,9 +14,8 @@ subtask's `Toolbox`, which
 - records every call in the audit, with long arguments cut short; arguments a tool declares
   `private` (file contents) are recorded only by their size, since a workspace file may hold a
   secret and the history is shown to anyone who looks at the task;
-- writes each call of a tool with an `effect` to its `Journal` (core/effects.py) before running
-  it and its result after, so a rerun of an interrupted execution gets the results back instead
-  of acting twice (D6).
+- writes each call to its `Journal` (core/effects.py) before running it and its result after,
+  so a rerun of an interrupted execution gets the results back instead of acting twice (D6).
 
 A call that is the model's mistake (unknown tool, bad arguments, a path outside the workspace,
 a missing file) comes back as a failed `ToolResult` the model can read and correct, not as an
@@ -99,13 +98,10 @@ class Tool(Generic[A]):
     ready: Callable[[], str | None] = lambda: None
     """Why the tool cannot run on this machine (e.g. no sandbox), or None. A tool that is not
     ready is neither offered nor run, whatever the policy allows."""
-    effect: bool = True
-    """Changes something (a file, a program's run): journaled, so a rerun of the same execution
-    replays the result instead of acting again. Only a tool that just reads says False."""
     repeatable: bool = False
-    """Running it again with the same arguments ends the same way (e.g. an atomic file write):
-    a call interrupted before its result was recorded is simply run again. Otherwise the model
-    is told the call was interrupted and its effects are unknown."""
+    """Running it again with the same arguments is harmless (reading, an atomic file write): a
+    call interrupted before its result was recorded is simply run again. Otherwise the model is
+    told the call was interrupted and its effects are unknown."""
 
     def spec(self) -> dict[str, Any]:
         """How the tool is shown to a model."""
@@ -158,7 +154,7 @@ class Replayed:
 
 
 class Journal(Protocol):
-    """Where a Toolbox records calls that have effects (core/effects.py)."""
+    """Where a Toolbox records its calls (core/effects.py)."""
 
     def begin(self, tool: Tool[Any], args: BaseModel) -> Replayed | None:
         """Before running a call: what to return instead of running it, or None to run it
@@ -228,7 +224,7 @@ class Toolbox:
         self.guard()
         if tool.permission is Permission.ADMIN:
             summary["elevated"] = True  # admin_rights is on: every such action stands out
-        journal = self.journal if tool.effect else None
+        journal = self.journal
         if journal is not None:
             replayed = journal.begin(tool, args)
             if replayed is not None:
@@ -357,7 +353,7 @@ READ_FILE: Final = Tool(
     args=ReadFileArgs,
     permission=Permission.WORKSPACE,
     run=_read_file,
-    effect=False,
+    repeatable=True,
 )
 WRITE_FILE: Final = Tool(
     name="write_file",
@@ -376,7 +372,7 @@ LIST_FILES: Final = Tool(
     args=ListFilesArgs,
     permission=Permission.WORKSPACE,
     run=_list_files,
-    effect=False,
+    repeatable=True,
 )
 
 

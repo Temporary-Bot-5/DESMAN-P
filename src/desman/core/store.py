@@ -28,6 +28,10 @@ from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, deriv
 from desman.core.states import transition as check_transition
 
 S = SubtaskStatus
+
+_EXECUTION_ENDED = """actor = 'executor' AND from_status = 'running'
+    AND (action IN ('submit', 'decomposed') OR json_extract(details_json, '$.failure') = 'quality')"""
+"""SQL condition on audit_log: the entry ended an execution with something to judge."""
 Clock = Callable[[], datetime]
 
 DEFAULT_LEASE_SECONDS = 300
@@ -593,8 +597,10 @@ class Store:
         *,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         checkpoint: dict[str, Any] | None = None,
+        effects: int | None = None,
     ) -> Subtask:
-        """Extend the lease and, optionally, save a checkpoint in the same update.
+        """Extend the lease and, optionally, save a checkpoint in the same update. `effects` is
+        how many tool calls the execution's journal had at the checkpoint (`effect_cursor`).
 
         Works while the claim is still this executor's (token matches), even if the deadline has
         just passed and nobody has requeued the subtask yet. Once it was requeued or reclaimed,
@@ -625,7 +631,11 @@ class Store:
                     Actor.EXECUTOR,
                     "checkpoint",
                     subtask=subtask,
-                    details={"owner": subtask.lease_owner, "checkpoint": checkpoint},
+                    details={
+                        "owner": subtask.lease_owner,
+                        "checkpoint": checkpoint,
+                        **({} if effects is None else {"effects": effects}),
+                    },
                 )
         return subtask
 
@@ -754,14 +764,26 @@ class Store:
         split or a quality failure. An interrupted one (crash, lost lease, provider error,
         limits) has not ended: the next run continues it, so its effects are replayed."""
         row = self.conn.execute(
-            """SELECT COUNT(*) FROM audit_log
-               WHERE subtask_id = ? AND actor = 'executor' AND from_status = 'running'
-                 AND (action IN ('submit', 'decomposed')
-                      OR json_extract(details_json, '$.failure') = 'quality')""",
+            f"SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND {_EXECUTION_ENDED}",
             (subtask_id,),
         ).fetchone()
         count: int = row[0]
         return count
+
+    def effect_cursor(self, subtask_id: str) -> int:
+        """Where the current execution's journal resumes: the number of calls it had at the
+        latest checkpoint of this execution (0 without one). The executor resumes from that
+        checkpoint and skips those calls, so the replay must skip them too."""
+        row = self.conn.execute(
+            f"""SELECT json_extract(details_json, '$.effects') FROM audit_log
+                WHERE subtask_id = :id AND action = 'checkpoint'
+                  AND seq > (SELECT COALESCE(MAX(seq), 0) FROM audit_log
+                             WHERE subtask_id = :id AND {_EXECUTION_ENDED})
+                ORDER BY seq DESC LIMIT 1""",
+            {"id": subtask_id},
+        ).fetchone()
+        cursor: int = row[0] if row is not None and row[0] is not None else 0
+        return cursor
 
     def effects(self, subtask_id: str, execution: int) -> list[sqlite3.Row]:
         """The journal of one execution, in call order."""

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from conftest import FakeClock
 from desman.agents import llm_executor
 from desman.core.audit import check_history
-from desman.core.coordinator import Coordinator, Review, Verdict
+from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
 from desman.core.effects import INTERRUPTED, Effects
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.policy import Policy, Role, RolePolicy
@@ -200,11 +200,48 @@ def test_a_repeatable_call_is_run_again_after_an_interruption(
     assert row["state"] == "done"
 
 
-def test_reading_is_not_journaled(store: Store, claimed: Subtask, tmp_path: Path) -> None:
-    box = toolbox(store, claimed, tmp_path, registry(bump_tool([])))
-    box.call(ToolCall(tool="list_files"))
-    box.call(ToolCall(tool="read_file", args={"path": "missing.txt"}))
-    assert store.effects(claimed.id, 0) == []
+def write(path: str, content: str) -> ToolCall:
+    return ToolCall(tool="write_file", args={"path": path, "content": content})
+
+
+def read(path: str) -> ToolCall:
+    return ToolCall(tool="read_file", args={"path": path})
+
+
+def test_reads_are_replayed_as_they_were(store: Store, claimed: Subtask, tmp_path: Path) -> None:
+    tools = registry(bump_tool([]))
+    box = toolbox(store, claimed, tmp_path, tools)
+    box.call(write("a.txt", "draft"))
+    seen = box.call(read("a.txt"))
+    box.call(write("a.txt", "final"))
+
+    box = toolbox(store, crash_and_reclaim(store), tmp_path, tools)
+    box.call(write("a.txt", "draft"))
+    # Read now, the file would say "final": the replay shows what the run saw at this point.
+    assert box.call(read("a.txt")) == seen and seen.output["content"] == "draft"
+    box.call(write("a.txt", "final"))
+    assert (tmp_path / claimed.task_id / "a.txt").read_text() == "final"
+
+
+def test_a_resume_from_a_checkpoint_replays_from_there(
+    store: Store, claimed: Subtask, tmp_path: Path
+) -> None:
+    assert claimed.lease_token is not None
+    ran: list[int] = []
+    tools = registry(bump_tool(ran))
+    box = toolbox(store, claimed, tmp_path, tools)
+    box.call(bump(1))
+    assert isinstance(box.journal, Effects)
+    store.heartbeat(
+        claimed.id, claimed.lease_token, checkpoint={"step": 1}, effects=box.journal.position
+    )
+    box.call(bump(2))
+
+    # The executor resumes after step 1 and makes the same call for step 2: it is not step 1's.
+    box = toolbox(store, crash_and_reclaim(store), tmp_path, tools)
+    box.call(bump(1))
+    assert ran == [1, 2, 1]
+    assert [row["ordinal"] for row in store.effects(claimed.id, 0)] == [0, 1]
 
 
 def test_a_new_attempt_acts_again(store: Store, claimed: Subtask, tmp_path: Path) -> None:
@@ -283,4 +320,38 @@ def test_a_provider_failure_mid_execution_does_not_repeat_the_effect(
         "tool_called",
         "tool_replayed",
     ]
+    assert check_history(store.conn, task_id) == []
+
+
+def test_the_coordinator_saves_the_journal_position_with_a_checkpoint(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    ran: list[int] = []
+
+    def executor(work: Work) -> Success:
+        if work.context.checkpoint is None:
+            work.tools.call(bump(1))  # step 1
+            work.heartbeat({"step": 1})
+            raise Killed
+        work.tools.call(bump(1))  # step 2 happens to make the same call
+        return Success(content={"steps": 2})
+
+    task_id = store.create_task(one_step())
+
+    def coordinator() -> Coordinator:
+        return Coordinator(
+            store,
+            executor,
+            accept,
+            workspaces=tmp_path,
+            tools=registry(bump_tool(ran)),
+            access=ACCESS,
+            abandoned=lambda owner: True,
+            sleep=clock.sleep,
+        )
+
+    with pytest.raises(Killed):
+        coordinator().run(task_id)
+    assert coordinator().run(task_id).status is TaskStatus.DONE
+    assert ran == [1, 1]
     assert check_history(store.conn, task_id) == []

@@ -3,7 +3,7 @@
 An execution of a subtask can be interrupted after some of its tool calls ran: the process is
 killed, the provider fails, the lease runs out. The next run of the subtask starts the executor
 again, and with the response cache (llm/cache.py) the model asks for the same calls in the same
-order. Each call of a tool with an `effect` therefore goes through the journal (table `effects`):
+order. Each call therefore goes through the journal (table `effects`):
 
 1. intent: before the call, a row (execution, ordinal, sha256 of tool and arguments) is written
    while the lease is still held;
@@ -12,19 +12,23 @@ order. Each call of a tool with an `effect` therefore goes through the journal (
 
 A later run of the same execution walks the journal along with its own calls. As long as call
 number N is the same tool with the same arguments as row N, the stored result is returned and
-nothing runs: the workspace is already in the state the replayed calls left it in. The first call
-that differs ends the replay; the rows from there on belonged to a run that went another way and
-are replaced, and every call after it runs for real.
+nothing runs: the workspace is already in the state the replayed calls left it in. Reads are
+replayed too: run now, they would see the files as the whole interrupted run left them, not as
+they were at that point. The first call that differs ends the replay; the rows from there on
+belonged to a run that went another way and are replaced, and every call after it runs for real.
+
+An executor that saved a checkpoint resumes from it and skips the calls made before it, so the
+replay starts at the number of calls the journal had at that checkpoint (`Store.effect_cursor`).
 
 A row that was started but never confirmed is a call cut off midway: its effects are unknown.
-A `repeatable` tool (writing a file) runs it again; any other tool is not rerun, and the model
-gets an error saying so, to check the workspace and call it again if it still needs to (that call
+A `repeatable` tool (reading, writing a file) runs it again; any other tool is not rerun, and
+the model gets an error saying so, to check the workspace and call it again if it still needs to (that call
 is a new one and runs).
 
 An execution ends when the executor hands in something to judge (`Store.executions`): a new
 attempt after a rejection starts a new journal, since the model is then meant to act again.
-Results are kept in the database because a replay must return them; arguments are not (only
-their hash), so file contents written by a call stay in the workspace alone.
+Results are kept in the database because a replay must return them (including what a read
+returned); arguments are not (only their hash), so what a call writes is not copied there.
 """
 
 from __future__ import annotations
@@ -66,9 +70,14 @@ class Effects:
         self.lease = lease
         self.execution = store.executions(subtask_id)
         self._past = {row["ordinal"]: row for row in store.effects(subtask_id, self.execution)}
-        self._next = 0
+        self._next = store.effect_cursor(subtask_id)
         self._replaying = True
         self._running: int | None = None
+
+    @property
+    def position(self) -> int:
+        """How many calls the execution has made so far (saved with a checkpoint)."""
+        return self._next
 
     def begin(self, tool: Tool[Any], args: BaseModel) -> Replayed | None:
         # A previous call that crashed stays started in the journal: interrupted, for a rerun.
