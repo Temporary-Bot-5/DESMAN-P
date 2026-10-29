@@ -185,6 +185,8 @@ class ModuleUse:
     """Of its latest call; None if that call succeeded."""
     limits: dict[str, str]
     """The rate-limit headers of its latest call that had any."""
+    last_seq: int = 0
+    """Its latest call's place in the log: of two modules on one subtask, the later is at work."""
 
 
 def modules(conn: sqlite3.Connection, task_id: str) -> list[ModuleUse]:
@@ -223,6 +225,7 @@ def modules(conn: sqlite3.Connection, task_id: str) -> list[ModuleUse]:
                 subtask_id=last["subtask_id"],
                 error_type=last["error_type"],
                 limits=json.loads(limits["limits_json"]) if limits else {},
+                last_seq=r["last_seq"],
             )
         )
     return out

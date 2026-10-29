@@ -289,3 +289,20 @@ def test_a_chat_task_shows_its_progress_and_every_call_is_attributed(
         ("reviewer", task_id, subtask_id, None),
         ("interlocutor", None, None, session_id),  # the retelling is the session's own
     ]
+
+
+def test_of_two_modules_on_a_subtask_only_the_later_is_working(
+    store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A retry with another model: the first module is no longer at work."""
+    task_id = one_task(store, "Search")
+    claimed = store.claim("me", task_id=task_id)
+    assert claimed is not None
+    record = calls.recorder(store.conn)
+    with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=task_id, subtask_id=claimed.id)):
+        record(call())
+        record(call(provider="mistral", key_id=None))
+    Progress(store, task_id, config_with_keys(), terminal=False).refresh()
+    printed = capsys.readouterr().out.splitlines()
+    assert "groq llama (#1 gsk_…kkkk): executor · [0] · idle" in printed
+    assert "mistral llama (local model): executor · [0] · working" in printed

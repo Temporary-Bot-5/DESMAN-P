@@ -5,7 +5,8 @@ and key) that worked on it: in which role and on which subtask, its calls and to
 left of its limits, its state (working, waiting for a limit, quota used up, idle).
 
 Everything is read from what is already written: the subtasks from `Store`, the modules from
-the call log (`calls.modules`). Nothing here writes. It is redrawn when the coordinator moves
+the call log (`calls.modules`). Nothing here writes, so a reply served from the response cache
+(`llm.cache`), which is no call and costs nothing, shows no module. It is redrawn when the coordinator moves
 (`Coordinator.watch`) and after each model call (`calls.watching`).
 
 In a terminal the view is redrawn in place and goes away when the task stops (the chat then
@@ -107,7 +108,7 @@ class Progress:
         rows = Table.grid(padding=(0, 2))
         by_id = {s.id: s for s in report.subtasks}
         for module in modules:
-            state, style = self._state(module, by_id)
+            state, style = self._state(module, by_id, modules)
             rows.add_row(
                 Text(self._name(module), style="key"),
                 Text(self._doing(module, by_id)),
@@ -126,7 +127,7 @@ class Progress:
         by_id = {s.id: s for s in report.subtasks}
         for module in modules:
             name = self._name(module)
-            state, _ = self._state(module, by_id)
+            state, _ = self._state(module, by_id, modules)
             out.append((f"module {name}", f"{name}: {self._doing(module, by_id)} · {state}"))
         return out
 
@@ -159,13 +160,21 @@ class Progress:
         ][:2]
         return " · ".join(spent)
 
-    def _state(self, module: calls.ModuleUse, by_id: dict[str, SubtaskReport]) -> tuple[str, str]:
+    def _state(
+        self,
+        module: calls.ModuleUse,
+        by_id: dict[str, SubtaskReport],
+        modules: list[calls.ModuleUse],
+    ) -> tuple[str, str]:
         if module.error_type == "QuotaExhausted":
             return t("quota used up"), "bad"
         if module.error_type == "RateLimited":
             return t("waiting for a limit"), "warn"
         sub = by_id.get(module.subtask_id or "")
-        if sub is not None and sub.status in _WORKING:
+        # Of the modules on a subtask, only the one called last is at work (a retry may have
+        # moved it to another model).
+        latest = max(m.last_seq for m in modules if m.subtask_id == module.subtask_id)
+        if sub is not None and sub.status in _WORKING and module.last_seq == latest:
             return t("working"), "good"
         return t("idle"), "muted"
 
