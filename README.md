@@ -6,8 +6,9 @@ DESMAN(P) coordinates many short-lived, specialized agents (LLM-based workers, t
 services) to decompose large tasks, recover from agent failures, prioritize critical work, and
 gradually improve its own components under human supervision.
 
-> **Status:** the core is being rewritten (see `ROADMAP.md`). Right now only the CLI shell and
-> the configuration wizard work.
+> **Status:** the core is being rewritten (see `ROADMAP.md`). A goal already runs on real free
+> models (`desman run`). Next: tools and security, then a chat — bare `desman` will take plain-language
+> requests, show progress per module, and return the result in the same chat.
 
 ## Core Principles
 

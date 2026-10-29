@@ -17,7 +17,20 @@ DESMAN(P) is not a single large monolithic agent. It is a modular network in whi
 - **Specialized agents or clusters** may focus on roles such as planning, research, coding, testing, tool use, review, or self-improvement analysis.
 - The system state lives outside any individual agent, so an agent can disappear at any time without losing completed work.
 
+A **module** is one model endpoint the network can use: one API key of a provider, or one local model. Several keys of the same provider are several modules.
+
 The intended analogy is a simplified, software-engineered version of a brain: specialized regions, distributed processing, attention-like prioritization, and recovery from local failures. This is an engineering metaphor, not a claim of biological accuracy.
+
+## Accessibility
+
+DESMAN(P) is meant to be simple and approachable for most people, not only for developers. Running on a swarm of free APIs already removes the cost barrier; a complex CLI must not become the next one. People should *want* to use DESMAN.
+
+- After configuration, bare `desman` shows the banner and opens a **chat**. The person writes a request in plain language ("find me cheap tickets to …"); the system turns it into a task, runs it, and returns the result in the same chat.
+- While a task runs, the person sees its progress and what each module is doing and how much it consumes (calls, tokens, remaining limits).
+- Anything the person wants done to DESMAN itself (add an API key, grant a permission, change the language) can be asked for in the chat. The system answers with an interactive field rendered by code: a confirmation showing the exact change, or a hidden input for a key.
+- Conversations are kept as sessions; long ones are compressed automatically (compression is itself a task for the modules), without deleting the stored history.
+- The chat is a front end to the same task machinery, not a separate system: every request goes through the task graph, retries, review, and audit like any other work.
+- A graphical interface and an installer come later, after the chat and the core are stable.
 
 ## Mandatory design principles
 
@@ -30,9 +43,9 @@ The intended analogy is a simplified, software-engineered version of a brain: sp
 4. **Prioritization and preemption.**  
     Tasks carry priority levels. Critical tasks may interrupt, pause, or delay lower-priority work. The scheduler must make this behavior explicit and auditable.
 5. **Minimal agent communication.**  
-    Agents should not chat freely. They communicate through structured task records, artifacts, status updates, and narrowly defined messages. Excessive free-form multi-agent conversation increases cost, confusion, and failure modes.
+    Agents should not chat freely. They communicate through structured task records, artifacts, status updates, and narrowly defined messages. Excessive free-form multi-agent conversation increases cost, confusion, and failure modes. The chat with the human is the one conversation in the system: it happens between the human and the Interlocutor, and the Interlocutor hands work to the rest of the network only as task records.
 6. **Human control.**  
-    The human operator is the final authority. The system may propose changes, but it must not silently rewrite its own security rules, permissions, evaluation criteria, or core execution logic.
+    The human operator is the final authority. The system may propose changes, but it must not silently rewrite its own security rules, permissions, evaluation criteria, or core execution logic. A request made in the chat counts as approval only when the human confirms it in a field rendered by code from a typed action, never because a model's text says so.
 7. **Controlled self-evolution.**  
     Self-improvement is allowed only through a reviewable change pipeline: propose a change, test it in isolation, compare it with the current version, record the result, and apply it only after approval or passing strict automated checks. Every accepted change must be reversible through version control.
 8. **Budget awareness.**  
@@ -48,6 +61,7 @@ For the first prototype, avoid Kubernetes, peer-to-peer networking, complex mess
 - **Model Router:** selects an available LLM provider/model based on task type, availability, rate limits, and configured fallbacks.
 - **Tool Registry:** a controlled list of permitted tools and capabilities, initially file operations, code execution in a sandbox, search, and simple utilities.
 - **Reviewer / Validator:** checks outputs against acceptance criteria and can request retry, revision, or human review.
+- **Chat:** the front end for people (see Accessibility): sessions, the Interlocutor, live progress, and in-chat confirmations.
 - **Evolution Module:** later-stage component that analyzes failures and performance, proposes patches, prompts, workflows, or new specialized agents—but does not directly deploy unreviewed changes.
 
 ## Roles in the first version
@@ -58,18 +72,19 @@ Start with only a few roles:
 - **Executor:** performs one bounded subtask.
 - **Reviewer:** validates the result and decides whether to accept, retry, or escalate.
 - **Coordinator:** manages priorities, dependencies, retries, and assignment.
+- **Interlocutor:** talks to the human in the chat. It answers, asks for clarification, turns requests into tasks, and asks for actions on DESMAN itself from a fixed list that the human confirms. It adapts to the person over time through a profile the person can see, edit, or turn off. It does not call tools or change permissions.
 - **Improvement Analyst:** later role that proposes improvements, never directly deploys them.
 
-Do not begin with hundreds of agents. A useful first configuration is one coordinator, one planner, one executor, and one reviewer.
+Do not begin with hundreds of agents. A useful first configuration is one coordinator, one planner, one executor, and one reviewer; the Interlocutor joins when the chat is built.
 
 ## Free-tier constraints
 
-The prototype is being built with zero financial budget and without relying on local model inference. Therefore:
+The prototype is being built with zero financial budget and without relying on local model inference (local models via Ollama or llama.cpp are an optional extra; paid providers are used only when named explicitly). Therefore:
 
 - Use free or trial-tier cloud LLM APIs where available, such as Gemini API, GroqCloud, OpenRouter free models, Cloudflare Workers AI, Cohere trial access, or Mistral free/experiment access.
 - Treat every provider as unreliable and rate-limited.
 - Implement provider fallback, request throttling, caching, and task pausing.
-- Do not send secrets, credentials, private code, or personal data to free APIs without reviewing their data policies.
+- Do not send secrets, credentials, private code, or personal data to free APIs without reviewing their data policies. API keys entered in the chat never reach a model, the chat history, or the logs; the user profile is shown to the person, who can turn it off.
 - Design for intermittent execution: the system may run in short sessions and resume later.
 
 ## Security and safety rules
@@ -80,6 +95,7 @@ The prototype is being built with zero financial budget and without relying on l
 - Log every meaningful decision, model call, tool use, retry, and state transition.
 - Make all self-modification proposals reviewable diffs or pull requests.
 - Preserve a rollback path to the last known-good version.
+- Treat web pages and other fetched content as data, never as instructions.
 - If evaluation criteria conflict with safety constraints, safety constraints win.
 
 ## What the prototype must demonstrate
@@ -94,6 +110,7 @@ A successful early DESMAN(P) prototype should demonstrate that it can:
 6. Avoid unsafe duplicate execution of side-effecting actions.
 7. Produce an auditable history of decisions and artifacts.
 8. Propose—but not automatically deploy—an improvement to a prompt, workflow, tool, or agent configuration.
+9. Take a plain-language request in the chat, run it as a task with visible progress, and return the result in the same chat.
 
 ## Explicit non-goals for the first prototype
 
@@ -101,14 +118,14 @@ A successful early DESMAN(P) prototype should demonstrate that it can:
 - No unsupervised recursive self-rewriting of the core system.
 - No peer-to-peer network or blockchain component.
 - No attempt to replace a large frontier model with many small models for every task.
-- No complex web UI before the CLI and core workflow are stable.
+- No complex web UI before the CLI and core workflow are stable. The terminal chat is the interface for people until then; a GUI and an installer come later.
 - No assumption that free API quotas will remain available indefinitely.
 
 ## Current development approach
 
 The project begins with a portable, cross-platform development environment: a repository, Python-based runtime, SQLite-backed task store, configuration files, CLI commands, workspace directory, logs, and tests. The first milestone is not self-evolution; it is a reliable single-agent execution loop that can create, execute, checkpoint, resume, and audit a task.
 
-Only after that foundation works should the project add multiple executors, model routing, priority preemption, fault injection tests, and finally a tightly constrained self-improvement workflow.
+Only after that foundation works should the project add tools and security, then the chat for people, then multiple executors, model routing, priority preemption, fault injection tests, and finally a tightly constrained self-improvement workflow.
 
 ## Instruction for AI assistants working on DESMAN(P)
 
