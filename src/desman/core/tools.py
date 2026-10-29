@@ -40,7 +40,7 @@ from pydantic import (
 )
 
 from desman.core.policy import Access, Permission, executor_access
-from desman.core.sandbox import Sandbox
+from desman.core.sandbox import Limits, Sandbox
 from desman.core.workspace import PathEscapeError, Workspace
 
 __all__ = ["Access", "Permission"]  # re-exported: tools are declared with a Permission
@@ -55,7 +55,7 @@ MAX_LISTED_FILES: Final = 500
 AUDIT_TEXT: Final = 200
 """Characters of a string argument kept in the audit."""
 MAX_ERROR_CHARS: Final = 500
-MAX_RUN_SECONDS: Final = 60
+MAX_RUN_SECONDS: Final = int(Limits().timeout)
 """Longest `run_command`: well inside a lease (the lease is renewed just before the call)."""
 MAX_COMMAND_ARGS: Final = 64
 MAX_COMMAND_ARG_CHARS: Final = 100_000

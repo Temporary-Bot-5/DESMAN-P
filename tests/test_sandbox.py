@@ -200,6 +200,18 @@ def test_without_a_working_bwrap_nothing_runs(ws: Workspace, tmp_path: Path) -> 
     assert ws.files() == []
 
 
+def test_the_longest_timeout_the_tool_allows_is_not_cut_short() -> None:
+    assert Sandbox().limits.timeout == MAX_RUN_SECONDS
+    assert Sandbox().limits.cpu_seconds >= MAX_RUN_SECONDS
+
+
+@confined
+def test_a_timeout_asked_for_is_never_longer_than_the_limit(ws: Workspace) -> None:
+    started = time.monotonic()
+    outcome = Sandbox(Limits(timeout=1.0)).run(["sleep", "30"], ws.root, timeout=60)
+    assert outcome.timed_out and time.monotonic() - started < 10
+
+
 def test_without_bwrap_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("desman.core.sandbox.shutil.which", lambda name: None)
     assert Sandbox().unavailable() == "bubblewrap (bwrap) is not installed"

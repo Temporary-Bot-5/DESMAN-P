@@ -67,9 +67,9 @@ class SandboxUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class Limits:
-    timeout: float = 30.0
-    """Wall-clock seconds for the whole run."""
-    cpu_seconds: int = 30
+    timeout: float = 60.0
+    """Wall-clock seconds for the whole run; the most a caller may ask for in `run`."""
+    cpu_seconds: int = 60
     memory_bytes: int = 1024 * 2**20
     """Address space of each process."""
     file_bytes: int = 16 * 2**20
