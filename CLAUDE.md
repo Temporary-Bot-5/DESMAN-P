@@ -15,6 +15,9 @@ DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving 
 - Every provider is unreliable and rate-limited
 - Must handle intermittent execution (sessions stop/start)
 - Human control is mandatory - no silent self-modification
+- Accessible to non-developers: after configuration, bare `desman` becomes a chat (ROADMAP
+  phase C, after phase 3). Requests become ordinary tasks; changes to DESMAN itself asked in
+  the chat take effect only after the human confirms them in a field rendered by code
 
 ## Architecture Principles (from PROJECT_PLAN.md)
 
@@ -101,8 +104,9 @@ anywhere else; `claim()` is the one other writer. Give each audit entry a meanin
 record events that change no status (e.g. discarded work) with `Store.note()`. Contracts crossing a boundary (executor /
 reviewer results, provider data) are Pydantic models validated where they enter.
 
-The core is rebuilt following `ROADMAP.md` phase by phase. Do not jump ahead of the
-current phase (no multiple workers, routing, preemption or self-improvement before their phase).
+The core is rebuilt following `ROADMAP.md` phase by phase (0–3, then C — chat, then 4–5, then
+G — desman-global). Do not jump ahead of the current phase (no chat, multiple workers, routing,
+preemption, self-improvement or network features before their phase).
 
 ## Configuration
 
@@ -116,7 +120,7 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 - Never print or log an API key; show it through `providers.mask()`.
 - `permissions` are set by the human only. Agents must never write them; they become the
   upper bound of the tool policy.
-- Subcommands must stay non-interactive; only bare `desman`, `desman config`, `config reset`
+- Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
   (confirmation, `--yes` skips it) and `keys add` (the hidden key; `--stdin` for scripts) may
   prompt. A key is never accepted as a command-line argument.
 
@@ -152,12 +156,15 @@ current phase (no multiple workers, routing, preemption or self-improvement befo
 ## What NOT To Do
 
 - ❌ Don't add Kubernetes, p2p, message brokers, blockchain
-- ❌ Don't let agents modify their own permissions/safety/evaluation
+- ❌ Don't let agents modify their own permissions/safety/evaluation (a chat request is applied
+  only after the human's confirmation in a field built by code, never on the model's word)
+- ❌ Don't let an API key reach a model, the chat history, or the logs
 - ❌ Don't run generated code with broad system access
 - ❌ Don't implement silent self-modification
 - ❌ Don't assume free API quotas are stable
 - ❌ Don't build complex UI before CLI is stable
 - ❌ Don't create hundreds of agents - start with 1 planner, 1 executor, 1 reviewer, 1 coordinator
+  (plus 1 interlocutor for the chat in phase C)
 
 ## Commands for Development
 
