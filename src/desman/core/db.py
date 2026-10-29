@@ -220,6 +220,24 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE subtasks ADD COLUMN parent_id TEXT REFERENCES subtasks(id) ON DELETE CASCADE;
     CREATE INDEX ix_subtasks_parent ON subtasks (parent_id);
     """,
+    # 7 — tool calls with side effects (ROADMAP 3.4, D6): intent before the call, result after,
+    # so a rerun of the same execution replays them instead of acting twice (core/effects.py)
+    """
+    CREATE TABLE effects (
+        subtask_id   TEXT NOT NULL REFERENCES subtasks(id) ON DELETE CASCADE,
+        execution    INTEGER NOT NULL CHECK (execution >= 0),
+        ordinal      INTEGER NOT NULL CHECK (ordinal >= 0),
+        tool         TEXT NOT NULL,
+        key          TEXT NOT NULL,  -- sha256 of the tool and its arguments, never the arguments
+        lease_token  TEXT NOT NULL,  -- whose call it is: a late result from a lost lease is ignored
+        state        TEXT NOT NULL CHECK (state IN ('started', 'done', 'interrupted')),
+        result_json  TEXT CHECK (result_json IS NULL OR json_valid(result_json)),
+        started_at   TEXT NOT NULL,
+        finished_at  TEXT,
+        PRIMARY KEY (subtask_id, execution, ordinal),
+        CHECK ((state = 'started') = (result_json IS NULL AND finished_at IS NULL))
+    ) STRICT, WITHOUT ROWID;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

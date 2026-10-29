@@ -513,6 +513,20 @@ def test_v5_database_with_tasks_upgrades_to_split_subtasks(tmp_path: Path) -> No
     store.conn.close()
 
 
+def test_v6_database_with_running_work_upgrades_to_the_effect_journal(tmp_path: Path) -> None:
+    path = tmp_path / "v6.db"
+    old = _db_at_version(path, 6)
+    task_id = add_task(old)
+    add_subtask(old, task_id)
+    old.close()
+
+    store = Store(db.open_db(path))
+    assert db.schema_version(store.conn) == db.SCHEMA_VERSION
+    [existing] = store.list_subtasks(task_id)
+    assert store.executions(existing.id) == 0 and store.effects(existing.id, 0) == []
+    store.conn.close()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="file modes")
 def test_a_new_database_is_private(tmp_path: Path) -> None:
     old_umask = os.umask(0o022)

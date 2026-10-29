@@ -747,6 +747,102 @@ class Store:
         recovered = self.recover_expired(policy, task_id=task_id, abandoned=abandoned)
         return recovered, self.resume_due(task_id=task_id)
 
+    # ── Side effects (core/effects.py) ───────────────────────────────────────
+
+    def executions(self, subtask_id: str) -> int:
+        """How many executions of the subtask have ended with something to judge: a result, a
+        split or a quality failure. An interrupted one (crash, lost lease, provider error,
+        limits) has not ended: the next run continues it, so its effects are replayed."""
+        row = self.conn.execute(
+            """SELECT COUNT(*) FROM audit_log
+               WHERE subtask_id = ? AND actor = 'executor' AND from_status = 'running'
+                 AND (action IN ('submit', 'decomposed')
+                      OR json_extract(details_json, '$.failure') = 'quality')""",
+            (subtask_id,),
+        ).fetchone()
+        count: int = row[0]
+        return count
+
+    def effects(self, subtask_id: str, execution: int) -> list[sqlite3.Row]:
+        """The journal of one execution, in call order."""
+        return self.conn.execute(
+            "SELECT * FROM effects WHERE subtask_id = ? AND execution = ? ORDER BY ordinal",
+            (subtask_id, execution),
+        ).fetchall()
+
+    def start_effect(
+        self, subtask_id: str, lease: str, execution: int, ordinal: int, tool: str, key: str
+    ) -> None:
+        """Record the intent to make call `ordinal` while the lease is still held. The calls the
+        journal had from `ordinal` on belonged to a run that went differently: they are dropped
+        (the audit keeps them)."""
+        with db.transaction(self.conn):
+            self._hold(subtask_id, lease)
+            self.conn.execute(
+                "DELETE FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal >= ?",
+                (subtask_id, execution, ordinal),
+            )
+            self.conn.execute(
+                """INSERT INTO effects (subtask_id, execution, ordinal, tool, key, lease_token,
+                                        state, started_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'started', ?)""",
+                (subtask_id, execution, ordinal, tool, key, lease, self._now()),
+            )
+
+    def adopt_effect(self, subtask_id: str, lease: str, execution: int, ordinal: int) -> None:
+        """Take over an interrupted call to run it again (the tool says that is safe)."""
+        with db.transaction(self.conn):
+            self._hold(subtask_id, lease)
+            self.conn.execute(
+                """UPDATE effects SET lease_token = ?, started_at = ?
+                   WHERE subtask_id = ? AND execution = ? AND ordinal = ? AND state = 'started'""",
+                (lease, self._now(), subtask_id, execution, ordinal),
+            )
+
+    def finish_effect(
+        self,
+        subtask_id: str,
+        lease: str,
+        execution: int,
+        ordinal: int,
+        result: dict[str, Any],
+        *,
+        interrupted: bool = False,
+    ) -> bool:
+        """Record what a started call returned. Not the lease's call any more (it was taken
+        over after the lease was lost): nothing changes and False is returned.
+
+        With `interrupted`, `lease` is the new holder's and the call is one an earlier run
+        started and never finished: `result` is what replays of it will return from now on."""
+        with db.transaction(self.conn):
+            if interrupted:
+                self._hold(subtask_id, lease)
+            row = self.conn.execute(
+                f"""UPDATE effects SET state = ?, result_json = ?, finished_at = ?
+                    WHERE subtask_id = ? AND execution = ? AND ordinal = ? AND state = 'started'
+                      {"" if interrupted else "AND lease_token = ?"}
+                    RETURNING 1""",
+                (
+                    "interrupted" if interrupted else "done",
+                    json.dumps(result, ensure_ascii=False),
+                    self._now(),
+                    subtask_id,
+                    execution,
+                    ordinal,
+                    *(() if interrupted else (lease,)),
+                ),
+            ).fetchone()
+        return row is not None
+
+    def _hold(self, subtask_id: str, lease: str) -> None:
+        """Raise StaleStateError unless `lease` still holds the subtask. Needs a transaction."""
+        held = self.conn.execute(
+            "SELECT 1 FROM subtasks WHERE id = ? AND status = 'running' AND lease_token = ?",
+            (subtask_id, lease),
+        ).fetchone()
+        if held is None:
+            self._raise_stale(subtask_id, S.RUNNING, S.RUNNING, lease, self._now())
+
     def _apply(
         self,
         subtask_id: str,
