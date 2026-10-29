@@ -77,6 +77,23 @@ def test_a_searxng_without_json_is_explained() -> None:
     assert check_searxng("http://s", http(lambda r: httpx.Response(200, json=RESULTS))) is None
 
 
+def test_an_answer_without_results_is_an_error_not_nothing_found() -> None:
+    broken = http(lambda r: httpx.Response(200, json={"error": "backend unavailable"}))
+    with pytest.raises(WebError, match="not a list"):
+        SearXNG("http://s", broken).search("q", 5)
+    empty = http(lambda r: httpx.Response(200, json={"results": []}))
+    assert SearXNG("http://s", empty).search("q", 5) == []
+
+
+def test_a_huge_answer_is_not_read_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(search, "MAX_BYTES", 100)
+    huge = http(lambda r: httpx.Response(200, json={"results": [], "pad": "x" * 1000}))
+    with pytest.raises(WebError, match="too big"):
+        SearXNG("http://s", huge).search("q", 5)
+    with pytest.raises(WebError, match="too big"):
+        Wikipedia(huge).search("q", 5)
+
+
 # ── Open sources ─────────────────────────────────────────────────────────────
 
 

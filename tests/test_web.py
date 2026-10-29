@@ -84,6 +84,14 @@ def test_a_page_is_fetched_from_the_checked_address() -> None:
     assert request.extensions["sni_hostname"] == "example.org"  # TLS checks the name
 
 
+def test_an_ipv6_address_keeps_its_brackets_in_the_host_header() -> None:
+    v6 = "2606:4700:4700::1111"
+    site = Site({f"http://[{v6}]/": html(), f"http://[{v6}]:8080/": html()})
+    for url in (f"http://[{v6}]/", f"http://[{v6}]:8080/"):
+        fetcher(site, lambda host, port: [v6]).fetch(url)
+    assert [r.headers["host"] for r in site.requests] == [f"[{v6}]", f"[{v6}]:8080"]
+
+
 @pytest.mark.parametrize(
     "address",
     [
@@ -213,6 +221,15 @@ def test_answers_are_cached_for_a_day(store: Store, clock: FakeClock) -> None:
     assert w.search("q", 3) != first and engine.queries == ["q", "q"]
     w.page("https://example.org/doc")
     assert len(site.requests) == 2
+
+
+def test_another_searxng_server_is_asked_again(store: Store, clock: FakeClock) -> None:
+    cache = WebCache(store.conn, clock)
+    first, second = CountingEngine(), CountingEngine()
+    first.url, second.url = "http://a", "http://b"  # type: ignore[attr-defined]
+    Web(engines=[first], cache=cache).search("q", 3)
+    Web(engines=[second], cache=cache).search("q", 3)
+    assert first.queries == second.queries == ["q"]
 
 
 # ── The tools ────────────────────────────────────────────────────────────────

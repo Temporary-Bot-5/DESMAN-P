@@ -22,7 +22,15 @@ from typing import Any, Final
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from desman.core.web import TIMEOUT, USER_AGENT, SearchEngine, SearchResult, WebError, html_text
+from desman.core.web import (
+    MAX_BYTES,
+    TIMEOUT,
+    USER_AGENT,
+    SearchEngine,
+    SearchResult,
+    WebError,
+    html_text,
+)
 
 
 def client() -> httpx.Client:
@@ -30,11 +38,22 @@ def client() -> httpx.Client:
     return httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
 
 
-def _get(http: httpx.Client, engine: str, url: str, **kwargs: Any) -> httpx.Response:
+def _send(http: httpx.Client, engine: str, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """The answer, read up to MAX_BYTES: a bigger one is an error, not a full memory."""
+    body = bytearray()
     try:
-        response = http.get(url, **kwargs)
+        with http.stream(method, url, **kwargs) as response:
+            for chunk in response.iter_bytes():
+                body += chunk
+                if len(body) > MAX_BYTES:
+                    raise WebError(f"{engine} sent an answer that is too big")
     except httpx.HTTPError as e:
         raise WebError(f"{engine} cannot be reached: {type(e).__name__}") from e
+    return httpx.Response(response.status_code, content=bytes(body))
+
+
+def _get(http: httpx.Client, engine: str, url: str, **kwargs: Any) -> httpx.Response:
+    response = _send(http, engine, "GET", url, **kwargs)
     if response.status_code != 200:
         raise WebError(f"{engine} answered HTTP {response.status_code}")
     return response
@@ -43,7 +62,7 @@ def _get(http: httpx.Client, engine: str, url: str, **kwargs: Any) -> httpx.Resp
 class _Results(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    results: list[SearchResult] = []
+    results: list[SearchResult]  # required: {} or {"error": ...} is not "nothing found"
 
 
 def parse_results(response: httpx.Response, engine: str) -> list[SearchResult]:
@@ -71,18 +90,14 @@ class SearXNG:
     def search(
         self, query: str, max_results: int, language: str | None = None
     ) -> list[SearchResult]:
-        try:
-            response = self.http.get(
-                f"{self.url}/search",
-                params={
-                    "q": query,
-                    "format": "json",
-                    **({"language": language} if language else {}),
-                },
-                timeout=TIMEOUT,
-            )
-        except httpx.HTTPError as e:
-            raise WebError(f"SearXNG cannot be reached: {type(e).__name__}") from e
+        response = _send(
+            self.http,
+            "SearXNG",
+            "GET",
+            f"{self.url}/search",
+            params={"q": query, "format": "json", **({"language": language} if language else {})},
+            timeout=TIMEOUT,
+        )
         if response.status_code == 403:
             raise WebError("SearXNG refuses the JSON format (see docs/searxng.md)")
         return parse_results(response, "SearXNG")[:max_results]
@@ -113,15 +128,15 @@ class Tavily:
     ) -> list[SearchResult]:
         problem = "no Tavily key"
         for key in self.keys:
-            try:
-                response = self.http.post(
-                    self.URL,
-                    json={"query": query, "max_results": max_results, "search_depth": "basic"},
-                    headers={"Authorization": f"Bearer {key}"},
-                    timeout=TIMEOUT,
-                )
-            except httpx.HTTPError as e:
-                raise WebError(f"search failed: {type(e).__name__}") from e
+            response = _send(
+                self.http,
+                "Tavily",
+                "POST",
+                self.URL,
+                json={"query": query, "max_results": max_results, "search_depth": "basic"},
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=TIMEOUT,
+            )
             if response.status_code in (401, 403, 429, 432, 433):  # bad key, limit, no credits
                 problem = f"Tavily refused the search (HTTP {response.status_code})"
                 continue

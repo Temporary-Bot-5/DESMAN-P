@@ -85,6 +85,7 @@ SOURCES: Final = ("web", "wikipedia", "stackoverflow", "arxiv", "github")
 
 class SearchEngine(Protocol):
     name: str
+    """Shown to the model; with `url` (if the engine has one), part of the cache key."""
 
     def search(
         self, query: str, max_results: int, language: str | None = None
@@ -158,7 +159,8 @@ class Fetcher:
         address = self._public_address(host, port)
         netloc = f"[{address}]" if ":" in address else address
         target = parts._replace(netloc=f"{netloc}:{port}").geturl()
-        host_header = host if parts.port is None else f"{host}:{parts.port}"
+        name = f"[{host}]" if ":" in host else host  # an IPv6 literal keeps its brackets
+        host_header = name if parts.port is None else f"{name}:{parts.port}"
         try:
             request = self.client.build_request(
                 "GET",
@@ -352,7 +354,9 @@ class Web:
                 else f"the source {source!r} is not available"
             )
             raise WebError(f"{what}; sources available: {others}")
-        request = f"{source}\0{language}\0{max_results}\0{query}"
+        # Which engines: after SEARXNG_URL changes, the old server's answers are not reused.
+        asked = " ".join(f"{e.name}={getattr(e, 'url', '')}" for e in engines)
+        request = f"{source}\0{asked}\0{language}\0{max_results}\0{query}"
         cached = self.cache.get("search", request) if self.cache else None
         if cached is not None:
             return cached
