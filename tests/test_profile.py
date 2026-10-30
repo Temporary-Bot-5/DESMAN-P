@@ -298,3 +298,31 @@ def test_config_show_says_whether_the_profile_is_on() -> None:
     assert re.search(r"Profile\s+off", result.output)
     shown = json.loads(CliRunner().invoke(cli, ["config", "show", "--json"]).output)
     assert shown["profile"] is False
+
+
+def test_a_changed_or_erased_note_leaves_the_response_cache(profile: Profile) -> None:
+    def cache(key: str, text: str) -> None:
+        profile.conn.execute(
+            "INSERT INTO response_cache VALUES (?, 'fake', 'm', ?, 'stop', 1, 1, '')", (key, text)
+        )
+
+    porto = profile.add("Lives in Porto", Author.INTERLOCUTOR)
+    kyiv = profile.add("Живёт в Киеве", Author.INTERLOCUTOR)
+    cache("a", reply("Ok.", {"add": "Lives in Porto"}))
+    cache("b", json.dumps({"profile": [{"add": "Живёт в Киеве"}]}))  # escaped: \\u0416...
+    cache("c", reply("Something else."))
+    profile.change(porto.id, "Lives in Lisbon", Author.PERSON)
+    profile.forget(kyiv.id, Author.PERSON)
+    keys = [r[0] for r in profile.conn.execute("SELECT key FROM response_cache")]
+    assert keys == ["c"]
+
+
+def test_a_task_is_retold_with_the_notes_its_turn_made(fake: FakeLLM) -> None:
+    plan = {"subtasks": [{"description": "Find flights", "acceptance_criteria": "Listed"}]}
+    task = {"type": "task", "title": "Flights", "goal": "Find flights to Oslo"}
+    fake.on(CHAT, json.dumps({**task, "profile": [{"add": "Prefers short answers"}]}))
+    fake.on("Plan task", json.dumps(plan)).on("Execute subtask", '{"flights": ["SK 1"]}')
+    fake.on("Review subtask", '{"verdict": "accept"}').on(RETELL, '{"text": "SK 1."}')
+    chat("briefly: flights to Oslo")
+    [retold] = turns(fake, RETELL)
+    assert payload(retold)["profile"] == [{"id": 1, "note": "Prefers short answers"}]

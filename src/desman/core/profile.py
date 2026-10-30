@@ -5,9 +5,12 @@ they make often) and sees them with every message, so they reach the model provi
 personal data. The person sees them in `/profile`, changes or erases them there, or turns the
 profile off (`Config.profile`), and then the interlocutor neither sees nor writes any.
 
-Unlike messages, notes are changed and deleted in place: erased means gone. Every change is
-written to the operator's journal (`core.operator`) with the note's number and who made it,
-never its text, so the journal does not keep what was erased.
+Unlike messages, notes are changed and deleted in place. Every change is written to the
+operator's journal (`core.operator`) with the note's number and who made it, never its text, so
+the journal does not keep what was erased; a changed or erased text also leaves the response
+cache (`llm.cache`: the turn that wrote the note is a reply kept there). What the person said
+in the conversation stays, like every message (`core.sessions`): erasing a note stops it from
+going to the models with every message, it does not rewrite the past.
 
 Notes change how the interlocutor talks, nothing else: no permission, rule or confirmation
 reads them.
@@ -15,6 +18,7 @@ reads them.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -109,31 +113,48 @@ class Profile:
         note. ValueError for a bad text."""
         text = normalized(text)
         with db.transaction(self.conn):
+            was = self._texts("WHERE id = ? AND text != ?", (note_id, text))
             now = db.to_iso(self.clock())
-            changed = self.conn.execute(
+            self.conn.execute(
                 "UPDATE profile_notes SET text = ?, author = ?, updated_at = ? "
                 "WHERE id = ? AND text != ?",
                 (text, author.value, now, note_id, text),
-            ).rowcount
-            if changed:
+            )
+            if was:
+                self._uncache(was)
                 self._journal("profile_note_changed", note_id, author, session_id)
         return self.get(note_id)
 
     def forget(self, note_id: int, author: Author, *, session_id: str | None = None) -> bool:
         """Erase a note; False if there was no such note."""
         with db.transaction(self.conn):
-            gone = self.conn.execute("DELETE FROM profile_notes WHERE id = ?", (note_id,)).rowcount
+            gone = self._texts("WHERE id = ?", (note_id,))
+            self.conn.execute("DELETE FROM profile_notes WHERE id = ?", (note_id,))
             if gone:
+                self._uncache(gone)
                 self._journal("profile_note_forgotten", note_id, author, session_id)
         return bool(gone)
 
     def clear(self, *, session_id: str | None = None) -> int:
         """Erase every note (only the person does that); how many there were."""
         with db.transaction(self.conn):
-            gone = self.conn.execute("DELETE FROM profile_notes").rowcount
+            gone = self._texts("", ())
+            self.conn.execute("DELETE FROM profile_notes")
             if gone:
-                operator.write(self.conn, "profile_cleared", {"notes": gone}, session_id=session_id)
-        return gone
+                self._uncache(gone)
+                details = {"notes": len(gone)}
+                operator.write(self.conn, "profile_cleared", details, session_id=session_id)
+        return len(gone)
+
+    def _texts(self, where: str, params: tuple[object, ...]) -> list[str]:
+        rows = self.conn.execute(f"SELECT text FROM profile_notes {where}", params).fetchall()
+        return [r["text"] for r in rows]
+
+    def _uncache(self, texts: list[str]) -> None:
+        """Drop cached replies that hold any of `texts`, as written or escaped in JSON."""
+        for text in texts:
+            for form in {text, json.dumps(text)[1:-1]}:
+                self.conn.execute("DELETE FROM response_cache WHERE instr(text, ?) > 0", (form,))
 
     def _journal(self, action: str, note_id: int, author: Author, session_id: str | None) -> None:
         details = {"note": note_id, "by": author.value}

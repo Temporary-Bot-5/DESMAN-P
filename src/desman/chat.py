@@ -173,6 +173,7 @@ class Chat:
             return
         if config.profile:  # off: the model was told nothing of it, and nothing is kept
             self._note(turn.profile, config)
+            interlocutor.profile = self.profile.notes()  # a task's retelling follows them
         if isinstance(turn, Reply):
             self._say(turn.text)
         elif isinstance(turn, Clarify):
@@ -764,10 +765,10 @@ class Chat:
     def _profile_do(self, chosen: str, notes: list[Note], config: Config) -> None:
         by, session = Author.PERSON, self.session_id
         if chosen in ("on", "off"):
-            manager = open_config()
-            before = manager.load()
-            manager.save(before.model_copy(update={"profile": chosen == "on"}))
-            for change, about in commands.config_changes(before, manager.load()):
+            with open_config().edit() as edited:  # locked: another command's key survives
+                before = edited.model_copy(deep=True)
+                edited.profile = chosen == "on"
+            for change, about in commands.config_changes(before, edited):
                 operator.record(self.store.conn, change, about, session_id=session)
             if chosen == "on":
                 ui.ok(t("The profile is on."))
