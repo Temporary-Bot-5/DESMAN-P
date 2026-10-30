@@ -40,6 +40,11 @@ Start the chat with bare `desman`, then type the following, each in your own wor
      left. Then `Task … is done.` and a short retelling with flights, prices and links.
    - If the interlocutor asks a question back (dates, airports), answer it. That is a
      `clarify` turn and it is fine.
+   - It may instead ask to start the task through a `Confirm` window (the `run` command).
+     Answer `y`.
+   - Compare the result with what the search found (`desman audit <ref>` shows the query). A
+     price or time that is not in the search results was made up, and the reviewer does not
+     catch this yet.
 
 ## What to look at afterwards
 
