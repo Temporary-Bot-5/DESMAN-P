@@ -22,7 +22,7 @@ from desman.providers import Provider
 SEARXNG_DOC = "https://github.com/Temporary-Bot-5/DESMAN-P/blob/master/docs/searxng.md"
 
 
-def _permission_labels() -> dict[str, str]:
+def permission_labels() -> dict[str, str]:
     return {
         "admin_rights": t("act with administrator / root privileges"),
         "fs_outside_access": t("touch files outside the DESMAN workspace"),
@@ -65,6 +65,24 @@ def run(manager: ConfigManager) -> None:
     if config.permissions.admin_rights:
         ui.warn(t("admin_rights is on: agents may act with elevated privileges."))
     ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
+
+
+SECTIONS = ("providers", "permissions")
+"""Parts of the wizard that can be opened on their own (from the chat, ADR 0003 §3)."""
+
+
+def run_section(manager: ConfigManager, section: str) -> None:
+    """One section of the wizard; saved when it ends, nothing saved when the user leaves."""
+    seen = manager.snapshot()
+    config = manager.load().model_copy(deep=True)
+    if section == "providers":
+        _providers_menu(_Session(config))
+    elif section == "permissions":
+        config.permissions = _permissions(config.permissions)
+    else:
+        raise ValueError(f"no wizard section {section!r}")
+    manager.save_if_unchanged(config, seen)
+    ui.ok(t("Configuration saved to {path}", path=manager.config_path))
 
 
 def _status(config: Config, p: Provider) -> str:
@@ -271,7 +289,7 @@ def _permissions(current: Permissions) -> Permissions:
         )
     )
     names = list(Permissions.model_fields)
-    labels = _permission_labels()
+    labels = permission_labels()
     granted = ui.checkbox(
         t("Allow agents to"),
         [ui.Choice(labels[name], name) for name in names],

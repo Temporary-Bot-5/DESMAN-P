@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from desman.cli import cli
-from desman.core import db
+from desman.core import db, operator
 from desman.core.audit import check_history, history
 from desman.core.sessions import Kind, Role, Sessions
 from desman.core.states import SubtaskStatus
@@ -602,4 +602,27 @@ def test_v10_database_with_a_call_log_upgrades_to_attributed_calls(tmp_path: Pat
             "INSERT INTO model_calls (provider, model, prompt_hash, latency_ms, role) "
             "VALUES ('groq', 'm', 'h', 5, 'chef')"
         )
+    conn.close()
+
+
+def test_v11_database_with_a_session_upgrades_to_the_operator_log(tmp_path: Path) -> None:
+    path = tmp_path / "v11.db"
+    old = _db_at_version(path, 11)
+    old.execute("INSERT INTO sessions (id) VALUES ('s1')")
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    operator.record(conn, "operator_command", {"command": "language"}, session_id="s1")
+    [entry] = operator.entries(conn)
+    assert (entry.session_id, entry.action, entry.details) == (
+        "s1",
+        "operator_command",
+        {"command": "language"},
+    )
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute("UPDATE operator_log SET action = 'x'")
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute("DELETE FROM operator_log")
+    with pytest.raises(sqlite3.IntegrityError):  # a session that exists, or none
+        operator.record(conn, "operator_command", session_id="no-such-session")
     conn.close()

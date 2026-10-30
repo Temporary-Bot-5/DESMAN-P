@@ -40,14 +40,21 @@ src/desman/
 │                  #   `init-db`, and the task
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
 │                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
+├── actions.py     # Bodies of the task commands (data functions + printers), shared by the CLI
+│                  #   and the chat's catalog; problems are click.ClickException
+├── commands.py    # The chat's catalog of every CLI command (a test checks both ways): about
+│                  #   for the model, Args (Pydantic, extra forbidden), class per call (read |
+│                  #   change → Proposal shown in a window | input → hidden field / wizard);
+│                  #   config_changes() for the operator's journal
 ├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
 │                  #   `{"type": "error"}` = can't do it (never accepted, see coordinator)
 │                  #   executor acts only via `{"tool_calls": [...]}` (≤8 rounds per attempt)
 ├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure;
 │                  #   decomposer(): splits a subtask whose retries failed (2–4 parts)
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
-├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import`,
-│                  #   `language [CODE]`, `usage`
+├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import|check`,
+│                  #   `language [CODE]`, `permissions [--grant|--revoke]`, `usage`; bodies as
+│                  #   functions the chat's catalog calls too
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions)
 ├── providers.py   # known model providers, readiness, key masking, key-file parsing
 ├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise)
@@ -57,9 +64,12 @@ src/desman/
 ├── info.py        # Banner / project info
 ├── chat.py        # The chat of bare `desman`: continues the last session; /help, /new,
 │                  #   /sessions, /exit; each message gets the interlocutor's turn; a task turn
-│                  #   runs a task of the session while the chat waits, then it is retold
+│                  #   runs a task of the session while the chat waits, then it is retold; a
+│                  #   command turn goes through the catalog: the window and the person's "yes"
+│                  #   are code's, the result goes back as an event, changes to operator_log
 ├── interlocutor.py # The interlocutor: Turn (reply | clarify | task | command), no tools;
-│                  #   retell() a task's outcome. Prompts "Chat turn", "Retell task"
+│                  #   retell() a task's outcome; the catalog is in its prompt. Prompts
+│                  #   "Chat turn", "Retell task"
 ├── runs.py        # A run put together from the config (models, executor access, web tools,
 │                  #   coordinator), shared by `run`/`resume` and the chat
 ├── live.py        # Live progress of a chat task: subtask bar, a line per module (role, calls,
@@ -79,6 +89,8 @@ src/desman/
                    #   fitted to a token budget, feedback on the previous attempt
     ├── sessions.py # Chat sessions and messages (append-only: role, text, kind
     │              #   message | summary | event, task link); a session starts with its first message
+    ├── operator.py # operator_log: what the person did outside tasks (chat commands confirmed
+    │              #   or declined, keys by fingerprint, permissions); append-only
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
                    #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
@@ -146,9 +158,12 @@ preemption, self-improvement or network features before their phase).
 - The file is the `Config` model; a schema change bumps `schema_version` and adds a step to
   `upgrade()`. A file that does not load is a `ConfigError`, never "unconfigured".
 - Never print or log an API key; show it through `providers.mask()`.
-- `permissions` are set by the human only. Agents must never write them; they are the
+- `permissions` are set by the human only (`desman config`, `desman permissions`, or a chat
+  request the human confirms in the window). Agents must never write them; they are the
   upper bound of the tool policy (`src/desman/policy.toml`, which is code: changed by people
   through git, never by an agent).
+- A new CLI command also gets an entry in `commands.CATALOG` (a test requires it); the chat
+  calls the same body function as the CLI, never the CLI itself.
 - Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
   (confirmation, `--yes` skips it) and `keys add` (the hidden key; `--stdin` for scripts) may
   prompt. A key is never accepted as a command-line argument.

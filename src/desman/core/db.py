@@ -285,6 +285,22 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE model_calls ADD COLUMN error_type TEXT;
     CREATE INDEX ix_model_calls_task ON model_calls (task_id, seq);
     """,
+    # 12 — what the person did outside any task (ROADMAP C.5, ADR 0003): commands confirmed or
+    # declined in the chat, keys added (provider and fingerprint, never the key), permissions
+    # granted or revoked. `audit_log` tells the story of tasks; this is the operator's own
+    f"""
+    CREATE TABLE operator_log (
+        seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts            TEXT NOT NULL DEFAULT {_NOW_SQL},
+        session_id    TEXT REFERENCES sessions(id),
+        action        TEXT NOT NULL,
+        details_json  TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details_json))
+    ) STRICT;
+    CREATE TRIGGER operator_log_no_update BEFORE UPDATE ON operator_log
+        BEGIN SELECT RAISE(ABORT, 'operator_log is append-only'); END;
+    CREATE TRIGGER operator_log_no_delete BEFORE DELETE ON operator_log
+        BEGIN SELECT RAISE(ABORT, 'operator_log is append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

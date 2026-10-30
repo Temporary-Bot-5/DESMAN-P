@@ -12,19 +12,27 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, i18n, providers, runs, ui
+from desman import __version__, actions, i18n, providers, runs, ui
+from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
 from desman.config import ConfigError, open_config
-from desman.config_cli import config, keys, language, load_config, run_wizard, usage
+from desman.config_cli import (
+    config,
+    keys,
+    language,
+    load_config,
+    permissions,
+    run_wizard,
+    usage,
+)
 from desman.core import calls, db
-from desman.core.audit import AuditEntry, check_history, history
 from desman.core.coordinator import RunResult
 from desman.core.models import Priority, TaskSpec
 from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.sessions import Sessions
-from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
-from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
+from desman.core.states import SubtaskStatus, TaskStatus
+from desman.core.store import DEFAULT_LEASE_SECONDS, Store
 from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
@@ -50,17 +58,6 @@ def db_option(command: F) -> F:
         default=None,
         help="Database file (default: $DESMAN_DATA_DIR/desman.db or ~/.local/share/desman/desman.db).",
     )(command)
-
-
-def open_existing(db_path: Path | None) -> Store:
-    """The store for commands that read tasks: they never create an empty database."""
-    path = db_path or db.default_db_path()
-    if not path.exists():
-        raise click.ClickException(t("no database at {path} (nothing has run yet?)", path=path))
-    try:
-        return Store(db.open_db(path))
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
 
 
 class DesmanGroup(click.Group):
@@ -130,6 +127,7 @@ cli.add_command(config)
 cli.add_command(keys)
 cli.add_command(usage)
 cli.add_command(language)
+cli.add_command(permissions)
 
 
 @cli.command("init-db")
@@ -137,23 +135,7 @@ cli.add_command(language)
 def init_db(db_path: Path | None) -> None:
     """Create the database or apply pending migrations. Safe to re-run."""
     path = db_path or db.default_db_path()
-    conn = db.connect(path)
-    try:
-        applied = db.migrate(conn)
-        db.verify_schema(conn)
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
-    finally:
-        conn.close()
-    click.echo(
-        tn(
-            applied,
-            "{path}: schema v{version} ({n} migration applied)",
-            "{path}: schema v{version} ({n} migrations applied)",
-            path=path,
-            version=db.SCHEMA_VERSION,
-        )
-    )
+    actions.print_init(path, actions.init_database(path))
 
 
 @cli.command()
@@ -168,65 +150,19 @@ def audit(task: str, db_path: Path | None, as_json: bool) -> None:
     """
     store = open_existing(db_path)
     try:
-        try:
-            row = store.find_task(task)
-        except LookupError as e:
-            raise click.ClickException(str(e)) from e
-        task_id = row["id"]
-        with db.read_snapshot(store.conn):  # a worker may be committing meanwhile
-            entries = [_redacted(e) for e in history(store.conn, task_id)]
-            problems = check_history(store.conn, task_id)
-            status = store.task_status(task_id)
-            labels = {s.id: f"[{s.seq}] {s.description}" for s in store.list_subtasks(task_id)}
+        found = actions.task_history(store, task)
     finally:
         store.conn.close()
-
     if as_json:
-        report = {
-            "task": {"id": task_id, "goal": row["goal"], "status": status.value},
-            "entries": [e.model_dump(mode="json") for e in entries],
-            "problems": problems,
-        }
-        click.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        click.echo(json.dumps(found.as_json(), ensure_ascii=False, indent=2))
     else:
-        click.echo(t("Task {id}  {status}", id=task_id, status=status.value))
-        click.echo(t("Goal: {goal}", goal=row["goal"]))
-        for entry in entries:
-            click.echo(_format_entry(entry, labels))
-    if problems:
-        click.echo(t("History is incomplete:"), err=True)
-        for problem in problems:
-            click.echo(f"  {problem}", err=True)
+        actions.print_history(found)
+    if found.problems:
+        if as_json:
+            click.echo(t("History is incomplete:"), err=True)
+            for problem in found.problems:
+                click.echo(f"  {problem}", err=True)
         raise SystemExit(1)
-
-
-def _redacted(entry: AuditEntry) -> AuditEntry:
-    """Lease tokens let their holder act as the executor: show only enough to tell them apart."""
-    lease = entry.details.get("lease")
-    if not isinstance(lease, str):
-        return entry
-    return entry.model_copy(update={"details": {**entry.details, "lease": lease[:8] + "…"}})
-
-
-def _format_entry(entry: AuditEntry, labels: dict[str, str]) -> str:
-    label = labels.get(entry.subtask_id, entry.subtask_id) if entry.subtask_id else "task"
-    label = " ".join(label.split())  # descriptions come from a planner and may span lines
-    change = ""
-    if entry.to_status is not None:
-        change = f"{entry.from_status} -> {entry.to_status}"
-    details = "  ".join(
-        f"{key}={_short(value)}" for key, value in entry.details.items() if value not in ("", None)
-    )
-    return (
-        f"{entry.seq:>5}  {entry.ts}  {label[:28]:<28}  {entry.actor:<9}  "
-        f"{entry.action:<16}  {change:<22}  {details}".rstrip()
-    )
-
-
-def _short(value: Any, limit: int = 80) -> str:
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    text = " ".join(text.split())  # one line per entry, whatever the content
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 # ── Task commands ────────────────────────────────────────────────────────────
@@ -395,7 +331,7 @@ def resume(
     store = open_existing(db_path)
     models = _attach(llm, other, store, cache=not no_cache)
     try:
-        task_id = _find(store, task)
+        task_id = find_task(store, task)
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
@@ -409,13 +345,13 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
     """Show TASK and its subtasks. Same exit codes as `run`."""
     store = open_existing(db_path)
     try:
-        report = task_report(store, _find(store, task))
+        report = task_report(store, find_task(store, task))
     finally:
         store.conn.close()
     if as_json:
         click.echo(json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2))
     else:
-        _print_report(report)
+        print_report(report)
     raise SystemExit(_exit_code(report.status, paused=_has_paused(report)))
 
 
@@ -442,11 +378,7 @@ def list_tasks(status_filter: str | None, limit: int, db_path: Path | None, as_j
         rows = [s.model_dump(mode="json", exclude={"subtasks"}) for s in summaries]
         click.echo(json.dumps(rows, ensure_ascii=False, indent=2))
         return
-    for summary in summaries:
-        click.echo(
-            f"{summary.id}  {summary.status:<11}  {summary.done:>3}/{summary.total:<3}  "
-            f"{summary.created_at}  {_one_line(summary.goal, 60)}"
-        )
+    actions.print_summaries(summaries)
 
 
 def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json: bool) -> Planned:
@@ -541,14 +473,6 @@ def _executor_access(as_json: bool) -> Access:
     return runs.executor_access(load_config().load(), stderr=as_json)
 
 
-def _find(store: Store, task: str) -> str:
-    try:
-        task_id: str = store.find_task(task)["id"]
-    except LookupError as e:
-        raise click.ClickException(str(e)) from e
-    return task_id
-
-
 def _drive(
     store: Store,
     models: runs.Models,
@@ -575,7 +499,7 @@ def _drive(
         out["task"] = report.model_dump(mode="json")
         click.echo(json.dumps(out, ensure_ascii=False, indent=2))
     else:
-        _print_report(report)
+        print_report(report)
         if result.paused_until:
             click.echo(
                 t(
@@ -612,48 +536,6 @@ def _has_paused(report: TaskReport) -> bool:
     return "paused" in statuses and not statuses & moving
 
 
-def _print_report(report: TaskReport) -> None:
-    click.echo(
-        t(
-            "Task {id}  {status}  ({done}/{total} done)",
-            id=report.id,
-            status=report.status,
-            done=report.done,
-            total=report.total,
-        )
-    )
-    click.echo(t("Goal: {goal}", goal=_one_line(report.goal, 200)))
-    for sub in report.subtasks:
-        line = f"  [{sub.seq}] {sub.status:<11}  {_one_line(sub.description, 60)}"
-        notes = []
-        if sub.part_of is not None:
-            notes.append(t("part of {seq}", seq=sub.part_of))
-        if sub.depends_on:
-            notes.append(t("after {deps}", deps=", ".join(str(d) for d in sub.depends_on)))
-        if sub.attempts.quality or sub.attempts.transient:
-            notes.append(
-                t(
-                    "attempts q{quality}/t{transient}",
-                    quality=sub.attempts.quality,
-                    transient=sub.attempts.transient,
-                )
-            )
-        if sub.lease_owner:
-            notes.append(
-                t("held by {owner} until {until}", owner=sub.lease_owner, until=sub.lease_until)
-            )
-        if sub.paused_until:
-            notes.append(t("paused until {until}", until=sub.paused_until))
-        if sub.reason and sub.status.value not in ("done", "running", "pending"):
-            notes.append(_one_line(sub.reason, 100))
-        click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
-
-
-def _one_line(text: str, limit: int) -> str:
-    flat = " ".join(text.split())
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
-
-
 # ── Operator decisions (a minimal subset of ROADMAP 5.1) ─────────────────────
 
 
@@ -672,17 +554,7 @@ def inbox_command(db_path: Path | None, as_json: bool) -> None:
             json.dumps([i.model_dump(mode="json") for i in items], ensure_ascii=False, indent=2)
         )
         return
-    if not items:
-        click.echo(t("Nothing is waiting for you."))
-        return
-    for item in items:
-        click.echo(
-            f"{item.ref:<12} {item.status:<11}  {_one_line(item.description, 50)}"
-            f"  [{_one_line(item.goal, 40)}]"
-        )
-        if item.reason:
-            click.echo(f"{'':<12} {_one_line(item.reason, 110)}")
-    click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
+    actions.print_inbox(items)
 
 
 def if_version_option(command: F) -> F:
@@ -765,29 +637,13 @@ def cancel(task: str, note: str, db_path: Path | None, as_json: bool) -> None:
     heartbeat."""
     store = open_existing(db_path)
     try:
-        task_id = _find(store, task)
-        try:
-            cancelled = store.cancel_task(task_id, reason=note)
-        except StaleStateError as e:  # a run changed it meanwhile: nothing was cancelled
-            raise click.ClickException(
-                t("it changed meanwhile, try again: {error}", error=e)
-            ) from e
-        status = store.task_status(task_id)
+        result = actions.cancel_task(store, find_task(store, task), note)
     finally:
         store.conn.close()
     if as_json:
-        out = {"task_id": task_id, "status": status.value, "cancelled": [s.id for s in cancelled]}
-        click.echo(json.dumps(out, indent=2))
+        click.echo(json.dumps(result.as_json(), indent=2))
     else:
-        click.echo(
-            tn(
-                len(cancelled),
-                "Task {id}: {n} subtask cancelled, task is {status}",
-                "Task {id}: {n} subtasks cancelled, task is {status}",
-                id=task_id,
-                status=status,
-            )
-        )
+        actions.print_cancelled(result)
 
 
 def _decide(
@@ -801,66 +657,11 @@ def _decide(
 ) -> None:
     store = open_existing(db_path)
     try:
-        try:
-            with db.read_snapshot(store.conn):  # the status and its version, read together
-                sub = store.find_subtask(ref)
-                version = store.status_version(sub.id)
-        except LookupError as e:
-            raise click.ClickException(str(e)) from e
-        if if_version is not None and if_version != version:
-            raise click.ClickException(
-                t(
-                    "[{seq}] changed since version {seen} (now {version}, {status}): "
-                    "look again with `desman inbox`",
-                    seq=sub.seq,
-                    seen=if_version,
-                    version=version,
-                    status=sub.status,
-                )
-            )
-        if target not in allowed_targets(sub.status, Actor.HUMAN):
-            options = sorted(s.value for s in allowed_targets(sub.status, Actor.HUMAN))
-            raise click.ClickException(
-                t(
-                    "[{seq}] is {status}: the operator can move it to {options}, not {target}",
-                    seq=sub.seq,
-                    status=sub.status,
-                    options=", ".join(options) if options else t("nothing"),
-                    target=target,
-                )
-            )
-        try:
-            # Not just "still in that status": unchanged since we looked (a retry that
-            # re-escalated meanwhile is a newer situation the operator has not seen).
-            moved = store.transition(
-                sub.id,
-                sub.status,
-                target,
-                Actor.HUMAN,
-                reason=note,
-                action=action,
-                expected_version=version,
-            )
-        except StaleStateError as e:
-            raise click.ClickException(
-                t("it changed meanwhile, look again: {error}", error=e)
-            ) from e
-        status = store.task_status(sub.task_id)
-        short = store.short_id(sub.task_id)
+        pending = actions.prepare_decision(store, ref, target, if_version)
+        decision = actions.apply_decision(store, pending, note, action)
     finally:
         store.conn.close()
     if as_json:
-        out = {
-            "subtask_id": sub.id,
-            "task_id": sub.task_id,
-            "from": sub.status.value,
-            "to": moved.status.value,
-            "task_status": status.value,
-        }
-        click.echo(json.dumps(out, indent=2))
-        return
-    click.echo(f"[{sub.seq}] {_one_line(sub.description, 60)}: {sub.status} -> {moved.status}")
-    if status is TaskStatus.ACTIVE:
-        click.echo(t("Task is active again. Continue with: desman resume {ref}", ref=short))
+        click.echo(json.dumps(decision.as_json(), indent=2))
     else:
-        click.echo(t("Task is {status}.", status=status))
+        actions.print_decision(decision)
