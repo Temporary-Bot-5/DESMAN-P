@@ -91,6 +91,21 @@ class ProviderRejected(ProviderError):
         self.status = status
 
 
+class GenerationFailed(ProviderError):
+    """The provider refused the model's own reply (Groq's `tool_use_failed`: the model called
+    a tool natively instead of writing text). The request was fine: another attempt, worded
+    differently or on another model, may well succeed, so it is a quality failure."""
+
+    kind = FailureKind.QUALITY
+
+    def __init__(self, provider: str, message: str = "") -> None:
+        super().__init__(
+            provider,
+            "the model's reply was refused: it called a tool natively instead of answering "
+            "in text (write the JSON object as the reply)" + (f": {message}" if message else ""),
+        )
+
+
 class RateLimited(ProviderError):
     kind = FailureKind.LIMIT
 

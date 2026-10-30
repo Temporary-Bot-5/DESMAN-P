@@ -3,7 +3,8 @@
 One `complete()` is one chat completion. HTTP outcomes become the typed errors of
 `llm/base.py`, so the retry policy can tell a bad key from a rate limit from an outage:
 
-- 400/404/422 and 401/403: `ProviderRejected` (permanent);
+- 400/404/422 and 401/403: `ProviderRejected` (permanent), except a 400 refusing the model's
+  own reply (`tool_use_failed`): `GenerationFailed` (quality, tried again differently);
 - 402, or a 429 that speaks of a quota or a daily limit: `QuotaExhausted` (pause);
 - other 429: `RateLimited`, with `Retry-After` when the provider sends it (pause);
 - 408, 5xx, timeouts, connection errors, a 200 without a usable reply: transient.
@@ -33,6 +34,7 @@ import httpx
 
 from desman.llm.base import (
     Completion,
+    GenerationFailed,
     ProviderError,
     ProviderRejected,
     ProviderTimeout,
@@ -277,6 +279,8 @@ class OpenAICompatible:
             )
         if status == 429:
             return RateLimited(self.name, _retry_after(response, message, self.clock()))
+        if status == 400 and _code(response) in _GENERATION_FAILED:
+            return GenerationFailed(self.name, message)
         if status in (408, 409) or status >= 500:
             return ProviderUnavailable(self.name, status, message)
         return ProviderRejected(self.name, status, message)
@@ -334,6 +338,22 @@ def _message(response: httpx.Response) -> str:
     else:
         text = ""
     return str(text)[:200].strip()
+
+
+_GENERATION_FAILED = frozenset({"tool_use_failed"})
+"""Error codes for a reply the provider refused, not a request: Groq's when a model (e.g.
+gpt-oss) calls a tool natively although the request offered none."""
+
+
+def _code(response: httpx.Response) -> str | None:
+    """The provider's error code (`{"error": {"code": ...}}`), if it sends one."""
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    error = data.get("error") if isinstance(data, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    return code if isinstance(code, str) else None
 
 
 def _retry_after(response: httpx.Response, message: str, now: datetime) -> float | None:
