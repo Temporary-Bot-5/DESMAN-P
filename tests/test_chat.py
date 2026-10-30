@@ -237,7 +237,7 @@ def test_the_chat_offers_its_own_commands(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(ui, "line", line)
     Chat(stored()).run()
-    assert offered == [["/help", "/new", "/sessions", "/rename", "/delete", "/exit"]]
+    assert offered == [["/help", "/new", "/sessions", "/rename", "/compact", "/delete", "/exit"]]
 
 
 # ── Naming and deleting sessions ─────────────────────────────────────────────

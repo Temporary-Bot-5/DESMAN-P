@@ -4,6 +4,9 @@ A session is one conversation in bare `desman`. Its messages are append-only (tr
 UPDATE and DELETE): a summary that later stands in for old messages (C.6) is a message of its
 own, and the originals stay in the database.
 
+What the interlocutor sees of a session is its `History`: the latest summary, if there is one,
+and the messages after those it covers.
+
 A session exists from its first message on: `/new` only starts a fresh one, so leaving the chat
 without writing anything leaves no empty session behind. The person may name a session and
 delete it: a deleted session leaves the lists and is never continued, but its messages stay.
@@ -48,6 +51,20 @@ class Message(BaseModel):
     kind: Kind
     text: str
     task_id: str | None = None
+    covers: int | None = None
+    """A summary's: the last message (by `seq`) it stands in for."""
+
+
+class History(BaseModel):
+    """What the interlocutor sees of a session (C.6): the latest summary and what came after
+    the messages it covers (other summaries never: the latest one includes them)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    summary: Message | None
+    messages: list[Message]
+    earlier: int = 0
+    """Messages after the summary (or from the start) left out of `messages` by its limit."""
 
 
 class SessionInfo(BaseModel):
@@ -87,8 +104,12 @@ class Sessions:
         text: str,
         kind: Kind = Kind.MESSAGE,
         task_id: str | None = None,
+        covers: int | None = None,
     ) -> Message:
-        """Append a message; `session_id` None starts a new session with it."""
+        """Append a message; `session_id` None starts a new session with it. A summary says
+        which messages it `covers`."""
+        if (covers is not None) != (kind is Kind.SUMMARY):
+            raise ValueError("a summary, and only a summary, covers earlier messages")
         now = db.to_iso(self.clock())
         with db.transaction(self.conn):
             if session_id is None:
@@ -96,10 +117,20 @@ class Sessions:
                 self.conn.execute(
                     "INSERT INTO sessions (id, created_at) VALUES (?, ?)", (session_id, now)
                 )
+            columns: dict[str, str | int | None] = {
+                "session_id": session_id,
+                "at": now,
+                "role": role.value,
+                "kind": kind.value,
+                "text": text,
+                "task_id": task_id,
+            }
+            if covers is not None:  # the column is newer than the other ones (migration 14)
+                columns["covers"] = covers
             cursor = self.conn.execute(
-                "INSERT INTO messages (session_id, at, role, kind, text, task_id) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (session_id, now, role.value, kind.value, text, task_id),
+                f"INSERT INTO messages ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' * len(columns))})",
+                tuple(columns.values()),
             )
         assert cursor.lastrowid is not None
         return Message(
@@ -110,6 +141,7 @@ class Sessions:
             kind=kind,
             text=text,
             task_id=task_id,
+            covers=covers,
         )
 
     def messages(self, session_id: str, last: int | None = None) -> list[Message]:
@@ -119,6 +151,31 @@ class Sessions:
             (session_id, -1 if last is None else last),
         ).fetchall()
         return [Message.model_validate(dict(r)) for r in reversed(rows)]
+
+    def history(self, session_id: str, last: int | None = None) -> History:
+        """The latest summary of the session and the messages after those it covers (only the
+        `last` few of them if given), summaries left out."""
+        row = self.conn.execute(
+            "SELECT * FROM messages WHERE session_id = ? AND kind = 'summary' "
+            "ORDER BY seq DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        summary = None if row is None else Message.model_validate(dict(row))
+        after = 0 if summary is None else summary.covers
+        after_summary = "FROM messages WHERE session_id = ? AND seq > ? AND kind != 'summary'"
+        rows = self.conn.execute(
+            f"SELECT * {after_summary} ORDER BY seq DESC LIMIT ?",
+            (session_id, after, -1 if last is None else last),
+        ).fetchall()
+        earlier = 0
+        if last is not None and len(rows) == last:
+            total = self.conn.execute(f"SELECT COUNT(*) {after_summary}", (session_id, after))
+            earlier = total.fetchone()[0] - last
+        return History(
+            summary=summary,
+            messages=[Message.model_validate(dict(r)) for r in reversed(rows)],
+            earlier=earlier,
+        )
 
     def changed_tasks(self, session_id: str) -> list[str]:
         """The session's tasks with audit entries newer than the last message about them: what

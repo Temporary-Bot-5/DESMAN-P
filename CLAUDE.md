@@ -64,13 +64,16 @@ src/desman/
 │                  #   ko, pl, tr, uk, hi)
 ├── info.py        # Banner / project info
 ├── chat.py        # The chat of bare `desman`: continues the last session; /help, /new,
-│                  #   /sessions, /rename, /delete, /exit; each message gets the interlocutor's turn; a task turn
+│                  #   /sessions, /rename, /compact, /delete, /exit; each message gets the interlocutor's turn; a task turn
 │                  #   runs a task of the session while the chat waits, then it is retold; a
 │                  #   command turn goes through the catalog: the window and the person's "yes"
 │                  #   are code's, the result goes back as an event, changes to operator_log
 ├── interlocutor.py # The interlocutor: Turn (reply | clarify | task | command), no tools;
 │                  #   retell() a task's outcome; the catalog is in its prompt. Prompts
 │                  #   "Chat turn", "Retell task"
+├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
+│                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
+│                  #   message that `covers` them; failed → they fall out of view, with a note
 ├── runs.py        # A run put together from the config (models, executor access, web tools,
 │                  #   coordinator), shared by `run`/`resume` and the chat
 ├── live.py        # Live progress of a chat task: subtask bar, a line per module (role, calls,
@@ -90,6 +93,7 @@ src/desman/
                    #   fitted to a token budget, feedback on the previous attempt
     ├── sessions.py # Chat sessions and messages (append-only: role, text, kind
     │              #   message | summary | event, task link); a session starts with its first message
+    │              #   history(): the latest summary and the messages after those it covers
     │              #   a session may be named; deleted = out of the lists, messages kept
     ├── operator.py # operator_log: what the person did outside tasks (chat commands confirmed
     │              #   or declined, keys by fingerprint, permissions); append-only
