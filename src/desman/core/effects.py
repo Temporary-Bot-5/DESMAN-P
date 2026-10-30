@@ -39,6 +39,8 @@ from typing import Any, Final
 
 from pydantic import BaseModel
 
+from desman.core.context import CHARS_PER_TOKEN, fair_shares, truncate
+from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import Replayed, Tool, ToolResult
 
@@ -47,6 +49,53 @@ INTERRUPTED: Final = (
     "finished, so it was not run again: its effects on the workspace are unknown. Check the "
     "workspace, then call it again if it is still needed."
 )
+
+
+EVIDENCE_TOKENS: Final = 4000
+"""What a reviewer gets of the evidence, at most (shared fairly between its items)."""
+
+
+def evidence(
+    store: Store, subtask: Subtask, budget_tokens: int = EVIDENCE_TOKENS
+) -> dict[str, Any]:
+    """What the result under review can rest on: the subtask's inputs, the accepted results of
+    its dependencies, and what the tools returned to the execution that handed it in (the
+    latest one ended: a rejected attempt's searches are not this result's). In call order,
+    fitted to `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so
+    a call shows its tool and its result."""
+    execution = store.executions(subtask.id) - 1
+    rows = store.effects(subtask.id, execution) if execution >= 0 else []
+    dependencies = store.dependency_results(subtask.id)
+    items: list[tuple[str, Any]] = [("inputs", subtask.inputs)] if subtask.inputs else []
+    items += [("dependency", d) for d in dependencies]
+    items += [("call", row) for row in rows]
+    texts = [_evidence_text(kind, item) for kind, item in items]
+    shares = fair_shares([len(text) for text in texts], budget_tokens * CHARS_PER_TOKEN)
+    out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
+    for (kind, item), text, chars in zip(items, texts, shares, strict=True):
+        whole = chars >= len(text)
+        content: Any = json.loads(text) if whole else truncate(text, chars)
+        if kind == "inputs":
+            out["inputs"] = content
+        elif kind == "dependency":
+            out["results_of_dependencies"].append(
+                {"subtask": item.description, "result": content, "truncated": not whole}
+            )
+        elif item["state"] != "done":  # cut off midway: what it returned is unknown
+            out["tool_results"].append({"tool": item["tool"], "result": None, "finished": False})
+        else:
+            out["tool_results"].append(
+                {"tool": item["tool"], "result": content, "truncated": not whole}
+            )
+    return out
+
+
+def _evidence_text(kind: str, item: Any) -> str:
+    if kind == "inputs":
+        return json.dumps(item, ensure_ascii=False, sort_keys=True)
+    if kind == "dependency":
+        return json.dumps(item.content, ensure_ascii=False, sort_keys=True)
+    return str(item["result_json"] or "null")
 
 
 def effect_key(tool: str, args: BaseModel) -> str:

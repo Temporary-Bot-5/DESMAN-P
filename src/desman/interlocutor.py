@@ -65,7 +65,8 @@ INTERLOCUTOR_SYSTEM = (
     '{"type": "clarify", "question": "..."} when the request is too unclear to act on;\n'
     '{"type": "task", "title": "a few words", "goal": "..."} when the person wants something '
     "done that needs work (finding, writing, computing, checking). The goal is all the workers "
-    "see: never refer to the conversation, write into the goal every detail the person gave;\n"
+    "see: never refer to the conversation, write into the goal every detail the person gave. "
+    "Work is always a task turn, never a command: the person asked for it already;\n"
     '{"type": "command", "name": "...", "args": {...}} when the person wants DESMAN itself to '
     "do something or show something: its settings, API keys, permissions, language, the list "
     "and state of tasks, decisions on them. The name and arguments come from this list "

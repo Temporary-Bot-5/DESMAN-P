@@ -13,7 +13,7 @@ from conftest import FakeClock
 from desman.agents import llm_executor
 from desman.core.audit import check_history
 from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
-from desman.core.effects import INTERRUPTED, Effects
+from desman.core.effects import INTERRUPTED, Effects, evidence
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.policy import Policy, Role, RolePolicy
 from desman.core.retry import FailureKind
@@ -355,3 +355,64 @@ def test_the_coordinator_saves_the_journal_position_with_a_checkpoint(
     assert coordinator().run(task_id).status is TaskStatus.DONE
     assert ran == [1, 1]
     assert check_history(store.conn, task_id) == []
+
+
+# ── Evidence for the reviewer ────────────────────────────────────────────────
+
+
+def test_the_reviewer_sees_what_the_tools_gave_the_attempt_under_review(
+    store: Store, claimed: Subtask, tmp_path: Path
+) -> None:
+    assert claimed.lease_token is not None
+    tools = registry(bump_tool([]))
+    toolbox(store, claimed, tmp_path, tools).call(bump(1))
+    store.submit(claimed.id, claimed.lease_token, {"done": True})
+    [call] = evidence(store, claimed)["tool_results"]
+    assert call == {
+        "tool": "bump",
+        "result": {"ok": True, "output": {"runs": 1}, "error": None},
+        "truncated": False,
+    }
+
+    store.record_failure(
+        claimed.id, S.REVIEW, Actor.REVIEWER, FailureKind.QUALITY, reason="do it again"
+    )
+    again = store.claim("w1")
+    assert again is not None and again.lease_token is not None
+    box = toolbox(store, again, tmp_path, tools)
+    box.call(bump(2))
+    box.call(bump(3))
+    store.submit(again.id, again.lease_token, {"done": True})
+    # Only this attempt's calls: the rejected attempt's results are not what this one rests on.
+    shown = evidence(store, again)["tool_results"]
+    assert [c["result"]["output"]["runs"] for c in shown] == [2, 3]
+
+
+def test_evidence_holds_inputs_and_dependencies_and_fits_its_budget(store: Store) -> None:
+    store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="find", acceptance_criteria="ok"),
+                SubtaskSpec(
+                    description="pick",
+                    acceptance_criteria="ok",
+                    depends_on=[0],
+                    inputs={"city": "Lisbon"},
+                ),
+            ],
+        )
+    )
+    find = store.claim("w")
+    assert find is not None and find.lease_token is not None
+    store.submit(find.id, find.lease_token, {"flights": ["TP 1351, 61 EUR"] * 400})
+    store.transition(find.id, S.REVIEW, S.DONE, Actor.REVIEWER, reason="ok")
+    pick = store.claim("w")
+    assert pick is not None and pick.description == "pick"
+
+    shown = evidence(store, pick, budget_tokens=100)
+    assert shown["inputs"] == {"city": "Lisbon"}  # small: whole
+    [dependency] = shown["results_of_dependencies"]
+    assert dependency["subtask"] == "find" and dependency["truncated"]
+    assert "TP 1351" in dependency["result"] and len(json.dumps(shown)) < 1000
+    assert shown["tool_results"] == []

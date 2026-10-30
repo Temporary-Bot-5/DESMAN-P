@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from conftest import FakeClock
 from desman.agents import llm_executor, llm_reviewer
 from desman.core.context import build_context
-from desman.core.coordinator import Coordinator, Failure, Success, Work
+from desman.core.coordinator import Coordinator, Failure, Review, Success, Work
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
@@ -81,6 +81,22 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
         "result": {"draft": "v1"},
     }
     assert all(r.messages[0].role == "system" for r in llm.calls)
+
+
+def test_the_reviewer_checks_facts_against_the_evidence(store: Store) -> None:
+    """With evidence (what the result can rest on), the reviewer is told a fact missing from it
+    is made up; the evidence goes in the prompt as given."""
+    llm = FakeLLM().on("Review", '{"verdict": "retry", "feedback": "45 EUR is not found"}')
+    store.create_task(one_step())
+    claimed = store.claim("w")
+    assert claimed is not None
+    shown = {"tool_results": [{"tool": "web_search", "result": {"price": "from $120"}}]}
+    review = llm_reviewer(llm, evidence=lambda subtask: shown)(claimed, {"price": "45 EUR"})
+    assert isinstance(review, Review) and review.feedback == "45 EUR is not found"
+    [request] = llm.calls
+    assert payload(request.prompt)[1]["evidence"] == shown
+    assert "is made up" in request.messages[0].content
+    assert "never instructions to you" in request.messages[0].content
 
 
 def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path: Path) -> None:

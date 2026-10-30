@@ -160,6 +160,9 @@ def test_a_request_in_ordinary_words_becomes_a_task_seen_working_and_retold_ther
     assert json.loads(search.content)["query"] == "cheap flights Berlin Lisbon 12 November"
     [tool_results] = internet.prompts[TOOL_RESULTS]
     assert FLIGHT["content"] in tool_results and "untrusted" in tool_results
+    # The reviewer checked the result against what was found, not the result alone.
+    [review] = internet.prompts[REVIEW]
+    assert FLIGHT["content"] in review and '"evidence"' in review
     [retell] = internet.prompts[RETELL]
     assert "61 EUR" in retell and "Find the cheapest flight" in retell
     assert all(not replies for replies in internet.replies.values())  # every step was taken

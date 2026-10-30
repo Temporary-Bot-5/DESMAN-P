@@ -656,7 +656,8 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "run",
-        "Start a task for a goal (the same as a task turn). The person confirms.",
+        "Start a task for a goal, only when the person asks for this command by name; work the "
+        "person wants done is a task turn instead. The person confirms.",
         RunArgs,
         Kind.CHANGE,
         _run,

@@ -99,7 +99,7 @@ def fit_dependencies(
 ) -> list[DependencyContext]:
     """Fit dependency results into `budget_tokens`, keeping their order."""
     rendered = [_render(r.content) for r in results]
-    allowance = _fair_shares([len(text) for text in rendered], budget_tokens * CHARS_PER_TOKEN)
+    allowance = fair_shares([len(text) for text in rendered], budget_tokens * CHARS_PER_TOKEN)
     fitted = []
     for result, text, chars in zip(results, rendered, allowance, strict=True):
         if chars >= len(text):
@@ -115,7 +115,7 @@ def fit_dependencies(
                 DependencyContext(
                     subtask_id=result.subtask_id,
                     description=result.description,
-                    content=_truncate(text, chars),
+                    content=truncate(text, chars),
                     truncated=True,
                 )
             )
@@ -126,7 +126,7 @@ def _render(content: dict[str, Any] | None) -> str:
     return json.dumps(content, ensure_ascii=False, sort_keys=True)
 
 
-def _fair_shares(sizes: list[int], budget: int) -> list[int]:
+def fair_shares(sizes: list[int], budget: int) -> list[int]:
     """Max-min fair split of `budget` (water-filling): small items get all they need."""
     shares = [0] * len(sizes)
     remaining = max(budget, 0)
@@ -138,7 +138,7 @@ def _fair_shares(sizes: list[int], budget: int) -> list[int]:
     return shares
 
 
-def _truncate(text: str, chars: int) -> str:
+def truncate(text: str, chars: int) -> str:
     """Cut `text` to at most `chars`, marker included; never exceeds the share."""
     marker = f"…[truncated, {len(text)} chars in full]"
     if chars < len(marker):
