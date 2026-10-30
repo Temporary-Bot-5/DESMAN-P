@@ -237,4 +237,97 @@ def test_the_chat_offers_its_own_commands(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(ui, "line", line)
     Chat(stored()).run()
-    assert offered == [["/help", "/new", "/sessions", "/exit"]]
+    assert offered == [["/help", "/new", "/sessions", "/rename", "/delete", "/exit"]]
+
+
+# ── Naming and deleting sessions ─────────────────────────────────────────────
+
+
+def test_a_session_is_renamed_and_named_back(sessions: Sessions) -> None:
+    first = sessions.add(None, Role.USER, "find flights to Oslo").session_id
+    sessions.rename(first, "  Trip   to Oslo ")
+    named = sessions.get(first)
+    assert named is not None and (named.title, named.name) == ("Trip to Oslo", "Trip to Oslo")
+    sessions.rename(first, "x" * 500)
+    assert len(sessions.get(first).title or "") == 80  # type: ignore[union-attr]
+    sessions.rename(first, None)
+    back = sessions.get(first)
+    assert back is not None and (back.title, back.name) == (None, "find flights to Oslo")
+
+
+def test_a_deleted_session_leaves_the_lists_but_keeps_its_messages(sessions: Sessions) -> None:
+    kept = sessions.add(None, Role.USER, "keep me").session_id
+    gone = sessions.add(None, Role.USER, "forget me").session_id
+    sessions.delete(gone)
+    assert [s.id for s in sessions.recent()] == [kept]
+    assert sessions.latest() is not None and sessions.latest().id == kept  # type: ignore[union-attr]
+    assert sessions.get(gone) is None
+    assert [m.text for m in sessions.messages(gone)] == ["forget me"]
+
+
+def operator_log() -> list[tuple[str, dict[str, object]]]:
+    from desman.core import operator
+
+    conn = db.open_db(db.default_db_path())
+    try:
+        return [(e.action, e.details) for e in operator.entries(conn)]
+    finally:
+        conn.close()
+
+
+def test_rename_names_the_session_in_the_list() -> None:
+    configured()
+    chat("find flights to Oslo", "/rename Trip to Oslo")
+    [session] = stored().recent()
+    assert session.title == "Trip to Oslo"
+    listed = chat("/sessions")
+    [row] = [line for line in listed.output.splitlines() if "· current" in line]
+    assert "Trip to Oslo" in row and "find flights" not in row
+    assert operator_log() == [("operator_session_renamed", {"title": "Trip to Oslo"})]
+
+
+def test_rename_without_a_name_asks_for_one_and_dash_names_it_back() -> None:
+    configured()
+    result = chat("find flights to Oslo", "/rename", "Oslo")
+    assert "Name of this session" in result.output
+    assert stored().recent()[0].title == "Oslo"
+    chat("/rename -")
+    assert stored().recent()[0].title is None
+
+
+def test_a_key_never_becomes_a_session_name() -> None:
+    configured()
+    key = "gsk_" + "Abc123" * 8
+    result = chat("hello", f"/rename my {key}")
+    assert "looked like an API key" in result.output
+    title = stored().recent()[0].title or ""
+    assert key not in title and key not in str(operator_log())
+
+
+def test_nothing_to_rename_or_delete_before_the_first_message() -> None:
+    configured()
+    result = chat("/rename Nothing", "/delete")
+    assert result.output.count("nothing to it yet") == 2
+    assert operator_log() == []
+
+
+def test_delete_asks_then_the_chat_starts_afresh() -> None:
+    configured()
+    chat("find flights to Oslo")
+    declined = chat("/delete", "n")
+    assert "Its messages stay in the database" in declined.output
+    assert "Nothing changed." in declined.output and len(stored().recent()) == 1
+    deleted = chat("/delete", "y", "something else")
+    assert "Session deleted." in deleted.output
+    [left] = stored().recent()
+    assert left.opening == "something else"
+    assert [action for action, _ in operator_log()] == ["operator_session_deleted"]
+    # The deleted session is never continued, and its messages are still there.
+    again = chat()
+    assert "find flights" not in again.output
+    conn = db.open_db(db.default_db_path())
+    assert (
+        conn.execute("SELECT COUNT(*) FROM messages WHERE text LIKE 'find flights%'").fetchone()[0]
+        == 1
+    )
+    conn.close()

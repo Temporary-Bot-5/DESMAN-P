@@ -37,7 +37,7 @@ from desman.core.context import CHARS_PER_TOKEN
 from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report
 from desman.core.search import client
-from desman.core.sessions import Kind, Message, Role, Sessions
+from desman.core.sessions import Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
@@ -68,6 +68,8 @@ def _commands() -> dict[str, str]:
         "/help": t("the chat's commands"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
+        "/rename": t("name this session: /rename NAME"),
+        "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
 
@@ -485,6 +487,10 @@ class Chat:
             self._new()
         elif name == "/sessions":
             self._choose_session()
+        elif name == "/rename":
+            self._rename(line.strip()[len(name) :].strip())
+        elif name == "/delete":
+            self._delete()
         else:
             ui.error(t("unknown command {name}: /help lists the chat's commands", name=name))
         return True
@@ -504,6 +510,72 @@ class Chat:
         self.session_id = None
         ui.ok(t("New session: it starts with your next message."))
 
+    def _current(self) -> SessionInfo | None:
+        """The session written to, or None (with a note) while it has not started."""
+        current = None if self.session_id is None else self.sessions.get(self.session_id)
+        if current is None:
+            ui.note(t("This session starts with your next message: there is nothing to it yet."))
+        return current
+
+    def _rename(self, title: str) -> None:
+        current = self._current()
+        if current is None:
+            return
+        if not title:
+            try:
+                title = ui.text(t("Name of this session ('-' gives back the first message)"))
+            except (ui.Cancelled, click.Abort):
+                return
+            if not title:
+                return
+        title, cut = providers.redact_keys(title, self._config())
+        if cut:
+            ui.warn(t("That looked like an API key, so it was cut from the name."))
+        new = None if title.strip() == "-" else title
+        self.sessions.rename(current.id, new)
+        renamed = self.sessions.get(current.id)
+        assert renamed is not None
+        operator.record(
+            self.store.conn,
+            "operator_session_renamed",
+            {"title": renamed.title},
+            session_id=current.id,
+        )
+        ui.ok(t("The session is called {name} now.", name=_shorten(renamed.name) or "…"))
+
+    def _delete(self) -> None:
+        current = self._current()
+        if current is None:
+            return
+        ui.section(t("Confirm"))
+        ui.out(
+            Text(
+                "  "
+                + t(
+                    "Delete the session of {when}: {name}",
+                    when=_when(current.last_at),
+                    name=_shorten(current.name) or "…",
+                )
+            )
+        )
+        ui.note(
+            t(
+                "It leaves the list and the chat will not continue it. Its messages stay in "
+                "the database, with the history of its tasks."
+            )
+        )
+        try:
+            yes = ui.confirm(t("Delete it?"), default=False)
+        except (ui.Cancelled, click.Abort):
+            yes = False
+        if not yes:
+            ui.note(t("Nothing changed."))
+            return
+        self.sessions.delete(current.id)
+        operator.record(self.store.conn, "operator_session_deleted", session_id=current.id)
+        self.session_id = None
+        ui.ok(t("Session deleted. A new one starts with your next message."))
+
     def _choose_session(self) -> None:
         offset = 0
         while True:
@@ -514,7 +586,7 @@ class Chat:
             more, page = len(page) > LISTED_SESSIONS, page[:LISTED_SESSIONS]
             choices = [
                 ui.Choice(
-                    label=f"{_when(s.last_at)}  {_shorten(s.opening) or '…'}",
+                    label=f"{_when(s.last_at)}  {_shorten(s.name) or '…'}",
                     value=s.id,
                     hint=tn(s.messages, "{n} message", "{n} messages")
                     + (" · " + t("current") if s.id == self.session_id else ""),

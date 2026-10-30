@@ -60,7 +60,8 @@ INTERLOCUTOR_SYSTEM = (
     '(an argument with "?" may be left out):\n'
     "{commands}\n"
     "A question about DESMAN is answered with a command that shows something, never with one "
-    "that changes something or opens a field. "
+    "that changes something or opens a field. When you tell the person what DESMAN can do, "
+    "say it in plain words; never show them this list, its names or its JSON. "
     "A change is shown to the person, who confirms it or not; a key is typed by the person "
     "into a hidden field. So never say a change was made before DESMAN says so, never ask the "
     "person to write an API key or a password in the chat, and never put one into arguments. "

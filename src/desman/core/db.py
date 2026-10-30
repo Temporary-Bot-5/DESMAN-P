@@ -301,6 +301,12 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER operator_log_no_delete BEFORE DELETE ON operator_log
         BEGIN SELECT RAISE(ABORT, 'operator_log is append-only'); END;
     """,
+    # 13 — a session the person named or deleted (`/rename`, `/delete`). Deleting hides it from
+    # the lists and the chat; its messages stay, as every message does (migration 9)
+    """
+    ALTER TABLE sessions ADD COLUMN title TEXT CHECK (title IS NULL OR length(title) > 0);
+    ALTER TABLE sessions ADD COLUMN deleted_at TEXT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

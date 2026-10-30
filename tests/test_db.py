@@ -626,3 +626,20 @@ def test_v11_database_with_a_session_upgrades_to_the_operator_log(tmp_path: Path
     with pytest.raises(sqlite3.IntegrityError):  # a session that exists, or none
         operator.record(conn, "operator_command", session_id="no-such-session")
     conn.close()
+
+
+def test_v12_database_with_a_session_upgrades_to_named_sessions(tmp_path: Path) -> None:
+    path = tmp_path / "v12.db"
+    old = _db_at_version(path, 12)
+    session_id = Sessions(old).add(None, Role.USER, "find flights").session_id
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    sessions = Sessions(conn)
+    [kept] = sessions.recent()  # an old session is neither named nor deleted
+    assert (kept.id, kept.title, kept.name) == (session_id, None, "find flights")
+    with pytest.raises(sqlite3.IntegrityError):  # a name has something in it
+        conn.execute("UPDATE sessions SET title = '' WHERE id = ?", (session_id,))
+    sessions.delete(session_id)
+    assert sessions.recent() == [] and len(sessions.messages(session_id)) == 1
+    conn.close()

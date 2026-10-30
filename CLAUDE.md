@@ -64,7 +64,7 @@ src/desman/
 │                  #   ko, pl, tr, uk, hi)
 ├── info.py        # Banner / project info
 ├── chat.py        # The chat of bare `desman`: continues the last session; /help, /new,
-│                  #   /sessions, /exit; each message gets the interlocutor's turn; a task turn
+│                  #   /sessions, /rename, /delete, /exit; each message gets the interlocutor's turn; a task turn
 │                  #   runs a task of the session while the chat waits, then it is retold; a
 │                  #   command turn goes through the catalog: the window and the person's "yes"
 │                  #   are code's, the result goes back as an event, changes to operator_log
@@ -90,6 +90,7 @@ src/desman/
                    #   fitted to a token budget, feedback on the previous attempt
     ├── sessions.py # Chat sessions and messages (append-only: role, text, kind
     │              #   message | summary | event, task link); a session starts with its first message
+    │              #   a session may be named; deleted = out of the lists, messages kept
     ├── operator.py # operator_log: what the person did outside tasks (chat commands confirmed
     │              #   or declined, keys by fingerprint, permissions); append-only
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
