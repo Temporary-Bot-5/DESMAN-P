@@ -40,11 +40,14 @@ Start the chat with bare `desman`, then type the following, each in your own wor
      left. Then `Task … is done.` and a short retelling with flights, prices and links.
    - If the interlocutor asks a question back (dates, airports), answer it. That is a
      `clarify` turn and it is fine.
-   - It may instead ask to start the task through a `Confirm` window (the `run` command).
-     Answer `y`.
-   - Compare the result with what the search found (`desman audit <ref>` shows the query). A
-     price or time that is not in the search results was made up, and the reviewer does not
-     catch this yet.
+   - No `Confirm` window should open for the request: work is a task turn. If one opens (the
+     `run` command), note it and answer `y`.
+   - Compare the result with what the search found (`desman audit <ref>` shows the query). The
+     reviewer checks facts against the tool results and sends made-up ones back. A price or
+     time in the result that is not in the search results is a failure of the demo.
+   - Known (ROADMAP C.9): Groq's gpt-oss wastes attempts with tools until another model takes
+     over, and a request for exact schedules may end waiting for you instead of with what was
+     found.
 
 ## What to look at afterwards
 
