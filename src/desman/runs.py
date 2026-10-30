@@ -27,7 +27,7 @@ from desman.core.retry import strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
-from desman.core.tools import builtin_registry
+from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
 from desman.llm import router
@@ -126,6 +126,32 @@ def coordinator(
     http: httpx.Client | None = None,
     watch: Callable[[], None] | None = None,
 ) -> Coordinator:
+    return _coordinator(
+        store,
+        models,
+        access=access,
+        tools=builtin_registry(web=web(config, store, http)),
+        lease_seconds=lease_seconds,
+        watch=watch,
+    )
+
+
+def summarizer(store: Store, models: Models) -> Coordinator:
+    """The operator for a summary of a chat session (`desman.compaction`): an ordinary run, but
+    its executor has no tools at all, whatever the permissions. What it reads is a conversation,
+    and nothing written in it can make the work act."""
+    return _coordinator(store, models, access=None, tools=Registry())
+
+
+def _coordinator(
+    store: Store,
+    models: Models,
+    *,
+    access: Access | None,
+    tools: Registry,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    watch: Callable[[], None] | None = None,
+) -> Coordinator:
     return Coordinator(
         store,
         llm_executor(models.llm, models.other),
@@ -137,6 +163,6 @@ def coordinator(
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
         decomposer=decomposer(models.llm),
         access=access,
-        tools=builtin_registry(web=web(config, store, http)),
+        tools=tools,
         watch=watch,
     )

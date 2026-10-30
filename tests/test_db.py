@@ -643,3 +643,21 @@ def test_v12_database_with_a_session_upgrades_to_named_sessions(tmp_path: Path) 
     sessions.delete(session_id)
     assert sessions.recent() == [] and len(sessions.messages(session_id)) == 1
     conn.close()
+
+
+def test_v13_database_with_messages_upgrades_to_summaries(tmp_path: Path) -> None:
+    path = tmp_path / "v13.db"
+    old = _db_at_version(path, 13)
+    sessions = Sessions(old)
+    session_id = sessions.add(None, Role.USER, "find flights").session_id
+    sessions.add(session_id, Role.DESMAN, "task started", kind=Kind.EVENT)
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    sessions = Sessions(conn)
+    history = sessions.history(session_id)  # old messages cover nothing and are all seen
+    assert history.summary is None and [m.covers for m in history.messages] == [None, None]
+    first = history.messages[0].seq
+    sessions.add(session_id, Role.DESMAN, "they want flights", kind=Kind.SUMMARY, covers=first)
+    assert [m.text for m in sessions.history(session_id).messages] == ["task started"]
+    conn.close()

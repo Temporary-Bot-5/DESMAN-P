@@ -307,6 +307,13 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE sessions ADD COLUMN title TEXT CHECK (title IS NULL OR length(title) > 0);
     ALTER TABLE sessions ADD COLUMN deleted_at TEXT;
     """,
+    # 14 — a summary (ROADMAP C.6) says which messages it stands in for: every message of its
+    # session up to `covers`. Only a summary has it, and every summary does (none were kept
+    # before this migration)
+    """
+    ALTER TABLE messages ADD COLUMN covers INTEGER
+        CHECK ((covers IS NOT NULL) = (kind = 'summary'));
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

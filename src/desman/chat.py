@@ -13,6 +13,11 @@ applied only on the person's "yes"; input (a key, a section of the wizard) is ty
 person into a window. What it did goes back to the interlocutor as an event of the session,
 and changes, declined ones too, into the operator's journal (`core.operator`).
 
+When the session's history no longer fits the interlocutor's budget, the older messages are
+summarised first (`desman.compaction`, C.6) by a task of their own, and `/compact` does it at
+once. A summary that fails leaves the older messages out of the model's view, with a note in
+the chat; the database keeps them either way.
+
 Without a ready provider the chat still opens; the program, not a model, says what is missing.
 
 Everything shown here goes through `ui`, so without a terminal the chat runs line by line and
@@ -30,14 +35,14 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import commands, providers, runs, ui
+from desman import commands, compaction, providers, runs, ui
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
-from desman.core.context import CHARS_PER_TOKEN
+from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report
 from desman.core.search import client
-from desman.core.sessions import Kind, Message, Role, SessionInfo, Sessions
+from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
@@ -69,6 +74,7 @@ def _commands() -> dict[str, str]:
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
+        "/compact": t("summarise this session's older messages now"),
         "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
@@ -86,6 +92,9 @@ class Chat:
         """The web tools' client, shared by the session's tasks and closed with the chat."""
         latest = sessions.latest()
         self.session_id: str | None = latest.id if latest else None
+        self._gave_up: dict[str, int] = {}
+        """Per session, the last message when a summary failed: until as much again is said,
+        the older messages just fall out of the model's view."""
 
     def run(self) -> None:
         self._greet()
@@ -122,11 +131,16 @@ class Chat:
             return
         interlocutor = Interlocutor(models.llm, config.language)
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
+        if self.session_id is not None:  # before the message: what it says comes after
+            before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
+            after = self._gave_up.get(self.session_id, 0)
+            if compaction.needed(before, after=after, extra=estimate_tokens(text)):
+                self._compact(before, models)
         self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
-        conversation = self.sessions.messages(self.session_id, last=HISTORY_MESSAGES)
+        history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
             with self._for(calls.Role.INTERLOCUTOR):
-                turn = interlocutor.turn(conversation)
+                turn = interlocutor.turn(history)
         except ProviderError as e:
             ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
             return
@@ -293,6 +307,72 @@ class Chat:
             budget = COMMAND_RESULT_TOKENS * CHARS_PER_TOKEN
             text += "\n" + commands.for_interlocutor(data, configs, budget)
         self.sessions.add(self.session_id, Role.DESMAN, text, kind=Kind.EVENT)
+
+    # ── Compaction ───────────────────────────────────────────────────────────
+
+    def _compact(
+        self, history: History, models: runs.Models, keep_tokens: int = compaction.KEEP_TOKENS
+    ) -> str | None:
+        """Summarise the older messages of `history` by a task of their own; the summary, or
+        None if there was nothing to summarise or no summary came of it."""
+        assert self.session_id is not None
+        part = compaction.split(history, keep_tokens)
+        if part is None:
+            return None
+        task_id = self.store.create_task(
+            compaction.spec(history, part),
+            details={
+                "title": compaction.GOAL,
+                "summarises": self.session_id,
+                "covers": part.covers,
+            },
+        )  # not a task of the session: the person did not ask for it, it is never retold
+        ui.note(t("Summarising the older messages of this session…"))
+        summary = None
+        try:
+            runs.summarizer(self.store, models).run(task_id)
+            if self.store.task_status(task_id) is TaskStatus.DONE:
+                summary = compaction.summary_of(self.store.final_result(task_id))
+        except KeyboardInterrupt:
+            pass
+        if self.store.task_status(task_id) not in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            # Waiting for a decision or a quota: nobody needs it any more, it leaves the inbox.
+            self.store.cancel_task(task_id, "the chat went on without this summary")
+        if summary is None:
+            self._gave_up[self.session_id] = history.messages[-1].seq
+            self._event(
+                t(
+                    "The older messages could not be summarised, so the model sees only the "
+                    "latest ones now. All of them stay in the database."
+                ),
+                task_id,
+            )
+            return None
+        self.sessions.add(
+            self.session_id,
+            Role.DESMAN,
+            summary,
+            kind=Kind.SUMMARY,
+            task_id=task_id,
+            covers=part.covers,
+        )
+        return summary
+
+    def _compact_now(self) -> None:
+        """`/compact`: every message after the last summary goes into a new one."""
+        current = self._current()
+        config = None if current is None else self._config()
+        models = None if config is None else self._models(config)
+        if current is None or models is None:
+            return
+        history = self.sessions.history(current.id, last=HISTORY_MESSAGES)
+        if not history.messages:
+            ui.note(t("Nothing new to summarise: the last summary covers every message."))
+            return
+        summary = self._compact(history, models, keep_tokens=0)
+        if summary is not None:
+            ui.ok(t("Summarised. The model sees this instead of the older messages:"))
+            ui.out(Text(summary, style="muted"))
 
     # ── Tasks ────────────────────────────────────────────────────────────────
 
@@ -472,6 +552,8 @@ class Chat:
             if message.kind is Kind.EVENT:  # a command's data or a result shown once is enough
                 first = message.text.split("\n", 1)[0]
                 message = message.model_copy(update={"text": first})
+            elif message.kind is Kind.SUMMARY:  # its start says what it is; /compact shows it
+                message = message.model_copy(update={"text": _shorten(message.text, 100)})
             ui.out(_render(message))
 
     # ── The chat's own commands ──────────────────────────────────────────────
@@ -491,6 +573,8 @@ class Chat:
             self._rename(line.strip()[len(name) :].strip())
         elif name == "/delete":
             self._delete()
+        elif name == "/compact":
+            self._compact_now()
         else:
             ui.error(t("unknown command {name}: /help lists the chat's commands", name=name))
         return True
@@ -618,6 +702,8 @@ class Chat:
 
 
 def _render(message: Message) -> Text:
+    if message.kind is Kind.SUMMARY:
+        return Text(t("Summary of the older messages:") + "\n" + message.text, style="muted")
     if message.role is Role.USER:
         return Text("› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
