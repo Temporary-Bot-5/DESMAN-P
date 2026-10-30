@@ -314,6 +314,18 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE messages ADD COLUMN covers INTEGER
         CHECK ((covers IS NOT NULL) = (kind = 'summary'));
     """,
+    # 15 — the user's profile (ROADMAP C.7): short notes about the person that the interlocutor
+    # sees. Personal data, so they can be changed and erased for real; who changed which note
+    # is kept in operator_log (by number, never the text)
+    """
+    CREATE TABLE profile_notes (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        text        TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 200),
+        author      TEXT NOT NULL CHECK (author IN ('person', 'interlocutor')),
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    ) STRICT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

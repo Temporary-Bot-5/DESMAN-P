@@ -2,7 +2,9 @@
 
 Language, then a provider menu that stays open until "Done": pick a provider, add or remove
 its keys (several per provider are fine) or change its settings, pick the next one. Then the
-permissions. Nothing is saved until the end; leaving with Ctrl+C or Esc saves nothing.
+permissions, then personalisation: whether the interlocutor may study the conversation and keep
+notes about the person, and how it talks (`Config.behaviour`), which holds either way. Nothing
+is saved until the end; leaving with Ctrl+C or Esc saves nothing.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from rich.text import Text
 
 from desman import config as config_module
 from desman import i18n, providers, ui
-from desman.config import Config, ConfigManager, Permissions
+from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigManager, Permissions
 from desman.core import search
 from desman.i18n import t, tn
 from desman.providers import Provider
@@ -29,6 +31,34 @@ def permission_labels() -> dict[str, str]:
         "network_access": t("use the network beyond model providers"),
         "shell_execution": t("run shell commands"),
     }
+
+
+def behaviour_labels() -> dict[str, str]:
+    """What each part of `Behaviour` is, for the person."""
+    return {
+        "length": t("length of answers"),
+        "tone": t("tone"),
+        "style": t("style"),
+        "custom": t("in your words"),
+    }
+
+
+def behaviour_values() -> dict[str, dict[str | None, str]]:
+    """The choices of each part of `Behaviour`; None is the interlocutor's own judgement."""
+    auto = t("as it sees fit")
+    return {
+        "length": {None: auto, "short": t("short"), "detailed": t("detailed")},
+        "tone": {None: auto, "formal": t("formal"), "informal": t("informal")},
+        "style": {None: auto, "simple": t("simple"), "technical": t("technical")},
+    }
+
+
+def behaviour_shown(behaviour: Behaviour, part: str) -> str:
+    """One part of `behaviour` as the person reads it."""
+    if part == "custom":
+        return behaviour.custom or "-"
+    value: str | None = getattr(behaviour, part)
+    return behaviour_values()[part][value]
 
 
 class _Session:
@@ -56,6 +86,9 @@ def run(manager: ConfigManager) -> None:
 
     _providers_menu(session)
     config.permissions = _permissions(config.permissions)
+    config.personalize = ask_personalize(config.personalize)
+    if ui.confirm(t("Set up how the interlocutor talks to you?"), default=False):
+        config.behaviour = ask_behaviour(config.behaviour, config)
     manager.save_if_unchanged(config, seen)  # a `keys add` meanwhile is not lost
 
     ui.out("")
@@ -67,7 +100,7 @@ def run(manager: ConfigManager) -> None:
     ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
 
 
-SECTIONS = ("providers", "permissions")
+SECTIONS = ("providers", "permissions", "personalize", "behaviour")
 """Parts of the wizard that can be opened on their own (from the chat, ADR 0003 §3)."""
 
 
@@ -79,6 +112,10 @@ def run_section(manager: ConfigManager, section: str) -> None:
         _providers_menu(_Session(config))
     elif section == "permissions":
         config.permissions = _permissions(config.permissions)
+    elif section == "personalize":
+        config.personalize = ask_personalize(config.personalize)
+    elif section == "behaviour":
+        config.behaviour = ask_behaviour(config.behaviour, config)
     else:
         raise ValueError(f"no wizard section {section!r}")
     manager.save_if_unchanged(config, seen)
@@ -296,3 +333,43 @@ def _permissions(current: Permissions) -> Permissions:
         checked={name for name in names if getattr(current, name)},
     )
     return Permissions(**{name: name in granted for name in names})
+
+
+def ask_personalize(current: bool) -> bool:
+    ui.section(t("Personalisation"))
+    ui.note(
+        t(
+            "If you agree, the interlocutor studies how you talk with it, anything you write "
+            "included, and keeps short notes about you (/profile in the chat shows and erases "
+            "them). The notes go to the model providers with every message."
+        )
+    )
+    return ui.confirm(
+        t("Do you want the agent to study your conversations and become more personal to you?"),
+        default=current,
+    )
+
+
+def ask_behaviour(current: Behaviour, config: Config) -> Behaviour:
+    """How the interlocutor talks: each part chosen, Enter keeps it; a text of your own."""
+    ui.section(t("How the interlocutor talks"))
+    ui.note(t("This holds whether or not it keeps notes about you."))
+    labels, values = behaviour_labels(), behaviour_values()
+    chosen: dict[str, object] = {}
+    for part, options in values.items():
+        chosen[part] = ui.select(
+            labels[part].capitalize(),
+            [ui.Choice(label, value) for value, label in options.items()],
+            default=getattr(current, part),
+        )
+    custom = ui.text(
+        t("Anything else about how it should talk ('-' for nothing)"), default=current.custom
+    )
+    custom, cut = providers.redact_keys(" ".join(custom.split()), config)
+    if cut:
+        ui.warn(t("That looked like an API key, so it was cut."))
+    if len(custom) > BEHAVIOUR_CHARS:
+        ui.warn(t("Cut to {n} characters.", n=BEHAVIOUR_CHARS))
+        custom = custom[:BEHAVIOUR_CHARS]
+    chosen["custom"] = "" if custom == "-" else custom
+    return Behaviour.model_validate(chosen)

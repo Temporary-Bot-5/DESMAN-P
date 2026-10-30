@@ -3,7 +3,8 @@
 `audit_log` tells the story of tasks; changes the person makes from the chat (a command they
 confirmed or declined, a key added, a permission granted) belong to no task and are written
 here. Append-only, like the audit log. A key is recorded by its provider and fingerprint
-(`openai_compat.key_id`), never by its value.
+(`openai_compat.key_id`), never by its value. Changes to the user's profile (C.7) are written
+here too, by the person or the interlocutor, with the note's number but never its text.
 """
 
 from __future__ import annotations
@@ -35,10 +36,21 @@ def record(
     session_id: str | None = None,
 ) -> None:
     with db.transaction(conn):
-        conn.execute(
-            "INSERT INTO operator_log (session_id, action, details_json) VALUES (?, ?, ?)",
-            (session_id, action, json.dumps(details or {}, ensure_ascii=False)),
-        )
+        write(conn, action, details, session_id=session_id)
+
+
+def write(
+    conn: sqlite3.Connection,
+    action: str,
+    details: dict[str, Any] | None = None,
+    *,
+    session_id: str | None = None,
+) -> None:
+    """`record` inside the caller's transaction: the entry and its change commit together."""
+    conn.execute(
+        "INSERT INTO operator_log (session_id, action, details_json) VALUES (?, ?, ?)",
+        (session_id, action, json.dumps(details or {}, ensure_ascii=False)),
+    )
 
 
 def entries(conn: sqlite3.Connection) -> list[OperatorEntry]:

@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints,
 from rich.text import Text
 
 from desman import actions, config_cli, i18n, providers, ui, wizard
-from desman.config import Config, ConfigError, ConfigManager
+from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigError, ConfigManager
 from desman.core import db
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
@@ -184,8 +184,25 @@ class ImportArgs(Args):
     file: Annotated[str, StringConstraints(min_length=1, max_length=500)]
 
 
+class PersonalizeArgs(Args):
+    on: bool | None = Field(None, description="true: turn on, false: off; none: show")
+
+
+class BehaviourArgs(Args):
+    length: Literal["short", "detailed", "auto"] | None = None
+    tone: Literal["formal", "informal", "auto"] | None = None
+    style: Literal["simple", "technical", "auto"] | None = None
+    custom: Annotated[str, StringConstraints(max_length=BEHAVIOUR_CHARS)] | None = Field(
+        None, description="anything else, in the person's words; empty clears it"
+    )
+    reset: bool = False
+
+    def change(self) -> config_cli.BehaviourChange:
+        return config_cli.BehaviourChange(**self.model_dump())
+
+
 class ConfigArgs(Args):
-    section: Literal["providers", "permissions"] | None = Field(
+    section: Literal["providers", "permissions", "personalize", "behaviour"] | None = Field(
         None, description="one section of the setup wizard; none: the whole wizard"
     )
 
@@ -304,6 +321,55 @@ def _language(ctx: Context, args: LanguageArgs) -> Outcome | Proposal:
 
     old, new = i18n.CATALOGS[current].name, i18n.CATALOGS[code].name
     return Proposal([t("Language: {old} → {new}", old=old, new=new)], apply)
+
+
+def _personalize_kind(args: PersonalizeArgs) -> Kind:
+    return Kind.READ if args.on is None else Kind.CHANGE
+
+
+def _personalize(ctx: Context, args: PersonalizeArgs) -> Outcome | Proposal:
+    current = ctx.config().personalize
+    if args.on is None or args.on == current:
+        config_cli.print_personalize(current)
+        return Outcome({"on": current, "changed": False})
+    on = args.on
+
+    def apply() -> Outcome:
+        config_cli.set_personalize(ctx.manager, on)
+        return Outcome({"on": on, "changed": True})
+
+    if on:
+        line = t("Let the interlocutor study your conversations and keep notes about you.")
+        warnings = [t("The notes go to the model providers with every message.")]
+    else:
+        line = t("Stop the interlocutor from studying your conversations and keeping notes.")
+        warnings = []
+    return Proposal([line], apply, warnings)
+
+
+def _behaviour_kind(args: BehaviourArgs) -> Kind:
+    return Kind.READ if args.change().empty() else Kind.CHANGE
+
+
+def _behaviour(ctx: Context, args: BehaviourArgs) -> Outcome | Proposal:
+    config = ctx.config()
+    current = config.behaviour
+    change = args.change()
+    if change.empty():
+        config_cli.print_behaviour(current)
+        return Outcome(current.model_dump())
+    new = change.applied(current, config)
+    lines = config_cli.behaviour_lines(current, new)
+    if not lines:
+        ui.note(t("Nothing changed."))
+        return Outcome({"changed": False, "behaviour": current.model_dump()})
+
+    def apply() -> Outcome:
+        old, now = config_cli.set_behaviour(ctx.manager, change)
+        config_cli.print_behaviour_change(old, now)
+        return Outcome({"changed": True, "behaviour": now.model_dump()})
+
+    return Proposal([t("How the interlocutor talks to you:")] + lines, apply)
 
 
 def _permissions_kind(args: PermissionArgs) -> Kind:
@@ -543,6 +609,10 @@ def _config(ctx: Context, args: ConfigArgs) -> Proposal:
         line = t("Open the setup wizard at its model providers: their keys and settings.")
     elif args.section == "permissions":
         line = t("Open the setup wizard at the agents' permissions.")
+    elif args.section == "personalize":
+        line = t("Open the setup wizard at personalisation: whether the agent keeps notes.")
+    elif args.section == "behaviour":
+        line = t("Open the setup wizard at how the interlocutor talks.")
     else:
         line = t("Open the whole setup wizard: language, model providers and keys, permissions.")
     return Proposal([line], apply, question=t("Open it?"))
@@ -643,6 +713,23 @@ CATALOG: tuple[Entry, ...] = (
         _permissions,
     ),
     Entry(
+        "personalize",
+        "Without arguments: show whether the interlocutor studies the conversations and keeps "
+        "notes about the person. With on: turn that on or off (the person confirms).",
+        PersonalizeArgs,
+        _personalize_kind,
+        _personalize,
+    ),
+    Entry(
+        "behaviour",
+        "Without arguments: show how the interlocutor talks (length of answers, tone, style, "
+        "the person's own words). With any of them: change it (the person confirms); auto "
+        "gives a part back to the interlocutor's judgement. Holds without personalisation.",
+        BehaviourArgs,
+        _behaviour_kind,
+        _behaviour,
+    ),
+    Entry(
         "keys list",
         "How many API keys each provider has and what each spent in the last 24 hours.",
         NoArgs,
@@ -682,7 +769,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "config",
         "Open the setup wizard, or one section of it (providers: keys and settings; "
-        "permissions), for the person to fill in; only when they ask to set DESMAN up or to "
+        "permissions; personalize; behaviour), for the person to fill in; only when they ask to set DESMAN up or to "
         "change settings. To show providers, keys or settings use keys list or config show.",
         ConfigArgs,
         Kind.INPUT,
@@ -815,6 +902,15 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
     for env in sorted(set(old.settings) | set(new.settings)):
         if old.settings.get(env) != new.settings.get(env):
             changes.append(("operator_setting", {"name": env}))
+    if old.personalize != new.personalize:
+        changes.append(("operator_personalize", {"on": new.personalize}))
+    if old.behaviour != new.behaviour:  # the parts, not the person's own words
+        parts = [
+            p
+            for p in Behaviour.model_fields
+            if getattr(old.behaviour, p) != getattr(new.behaviour, p)
+        ]
+        changes.append(("operator_behaviour", {"changed": parts}))
     if before is not None and after is None:
         changes.append(("operator_config_deleted", {}))
     return changes

@@ -42,14 +42,14 @@ def test_schema_0_file_is_upgraded_on_load_and_save() -> None:
     )
     manager = ConfigManager(path)
     config = manager.load()
-    assert config.schema_version == 2 and config.configured and config.language == "ru"
+    assert config.schema_version == 3 and config.configured and config.language == "ru"
     assert config.permissions == Permissions(shell_execution=True)
     assert flat_keys(config) == {"GROQ_API_KEY": GROQ, "AI_GATEWAY_API_KEY": "vck_x"}
     assert config.settings == {"OLLAMA_HOST": "http://box:11434"}
 
     manager.save(config)
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["schema_version"] == 2
+    assert saved["schema_version"] == 3
     assert "version" not in saved and "local_settings" not in saved
     assert ConfigManager(path).load() == config
 
@@ -109,7 +109,7 @@ def test_config_show_masks_every_secret() -> None:
     assert "OLLAMA_HOST=http://box:11434" in lines["Ollama"]
 
     out = json.loads(js.output)
-    assert out["path"] == str(default_config_path()) and out["schema_version"] == 2
+    assert out["path"] == str(default_config_path()) and out["schema_version"] == 3
     rows = {r["id"]: r for r in out["providers"]}
     assert rows["groq"]["key_env"] == "GROQ_API_KEY"
     assert rows["groq"]["keys"] == [
