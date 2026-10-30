@@ -155,6 +155,14 @@ def test_the_latest_message_is_never_summarised_automatically() -> None:
     assert part is not None and part.covers == 10
 
 
+def test_room_is_made_for_a_long_new_message() -> None:
+    """The new message is the latest one: what is kept must fit beside it and a summary."""
+    one = "x" * (1200 * CHARS_PER_TOKEN)
+    part = compaction.split(_history(one), incoming=3000)
+    assert part is not None and part.covers == 10  # summarised, not lost to the budget
+    assert compaction.split(_history("old", "recent"), incoming=100) is None  # room enough
+
+
 def test_a_summary_reads_the_newest_of_what_it_stands_in_for() -> None:
     big = "x" * (compaction.MESSAGE_TOKENS * CHARS_PER_TOKEN)  # 4 of them fill the input
     part = compaction.split(_history("a", big, big, big, big, "last"), keep_tokens=1)
@@ -228,6 +236,18 @@ def test_a_history_over_the_budget_is_summarised_before_the_turn(fake: FakeLLM) 
     chat("thanks")
     assert len(calls(fake, "Execute subtask")) == 1
     assert "summary_of_earlier_conversation" in payload(calls(fake, CHAT)[1])
+
+
+def test_a_long_new_message_does_not_push_the_only_old_one_out_unsummarised(
+    fake: FakeLLM,
+) -> None:
+    said_before("I plan a trip to Lisbon in May" + " " + "x" * (1200 * CHARS_PER_TOKEN))
+    summarised(fake).on(CHAT, REPLY)
+    chat("y" * (3000 * CHARS_PER_TOKEN))
+    [execute] = calls(fake, "Execute subtask")
+    assert "I plan a trip to Lisbon" in execute.prompt
+    seen = payload(calls(fake, CHAT)[0])
+    assert seen["summary_of_earlier_conversation"].startswith("The person plans a trip")
 
 
 def test_the_summary_task_has_no_tools_whatever_the_permissions(fake: FakeLLM) -> None:

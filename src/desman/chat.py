@@ -134,8 +134,9 @@ class Chat:
         if self.session_id is not None:  # before the message: what it says comes after
             before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
             after = self._gave_up.get(self.session_id, 0)
-            if compaction.needed(before, after=after, extra=estimate_tokens(text)):
-                self._compact(before, models)
+            incoming = estimate_tokens(text)
+            if compaction.needed(before, after=after, extra=incoming):
+                self._compact(before, models, incoming=incoming)
         self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
@@ -311,12 +312,17 @@ class Chat:
     # ── Compaction ───────────────────────────────────────────────────────────
 
     def _compact(
-        self, history: History, models: runs.Models, keep_tokens: int = compaction.KEEP_TOKENS
+        self,
+        history: History,
+        models: runs.Models,
+        keep_tokens: int = compaction.KEEP_TOKENS,
+        incoming: int = 0,
     ) -> str | None:
-        """Summarise the older messages of `history` by a task of their own; the summary, or
-        None if there was nothing to summarise or no summary came of it."""
+        """Summarise the older messages of `history` (to make room for a new message of
+        `incoming` tokens) by a task of their own; the summary, or None if there was nothing
+        to summarise or no summary came of it."""
         assert self.session_id is not None
-        part = compaction.split(history, keep_tokens)
+        part = compaction.split(history, keep_tokens, incoming)
         if part is None:
             return None
         task_id = self.store.create_task(
@@ -359,7 +365,9 @@ class Chat:
         return summary
 
     def _compact_now(self) -> None:
-        """`/compact`: every message after the last summary goes into a new one."""
+        """`/compact`: every message after the last summary goes into a new one. It reads the
+        newest of them within `compaction.INPUT_TOKENS` (and the history's limit); the older
+        ones are covered unread, and the task is told how many."""
         current = self._current()
         config = None if current is None else self._config()
         models = None if config is None else self._models(config)

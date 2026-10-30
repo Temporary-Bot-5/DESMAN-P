@@ -94,18 +94,23 @@ def needed(history: History, after: int = 0, extra: int = 0) -> bool:
     return size(history, after) + extra > HISTORY_TOKENS
 
 
-def split(history: History, keep_tokens: int = KEEP_TOKENS) -> Part | None:
-    """The older messages, leaving the newest within `keep_tokens` (the latest one always,
-    unless `keep_tokens` is 0: then all of them); None when there is nothing older."""
+def split(history: History, keep_tokens: int = KEEP_TOKENS, incoming: int = 0) -> Part | None:
+    """The older messages, leaving the newest within `keep_tokens`; None when there is nothing
+    older. `incoming` is the size of the person's new message, about to come after them: the
+    kept ones and a summary must fit beside it, and it is the latest message, which the
+    interlocutor always sees. Without it the latest message of `history` is kept always,
+    unless `keep_tokens` is 0 (`/compact`: then all of them go)."""
     messages = history.messages
+    if incoming:
+        keep_tokens = min(keep_tokens, HISTORY_TOKENS - SUMMARY_LIMIT // CHARS_PER_TOKEN - incoming)
+    always_last = keep_tokens > 0 and not incoming
     kept = 0
     used = 0
-    if keep_tokens > 0:
-        for message in reversed(messages):
-            used += estimate_tokens(message.text)
-            if kept and used > keep_tokens:
-                break
-            kept += 1
+    for message in reversed(messages):
+        used += estimate_tokens(message.text)
+        if used > keep_tokens and not (always_last and not kept):
+            break
+        kept += 1
     older = messages[: len(messages) - kept]
     if not older:
         return None
