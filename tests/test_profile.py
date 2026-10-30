@@ -1,5 +1,5 @@
-"""Tests for the user's profile (ROADMAP C.7): the notes, the interlocutor keeping them, and
-`/profile`."""
+"""Tests for the user's profile (ROADMAP C.7): personalisation (the notes the interlocutor
+keeps, only if the person agreed), how the person set it to talk (`behaviour`), and `/profile`."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ from click.testing import CliRunner, Result
 from conftest import FakeClock
 from desman import providers, runs
 from desman.cli import cli
-from desman.config import Config, ConfigManager, default_config_path, upgrade
+from desman.config import Behaviour, Config, ConfigManager, default_config_path, upgrade
 from desman.core import db, operator
 from desman.core.profile import MAX_NOTES, NOTE_CHARS, Author, Profile, ProfileFull
 from desman.core.sessions import History, Kind, Message, Role
-from desman.interlocutor import CHAT, PROFILE, RETELL, Interlocutor, Turn
+from desman.interlocutor import BEHAVIOUR, CHAT, PROFILE, RETELL, Interlocutor, Turn
 from desman.llm.base import Request
 from desman.llm.fake import FakeLLM
 from helpers import make_config
@@ -39,7 +39,7 @@ def profile(clock: FakeClock) -> Iterator[Profile]:
 def fake(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
     llm = FakeLLM()
     monkeypatch.setattr(runs, "models", lambda config, conn, **_: runs.Models(llm, None))
-    save(make_config(language="en", configured=True))
+    save(make_config(language="en", configured=True, personalize=True))
     return llm
 
 
@@ -158,9 +158,10 @@ def test_v14_database_upgrades_to_the_profile(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_a_config_from_before_the_profile_has_it_on() -> None:
+def test_a_config_from_before_asks_nothing_and_keeps_no_notes() -> None:
     config = Config.model_validate(upgrade({"schema_version": 2, "language": "ru"}))
-    assert config.schema_version == 3 and config.profile is True
+    assert config.schema_version == 3 and config.personalize is False
+    assert not config.behaviour.is_set()
 
 
 # ── The interlocutor ─────────────────────────────────────────────────────────
@@ -228,8 +229,8 @@ def test_a_key_never_lands_in_the_profile(fake: FakeLLM) -> None:
     assert KEY not in text and providers.REDACTED in text
 
 
-def test_with_the_profile_off_nothing_is_seen_or_kept(fake: FakeLLM) -> None:
-    save(make_config(language="en", configured=True, profile=False))
+def test_without_personalisation_nothing_is_seen_or_kept(fake: FakeLLM) -> None:
+    save(make_config(language="en", configured=True, personalize=False))
     fake.on(CHAT, reply("Ok.", {"add": "Prefers short answers"}))
     result = chat("speak shorter")
     assert "Noted" not in result.output and stored() == []
@@ -253,19 +254,19 @@ def test_a_note_never_stands_for_the_person_s_yes(fake: FakeLLM) -> None:
 def test_profile_lists_the_notes_and_the_person_edits_them(fake: FakeLLM) -> None:
     fake.on(CHAT, reply("Ok.", {"add": "Likes jazz"}))
     chat("I like jazz")
-    # Menu with notes: 1 add, 2 change, 3 forget, 4 forget all, 5 off, 6 done.
-    result = chat("/profile", "1", "Prefers formal address", "2", "1", "Likes jazz and blues", "")
+    # Menu with notes: 1 how it talks, 2 add, 3 change, 4 forget, 5 forget all, 6 off, 7 done.
+    result = chat("/profile", "2", "Prefers formal address", "3", "1", "Likes jazz and blues", "")
     assert "Likes jazz  (by the interlocutor)" in result.output
     assert "free providers may keep what they get" in result.output
     assert stored() == [
         ("Likes jazz and blues", Author.PERSON),
         ("Prefers formal address", Author.PERSON),
     ]
-    chat("/profile", "3", "2", "")
+    chat("/profile", "4", "2", "")
     assert stored() == [("Likes jazz and blues", Author.PERSON)]
-    chat("/profile", "4", "n", "")
+    chat("/profile", "5", "n", "")
     assert len(stored()) == 1
-    cleared = chat("/profile", "4", "y", "")
+    cleared = chat("/profile", "5", "y", "")
     assert "Every note is forgotten." in cleared.output and stored() == []
     assert [action for action, _ in journal()][1:] == [
         "profile_note_added",
@@ -276,28 +277,41 @@ def test_profile_lists_the_notes_and_the_person_edits_them(fake: FakeLLM) -> Non
 
 
 def test_profile_refuses_keys_and_too_long_notes(fake: FakeLLM) -> None:
-    # Without notes: 1 add, 2 off, 3 done.
-    result = chat("/profile", "1", f"my key {KEY}", "1", "x" * (NOTE_CHARS + 1), "")
+    # Without notes: 1 how it talks, 2 add, 3 off, 4 done.
+    result = chat("/profile", "2", f"my key {KEY}", "2", "x" * (NOTE_CHARS + 1), "")
     assert "cut from the note" in result.output and "at most 200 characters" in result.output
     [(text, _)] = stored()
     assert KEY not in text
 
 
-def test_the_profile_is_turned_off_and_on(fake: FakeLLM) -> None:
-    result = chat("/profile", "2", "")
-    assert "The profile is off." in result.output and saved().profile is False
-    assert "The profile is off: the interlocutor neither sees" in result.output
-    chat("/profile", "2", "")
-    assert saved().profile is True
-    assert journal() == [("operator_profile", {"on": False}), ("operator_profile", {"on": True})]
+def test_personalisation_is_turned_off_and_on_in_profile(fake: FakeLLM) -> None:
+    # Without notes and on: 1 how it talks, 2 add, 3 off, 4 done; off: 1, 2 on, 3 done.
+    result = chat("/profile", "3", "n", "")
+    assert "Personalisation is off. Notes already kept" in result.output
+    assert saved().personalize is False
+    off = chat("/profile", "2", "y", "")
+    said = " ".join(off.output.split())  # wrapped to the width of the screen
+    assert "neither sees nor keeps notes" in said and "studies how you talk" in said
+    assert saved().personalize is True
+    assert journal() == [
+        ("operator_personalize", {"on": False}),
+        ("operator_personalize", {"on": True}),
+    ]
 
 
-def test_config_show_says_whether_the_profile_is_on() -> None:
-    save(make_config(language="en", configured=True, profile=False))
+def test_config_show_tells_both() -> None:
+    save(
+        make_config(
+            language="en",
+            configured=True,
+            behaviour={"length": "short", "custom": "with examples"},
+        )
+    )
     result = CliRunner().invoke(cli, ["config", "show"])
-    assert re.search(r"Profile\s+off", result.output)
+    assert re.search(r"Personalisation\s+off", result.output)
+    assert "length of answers: short; in your words: with examples" in result.output
     shown = json.loads(CliRunner().invoke(cli, ["config", "show", "--json"]).output)
-    assert shown["profile"] is False
+    assert shown["personalize"] is False and shown["behaviour"]["length"] == "short"
 
 
 def test_a_changed_or_erased_note_leaves_the_response_cache(profile: Profile) -> None:
@@ -326,3 +340,87 @@ def test_a_task_is_retold_with_the_notes_its_turn_made(fake: FakeLLM) -> None:
     chat("briefly: flights to Oslo")
     [retold] = turns(fake, RETELL)
     assert payload(retold)["profile"] == [{"id": 1, "note": "Prefers short answers"}]
+
+
+# ── How the person set it to talk ────────────────────────────────────────────
+
+
+def test_the_interlocutor_follows_the_settings_without_any_notes() -> None:
+    llm = FakeLLM().on(CHAT, reply("Hi."), reply("Hi."))
+    said = Message(seq=1, session_id="s", at="", role=Role.USER, kind=Kind.MESSAGE, text="hi")
+    history = History(summary=None, messages=[said])
+    behaviour = Behaviour(length="short", custom="with examples")
+    Interlocutor(llm, "en", None, behaviour).turn(history)
+    Interlocutor(llm, "en", None).turn(history)
+    set_, unset = llm.calls
+    assert payload(set_)["behaviour"] == {"length": "short", "custom": "with examples"}
+    assert "profile" not in payload(set_) and PROFILE not in set_.messages[0].content
+    assert BEHAVIOUR in set_.messages[0].content  # told how to ask for a change either way
+    assert "behaviour" not in payload(unset) and BEHAVIOUR in unset.messages[0].content
+
+
+def test_behaviour_and_personalize_from_the_command_line() -> None:
+    save(make_config(language="en", configured=True))
+    runner = CliRunner()
+    changed = runner.invoke(
+        cli, ["behaviour", "--length", "short", "--tone", "informal", "--custom", f"x {KEY}"]
+    )
+    assert changed.exit_code == 0, changed.output
+    assert "length of answers: as it sees fit → short" in changed.output
+    behaviour = saved().behaviour
+    assert (behaviour.length, behaviour.tone, behaviour.style) == ("short", "informal", None)
+    assert KEY not in behaviour.custom
+    runner.invoke(cli, ["behaviour", "--length", "auto"])
+    assert saved().behaviour.length is None and saved().behaviour.tone == "informal"
+    shown = runner.invoke(cli, ["behaviour"])
+    assert "informal" in shown.output and "desman behaviour --length" in shown.output
+    runner.invoke(cli, ["behaviour", "--reset"])
+    assert not saved().behaviour.is_set()
+    assert runner.invoke(cli, ["personalize", "on"]).exit_code == 0
+    assert saved().personalize is True
+    assert "Personalisation is on" in runner.invoke(cli, ["personalize"]).output
+
+
+def test_asked_in_the_chat_how_it_talks_changes_only_on_the_person_s_yes(fake: FakeLLM) -> None:
+    save(make_config(language="en", configured=True))  # no personalisation: it still works
+    ask = json.dumps({"type": "command", "name": "behaviour", "args": {"length": "short"}})
+    fake.on(CHAT, ask, ask, reply("Ok."))
+    declined = chat("speak shorter from now on", "n")
+    assert "length of answers: as it sees fit → short" in declined.output
+    assert saved().behaviour.length is None
+    chat("speak shorter from now on", "y", "hello")
+    assert saved().behaviour.length == "short"
+    assert ("operator_behaviour", {"changed": ["length"]}) in journal()
+    assert payload(turns(fake)[-1])["behaviour"] == {"length": "short"}
+
+
+def test_personalisation_asked_in_the_chat_waits_for_the_window(fake: FakeLLM) -> None:
+    save(make_config(language="en", configured=True))
+    fake.on(CHAT, json.dumps({"type": "command", "name": "personalize", "args": {"on": True}}))
+    result = chat("get to know me", "n")
+    assert "go to the model providers" in result.output and saved().personalize is False
+
+
+def test_how_it_talks_is_changed_in_profile_and_in_the_wizard(fake: FakeLLM) -> None:
+    # /profile: 1 how it talks → length (1 auto, 2 short, 3 detailed), tone, style, own words.
+    result = chat("/profile", "1", "3", "2", "1", "use examples", "")
+    assert "tone: as it sees fit → formal" in result.output
+    behaviour = saved().behaviour
+    assert (behaviour.length, behaviour.tone, behaviour.custom) == (
+        "detailed",
+        "formal",
+        "use examples",
+    )
+    assert ("operator_behaviour", {"changed": ["length", "tone", "custom"]}) in journal()
+    # The wizard: language, providers Done, permissions, then personalisation and how it talks.
+    done = str(len(providers.PROVIDERS + providers.SEARCH) + 1)
+    answers = ["1", done, "", "", "", "", "n", "y", "2", "", "", "-"]
+    wizard = CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
+    assert wizard.exit_code == 0, wizard.output
+    config = saved()
+    assert config.personalize is False
+    assert (config.behaviour.length, config.behaviour.tone, config.behaviour.custom) == (
+        "short",
+        "formal",
+        "",
+    )

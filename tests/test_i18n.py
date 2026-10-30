@@ -236,9 +236,9 @@ def test_a_broken_config_shows_english_and_the_error() -> None:
 
 
 def test_the_wizard_switches_the_language_for_the_rest_of_the_command() -> None:
-    # Language 2 (Русский), providers menu: Done, then the four permission questions.
+    # Language 2 (Русский), providers menu: Done, then the four permission questions, personalisation, how it talks.
     done = str(len(providers.PROVIDERS + providers.SEARCH) + 1)
-    result = CliRunner().invoke(cli, ["config"], input=f"2\n{done}\n\n\n\n\n")
+    result = CliRunner().invoke(cli, ["config"], input=f"2\n{done}\n\n\n\n\n\n\n")
     assert result.exit_code == 0, result.output
     assert "Настройки сохранены в" in result.output
     assert "DESMAN(P) — Configuration" in result.output  # asked in English before the choice

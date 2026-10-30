@@ -18,9 +18,11 @@ summarised first (`desman.compaction`, C.6) by a task of their own, and `/compac
 once. A summary that fails leaves the older messages out of the model's view, with a note in
 the chat; the database keeps them either way.
 
-The interlocutor sees the user's profile (C.7, `core.profile`) and may change it with any
-turn; each change is shown as it is made. `/profile` lists the notes, and there the person
-adds, changes or erases them, or turns the profile off.
+How the person set the interlocutor to talk (`Config.behaviour`) goes with every turn; if they
+agreed to personalisation, so do the notes of the user's profile (C.7, `core.profile`), which
+the interlocutor may change with any turn, each change shown as it is made. `/profile` shows
+both: there the person changes how it talks, adds, changes or erases notes, and turns
+personalisation on or off.
 
 Without a ready provider the chat still opens; the program, not a model, says what is missing.
 
@@ -39,7 +41,7 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import commands, compaction, providers, runs, ui
+from desman import commands, compaction, config_cli, providers, runs, ui, wizard
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -90,7 +92,7 @@ def _commands() -> dict[str, str]:
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
         "/compact": t("summarise this session's older messages now"),
-        "/profile": t("what the interlocutor notes about you: change, erase, turn off"),
+        "/profile": t("how the interlocutor talks to you and what it notes about you"),
         "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
@@ -146,8 +148,8 @@ class Chat:
         if config is None or models is None:
             self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
             return
-        notes = self.profile.notes() if config.profile else None
-        interlocutor = Interlocutor(models.llm, config.language, notes)
+        notes = self.profile.notes() if config.personalize else None
+        interlocutor = Interlocutor(models.llm, config.language, notes, config.behaviour)
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
         if self.session_id is not None:  # before the message: what it says comes after
             before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
@@ -171,7 +173,7 @@ class Chat:
                 )
             )
             return
-        if config.profile:  # off: the model was told nothing of it, and nothing is kept
+        if config.personalize:  # off: the model was told nothing of it, and nothing is kept
             self._note(turn.profile, config)
             interlocutor.profile = self.profile.notes()  # a task's retelling follows them
         if isinstance(turn, Reply):
@@ -719,14 +721,19 @@ class Chat:
         ui.ok(t("Session deleted. A new one starts with your next message."))
 
     def _profile(self) -> None:
-        """`/profile`: the notes, and what the person may do with them, until they are done."""
+        """`/profile`: the two things that shape how the interlocutor talks (how the person set
+        it, and the notes it keeps if they let it), and what the person may do with them."""
         while True:
             config = self._config()
             if config is None:
                 return
             notes = self.profile.notes()
-            ui.section(t("Profile"))
-            if config.profile:
+            ui.section(t("How the interlocutor talks"))
+            for part, label in wizard.behaviour_labels().items():
+                shown = wizard.behaviour_shown(config.behaviour, part)
+                ui.out(Text(f"  {label}: ", style="muted") + Text(shown))
+            ui.section(t("Notes about you"))
+            if config.personalize:
                 ui.note(
                     t(
                         "The interlocutor keeps these notes about you to talk the way you like. "
@@ -735,13 +742,15 @@ class Chat:
                     )
                 )
             else:
-                ui.note(t("The profile is off: the interlocutor neither sees nor keeps notes."))
+                ui.note(t("Personalisation is off: the interlocutor neither sees nor keeps notes."))
             for note in notes:
                 by = t("by you") if note.author is Author.PERSON else t("by the interlocutor")
                 ui.out(Text("  • " + note.text) + Text(f"  ({by})", style="muted"))
-            if not notes:
+            if not notes and config.personalize:
                 ui.out(Text("  " + t("No notes yet."), style="muted"))
-            choices = [ui.Choice(label=t("add a note"), value="add")]
+            choices = [ui.Choice(label=t("change how it talks"), value="behaviour")]
+            if config.personalize:
+                choices.append(ui.Choice(label=t("add a note"), value="add"))
             if notes:
                 choices += [
                     ui.Choice(label=t("change a note"), value="change"),
@@ -749,9 +758,9 @@ class Chat:
                     ui.Choice(label=t("forget all notes"), value="clear"),
                 ]
             choices += [
-                ui.Choice(label=t("turn the profile off"), value="off")
-                if config.profile
-                else ui.Choice(label=t("turn the profile on"), value="on"),
+                ui.Choice(label=t("turn personalisation off"), value="personalize")
+                if config.personalize
+                else ui.Choice(label=t("turn personalisation on"), value="personalize"),
                 ui.Choice(label=t("done"), value="done"),
             ]
             try:
@@ -764,16 +773,23 @@ class Chat:
 
     def _profile_do(self, chosen: str, notes: list[Note], config: Config) -> None:
         by, session = Author.PERSON, self.session_id
-        if chosen in ("on", "off"):
-            with open_config().edit() as edited:  # locked: another command's key survives
-                before = edited.model_copy(deep=True)
-                edited.profile = chosen == "on"
-            for change, about in commands.config_changes(before, edited):
-                operator.record(self.store.conn, change, about, session_id=session)
-            if chosen == "on":
-                ui.ok(t("The profile is on."))
-            else:
-                ui.ok(t("The profile is off. The notes stay, unused, until you forget them."))
+        if chosen == "personalize":
+            on = wizard.ask_personalize(config.personalize)
+            self._edit_config(lambda c: setattr(c, "personalize", on))
+            if on != config.personalize:
+                ui.ok(
+                    t("Personalisation is on.")
+                    if on
+                    else t(
+                        "Personalisation is off. Notes already kept stay, unused, until you "
+                        "erase them."
+                    )
+                )
+        elif chosen == "behaviour":
+            behaviour = wizard.ask_behaviour(config.behaviour, config)
+            self._edit_config(lambda c: setattr(c, "behaviour", behaviour))
+            for line in config_cli.behaviour_lines(config.behaviour, behaviour):
+                ui.ok(line)
         elif chosen == "clear":
             if ui.confirm(t("Forget every note?"), default=False):
                 self.profile.clear(session_id=session)
@@ -796,6 +812,14 @@ class Chat:
             text = self._note_text(t("The note"), note.text, config)
             if text:
                 self.profile.change(note.id, text, by, session_id=session)
+
+    def _edit_config(self, change: Callable[[Config], None]) -> None:
+        """Change the config under its lock (another command's key survives) and journal it."""
+        with open_config().edit() as edited:
+            before = edited.model_copy(deep=True)
+            change(edited)
+        for action, about in commands.config_changes(before, edited):
+            operator.record(self.store.conn, action, about, session_id=self.session_id)
 
     def _note_text(self, question: str, default: str, config: Config) -> str:
         """A note the person types: keys cut, and too long a note refused."""

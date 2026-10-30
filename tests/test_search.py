@@ -22,7 +22,7 @@ from desman.core.search import (
 from desman.core.store import Store
 from desman.core.web import SearchResult, WebError
 from helpers import make_config
-from test_wizard import DONE, KEEP_PERMISSIONS, menu, saved, wizard
+from test_wizard import DONE, KEEP_PERMISSIONS, KEEP_PERSONAL, menu, saved, wizard
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -221,10 +221,28 @@ def test_the_wizard_checks_a_searxng_url(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(search, "check_searxng", check)
     # SearXNG's menu: 1 = set URL, 2 = Back.
-    good = wizard("1", menu("searxng"), "1", "http://localhost:8888", "2", DONE, *KEEP_PERMISSIONS)
+    good = wizard(
+        "1",
+        menu("searxng"),
+        "1",
+        "http://localhost:8888",
+        "2",
+        DONE,
+        *KEEP_PERMISSIONS,
+        *KEEP_PERSONAL,
+    )
     assert good.exit_code == 0, good.output
     assert "docs/searxng.md" in good.output and "web search works" in good.output
-    bad = wizard("1", menu("searxng"), "1", "http://localhost:9", "2", DONE, *KEEP_PERMISSIONS)
+    bad = wizard(
+        "1",
+        menu("searxng"),
+        "1",
+        "http://localhost:9",
+        "2",
+        DONE,
+        *KEEP_PERMISSIONS,
+        *KEEP_PERSONAL,
+    )
     assert "cannot be used yet" in bad.output
     assert checked == ["http://localhost:8888", "http://localhost:9"]
     assert saved().load().settings["SEARXNG_URL"] == "http://localhost:9"  # kept, with a warning

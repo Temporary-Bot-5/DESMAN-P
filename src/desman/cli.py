@@ -17,11 +17,13 @@ from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
 from desman.config import ConfigError, open_config
 from desman.config_cli import (
+    behaviour,
     config,
     keys,
     language,
     load_config,
     permissions,
+    personalize,
     run_wizard,
     usage,
 )
@@ -128,6 +130,8 @@ cli.add_command(keys)
 cli.add_command(usage)
 cli.add_command(language)
 cli.add_command(permissions)
+cli.add_command(personalize)
+cli.add_command(behaviour)
 
 
 @cli.command("init-db")

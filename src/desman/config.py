@@ -113,6 +113,26 @@ class Permissions(BaseModel):
     shell_execution: StrictBool = False
 
 
+BEHAVIOUR_CHARS = 500
+"""The longest text the person may add about how the interlocutor talks."""
+
+
+class Behaviour(BaseModel):
+    """How the interlocutor talks, as the person set it (ROADMAP C.7): it holds whether or not
+    the person lets it keep notes. None: as the interlocutor sees fit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    length: Literal["short", "detailed"] | None = None
+    tone: Literal["formal", "informal"] | None = None
+    style: Literal["simple", "technical"] | None = None
+    custom: StrictStr = Field(default="", max_length=BEHAVIOUR_CHARS)
+    """Anything else, in the person's words."""
+
+    def is_set(self) -> bool:
+        return self != Behaviour()
+
+
 class ApiKey(BaseModel):
     """One key of a provider. A provider may have several (e.g. two accounts' free tiers)."""
 
@@ -136,8 +156,10 @@ class Config(BaseModel):
     # Secrets, by the provider's variable name; in the order they are tried.
     api_keys: dict[str, list[ApiKey]] = Field(default_factory=dict)
     settings: dict[str, StrictStr] = Field(default_factory=dict)  # not secret: hosts, account ids
-    # The interlocutor keeps and sees notes about the person (ROADMAP C.7); off: neither.
-    profile: StrictBool = True
+    # The person lets the interlocutor study the conversation and keep notes about them
+    # (ROADMAP C.7); off unless they said yes: it neither sees nor keeps any.
+    personalize: StrictBool = False
+    behaviour: Behaviour = Field(default_factory=Behaviour)
 
     def keys(self, env: str) -> list[ApiKey]:
         return list(self.api_keys.get(env, []))
@@ -173,7 +195,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     0: written before there was a schema_version (`version: "0.1.0"`, `local_settings`).
     1: one key per provider, `api_keys: {ENV: "key"}`.
     2: a list of keys per provider, `api_keys: {ENV: [{"value": ..., "label": ...}]}`.
-    3: `profile` (on unless it says otherwise).
+    3: `personalize` (off unless it says otherwise) and `behaviour`.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -207,7 +229,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
             }
         version = 2
     if version == 2:
-        version = 3  # `profile` has a default
+        version = 3  # `personalize` and `behaviour` have defaults
     data["schema_version"] = version
     return data
 

@@ -20,7 +20,15 @@ import httpx
 from rich.text import Text
 
 from desman import i18n, providers, ui, wizard
-from desman.config import Config, ConfigError, ConfigManager, Permissions, open_config
+from desman.config import (
+    BEHAVIOUR_CHARS,
+    Behaviour,
+    Config,
+    ConfigError,
+    ConfigManager,
+    Permissions,
+    open_config,
+)
 from desman.core import calls, db
 from desman.i18n import t, tn
 from desman.llm import check
@@ -102,8 +110,10 @@ def print_config(path: Path, out: dict[str, Any]) -> None:
     ui.out(Text(t("Permissions") + "  ", style="muted") + Text(", ".join(granted) or t("none")))
     if out["permissions"]["admin_rights"]:
         ui.warn(t("WARNING: admin_rights is on: agents may act with elevated privileges."))
-    profile = t("on (/profile in the chat)") if out["profile"] else t("off")
-    ui.out(Text(t("Profile") + "  ", style="muted") + Text(profile))
+    notes = t("on (/profile in the chat)") if out["personalize"] else t("off")
+    ui.out(Text(t("Personalisation") + "  ", style="muted") + Text(notes))
+    behaviour = Behaviour.model_validate(out["behaviour"])
+    ui.out(Text(t("Behaviour") + "  ", style="muted") + Text(behaviour_summary(behaviour)))
 
     rows = ui.table(t("provider"), t("status"), t("keys"), t("settings"), title=t("Providers"))
     for row in out["providers"]:
@@ -314,6 +324,161 @@ def print_permission_changes(changes: list[PermissionChange]) -> None:
         ui.ok(t("{name} granted.", name=name) if now else t("{name} revoked.", name=name))
     if any(name == "admin_rights" and now for name, _, now in changes):
         ui.warn(t("admin_rights is on: agents may act with elevated privileges."))
+
+
+# ── desman personalize ──────────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("state", type=click.Choice(["on", "off"]), required=False)
+def personalize(state: str | None) -> None:
+    """Whether the interlocutor studies your conversations and keeps notes: show, on or off."""
+    manager = load_config()
+    if state is None:
+        print_personalize(manager.load().personalize)
+        return
+    set_personalize(manager, state == "on")
+
+
+def print_personalize(on: bool) -> None:
+    if on:
+        ui.out(
+            t(
+                "Personalisation is on: the interlocutor studies your conversations and keeps "
+                "notes about you (/profile in the chat)."
+            )
+        )
+    else:
+        ui.out(t("Personalisation is off: the interlocutor keeps no notes about you."))
+    ui.note(t("Change with `desman personalize on` or `off`."))
+
+
+def set_personalize(manager: ConfigManager, on: bool) -> bool:
+    """Whether it changed."""
+    with manager.edit() as config:
+        changed = config.personalize != on
+        config.personalize = on
+    if not changed:
+        ui.note(t("Nothing changed."))
+    elif on:
+        ui.ok(t("Personalisation is on."))
+    else:
+        ui.ok(t("Personalisation is off. Notes already kept stay, unused, until you erase them."))
+    return changed
+
+
+# ── desman behaviour ────────────────────────────────────────────────────────
+
+AUTO = "auto"
+"""On the command line: back to the interlocutor's own judgement."""
+
+
+@click.command()
+@click.option("--length", type=click.Choice(["short", "detailed", AUTO]), help="Length of answers.")
+@click.option("--tone", type=click.Choice(["formal", "informal", AUTO]))
+@click.option("--style", type=click.Choice(["simple", "technical", AUTO]))
+@click.option("--custom", help="Anything else, in your words; an empty text clears it.")
+@click.option("--reset", is_flag=True, help="Everything back to the interlocutor's judgement.")
+def behaviour(
+    length: str | None, tone: str | None, style: str | None, custom: str | None, reset: bool
+) -> None:
+    """How the interlocutor talks to you, with or without personalisation: show or change."""
+    manager = load_config()
+    config = manager.load()
+    wanted = BehaviourChange(length=length, tone=tone, style=style, custom=custom, reset=reset)
+    if wanted.empty():
+        print_behaviour(config.behaviour)
+        return
+    old, new = set_behaviour(manager, wanted)
+    print_behaviour_change(old, new)
+
+
+@dataclass(frozen=True)
+class BehaviourChange:
+    """What to change in `Behaviour`: a part left None stays, `auto` clears it."""
+
+    length: str | None = None
+    tone: str | None = None
+    style: str | None = None
+    custom: str | None = None
+    reset: bool = False
+
+    def empty(self) -> bool:
+        return self == BehaviourChange()
+
+    def applied(self, current: Behaviour, config: Config | None = None) -> Behaviour:
+        """`current` with this change; a key in the text is cut (`config`'s too)."""
+        data = Behaviour().model_dump() if self.reset else current.model_dump()
+        for part in ("length", "tone", "style"):
+            value = getattr(self, part)
+            if value is not None:
+                data[part] = None if value == AUTO else value
+        if self.custom is not None:
+            custom = providers.redact_keys(" ".join(self.custom.split()), config)[0]
+            if len(custom) > BEHAVIOUR_CHARS:
+                raise click.UsageError(t("--custom is at most {n} characters.", n=BEHAVIOUR_CHARS))
+            data["custom"] = custom
+        try:
+            return Behaviour.model_validate(data)
+        except ValueError as e:
+            raise click.UsageError(str(e)) from e
+
+
+def set_behaviour(manager: ConfigManager, change: BehaviourChange) -> tuple[Behaviour, Behaviour]:
+    """(before, after), changed under the config's lock."""
+    with manager.edit() as config:
+        old = config.behaviour
+        config.behaviour = change.applied(old, config)
+    return old, config.behaviour
+
+
+def behaviour_lines(old: Behaviour, new: Behaviour) -> list[str]:
+    """What changes, a line per part: "tone: as it sees fit → informal"."""
+    labels = wizard.behaviour_labels()
+    return [
+        t(
+            "{what}: {old} → {new}",
+            what=labels[part],
+            old=wizard.behaviour_shown(old, part),
+            new=wizard.behaviour_shown(new, part),
+        )
+        for part in labels
+        if getattr(old, part) != getattr(new, part)
+    ]
+
+
+def behaviour_summary(behaviour: Behaviour) -> str:
+    """One line: the parts that are set, or that nothing is."""
+    if not behaviour.is_set():
+        return t("as the interlocutor sees fit")
+    labels = wizard.behaviour_labels()
+    return "; ".join(
+        f"{labels[part]}: {wizard.behaviour_shown(behaviour, part)}"
+        for part in labels
+        if getattr(behaviour, part)
+    )
+
+
+def print_behaviour(behaviour: Behaviour) -> None:
+    table = ui.table("", "", title=t("How the interlocutor talks"))
+    table.show_header = False
+    for part, label in wizard.behaviour_labels().items():
+        table.add_row(Text(label, style="muted"), wizard.behaviour_shown(behaviour, part))
+    ui.out(table)
+    ui.note(
+        t(
+            "Change with `desman behaviour --length short|detailed|auto`, `--tone`, `--style`, "
+            "`--custom TEXT`, or `--reset`."
+        )
+    )
+
+
+def print_behaviour_change(old: Behaviour, new: Behaviour) -> None:
+    lines = behaviour_lines(old, new)
+    if not lines:
+        ui.note(t("Nothing changed."))
+    for line in lines:
+        ui.ok(line)
 
 
 # ── desman keys ─────────────────────────────────────────────────────────────

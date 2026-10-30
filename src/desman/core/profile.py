@@ -2,8 +2,10 @@
 
 The interlocutor keeps them (how the person likes to be answered, their interests, requests
 they make often) and sees them with every message, so they reach the model providers: they are
-personal data. The person sees them in `/profile`, changes or erases them there, or turns the
-profile off (`Config.profile`), and then the interlocutor neither sees nor writes any.
+personal data. They exist only if the person agreed to personalisation (`Config.personalize`,
+off by default); otherwise the interlocutor neither sees nor writes any. The person sees them in
+`/profile` and changes or erases them there. How the person set the interlocutor to talk is
+apart from them (`Config.behaviour`), and holds either way.
 
 Unlike messages, notes are changed and deleted in place. Every change is written to the
 operator's journal (`core.operator`) with the note's number and who made it, never its text, so

@@ -53,9 +53,11 @@ src/desman/
 │                  #   decomposer(): splits a subtask whose retries failed (2–4 parts)
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
 ├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import|check`,
-│                  #   `language [CODE]`, `permissions [--grant|--revoke]`, `usage`; bodies as
+│                  #   `language [CODE]`, `permissions [--grant|--revoke]`, `personalize [on|off]`,
+│                  #   `behaviour [--length|--tone|--style|--custom|--reset]`, `usage`; bodies as
 │                  #   functions the chat's catalog calls too
-├── wizard.py      # setup wizard (language, provider menu loop, permissions)
+├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
+│                  #   consent, how the interlocutor talks)
 ├── providers.py   # known model providers, readiness, key masking, key-file parsing
 ├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise);
 │                  #   the chat's line (prompt_toolkit: `/` lists the chat's commands, Tab)
@@ -70,8 +72,9 @@ src/desman/
 │                  #   are code's, the result goes back as an event, changes to operator_log
 ├── interlocutor.py # The interlocutor: Turn (reply | clarify | task | command), no tools;
 │                  #   retell() a task's outcome; the catalog is in its prompt. Prompts
-│                  #   "Chat turn", "Retell task". Sees the profile; any turn may edit it
-│                  #   (`profile`: add | change | forget, ≤3), the chat applies and shows them
+│                  #   "Chat turn", "Retell task". Talks as `Config.behaviour` says (always);
+│                  #   with `Config.personalize` it also sees the profile and any turn may edit
+│                  #   it (`profile`: add | change | forget, ≤3), the chat applies and shows them
 ├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
 │                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
 │                  #   message that `covers` them; failed → they fall out of view, with a note
@@ -100,7 +103,7 @@ src/desman/
     │              #   or declined, keys by fingerprint, permissions); append-only
     ├── profile.py # User's profile (C.7): short notes for the interlocutor (≤20, ≤200 chars),
     │              #   changed and erased in place (personal data); each change in operator_log
-    │              #   by note number, never the text; `Config.profile` off → unseen, unkept
+    │              #   by note number, never the text; `Config.personalize` off → unseen, unkept
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
                    #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
@@ -161,7 +164,7 @@ preemption, self-improvement or network features before their phase).
 ## Configuration
 
 - Single source: `config.json` via `ConfigManager` (`language`, `api_keys`, `settings`,
-  `permissions`), opened with `open_config()`. It lives in the project folder (git-ignored,
+  `permissions`, `personalize`, `behaviour`), opened with `open_config()`. It lives in the project folder (git-ignored,
   0600); an installed package without one uses `~/.config/desman/config.json`. Override the
   directory with `DESMAN_CONFIG_DIR`.
 - No `.env`. Do not add a second configuration path.
