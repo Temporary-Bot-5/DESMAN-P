@@ -72,6 +72,7 @@ ruff check . && ruff format --check . && mypy && pytest
 - `PROJECT_PLAN.md` - full specification
 - `ROADMAP.md` - audit of the first prototype and the ordered task chain
 - `docs/adr/` - architecture decisions
+- `docs/demo-d9.md` - the chat demo, checked by hand on real providers
 - `CLAUDE.md` - guidance for AI assistants
 
 ## License
