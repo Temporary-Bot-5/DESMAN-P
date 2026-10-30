@@ -409,6 +409,7 @@ def describe(config: Config) -> dict[str, Any]:
         "configured": config.configured,
         "language": config.language,
         "permissions": config.permissions.model_dump(),
+        "profile": config.profile,
         "providers": rows,
         # Saved under a name no provider uses (typo, or a provider not supported yet).
         "unknown_keys": {

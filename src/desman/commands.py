@@ -815,6 +815,8 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
     for env in sorted(set(old.settings) | set(new.settings)):
         if old.settings.get(env) != new.settings.get(env):
             changes.append(("operator_setting", {"name": env}))
+    if old.profile != new.profile:
+        changes.append(("operator_profile", {"on": new.profile}))
     if before is not None and after is None:
         changes.append(("operator_config_deleted", {}))
     return changes

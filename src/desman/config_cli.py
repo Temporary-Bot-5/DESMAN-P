@@ -102,6 +102,8 @@ def print_config(path: Path, out: dict[str, Any]) -> None:
     ui.out(Text(t("Permissions") + "  ", style="muted") + Text(", ".join(granted) or t("none")))
     if out["permissions"]["admin_rights"]:
         ui.warn(t("WARNING: admin_rights is on: agents may act with elevated privileges."))
+    profile = t("on (/profile in the chat)") if out["profile"] else t("off")
+    ui.out(Text(t("Profile") + "  ", style="muted") + Text(profile))
 
     rows = ui.table(t("provider"), t("status"), t("keys"), t("settings"), title=t("Providers"))
     for row in out["providers"]:

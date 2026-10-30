@@ -18,6 +18,10 @@ summarised first (`desman.compaction`, C.6) by a task of their own, and `/compac
 once. A summary that fails leaves the older messages out of the model's view, with a note in
 the chat; the database keeps them either way.
 
+The interlocutor sees the user's profile (C.7, `core.profile`) and may change it with any
+turn; each change is shown as it is made. `/profile` lists the notes, and there the person
+adds, changes or erases them, or turns the profile off.
+
 Without a ready provider the chat still opens; the program, not a model, says what is missing.
 
 Everything shown here goes through `ui`, so without a terminal the chat runs line by line and
@@ -40,13 +44,24 @@ from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.policy import Access
+from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
 from desman.core.report import TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
-from desman.interlocutor import Clarify, Command, Interlocutor, NewTask, Reply, excerpt
+from desman.interlocutor import (
+    AddNote,
+    ChangeNote,
+    Clarify,
+    Command,
+    Interlocutor,
+    NewTask,
+    ProfileEdit,
+    Reply,
+    excerpt,
+)
 from desman.live import Progress
 from desman.llm import router
 from desman.llm.base import ProviderError
@@ -75,6 +90,7 @@ def _commands() -> dict[str, str]:
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
         "/compact": t("summarise this session's older messages now"),
+        "/profile": t("what the interlocutor notes about you: change, erase, turn off"),
         "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
@@ -84,6 +100,7 @@ class Chat:
     def __init__(self, sessions: Sessions, read: Callable[[], str | None] | None = None) -> None:
         self.sessions = sessions
         self.store = Store(sessions.conn, clock=sessions.clock)
+        self.profile = Profile(sessions.conn, clock=sessions.clock)
         self.read = read or (lambda: ui.line(_commands()))
         self.models: runs.Models | None = None
         """Built at the first message that needs them, again when the config changes."""
@@ -129,7 +146,8 @@ class Chat:
         if config is None or models is None:
             self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
             return
-        interlocutor = Interlocutor(models.llm, config.language)
+        notes = self.profile.notes() if config.profile else None
+        interlocutor = Interlocutor(models.llm, config.language, notes)
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
         if self.session_id is not None:  # before the message: what it says comes after
             before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
@@ -153,6 +171,8 @@ class Chat:
                 )
             )
             return
+        if config.profile:  # off: the model was told nothing of it, and nothing is kept
+            self._note(turn.profile, config)
         if isinstance(turn, Reply):
             self._say(turn.text)
         elif isinstance(turn, Clarify):
@@ -201,6 +221,33 @@ class Chat:
             self.session_id, Role.DESMAN, text, kind=Kind.EVENT, task_id=task_id
         )
         ui.out(_render(message))
+
+    def _note(self, edits: list[ProfileEdit], config: Config) -> None:
+        """The interlocutor's edits of the profile, each shown as it is made. One that does
+        not apply (no such note, no room) is left out: the model sees the notes next time."""
+        by = Author.INTERLOCUTOR
+        for edit in edits:
+            try:
+                if isinstance(edit, AddNote):
+                    text = providers.redact_keys(edit.add, config)[0]
+                    if any(n.text.casefold() == text.casefold() for n in self.profile.notes()):
+                        continue
+                    note = self.profile.add(text, by, session_id=self.session_id)
+                    ui.note(t("Noted about you: {note}", note=note.text))
+                elif isinstance(edit, ChangeNote):
+                    text = providers.redact_keys(edit.to, config)[0]
+                    was = self.profile.get(edit.change)
+                    changed = self.profile.change(edit.change, text, by, session_id=self.session_id)
+                    if was is not None and changed is not None and changed.text != was.text:
+                        ui.note(t("Changed a note about you: {note}", note=changed.text))
+                else:
+                    was = self.profile.get(edit.forget)
+                    if was is not None and self.profile.forget(
+                        edit.forget, by, session_id=self.session_id
+                    ):
+                        ui.note(t("Forgot a note about you: {note}", note=was.text))
+            except ValueError:  # ProfileFull, or a text the key cut made empty
+                continue
 
     # ── Commands ─────────────────────────────────────────────────────────────
 
@@ -583,6 +630,8 @@ class Chat:
             self._delete()
         elif name == "/compact":
             self._compact_now()
+        elif name == "/profile":
+            self._profile()
         else:
             ui.error(t("unknown command {name}: /help lists the chat's commands", name=name))
         return True
@@ -667,6 +716,96 @@ class Chat:
         operator.record(self.store.conn, "operator_session_deleted", session_id=current.id)
         self.session_id = None
         ui.ok(t("Session deleted. A new one starts with your next message."))
+
+    def _profile(self) -> None:
+        """`/profile`: the notes, and what the person may do with them, until they are done."""
+        while True:
+            config = self._config()
+            if config is None:
+                return
+            notes = self.profile.notes()
+            ui.section(t("Profile"))
+            if config.profile:
+                ui.note(
+                    t(
+                        "The interlocutor keeps these notes about you to talk the way you like. "
+                        "They go to the model providers with every message, and free "
+                        "providers may keep what they get."
+                    )
+                )
+            else:
+                ui.note(t("The profile is off: the interlocutor neither sees nor keeps notes."))
+            for note in notes:
+                by = t("by you") if note.author is Author.PERSON else t("by the interlocutor")
+                ui.out(Text("  • " + note.text) + Text(f"  ({by})", style="muted"))
+            if not notes:
+                ui.out(Text("  " + t("No notes yet."), style="muted"))
+            choices = [ui.Choice(label=t("add a note"), value="add")]
+            if notes:
+                choices += [
+                    ui.Choice(label=t("change a note"), value="change"),
+                    ui.Choice(label=t("forget a note"), value="forget"),
+                    ui.Choice(label=t("forget all notes"), value="clear"),
+                ]
+            choices += [
+                ui.Choice(label=t("turn the profile off"), value="off")
+                if config.profile
+                else ui.Choice(label=t("turn the profile on"), value="on"),
+                ui.Choice(label=t("done"), value="done"),
+            ]
+            try:
+                chosen = ui.select(t("What now?"), choices, default="done")
+                if chosen == "done":
+                    return
+                self._profile_do(chosen, notes, config)
+            except (ui.Cancelled, click.Abort):
+                return
+
+    def _profile_do(self, chosen: str, notes: list[Note], config: Config) -> None:
+        by, session = Author.PERSON, self.session_id
+        if chosen in ("on", "off"):
+            manager = open_config()
+            before = manager.load()
+            manager.save(before.model_copy(update={"profile": chosen == "on"}))
+            for change, about in commands.config_changes(before, manager.load()):
+                operator.record(self.store.conn, change, about, session_id=session)
+            if chosen == "on":
+                ui.ok(t("The profile is on."))
+            else:
+                ui.ok(t("The profile is off. The notes stay, unused, until you forget them."))
+        elif chosen == "clear":
+            if ui.confirm(t("Forget every note?"), default=False):
+                self.profile.clear(session_id=session)
+                ui.ok(t("Every note is forgotten."))
+        elif chosen == "add":
+            text = self._note_text(t("The note"), "", config)
+            if text:
+                try:
+                    self.profile.add(text, by, session_id=session)
+                except ProfileFull:
+                    ui.error(t("The profile is full: change or forget a note first."))
+        else:
+            note = ui.select(
+                t("Which note?"),
+                [ui.Choice(label=_shorten(n.text, 70), value=n) for n in notes],
+            )
+            if chosen == "forget":
+                self.profile.forget(note.id, by, session_id=session)
+                return
+            text = self._note_text(t("The note"), note.text, config)
+            if text:
+                self.profile.change(note.id, text, by, session_id=session)
+
+    def _note_text(self, question: str, default: str, config: Config) -> str:
+        """A note the person types: keys cut, and too long a note refused."""
+        text, cut = providers.redact_keys(ui.text(question, default=default), config)
+        if cut:
+            ui.warn(t("That looked like an API key, so it was cut from the note."))
+        text = " ".join(text.split())
+        if len(text) > NOTE_CHARS:
+            ui.error(t("A note is at most {n} characters.", n=NOTE_CHARS))
+            return ""
+        return text
 
     def _choose_session(self) -> None:
         offset = 0

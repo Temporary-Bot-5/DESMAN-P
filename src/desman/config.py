@@ -81,7 +81,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -127,7 +127,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -136,6 +136,8 @@ class Config(BaseModel):
     # Secrets, by the provider's variable name; in the order they are tried.
     api_keys: dict[str, list[ApiKey]] = Field(default_factory=dict)
     settings: dict[str, StrictStr] = Field(default_factory=dict)  # not secret: hosts, account ids
+    # The interlocutor keeps and sees notes about the person (ROADMAP C.7); off: neither.
+    profile: StrictBool = True
 
     def keys(self, env: str) -> list[ApiKey]:
         return list(self.api_keys.get(env, []))
@@ -171,6 +173,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     0: written before there was a schema_version (`version: "0.1.0"`, `local_settings`).
     1: one key per provider, `api_keys: {ENV: "key"}`.
     2: a list of keys per provider, `api_keys: {ENV: [{"value": ..., "label": ...}]}`.
+    3: `profile` (on unless it says otherwise).
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -203,6 +206,8 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
                 if v != ""
             }
         version = 2
+    if version == 2:
+        version = 3  # `profile` has a default
     data["schema_version"] = version
     return data
 
