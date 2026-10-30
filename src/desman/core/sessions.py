@@ -5,7 +5,8 @@ UPDATE and DELETE): a summary that later stands in for old messages (C.6) is a m
 own, and the originals stay in the database.
 
 A session exists from its first message on: `/new` only starts a fresh one, so leaving the chat
-without writing anything leaves no empty session behind.
+without writing anything leaves no empty session behind. The person may name a session and
+delete it: a deleted session leaves the lists and is never continued, but its messages stay.
 """
 
 from __future__ import annotations
@@ -58,6 +59,16 @@ class SessionInfo(BaseModel):
     messages: int
     opening: str
     """The first thing the person wrote: how they recognise the session in a list."""
+    title: str | None = None
+    """The name the person gave it (`/rename`), shown instead of the opening."""
+
+    @property
+    def name(self) -> str:
+        return self.title or self.opening
+
+
+TITLE_CHARS = 80
+"""The longest name a session keeps."""
 
 
 def _utcnow() -> datetime:
@@ -126,20 +137,46 @@ class Sessions:
         ).fetchall()
         return [r["id"] for r in rows]
 
+    def rename(self, session_id: str, title: str | None) -> None:
+        """Name a session; None (or blank) gives it back its opening as the name."""
+        title = " ".join((title or "").split())[:TITLE_CHARS] or None
+        with db.transaction(self.conn):
+            self.conn.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+
+    def delete(self, session_id: str) -> None:
+        """Take a session out of the lists and the chat. Its messages are kept."""
+        now = db.to_iso(self.clock())
+        with db.transaction(self.conn):
+            self.conn.execute(
+                "UPDATE sessions SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+                (now, session_id),
+            )
+
+    def get(self, session_id: str) -> SessionInfo | None:
+        """A session that is not deleted, or None."""
+        found = self._infos("AND s.id = ?", (session_id,), limit=1, offset=0)
+        return found[0] if found else None
+
     def recent(self, limit: int = 20, offset: int = 0) -> list[SessionInfo]:
-        """Sessions, the one written to last first; `offset` skips that many."""
+        """Sessions not deleted, the one written to last first; `offset` skips that many."""
+        return self._infos("", (), limit=limit, offset=offset)
+
+    def _infos(
+        self, where: str, params: tuple[str, ...], *, limit: int, offset: int
+    ) -> list[SessionInfo]:
         rows = self.conn.execute(
-            """
-            SELECT s.id, s.created_at, MAX(m.at) AS last_at, COUNT(m.seq) AS messages,
+            f"""
+            SELECT s.id, s.created_at, s.title, MAX(m.at) AS last_at, COUNT(m.seq) AS messages,
                    COALESCE((SELECT u.text FROM messages u
                              WHERE u.session_id = s.id AND u.role = 'user'
                              ORDER BY u.seq LIMIT 1), '') AS opening
             FROM sessions s JOIN messages m ON m.session_id = s.id
+            WHERE s.deleted_at IS NULL {where}
             GROUP BY s.id
             ORDER BY MAX(m.seq) DESC
             LIMIT ? OFFSET ?
             """,
-            (limit, offset),
+            (*params, limit, offset),
         ).fetchall()
         return [SessionInfo.model_validate(dict(r)) for r in rows]
 

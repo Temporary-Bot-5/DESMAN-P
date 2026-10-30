@@ -5,8 +5,13 @@ commands (`/help` lists them); anything else is a message, saved in the session 
 the interlocutor (`desman.interlocutor`, C.3) with one turn: a reply, a question back, a task
 or a command. A task is an ordinary task of the session: planned, run by the coordinator while
 the chat waits (Ctrl+C stops it, `desman resume` continues), then retold. What waits for the
-operator is shown with the same decisions as `desman inbox`. Commands come with their catalog
-(C.5); until then the chat says so.
+operator is shown with the same decisions as `desman inbox`.
+
+A command is looked up in the catalog (`desman.commands`, C.5) and its arguments validated
+there. A read runs at once; a change is shown in a window drawn from the command itself and
+applied only on the person's "yes"; input (a key, a section of the wizard) is typed by the
+person into a window. What it did goes back to the interlocutor as an event of the session,
+and changes, declined ones too, into the operator's journal (`core.operator`).
 
 Without a ready provider the chat still opens; the program, not a model, says what is missing.
 
@@ -19,21 +24,24 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from typing import Any
 
 import click
 import httpx
 from rich.text import Text
 
-from desman import providers, runs, ui
+from desman import commands, providers, runs, ui
 from desman.config import Config, ConfigError, open_config
-from desman.core import calls, db
+from desman.core import calls, db, operator
+from desman.core.context import CHARS_PER_TOKEN
+from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report
 from desman.core.search import client
-from desman.core.sessions import Kind, Message, Role, Sessions
+from desman.core.sessions import Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
-from desman.interlocutor import Clarify, Interlocutor, NewTask, Reply, excerpt
+from desman.interlocutor import Clarify, Command, Interlocutor, NewTask, Reply, excerpt
 from desman.live import Progress
 from desman.llm import router
 from desman.llm.base import ProviderError
@@ -42,6 +50,9 @@ from desman.planner import plan
 
 SHOWN_ON_RETURN = 6
 """How many of the last messages are shown when a session is continued or switched to."""
+
+COMMAND_RESULT_TOKENS = 800
+"""How much of a command's result the interlocutor gets: it has to fit its history budget."""
 
 HISTORY_MESSAGES = 200
 """The most messages read for the interlocutor; it keeps the newest that fit its budget."""
@@ -57,15 +68,17 @@ def _commands() -> dict[str, str]:
         "/help": t("the chat's commands"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
+        "/rename": t("name this session: /rename NAME"),
+        "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
 
 
 class Chat:
-    def __init__(self, sessions: Sessions, read: Callable[[], str | None] = ui.line) -> None:
+    def __init__(self, sessions: Sessions, read: Callable[[], str | None] | None = None) -> None:
         self.sessions = sessions
         self.store = Store(sessions.conn, clock=sessions.clock)
-        self.read = read
+        self.read = read or (lambda: ui.line(_commands()))
         self.models: runs.Models | None = None
         """Built at the first message that needs them, again when the config changes."""
         self._models_for: Config | None = None
@@ -82,7 +95,7 @@ class Chat:
                 if not command:
                     continue
                 if command.startswith("/"):
-                    if not self._command(command):
+                    if not self._slash(command):
                         return
                     continue
                 self._message(line)  # kept as typed: indentation may matter (code, a list)
@@ -131,13 +144,8 @@ class Chat:
             self._say(turn.question)
         elif isinstance(turn, NewTask):
             self._task(turn, config, models, interlocutor)
-        else:  # the model's command is never run as it is: the catalog of commands decides (C.5)
-            self._event(
-                t(
-                    "DESMAN commands cannot be run from the chat yet. In the terminal, "
-                    "`desman --help` lists them."
-                )
-            )
+        else:
+            self._command(turn, config, models, interlocutor)
 
     def _config(self) -> Config | None:
         try:
@@ -179,15 +187,120 @@ class Chat:
         )
         ui.out(_render(message))
 
+    # ── Commands ─────────────────────────────────────────────────────────────
+
+    def _command(
+        self, turn: Command, config: Config, models: runs.Models, interlocutor: Interlocutor
+    ) -> None:
+        """The command the interlocutor asked for, through the catalog; never as it was
+        written. Only the person's answer in a window built here applies a change."""
+        entry = commands.find(turn.name)
+        if entry is None:
+            name = providers.redact_keys(turn.name, config)[0]
+            ui.error(t("DESMAN has no command {name}.", name=name))
+            self._result(
+                t("Asked for {name}: there is no such command.", name=name),
+                {"error": "unknown command", "commands": [e.name for e in commands.CATALOG]},
+                config,
+            )
+            return
+        try:
+            args = commands.parse(entry, turn.args, config)
+        except commands.BadArgs as e:
+            ui.error(f"{entry.name}: {e}")
+            self._result(
+                t("Asked for {name} with arguments that do not fit.", name=entry.name),
+                {"error": str(e)},
+                config,
+            )
+            return
+        command = commands.shown(entry, args)
+        kind = entry.kind_of(args)
+        before = self._saved_config()
+        context = commands.Context(
+            self.store,
+            open_config(),
+            start_task=lambda title, goal: self._task(
+                NewTask(type="task", title=title, goal=goal), config, models, interlocutor
+            ),
+            resume_task=lambda task_id: self._resume(task_id, config, models, interlocutor),
+        )
+        try:
+            made = entry.handler(context, args)
+            if isinstance(made, commands.Proposal):
+                if not self._confirmed(made):
+                    made = commands.Outcome({"declined": True}, done=False)
+                else:
+                    made = made.apply()
+        except click.ClickException as e:
+            ui.error(e.format_message())
+            self._result(
+                t("{command} did not run: {error}", command=command, error=e.format_message()),
+                {"error": e.format_message()},
+                config,
+            )
+            return
+        except (ui.Cancelled, click.Abort):
+            ui.out("")
+            made = commands.Outcome({"declined": True}, done=False)
+        if kind is not commands.Kind.READ:
+            self._journal(entry, args, made.done, before)
+        if not made.done:
+            ui.note(t("Nothing changed."))
+            self._result(t("{command}: the person declined.", command=command), None, config)
+        elif made.data is not None:
+            self._result(t("{command} ran.", command=command), made.data, config)
+
+    def _confirmed(self, proposal: commands.Proposal) -> bool:
+        """The window of a change: what it does, as the command worded it, and the person's
+        answer. Nothing the model said is shown here or counts as an answer."""
+        ui.section(t("Confirm"))
+        for line in proposal.lines:
+            ui.out(Text("  " + line))
+        for warning in proposal.warnings:
+            ui.warn(warning)
+        return ui.confirm(proposal.question or t("Apply this change?"), default=False)
+
+    def _journal(
+        self, entry: commands.Entry, args: commands.Args, done: bool, before: Config | None
+    ) -> None:
+        """The operator's journal: the command, confirmed or declined, and what it changed in
+        the config (a key by its fingerprint, a permission by its name)."""
+        conn = self.store.conn
+        details = {"command": entry.name, "args": args.model_dump(mode="json")}
+        action = "operator_command" if done else "operator_declined"
+        operator.record(conn, action, details, session_id=self.session_id)
+        for change, about in commands.config_changes(before, self._saved_config()):
+            operator.record(conn, change, about, session_id=self.session_id)
+
+    def _saved_config(self) -> Config | None:
+        """The config as saved (None: no file, or one that does not load)."""
+        manager = open_config()
+        if not manager.config_path.exists():
+            return None
+        try:
+            return manager.load()
+        except ConfigError:
+            return None
+
+    def _result(self, said: str, data: Any, config: Config | None) -> None:
+        """What a command did, for the interlocutor's next turns: an event of the session,
+        not printed (the person saw it already). Never a key: see `commands.for_interlocutor`."""
+        assert self.session_id is not None
+        text = said
+        if data is not None:
+            configs = [config, self._saved_config()]
+            budget = COMMAND_RESULT_TOKENS * CHARS_PER_TOKEN
+            text += "\n" + commands.for_interlocutor(data, configs, budget)
+        self.sessions.add(self.session_id, Role.DESMAN, text, kind=Kind.EVENT)
+
     # ── Tasks ────────────────────────────────────────────────────────────────
 
     def _task(
         self, turn: NewTask, config: Config, models: runs.Models, interlocutor: Interlocutor
     ) -> None:
-        try:
-            access = runs.executor_access(config)
-        except click.ClickException as e:
-            ui.error(e.message)
+        access = self._access(config)
+        if access is None:
             return
         ui.note(t("Planning…"))
         with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
@@ -215,6 +328,35 @@ class Chat:
             ),
             task_id,
         )
+        self._work(task_id, ref, config, models, access, interlocutor)
+
+    def _resume(
+        self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor
+    ) -> None:
+        access = self._access(config)
+        if access is None:
+            return
+        ref = self.store.short_id(task_id)
+        self._event(t("Task {ref} continues.", ref=ref), task_id)
+        self._work(task_id, ref, config, models, access, interlocutor)
+
+    def _access(self, config: Config) -> Access | None:
+        try:
+            return runs.executor_access(config)
+        except click.ClickException as e:
+            ui.error(e.message)
+            return None
+
+    def _work(
+        self,
+        task_id: str,
+        ref: str,
+        config: Config,
+        models: runs.Models,
+        access: Access,
+        interlocutor: Interlocutor,
+    ) -> None:
+        """Run the task while the chat waits, then retell how it went."""
         try:
             if self._http is None:
                 self._http = client()
@@ -327,11 +469,14 @@ class Chat:
     def _show_last(self) -> None:
         assert self.session_id is not None
         for message in self.sessions.messages(self.session_id, last=SHOWN_ON_RETURN):
+            if message.kind is Kind.EVENT:  # a command's data or a result shown once is enough
+                first = message.text.split("\n", 1)[0]
+                message = message.model_copy(update={"text": first})
             ui.out(_render(message))
 
     # ── The chat's own commands ──────────────────────────────────────────────
 
-    def _command(self, line: str) -> bool:
+    def _slash(self, line: str) -> bool:
         """Run a chat command; False when it ends the chat."""
         name = line.split()[0].lower()
         if name == "/exit":
@@ -342,6 +487,10 @@ class Chat:
             self._new()
         elif name == "/sessions":
             self._choose_session()
+        elif name == "/rename":
+            self._rename(line.strip()[len(name) :].strip())
+        elif name == "/delete":
+            self._delete()
         else:
             ui.error(t("unknown command {name}: /help lists the chat's commands", name=name))
         return True
@@ -361,6 +510,72 @@ class Chat:
         self.session_id = None
         ui.ok(t("New session: it starts with your next message."))
 
+    def _current(self) -> SessionInfo | None:
+        """The session written to, or None (with a note) while it has not started."""
+        current = None if self.session_id is None else self.sessions.get(self.session_id)
+        if current is None:
+            ui.note(t("This session starts with your next message: there is nothing to it yet."))
+        return current
+
+    def _rename(self, title: str) -> None:
+        current = self._current()
+        if current is None:
+            return
+        if not title:
+            try:
+                title = ui.text(t("Name of this session ('-' gives back the first message)"))
+            except (ui.Cancelled, click.Abort):
+                return
+            if not title:
+                return
+        title, cut = providers.redact_keys(title, self._config())
+        if cut:
+            ui.warn(t("That looked like an API key, so it was cut from the name."))
+        new = None if title.strip() == "-" else title
+        self.sessions.rename(current.id, new)
+        renamed = self.sessions.get(current.id)
+        assert renamed is not None
+        operator.record(
+            self.store.conn,
+            "operator_session_renamed",
+            {"title": renamed.title},
+            session_id=current.id,
+        )
+        ui.ok(t("The session is called {name} now.", name=_shorten(renamed.name) or "…"))
+
+    def _delete(self) -> None:
+        current = self._current()
+        if current is None:
+            return
+        ui.section(t("Confirm"))
+        ui.out(
+            Text(
+                "  "
+                + t(
+                    "Delete the session of {when}: {name}",
+                    when=_when(current.last_at),
+                    name=_shorten(current.name) or "…",
+                )
+            )
+        )
+        ui.note(
+            t(
+                "It leaves the list and the chat will not continue it. Its messages stay in "
+                "the database, with the history of its tasks."
+            )
+        )
+        try:
+            yes = ui.confirm(t("Delete it?"), default=False)
+        except (ui.Cancelled, click.Abort):
+            yes = False
+        if not yes:
+            ui.note(t("Nothing changed."))
+            return
+        self.sessions.delete(current.id)
+        operator.record(self.store.conn, "operator_session_deleted", session_id=current.id)
+        self.session_id = None
+        ui.ok(t("Session deleted. A new one starts with your next message."))
+
     def _choose_session(self) -> None:
         offset = 0
         while True:
@@ -371,7 +586,7 @@ class Chat:
             more, page = len(page) > LISTED_SESSIONS, page[:LISTED_SESSIONS]
             choices = [
                 ui.Choice(
-                    label=f"{_when(s.last_at)}  {_shorten(s.opening) or '…'}",
+                    label=f"{_when(s.last_at)}  {_shorten(s.name) or '…'}",
                     value=s.id,
                     hint=tn(s.messages, "{n} message", "{n} messages")
                     + (" · " + t("current") if s.id == self.session_id else ""),

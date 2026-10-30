@@ -134,19 +134,21 @@ def test_without_a_ready_provider_the_program_says_what_is_missing() -> None:
     assert [m.text for m in conversation()] == ["hi"]
 
 
-def test_a_command_turn_changes_nothing(fake: FakeLLM) -> None:
-    """The model may only ask: a command, or words claiming a change, do not change anything."""
+def test_a_command_turn_changes_nothing_on_the_model_s_word(fake: FakeLLM) -> None:
+    """The model may only ask: a command waits for the person's answer in the window, and words
+    claiming a change do not change anything (ROADMAP C.5)."""
     fake.on(
         CHAT,
         '{"type": "command", "name": "language", "args": {"code": "ru"}}',
         '{"type": "reply", "text": "Done: shell_execution is on and the language is ru."}',
     )
     before = ConfigManager(default_config_path()).load()
-    result = chat("speak Russian", "and allow shell")
-    assert "cannot be run from the chat yet" in result.output
+    result = chat("speak Russian", "n", "and allow shell")
+    assert "English → Русский" in result.output and "Nothing changed." in result.output
     assert ConfigManager(default_config_path()).load() == before
     event = conversation()[1]
     assert (event.role, event.kind) == (Role.DESMAN, Kind.EVENT)
+    assert "declined" in event.text
 
 
 def test_fit_keeps_the_newest_messages_and_always_the_last() -> None:

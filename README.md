@@ -27,8 +27,9 @@ gradually improve its own components under human supervision.
 uv venv -p python3.12 .venv
 uv pip install -e ".[dev]"
 
-desman                        # first run: configuration wizard, then project info
+desman                        # the chat (first run: the configuration wizard first)
 desman config                 # providers, API keys (several per provider), permissions
+desman permissions            # what agents may do; --grant NAME / --revoke NAME
 desman config show            # what is configured, API keys masked
 desman config reset           # delete the configuration, keys included
 desman keys                   # how many keys each provider has
@@ -41,8 +42,15 @@ desman run "GOAL"             # on a real model; --provider groq --model ...
 desman help
 ```
 
+In the chat, ask in your own words for anything the commands do ("add a groq key", "allow
+network access", "what waits for me?"). A change is shown in a window and happens only after
+your "yes" there; a key is typed into a hidden field and never reaches a model or the history.
+The chat's own commands start with `/`: typing `/` lists them, Tab completes the name.
+`/rename NAME` names the session, `/delete` takes it out of the list (its messages stay in
+the local database, with the history of its tasks).
+
 Agents run code only in a sandbox, and only after you turn on `shell_execution` in
-`desman config`. The sandbox is [bubblewrap](https://github.com/containers/bubblewrap)
+`desman config` (or `desman permissions --grant shell_execution`). The sandbox is [bubblewrap](https://github.com/containers/bubblewrap)
 (Linux): `sudo apt install bubblewrap`. Without it, or where the system forbids unprivileged
 user namespaces (Ubuntu 24.04+: `kernel.apparmor_restrict_unprivileged_userns`), agents cannot
 run code at all, and `desman run` says so.
