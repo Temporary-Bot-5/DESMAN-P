@@ -70,6 +70,8 @@ class Proposal:
     lines: list[str]
     apply: Callable[[], Outcome]
     warnings: list[str] = field(default_factory=list)
+    question: str | None = None
+    """Asked instead of "Apply this change?" (opening the wizard changes nothing yet)."""
 
 
 @dataclass
@@ -517,19 +519,33 @@ def _keys_import(ctx: Context, args: ImportArgs) -> Outcome | Proposal:
     return Proposal(lines, apply, warnings)
 
 
-def _config(ctx: Context, args: ConfigArgs) -> Outcome:
-    try:
-        if args.section is None:
-            wizard.run(ctx.manager)
-        else:
-            wizard.run_section(ctx.manager, args.section)
-    except ConfigError as e:
-        raise click.ClickException(t("config {error}; run `desman config` again", error=e)) from e
-    except (ui.Cancelled, click.Abort):
-        ui.out("")
-        ui.warn(t("Configuration cancelled; nothing was saved."))
-        return Outcome({"saved": False}, done=False)
-    return Outcome({"saved": True})
+def _config(ctx: Context, args: ConfigArgs) -> Proposal:
+    """The wizard takes over the screen, so the person first says whether to open it: a
+    question the model misread must not drop them into the language menu."""
+
+    def apply() -> Outcome:
+        try:
+            if args.section is None:
+                wizard.run(ctx.manager)
+            else:
+                wizard.run_section(ctx.manager, args.section)
+        except ConfigError as e:
+            raise click.ClickException(
+                t("config {error}; run `desman config` again", error=e)
+            ) from e
+        except (ui.Cancelled, click.Abort):
+            ui.out("")
+            ui.warn(t("Configuration cancelled; nothing was saved."))
+            return Outcome({"saved": False}, done=False)
+        return Outcome({"saved": True})
+
+    if args.section == "providers":
+        line = t("Open the setup wizard at its model providers: their keys and settings.")
+    elif args.section == "permissions":
+        line = t("Open the setup wizard at the agents' permissions.")
+    else:
+        line = t("Open the whole setup wizard: language, model providers and keys, permissions.")
+    return Proposal([line], apply, question=t("Open it?"))
 
 
 def _config_reset(ctx: Context, args: NoArgs) -> Outcome | Proposal:
@@ -666,7 +682,8 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "config",
         "Open the setup wizard, or one section of it (providers: keys and settings; "
-        "permissions), for the person to fill in.",
+        "permissions), for the person to fill in; only when they ask to set DESMAN up or to "
+        "change settings. To show providers, keys or settings use keys list or config show.",
         ConfigArgs,
         Kind.INPUT,
         _config,

@@ -57,7 +57,8 @@ src/desman/
 │                  #   functions the chat's catalog calls too
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions)
 ├── providers.py   # known model providers, readiness, key masking, key-file parsing
-├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise)
+├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise);
+│                  #   the chat's line (prompt_toolkit: `/` lists the chat's commands, Tab)
 ├── i18n.py        # t()/tn(): messages, command help and Click's own text in the configured
 │                  #   language (ADR 0002); catalogs in locales/ (ru, zh, es, pt, de, fr, ja,
 │                  #   ko, pl, tr, uk, hi)

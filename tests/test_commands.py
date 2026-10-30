@@ -492,16 +492,26 @@ def test_a_key_written_by_the_model_changes_nothing(fake: FakeLLM, args: dict[st
 def test_a_section_of_the_wizard_from_the_chat(fake: FakeLLM) -> None:
     fake.on(CHAT, asks("config", section="permissions"))
     # Without a terminal the checkbox asks for each permission in turn.
-    result = chat("let me set permissions", "n", "n", "y", "n")
-    assert "Agent permissions" in result.output
+    result = chat("let me set permissions", "y", "n", "n", "y", "n")
+    assert "Open it?" in result.output and "Agent permissions" in result.output
     assert saved().permissions.network_access is True
     assert ("operator_permission_grant", {"permission": "network_access"}) in journal()
+
+
+def test_the_wizard_opens_only_when_the_person_says_so(fake: FakeLLM) -> None:
+    fake.on(CHAT, asks("config"))  # a question the model took for a wish to set DESMAN up
+    before = saved()
+    result = chat("which providers are connected?", "n")
+    assert "Open the whole setup wizard" in result.output
+    assert "Language" not in result.output and "Model providers" not in result.output
+    assert saved() == before
+    assert [action for action, _ in journal()] == ["operator_declined"]
 
 
 def test_leaving_the_wizard_saves_nothing(fake: FakeLLM) -> None:
     fake.on(CHAT, asks("config"))
     before = saved()
-    chat("open the settings")  # the input ends inside the wizard
+    chat("open the settings", "y")  # the input ends inside the wizard
     assert saved() == before
     assert [action for action, _ in journal()] == ["operator_declined"]
 

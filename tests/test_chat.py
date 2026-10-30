@@ -10,6 +10,8 @@ import pytest
 from click.testing import CliRunner, Result
 
 from conftest import FakeClock
+from desman import ui
+from desman.chat import Chat
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
@@ -192,3 +194,47 @@ def test_every_session_stays_reachable_page_by_page(monkeypatch: pytest.MonkeyPa
     assert "Switched to the session" in result.output
     assert [s.opening for s in stored().recent()] == ["oldest", "newest", "middle"]
     assert [s.opening for s in stored().recent(limit=1, offset=2)] == ["middle"]
+
+
+# ── Suggestions for the chat's commands ──────────────────────────────────────
+
+SLASH = {"/help": "list", "/new": "new", "/sessions": "earlier", "/exit": "leave"}
+
+
+@pytest.mark.parametrize(
+    ("typed", "names"),
+    [
+        ("/", ["/help", "/new", "/sessions", "/exit"]),
+        ("/s", ["/sessions"]),
+        ("/E", ["/exit"]),
+        ("/x", []),
+        ("/sessions now", []),  # a space: the name is done
+        ("hello /", []),  # a message, not a command
+        ("", []),
+    ],
+)
+def test_slash_suggests_the_commands_a_line_may_become(typed: str, names: list[str]) -> None:
+    assert [name for name, _ in ui.slash_matches(typed, SLASH)] == names
+
+
+def test_the_completer_replaces_what_was_typed_and_says_what_a_command_does() -> None:
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    found = list(ui._completer(SLASH).get_completions(Document("/se"), CompleteEvent()))
+    assert [(c.text, c.start_position, c.display_meta_text) for c in found] == [
+        ("/sessions", -3, "earlier")
+    ]
+
+
+def test_the_chat_offers_its_own_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    configured()
+    offered: list[list[str]] = []
+
+    def line(commands: dict[str, str] | None = None) -> None:
+        offered.append(list(commands or {}))
+        return None  # the person leaves
+
+    monkeypatch.setattr(ui, "line", line)
+    Chat(stored()).run()
+    assert offered == [["/help", "/new", "/sessions", "/exit"]]

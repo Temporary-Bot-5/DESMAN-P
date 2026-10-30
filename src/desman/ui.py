@@ -7,10 +7,9 @@ typing numbers. A cancelled prompt (Ctrl+C, Esc) raises `Cancelled`.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -261,24 +260,70 @@ def text(question: str, default: str = "") -> str:
     return str(click.prompt(question, default=default, show_default=bool(default))).strip()
 
 
-def line() -> str | None:
+def line(commands: Mapping[str, str] | None = None) -> str | None:
     """A line typed in the chat; None when the person leaves (Ctrl+D, Ctrl+C, end of input).
 
-    In a terminal, `readline` (where Python has it) gives line editing and ↑ for earlier lines.
-    Otherwise a line is read from stdin and no prompt is printed: the chat then runs line by
-    line, in pipes and in tests.
+    In a terminal the line is edited with prompt_toolkit (questionary's own base): ↑ for earlier
+    lines, and `commands` (name → what it does) as suggestions: typing `/` lists them under
+    the line, Tab completes the name. Otherwise a line is read from stdin and no prompt is
+    printed: the chat then runs line by line, in pipes and in tests.
     """
     if interactive():
-        with contextlib.suppress(ImportError):  # no readline e.g. on Windows
-            import readline  # noqa: F401  (loading it is what gives input() editing)
         try:
-            # \001 and \002 tell readline the colour codes take no room on the line.
-            return input("\001\033[1;38;2;0;238;255m\002›\001\033[0m\002 ")
+            return str(_chat_prompt().prompt(completer=_completer(commands or {})))
         except (EOFError, KeyboardInterrupt):
             out("")
             return None
     raw = sys.stdin.readline()
     return raw.rstrip("\r\n") if raw else None
+
+
+_prompt: Any = None
+"""The chat's prompt, made once so that ↑ reaches the lines typed earlier in this run."""
+
+
+def _chat_prompt() -> Any:
+    global _prompt
+    if _prompt is None:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.styles import Style
+
+        _prompt = PromptSession(
+            [("class:mark", "› ")],
+            complete_while_typing=True,
+            reserve_space_for_menu=6,
+            style=Style.from_dict(
+                {
+                    "mark": f"fg:{ACCENT} bold",
+                    "completion-menu": "bg:default",
+                    "completion-menu.completion": f"fg:{ACCENT} bg:default",
+                    "completion-menu.completion.current": f"fg:#000000 bg:{ACCENT} bold",
+                    "completion-menu.meta.completion": f"fg:{MUTED} bg:default",
+                    "completion-menu.meta.completion.current": f"fg:#000000 bg:{ACCENT}",
+                }
+            ),
+        )
+    return _prompt
+
+
+def slash_matches(typed: str, commands: Mapping[str, str]) -> list[tuple[str, str]]:
+    """The commands (name, what it does) a line typed so far may become: while it is `/` and
+    the start of a name; nothing once it holds a space or is a message."""
+    if not typed.startswith("/") or any(c.isspace() for c in typed):
+        return []
+    return [(name, what) for name, what in commands.items() if name.startswith(typed.lower())]
+
+
+def _completer(commands: Mapping[str, str]) -> Any:
+    from prompt_toolkit.completion import Completer, Completion
+
+    class Slash(Completer):
+        def get_completions(self, document: Any, event: Any) -> Iterator[Completion]:
+            typed = document.text_before_cursor
+            for name, what in slash_matches(typed, commands):
+                yield Completion(name, -len(typed), display_meta=what)
+
+    return Slash()
 
 
 def secret(question: str) -> str:

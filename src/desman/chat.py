@@ -73,10 +73,10 @@ def _commands() -> dict[str, str]:
 
 
 class Chat:
-    def __init__(self, sessions: Sessions, read: Callable[[], str | None] = ui.line) -> None:
+    def __init__(self, sessions: Sessions, read: Callable[[], str | None] | None = None) -> None:
         self.sessions = sessions
         self.store = Store(sessions.conn, clock=sessions.clock)
-        self.read = read
+        self.read = read or (lambda: ui.line(_commands()))
         self.models: runs.Models | None = None
         """Built at the first message that needs them, again when the config changes."""
         self._models_for: Config | None = None
@@ -257,7 +257,7 @@ class Chat:
             ui.out(Text("  " + line))
         for warning in proposal.warnings:
             ui.warn(warning)
-        return ui.confirm(t("Apply this change?"), default=False)
+        return ui.confirm(proposal.question or t("Apply this change?"), default=False)
 
     def _journal(
         self, entry: commands.Entry, args: commands.Args, done: bool, before: Config | None
