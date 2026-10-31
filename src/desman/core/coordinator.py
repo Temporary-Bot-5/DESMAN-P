@@ -307,9 +307,7 @@ class Coordinator:
                     return
                 # No usable split: try once more the way the attempt before did.
                 context = context.model_copy(
-                    update={
-                        "strategy": self.strategies(attempt, split=False, **avoid)
-                    }
+                    update={"strategy": self.strategies(attempt, split=False, **avoid)}
                 )
                 work = work.model_copy(update={"context": context})
                 self._started(subtask, context)
