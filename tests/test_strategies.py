@@ -229,3 +229,84 @@ def test_an_unusable_reply_is_feedback_for_the_next_attempt(store: Store, clock:
         "unusable reply: The reply is not a JSON object."
     )
     assert second_try["attempt"] == 2
+
+
+def test_a_main_model_found_unfit_is_not_asked_again() -> None:
+    assert [strategy_for(n, avoid_main=True) for n in range(1, 6)] == [
+        S.OTHER_MODEL, S.OTHER_MODEL, S.OTHER_MODEL, S.OTHER_MODEL, S.DECOMPOSE
+    ]  # fmt: skip
+    # Nothing to switch to: the attempts go on as before.
+    assert [strategy_for(n, other_model=False, avoid_main=True) for n in range(1, 5)] == [
+        S.FIRST, S.FEEDBACK, S.REPHRASE, S.REPHRASE
+    ]  # fmt: skip
+
+
+def two_steps() -> TaskSpec:
+    return TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(description="a", acceptance_criteria="c"),
+            SubtaskSpec(description="b", acceptance_criteria="c", depends_on=[0]),
+        ],
+    )
+
+
+def started(store: Store, task_id: str) -> list[tuple[int, str]]:
+    return [
+        (e.details["attempt"], e.details["strategy"])
+        for e in history(store.conn, task_id)
+        if e.action == "attempt_started"
+    ]
+
+
+def test_a_refused_reply_sends_the_next_attempts_to_the_other_model(
+    store: Store, clock: FakeClock
+) -> None:
+    from desman.llm.fake import ToolUseFailed
+
+    # Groq's gpt-oss calling a tool natively (C.8): the same model would fail the same way.
+    main = FakeLLM().on("Execute", ToolUseFailed()).on("Review", REJECT, ACCEPT, ACCEPT)
+    other = FakeLLM().on("Execute", '{"v": 1}', '{"v": 2}', '{"v": 3}')
+    task_id = store.create_task(two_steps())
+    coordinator = Coordinator(
+        store,
+        llm_executor(main, other),
+        llm_reviewer(main),
+        sleep=clock.sleep,
+        strategies=functools.partial(strategy_for, other_model=True),
+    )
+    assert coordinator.run(task_id).status is TaskStatus.DONE
+
+    assert len(executions(main)) == 1  # asked once, never again in this task
+    assert len(executions(other)) == 3
+    # The retry after a rejection stays on the other model; so does the next subtask's first try.
+    assert started(store, task_id) == [
+        (1, "first"), (2, "other_model"), (3, "other_model"), (1, "other_model")
+    ]  # fmt: skip
+    [failed] = [e for e in history(store.conn, task_id) if e.action == "execution_failed"]
+    assert failed.details["unfit_model"] == "main"
+    assert failed.details["failure"] == "quality"
+    assert store.unfit_models(task_id) == {"main"}
+    assert check_history(store.conn, task_id) == []
+
+
+def test_when_both_models_are_unfit_the_attempts_go_on_by_number(
+    store: Store, clock: FakeClock
+) -> None:
+    from desman.llm.fake import ToolUseFailed
+
+    main = FakeLLM().on("Execute", ToolUseFailed(), '{"v": 1}').on("Review", ACCEPT)
+    other = FakeLLM().on("Execute", ToolUseFailed())
+    task_id = run(store, clock, main, other)
+    assert started(store, task_id) == [(1, "first"), (2, "other_model"), (3, "rephrase")]
+    assert store.unfit_models(task_id) == {"main", "other"}
+
+
+def test_with_one_model_a_refused_reply_claims_no_switch(store: Store, clock: FakeClock) -> None:
+    from desman.llm.fake import ToolUseFailed
+
+    main = FakeLLM().on("Execute", ToolUseFailed(), '{"v": 1}').on("Review", ACCEPT)
+    task_id = store.create_task(one_step())
+    coordinator = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    assert coordinator.run(task_id).status is TaskStatus.DONE
+    assert started(store, task_id) == [(1, "first"), (2, "feedback")]

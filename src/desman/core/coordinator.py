@@ -67,6 +67,9 @@ class Failure(BaseModel):
     reason: str
     paused_until: str | None = None
     """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
+    unfit_model: bool = False
+    """The model cannot answer this kind of request (`ProviderError.unfit_model`): the task's
+    next attempts go to another model, if there is one."""
 
     @field_validator("paused_until", mode="before")
     @classmethod
@@ -273,13 +276,17 @@ class Coordinator:
             )
 
         outcome: Outcome
+        strategy: Strategy | None = None
         try:
             attempt = subtask.attempts.quality + 1
+            unfit = self.store.unfit_models(subtask.task_id)
+            # The main model failed as unfit, the other one has not: no attempt asks it again.
+            avoid_main = "main" in unfit and "other" not in unfit
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
                 can_split = self.decomposer is not None and subtask.parent_id is None
-                strategy = self.strategies(attempt, split=can_split)
+                strategy = self.strategies(attempt, split=can_split, avoid_main=avoid_main)
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
@@ -299,7 +306,9 @@ class Coordinator:
                     return
                 # No usable split: try once more the way the attempt before did.
                 context = context.model_copy(
-                    update={"strategy": self.strategies(attempt, split=False)}
+                    update={
+                        "strategy": self.strategies(attempt, split=False, avoid_main=avoid_main)
+                    }
                 )
                 work = work.model_copy(update={"context": context})
                 self._started(subtask, context)
@@ -339,6 +348,7 @@ class Coordinator:
                     paused_until=outcome.paused_until,
                     policy=self.policy,
                     action="execution_failed",
+                    details=self._unfit(outcome, strategy),
                 )
                 events.append(f"{outcome.kind} {subtask.id} -> {moved.status}")
         except StaleStateError:  # e.g. cancelled while running
@@ -482,7 +492,16 @@ class Coordinator:
             kind=error.kind,
             reason=f"{type(error).__name__}: {error}",
             paused_until=None if until is None else db.to_iso(until),
+            unfit_model=error.unfit_model,
         )
+
+    @staticmethod
+    def _unfit(outcome: Failure, strategy: Strategy | None) -> dict[str, Any] | None:
+        """Which model the failed execution found unfit, for `Store.unfit_models`. Only an
+        attempt marked `other_model` asked the other one."""
+        if not outcome.unfit_model or strategy is None:
+            return None
+        return {"unfit_model": "other" if strategy is Strategy.OTHER_MODEL else "main"}
 
     def _earliest(self, task_id: str, status: str, column: str) -> str | None:
         row = self.store.conn.execute(

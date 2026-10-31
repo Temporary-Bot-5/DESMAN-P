@@ -54,17 +54,23 @@ class Strategy(StrEnum):
     COMBINE = "combine"  # a split subtask, once its parts are done: the result from theirs
 
 
-def strategy_for(attempt: int, *, other_model: bool = True, split: bool = True) -> Strategy:
+def strategy_for(
+    attempt: int, *, other_model: bool = True, split: bool = True, avoid_main: bool = False
+) -> Strategy:
     """The strategy of attempt number `attempt` (1 is the first try): first, feedback, rephrase,
     other model, then decompose. Without `other_model` (nothing to switch to) the fourth attempt
     is rephrased; when the subtask may not be split (`split`), later attempts repeat the fourth
-    one. COMBINE is not picked by number: it is what a split subtask does next."""
+    one. With `avoid_main` (the main model proved unable to answer this task, ROADMAP C.9) every
+    attempt that would ask it goes to the other model instead, if there is one. COMBINE is not
+    picked by number: it is what a split subtask does next."""
+    if attempt >= 5 and split:
+        return Strategy.DECOMPOSE
+    if avoid_main and other_model:
+        return Strategy.OTHER_MODEL
     if attempt <= 1:
         return Strategy.FIRST
     if attempt == 2:
         return Strategy.FEEDBACK
-    if attempt >= 5 and split:
-        return Strategy.DECOMPOSE
     if attempt == 3 or not other_model:
         return Strategy.REPHRASE
     return Strategy.OTHER_MODEL
@@ -72,9 +78,12 @@ def strategy_for(attempt: int, *, other_model: bool = True, split: bool = True) 
 
 class Strategies(Protocol):
     """Attempt number -> strategy, like `strategy_for`; `split` says whether this subtask may
-    still be split (the coordinator knows, the caller who narrows the choice does not)."""
+    still be split and `avoid_main` whether the main model failed this task as unfit (the
+    coordinator knows both, the caller who narrows the choice does not)."""
 
-    def __call__(self, attempt: int, *, split: bool = True) -> Strategy: ...
+    def __call__(
+        self, attempt: int, *, split: bool = True, avoid_main: bool = False
+    ) -> Strategy: ...
 
 
 class Attempts(BaseModel):
