@@ -230,6 +230,10 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         version = 2
     if version == 2:
         version = 3  # `personalize` and `behaviour` have defaults
+    if data.get("profile") in (True, False):
+        # Written by a 3 before its release (62d084b): `profile`, on unless it said otherwise,
+        # was never the person's consent, so `personalize` stays as the file says, off if unsaid.
+        del data["profile"]
     data["schema_version"] = version
     return data
 

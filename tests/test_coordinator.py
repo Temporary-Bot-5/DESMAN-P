@@ -26,6 +26,7 @@ from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+from desman.llm.base import GenerationFailed
 
 S = SubtaskStatus
 K = FailureKind
@@ -92,6 +93,27 @@ def test_reviewer_sees_submitted_artifact_and_retry_feedback_is_audited(
     assert subtask.attempts == Attempts(quality=1)
     reasons = [r["details_json"] for r in store.audit_log(task_id) if r["actor"] == "reviewer"]
     assert any("too short" in r for r in reasons)
+
+
+def test_a_reply_the_provider_refused_is_tried_again_not_escalated(
+    store: Store, clock: FakeClock
+) -> None:
+    """Groq's `tool_use_failed` (a model calling a tool natively) is the reply's fault, not the
+    request's: the next attempt goes on, told why, instead of waiting for a person."""
+    seen: list[Work] = []
+
+    def natively_once(work: Work) -> Success:
+        seen.append(work)
+        if len(seen) == 1:
+            raise GenerationFailed("groq", "Tool choice is none, but model called a tool")
+        return ok_executor(work)
+
+    task_id = store.create_task(chain("a"))
+    assert coordinator(store, clock, executor=natively_once).run(task_id).status is TaskStatus.DONE
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts == Attempts(quality=1)
+    feedback = seen[1].context.feedback
+    assert feedback is not None and "called a tool natively" in str(feedback)
 
 
 def test_old_prototype_hang_now_ends_with_operator(store: Store, clock: FakeClock) -> None:

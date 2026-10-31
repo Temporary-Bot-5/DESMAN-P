@@ -21,6 +21,7 @@ from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config
 from desman.core import calls
 from desman.core.coordinator import Coordinator
+from desman.core.effects import evidence
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import strategy_for
@@ -155,7 +156,7 @@ def _coordinator(
     return Coordinator(
         store,
         llm_executor(models.llm, models.other),
-        llm_reviewer(models.llm),
+        llm_reviewer(models.llm, evidence=functools.partial(evidence, store)),
         owner=current_owner(),
         lease_seconds=lease_seconds,
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once

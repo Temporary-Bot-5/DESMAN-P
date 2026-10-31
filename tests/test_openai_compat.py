@@ -21,6 +21,7 @@ from desman.core.retry import FailureKind
 from desman.llm import check, router
 from desman.llm.base import (
     Completion,
+    GenerationFailed,
     Message,
     ProviderRejected,
     ProviderTimeout,
@@ -100,6 +101,7 @@ def test_success_and_what_is_sent() -> None:
     [
         (httpx.Response(401, json={"error": {"message": "Invalid API Key"}}), ProviderRejected, FailureKind.PERMANENT),
         (httpx.Response(400, json={"error": "model not found"}), ProviderRejected, FailureKind.PERMANENT),
+        (httpx.Response(400, json={"error": {"message": "Tool choice is none, but model called a tool", "type": "invalid_request_error", "code": "tool_use_failed"}}), GenerationFailed, FailureKind.QUALITY),
         (httpx.Response(404, text="no such model"), ProviderRejected, FailureKind.PERMANENT),
         (httpx.Response(429, headers={"retry-after": "7"}), RateLimited, FailureKind.LIMIT),
         (httpx.Response(429, json={"error": {"message": "Please try again in 1.5s"}}), RateLimited, FailureKind.LIMIT),

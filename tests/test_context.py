@@ -10,9 +10,9 @@ from conftest import FakeClock
 from desman.core.context import (
     CHARS_PER_TOKEN,
     DependencyResult,
-    _fair_shares,
     _render,
     estimate_tokens,
+    fair_shares,
     fit_dependencies,
 )
 from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
@@ -32,17 +32,17 @@ def result(name: str, content: dict[str, Any] | None) -> DependencyResult:
 
 
 def test_fair_shares_give_small_items_all_they_need() -> None:
-    assert _fair_shares([10, 100, 1000], 300) == [10, 100, 190]
-    assert _fair_shares([500, 500], 300) == [150, 150]
-    assert _fair_shares([1, 2, 3], 1000) == [1, 2, 3]
-    assert _fair_shares([], 100) == []
-    assert _fair_shares([5], 0) == [0]
+    assert fair_shares([10, 100, 1000], 300) == [10, 100, 190]
+    assert fair_shares([500, 500], 300) == [150, 150]
+    assert fair_shares([1, 2, 3], 1000) == [1, 2, 3]
+    assert fair_shares([], 100) == []
+    assert fair_shares([5], 0) == [0]
 
 
 @pytest.mark.parametrize("budget", [0, 1, 50, 333, 10_000])
 def test_fair_shares_never_exceed_budget(budget: int) -> None:
     sizes = [7, 400, 3, 1200, 90]
-    shares = _fair_shares(sizes, budget)
+    shares = fair_shares(sizes, budget)
     assert sum(shares) <= budget
     assert all(0 <= share <= size for share, size in zip(shares, sizes, strict=True))
 

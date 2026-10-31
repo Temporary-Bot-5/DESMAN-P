@@ -54,6 +54,22 @@ def test_schema_0_file_is_upgraded_on_load_and_save() -> None:
     assert ConfigManager(path).load() == config
 
 
+@pytest.mark.parametrize("personalize", [None, True])
+def test_a_profile_switch_from_before_the_release_of_3_is_not_consent(
+    personalize: bool | None,
+) -> None:
+    """62d084b wrote schema 3 with `profile` (on by default); the release calls it `personalize`
+    and asks for it. Such a file loads, and only a `personalize` it says turns it on."""
+    data: dict[str, object] = {"schema_version": 3, "configured": True, "profile": True}
+    if personalize is not None:
+        data["personalize"] = personalize
+    path = write(data)
+    config = ConfigManager(path).load()
+    assert config.configured and config.personalize is bool(personalize)
+    ConfigManager(path).save(config)
+    assert "profile" not in json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_missing_file_is_an_unconfigured_default() -> None:
     config = ConfigManager(default_config_path()).load()
     assert config == Config() and not config.configured
