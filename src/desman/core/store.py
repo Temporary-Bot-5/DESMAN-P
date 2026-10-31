@@ -780,6 +780,18 @@ class Store:
 
     # ── Side effects (core/effects.py) ───────────────────────────────────────
 
+    def unfit_providers(self, task_id: str) -> set[str]:
+        """The providers an execution of the task failed as unable to answer (`unfit_provider`
+        in its `execution_failed` entry). Read from the audit, so a resumed run does not ask
+        them again either; by name, so a provider that is new to the task is still tried."""
+        rows = self.conn.execute(
+            """SELECT DISTINCT json_extract(details_json, '$.unfit_provider') FROM audit_log
+               WHERE task_id = ? AND action = 'execution_failed'
+                 AND json_extract(details_json, '$.unfit_provider') IS NOT NULL""",
+            (task_id,),
+        ).fetchall()
+        return {str(r[0]) for r in rows}
+
     def executions(self, subtask_id: str) -> int:
         """How many executions of the subtask have ended with something to judge: a result, a
         split or a quality failure. An interrupted one (crash, lost lease, provider error,

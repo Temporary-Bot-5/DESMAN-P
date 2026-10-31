@@ -45,9 +45,11 @@ Start the chat with bare `desman`, then type the following, each in your own wor
    - Compare the result with what the search found (`desman audit <ref>` shows the query). The
      reviewer checks facts against the tool results and sends made-up ones back. A price or
      time in the result that is not in the search results is a failure of the demo.
-   - Known (ROADMAP C.9): Groq's gpt-oss wastes attempts with tools until another model takes
-     over, and a request for exact schedules may end waiting for you instead of with what was
-     found.
+   - If Groq's gpt-oss refuses tools (`tool_use_failed`), only that one attempt is lost: the
+     next attempts of the task show `other_model` in `desman audit <ref>` (ROADMAP C.9).
+   - Live data comes as the best that was found, each fact with its source, and a plain "not
+     found" for the rest (an exact time on a date, a booking link). The task should end with
+     that result, not wait for you.
 
 ## What to look at afterwards
 
