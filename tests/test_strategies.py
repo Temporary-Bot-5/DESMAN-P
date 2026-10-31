@@ -26,7 +26,8 @@ from desman.core.audit import check_history, history
 from desman.core.coordinator import Coordinator
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import RetryPolicy, Strategy, strategy_for
-from desman.core.states import TaskStatus
+from desman.core.states import Actor, TaskStatus
+from desman.core.states import SubtaskStatus as S_
 from desman.core.store import Store
 from desman.llm import router
 from desman.llm.fake import FakeLLM
@@ -259,23 +260,28 @@ def started(store: Store, task_id: str) -> list[tuple[int, str]]:
     ]
 
 
+def coordinator(store: Store, clock: FakeClock, main: FakeLLM, other: FakeLLM, **kw: Any) -> Any:
+    return Coordinator(
+        store,
+        llm_executor(main, other),
+        llm_reviewer(main),
+        sleep=clock.sleep,
+        strategies=functools.partial(strategy_for, other_model=True),
+        providers=(main.name, other.name),
+        **kw,
+    )
+
+
 def test_a_refused_reply_sends_the_next_attempts_to_the_other_model(
     store: Store, clock: FakeClock
 ) -> None:
     from desman.llm.fake import ToolUseFailed
 
     # Groq's gpt-oss calling a tool natively (C.8): the same model would fail the same way.
-    main = FakeLLM().on("Execute", ToolUseFailed()).on("Review", REJECT, ACCEPT, ACCEPT)
-    other = FakeLLM().on("Execute", '{"v": 1}', '{"v": 2}', '{"v": 3}')
+    main = FakeLLM(name="groq").on("Execute", ToolUseFailed()).on("Review", REJECT, ACCEPT, ACCEPT)
+    other = FakeLLM(name="google").on("Execute", '{"v": 1}', '{"v": 2}', '{"v": 3}')
     task_id = store.create_task(two_steps())
-    coordinator = Coordinator(
-        store,
-        llm_executor(main, other),
-        llm_reviewer(main),
-        sleep=clock.sleep,
-        strategies=functools.partial(strategy_for, other_model=True),
-    )
-    assert coordinator.run(task_id).status is TaskStatus.DONE
+    assert coordinator(store, clock, main, other).run(task_id).status is TaskStatus.DONE
 
     assert len(executions(main)) == 1  # asked once, never again in this task
     assert len(executions(other)) == 3
@@ -284,10 +290,46 @@ def test_a_refused_reply_sends_the_next_attempts_to_the_other_model(
         (1, "first"), (2, "other_model"), (3, "other_model"), (1, "other_model")
     ]  # fmt: skip
     [failed] = [e for e in history(store.conn, task_id) if e.action == "execution_failed"]
-    assert failed.details["unfit_model"] == "main"
+    assert failed.details["unfit_provider"] == "groq"
     assert failed.details["failure"] == "quality"
-    assert store.unfit_models(task_id) == {"main"}
+    assert store.unfit_providers(task_id) == {"groq"}
     assert check_history(store.conn, task_id) == []
+
+
+def test_an_unfit_other_model_is_not_switched_to_again(store: Store, clock: FakeClock) -> None:
+    from desman.llm.fake import ToolUseFailed
+
+    main = FakeLLM(name="groq").on("Execute", *[f'{{"v": {n}}}' for n in range(5)])
+    main.on("Review", REJECT, REJECT, REJECT, ACCEPT, ACCEPT)
+    other = FakeLLM(name="google").on("Execute", ToolUseFailed())
+    task_id = store.create_task(two_steps())
+    # Six attempts and no split: the fifth and the next subtask's fourth would have asked other.
+    c = coordinator(store, clock, main, other, policy=RetryPolicy(max_attempts=6))
+    assert c.run(task_id).status is TaskStatus.DONE
+    assert len(executions(other)) == 1
+    assert started(store, task_id) == [
+        (1, "first"), (2, "feedback"), (3, "rephrase"), (4, "other_model"), (5, "rephrase"),
+        (1, "first"),
+    ]  # fmt: skip
+
+
+def test_a_provider_new_to_the_task_is_tried_after_all(store: Store, clock: FakeClock) -> None:
+    from desman.llm.fake import ToolUseFailed
+
+    groq = FakeLLM(name="groq").on("Execute", ToolUseFailed()).on("Review", ACCEPT)
+    google = FakeLLM(name="google").on("Execute", ToolUseFailed())
+    task_id = store.create_task(one_step())
+    first = coordinator(store, clock, groq, google, policy=RetryPolicy(max_attempts=2))
+    assert first.run(task_id).status is TaskStatus.NEEDS_HUMAN
+    assert store.unfit_providers(task_id) == {"groq", "google"}
+    # The operator changes the providers and sends the subtask back: both new to this task.
+    [sub_id] = [r[0] for r in store.conn.execute("SELECT id FROM subtasks")]
+    store.transition(sub_id, S_.NEEDS_HUMAN, S_.READY, Actor.HUMAN, reason="other providers")
+    openrouter = FakeLLM(name="openrouter").on("Execute", '{"v": 1}').on("Review", ACCEPT)
+    mistral = FakeLLM(name="mistral")
+    assert coordinator(store, clock, openrouter, mistral).run(task_id).status is TaskStatus.DONE
+    assert len(executions(openrouter)) == 1 and not mistral.calls
+    assert started(store, task_id)[-1] == (1, "first")
 
 
 def test_when_both_models_are_unfit_the_attempts_go_on_by_number(
@@ -295,11 +337,12 @@ def test_when_both_models_are_unfit_the_attempts_go_on_by_number(
 ) -> None:
     from desman.llm.fake import ToolUseFailed
 
-    main = FakeLLM().on("Execute", ToolUseFailed(), '{"v": 1}').on("Review", ACCEPT)
-    other = FakeLLM().on("Execute", ToolUseFailed())
-    task_id = run(store, clock, main, other)
+    main = FakeLLM(name="groq").on("Execute", ToolUseFailed(), '{"v": 1}').on("Review", ACCEPT)
+    other = FakeLLM(name="google").on("Execute", ToolUseFailed())
+    task_id = store.create_task(one_step())
+    assert coordinator(store, clock, main, other).run(task_id).status is TaskStatus.DONE
     assert started(store, task_id) == [(1, "first"), (2, "other_model"), (3, "rephrase")]
-    assert store.unfit_models(task_id) == {"main", "other"}
+    assert store.unfit_providers(task_id) == {"groq", "google"}
 
 
 def test_with_one_model_a_refused_reply_claims_no_switch(store: Store, clock: FakeClock) -> None:
@@ -307,6 +350,6 @@ def test_with_one_model_a_refused_reply_claims_no_switch(store: Store, clock: Fa
 
     main = FakeLLM().on("Execute", ToolUseFailed(), '{"v": 1}').on("Review", ACCEPT)
     task_id = store.create_task(one_step())
-    coordinator = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
-    assert coordinator.run(task_id).status is TaskStatus.DONE
+    c = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    assert c.run(task_id).status is TaskStatus.DONE
     assert started(store, task_id) == [(1, "first"), (2, "feedback")]

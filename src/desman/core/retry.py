@@ -55,14 +55,21 @@ class Strategy(StrEnum):
 
 
 def strategy_for(
-    attempt: int, *, other_model: bool = True, split: bool = True, avoid_main: bool = False
+    attempt: int,
+    *,
+    other_model: bool = True,
+    split: bool = True,
+    avoid_main: bool = False,
+    avoid_other: bool = False,
 ) -> Strategy:
     """The strategy of attempt number `attempt` (1 is the first try): first, feedback, rephrase,
     other model, then decompose. Without `other_model` (nothing to switch to) the fourth attempt
     is rephrased; when the subtask may not be split (`split`), later attempts repeat the fourth
-    one. With `avoid_main` (the main model proved unable to answer this task, ROADMAP C.9) every
-    attempt that would ask it goes to the other model instead, if there is one. COMBINE is not
-    picked by number: it is what a split subtask does next."""
+    one. A model that proved unable to answer this task (ROADMAP C.9) is not asked again: with
+    `avoid_other` there is no other model to switch to; with `avoid_main` every attempt that
+    would ask the main one goes to the other instead, if there is one. COMBINE is not picked by
+    number: it is what a split subtask does next."""
+    other_model = other_model and not avoid_other
     if attempt >= 5 and split:
         return Strategy.DECOMPOSE
     if avoid_main and other_model:
@@ -78,11 +85,16 @@ def strategy_for(
 
 class Strategies(Protocol):
     """Attempt number -> strategy, like `strategy_for`; `split` says whether this subtask may
-    still be split and `avoid_main` whether the main model failed this task as unfit (the
-    coordinator knows both, the caller who narrows the choice does not)."""
+    still be split, `avoid_main` and `avoid_other` whether that model failed this task as unfit
+    (the coordinator knows, the caller who narrows the choice does not)."""
 
     def __call__(
-        self, attempt: int, *, split: bool = True, avoid_main: bool = False
+        self,
+        attempt: int,
+        *,
+        split: bool = True,
+        avoid_main: bool = False,
+        avoid_other: bool = False,
     ) -> Strategy: ...
 
 

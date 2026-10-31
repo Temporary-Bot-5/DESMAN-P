@@ -67,9 +67,9 @@ class Failure(BaseModel):
     reason: str
     paused_until: str | None = None
     """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
-    unfit_model: bool = False
-    """The model cannot answer this kind of request (`ProviderError.unfit_model`): the task's
-    next attempts go to another model, if there is one."""
+    unfit_provider: str | None = None
+    """The provider whose model cannot answer this kind of request (`ProviderError.unfit_model`):
+    the task's next attempts go to another model, if there is one."""
 
     @field_validator("paused_until", mode="before")
     @classmethod
@@ -164,6 +164,7 @@ class Coordinator:
         access: Access | None = None,
         abandoned: Callable[[str], bool] | None = None,
         strategies: Strategies = ONE_MODEL,
+        providers: tuple[str, str | None] | None = None,
         decomposer: Decomposer | None = None,
         sleep: Callable[[float], None] = time.sleep,
         watch: Callable[[], None] | None = None,
@@ -188,6 +189,9 @@ class Coordinator:
         """Attempt number -> strategy. The executor's owner says what it can do: by default
         there is no other model to switch to, so the audit never claims a switch that did not
         happen; pass `strategy_for` when the executor has one."""
+        self.providers = providers
+        """The names of the providers the executor asks: the main one and the other model of
+        `strategies` (None if there is none). Without them no model is avoided as unfit."""
         self.decomposer = decomposer
         """Without one, subtasks are never split."""
         self.sleep = sleep
@@ -276,17 +280,14 @@ class Coordinator:
             )
 
         outcome: Outcome
-        strategy: Strategy | None = None
         try:
             attempt = subtask.attempts.quality + 1
-            unfit = self.store.unfit_models(subtask.task_id)
-            # The main model failed as unfit, the other one has not: no attempt asks it again.
-            avoid_main = "main" in unfit and "other" not in unfit
+            avoid = self._avoid(subtask.task_id)
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
                 can_split = self.decomposer is not None and subtask.parent_id is None
-                strategy = self.strategies(attempt, split=can_split, avoid_main=avoid_main)
+                strategy = self.strategies(attempt, split=can_split, **avoid)
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
@@ -307,7 +308,7 @@ class Coordinator:
                 # No usable split: try once more the way the attempt before did.
                 context = context.model_copy(
                     update={
-                        "strategy": self.strategies(attempt, split=False, avoid_main=avoid_main)
+                        "strategy": self.strategies(attempt, split=False, **avoid)
                     }
                 )
                 work = work.model_copy(update={"context": context})
@@ -348,7 +349,11 @@ class Coordinator:
                     paused_until=outcome.paused_until,
                     policy=self.policy,
                     action="execution_failed",
-                    details=self._unfit(outcome, strategy),
+                    details=(
+                        None
+                        if outcome.unfit_provider is None
+                        else {"unfit_provider": outcome.unfit_provider}
+                    ),
                 )
                 events.append(f"{outcome.kind} {subtask.id} -> {moved.status}")
         except StaleStateError:  # e.g. cancelled while running
@@ -492,16 +497,18 @@ class Coordinator:
             kind=error.kind,
             reason=f"{type(error).__name__}: {error}",
             paused_until=None if until is None else db.to_iso(until),
-            unfit_model=error.unfit_model,
+            unfit_provider=error.provider if error.unfit_model else None,
         )
 
-    @staticmethod
-    def _unfit(outcome: Failure, strategy: Strategy | None) -> dict[str, Any] | None:
-        """Which model the failed execution found unfit, for `Store.unfit_models`. Only an
-        attempt marked `other_model` asked the other one."""
-        if not outcome.unfit_model or strategy is None:
-            return None
-        return {"unfit_model": "other" if strategy is Strategy.OTHER_MODEL else "main"}
+    def _avoid(self, task_id: str) -> dict[str, bool]:
+        """Which of the executor's models an execution of the task found unfit (C.9): the
+        other one is then not switched to; the main one is not asked while the other is fit."""
+        if self.providers is None:
+            return {}
+        unfit = self.store.unfit_providers(task_id)
+        main, other = self.providers
+        avoid_other = other is not None and other in unfit
+        return {"avoid_main": main in unfit and not avoid_other, "avoid_other": avoid_other}
 
     def _earliest(self, task_id: str, status: str, column: str) -> str | None:
         row = self.store.conn.execute(
