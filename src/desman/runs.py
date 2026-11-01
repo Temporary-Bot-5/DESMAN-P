@@ -274,11 +274,12 @@ def coordinator(
     )
 
 
-def summarizer(store: Store, models: Models) -> Coordinator:
+def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Coordinator:
     """The operator for a summary of a chat session (`desman.compaction`): an ordinary run, but
     its executor has no tools at all, whatever the permissions. What it reads is a conversation,
-    and nothing written in it can make the work act."""
-    return _coordinator(store, models, access=None, tools=Registry())
+    and nothing written in it can make the work act. The benchmark (`desman.bench`) runs on it
+    too, with the tuning it evaluates."""
+    return _coordinator(store, models, access=None, tools=Registry(), tuning=tuning)
 
 
 def _coordinator(

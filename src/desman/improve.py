@@ -1,5 +1,6 @@
 """The Improvement Analyst (ROADMAP 5.4): from what went wrong, a proposed change to DESMAN,
-as a diff for the person to read. It applies nothing (evaluation is 5.5, applying 5.6).
+as a diff for the person to read. It applies nothing (`desman.evaluation` runs it on the
+benchmark, 5.5; applying is 5.6).
 
 The analysis is an ordinary task, like a chat summary: one subtask of kind analysis, an
 executor and a reviewer, retries by the retry policy. It has no tools (`Tools.NONE`): it reads

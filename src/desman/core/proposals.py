@@ -252,3 +252,80 @@ def plan_fallbacks(
 
 def _cut(text: str, limit: int = TEXT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit] + " …(cut)"
+
+
+# ── Evaluations (ROADMAP 5.5) ────────────────────────────────────────────────
+
+
+class Evaluation(BaseModel):
+    """A proposal run on the benchmark (`desman.evaluation`), as it was recorded."""
+
+    id: int
+    proposal_id: int
+    created_at: str
+    mode: str
+    """"fake" (the scripted model) or "real" (the person's models)."""
+    commit: str
+    """The commit both runs started from."""
+    verdict: str
+    """better, worse, same; failed: it could not be finished (`reason`)."""
+    reason: str | None
+    base: dict[str, Any] | None
+    """The current version's run (`desman.bench.Result`); None if it did not report."""
+    candidate: dict[str, Any] | None
+    """The run with the proposal."""
+
+
+def record_evaluation(
+    conn: sqlite3.Connection,
+    proposal_id: int,
+    *,
+    mode: str,
+    commit: str,
+    verdict: str,
+    reason: str | None = None,
+    base: dict[str, Any] | None = None,
+    candidate: dict[str, Any] | None = None,
+) -> Evaluation:
+    with db.transaction(conn):
+        cursor = conn.execute(
+            """INSERT INTO evaluations (proposal_id, mode, git_commit, verdict, reason,
+                                        base_json, candidate_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                proposal_id,
+                mode,
+                commit,
+                verdict,
+                reason,
+                None if base is None else json.dumps(base, ensure_ascii=False),
+                None if candidate is None else json.dumps(candidate, ensure_ascii=False),
+            ),
+        )
+    found = evaluations(conn, proposal_id, evaluation_id=cursor.lastrowid)
+    return found[0]
+
+
+def evaluations(
+    conn: sqlite3.Connection, proposal_id: int, *, evaluation_id: int | None = None
+) -> list[Evaluation]:
+    """The proposal's evaluations, newest first."""
+    rows = conn.execute(
+        """SELECT * FROM evaluations WHERE proposal_id = ? AND (? IS NULL OR id = ?)
+           ORDER BY id DESC""",
+        (proposal_id, evaluation_id, evaluation_id),
+    ).fetchall()
+    return [
+        Evaluation(
+            id=r["id"],
+            proposal_id=r["proposal_id"],
+            created_at=r["created_at"],
+            mode=r["mode"],
+            commit=r["git_commit"],
+            verdict=r["verdict"],
+            reason=r["reason"],
+            base=None if r["base_json"] is None else json.loads(r["base_json"]),
+            candidate=None if r["candidate_json"] is None else json.loads(r["candidate_json"]),
+        )
+        for r in rows
+    ]

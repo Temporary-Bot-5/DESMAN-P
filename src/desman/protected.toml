@@ -19,6 +19,9 @@
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
+# How a proposal of the Improvement Analyst is judged: the benchmark and its comparison.
+"bench.py" = "2121d58e84ebc0748fd454ab4bcc4b9c6642810e02e323bc31ff61b758951d31"
+"evaluation.py" = "461accc22577046fb5b387defee6ccf60bb873bdae7a27cf136b8c1be9dcfe52"
 # The scripted model every test of agents runs on.
 "llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"
 

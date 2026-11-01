@@ -294,6 +294,13 @@ class ProposalShowArgs(Args):
     proposal: Annotated[int, Field(ge=1)] = Field(description="the proposal's number")
 
 
+class EvaluateArgs(Args):
+    proposal: Annotated[int, Field(ge=1)] = Field(description="the proposal's number")
+    real: bool = Field(
+        default=False, description="the person's models instead of the scripted fake model"
+    )
+
+
 class AnalyzeArgs(Args):
     since: Annotated[str, StringConstraints(pattern=r"^(all|[1-9]\d*[mhd])$")] = "all"
 
@@ -646,6 +653,34 @@ def _proposals_analyze(ctx: Context, args: AnalyzeArgs) -> Outcome | Proposal:
         found = proposals_cli.finish(ctx.store, analysis.proposal.id)
         proposals_cli.print_proposal(ctx.store, found)
         return Outcome(proposals_cli.proposal_json(ctx.store, found))
+
+    return Proposal([line], apply)
+
+
+def _proposals_evaluate(ctx: Context, args: EvaluateArgs) -> Proposal:
+    improve.settle(ctx.store)
+    found = proposals_cli.find(ctx.store, args.proposal)
+    if found.status is not proposals.Status.PROPOSED:
+        raise click.ClickException(t("Proposal {id} proposes nothing to evaluate.", id=found.id))
+    if args.real:
+        line = t(
+            "Evaluate proposal {id} on your models: the benchmark runs on the current version "
+            "and on the proposed one, each in a git worktree of its own. It spends model calls; "
+            "nothing is applied.",
+            id=found.id,
+        )
+    else:
+        line = t(
+            "Evaluate proposal {id} with the scripted fake model: the benchmark runs on the "
+            "current version and on the proposed one, each in a git worktree of its own. "
+            "Nothing is applied.",
+            id=found.id,
+        )
+
+    def apply() -> Outcome:
+        done = proposals_cli.evaluate_now(ctx.store, found, real=args.real)
+        proposals_cli.print_evaluation(done)
+        return Outcome(proposals_cli.evaluation_json(done))
 
     return Proposal([line], apply)
 
@@ -1068,6 +1103,16 @@ CATALOG: tuple[Entry, ...] = (
         AnalyzeArgs,
         Kind.CHANGE,
         _proposals_analyze,
+    ),
+    Entry(
+        "proposals evaluate",
+        "Run the benchmark on the current version of DESMAN and on it with one proposal, each "
+        "in a git worktree, and compare them; real: on the person's models (spends their "
+        "quota), otherwise the scripted fake model (does the proposed version still work, what "
+        "do its prompts cost). Applies nothing. The person confirms.",
+        EvaluateArgs,
+        Kind.CHANGE,
+        _proposals_evaluate,
     ),
     Entry(
         "models show",
