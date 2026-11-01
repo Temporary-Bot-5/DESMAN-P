@@ -384,7 +384,7 @@ def test_a_template_plan_is_held_to_running_code_when_the_person_says_so(tmp_pat
     assert not any(r["action"] == "attempt_started" for r in store.audit_log(task_id))
 
 
-def test_must_run_marks_the_last_subtask_only_when_none_is_marked() -> None:
+def test_must_run_marks_the_last_subtask_and_keeps_the_plan_s_marks() -> None:
     from desman.planner import must_run, template_plan
 
     assert [s.runs_code for s in must_run(template_plan("g")).subtasks] == [True]
@@ -396,7 +396,9 @@ def test_must_run_marks_the_last_subtask_only_when_none_is_marked() -> None:
             ]
         }
     ).spec("g")
-    assert must_run(plan) == plan
+    # An earlier run (a setup step) proves nothing about the result: the last one runs too.
+    assert [s.runs_code for s in must_run(plan).subtasks] == [True, True]
+    assert must_run(must_run(plan)) == must_run(plan)
 
 
 def test_the_interlocutor_s_word_holds_a_failed_plan_to_running_code(fake: FakeLLM) -> None:

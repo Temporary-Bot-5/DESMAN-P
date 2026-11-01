@@ -183,12 +183,14 @@ def template_plan(goal: str, priority: int = Priority.NORMAL) -> TaskSpec:
 
 def must_run(spec: TaskSpec) -> TaskSpec:
     """`spec` for work that must run code (the person said so, or the interlocutor did,
-    independently of the planner): when no subtask is marked `runs_code`, the last one is,
-    since the final result has to rest on a run. A template plan (the goal its only subtask)
-    and a plan that overlooked it are held to it all the same."""
-    if any(sub.runs_code for sub in spec.subtasks):
-        return spec
+    independently of the planner): the last subtask, the one that gives the result, is marked
+    `runs_code` whatever else the plan marked, since the result has to rest on a run of its
+    own (an earlier run, a setup step, say, proves nothing about the test it reports). The
+    marks the plan made stay. A template plan (the goal its only subtask) and a plan that
+    overlooked it are held to it all the same."""
     *rest, last = spec.subtasks
+    if last.runs_code:
+        return spec
     return spec.model_copy(
         update={"subtasks": [*rest, last.model_copy(update={"runs_code": True})]}
     )
