@@ -402,6 +402,30 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER protected_files_no_delete BEFORE DELETE ON protected_files
         BEGIN SELECT RAISE(ABORT, 'protected_files is append-only'); END;
     """,
+    # 22 — the Improvement Analyst's proposals (ROADMAP 5.4, core/proposals.py): one per
+    # analysis task. While the task runs it is `analysing`; then it is settled once (proposed,
+    # nothing to propose, or unusable) and never changes again: the diff the person reads is
+    # the diff that was proposed. What happens to it later (5.5, 5.6) goes elsewhere
+    f"""
+    CREATE TABLE proposals (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id     TEXT NOT NULL UNIQUE REFERENCES tasks(id),
+        created_at  TEXT NOT NULL DEFAULT {_NOW_SQL},
+        since       TEXT,
+        status      TEXT NOT NULL DEFAULT 'analysing'
+                    CHECK (status IN ('analysing', 'proposed', 'nothing', 'unusable')),
+        settled_at  TEXT CHECK ((settled_at IS NULL) = (status = 'analysing')),
+        summary     TEXT,
+        reason      TEXT,
+        details_json TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details_json)),
+        diff        TEXT CHECK ((diff IS NOT NULL) = (status = 'proposed'))
+    ) STRICT;
+    CREATE TRIGGER proposals_settled_once BEFORE UPDATE ON proposals
+        WHEN OLD.status <> 'analysing'
+        BEGIN SELECT RAISE(ABORT, 'a settled proposal never changes'); END;
+    CREATE TRIGGER proposals_no_delete BEFORE DELETE ON proposals
+        BEGIN SELECT RAISE(ABORT, 'proposals are kept'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -11,7 +11,7 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 try:
     import fcntl
@@ -19,7 +19,16 @@ except ImportError:  # pragma: no cover - Windows
     fcntl = None  # type: ignore[assignment]
 
 import click
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    StringConstraints,
+    ValidationError,
+)
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
@@ -81,7 +90,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -133,6 +142,65 @@ class Behaviour(BaseModel):
         return self != Behaviour()
 
 
+ModelLabel = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_-]+/\S+$", max_length=200)]
+"""`provider/model`, as `router.Choice.label` writes it."""
+
+
+class ModelChoices(BaseModel):
+    """The model a role asks first (`provider/model`), when the person chose one (ROADMAP 5.4);
+    None: DESMAN's own order. A chosen model only goes first among the ready free ones: one
+    whose provider is not ready, or is paid, is passed over, and the rest stay behind it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    planner: ModelLabel | None = None
+    reviewer: ModelLabel | None = None
+    decomposer: ModelLabel | None = None
+    text: ModelLabel | None = None
+    """The executor's, for a subtask of that kind."""
+    code: ModelLabel | None = None
+    analysis: ModelLabel | None = None
+
+
+TUNING_BOUNDS: dict[str, tuple[int, int]] = {
+    "max_subtasks": (1, 12),
+    "max_parts": (2, 6),
+    "context_tokens": (1000, 16000),
+    "max_attempts": (2, 8),
+    "max_transient": (2, 10),
+}
+"""The least and the most each number of `Tuning` may be."""
+TUNING_LIMITS = tuple(TUNING_BOUNDS)
+"""The numbers of `Tuning`, in the order they are shown."""
+
+
+def _bounded(name: str) -> Any:
+    low, high = TUNING_BOUNDS[name]
+    return Field(default=None, ge=low, le=high)
+
+
+class Tuning(BaseModel):
+    """How the work is done, as the person tuned it (`desman tuning`); the Improvement Analyst
+    may propose a change. None: DESMAN's default (`runs.TUNING_DEFAULTS`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    models: ModelChoices = Field(default_factory=ModelChoices)
+    max_subtasks: StrictInt | None = _bounded("max_subtasks")
+    """The most subtasks in a plan."""
+    max_parts: StrictInt | None = _bounded("max_parts")
+    """The most parts a failing subtask is split into."""
+    context_tokens: StrictInt | None = _bounded("context_tokens")
+    """Tokens of dependency results an executor is shown."""
+    max_attempts: StrictInt | None = _bounded("max_attempts")
+    """Attempts of a subtask before the person decides (a planned task's)."""
+    max_transient: StrictInt | None = _bounded("max_transient")
+    """Interruptions of a subtask tolerated before the person decides (a planned task's)."""
+
+    def is_set(self) -> bool:
+        return self != Tuning()
+
+
 class ApiKey(BaseModel):
     """One key of a provider. A provider may have several (e.g. two accounts' free tiers)."""
 
@@ -147,7 +215,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -160,6 +228,7 @@ class Config(BaseModel):
     # (ROADMAP C.7); off unless they said yes: it neither sees nor keeps any.
     personalize: StrictBool = False
     behaviour: Behaviour = Field(default_factory=Behaviour)
+    tuning: Tuning = Field(default_factory=Tuning)
 
     def keys(self, env: str) -> list[ApiKey]:
         return list(self.api_keys.get(env, []))
@@ -196,6 +265,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     1: one key per provider, `api_keys: {ENV: "key"}`.
     2: a list of keys per provider, `api_keys: {ENV: [{"value": ..., "label": ...}]}`.
     3: `personalize` (off unless it says otherwise) and `behaviour`.
+    4: `tuning` (empty: DESMAN's defaults).
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -230,6 +300,8 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         version = 2
     if version == 2:
         version = 3  # `personalize` and `behaviour` have defaults
+    if version == 3:
+        version = 4  # `tuning` has a default
     if data.get("profile") in (True, False):
         # Written by a 3 before its release (62d084b): `profile`, on unless it said otherwise,
         # was never the person's consent, so `personalize` stays as the file says, off if unsaid.

@@ -7,7 +7,9 @@ asks of a model, for the executor what its subtask's kind asks, then a model tha
 Ollama, llama.cpp), once its model is set, comes after every cloud one: it costs nothing and
 has no quota, but it is slow, so it takes the calls the cloud ones cannot. A paid provider is used only
 when asked for (`--provider`); then the lineup is that provider's models. `--model` pins one
-model: the lineup is that model alone.
+model: the lineup is that model alone. A model the person chose for a role (`config.tuning`,
+`desman tuning`) goes first in that role's lineup when it is among them; the rest stay behind
+it in their order.
 
 A role's calls go through `Fallback`: a model that cannot take the call now (a limit, a server
 down, a key refused, a request larger than it takes) hands it to the next one in the lineup,
@@ -146,7 +148,38 @@ def lineup(
         for place, p in enumerate(pool)
         for order, c in enumerate(_choices(config, p))
     ]
-    return [row[-1] for row in sorted(ranked, key=lambda row: row[:5])]
+    choices = [row[-1] for row in sorted(ranked, key=lambda row: row[:5])]
+    chosen = preferred(config, role, kind)
+    if chosen is not None:  # the person's choice goes first, if it is among them
+        choices.sort(key=lambda c: c.label != chosen)
+    return choices
+
+
+def tuning_field(role: Role, kind: Kind | None = None) -> str | None:
+    """The field of `ModelChoices` for `role` (the executor's: its subtask's kind); None for a
+    role the person does not choose a model for (the interlocutor)."""
+    if role is Role.EXECUTOR:
+        return (kind or Kind.TEXT).value
+    if role in (Role.PLANNER, Role.REVIEWER, Role.DECOMPOSER):
+        return role.value
+    return None
+
+
+def candidates(config: Config, name: str) -> list[str]:
+    """The models the role of `ModelChoices` field `name` may ask now (ready free providers),
+    as `provider/model`, best first; none when no provider is ready."""
+    kind = Kind(name) if name in {k.value for k in Kind} else None
+    role = Role.EXECUTOR if kind is not None else Role(name)
+    try:
+        return [c.label for c in lineup(config, role, kind=kind)]
+    except NoProvider:
+        return []
+
+
+def preferred(config: Config, role: Role, kind: Kind | None = None) -> str | None:
+    """The model the person chose for `role` (`config.tuning.models`), as `provider/model`."""
+    name = tuning_field(role, kind)
+    return None if name is None else getattr(config.tuning.models, name)
 
 
 def _choices(config: Config, p: Provider) -> list[Choice]:

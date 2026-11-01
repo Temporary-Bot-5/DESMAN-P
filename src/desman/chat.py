@@ -462,7 +462,11 @@ class Chat:
             return
         ui.note(t("Planning…"))
         with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
-            planned = plan(models.for_(calls.Role.PLANNER), turn.goal)
+            planned = plan(
+                models.for_(calls.Role.PLANNER),
+                turn.goal,
+                limit=runs.tuned(config.tuning, "max_subtasks"),
+            )
         if planned.error is not None:
             ui.warn(
                 t(
@@ -471,7 +475,7 @@ class Chat:
                 )
             )
         task_id = self.store.create_task(
-            planned.spec,
+            runs.tuned_spec(planned.spec, config.tuning),
             details={**planned.details(), "title": turn.title},
             session_id=self.session_id,
         )

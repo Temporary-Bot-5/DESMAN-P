@@ -160,7 +160,7 @@ def test_v14_database_upgrades_to_the_profile(tmp_path: Path) -> None:
 
 def test_a_config_from_before_asks_nothing_and_keeps_no_notes() -> None:
     config = Config.model_validate(upgrade({"schema_version": 2, "language": "ru"}))
-    assert config.schema_version == 3 and config.personalize is False
+    assert config.schema_version == 4 and config.personalize is False
     assert not config.behaviour.is_set()
 
 
