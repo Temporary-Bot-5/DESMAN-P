@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from desman import __version__, actions, i18n, proposals_cli, providers, runs, ui
 from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
-from desman.config import ConfigError, open_config
+from desman.config import Config, ConfigError, Tuning, open_config
 from desman.config_cli import (
     behaviour,
     config,
@@ -48,6 +48,7 @@ from desman.models_cli import models
 from desman.planner import Planned, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
+from desman.tuning_cli import tuning
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -139,6 +140,7 @@ cli.add_command(language)
 cli.add_command(permissions)
 cli.add_command(personalize)
 cli.add_command(behaviour)
+cli.add_command(tuning)
 cli.add_command(models)
 cli.add_command(protected_group, name="protected")
 cli.add_command(proposals_group, name="proposals")
@@ -514,14 +516,15 @@ def list_tasks(status_filter: str | None, limit: int, db_path: Path | None, as_j
 
 def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json: bool) -> Planned:
     level = Priority.NORMAL if priority is None else priority
+    tuning = _tuning()
     if not by_model:
-        return Planned(template_plan(goal, level), "template")
+        return Planned(runs.tuned_spec(template_plan(goal, level), tuning), "template")
     if not as_json:
         ui.note(t("Planning…"))
         sys.stdout.flush()
     try:
         with calls.for_(calls.Purpose(calls.Role.PLANNER)):  # before the task exists
-            planned = plan(llm, goal, level)
+            planned = plan(llm, goal, level, limit=runs.tuned(tuning, "max_subtasks"))
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
     if planned.error is not None and not as_json:
@@ -531,7 +534,20 @@ def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json:
                 error=planned.error,
             )
         )
-    return planned
+    return Planned(runs.tuned_spec(planned.spec, tuning), planned.source, planned.error)
+
+
+def _tuning() -> Tuning:
+    """The person's tuning; DESMAN's defaults when there is no config (e.g. with --fake-llm)."""
+    return _config_or_default().tuning
+
+
+def _config_or_default() -> Config:
+    """The config; an empty one when it cannot be read (a run with --fake-llm needs none)."""
+    try:
+        return open_config().load()
+    except ConfigError:
+        return Config()
 
 
 def _load_spec(spec_path: Path) -> TaskSpec:
@@ -590,7 +606,7 @@ def analyze(
         raise click.ClickException(str(e)) from e
     try:
         runs.guard(store)  # before any model is asked
-        analysis = proposals_cli.prepare(store, start)
+        analysis = proposals_cli.prepare(store, start, _config_or_default())
         if analysis is None:
             if as_json:
                 click.echo(json.dumps({"proposal": None}, indent=2))

@@ -62,8 +62,12 @@ src/desman/
 ├── models_cli.py  # `models show|add MODEL`: a Hugging Face GGUF model for a local server
 ├── protected_cli.py # `protected show [--diff]|approve [--note]`: bodies shared with the chat
 ├── improve.py     # Improvement Analyst (5.4): an ordinary task without tools reads failures,
-│                  #   names TARGETS (plain constants: planner prompts, limits; never a protected
-│                  #   file) with new values; code builds the diff. Applies nothing
+│                  #   names TARGETS (planner prompts in plain constants; never a protected file)
+│                  #   with new texts, code builds the diff; or SETTINGS (`Config.tuning`),
+│                  #   checked against what it was shown, given as a `desman tuning` command.
+│                  #   Applies nothing
+├── tuning_cli.py  # `tuning`: the model each role asks first, the limits of the workflow
+│                  #   (`runs.TUNING_DEFAULTS` when unset); set by the person only
 ├── proposals_cli.py # `proposals [list]|show N` (and `analyze` in cli.py, beside `run`)
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
@@ -214,7 +218,7 @@ preemption, self-improvement or network features before their phase).
 ## Configuration
 
 - Single source: `config.json` via `ConfigManager` (`language`, `api_keys`, `settings`,
-  `permissions`, `personalize`, `behaviour`), opened with `open_config()`. It lives in the project folder (git-ignored,
+  `permissions`, `personalize`, `behaviour`, `tuning`), opened with `open_config()`. It lives in the project folder (git-ignored,
   0600); an installed package without one uses `~/.config/desman/config.json`. Override the
   directory with `DESMAN_CONFIG_DIR`.
 - No `.env`. Do not add a second configuration path.

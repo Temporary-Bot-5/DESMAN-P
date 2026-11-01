@@ -3,7 +3,6 @@ result becomes a diff, and the `desman proposals` commands. Nothing is ever appl
 
 from __future__ import annotations
 
-import ast
 import json
 import shutil
 import sqlite3
@@ -18,7 +17,13 @@ from click.testing import CliRunner, Result
 
 from desman import improve, runs
 from desman.cli import EXIT_DONE, EXIT_NEEDS_HUMAN, cli
-from desman.config import ConfigManager, default_config_path
+from desman.config import (
+    TUNING_LIMITS,
+    ConfigManager,
+    ModelChoices,
+    default_config_path,
+    open_config,
+)
 from desman.core import db, proposals
 from desman.core.models import SubtaskSpec, TaskSpec, Tools
 from desman.core.proposals import Status
@@ -85,13 +90,16 @@ def test_every_target_is_a_plain_value_outside_the_protected_files() -> None:
     for target in TARGETS:
         assert target.path not in protected, target.id
         value = improve.current(target)
-        if isinstance(value, int):
-            assert target.minimum is not None and target.maximum is not None
-            assert target.minimum <= value <= target.maximum, target.id
-        else:
-            assert all(k in value for k in target.keep), target.id
-            assert len(value) <= target.max_chars, target.id
+        assert all(k in value for k in target.keep), target.id
+        assert len(value) <= target.max_chars, target.id
     assert len(BY_ID) == len(TARGETS)
+    assert not set(BY_ID) & set(improve.SETTINGS_BY_ID)
+
+
+def test_every_setting_is_a_part_of_the_tuning_and_never_a_key_or_permission() -> None:
+    names = {s.name for s in improve.SETTINGS}
+    assert names == set(TUNING_LIMITS) | set(ModelChoices.model_fields)
+    assert all(s.id.startswith("tuning.") for s in improve.SETTINGS)
 
 
 def test_the_planner_prompts_are_made_of_the_targets() -> None:
@@ -128,14 +136,13 @@ def test_a_diff_applies_and_makes_exactly_the_change(tmp_path: Path) -> None:
     new_rules = old_rules.replace("(one is fine", "(one is best")
     changes = [
         Change(target="planner.rules", value=new_rules),
-        Change(target="planner.max_subtasks", value=6),
-        Change(target="context.budget_tokens", value=6000),
         Change(target="planner.criteria_rules", value=criteria_change()["value"] + " \"q\" 's' \\"),
     ]
-    before = {p: (package / p).read_text() for p in ("planner.py", "core/context.py")}
-    diff, details = render(changes[:3] + changes[3:], package)
+    before = {p: (package / p).read_text() for p in ("planner.py",)}
+    diff, details = render(changes, package)
     assert [c["target"] for c in details["changes"]] == [c.target for c in changes]
-    assert set(details["base"]) == {"src/desman/planner.py", "src/desman/core/context.py"}
+    assert set(details["base"]) == {"src/desman/planner.py"}
+    assert "settings" not in details
     assert (package / "planner.py").read_text() == before["planner.py"]  # nothing written
     apply(tmp_path, diff)
     for change in changes:
@@ -165,16 +172,18 @@ def test_a_glued_text_keeps_its_spaces_at_either_end(tmp_path: Path) -> None:
     ("changes", "reason"),
     [
         ([{"target": "agents.executor", "value": "x"}], "'agents.executor' is not a target"),
-        ([{"target": "planner.max_parts", "value": "4"}], "planner.max_parts is a number"),
-        ([{"target": "planner.max_parts", "value": 9}], "must be from 2 to 6"),
+        ([{"target": "tuning.max_parts", "value": "4"}], "tuning.max_parts is a number"),
+        ([{"target": "tuning.max_parts", "value": 9}], "must be from 2 to 6"),
+        ([{"target": "tuning.max_parts", "value": None}], "would stay as it is"),
+        ([{"target": "tuning.model.planner", "value": "paid/model"}], "one of the models shown"),
         ([{"target": "planner.rules", "value": 3}], "planner.rules is a text"),
         ([{"target": "planner.rules", "value": "Plan well."}], 'must still contain "subtasks"'),
-        ([{"target": "planner.max_subtasks", "value": 8}], "would stay as it is"),
+        ([{"target": "planner.rules", "value": None}], "planner.rules is a text"),
         ([{"target": "planner.criteria_rules", "value": "  "}], "cannot be empty"),
         (
             [
-                {"target": "planner.max_parts", "value": 3},
-                {"target": "planner.max_parts", "value": 5},
+                {"target": "tuning.max_parts", "value": 3},
+                {"target": "tuning.max_parts", "value": 5},
             ],
             "changed twice",
         ),
@@ -183,8 +192,46 @@ def test_a_glued_text_keeps_its_spaces_at_either_end(tmp_path: Path) -> None:
 def test_a_change_that_cannot_be_made_is_refused(
     changes: list[dict[str, Any]], reason: str
 ) -> None:
+    shown = improve.settings_shown(make_config(api_keys={"GROQ_API_KEY": "gsk_test"}))
     with pytest.raises(Unfit, match=reason.replace("(", r"\(")):
-        render([Change.model_validate(c) for c in changes])
+        render([Change.model_validate(c) for c in changes], shown=shown)
+
+
+def test_a_setting_change_is_checked_against_what_was_shown() -> None:
+    config = make_config(api_keys={"GROQ_API_KEY": "gsk_test"})
+    shown = improve.settings_shown(config)
+    by_id = {s["setting"]: s for s in shown}
+    choices = by_id["tuning.model.reviewer"]["choices"]
+    assert choices and all(c.startswith("groq/") for c in choices)
+    assert by_id["tuning.max_subtasks"] | {"about": ""} == {
+        "setting": "tuning.max_subtasks",
+        "about": "",
+        "current": None,
+        "default": 8,
+        "limits": {"min": 1, "max": 12},
+    }
+    diff, details = render(
+        [
+            Change(target="tuning.max_subtasks", value=5),
+            Change(target="tuning.model.reviewer", value=choices[-1]),
+        ],
+        shown=shown,
+    )
+    assert diff == ""  # settings are not a diff
+    assert details["settings"] == [
+        {"setting": "tuning.max_subtasks", "old": None, "new": 5},
+        {"setting": "tuning.model.reviewer", "old": None, "new": choices[-1]},
+    ]
+    assert details["command"] == f"desman tuning --max-subtasks 5 --model reviewer={choices[-1]}"
+    # Without having been shown, a setting cannot change.
+    with pytest.raises(Unfit, match="not among the settings shown"):
+        render([Change(target="tuning.max_subtasks", value=5)], shown=[])
+    # Back to the default: auto.
+    config.tuning.max_parts = 3
+    _diff, details = render(
+        [Change(target="tuning.max_parts", value=None)], shown=improve.settings_shown(config)
+    )
+    assert details["command"] == "desman tuning --max-parts auto"
 
 
 # ── What an analysis reads ───────────────────────────────────────────────────
@@ -288,11 +335,27 @@ def test_analyze_json(tmp_path: Path) -> None:
 
 def test_a_change_the_code_refuses_is_unusable_with_the_reason(tmp_path: Path) -> None:
     a_failure(tmp_path)
-    fake = script(tmp_path, [analysis([{"target": "planner.max_parts", "value": 40}])])
+    fake = script(tmp_path, [analysis([{"target": "tuning.max_parts", "value": 40}])])
     desman("proposals", "analyze", "--fake-llm", fake)
     shown = desman("proposals", "show", "1")
     assert "Proposal 1: unusable" in shown.output
-    assert "planner.max_parts must be from 2 to 6" in shown.output
+    assert "tuning.max_parts must be from 2 to 6" in shown.output
+
+
+def test_a_proposed_setting_is_made_by_the_person_with_the_command(tmp_path: Path) -> None:
+    a_failure(tmp_path)
+    change = [{"target": "tuning.max_attempts", "value": 6}, criteria_change()]
+    result = desman("proposals", "analyze", "--fake-llm", script(tmp_path, [analysis(change)]))
+    assert result.exit_code == EXIT_DONE, result.output
+    assert "tuning.max_attempts: default → 6" in result.output
+    assert "Make it yourself if you agree: desman tuning --max-attempts 6" in result.output
+    [p] = proposals.listing(store().conn)
+    assert improve.changed(p) == ["planner.criteria_rules", "tuning.max_attempts"]
+    text = (db.default_db_path().parent / "proposals" / "1.diff").read_text()
+    assert "# The settings change with: desman tuning --max-attempts 6" in text
+    assert open_config().load().tuning.max_attempts is None  # nothing applied
+    assert desman("tuning", "--max-attempts", "6").exit_code == 0
+    assert open_config().load().tuning.max_attempts == 6
 
 
 def test_an_analysis_that_stopped_is_settled_once_it_ends(tmp_path: Path) -> None:
@@ -389,8 +452,63 @@ def test_the_chat_analyses_only_after_the_window(fake: FakeLLM, tmp_path: Path) 
     assert p.status is Status.PROPOSED
 
 
-def test_the_diff_is_parseable_python(tmp_path: Path) -> None:
-    package = copy_package(tmp_path)
-    diff, _ = render([Change(target="planner.max_parts", value=3)], package)
-    apply(tmp_path, diff)
-    ast.parse((package / "planner.py").read_text())
+def test_the_analyst_sees_the_settings_and_the_models_stats(tmp_path: Path) -> None:
+    a_failure(tmp_path)
+    s = store()
+    config = make_config(api_keys={"GROQ_API_KEY": "gsk_test"})
+    config.tuning.max_subtasks = 4
+    task = improve.spec(s, None, config)
+    assert task is not None
+    inputs = task.subtasks[0].inputs
+    by_id = {x["setting"]: x for x in inputs["settings"]}
+    assert by_id["tuning.max_subtasks"]["current"] == 4
+    assert by_id["tuning.model.code"]["choices"]
+    assert "models" in inputs["stats"] and "roles" in inputs["stats"]
+    assert "api_keys" not in json.dumps(inputs) and "gsk_test" not in json.dumps(inputs)
+
+
+# ── Review fixes ─────────────────────────────────────────────────────────────
+
+
+def test_only_one_analysis_is_under_way_and_its_task_never_lacks_its_row(tmp_path: Path) -> None:
+    a_failure(tmp_path)
+    s = store()
+    first = improve.start(s, None)
+    assert first is not None
+    tasks = s.conn.execute("SELECT count(*) FROM tasks").fetchone()[0]
+    with pytest.raises(proposals.UnderWay):
+        improve.start(s, None)  # another process, a moment later
+    assert s.conn.execute("SELECT count(*) FROM tasks").fetchone()[0] == tasks  # none created
+    from desman import proposals_cli
+
+    again = proposals_cli.prepare(s, None)
+    assert again is not None and again.proposal.id == first.id and not again.new
+
+
+def test_a_text_changed_since_the_analysis_read_it_is_not_diffed(tmp_path: Path) -> None:
+    change = Change.model_validate(criteria_change())
+    old = improve.current(BY_ID["planner.criteria_rules"])
+    render([change], read={"planner.criteria_rules": old})  # as read: fine
+    with pytest.raises(Unfit, match="changed since the analysis read it"):
+        render([change], read={"planner.criteria_rules": old + " (an older text)"})
+
+
+def test_the_analyst_s_stats_leave_out_its_own_tasks(tmp_path: Path) -> None:
+    a_failure(tmp_path)
+    fake = script(tmp_path, [analysis([])], [RETRY, ACCEPT])  # the analysis is rejected once
+    desman("proposals", "analyze", "--fake-llm", fake)
+    from desman.core.stats import collect
+
+    conn = store().conn
+    assert collect(conn).reviews == {"accept": 2, "retry": 2}
+    assert collect(conn, skip=proposals.PURPOSE).reviews == {"accept": 1, "retry": 1}
+
+
+def test_control_characters_never_reach_the_terminal_or_the_file(tmp_path: Path) -> None:
+    a_failure(tmp_path)
+    sneaky = analysis([criteria_change()], summary="Fine.\x1b[2J\x07 Really\nfine.")
+    desman("proposals", "analyze", "--fake-llm", script(tmp_path, [sneaky]))
+    [p] = proposals.listing(store().conn)
+    assert p.summary == "Fine.[2J Really\nfine."
+    with pytest.raises(Unfit, match="control characters"):
+        render([Change(target="planner.criteria_rules", value="Criteria.\x1b[31m red")])

@@ -19,14 +19,15 @@ import httpx
 
 from desman import providers, ui
 from desman.agents import llm_executor, llm_reviewer
-from desman.config import Config
+from desman.config import Config, Tuning
 from desman.core import calls, protected
+from desman.core.context import DEFAULT_BUDGET_TOKENS
 from desman.core.coordinator import Coordinator, Labels
 from desman.core.effects import evidence
-from desman.core.models import Kind, Subtask
+from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
-from desman.core.retry import strategy_for
+from desman.core.retry import RetryPolicy, strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
@@ -37,7 +38,30 @@ from desman.llm import hub, router
 from desman.llm.base import LLM
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
-from desman.planner import decomposer
+from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
+
+TUNING_DEFAULTS: Mapping[str, int] = {
+    "max_subtasks": MAX_SUBTASKS,
+    "max_parts": MAX_PARTS,
+    "context_tokens": DEFAULT_BUDGET_TOKENS,
+    "max_attempts": RetryPolicy().max_attempts,
+    "max_transient": RetryPolicy().max_transient,
+}
+"""What each number of `config.Tuning` is when the person left it unset."""
+
+
+def tuned(tuning: Tuning, name: str) -> int:
+    """A number of the tuning: the person's, or the default."""
+    value: int | None = getattr(tuning, name)
+    return TUNING_DEFAULTS[name] if value is None else value
+
+
+def tuned_spec(spec: TaskSpec, tuning: Tuning) -> TaskSpec:
+    """A planned task with the retry budgets of the tuning (a --spec keeps its own)."""
+    retry = RetryPolicy(
+        max_attempts=tuned(tuning, "max_attempts"), max_transient=tuned(tuning, "max_transient")
+    )
+    return spec.model_copy(update={"retry": retry})
 
 
 @dataclass(frozen=True)
@@ -246,6 +270,7 @@ def coordinator(
         ),
         lease_seconds=lease_seconds,
         watch=watch,
+        tuning=config.tuning,
     )
 
 
@@ -264,7 +289,9 @@ def _coordinator(
     tools: Registry,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     watch: Callable[[], None] | None = None,
+    tuning: Tuning | None = None,
 ) -> Coordinator:
+    tuning = tuning or Tuning()
     guard(store)
     # A step may not outlast what holds the subtask while it waits: a slow local model gets a
     # longer lease and review reservation (each only as long as needed, since a longer one
@@ -280,7 +307,8 @@ def _coordinator(
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
         providers=models.labels,
-        decomposer=decomposer(models.for_(calls.Role.DECOMPOSER)),
+        decomposer=decomposer(models.for_(calls.Role.DECOMPOSER), limit=tuned(tuning, "max_parts")),
+        context_budget_tokens=tuned(tuning, "context_tokens"),
         access=access,
         tools=tools,
         watch=watch,

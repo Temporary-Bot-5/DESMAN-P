@@ -100,10 +100,12 @@ class Store:
         actor: Actor = Actor.HUMAN,
         details: dict[str, Any] | None = None,
         session_id: str | None = None,
+        also: Callable[[sqlite3.Connection, str], None] | None = None,
     ) -> str:
         """Store a task and its subtask graph; returns the task id. `details` go into the
         `task_created` audit entry (e.g. how the plan was made); `session_id` is the chat
-        session that asked for it."""
+        session that asked for it. `also(conn, task_id)` runs in the same transaction (a
+        record that belongs with the task); what it raises leaves nothing created."""
         task_id = _new_id()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
@@ -160,6 +162,8 @@ class Store:
                     "subtasks": ids,
                 },
             )
+            if also is not None:
+                also(self.conn, task_id)
             self._promote_ready()
         return task_id
 

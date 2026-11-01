@@ -20,6 +20,7 @@ The prompts start with "Plan task" and "Split subtask", so a fake script can rou
 
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Self
@@ -65,9 +66,13 @@ PLANNER_RULES = (
 """The planner's own instructions. Like `KIND_RULES`, `CRITERIA_RULES` and the limits, a plain
 value the Improvement Analyst may propose to change (`improve.TARGETS`)."""
 
-PLANNER_SYSTEM = (
-    PLANNER_RULES + f" Never more than {MAX_SUBTASKS} subtasks." + KIND_RULES + CRITERIA_RULES
-)
+
+def planner_system(limit: int = MAX_SUBTASKS) -> str:
+    """The planner's instructions with its limit (`Tuning.max_subtasks`, or the default)."""
+    return PLANNER_RULES + f" Never more than {limit} subtasks." + KIND_RULES + CRITERIA_RULES
+
+
+PLANNER_SYSTEM = planner_system()
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
@@ -123,6 +128,18 @@ class Plan(BaseModel):
         )
 
 
+@functools.cache
+def plan_schema(limit: int) -> type[Plan]:
+    """`Plan` holding at most `limit` subtasks."""
+    if limit == MAX_SUBTASKS:
+        return Plan
+
+    class Limited(Plan):
+        subtasks: list[PlannedSubtask] = Field(min_length=1, max_length=limit)
+
+    return Limited
+
+
 @dataclass(frozen=True)
 class Planned:
     spec: TaskSpec
@@ -147,16 +164,20 @@ def template_plan(goal: str, priority: int = Priority.NORMAL) -> TaskSpec:
     )
 
 
-def plan(llm: LLM, goal: str, priority: int = Priority.NORMAL) -> Planned:
-    """The model's plan for `goal`, or the template plan if the model fails."""
+def plan(
+    llm: LLM, goal: str, priority: int = Priority.NORMAL, *, limit: int | None = None
+) -> Planned:
+    """The model's plan for `goal`, or the template plan if the model fails. `limit`: the most
+    subtasks (default `MAX_SUBTASKS`)."""
+    limit = limit or MAX_SUBTASKS
     request = Request(
         messages=[
-            Message(role="system", content=PLANNER_SYSTEM),
+            Message(role="system", content=planner_system(limit)),
             Message(role="user", content=f"{PLAN}:\n{goal}"),
         ]
     )
     try:
-        reply = complete_json(llm, request, Plan, heading=PLAN)
+        reply = complete_json(llm, request, plan_schema(limit), heading=PLAN)
     except StructuredOutputError as e:
         # The problem only: the reply itself may echo anything (it is in the call log).
         return Planned(
@@ -185,9 +206,15 @@ SPLITTER_RULES = (
 )
 """The splitter's own instructions (a target of the Improvement Analyst, like the planner's)."""
 
-SPLITTER_SYSTEM = (
-    SPLITTER_RULES + f" Make at least 2 parts, at most {MAX_PARTS}." + KIND_RULES + CRITERIA_RULES
-)
+
+def splitter_system(limit: int = MAX_PARTS) -> str:
+    """The splitter's instructions with its limit (`Tuning.max_parts`, or the default)."""
+    return (
+        SPLITTER_RULES + f" Make at least 2 parts, at most {limit}." + KIND_RULES + CRITERIA_RULES
+    )
+
+
+SPLITTER_SYSTEM = splitter_system()
 
 
 class Split(BaseModel):
@@ -221,9 +248,23 @@ class Split(BaseModel):
         return spec.subtasks
 
 
-def decomposer(llm: LLM) -> Decomposer:
+@functools.cache
+def split_schema(limit: int) -> type[Split]:
+    """`Split` into at most `limit` parts."""
+    if limit == MAX_PARTS:
+        return Split
+
+    class Limited(Split):
+        subtasks: list[PlannedSubtask] = Field(min_length=2, max_length=limit)
+
+    return Limited
+
+
+def decomposer(llm: LLM, *, limit: int | None = None) -> Decomposer:
     """Splits a subtask the model's way; None (the coordinator retries normally) when the reply
-    stays unusable. Provider errors propagate: the coordinator pauses or retries as usual."""
+    stays unusable. Provider errors propagate: the coordinator pauses or retries as usual.
+    `limit`: the most parts (default `MAX_PARTS`)."""
+    parts = limit or MAX_PARTS
 
     def split(work: Work) -> list[SubtaskSpec] | None:
         context = work.context
@@ -237,12 +278,13 @@ def decomposer(llm: LLM) -> Decomposer:
         body = json.dumps(payload, ensure_ascii=False, indent=2)
         request = Request(
             messages=[
-                Message(role="system", content=SPLITTER_SYSTEM),
+                Message(role="system", content=splitter_system(parts)),
                 Message(role="user", content=f"{SPLIT}:\n{body}"),
             ]
         )
         try:
-            return complete_json(llm, request, Split, heading=SPLIT).parts(work.subtask.kind)
+            schema = split_schema(parts)
+            return complete_json(llm, request, schema, heading=SPLIT).parts(work.subtask.kind)
         except StructuredOutputError:
             return None
 

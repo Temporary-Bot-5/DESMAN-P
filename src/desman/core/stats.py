@@ -105,27 +105,48 @@ class Stats:
         )
 
 
-def collect(conn: sqlite3.Connection, since: datetime | None = None) -> Stats:
+def collect(
+    conn: sqlite3.Connection, since: datetime | None = None, *, skip: str | None = None
+) -> Stats:
+    """`skip`: leave out the tasks created for this purpose (`task_created` details), e.g. the
+    Improvement Analyst's own, so its totals describe the work it studies."""
     start = None if since is None else db.to_iso(since)
+    w = _Window(start, skip)
     with db.read_snapshot(conn):
         return Stats(
             since=start,
-            tasks=_tasks(conn, start),
-            subtasks=_subtasks(conn, start),
-            strategies=_strategies(conn, start),
-            reviews=_reviews(conn, start),
-            failures=_failures(conn, start),
-            roles=_roles(conn, start),
-            models=_models(conn, start),
+            tasks=_tasks(conn, w),
+            subtasks=_subtasks(conn, w),
+            strategies=_strategies(conn, w),
+            reviews=_reviews(conn, w),
+            failures=_failures(conn, w),
+            roles=_roles(conn, w),
+            models=_models(conn, w),
         )
 
 
-def _after(column: str, start: str | None) -> tuple[str, list[str]]:
-    return (f"{column} >= ?", [start]) if start is not None else ("1", [])
+@dataclass(frozen=True)
+class _Window:
+    start: str | None
+    skip: str | None
+
+    def where(self, column: str, task: str) -> tuple[str, list[str]]:
+        """SQL for: `column` (a time) in the window, `task` (a task id) not skipped."""
+        parts, args = [], []
+        if self.start is not None:
+            parts.append(f"{column} >= ?")
+            args.append(self.start)
+        if self.skip is not None:
+            parts.append(
+                f"({task} IS NULL OR {task} NOT IN (SELECT task_id FROM audit_log "
+                "WHERE action = 'task_created' AND json_extract(details_json, '$.purpose') = ?))"
+            )
+            args.append(self.skip)
+        return (" AND ".join(parts) or "1"), args
 
 
-def _tasks(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
-    where, args = _after("t.created_at", start)
+def _tasks(conn: sqlite3.Connection, w: _Window) -> dict[str, int]:
+    where, args = w.where("t.created_at", "t.id")
     statuses: dict[str, list[SubtaskStatus]] = {}
     for task_id, value in conn.execute(
         f"""SELECT t.id, s.status FROM tasks t LEFT JOIN subtasks s ON s.task_id = t.id
@@ -139,8 +160,8 @@ def _tasks(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
     return {status.value: counts[status.value] for status in TaskStatus if counts[status.value]}
 
 
-def _subtasks(conn: sqlite3.Connection, start: str | None) -> SubtaskCounts:
-    where, args = _after("t.created_at", start)
+def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:
+    where, args = w.where("t.created_at", "t.id")
     row = conn.execute(
         f"""
         WITH subs AS (
@@ -173,10 +194,10 @@ def _subtasks(conn: sqlite3.Connection, start: str | None) -> SubtaskCounts:
     )
 
 
-def _strategies(conn: sqlite3.Connection, start: str | None) -> list[StrategyUse]:
+def _strategies(conn: sqlite3.Connection, w: _Window) -> list[StrategyUse]:
     """Each attempt_started opens an attempt; the next verdict on that subtask closes it. An
     attempt with no verdict (failed, interrupted, still running) was not accepted."""
-    where, args = _after("ts", start)
+    where, args = w.where("ts", "task_id")
     started: Counter[str] = Counter()
     accepted: Counter[str] = Counter()
     open_: dict[str, str] = {}  # subtask id -> strategy of its attempt waiting for a verdict
@@ -199,8 +220,8 @@ def _strategies(conn: sqlite3.Connection, start: str | None) -> list[StrategyUse
     return [StrategyUse(s, started[s], accepted[s]) for s in names]
 
 
-def _reviews(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
-    where, args = _after("ts", start)
+def _reviews(conn: sqlite3.Connection, w: _Window) -> dict[str, int]:
+    where, args = w.where("ts", "task_id")
     counts: Counter[str] = Counter()
     for action, details_json in conn.execute(
         f"""SELECT action, details_json FROM audit_log
@@ -217,8 +238,8 @@ def _reviews(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
 _REVIEW_ORDER = {"accept": 0, "retry": 1, "escalate": 2, "failed": 3}
 
 
-def _failures(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
-    where, args = _after("ts", start)
+def _failures(conn: sqlite3.Connection, w: _Window) -> dict[str, int]:
+    where, args = w.where("ts", "task_id")
     rows = conn.execute(
         f"""SELECT json_extract(details_json, '$.failure') AS kind, COUNT(*) AS n
             FROM audit_log WHERE kind IS NOT NULL AND {where}
@@ -228,8 +249,8 @@ def _failures(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
     return {r["kind"]: r["n"] for r in rows}
 
 
-def _roles(conn: sqlite3.Connection, start: str | None) -> list[RoleUse]:
-    where, args = _after("at", start)
+def _roles(conn: sqlite3.Connection, w: _Window) -> list[RoleUse]:
+    where, args = w.where("at", "task_id")
     rows = conn.execute(
         f"""
         SELECT COALESCE(role, 'other') AS role, COUNT(*) AS calls,
@@ -252,8 +273,8 @@ def _roles(conn: sqlite3.Connection, start: str | None) -> list[RoleUse]:
     ]
 
 
-def _models(conn: sqlite3.Connection, start: str | None) -> list[ModelUse]:
-    where, args = _after("at", start)
+def _models(conn: sqlite3.Connection, w: _Window) -> list[ModelUse]:
+    where, args = w.where("at", "task_id")
     rows = conn.execute(
         f"""
         SELECT provider, model, COUNT(*) AS calls,

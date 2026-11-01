@@ -18,6 +18,7 @@ import click
 from rich.text import Text
 
 from desman import actions, improve, ui
+from desman.config import Config
 from desman.config_cli import json_option, parse_window
 from desman.core import db, proposals
 from desman.core.proposals import Proposal, Status
@@ -95,14 +96,20 @@ def since_of(since: str) -> str | None:
     return None if window is None else db.to_iso(datetime.now(UTC) - window)
 
 
-def prepare(store: Store, since: str | None) -> Analysis | None:
+def prepare(store: Store, since: str | None, config: Config | None = None) -> Analysis | None:
     """Settle what ended, then the analysis to run: the one under way (its task still has work
-    left), else a new one. None when there is nothing to analyse."""
+    left), else a new one over the settings of `config`. None when there is nothing to
+    analyse."""
     improve.settle(store)
     under_way = proposals.analysing(store.conn)
     if under_way:
         return Analysis(under_way[0], new=False)
-    started = improve.start(store, since)
+    try:
+        started = improve.start(store, since, config)
+    except proposals.UnderWay as e:  # another process started one just now
+        found = proposals.get(store.conn, e.proposal_id)
+        assert found is not None
+        return Analysis(found, new=False)
     return None if started is None else Analysis(started, new=True)
 
 
@@ -139,7 +146,8 @@ def status_label(status: Status) -> str:
 
 
 def targets(proposal: Proposal) -> list[str]:
-    return [str(c["target"]) for c in proposal.details.get("changes", [])]
+    """The prompts and settings it changes."""
+    return improve.changed(proposal)
 
 
 def print_listing(store: Store, found: list[Proposal]) -> None:
@@ -171,28 +179,39 @@ def print_proposal(store: Store, p: Proposal) -> None:
     if p.status is not Status.PROPOSED:
         return
     changes = p.details.get("changes", [])
-    ui.note(
-        tn(
-            len(changes),
-            "{n} change, in prompts or limits of the workflow:",
-            "{n} changes, in prompts or limits of the workflow:",
-        )
-    )
-    for change in changes:
-        ui.out(Text(f"  {change['target']} ({change['file']})"))
+    settings = p.details.get("settings", [])
     if p.details.get("expected_effect"):
         ui.out(Text(t("Expected: {effect}", effect=p.details["expected_effect"])))
-    assert p.diff is not None
-    ui.out(Text(p.diff))
-    path = improve.file_for(store.conn, p)
-    if path is not None and path.exists():
-        ui.note(t("The diff is also in {path}", path=path))
+    if changes:
+        ui.note(
+            tn(
+                len(changes),
+                "{n} change to a prompt:",
+                "{n} changes to prompts:",
+            )
+        )
+        for change in changes:
+            ui.out(Text(f"  {change['target']} ({change['file']})"))
+        assert p.diff is not None
+        ui.out(Text(p.diff))
+        path = improve.file_for(store.conn, p)
+        if path is not None and path.exists():
+            ui.note(t("The diff is also in {path}", path=path))
+    if settings:
+        ui.note(tn(len(settings), "{n} change to a setting:", "{n} changes to settings:"))
+        for item in settings:
+            ui.out(Text(f"  {item['setting']}: {_value(item['old'])} → {_value(item['new'])}"))
+        ui.note(t("Make it yourself if you agree: {command}", command=p.details["command"]))
     ui.note(
         t(
             "Nothing was applied. Evaluating and applying proposals comes later (ROADMAP "
             "5.5, 5.6); until then a person may apply the diff with git."
         )
     )
+
+
+def _value(value: Any) -> str:
+    return t("default") if value is None else str(value)
 
 
 def listing_json(found: list[Proposal]) -> list[dict[str, Any]]:

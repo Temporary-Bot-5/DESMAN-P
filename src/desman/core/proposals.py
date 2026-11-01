@@ -9,8 +9,8 @@ use, and `reason` says why). A settled proposal never changes (a trigger refuses
 diff the person reads is the one that was proposed. Nothing here applies anything.
 
 The task is marked in its `task_created` entry (`PURPOSE`), so its own failures are never
-evidence for the next analysis, and a task created by a run that died before its row was
-written is still found (`adopt`).
+evidence for the next analysis. The task and its row are written in one transaction, which
+also makes sure only one analysis is under way at a time.
 """
 
 from __future__ import annotations
@@ -67,14 +67,35 @@ _PURPOSE_SQL = """SELECT task_id FROM audit_log
                   WHERE action = 'task_created' AND json_extract(details_json, '$.purpose') = ?"""
 
 
+class UnderWay(Exception):
+    """An analysis is already under way: no second one is started."""
+
+    def __init__(self, proposal_id: int) -> None:
+        super().__init__(f"proposal {proposal_id} is still being analysed")
+        self.proposal_id = proposal_id
+
+
 def start(store: Store, spec: TaskSpec, since: str | None) -> Proposal:
-    """Create the analysis task for `spec` and its proposal, `analysing`."""
-    task_id = store.create_task(spec, details={"purpose": PURPOSE, "since": since})
-    return _insert(store.conn, task_id, since)
+    """Create the analysis task for `spec` and its proposal, `analysing`, in one transaction:
+    raises `UnderWay` (and creates nothing) when another analysis is under way, so two
+    processes never run two at once, and no task is ever without its row."""
+
+    def record(conn: sqlite3.Connection, task_id: str) -> None:
+        row = conn.execute("SELECT id FROM proposals WHERE status = 'analysing'").fetchone()
+        if row is not None:
+            raise UnderWay(row["id"])
+        conn.execute("INSERT INTO proposals (task_id, since) VALUES (?, ?)", (task_id, since))
+
+    task_id = store.create_task(spec, details={"purpose": PURPOSE, "since": since}, also=record)
+    row = store.conn.execute("SELECT id FROM proposals WHERE task_id = ?", (task_id,)).fetchone()
+    found = get(store.conn, row["id"])
+    assert found is not None
+    return found
 
 
 def adopt(conn: sqlite3.Connection) -> None:
-    """A row for every analysis task that has none (its run died between the two writes)."""
+    """A row for every analysis task that has none (made before task and row were written in
+    one transaction, by a development revision)."""
     rows = conn.execute(
         """SELECT task_id, json_extract(details_json, '$.since') AS since FROM audit_log
            WHERE action = 'task_created' AND json_extract(details_json, '$.purpose') = ?
@@ -86,14 +107,9 @@ def adopt(conn: sqlite3.Connection) -> None:
             _insert(conn, row["task_id"], row["since"])
 
 
-def _insert(conn: sqlite3.Connection, task_id: str, since: str | None) -> Proposal:
+def _insert(conn: sqlite3.Connection, task_id: str, since: str | None) -> None:
     with db.transaction(conn):
-        cursor = conn.execute(
-            "INSERT INTO proposals (task_id, since) VALUES (?, ?)", (task_id, since)
-        )
-    found = get(conn, int(cursor.lastrowid or 0))
-    assert found is not None
-    return found
+        conn.execute("INSERT INTO proposals (task_id, since) VALUES (?, ?)", (task_id, since))
 
 
 def settle(

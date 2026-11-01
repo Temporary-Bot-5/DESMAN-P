@@ -43,10 +43,19 @@ from desman import (
     proposals_cli,
     protected_cli,
     providers,
+    tuning_cli,
     ui,
     wizard,
 )
-from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigError, ConfigManager
+from desman.config import (
+    BEHAVIOUR_CHARS,
+    Behaviour,
+    Config,
+    ConfigError,
+    ConfigManager,
+    ModelChoices,
+    Tuning,
+)
 from desman.core import db, proposals
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
@@ -231,6 +240,33 @@ class BehaviourArgs(Args):
 
     def change(self) -> config_cli.BehaviourChange:
         return config_cli.BehaviourChange(**self.model_dump())
+
+
+Limit = Annotated[int, Field(ge=1, le=16000)] | Literal["auto"]
+
+
+class TuningArgs(Args):
+    max_subtasks: Limit | None = None
+    max_parts: Limit | None = None
+    context_tokens: Limit | None = None
+    max_attempts: Limit | None = None
+    max_transient: Limit | None = None
+    models: (
+        dict[
+            Literal["planner", "reviewer", "decomposer", "text", "code", "analysis"],
+            Annotated[str, StringConstraints(min_length=1, max_length=200)],
+        ]
+        | None
+    ) = Field(None, description='role -> "provider/model" it asks first, or "auto"')
+    reset: bool = False
+
+    def change(self) -> tuning_cli.TuningChange:
+        numbers = ("max_subtasks", "max_parts", "context_tokens", "max_attempts", "max_transient")
+        return tuning_cli.TuningChange(
+            limits={n: getattr(self, n) for n in numbers if getattr(self, n) is not None},
+            models={str(k): v for k, v in (self.models or {}).items()},
+            reset=self.reset,
+        )
 
 
 class ConfigArgs(Args):
@@ -463,6 +499,31 @@ def _behaviour(ctx: Context, args: BehaviourArgs) -> Outcome | Proposal:
     return Proposal([t("How the interlocutor talks to you:")] + lines, apply)
 
 
+def _tuning_kind(args: TuningArgs) -> Kind:
+    return Kind.READ if args.change().empty() else Kind.CHANGE
+
+
+def _tuning(ctx: Context, args: TuningArgs) -> Outcome | Proposal:
+    config = ctx.config()
+    current = config.tuning
+    change = args.change()
+    if change.empty():
+        tuning_cli.print_tuning(current)
+        return Outcome(tuning_cli.tuning_json(current))
+    new = change.applied(current)
+    lines = tuning_cli.lines(current, new)
+    if not lines:
+        ui.note(t("Nothing changed."))
+        return Outcome({"changed": False, "tuning": tuning_cli.tuning_json(current)})
+
+    def apply() -> Outcome:
+        old, now, saved = tuning_cli.set_tuning(ctx.manager, change)
+        tuning_cli.print_change(old, now, saved)
+        return Outcome({"changed": True, "tuning": tuning_cli.tuning_json(now)})
+
+    return Proposal([t("How the work is done:")] + lines, apply)
+
+
 def _permissions_kind(args: PermissionArgs) -> Kind:
     return Kind.READ if not args.grant and not args.revoke else Kind.CHANGE
 
@@ -558,7 +619,7 @@ def _proposals_analyze(ctx: Context, args: AnalyzeArgs) -> Outcome | Proposal:
             "Continue the analysis of the failures already under way (task {ref}).",
             ref=ctx.store.short_id(under_way[0].task_id),
         )
-    elif improve.spec(ctx.store, start) is None:
+    elif improve.spec(ctx.store, start, ctx.config()) is None:
         proposals_cli.print_nothing_to_analyse()
         return Outcome({"proposal": None})
     elif start is None:
@@ -576,7 +637,7 @@ def _proposals_analyze(ctx: Context, args: AnalyzeArgs) -> Outcome | Proposal:
         )
 
     def apply() -> Outcome:
-        analysis = proposals_cli.prepare(ctx.store, start)
+        analysis = proposals_cli.prepare(ctx.store, start, ctx.config())
         if analysis is None:
             proposals_cli.print_nothing_to_analyse()
             return Outcome({"proposal": None})
@@ -955,6 +1016,17 @@ CATALOG: tuple[Entry, ...] = (
         _behaviour,
     ),
     Entry(
+        "tuning",
+        "Without arguments: show how the work is done (the model each role asks first; the "
+        "most subtasks in a plan, parts of a split, tokens of dependency results shown, "
+        'attempts and interruptions before the person decides). With any of them ("auto": '
+        "back to the default): change it (the person confirms). A proposal of the Improvement "
+        "Analyst names such a change.",
+        TuningArgs,
+        _tuning_kind,
+        _tuning,
+    ),
+    Entry(
         "protected show",
         "Whether the protected files (tool policy, reviewer, sandbox, approval rules, test "
         "harness) are as the person approved them; while one changed without approval, no task "
@@ -1196,6 +1268,18 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
             if getattr(old.behaviour, p) != getattr(new.behaviour, p)
         ]
         changes.append(("operator_behaviour", {"changed": parts}))
+    if old.tuning != new.tuning:  # which parts, by name
+        parts = [
+            n
+            for n in Tuning.model_fields
+            if n != "models" and getattr(old.tuning, n) != getattr(new.tuning, n)
+        ]
+        parts += [
+            f"models.{r}"
+            for r in ModelChoices.model_fields
+            if getattr(old.tuning.models, r) != getattr(new.tuning.models, r)
+        ]
+        changes.append(("operator_tuning", {"changed": parts}))
     if before is not None and after is None:
         changes.append(("operator_config_deleted", {}))
     return changes
