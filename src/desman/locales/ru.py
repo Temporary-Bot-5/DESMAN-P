@@ -21,6 +21,14 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Show help for commands.": "Показать справку по командам.",
     "Show the version and exit.": "Показать версию и выйти.",
+    "continue the last chat / a chat that is not kept": "продолжить последний чат / чат без сохранения",
+    "Continue the last chat session instead of starting a new one.": "Продолжить последнюю сессию чата вместо новой.",
+    "A temporary chat: nothing said is kept, it is erased when you leave.": "Временный чат: ничего не сохраняется, всё стирается при выходе.",
+    "-c and -t are for the chat: give them without a command.": "-c и -t относятся к чату: укажите их без команды.",
+    "A temporary chat starts afresh: -c and -t do not go together.": "Временный чат начинается с чистого листа: -c и -t вместе не используются.",
+    "start a new temporary chat (this one is erased)": "начать новый временный чат (этот будет стёрт)",
+    "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "Временный чат: сказанное здесь не сохраняется и стирается при выходе; задачи, которые вы попросите, остаются, как любые задачи. /help — команды чата.",
+    "{name} is not available in a temporary chat": "{name} недоступна во временном чате",
     "{prog}, version {version}": "{prog}, версия {version}",
     "Create the database or apply pending migrations. Safe to re-run.": (
         "Создать базу данных или применить новые миграции. Можно запускать повторно."

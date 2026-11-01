@@ -449,6 +449,22 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER evaluations_no_delete BEFORE DELETE ON evaluations
         BEGIN SELECT RAISE(ABORT, 'evaluations are append-only'); END;
     """,
+    # 24 — temporary chats (ROADMAP C.11, `desman -t`): a session marked temporary when it is
+    # created, never later, by the chat that holds it (`owner`, "host:pid"). Out of the lists;
+    # its messages are erased when that chat ends, or after it is gone. Only a temporary
+    # session's messages may be deleted: every other session stays append-only (migration 9).
+    # The session's row stays, so the tasks and calls that name it keep their link
+    """
+    ALTER TABLE sessions ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0
+        CHECK (temporary IN (0, 1));
+    ALTER TABLE sessions ADD COLUMN owner TEXT CHECK ((owner IS NOT NULL) = (temporary = 1));
+    CREATE TRIGGER sessions_temporary_fixed BEFORE UPDATE OF temporary, owner ON sessions
+        BEGIN SELECT RAISE(ABORT, 'a session is temporary from its start or never'); END;
+    DROP TRIGGER messages_no_delete;
+    CREATE TRIGGER messages_no_delete BEFORE DELETE ON messages
+        WHEN NOT EXISTS (SELECT 1 FROM sessions WHERE id = OLD.session_id AND temporary = 1)
+        BEGIN SELECT RAISE(ABORT, 'messages are append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -44,7 +44,7 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
 
 
 def chat(*lines: str) -> Result:
-    result = CliRunner().invoke(cli, [], input="".join(f"{line}\n" for line in lines))
+    result = CliRunner().invoke(cli, ["-c"], input="".join(f"{line}\n" for line in lines))
     assert result.exit_code == 0, result.output
     return result
 

@@ -743,3 +743,21 @@ def test_v20_database_with_tasks_upgrades_to_protected_approvals(tmp_path: Path)
     [row] = conn.execute("SELECT source FROM protected_approvals").fetchall()
     assert row["source"] == "release"
     assert conn.execute("SELECT id FROM tasks").fetchone()["id"] == task_id
+
+
+def test_v23_database_with_sessions_upgrades_to_temporary_chats(tmp_path: Path) -> None:
+    path = tmp_path / "v23.db"
+    old = _db_at_version(path, 23)
+    kept = Sessions(old).add(None, Role.USER, "find flights").session_id
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    sessions = Sessions(conn)
+    # An older session is a kept one: listed, its messages never erased.
+    assert [s.id for s in sessions.recent()] == [kept]
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        sessions.erase(kept)
+    temporary = sessions.add(None, Role.USER, "a secret", temporary=True).session_id
+    sessions.erase(temporary)
+    assert sessions.messages(temporary) == [] and [s.id for s in sessions.recent()] == [kept]
+    conn.close()

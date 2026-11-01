@@ -35,6 +35,9 @@ def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
     for quoted in re.findall(r"`([^`]*)`", topic.text):
         if quoted == "desman" or quoted in chat_commands:
             continue
+        if re.fullmatch(r"desman( -\w)+", quoted):  # the chat's own options: `desman -t`
+            assert typed(cli, quoted.split()[1:]), f"{topic.name}: `{quoted}`"
+            continue
         assert quoted.startswith("desman "), f"{topic.name}: `{quoted}` is not a command"
         words = quoted.split()[1:]
         name = list(itertools.takewhile(lambda w: not w.startswith("-") and not w.isupper(), words))

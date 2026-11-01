@@ -105,9 +105,26 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
     callback=_print_version,
     help="Show the version and exit.",
 )
+@click.option(
+    "-c",
+    "--continue",
+    "resume",
+    is_flag=True,
+    help="Continue the last chat session instead of starting a new one.",
+)
+@click.option(
+    "-t",
+    "--temporary",
+    is_flag=True,
+    help="A temporary chat: nothing said is kept, it is erased when you leave.",
+)
 @click.pass_context
-def cli(ctx: click.Context) -> None:
+def cli(ctx: click.Context, resume: bool, temporary: bool) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
+    if ctx.invoked_subcommand is not None and (resume or temporary):
+        raise click.UsageError(t("-c and -t are for the chat: give them without a command."))
+    if resume and temporary:
+        raise click.UsageError(t("A temporary chat starts afresh: -c and -t do not go together."))
     if ctx.invoked_subcommand is None:
         # Bare `desman` is the interactive entry point (ADR 0003): configure on first run,
         # then the banner and the chat.
@@ -120,7 +137,7 @@ def cli(ctx: click.Context) -> None:
         except (db.SchemaVersionError, db.SchemaMismatchError) as e:
             raise click.ClickException(str(e)) from e
         try:
-            Chat(Sessions(conn)).run()
+            Chat(Sessions(conn), resume=resume, temporary=temporary).run()
         finally:
             conn.close()
 
