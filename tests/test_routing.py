@@ -20,7 +20,8 @@ from desman.core import db
 from desman.core.audit import check_history, history
 from desman.core.calls import Role
 from desman.core.coordinator import Coordinator
-from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.models import Kind, SubtaskSpec, TaskSpec
+from desman.core.report import task_report
 from desman.core.retry import strategy_for
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
@@ -54,6 +55,7 @@ GROQ = "gsk_" + "a" * 48
 GOOGLE = "AIza" + "b" * 35
 OPENROUTER = "sk-or-" + "c" * 48
 DEEPSEEK = "sk-" + "d" * 40
+MISTRAL = "m" * 32
 REQUEST = Request(messages=[Message(role="user", content="hi")])
 
 
@@ -580,3 +582,179 @@ def test_an_unfit_model_the_lineup_fell_back_to_is_not_asked_again(
     executed = [model for _, model, what in seen if what == "Execute subtask"]
     assert executed.count("openai/gpt-oss-120b") == 1
     assert executed[-1] == "llama-3.3-70b-versatile"
+
+
+# ── The kind of a subtask picks its executor's model (4.5, part 2) ───────────
+
+
+def test_every_kind_says_what_it_needs() -> None:
+    assert set(catalog.KIND_NEEDS) == set(Kind)
+    assert catalog.need(Role.EXECUTOR) is catalog.NEEDS[Role.EXECUTOR]
+    assert catalog.need(Role.EXECUTOR, Kind.CODE) is catalog.Strength.CODE
+    # Other roles do the same work whatever the subtask: a reviewer judges code too.
+    assert catalog.need(Role.REVIEWER, Kind.CODE) is catalog.Strength.ANALYSIS
+
+
+def test_the_executors_lineup_follows_the_kind_of_its_subtask() -> None:
+    config = make_config(api_keys={"MISTRAL_API_KEY": MISTRAL})
+
+    def first(kind: Kind | None) -> str:
+        return router.lineup(config, Role.EXECUTOR, kind=kind)[0].label
+
+    assert first(None) == first(Kind.TEXT) == "mistral/mistral-small-latest"
+    assert first(Kind.CODE) == "mistral/codestral-latest"
+    assert first(Kind.ANALYSIS) == "mistral/mistral-medium-latest"
+    # Pinned, the model is the one asked whatever the kind.
+    pinned = router.lineup(config, Role.EXECUTOR, model="mistral-small-latest", kind=Kind.CODE)
+    assert labels(pinned) == ["mistral/mistral-small-latest"]
+
+
+def test_a_subtask_keeps_its_kind_and_so_do_its_parts(store: Store) -> None:
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="script", acceptance_criteria="c", kind=Kind.CODE),
+                SubtaskSpec(description="note", acceptance_criteria="c", depends_on=[0]),
+            ],
+        )
+    )
+    script, note = store.list_subtasks(task_id)
+    assert (script.kind, note.kind) == (Kind.CODE, Kind.TEXT)
+    claimed = store.claim("w")
+    assert claimed is not None and claimed.lease_token is not None
+    parts = [
+        SubtaskSpec(description="a", acceptance_criteria="c", kind=Kind.CODE),
+        SubtaskSpec(description="b", acceptance_criteria="c", kind=Kind.ANALYSIS),
+    ]
+    made = store.decompose(script.id, claimed.lease_token, parts)
+    assert [p.kind for p in made] == [Kind.CODE, Kind.ANALYSIS]
+    reported = {s.description: s.kind for s in task_report(store, task_id).subtasks}
+    assert reported == {"script": Kind.CODE, "note": Kind.TEXT, "a": Kind.CODE, "b": Kind.ANALYSIS}
+
+
+def test_the_kind_check_matches_the_kinds(store: Store) -> None:
+    task_id = store.create_task(
+        TaskSpec(goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")])
+    )
+    [subtask] = store.list_subtasks(task_id)
+    for kind in Kind:
+        store.conn.execute("UPDATE subtasks SET kind = ? WHERE id = ?", (kind.value, subtask.id))
+    with pytest.raises(sqlite3.IntegrityError):
+        store.conn.execute("UPDATE subtasks SET kind = 'poetry' WHERE id = ?", (subtask.id,))
+
+
+def test_a_v19_database_upgrades_its_subtasks_to_text(tmp_path: Path) -> None:
+    from test_db import _db_at_version, add_subtask, add_task
+
+    path = tmp_path / "v19.db"
+    old = _db_at_version(path, 19)
+    subtask_id = add_subtask(old, add_task(old), 0, status="ready")
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    assert Store(conn).get_subtask(subtask_id).kind is Kind.TEXT
+    conn.close()
+
+
+def mistral_models(conn: sqlite3.Connection, clock: FakeClock, handler: Handler) -> runs.Models:
+    return runs.models(
+        make_config(api_keys={"MISTRAL_API_KEY": MISTRAL, "GROQ_API_KEY": GROQ}),
+        conn,
+        provider="mistral",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        clock=clock,
+        sleep=clock.sleep,
+        cache=False,
+    )
+
+
+def test_each_subtask_is_executed_by_the_model_for_its_kind(store: Store, clock: FakeClock) -> None:
+    seen: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(sent(request))
+        return ok('{"verdict": "accept"}' if "Review" in seen[-1][2] else f'{{"v": {len(seen)}}}')
+
+    models = mistral_models(store.conn, clock, handler)
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="code it", acceptance_criteria="c", kind=Kind.CODE),
+                SubtaskSpec(
+                    description="weigh it",
+                    acceptance_criteria="c",
+                    kind=Kind.ANALYSIS,
+                    depends_on=[0],
+                ),
+                SubtaskSpec(description="say it", acceptance_criteria="c", depends_on=[1]),
+            ],
+        )
+    )
+    assert runs.summarizer(store, models).run(task_id).status is TaskStatus.DONE
+    executed = [model for _, model, what in seen if what == "Execute subtask"]
+    assert executed == ["codestral-latest", "mistral-medium-latest", "mistral-small-latest"]
+    reviewed = {model for _, model, what in seen if what == "Review subtask"}
+    assert reviewed == {"mistral-medium-latest"}  # the reviewer's model, whatever the kind
+
+
+def test_an_unfit_model_is_avoided_by_the_kind_that_asks_it(store: Store, clock: FakeClock) -> None:
+    """Codestral failing as unfit: a code subtask's next attempt asks the other model at once
+    (`avoid_main`), since the main one for its kind is the unfit one."""
+    seen: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(sent(request))
+        if seen[-1][1] == "codestral-latest":
+            error = {"message": "model called a tool", "code": "tool_use_failed"}
+            return httpx.Response(400, json={"error": error})
+        return ok('{"verdict": "accept"}' if "Review" in seen[-1][2] else f'{{"v": {len(seen)}}}')
+
+    models = mistral_models(store.conn, clock, handler)
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="code it", acceptance_criteria="c", kind=Kind.CODE),
+                SubtaskSpec(description="say it", acceptance_criteria="c", depends_on=[0]),
+            ],
+        )
+    )
+    code, text = store.list_subtasks(task_id)
+    assert models.labels(code) == ("mistral/codestral-latest", "mistral/mistral-small-latest")
+    assert models.labels(text)[0] == "mistral/mistral-small-latest"
+    assert runs.summarizer(store, models).run(task_id).status is TaskStatus.DONE
+    assert store.unfit_providers(task_id) == {"mistral/codestral-latest"}
+    executed = [model for _, model, what in seen if what == "Execute subtask"]
+    assert executed == ["codestral-latest", "mistral-small-latest", "mistral-small-latest"]
+    assert check_history(store.conn, task_id) == []
+    strategies = [
+        (e.subtask_id, e.details["strategy"])
+        for e in history(store.conn, task_id)
+        if e.action == "attempt_started"
+    ]
+    assert strategies == [(code.id, "first"), (code.id, "other_model"), (text.id, "first")]
+
+
+def test_run_names_the_models_for_code_and_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    from click.testing import CliRunner
+
+    from desman.cli import EXIT_DONE, cli
+    from desman.config import ConfigManager, default_config_path
+
+    ConfigManager(default_config_path()).save(make_config(api_keys={"MISTRAL_API_KEY": MISTRAL}))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][-1]["content"]
+        return ok('{"verdict": "accept"}' if prompt.startswith("Review") else '{"v": 1}')
+
+    real = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    )
+    result = CliRunner().invoke(cli, ["run", "g", "--plan", "template"])
+    assert result.exit_code == EXIT_DONE, result.output
+    assert "Using Mistral AI · mistral-small-latest" in result.output
+    assert "Code by Mistral AI · codestral-latest" in result.output
+    assert "Analysis by Mistral AI · mistral-medium-latest" in result.output

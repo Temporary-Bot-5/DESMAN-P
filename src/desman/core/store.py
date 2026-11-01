@@ -126,8 +126,8 @@ class Store:
             for seq, (subtask_id, sub) in enumerate(zip(ids, spec.subtasks, strict=True)):
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
-                                             inputs_json, priority, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             inputs_json, priority, kind, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         subtask_id,
                         task_id,
@@ -136,6 +136,7 @@ class Store:
                         sub.acceptance_criteria,
                         json.dumps(sub.inputs, ensure_ascii=False),
                         spec.priority if sub.priority is None else sub.priority,
+                        sub.kind.value,
                         now,
                         now,
                     ),
@@ -643,9 +644,9 @@ class Store:
             for offset, (part_id, part) in enumerate(zip(ids, parts, strict=True)):
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
-                                             inputs_json, priority, parent_id, created_at,
-                                             updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             inputs_json, priority, kind, parent_id,
+                                             created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         part_id,
                         parent.task_id,
@@ -654,6 +655,7 @@ class Store:
                         part.acceptance_criteria,
                         json.dumps({**parent.inputs, **part.inputs}, ensure_ascii=False),
                         parent.priority if part.priority is None else part.priority,
+                        part.kind.value,
                         subtask_id,
                         now,
                         now,

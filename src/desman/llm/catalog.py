@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from desman.core.calls import Role
+from desman.core.models import Kind
 from desman.providers import Provider
 
 
@@ -89,7 +90,21 @@ NEEDS: dict[Role, Strength] = {
     Role.EXECUTOR: Strength.TEXT,
     Role.INTERLOCUTOR: Strength.TEXT,
 }
-"""What each role asks of its model. An executor's need will follow its subtask's type."""
+"""What each role asks of its model; an executor's need follows its subtask's kind (`need`)."""
+
+KIND_NEEDS: dict[Kind, Strength] = {
+    Kind.TEXT: Strength.TEXT,
+    Kind.CODE: Strength.CODE,
+    Kind.ANALYSIS: Strength.ANALYSIS,
+}
+
+
+def need(role: Role, kind: Kind | None = None) -> Strength:
+    """What `role` asks of its model; for the executor of a subtask of `kind`, what that kind
+    of work asks (other roles do the same work whatever the subtask)."""
+    if role is Role.EXECUTOR and kind is not None:
+        return KIND_NEEDS[kind]
+    return NEEDS[role]
 
 
 def models_of(provider: Provider) -> tuple[Model, ...]:

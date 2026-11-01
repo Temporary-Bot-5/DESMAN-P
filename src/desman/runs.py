@@ -1,9 +1,9 @@
 """What a run of the local operator is made of, shared by `desman run`/`resume` and the chat.
 
 The operator (ADR 0003) is the coordinator with its planner, executor and reviewer. Here it is
-put together from the config: the models (a lineup per role, `llm.router`, and for retries with
-another model the executor's other lineup), the executor's access (the tool policy within the
-human's permissions) and its tools.
+put together from the config: the models (a lineup per role, `llm.router`; the executor's per
+kind of subtask, each with its other lineup for retries with another model), the executor's
+access (the tool policy within the human's permissions) and its tools.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ from desman import providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config
 from desman.core import calls
-from desman.core.coordinator import Coordinator
+from desman.core.coordinator import Coordinator, Labels
 from desman.core.effects import evidence
+from desman.core.models import Kind, Subtask
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import strategy_for
@@ -49,9 +50,21 @@ class Models:
     """The executor's first model; None for a fake."""
     roles: Mapping[calls.Role, LLM] = field(default_factory=dict)
     other_choice: router.Choice | None = None
+    kinds: Mapping[Kind, tuple[LLM, LLM | None]] = field(default_factory=dict)
+    """The executor's main and other models for subtasks of each kind (ROADMAP 4.5); a kind
+    not in it (all of them, for a fake) asks `llm` and `other`."""
 
     def for_(self, role: calls.Role) -> LLM:
         return self.roles.get(role, self.llm)
+
+    def executor(self, kind: Kind) -> tuple[LLM, LLM | None]:
+        """The main and other models of the executor of a subtask of `kind`."""
+        return self.kinds.get(kind, (self.llm, self.other))
+
+    def labels(self, subtask: Subtask) -> Labels:
+        """How the coordinator tells apart the models the executor asks for `subtask`."""
+        main, other = self.executor(subtask.kind)
+        return label(main), None if other is None else label(other)
 
     def first(self, role: calls.Role) -> router.Choice | None:
         """The model `role` asks first (None for a fake)."""
@@ -93,6 +106,11 @@ def models(
 
     lineups = {role: router.lineup(config, role, provider, model) for role in calls.Role}
     roles = {role: chain(choices) for role, choices in lineups.items()}
+    kinds: dict[Kind, tuple[LLM, LLM | None]] = {}
+    for kind in Kind:
+        own = router.lineup(config, calls.Role.EXECUTOR, provider, model, kind=kind)
+        others = [] if model is not None else router.other_lineup(own)
+        kinds[kind] = (chain(own), chain(others) if others else None)
     executor = lineups[calls.Role.EXECUTOR]
     others = [] if model is not None else router.other_lineup(executor)
     return Models(
@@ -101,6 +119,7 @@ def models(
         executor[0],
         roles,
         others[0] if others else None,
+        kinds,
     )
 
 
@@ -194,14 +213,14 @@ def _coordinator(
 ) -> Coordinator:
     return Coordinator(
         store,
-        llm_executor(models.llm, models.other),
+        llm_executor(models.llm, models.other, by_kind=models.kinds),
         llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
         owner=current_owner(),
         lease_seconds=lease_seconds,
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
-        providers=(label(models.llm), None if models.other is None else label(models.other)),
+        providers=models.labels,
         decomposer=decomposer(models.for_(calls.Role.DECOMPOSER)),
         access=access,
         tools=tools,

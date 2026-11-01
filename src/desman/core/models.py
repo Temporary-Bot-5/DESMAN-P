@@ -32,6 +32,17 @@ class Tools(StrEnum):
     (a chat summary), so nothing written in it can make the work act."""
 
 
+class Kind(StrEnum):
+    """What sort of work a subtask is (ROADMAP 4.5): its executor's model is picked by it."""
+
+    TEXT = "text"
+    """Writing, answering, gathering facts: the default."""
+    CODE = "code"
+    """Writing, changing or explaining programs."""
+    ANALYSIS = "analysis"
+    """Reasoning over given material: comparing, judging, working something out."""
+
+
 class SubtaskSpec(BaseModel):
     description: str = Field(min_length=1)
     acceptance_criteria: str = Field(min_length=1)
@@ -40,6 +51,7 @@ class SubtaskSpec(BaseModel):
     """Indices of other subtasks in the same TaskSpec."""
     priority: int | None = None
     """Defaults to the task's priority."""
+    kind: Kind = Kind.TEXT
 
 
 class TaskSpec(BaseModel):
@@ -101,6 +113,7 @@ class Subtask(BaseModel):
     """A review in progress: who reserved it and until when (`Store.reserve_review`)."""
     queued_at: str | None = None
     """When it joined the queue it is in (READY or REVIEW); the scheduler ages it from then."""
+    kind: Kind = Kind.TEXT
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -125,4 +138,5 @@ class Subtask(BaseModel):
             review_owner=row["review_owner"],
             review_until=row["review_until"],
             queued_at=row["queued_at"],
+            kind=Kind(row["kind"]),
         )

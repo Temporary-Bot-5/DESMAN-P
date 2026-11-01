@@ -50,8 +50,9 @@ src/desman/
 ├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
 │                  #   `{"type": "error"}` = can't do it (never accepted, see coordinator)
 │                  #   executor acts only via `{"tool_calls": [...]}` (≤8 rounds per attempt)
-├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG); template on failure;
-│                  #   decomposer(): splits a subtask whose retries failed (2–4 parts)
+├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG, each tagged with its
+│                  #   Kind); template on failure; decomposer(): splits a subtask whose retries
+│                  #   failed (2–4 parts, untagged ones keep the subtask's kind)
 ├── config.py      # Config model (schema_version, several keys per provider), ConfigManager
 ├── config_cli.py  # `config` (wizard), `config show|reset`, `keys list|add|remove|import|check`,
 │                  #   `language [CODE]`, `permissions [--grant|--revoke]`, `personalize [on|off]`,
@@ -79,7 +80,8 @@ src/desman/
 ├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
 │                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
 │                  #   message that `covers` them; failed → they fall out of view, with a note
-├── runs.py        # A run put together from the config (models: a lineup per role, each model
+├── runs.py        # A run put together from the config (models: a lineup per role, the
+│                  #   executor's per subtask Kind, each model
 │                  #   paced, backed off, cached; executor access, web tools, coordinator),
 │                  #   shared by `run`/`resume`/`worker` and the chat
 ├── live.py        # Live progress of a chat task: subtask bar, a line per module (role, calls,
@@ -93,7 +95,8 @@ src/desman/
     │              #   combine), audited as attempt_started; Store.decompose() makes the parts
     ├── db.py      # sqlite3 connection, transactions, append-only migrations
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG; retry budgets and `Tools` kept with
-                   #   the task: `none` = no tools for whoever runs it), Subtask, Priority
+                   #   the task: `none` = no tools for whoever runs it), Subtask, Priority,
+                   #   Kind (text | code | analysis: picks the executor's model)
     ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
                    #        record_failure (the task's own retry policy, `TaskSpec.retry`,
                    #        applied atomically; no caller brings one), reserve_review
@@ -149,7 +152,8 @@ src/desman/
     ├── cache.py   # Cached: accepted replies by exact request (response_cache, 7 days);
                    #   complete_json() accepts, garbage is never kept; --no-cache skips it
     ├── catalog.py # Models per provider (default first): context, strict JSON, strengths
-                   #   (code, text, analysis), free-tier rpm; NEEDS: what each role asks
+                   #   (code, text, analysis), free-tier rpm; need(): what each role asks (the
+                   #   executor: what its subtask's Kind asks)
     ├── router.py  # lineup(): a role's models, best first (need, JSON, PREFERENCE, catalog);
                    #   --provider narrows it, --model pins one; other_lineup() for "other model"
                    #   Fallback: a call moves to the next model on a limit, outage, refused key,

@@ -158,6 +158,8 @@ class Work(BaseModel):
 
 
 Executor = Callable[[Work], Outcome]
+Labels = tuple[str, str | None]
+"""The executor's main model and its other one (None: no other), as `provider/model`."""
 Decomposer = Callable[[Work], list[SubtaskSpec] | None]
 """Splits the subtask of `Work` into smaller ones (ROADMAP 2.9b); None if it cannot. Provider
 errors propagate like the executor's."""
@@ -204,7 +206,7 @@ class Coordinator:
         access: Access | None = None,
         abandoned: Callable[[str], bool] | None = None,
         strategies: Strategies = ONE_MODEL,
-        providers: tuple[str, str | None] | None = None,
+        providers: Labels | Callable[[Subtask], Labels] | None = None,
         decomposer: Decomposer | None = None,
         sleep: Callable[[float], None] = time.sleep,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
@@ -235,8 +237,9 @@ class Coordinator:
         happen; pass `strategy_for` when the executor has one."""
         self.providers = providers
         """The labels of the models the executor asks (`provider/model`, or a provider's name):
-        the main one and the other model of `strategies` (None if there is none). Without them
-        no model is avoided as unfit."""
+        the main one and the other model of `strategies` (None if there is none); or, when they
+        depend on the subtask (its kind, ROADMAP 4.5), a function giving them for one. Without
+        them no model is avoided as unfit."""
         self.decomposer = decomposer
         """Without one, subtasks are never split."""
         self.sleep = sleep
@@ -398,7 +401,7 @@ class Coordinator:
         try:
             attempt = subtask.attempts.quality + 1
             unfit = frozenset(self.store.unfit_providers(subtask.task_id))
-            avoid = self._avoid(unfit)
+            avoid = self._avoid(subtask, unfit)
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
@@ -632,12 +635,13 @@ class Coordinator:
             unfit_provider=error.label if error.unfit_model else None,
         )
 
-    def _avoid(self, unfit: frozenset[str]) -> dict[str, bool]:
-        """Which of the executor's models an execution of the task found unfit (C.9): the
-        other one is then not switched to; the main one is not asked while the other is fit."""
+    def _avoid(self, subtask: Subtask, unfit: frozenset[str]) -> dict[str, bool]:
+        """Which of the models the executor asks for `subtask` an execution of the task found
+        unfit (C.9): the other one is then not switched to; the main one is not asked while the
+        other is fit."""
         if self.providers is None:
             return {}
-        main, other = self.providers
+        main, other = self.providers(subtask) if callable(self.providers) else self.providers
         avoid_other = other is not None and among(other, unfit)
         return {"avoid_main": among(main, unfit) and not avoid_other, "avoid_other": avoid_other}
 

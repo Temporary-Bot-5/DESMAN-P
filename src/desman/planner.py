@@ -9,6 +9,10 @@ Planning never stops a task from starting. When the model fails (provider error,
 is still wrong after the repair), the template plan is used: one subtask, the goal itself. The
 reason is shown to the operator and kept in the audit (`task_created`, `plan`).
 
+Each subtask is tagged with its kind (`Kind`: code, text, analysis): its executor's model is
+picked by it (ROADMAP 4.5). A subtask the model leaves untagged is text; a part of a split
+subtask left untagged is of the subtask's kind.
+
 `decomposer()` splits one subtask the same way when its retries keep failing (ROADMAP 2.9b).
 
 The prompts start with "Plan task" and "Split subtask", so a fake script can route on them.
@@ -23,7 +27,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, Field, StringConstraints, ValidationError, model_validator
 
 from desman.core.coordinator import Decomposer, Work
-from desman.core.models import Priority, SubtaskSpec, TaskSpec
+from desman.core.models import Kind, Priority, SubtaskSpec, TaskSpec
 from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
 
@@ -42,6 +46,12 @@ CRITERIA_RULES = (
     "not found."
 )
 
+KIND_RULES = (
+    ' "kind" says what sort of work the subtask is, so a model good at it does it: "code" '
+    '(writing, changing or explaining programs), "analysis" (reasoning over given material: '
+    'comparing, judging, working something out) or "text" (writing, answering, finding facts).'
+)
+
 PLANNER_SYSTEM = (
     "You split a goal into subtasks for small language models. Each subtask is done by one "
     "model call that sees only that subtask's description, its acceptance criteria and the "
@@ -49,8 +59,10 @@ PLANNER_SYSTEM = (
     "make sense on its own. Use as few subtasks as the goal needs (one is fine for a simple "
     f"goal), at most {MAX_SUBTASKS}. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
-    'done", "depends_on": [indices of earlier subtasks, counting from 0]}]}. '
-    "The last subtask must produce the final result of the goal." + CRITERIA_RULES
+    'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier subtasks, '
+    "counting from 0]}]}. The last subtask must produce the final result of the goal."
+    + KIND_RULES
+    + CRITERIA_RULES
 )
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
@@ -60,6 +72,8 @@ class PlannedSubtask(BaseModel):
     description: Text
     acceptance_criteria: Text
     depends_on: list[int] = Field(default_factory=list)
+    kind: Kind | None = None
+    """None: the model did not say (text for a planned subtask, the subtask's kind for a part)."""
 
 
 class Plan(BaseModel):
@@ -98,6 +112,7 @@ class Plan(BaseModel):
                     description=sub.description,
                     acceptance_criteria=sub.acceptance_criteria,
                     depends_on=sub.depends_on + unused if i == last else sub.depends_on,
+                    kind=sub.kind or Kind.TEXT,
                 )
                 for i, sub in enumerate(self.subtasks)
             ],
@@ -162,7 +177,8 @@ SPLITTER_SYSTEM = (
     "Afterwards the subtask's result is built from the parts' results; the feedback says what "
     "went wrong so far. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
-    'done", "depends_on": [indices of earlier parts, counting from 0]}]}.' + CRITERIA_RULES
+    'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier parts, '
+    "counting from 0]}]}." + KIND_RULES + CRITERIA_RULES
 )
 
 
@@ -180,7 +196,8 @@ class Split(BaseModel):
             raise ValueError("; ".join(reasons)) from None
         return self
 
-    def parts(self) -> list[SubtaskSpec]:
+    def parts(self, kind: Kind = Kind.TEXT) -> list[SubtaskSpec]:
+        """The parts; one the model did not tag is of `kind` (the split subtask's)."""
         spec = TaskSpec(
             goal="split",
             subtasks=[
@@ -188,6 +205,7 @@ class Split(BaseModel):
                     description=sub.description,
                     acceptance_criteria=sub.acceptance_criteria,
                     depends_on=sub.depends_on,
+                    kind=sub.kind or kind,
                 )
                 for sub in self.subtasks
             ],
@@ -204,6 +222,7 @@ def decomposer(llm: LLM) -> Decomposer:
         payload = {
             "subtask": context.description,
             "acceptance_criteria": context.acceptance_criteria,
+            "kind": work.subtask.kind.value,
             "inputs": context.inputs,
             "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
         }
@@ -215,7 +234,7 @@ def decomposer(llm: LLM) -> Decomposer:
             ]
         )
         try:
-            return complete_json(llm, request, Split, heading=SPLIT).parts()
+            return complete_json(llm, request, Split, heading=SPLIT).parts(work.subtask.kind)
         except StructuredOutputError:
             return None
 
