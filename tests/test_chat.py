@@ -470,3 +470,23 @@ def test_c_and_t_are_for_the_chat_alone(args: list[str]) -> None:
     result = CliRunner().invoke(cli, args, input="hello\n")
     assert result.exit_code == 2 and "-c" in result.output
     assert not db.default_db_path().exists() or texts() == []
+
+
+def test_a_temporary_chat_s_command_is_journaled_without_its_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from desman import runs
+    from desman.llm.fake import FakeLLM
+
+    turn = '{"type": "command", "name": "run", "args": {"goal": "plan my secret trip"}}'
+    llm = FakeLLM().on("Chat turn", turn)
+    monkeypatch.setattr(runs, "models", lambda config, conn, **_: runs.Models(llm, None))
+    configured()
+    temporary("run it", "n")
+    assert operator_log() == [
+        ("operator_declined", {"command": "run", "args_given": ["goal"], "temporary": True})
+    ]
+    conn = db.open_db(db.default_db_path())
+    dumped = "\n".join(conn.iterdump())
+    conn.close()
+    assert "secret trip" not in dumped and "run it" not in dumped  # nowhere in the database

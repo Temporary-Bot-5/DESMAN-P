@@ -378,9 +378,13 @@ class Chat:
         self, entry: commands.Entry, args: commands.Args, done: bool, before: Config | None
     ) -> None:
         """The operator's journal: the command, confirmed or declined, and what it changed in
-        the config (a key by its fingerprint, a permission by its name)."""
+        the config (a key by its fingerprint, a permission by its name). A temporary chat's
+        command is kept without its arguments' values: a goal or a note is the chat's text."""
         conn = self.store.conn
-        details = {"command": entry.name, "args": args.model_dump(mode="json")}
+        given = args.model_dump(mode="json", exclude_defaults=True)
+        details: dict[str, Any] = {"command": entry.name, "args": args.model_dump(mode="json")}
+        if self.temporary:  # the decision is the person's, kept; what the chat said is not
+            details = {"command": entry.name, "args_given": sorted(given), "temporary": True}
         action = "operator_command" if done else "operator_declined"
         operator.record(conn, action, details, session_id=self.session_id)
         for change, about in commands.config_changes(before, self._saved_config()):
