@@ -326,6 +326,7 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "워커가 할 수 있는 작업이 어떤 작업에도 남지 않으면 멈춥니다(기본적으로 워커는 새 작업과 일시 정지가 끝나기를 계속 기다립니다).",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "멈출 때까지(Ctrl+C) 모든 작업의 하위 작업을 처리합니다.\n\n여러 워커를 각각 다른 터미널에서 하나의 데이터베이스로 동시에 실행할 수 있습니다. 각 워커는 어떤 작업이든 가장 급한 준비된 하위 작업을 가져가고 판정을 기다리는 결과를 검토하며, 다른 워커와 같은 것을 맡지 않습니다. 멈추거나 강제 종료된 워커는 아무것도 남기지 않습니다. 그 하위 작업은 다른 워커나 `resume`이 다시 가져갑니다.",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "완료되지 않은 작업을 차례로 처리하며, 어떤 작업에도 할 일이 남지 않을 때까지 계속합니다({n}):",
+    "Not taken this time (ask again, or run `desman worker`): {n}": "이번에는 처리하지 않음(다시 요청하거나 `desman worker`를 실행하세요): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "워커가 멈췄습니다. 실행: {executed}, 검토: {reviewed}.",
     "Worker {owner} started. Ctrl+C stops it.": "워커 {owner}이(가) 시작되었습니다. Ctrl+C로 멈춥니다.",
     "Take a permission back (repeat for several).": "권한을 취소합니다(여러 번 지정 가능).",

@@ -79,18 +79,18 @@ def task_report(store: Store, task_id: str) -> TaskReport:
 
 
 def task_summaries(
-    store: Store, *, status: TaskStatus | None = None, limit: int = 20
+    store: Store, *, status: TaskStatus | None = None, limit: int | None = 20
 ) -> list[TaskReport]:
-    """Tasks newest first, without their subtasks.
+    """Tasks newest first, without their subtasks; `limit` None: every one that matches.
 
     Read page by page: status is derived from subtasks, so a filter cannot be pushed into SQL,
     but without one only `limit` tasks are read.
     """
-    page = limit if status is None else max(limit, 100)
+    page = limit if status is None and limit is not None else max(limit or 0, 100)
     summaries: list[TaskReport] = []
     with db.read_snapshot(store.conn):
         offset = 0
-        while len(summaries) < limit:
+        while limit is None or len(summaries) < limit:
             rows = store.conn.execute(
                 "SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 (page, offset),
@@ -109,7 +109,7 @@ def task_summaries(
                 report = _report(row, statuses.get(row["id"], []), [])
                 if status is None or report.status is status:
                     summaries.append(report)
-                    if len(summaries) >= limit:
+                    if limit is not None and len(summaries) >= limit:
                         break
     return summaries
 

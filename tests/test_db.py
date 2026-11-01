@@ -681,3 +681,28 @@ def test_v15_database_with_work_in_review_upgrades_to_workers(tmp_path: Path) ->
     assert store.reserve_review(subtask_id, "w1")
     assert not store.reserve_review(subtask_id, "w2")
     conn.close()
+
+
+def test_v16_database_with_a_review_in_progress_upgrades_to_review_tokens(tmp_path: Path) -> None:
+    """A reservation made before tokens existed cannot be proven current: it is dropped (taken
+    over at once), and the new reservations carry a token."""
+    path = tmp_path / "v16.db"
+    old = _db_at_version(path, 16)
+    task_id = add_task(old)
+    subtask_id = add_subtask(
+        old,
+        task_id,
+        status="review",
+        review_owner="old-worker",
+        review_until="2999-01-01T00:00:00.000Z",
+    )
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    store = Store(conn)
+    assert store.get_subtask(subtask_id).review_owner is None
+    token = store.reserve_review(subtask_id, "w1")
+    assert token is not None
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        conn.execute("UPDATE subtasks SET review_token = NULL WHERE id = ?", (subtask_id,))
+    conn.close()

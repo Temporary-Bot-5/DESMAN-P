@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,12 @@ from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
 from desman.core.models import Priority, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.retry import FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
-from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
+from desman.core.store import (
+    DEFAULT_LEASE_SECONDS,
+    DEFAULT_REVIEW_SECONDS,
+    StaleStateError,
+    Store,
+)
 
 S = SubtaskStatus
 
@@ -124,22 +130,73 @@ def test_a_gone_reviewers_reservation_is_taken_over_at_once(store: Store) -> Non
 
 def test_the_verdict_ends_the_reservation(store: Store) -> None:
     sub = submitted(store, store.create_task(spec("a")))
-    assert store.reserve_review(sub.id, "w1")
-    done = store.transition(sub.id, S.REVIEW, S.DONE, Actor.REVIEWER, action="verdict")
+    token = store.reserve_review(sub.id, "w1")
+    done = store.transition(
+        sub.id, S.REVIEW, S.DONE, Actor.REVIEWER, action="verdict", review=token
+    )
     assert (done.review_owner, done.review_until) == (None, None)
     assert not store.reserve_review(sub.id, "w2")  # not in REVIEW any more
 
 
 def test_an_interrupted_review_frees_the_reservation(store: Store) -> None:
     sub = submitted(store, store.create_task(spec("a")))
-    assert store.reserve_review(sub.id, "w1")
-    kept = store.record_failure(sub.id, S.REVIEW, Actor.REVIEWER, FailureKind.TRANSIENT)
+    first = store.reserve_review(sub.id, "w1")
+    kept = store.record_failure(
+        sub.id, S.REVIEW, Actor.REVIEWER, FailureKind.TRANSIENT, review=first
+    )
     assert kept.status is S.REVIEW and kept.review_owner is None
-    assert store.reserve_review(sub.id, "w2")
-    store.release_review(sub.id, "w1")  # not the holder: changes nothing
+    second = store.reserve_review(sub.id, "w2")
+    assert first is not None and second is not None
+    store.release_review(sub.id, first)  # not the current reservation: changes nothing
     assert store.get_subtask(sub.id).review_owner == "w2"
-    store.release_review(sub.id, "w2")
+    store.release_review(sub.id, second)
     assert store.get_subtask(sub.id).review_owner is None
+
+
+def test_a_reviewer_whose_reservation_was_taken_over_cannot_decide(
+    store: Store, clock: FakeClock
+) -> None:
+    sub = submitted(store, store.create_task(spec("a")))
+    late = store.reserve_review(sub.id, "w1")
+    clock.advance(DEFAULT_REVIEW_SECONDS + 1)
+    current = store.reserve_review(sub.id, "w2")  # ran out: taken over
+    assert late is not None and current is not None and late != current
+    decisions: list[Callable[[], Subtask]] = [
+        lambda: store.transition(sub.id, S.REVIEW, S.DONE, Actor.REVIEWER, review=late),
+        lambda: store.record_failure(
+            sub.id, S.REVIEW, Actor.REVIEWER, FailureKind.QUALITY, review=late
+        ),
+        lambda: store.record_failure(
+            sub.id, S.REVIEW, Actor.REVIEWER, FailureKind.TRANSIENT, review=late
+        ),
+        # Nor without any token while someone holds the review.
+        lambda: store.transition(sub.id, S.REVIEW, S.DONE, Actor.REVIEWER),
+    ]
+    for decide in decisions:
+        with pytest.raises(StaleStateError, match="review"):
+            decide()
+    held = store.get_subtask(sub.id)
+    assert held.status is S.REVIEW and held.review_owner == "w2"
+    assert held.attempts.quality == 0 and held.attempts.transient == 0  # nothing was counted
+    done = store.transition(sub.id, S.REVIEW, S.DONE, Actor.REVIEWER, review=current)
+    assert done.status is S.DONE
+
+
+def test_a_renewed_reservation_has_a_new_token(store: Store) -> None:
+    sub = submitted(store, store.create_task(spec("a")))
+    old = store.reserve_review(sub.id, "w1")
+    new = store.reserve_review(sub.id, "w1")
+    assert old is not None and new is not None and old != new
+    with pytest.raises(StaleStateError):
+        store.transition(sub.id, S.REVIEW, S.DONE, Actor.REVIEWER, review=old)
+    store.transition(sub.id, S.REVIEW, S.DONE, Actor.REVIEWER, review=new)
+
+
+def test_the_operator_decides_whoever_holds_the_review(store: Store) -> None:
+    sub = submitted(store, store.create_task(spec("a")))
+    assert store.reserve_review(sub.id, "w1")
+    moved = store.transition(sub.id, S.REVIEW, S.CANCELLED, Actor.HUMAN, reason="enough")
+    assert moved.status is S.CANCELLED and moved.review_owner is None
 
 
 def test_the_schema_allows_a_reservation_only_in_review(store: Store) -> None:
@@ -174,6 +231,34 @@ def test_two_workers_never_review_the_same_result(store: Store, clock: FakeClock
     assert second_reviews == []
     assert store.task_status(task_id) is TaskStatus.DONE
     assert (first.reviewed, second.reviewed) == (1, 0)
+
+
+def test_a_slow_reviewers_verdict_is_discarded_after_a_takeover(
+    store: Store, clock: FakeClock
+) -> None:
+    """A review outlives its reservation; another worker takes it over and decides. The slow
+    one's verdict is thrown away, and the history says so."""
+    task_id = store.create_task(spec("a"))
+    sub = submitted(store, task_id)
+    second = worker(store, clock, "w2")
+
+    def slow_reviewer(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        clock.advance(DEFAULT_REVIEW_SECONDS + 1)  # the provider takes its time
+        assert second.tick(None, []) is True  # takes the review over and accepts
+        return Review(verdict=Verdict.RETRY, feedback="redo it")
+
+    events: list[str] = []
+    first = worker(store, clock, "w1", reviewer=slow_reviewer)
+    first.tick(None, events)
+    assert f"lost review {sub.id}" in events
+    assert (first.reviewed, second.reviewed) == (0, 1)
+    assert store.task_status(task_id) is TaskStatus.DONE  # the current reviewer's verdict
+    assert store.get_subtask(sub.id).attempts.quality == 0  # the late "retry" counted nothing
+    discarded = [r for r in store.audit_log(task_id) if r["action"] == "review_discarded"]
+    assert len(discarded) == 1
+    details = json.loads(discarded[0]["details_json"])
+    assert details["owner"] == "w1" and details["verdict"] == "retry"
+    assert check_history(store.conn, task_id) == []
 
 
 def test_a_crashed_review_is_released(store: Store, clock: FakeClock) -> None:
@@ -249,6 +334,19 @@ def test_an_idle_worker_waits_for_new_work(store: Store, clock: FakeClock) -> No
     result = w.work(max_ticks=3)  # idle, sleep; execute; review
     assert clock.slept == 3 and result.executed == 1
     assert store.task_status(created[0]) is TaskStatus.DONE
+
+
+def test_a_worker_keeps_only_the_latest_ticks_events(store: Store, clock: FakeClock) -> None:
+    """A worker runs for days: its history is the audit log, not a list growing in memory."""
+    for name in ("a", "b", "c"):
+        store.create_task(spec(name))
+    seen: list[list[str]] = []
+    result = worker(store, clock, "w1").work(
+        until_idle=True, on_tick=lambda r: seen.append(list(r.events))
+    )
+    assert (result.executed, result.reviewed) == (3, 3)  # the counters cover everything
+    assert all(len(events) <= 2 for events in seen)  # one tick: a verdict and an execution
+    assert result.events == seen[-1]
 
 
 def test_until_idle_still_waits_for_work_another_worker_holds(

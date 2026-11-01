@@ -17,7 +17,7 @@ from desman.cli import cli
 from desman.config import Config, ConfigManager, default_config_path
 from desman.core import db, operator
 from desman.core.audit import history
-from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.models import Priority, SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.sessions import Kind, Message, Role, Sessions
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -448,6 +448,37 @@ def test_worker_works_on_every_unfinished_task_after_yes(fake: FakeLLM) -> None:
     store = Store(db.open_db())
     try:
         assert {store.task_status(first), store.task_status(second)} == {TaskStatus.DONE}
+    finally:
+        store.conn.close()
+
+
+def test_worker_takes_the_most_urgent_first_and_says_what_it_leaves(
+    fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(commands, "WORKER_TASKS", 1)
+    store = Store(db.open_db())
+    try:
+        spec = TaskSpec(
+            goal="routine goal", subtasks=[SubtaskSpec(description="a", acceptance_criteria="ok")]
+        )
+        routine = store.create_task(spec)
+        urgent = store.create_task(
+            spec.model_copy(update={"goal": "urgent goal", "priority": Priority.CRITICAL})
+        )
+    finally:
+        store.conn.close()
+    fake.on(CHAT, asks("worker"))
+    fake.on("Execute subtask", '{"ok": true}', repeat_last=True)
+    fake.on("Review subtask", '{"verdict": "accept"}', repeat_last=True)
+    fake.on(RETELL, '{"text": "One done."}', repeat_last=True)
+    result = chat("do everything that waits", "y")
+    assert "Work on the unfinished tasks in turn, until none has work left (1):" in result.output
+    assert "urgent goal" in result.output and "routine goal" not in result.output
+    assert "Not taken this time (ask again, or run `desman worker`): 1" in result.output
+    store = Store(db.open_db())
+    try:
+        assert store.task_status(urgent) is TaskStatus.DONE
+        assert store.task_status(routine) is TaskStatus.ACTIVE
     finally:
         store.conn.close()
 

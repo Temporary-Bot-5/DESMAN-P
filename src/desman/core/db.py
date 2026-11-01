@@ -342,6 +342,15 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         CHECK ((review_until IS NULL) = (review_owner IS NULL)
                AND (review_until IS NULL OR status = 'review'));
     """,
+    # 17 — a review reservation has a token, like a lease: a reviewer's verdict is written only
+    # with the token of the reservation that is still current, so a reviewer whose reservation
+    # ran out and was taken over cannot decide after all. Reservations in flight are dropped
+    # (taken over at once, as if expired): they hold no work, only the right to one model call
+    """
+    UPDATE subtasks SET review_owner = NULL, review_until = NULL;
+    ALTER TABLE subtasks ADD COLUMN review_token TEXT
+        CHECK ((review_token IS NULL) = (review_owner IS NULL));
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

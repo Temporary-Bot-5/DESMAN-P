@@ -328,6 +328,7 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "ワーカーにできる作業がどのタスクにも残っていなければ停止します（既定では、ワーカーは新しい作業と一時停止の終了を待ち続けます）。",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "停止されるまで（Ctrl+C）、すべてのタスクのサブタスクに取り組みます。\n\n複数のワーカーを、別々のターミナルで、1 つのデータベースに対して同時に実行できます。各ワーカーは任意のタスクから最も緊急の準備済みサブタスクを取り、判定を待つ結果をレビューします。他のワーカーと同じものを扱うことはありません。停止または強制終了されたワーカーは何も残しません。そのサブタスクは別のワーカーか `resume` が引き取ります。",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "未完了のタスクに順番に取り組み、どのタスクにも作業が残らなくなるまで続けます（{n}）：",
+    "Not taken this time (ask again, or run `desman worker`): {n}": "今回は対象外（もう一度依頼するか、`desman worker` を実行してください）：{n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "ワーカーを停止しました。実行: {executed}、レビュー: {reviewed}。",
     "Worker {owner} started. Ctrl+C stops it.": "ワーカー {owner} を開始しました。Ctrl+C で停止します。",
     "Take a permission back (repeat for several).": "権限を取り消す（繰り返し指定可）。",

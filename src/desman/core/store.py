@@ -337,6 +337,7 @@ class Store:
         details: dict[str, Any] | None = None,
         action: str = "transition",
         expected_version: int | None = None,
+        review: str | None = None,
     ) -> Subtask:
         """Move a subtask from `src` to `dst` if it is still in `src`.
 
@@ -345,6 +346,9 @@ class Store:
           (e.g. a newer escalation), and a decision taken on the old one must not apply to it.
         - Leaving RUNNING as the executor requires `lease`, the token from `claim()`: an executor
           whose claim expired cannot touch a later claim, even one taken under the same name.
+        - Leaving REVIEW as the reviewer requires `review`, the token from `reserve_review()`,
+          to be the current reservation (None: only while nobody holds one), so a reviewer
+          whose reservation was taken over cannot decide.
         - `attempts` replaces the failure counters in the same update; a human sending the
           subtask back to READY resets them (a fresh budget is the point of a restart).
         - The scheduler can only take RUNNING away from an executor whose lease has expired.
@@ -365,6 +369,7 @@ class Store:
                 details=details,
                 action=action,
                 expected_version=expected_version,
+                review=review,
             )
 
     def status_version(self, subtask_id: str) -> int:
@@ -389,6 +394,7 @@ class Store:
         paused_until: str | None = None,
         action: str = "failure",
         details: dict[str, Any] | None = None,
+        review: str | None = None,
     ) -> Subtask:
         """Apply the task's retry policy to a failed attempt: retry, pause or escalate to the
         operator.
@@ -396,6 +402,7 @@ class Store:
         Counters are read and written in one transaction, so concurrent failures cannot lose a count.
         A transient failure during REVIEW is the reviewer's, not the work's: the subtask stays in
         REVIEW with its artifact (only the counter grows), so the work is not run again.
+        A reviewer's failure passes `review` as a verdict does (see `transition`).
         """
         with db.transaction(self.conn):
             current = self.get_subtask(subtask_id)
@@ -406,6 +413,7 @@ class Store:
                     decision.attempts,
                     f"{reason}: {decision.reason}" if reason else decision.reason,
                     details,
+                    review,
                 )
             return self._apply(
                 subtask_id,
@@ -423,6 +431,7 @@ class Store:
                     **({"cause": reason} if reason else {}),
                 },
                 action=action,
+                review=review,
             )
 
     def _count_review_interruption(
@@ -431,6 +440,7 @@ class Store:
         attempts: Attempts,
         reason: str,
         details: dict[str, Any] | None = None,
+        review: str | None = None,
     ) -> Subtask:
         """Bump the transient counter of a subtask that stays in REVIEW. Needs a transaction."""
         if current.status is not S.REVIEW:
@@ -439,10 +449,12 @@ class Store:
             )
         row = self.conn.execute(
             """UPDATE subtasks SET attempts_quality = ?, attempts_transient = ?, updated_at = ?,
-                                  review_owner = NULL, review_until = NULL
-               WHERE id = ? AND status = 'review' RETURNING *""",
-            (attempts.quality, attempts.transient, self._now(), current.id),
+                                  review_owner = NULL, review_until = NULL, review_token = NULL
+               WHERE id = ? AND status = 'review' AND review_token IS ? RETURNING *""",
+            (attempts.quality, attempts.transient, self._now(), current.id, review),
         ).fetchone()
+        if row is None:
+            self._raise_stale(current.id, S.REVIEW, S.REVIEW, None, self._now(), review=review)
         subtask = Subtask.from_row(row)
         self._audit(
             Actor.REVIEWER,
@@ -805,11 +817,16 @@ class Store:
         *,
         seconds: int = DEFAULT_REVIEW_SECONDS,
         abandoned: Callable[[str], bool] | None = None,
-    ) -> bool:
-        """Reserve the review of a subtask in REVIEW for `owner`; False if it left REVIEW or
-        another reviewer holds it. A reservation that ran out, or whose owner `abandoned` says
-        is certainly gone, is taken over. Not a status change, so not audited (like a heartbeat):
-        the verdict is. It ends with the verdict, or with `release_review`."""
+    ) -> str | None:
+        """Reserve the review of a subtask in REVIEW for `owner`: returns the reservation's
+        token, None if it left REVIEW or another reviewer holds it. A reservation that ran out,
+        or whose owner `abandoned` says is certainly gone, is taken over.
+
+        The verdict passes the token (`review=` of `transition`/`record_failure`), like a lease:
+        a reviewer whose reservation was taken over meanwhile cannot decide any more. Every
+        reservation gets a new token, even renewed by the same owner. Not a status change, so
+        not audited (like a heartbeat): the verdict is. It ends with the verdict, or with
+        `release_review`."""
         with db.transaction(self.conn):
             now = self._now()
             row = self.conn.execute(
@@ -817,7 +834,7 @@ class Store:
                 (subtask_id,),
             ).fetchone()
             if row is None or row["status"] != S.REVIEW.value:
-                return False
+                return None
             holder = row["review_owner"]
             if (
                 holder is not None
@@ -825,22 +842,25 @@ class Store:
                 and row["review_until"] >= now
                 and not (abandoned is not None and abandoned(holder))
             ):
-                return False
+                return None
             until = db.to_iso(self.clock() + timedelta(seconds=seconds))
+            token = _new_id()
             self.conn.execute(
-                """UPDATE subtasks SET review_owner = ?, review_until = ?
+                """UPDATE subtasks SET review_owner = ?, review_until = ?, review_token = ?
                    WHERE id = ? AND status = 'review'""",
-                (owner, until, subtask_id),
+                (owner, until, token, subtask_id),
             )
-        return True
+        return token
 
-    def release_review(self, subtask_id: str, owner: str) -> None:
-        """End `owner`'s reservation of a review it did not finish (e.g. interrupted)."""
+    def release_review(self, subtask_id: str, token: str) -> None:
+        """End the reservation `token` of a review that was not finished (e.g. interrupted);
+        a reservation taken over meanwhile is not touched."""
         with db.transaction(self.conn):
             self.conn.execute(
-                """UPDATE subtasks SET review_owner = NULL, review_until = NULL
-                   WHERE id = ? AND review_owner = ?""",
-                (subtask_id, owner),
+                """UPDATE subtasks SET review_owner = NULL, review_until = NULL,
+                                      review_token = NULL
+                   WHERE id = ? AND review_token = ?""",
+                (subtask_id, token),
             )
 
     def sweep(
@@ -989,6 +1009,7 @@ class Store:
         action: str = "transition",
         abandoned_lease: bool = False,
         expected_version: int | None = None,
+        review: str | None = None,
     ) -> Subtask:
         """Compare-and-swap status change plus audit entry. Needs a transaction.
 
@@ -1011,7 +1032,7 @@ class Store:
         if src is S.RUNNING:
             sets += ["lease_owner = NULL", "lease_token = NULL", "lease_until = NULL"]
         if src is S.REVIEW:
-            sets += ["review_owner = NULL", "review_until = NULL"]
+            sets += ["review_owner = NULL", "review_until = NULL", "review_token = NULL"]
         if dst is S.PAUSED:
             if paused_until is None:
                 paused_until = db.to_iso(self.clock() + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
@@ -1035,6 +1056,9 @@ class Store:
         if src is S.RUNNING and lease is not None:
             where.append("lease_token = ?")
             params.append(lease)
+        if src is S.REVIEW and actor is Actor.REVIEWER:
+            where.append("review_token IS ?")  # the current reservation, or none at all
+            params.append(review)
         if src is S.RUNNING and actor is Actor.SCHEDULER and not abandoned_lease:
             where.append("lease_until < ?")  # never take a live lease away
             params.append(now)
@@ -1059,7 +1083,9 @@ class Store:
             params,
         ).fetchone()
         if row is None:
-            self._raise_stale(subtask_id, src, dst, lease, now, expected_version, actor)
+            self._raise_stale(
+                subtask_id, src, dst, lease, now, expected_version, actor, review=review
+            )
         subtask = Subtask.from_row(row)
 
         audit_details = dict(details or {})
@@ -1114,6 +1140,8 @@ class Store:
         now: str,
         expected_version: int | None = None,
         actor: Actor | None = None,
+        *,
+        review: str | None = None,
     ) -> NoReturn:
         current = self.get_subtask(subtask_id)
         if current.status is not src:
@@ -1129,6 +1157,11 @@ class Store:
             raise StaleStateError(
                 f"subtask {subtask_id}: lease {lease} is no longer valid "
                 f"(now held by {current.lease_owner})"
+            )
+        if src is S.REVIEW:
+            what = "reservation is no longer current" if review else "is reserved"
+            raise StaleStateError(
+                f"subtask {subtask_id}: its review {what} (now held by {current.review_owner})"
             )
         if src is S.RUNNING:
             raise StaleStateError(
