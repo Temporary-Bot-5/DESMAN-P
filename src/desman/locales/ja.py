@@ -393,6 +393,12 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "タスク {ref} はプロバイダーの制限により {until} まで一時停止中です。`desman resume {ref}` で再開できます。",
     "Task {ref} is {status}.": "タスク {ref}：{status}。",
     "The model could not retell the result; here it is as it is:": "モデルは結果を要約できませんでした。結果をそのまま示します：",
+    "Task {ref} got copies of the files of task {source}: {files}": "タスク {ref} はタスク {source} のファイルのコピーを受け取りました：{files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "タスク {ref} はこのチャットのタスクではないため、そのファイルは渡されません。",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "要約にタスク {ref} が作成していないコードが含まれていたため、表示しません。",
+    "The result as it is:": "そのままの結果：",
+    "Files of task {ref} are in {folder}:": "タスク {ref} のファイルは {folder} にあります：",
+    "…and {n} more file": ("…ほか {n} 件のファイル",),
     "New session. /help lists the chat's commands.": "新しいセッションです。/help でチャットのコマンドを表示します。",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "{when} のセッションを続けます（{n} 件のメッセージ）。/new で別のセッション、/help でチャットのコマンドを表示します。",

@@ -509,6 +509,13 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER network_log_no_delete BEFORE DELETE ON network_log
         BEGIN SELECT RAISE(ABORT, 'network_log is append-only'); END;
     """,
+    # 27 — a subtask that must run code and report what it printed (`SubtaskSpec.runs_code`):
+    # it is done only through `run_command`, which the coordinator checks, never on a model's
+    # word. Subtasks made before were not told apart: none of them is held to it
+    """
+    ALTER TABLE subtasks ADD COLUMN runs_code INTEGER NOT NULL DEFAULT 0
+        CHECK (runs_code IN (0, 1));
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

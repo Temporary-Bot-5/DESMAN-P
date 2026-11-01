@@ -460,6 +460,16 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "Задачу {ref} призупинено лімітом провайдера до {until}. `desman resume {ref}` продовжить її.",
     "Task {ref} is {status}.": "Задача {ref}: {status}.",
     "The model could not retell the result; here it is as it is:": "Модель не змогла переказати результат; ось він як є:",
+    "Task {ref} got copies of the files of task {source}: {files}": "Задача {ref} отримала копії файлів задачі {source}: {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "Задача {ref} — не з цього чату, тому її файли не передано.",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "Переказ показав код, якого задача {ref} не створювала, тому його не показано.",
+    "The result as it is:": "Результат як є:",
+    "Files of task {ref} are in {folder}:": "Файли задачі {ref} лежать у {folder}:",
+    "…and {n} more file": (
+        "…і ще {n} файл",
+        "…і ще {n} файли",
+        "…і ще {n} файлів",
+    ),
     "New session. /help lists the chat's commands.": "Нова сесія. /help — команди чату.",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "Продовжуємо сесію від {when} ({n} повідомлення). /new починає іншу, /help — команди чату.",

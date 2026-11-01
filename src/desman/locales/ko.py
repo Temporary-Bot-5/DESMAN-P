@@ -391,6 +391,12 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "작업 {ref}이(가) 제공자 한도로 {until}까지 일시 중지되었습니다. `desman resume {ref}`로 이어서 할 수 있습니다.",
     "Task {ref} is {status}.": "작업 {ref}: {status}.",
     "The model could not retell the result; here it is as it is:": "모델이 결과를 요약하지 못했습니다. 결과를 그대로 보여 드립니다:",
+    "Task {ref} got copies of the files of task {source}: {files}": "작업 {ref}이(가) 작업 {source}의 파일 사본을 받았습니다: {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "작업 {ref}은(는) 이 채팅의 작업이 아니므로 파일을 전달하지 않습니다.",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "요약에 작업 {ref}이(가) 만들지 않은 코드가 있어 표시하지 않습니다.",
+    "The result as it is:": "있는 그대로의 결과:",
+    "Files of task {ref} are in {folder}:": "작업 {ref}의 파일 위치: {folder}",
+    "…and {n} more file": ("…그 외 파일 {n}개",),
     "New session. /help lists the chat's commands.": "새 세션입니다. /help로 채팅 명령을 볼 수 있습니다.",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "{when} 세션을 이어갑니다(메시지 {n}개). /new는 다른 세션을 시작하고, /help는 채팅 명령을 보여 줍니다.",

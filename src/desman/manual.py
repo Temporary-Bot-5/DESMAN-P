@@ -57,6 +57,24 @@ TOPICS: Final = (
         "subtasks, `desman audit TASK` its full history, `desman stats` how well tasks go.",
     ),
     Topic(
+        "files",
+        "where a task's files are, giving them to a later task, running code",
+        "Each task has a folder of its own (workspaces/TASK next to the database), where the "
+        "executor reads and writes files with its tools; nothing outside it. After a task, the "
+        "chat lists its files and their folder itself. A task sees only its own folder: when "
+        'a request builds on what an earlier task of the same chat wrote ("test it", "change '
+        'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
+        "the original files stay as they were. Saving something is work too: a task writes it.\n"
+        "Running code (a test, a crash test, checking what a program prints) needs the "
+        "run_command tool, which needs the person's shell_execution switch (`desman "
+        "permissions`) and a working sandbox. A subtask that must run code is marked so by the "
+        "planner: without the tool it waits for the person at once, with the reason, and "
+        "with it its result counts only if the code really ran. No part of DESMAN reports "
+        "what code would print without running it.\n"
+        "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
+        "A retelling shows code only as the task left it.",
+    ),
+    Topic(
         "retries",
         "what happens after a failed attempt; what waits for the person's decision",
         "A rejected or unusable attempt is tried again, each time differently: with the "

@@ -128,8 +128,9 @@ class Store:
             for seq, (subtask_id, sub) in enumerate(zip(ids, spec.subtasks, strict=True)):
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
-                                             inputs_json, priority, kind, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             inputs_json, priority, kind, runs_code,
+                                             created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         subtask_id,
                         task_id,
@@ -139,6 +140,7 @@ class Store:
                         json.dumps(sub.inputs, ensure_ascii=False),
                         spec.priority if sub.priority is None else sub.priority,
                         sub.kind.value,
+                        int(sub.runs_code),
                         now,
                         now,
                     ),
@@ -648,9 +650,9 @@ class Store:
             for offset, (part_id, part) in enumerate(zip(ids, parts, strict=True)):
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
-                                             inputs_json, priority, kind, parent_id,
-                                             created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             inputs_json, priority, kind, runs_code,
+                                             parent_id, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         part_id,
                         parent.task_id,
@@ -660,6 +662,7 @@ class Store:
                         json.dumps({**parent.inputs, **part.inputs}, ensure_ascii=False),
                         parent.priority if part.priority is None else part.priority,
                         part.kind.value,
+                        int(part.runs_code),
                         subtask_id,
                         now,
                         now,
@@ -993,13 +996,14 @@ class Store:
     # ── Side effects (core/effects.py) ───────────────────────────────────────
 
     def unfit_providers(self, task_id: str) -> set[str]:
-        """The models an execution of the task failed as unable to answer (`unfit_provider` in
-        its `execution_failed` entry: `provider/model`, or a provider's name). Read from the
+        """The models an execution of the task found unable to answer (`unfit_provider` in its
+        `execution_failed` entry, or in `model_unfit` when a lineup moved past it within the
+        attempt: `provider/model`, or a provider's name). Read from the
         audit, so a resumed run does not ask them again either; by label, so a model that is new
         to the task is still tried."""
         rows = self.conn.execute(
             """SELECT DISTINCT json_extract(details_json, '$.unfit_provider') FROM audit_log
-               WHERE task_id = ? AND action = 'execution_failed'
+               WHERE task_id = ? AND action IN ('execution_failed', 'model_unfit')
                  AND json_extract(details_json, '$.unfit_provider') IS NOT NULL""",
             (task_id,),
         ).fetchall()

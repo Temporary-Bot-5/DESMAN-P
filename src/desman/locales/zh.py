@@ -385,6 +385,12 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "任务 {ref} 因提供商限制暂停到 {until}。`desman resume {ref}` 可以继续。",
     "Task {ref} is {status}.": "任务 {ref}：{status}。",
     "The model could not retell the result; here it is as it is:": "模型无法复述结果；以下是原始结果：",
+    "Task {ref} got copies of the files of task {source}: {files}": "任务 {ref} 已获得任务 {source} 的文件副本：{files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "任务 {ref} 不是本聊天中的任务，因此不提供它的文件。",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "复述中出现了任务 {ref} 并未生成的代码，因此不予显示。",
+    "The result as it is:": "原样结果：",
+    "Files of task {ref} are in {folder}:": "任务 {ref} 的文件位于 {folder}：",
+    "…and {n} more file": ("……以及另外 {n} 个文件",),
     "New session. /help lists the chat's commands.": "新会话。/help 列出聊天命令。",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "继续 {when} 的会话（{n} 条消息）。/new 开始另一个，/help 列出聊天命令。",

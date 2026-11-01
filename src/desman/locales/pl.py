@@ -460,6 +460,16 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "Zadanie {ref} wstrzymane przez limit dostawcy do {until}. `desman resume {ref}` je wznowi.",
     "Task {ref} is {status}.": "Zadanie {ref}: {status}.",
     "The model could not retell the result; here it is as it is:": "Model nie zdołał streścić wyniku; oto on w całości:",
+    "Task {ref} got copies of the files of task {source}: {files}": "Zadanie {ref} dostało kopie plików zadania {source}: {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "Zadanie {ref} nie pochodzi z tego czatu, więc jego pliki nie zostały przekazane.",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "Streszczenie pokazało kod, którego zadanie {ref} nie wytworzyło, więc nie jest pokazane.",
+    "The result as it is:": "Wynik w oryginalnej postaci:",
+    "Files of task {ref} are in {folder}:": "Pliki zadania {ref} są w {folder}:",
+    "…and {n} more file": (
+        "…i jeszcze {n} plik",
+        "…i jeszcze {n} pliki",
+        "…i jeszcze {n} plików",
+    ),
     "New session. /help lists the chat's commands.": "Nowa sesja. /help pokazuje polecenia czatu.",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "Kontynuujemy sesję z {when} ({n} wiadomość). /new zaczyna inną, /help pokazuje polecenia czatu.",

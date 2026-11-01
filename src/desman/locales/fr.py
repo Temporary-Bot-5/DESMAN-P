@@ -433,6 +433,15 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "La tâche {ref} est en pause à cause d'une limite du fournisseur jusqu'à {until}. `desman resume {ref}` la reprend.",
     "Task {ref} is {status}.": "Tâche {ref} : {status}.",
     "The model could not retell the result; here it is as it is:": "Le modèle n'a pas pu résumer le résultat ; le voici tel quel :",
+    "Task {ref} got copies of the files of task {source}: {files}": "La tâche {ref} a reçu des copies des fichiers de la tâche {source} : {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "La tâche {ref} n'est pas une tâche de ce chat : ses fichiers ne sont pas transmis.",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "Le récit montrait du code que la tâche {ref} n'a pas produit : il n'est donc pas affiché.",
+    "The result as it is:": "Le résultat tel quel :",
+    "Files of task {ref} are in {folder}:": "Les fichiers de la tâche {ref} sont dans {folder} :",
+    "…and {n} more file": (
+        "…et {n} autre fichier",
+        "…et {n} autres fichiers",
+    ),
     "New session. /help lists the chat's commands.": "Nouvelle session. /help liste les commandes du chat.",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "Reprise de la session du {when} ({n} message). /new en commence une autre, /help liste les commandes du chat.",

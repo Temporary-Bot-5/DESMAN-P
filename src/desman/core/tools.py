@@ -220,6 +220,13 @@ class Toolbox:
                 refusal = f"{tool.name!r} cannot run here: {problem}"
         return refusal
 
+    def refusal(self, name: str) -> str | None:
+        """Why the tool `name` may not be used here, or None if it may."""
+        tool = self.registry.get(name)
+        if tool is None:
+            return f"{name!r} is not among the tools given to this subtask"
+        return self._refusal(tool)
+
     def specs(self) -> list[dict[str, Any]]:
         """The tools to offer a model: only those it may use."""
         return [tool.spec() for tool in self.available()]

@@ -430,6 +430,15 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "कार्य {ref} प्रदाता की सीमा के कारण {until} तक रुका है। `desman resume {ref}` इसे जारी रखता है।",
     "Task {ref} is {status}.": "कार्य {ref}: {status}।",
     "The model could not retell the result; here it is as it is:": "मॉडल परिणाम का सार नहीं बता सका; यह रहा परिणाम जैसा है:",
+    "Task {ref} got copies of the files of task {source}: {files}": "कार्य {ref} को कार्य {source} की फ़ाइलों की प्रतियाँ मिलीं: {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "कार्य {ref} इस चैट का कार्य नहीं है, इसलिए उसकी फ़ाइलें नहीं दी गईं।",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "सारांश में ऐसा कोड दिखाया गया जो कार्य {ref} ने नहीं बनाया था, इसलिए वह नहीं दिखाया गया।",
+    "The result as it is:": "परिणाम जैसा है:",
+    "Files of task {ref} are in {folder}:": "कार्य {ref} की फ़ाइलें {folder} में हैं:",
+    "…and {n} more file": (
+        "…और {n} फ़ाइल",
+        "…और {n} फ़ाइलें",
+    ),
     "New session. /help lists the chat's commands.": "नया सत्र। /help चैट के कमांड दिखाता है।",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "{when} का सत्र जारी है ({n} संदेश)। /new दूसरा शुरू करता है, /help चैट के कमांड दिखाता है।",

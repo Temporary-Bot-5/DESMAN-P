@@ -36,13 +36,24 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from pathlib import Path
 from typing import Any
 
 import click
 import httpx
 from rich.text import Text
 
-from desman import actions, commands, compaction, config_cli, providers, runs, ui, wizard
+from desman import (
+    actions,
+    commands,
+    compaction,
+    config_cli,
+    providers,
+    runs,
+    task_files,
+    ui,
+    wizard,
+)
 from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
@@ -53,7 +64,8 @@ from desman.core.report import InboxWatch, TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
-from desman.core.store import Store
+from desman.core.store import AmbiguousIdError, NotFoundError, Store
+from desman.core.workspace import workspace_root_for
 from desman.i18n import t, tn
 from desman.interlocutor import (
     AddNote,
@@ -65,6 +77,7 @@ from desman.interlocutor import (
     ProfileEdit,
     Reply,
     excerpt,
+    unbacked_code,
 )
 from desman.live import Progress
 from desman.llm import hub, router
@@ -500,11 +513,24 @@ class Chat:
         access = self._access(config)
         if access is None:
             return
+        root = workspace_root_for(self.store.conn)
+        sources = self._sources(turn.files_from)
+        goal = turn.goal
+        given = {
+            ref: [f"from-{ref}/{f.path}" for f in task_files.listing(root, source)]
+            for source, ref in sources
+        }
+        paths = [path for made in given.values() for path in made]
+        if paths:  # what the workers see is the goal: the files are named in it, by code
+            goal += (
+                "\n\nFiles of earlier work are in this task's workspace (read them with the "
+                "file tools): " + ", ".join(paths[: task_files.MAX_HANDED]) + "."
+            )
         ui.note(t("Planning…"))
         with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
             planned = plan(
                 models.for_(calls.Role.PLANNER),
-                turn.goal,
+                goal,
                 limit=runs.tuned(config.tuning, "max_subtasks"),
             )
         if planned.error is not None:
@@ -530,7 +556,40 @@ class Chat:
             ),
             task_id,
         )
+        for source, source_ref in sources:
+            made = task_files.hand_over(root, source, task_id, source_ref)
+            if made:
+                self._event(
+                    t(
+                        "Task {ref} got copies of the files of task {source}: {files}",
+                        ref=ref,
+                        source=source_ref,
+                        files=", ".join(made),
+                    ),
+                    task_id,
+                )
         self._work(task_id, ref, config, models, access, interlocutor)
+
+    def _sources(self, refs: list[str]) -> list[tuple[str, str]]:
+        """The tasks of `refs` (id and short ref) that are this session's own; the others are
+        said to be left out (the interlocutor named a task the person never had here)."""
+        found: list[tuple[str, str]] = []
+        for ref in refs:
+            try:
+                row = self.store.find_task(ref)
+            except (NotFoundError, AmbiguousIdError):
+                row = None
+            if row is None or row["session_id"] != self.session_id:
+                ui.warn(
+                    t(
+                        "Task {ref} is not a task of this chat, so its files are not given.",
+                        ref=ref,
+                    )
+                )
+                continue
+            if row["id"] not in (task_id for task_id, _ in found):
+                found.append((row["id"], self.store.short_id(row["id"])))
+        return found
 
     def _resume(
         self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor
@@ -638,6 +697,8 @@ class Chat:
         for line in suggestion_lines(report.suggestions):
             ui.note(line)
         result = self.store.final_result(task_id)
+        root = workspace_root_for(self.store.conn)
+        files = task_files.for_retelling(root, task_id)
         outcome = {
             "goal": report.goal,
             "status": report.status.value,
@@ -647,6 +708,8 @@ class Chat:
                 for i in waiting
             ],
         }
+        if files:
+            outcome["files"] = files
         if report.suggestions:  # the person may ask for one: `models add`, with the window
             outcome["suggested_models"] = [
                 {
@@ -661,7 +724,6 @@ class Chat:
         try:
             with self._for(calls.Role.INTERLOCUTOR):
                 retold = interlocutor.retell(outcome)
-            self._say(retold, task_id)
         except (ProviderError, StructuredOutputError):
             if result is not None:  # the work is not lost with the retelling
                 self._event(
@@ -670,6 +732,48 @@ class Chat:
                     + json.dumps(result, ensure_ascii=False, indent=2),
                     task_id,
                 )
+        else:
+            # Code the task never produced must not reach the person as its work.
+            if unbacked_code(retold, [result, [f["content"] for f in files]]):
+                self._event(
+                    t(
+                        "The retelling showed code that task {ref} did not produce, so it is "
+                        "not shown.",
+                        ref=ref,
+                    )
+                    + (
+                        ""
+                        if result is None
+                        else "\n"
+                        + t("The result as it is:")
+                        + "\n"
+                        + json.dumps(result, ensure_ascii=False, indent=2)
+                    ),
+                    task_id,
+                )
+            else:
+                self._say(retold, task_id)
+        self._files(task_id, ref, root)
+
+    def _files(self, task_id: str, ref: str, root: Path) -> None:
+        """Where the task's files are, told by code (the interlocutor sees it as an event)."""
+        found = task_files.listing(root, task_id)
+        if not found:
+            return
+        lines = [f"  {f.path} ({_size(f.size)})" for f in found[: task_files.MAX_LISTED]]
+        more = len(found) - task_files.MAX_LISTED
+        if more > 0:
+            lines.append("  " + tn(more, "…and {n} more file", "…and {n} more files"))
+        self._event(
+            t(
+                "Files of task {ref} are in {folder}:",
+                ref=ref,
+                folder=task_files.folder(root, task_id),
+            )
+            + "\n"
+            + "\n".join(lines),
+            task_id,
+        )
 
     def _greet(self) -> None:
         if self.temporary:
@@ -1021,6 +1125,15 @@ def _paused_until(report: TaskReport) -> str | None:
 def _when(moment: str) -> str:
     """A database timestamp in the person's local time, to the minute."""
     return db.parse_iso(moment).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _size(size: int) -> str:
+    """A file's size for people (decimal units)."""
+    if size < 1_000:
+        return f"{size} B"
+    if size < 1_000_000:
+        return f"{size / 1_000:.1f} KB"
+    return f"{size / 1_000_000:.1f} MB"
 
 
 def _shorten(text: str, width: int = 50) -> str:

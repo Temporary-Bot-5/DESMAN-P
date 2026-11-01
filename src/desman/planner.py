@@ -11,7 +11,8 @@ reason is shown to the operator and kept in the audit (`task_created`, `plan`).
 
 Each subtask is tagged with its kind (`Kind`: code, text, analysis): its executor's model is
 picked by it (ROADMAP 4.5). A subtask the model leaves untagged is text; a part of a split
-subtask left untagged is of the subtask's kind.
+subtask left untagged is of the subtask's kind. A subtask that must run code is marked
+`runs_code` (`RUN_RULES`): the coordinator, not a model, then checks that it really ran.
 
 `decomposer()` splits one subtask the same way when its retries keep failing (ROADMAP 2.9b).
 
@@ -53,6 +54,14 @@ KIND_RULES = (
     'comparing, judging, working something out) or "text" (writing, answering, finding facts).'
 )
 
+RUN_RULES = (
+    " A subtask that must run code or a command and report what it printed (testing a "
+    'program, measuring, checking that something works) also gets "runs_code": true. Only '
+    "such a subtask is given a way to run anything, and it is done only once it really ran: "
+    "never plan a subtask that says what running something would print without it."
+)
+"""Not a target of the Improvement Analyst: the analyst may not loosen what code checks."""
+
 PLANNER_RULES = (
     "You split a goal into subtasks for small language models. Each subtask is done by one "
     "model call that sees only that subtask's description, its acceptance criteria and the "
@@ -69,7 +78,13 @@ value the Improvement Analyst may propose to change (`improve.TARGETS`)."""
 
 def planner_system(limit: int = MAX_SUBTASKS) -> str:
     """The planner's instructions with its limit (`Tuning.max_subtasks`, or the default)."""
-    return PLANNER_RULES + f" Never more than {limit} subtasks." + KIND_RULES + CRITERIA_RULES
+    return (
+        PLANNER_RULES
+        + f" Never more than {limit} subtasks."
+        + KIND_RULES
+        + RUN_RULES
+        + CRITERIA_RULES
+    )
 
 
 PLANNER_SYSTEM = planner_system()
@@ -83,6 +98,7 @@ class PlannedSubtask(BaseModel):
     depends_on: list[int] = Field(default_factory=list)
     kind: Kind | None = None
     """None: the model did not say (text for a planned subtask, the subtask's kind for a part)."""
+    runs_code: bool = False
 
 
 class Plan(BaseModel):
@@ -122,6 +138,7 @@ class Plan(BaseModel):
                     acceptance_criteria=sub.acceptance_criteria,
                     depends_on=sub.depends_on + unused if i == last else sub.depends_on,
                     kind=sub.kind or Kind.TEXT,
+                    runs_code=sub.runs_code,
                 )
                 for i, sub in enumerate(self.subtasks)
             ],
@@ -210,7 +227,11 @@ SPLITTER_RULES = (
 def splitter_system(limit: int = MAX_PARTS) -> str:
     """The splitter's instructions with its limit (`Tuning.max_parts`, or the default)."""
     return (
-        SPLITTER_RULES + f" Make at least 2 parts, at most {limit}." + KIND_RULES + CRITERIA_RULES
+        SPLITTER_RULES
+        + f" Make at least 2 parts, at most {limit}."
+        + KIND_RULES
+        + RUN_RULES
+        + CRITERIA_RULES
     )
 
 
@@ -241,6 +262,7 @@ class Split(BaseModel):
                     acceptance_criteria=sub.acceptance_criteria,
                     depends_on=sub.depends_on,
                     kind=sub.kind or kind,
+                    runs_code=sub.runs_code,
                 )
                 for sub in self.subtasks
             ],

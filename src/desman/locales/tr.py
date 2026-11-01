@@ -395,6 +395,12 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "{ref} görevi bir sağlayıcı sınırı nedeniyle {until} zamanına kadar duraklatıldı. `desman resume {ref}` onu sürdürür.",
     "Task {ref} is {status}.": "{ref} görevi: {status}.",
     "The model could not retell the result; here it is as it is:": "Model sonucu özetleyemedi; işte olduğu gibi:",
+    "Task {ref} got copies of the files of task {source}: {files}": "{ref} görevi, {source} görevinin dosyalarının kopyalarını aldı: {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "{ref} görevi bu sohbetin görevi değil, bu yüzden dosyaları verilmedi.",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "Özet, {ref} görevinin üretmediği bir kod gösterdi; bu yüzden gösterilmiyor.",
+    "The result as it is:": "Sonucun kendisi:",
+    "Files of task {ref} are in {folder}:": "{ref} görevinin dosyaları {folder} içinde:",
+    "…and {n} more file": ("…ve {n} dosya daha",),
     "New session. /help lists the chat's commands.": "Yeni oturum. /help sohbetin komutlarını listeler.",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "{when} tarihli oturuma devam ediliyor ({n} mesaj). /new başka bir oturum başlatır, /help sohbetin komutlarını listeler.",

@@ -1498,7 +1498,10 @@ def for_model() -> str:
     """The catalog as the interlocutor's prompt lists it."""
     lines = []
     for entry in CATALOG:
-        lines.append(f"- {entry.name} {_signature(entry.args)}: {entry.about}")
+        # A command without arguments shows none: an empty "{}" ended up in replies.
+        signature = _signature(entry.args)
+        shown = entry.name if signature == "{}" else f"{entry.name} {signature}"
+        lines.append(f"- {shown}: {entry.about}")
     return "\n".join(lines)
 
 
