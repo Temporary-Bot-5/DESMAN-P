@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 
 from desman.core import db
 from desman.llm.base import LLM, Completion, QuotaExhausted, RateLimited, Request
+from desman.llm.openai_compat import OpenAICompatible
 
 MAX_WAIT = 10.0
 """Seconds a call may wait for its turn here (as long as `router.Backoff` waits out a limit)."""
@@ -34,6 +35,11 @@ def _now() -> datetime:
 
 def _sleep(seconds: float) -> None:
     time.sleep(seconds)  # looked up at call time, so tests replace it
+
+
+class Paced(RateLimited):
+    """Raised here, before anything was sent: the bucket's own wait, not a limit the provider
+    reported (so it blocks nothing)."""
 
 
 class Buckets:
@@ -105,7 +111,12 @@ class Buckets:
 
 
 class Limited:
-    """An LLM that calls `inner` only when the bucket of `scope` gives it a token."""
+    """An LLM that calls `inner` only when the bucket of `scope` gives it a token.
+
+    The bucket counts requests sent, not calls: a client that may send several for one call (a
+    key refused, the next one tried) takes a token before each (`OpenAICompatible.pace`), and
+    every repeat of `router.Backoff`, which wraps this, is a call of its own.
+    """
 
     def __init__(
         self,
@@ -122,17 +133,27 @@ class Limited:
         self.scope = scope
         self.per_minute = per_minute
         self.sleep = sleep
+        self._per_request = isinstance(llm, OpenAICompatible)
+        if isinstance(llm, OpenAICompatible):
+            llm.pace = self.pace
 
-    def complete(self, request: Request) -> Completion:
+    def pace(self) -> None:
+        """Takes a token, waiting for it if that is short; raises `RateLimited` if it is not
+        (nothing is sent: the provider would only refuse it)."""
         waited = 0.0
         while (wait := self.buckets.take(self.scope, self.per_minute)) > 0.0:
             if waited + wait > MAX_WAIT:
-                # Not called: the provider would only refuse it. Nothing was spent.
-                raise RateLimited(self.name, retry_after=wait)
+                raise Paced(self.name, retry_after=wait)
             (self.sleep or _sleep)(wait)
             waited += wait
+
+    def complete(self, request: Request) -> Completion:
+        if not self._per_request:
+            self.pace()
         try:
             return self.inner.complete(request)
+        except Paced:
+            raise
         except RateLimited as e:
             after = DEFAULT_BLOCK if e.retry_after is None else e.retry_after
             self.buckets.block(self.scope, self.buckets.clock() + timedelta(seconds=after))

@@ -147,7 +147,9 @@ def llm_executor(llm: LLM, other: LLM | None = None) -> Executor:
             system = EXECUTOR_SYSTEM_COMBINE
         if tools:
             system += TOOLS_INSTRUCTIONS
-        request = _request(system, EXECUTE, prompt, temperature)
+        request = _request(system, EXECUTE, prompt, temperature).model_copy(
+            update={"avoid": work.unfit}
+        )
         for _round in range(MAX_TOOL_ROUNDS + 1):
             try:
                 # An error report is not cached: the next task asking the same may succeed.

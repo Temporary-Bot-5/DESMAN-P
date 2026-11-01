@@ -40,6 +40,7 @@ from desman.llm.base import (
     ProviderUnavailable,
     RateLimited,
     Request,
+    among,
 )
 from desman.llm.openai_compat import CallRecord, OpenAICompatible
 from desman.providers import Provider
@@ -184,26 +185,21 @@ def estimated_tokens(request: Request) -> int:
 class Fallback:
     """One role's models: a call goes to the first one that can take it.
 
-    A model whose context is too small for the request is skipped (unless none is large enough:
-    then each is tried anyway). A provider error moves the call to the next model, except a
-    quality one (`GenerationFailed`): that is the model's own answer, judged by the retry policy
-    (which may switch models for the next attempt). Nor does a slow failure (a timeout: more
-    than `QUICK_FAILURE` seconds), for the reason `Backoff` does not repeat one: nobody renews
-    the subtask's lease while it waits. When the models tried failed, the error raised is a
+    A model the task found unfit (`Request.avoid`) is skipped, and so is one whose context is
+    too small for the request (unless that leaves none: then the rest are tried all the same).
+    A provider error moves the call to the next model, except a quality one
+    (`GenerationFailed`): that is the model's own answer, judged by the retry policy (which may
+    switch models for the next attempt). Nor does a slow failure (`ProviderError.slow`, set by
+    `Backoff`: one call that took over `QUICK_FAILURE` seconds), for the reason `Backoff` does
+    not repeat one: nobody renews the subtask's lease while it waits. When the models tried failed, the error raised is a
     limit if any model was limited (the soonest one: the subtask pauses until then), else a
     passing one, else the first model's.
     """
 
-    def __init__(
-        self,
-        members: Sequence[tuple[LLM, Choice | None]],
-        *,
-        monotonic: Callable[[], float] = time.monotonic,
-    ) -> None:
+    def __init__(self, members: Sequence[tuple[LLM, Choice | None]]) -> None:
         if not members:
             raise ValueError("a lineup needs at least one model")
         self.members = list(members)
-        self.monotonic = monotonic
         first, choice = self.members[0]
         self.name = first.name
         self.label = first.name if choice is None else choice.label
@@ -215,17 +211,18 @@ class Fallback:
 
     def complete(self, request: Request) -> Completion:
         need = estimated_tokens(request)
-        fitting = [m for m in self.members if m[1] is None or m[1].spec.context >= need]
+        fit = [m for m in self.members if m[1] is None or not among(m[1].label, request.avoid)]
+        fit = fit or self.members
+        large = [m for m in fit if m[1] is None or m[1].spec.context >= need]
         errors: list[ProviderError] = []
-        for llm, _choice in fitting or self.members:
-            started = self.monotonic()
+        for llm, _choice in large or fit:
             try:
                 reply = llm.complete(request)
             except ProviderError as e:
                 if e.kind is FailureKind.QUALITY:
                     raise
                 errors.append(e)
-                if self.monotonic() - started > QUICK_FAILURE:
+                if e.slow:
                     break
                 continue
             self._last = (reply, llm)
@@ -301,16 +298,19 @@ class Backoff:
             started = self.monotonic()
             try:
                 return self.inner.complete(request)
-            except (ProviderTimeout, ProviderUnavailable):
-                if attempt == self.attempts or self.monotonic() - started > QUICK_FAILURE:
+            except ProviderError as e:
+                # Said of this call alone, not of the repeats before it (`Fallback` asks).
+                e.slow = self.monotonic() - started > QUICK_FAILURE
+                if not isinstance(e, (ProviderTimeout, ProviderUnavailable, RateLimited)):
                     raise
-                delay = min(MAX_DELAY, BASE_DELAY * 2 ** (attempt - 1))
-                delay *= 0.5 + self.jitter() / 2
-            except RateLimited as e:
-                if attempt == self.attempts or e.retry_after is None:
+                if attempt == self.attempts or e.slow:
                     raise
-                if e.retry_after > SHORT_LIMIT:
-                    raise
-                delay = e.retry_after
+                if isinstance(e, RateLimited):
+                    if e.retry_after is None or e.retry_after > SHORT_LIMIT:
+                        raise
+                    delay = e.retry_after
+                else:
+                    delay = min(MAX_DELAY, BASE_DELAY * 2 ** (attempt - 1))
+                    delay *= 0.5 + self.jitter() / 2
             (self.sleep or _sleep)(delay)
         raise AssertionError("unreachable")  # pragma: no cover

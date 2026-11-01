@@ -26,6 +26,7 @@ from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.llm import catalog, router
 from desman.llm.base import (
+    LLM,
     GenerationFailed,
     Message,
     ProviderTimeout,
@@ -33,6 +34,7 @@ from desman.llm.base import (
     QuotaExhausted,
     RateLimited,
     Request,
+    among,
 )
 from desman.llm.cache import Cached
 from desman.llm.fake import (
@@ -131,7 +133,7 @@ def test_a_paid_provider_is_in_a_lineup_only_by_name() -> None:
 # ── Fallback ─────────────────────────────────────────────────────────────────
 
 
-def members(*llms: FakeLLM) -> list[tuple[Any, router.Choice | None]]:
+def members(*llms: LLM) -> list[tuple[LLM, router.Choice | None]]:
     return [(llm, None) for llm in llms]
 
 
@@ -177,21 +179,56 @@ def test_when_every_model_fails_a_limit_wins_and_the_soonest_one() -> None:
         down.complete(REQUEST)
 
 
+def backed(llm: FakeLLM, clock: FakeClock) -> router.Backoff:
+    return router.Backoff(
+        llm, sleep=clock.sleep, jitter=lambda: 1.0, monotonic=lambda: clock().timestamp()
+    )
+
+
 def test_a_slow_failure_is_not_handed_on(clock: FakeClock) -> None:
     """A timeout took most of what the lease allows: the next model could outlast it."""
     second = FakeLLM("ok", name="b")
-    lineup = router.Fallback(
-        members(FakeLLM(Timeout(after=60), name="a", sleep=clock.sleep), second),
-        monotonic=lambda: clock().timestamp(),
-    )
+    slow = backed(FakeLLM(Timeout(after=60), name="a", sleep=clock.sleep), clock)
     with pytest.raises(ProviderTimeout):
-        lineup.complete(REQUEST)
+        router.Fallback(members(slow, second)).complete(REQUEST)
     assert second.calls == []
-    quick = router.Fallback(
-        members(FakeLLM(Timeout(after=1), name="a", sleep=clock.sleep), FakeLLM("ok", name="b")),
-        monotonic=lambda: clock().timestamp(),
+
+
+def test_quick_failures_are_handed_on_however_long_they_took_together(clock: FakeClock) -> None:
+    """Three quick failures and the waits between them add up to more than a slow one."""
+    flaky = FakeLLM(*[Timeout(after=6)] * 3, name="a", sleep=clock.sleep)
+    lineup = router.Fallback(members(backed(flaky, clock), FakeLLM("ok", name="b")))
+    started = clock()
+    assert lineup.complete(REQUEST).text == "ok"
+    assert len(flaky.calls) == 3 and (clock() - started).total_seconds() > 10
+
+
+def test_a_model_found_unfit_for_the_task_is_not_asked(store: Store) -> None:
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ, "GOOGLE_API_KEY": GOOGLE})
+    first, second, third = router.lineup(config, Role.EXECUTOR)[:3]
+    a, b, c = (FakeLLM(x, name=x, repeat_last=True) for x in "abc")
+    lineup = router.Fallback([(a, first), (b, second), (c, third)])
+    avoid = REQUEST.model_copy(update={"avoid": frozenset({second.label})})
+    assert lineup.complete(avoid).text == "a"
+    limited = router.Fallback(
+        [(FakeLLM(RateLimit(retry_after=600), name="a"), first), (b, second), (c, third)]
     )
-    assert quick.complete(REQUEST).text == "ok"
+    assert limited.complete(avoid).text == "c"  # not the unfit second one
+    assert b.calls == []
+    # An entry from before models were told apart names the provider: all its models are out.
+    google = router.lineup(config, Role.EXECUTOR, "google")[0]
+    g = FakeLLM("google", name="g")
+    old = REQUEST.model_copy(update={"avoid": frozenset({"groq"})})
+    assert router.Fallback([(a, first), (b, second), (g, google)]).complete(old).text == "google"
+    # When every model is unfit, they are asked all the same (the retry policy goes on by number).
+    assert router.Fallback([(a, first), (b, second)]).complete(old).text == "a"
+
+
+def test_old_unfit_entries_name_a_provider_and_still_count() -> None:
+    assert among("groq/openai/gpt-oss-20b", {"groq"})
+    assert among("groq/openai/gpt-oss-20b", {"groq/openai/gpt-oss-20b"})
+    assert not among("groq/openai/gpt-oss-120b", {"groq/openai/gpt-oss-20b"})
+    assert among("fake", {"fake"}) and not among("google/m", {"groq"})
 
 
 def test_a_model_too_small_for_the_request_is_skipped() -> None:
@@ -244,6 +281,45 @@ def test_the_pace_outlives_a_restart_and_is_shared_by_workers(
     assert Buckets(other, clock).take("google/m", 2) == pytest.approx(3600.0)
     worker.close()
     other.close()
+
+
+def test_every_request_sent_takes_a_token(store: Store, clock: FakeClock) -> None:
+    """A refused key and the next one tried, a blip and its repeat: three requests, three
+    tokens, for one call."""
+    replies = iter(
+        [
+            httpx.Response(401, json={"error": {"message": "bad key"}}),
+            httpx.Response(503, json={}),
+            ok("fine"),
+        ]
+    )
+    statuses: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = next(replies)
+        statuses.append(response.status_code)
+        return response
+
+    from desman.llm.openai_compat import OpenAICompatible
+
+    api = OpenAICompatible(
+        "groq",
+        "https://api.example/v1",
+        [GROQ, "gsk_" + "z" * 48],
+        "m",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    buckets = Buckets(store.conn, clock)
+    llm = backed_api(Limited(api, buckets, "groq/m", 60, sleep=clock.sleep), clock)
+    assert llm.complete(REQUEST).text == "fine"
+    assert statuses == [401, 503, 200]
+    # 60 a minute to begin with, three taken (the bucket refills only as the clock moves).
+    row = store.conn.execute("SELECT tokens FROM rate_buckets WHERE scope = 'groq/m'").fetchone()
+    assert row["tokens"] == pytest.approx(60 - 3 + clock.slept)
+
+
+def backed_api(llm: Limited, clock: FakeClock) -> router.Backoff:
+    return router.Backoff(llm, sleep=clock.sleep, jitter=lambda: 1.0, monotonic=lambda: 0.0)
 
 
 def test_a_short_wait_is_waited_out_a_long_one_is_not_called(
@@ -467,3 +543,40 @@ def test_a_fake_has_no_lineup() -> None:
     models = runs.Models(fake, None)
     assert models.for_(Role.REVIEWER) is fake and models.first(Role.REVIEWER) is None
     assert runs.label(fake) == fake.name
+
+
+def test_an_unfit_model_the_lineup_fell_back_to_is_not_asked_again(
+    store: Store, clock: FakeClock
+) -> None:
+    """The first model is limited, the second calls a tool natively: the next attempt skips
+    both (the first is still aside, the second unfit) instead of spending attempts on it."""
+    seen: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(sent(request))
+        model, what = seen[-1][1], seen[-1][2]
+        if model == "openai/gpt-oss-20b":
+            return httpx.Response(429, headers={"retry-after": "3600"}, json={})
+        if model == "openai/gpt-oss-120b" and what.startswith("Execute"):
+            error = {"message": "model called a tool", "code": "tool_use_failed"}
+            return httpx.Response(400, json={"error": error})
+        return ok('{"verdict": "accept"}' if what.startswith("Review") else '{"v": 1}')
+
+    models = run_models(store.conn, clock, handler)
+    task_id = store.create_task(
+        TaskSpec(goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")])
+    )
+    assert models.other is not None
+    coordinator = Coordinator(
+        store,
+        llm_executor(models.llm, models.other),
+        llm_reviewer(models.for_(Role.REVIEWER)),
+        sleep=clock.sleep,
+        strategies=strategy_for,
+        providers=(runs.label(models.llm), runs.label(models.other)),
+    )
+    assert coordinator.run(task_id).status is TaskStatus.DONE
+    assert store.unfit_providers(task_id) == {"groq/openai/gpt-oss-120b"}
+    executed = [model for _, model, what in seen if what == "Execute subtask"]
+    assert executed.count("openai/gpt-oss-120b") == 1
+    assert executed[-1] == "llama-3.3-70b-versatile"

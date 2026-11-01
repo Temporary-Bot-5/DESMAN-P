@@ -55,7 +55,7 @@ from desman.core.store import (
 )
 from desman.core.tools import Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
-from desman.llm.base import ProviderError
+from desman.llm.base import ProviderError, among
 
 S = SubtaskStatus
 
@@ -152,6 +152,9 @@ class Work(BaseModel):
     tools: Toolbox
     """The only way to act: tool calls on the task's own workspace (and, once granted, more).
     A refused or mistaken call comes back as a failed ToolResult; every call is audited."""
+    unfit: frozenset[str] = frozenset()
+    """The models an execution of this task found unfit (`Failure.unfit_provider`): an executor
+    with a lineup of models does not ask them (`Request.avoid`)."""
 
 
 Executor = Callable[[Work], Outcome]
@@ -394,7 +397,8 @@ class Coordinator:
         outcome: Outcome
         try:
             attempt = subtask.attempts.quality + 1
-            avoid = self._avoid(subtask.task_id)
+            unfit = frozenset(self.store.unfit_providers(subtask.task_id))
+            avoid = self._avoid(unfit)
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
@@ -413,6 +417,7 @@ class Coordinator:
                 context=context,
                 heartbeat=heartbeat,
                 tools=self._toolbox(subtask, journal, heartbeat),
+                unfit=unfit,
             )
             if strategy is Strategy.DECOMPOSE:
                 if self._decompose(work, lease, events):
@@ -627,15 +632,14 @@ class Coordinator:
             unfit_provider=error.label if error.unfit_model else None,
         )
 
-    def _avoid(self, task_id: str) -> dict[str, bool]:
+    def _avoid(self, unfit: frozenset[str]) -> dict[str, bool]:
         """Which of the executor's models an execution of the task found unfit (C.9): the
         other one is then not switched to; the main one is not asked while the other is fit."""
         if self.providers is None:
             return {}
-        unfit = self.store.unfit_providers(task_id)
         main, other = self.providers
-        avoid_other = other is not None and other in unfit
-        return {"avoid_main": main in unfit and not avoid_other, "avoid_other": avoid_other}
+        avoid_other = other is not None and among(other, unfit)
+        return {"avoid_main": among(main, unfit) and not avoid_other, "avoid_other": avoid_other}
 
     def _earliest(self, task_id: str | None, status: str, column: str) -> str | None:
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
