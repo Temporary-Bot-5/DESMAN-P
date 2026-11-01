@@ -512,3 +512,18 @@ def test_the_analyst_sees_how_earlier_proposals_did(checkout: Path, tmp_path: Pa
     assert real == {"models": "real", "verdict": "failed", "reason": "ittook too long"}
     assert fake["models"] == "fake" and fake["verdict"] == "worse"
     assert fake["current"] == fake["proposed"] == bench.metrics(result)
+    assert "settings" not in earlier  # it changed a prompt only
+
+
+def test_the_analyst_sees_the_values_an_earlier_proposal_gave(
+    checkout: Path, tmp_path: Path
+) -> None:
+    from test_improve import a_failure
+
+    a_failure(tmp_path)
+    s = store()
+    a_proposal(s, checkout, [Change(target="tuning.max_subtasks", value=3)])
+    spec = improve.spec(s, None)
+    assert spec is not None
+    [earlier] = spec.subtasks[0].inputs["earlier_proposals"]
+    assert earlier["settings"] == [{"setting": "tuning.max_subtasks", "old": None, "new": 3}]

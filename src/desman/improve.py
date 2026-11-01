@@ -245,6 +245,7 @@ def spec(store: Store, since: str | None, config: Config | None = None) -> TaskS
         "settings": settings_shown(config),
         "earlier_proposals": [
             {"status": p.status.value, "changed": changed(p), "summary": p.summary}
+            | settings_of(p)
             | evaluated(conn, p)
             for p in proposals.listing(conn, EARLIER)
             if p.status is not Status.ANALYSING
@@ -294,6 +295,17 @@ def _setting_shown(setting: Setting, config: Config) -> dict[str, Any]:
         low, high = TUNING_BOUNDS[setting.name]
         shown["limits"] = {"min": low, "max": high}
     return shown
+
+
+def settings_of(proposal: Proposal) -> dict[str, Any]:
+    """The values a proposal gave settings (old and new), so one that did worse is not
+    proposed again; nothing when it changed none. (A prompt's new text is long: its summary
+    says what it changed.)"""
+    found = [
+        {"setting": item.get("setting"), "old": item.get("old"), "new": item.get("new")}
+        for item in proposal.details.get("settings", [])
+    ]
+    return {"settings": found} if found else {}
 
 
 def evaluated(conn: sqlite3.Connection, proposal: Proposal) -> dict[str, Any]:
