@@ -7,7 +7,8 @@ StaleStateError instead of overwriting newer state.
 
 Readiness is computed in SQL: a PENDING subtask becomes READY once all its dependencies are DONE,
 and only READY subtasks can be claimed. A high-priority subtask waiting for its dependencies
-therefore never hides work that is ready to run.
+therefore never hides work that is ready to run. Which ready work goes first, across every
+task, is the scheduler's order (core/scheduler.py: priority aged by the wait).
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
+from desman.core.scheduler import DEFAULT_AGING, Aging
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.states import transition as check_transition
 
@@ -69,9 +71,14 @@ def _new_id() -> str:
 
 
 class Store:
-    def __init__(self, conn: sqlite3.Connection, clock: Clock = _utcnow) -> None:
+    def __init__(
+        self, conn: sqlite3.Connection, clock: Clock = _utcnow, aging: Aging = DEFAULT_AGING
+    ) -> None:
         self.conn = conn
         self.clock = clock
+        self.aging = aging
+        """How waiting work gains urgency (core/scheduler.py); every process sharing a database
+        should use the same, or they disagree on what is most urgent."""
 
     def _now(self) -> str:
         return db.to_iso(self.clock())
@@ -289,10 +296,12 @@ class Store:
         task_id: str | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> Subtask | None:
-        """Atomically take the most urgent READY subtask; None if nothing is ready.
+        """Atomically take the most urgent READY subtask of any task (or of `task_id`); None if
+        nothing is ready.
 
-        Order: priority (high first), then age, then position in the task. The returned subtask
-        carries a fresh `lease_token`; the executor must present it to leave RUNNING.
+        Order: urgency (priority aged by the wait, core/scheduler.py), then the longest wait,
+        then position in the task. The returned subtask carries a fresh `lease_token`; the
+        executor must present it to leave RUNNING.
         """
         check_transition(S.READY, S.RUNNING, Actor.EXECUTOR)
         lease_token = _new_id()
@@ -301,25 +310,36 @@ class Store:
             # Times are taken after the write lock is held: waiting for it must not eat the lease.
             lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
             self._promote_ready()
-            row = self.conn.execute(
-                f"""UPDATE subtasks
-                    SET status = 'running', lease_owner = ?, lease_token = ?, lease_until = ?,
-                        updated_at = ?
-                    WHERE id = (SELECT id FROM subtasks WHERE status = 'ready' {scope}
-                                ORDER BY priority DESC, created_at, seq LIMIT 1)
-                    RETURNING *""",
-                (owner, lease_token, lease_until, self._now(), *params),
+            now = self._now()
+            chosen = self.conn.execute(
+                f"""SELECT id, {self.aging.urgency_sql()} AS urgency FROM subtasks
+                    WHERE status = 'ready' {scope}
+                    ORDER BY urgency DESC, queued_at, seq LIMIT 1""",
+                (now, *params),
             ).fetchone()
-            if row is None:
+            if chosen is None:
                 return None
-            subtask = Subtask.from_row(row)
+            row = self.conn.execute(
+                """UPDATE subtasks
+                    SET status = 'running', lease_owner = ?, lease_token = ?, lease_until = ?,
+                        updated_at = ?, queued_at = NULL
+                    WHERE id = ? AND status = 'ready'
+                    RETURNING *""",
+                (owner, lease_token, lease_until, now, chosen["id"]),
+            ).fetchone()
+            subtask = Subtask.from_row(row)  # the write lock is held: nothing moved it
             self._audit(
                 Actor.EXECUTOR,
                 "claim",
                 subtask=subtask,
                 from_status=S.READY,
                 to_status=S.RUNNING,
-                details={"owner": owner, "lease": lease_token, "lease_until": lease_until},
+                details={
+                    "owner": owner,
+                    "lease": lease_token,
+                    "lease_until": lease_until,
+                    "urgency": chosen["urgency"],
+                },
             )
         return subtask
 
@@ -802,11 +822,23 @@ class Store:
         reviewed again without re-running the work. A reviewer reserves one first
         (`reserve_review`), so another worker does not spend a model call on the same verdict.
         """
+        return self._queue("review", limit, task_id)
+
+    def next_ready(self, *, task_id: str | None = None) -> Subtask | None:
+        """The READY subtask `claim` would take now, without taking it (another worker may)."""
+        ready = self._queue("ready", 1, task_id)
+        return ready[0] if ready else None
+
+    def urgency(self, subtask: Subtask) -> int:
+        """How urgent waiting `subtask` is now: the order `claim` and `pending_reviews` use."""
+        return self.aging.urgency(subtask.priority, subtask.queued_at, db.parse_iso(self._now()))
+
+    def _queue(self, status: str, limit: int, task_id: str | None) -> list[Subtask]:
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         rows = self.conn.execute(
-            f"""SELECT * FROM subtasks WHERE status = 'review' {scope}
-                ORDER BY priority DESC, updated_at, seq LIMIT ?""",
-            (*params, limit),
+            f"""SELECT * FROM subtasks WHERE status = ? {scope}
+                ORDER BY {self.aging.urgency_sql()} DESC, queued_at, seq LIMIT ?""",
+            (status, *params, self._now(), limit),
         ).fetchall()
         return [Subtask.from_row(r) for r in rows]
 
@@ -1042,6 +1074,9 @@ class Store:
             params += [(S.READY if src is S.RUNNING else S.REVIEW).value, paused_until]
         if src is S.PAUSED:
             sets += ["resume_status = NULL", "paused_until = NULL"]
+        # Waiting starts over in each queue it joins (core/scheduler.py ages it from here).
+        sets.append("queued_at = ?")
+        params.append(now if dst in (S.READY, S.REVIEW) else None)
         if actor is Actor.HUMAN and dst is S.READY:
             attempts = Attempts()
         if attempts is not None:

@@ -99,6 +99,8 @@ class Subtask(BaseModel):
     review_owner: str | None = None
     review_until: str | None = None
     """A review in progress: who reserved it and until when (`Store.reserve_review`)."""
+    queued_at: str | None = None
+    """When it joined the queue it is in (READY or REVIEW); the scheduler ages it from then."""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -122,4 +124,5 @@ class Subtask(BaseModel):
             parent_id=row["parent_id"],
             review_owner=row["review_owner"],
             review_until=row["review_until"],
+            queued_at=row["queued_at"],
         )
