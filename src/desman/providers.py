@@ -515,6 +515,12 @@ def describe(config: Config) -> dict[str, Any]:
         "permissions": config.permissions.model_dump(),
         "personalize": config.personalize,
         "behaviour": config.behaviour.model_dump(),
+        # Not secret: whether it is on, the registry, the providers lent and their quotas.
+        "network": {
+            "enabled": config.network.enabled,
+            "registry": config.network.registry,
+            "donated": {p: d.model_dump() for p, d in config.network.donated.items()},
+        },
         "providers": rows,
         # Saved under a name no provider uses (typo, or a provider not supported yet).
         "unknown_keys": {

@@ -566,7 +566,12 @@ def _global_status(ctx: Context, args: NoArgs) -> Outcome:
 def _global_join(ctx: Context, args: JoinArgs) -> Outcome | Proposal:
     config = ctx.config()
     address = global_cli.join_registry(config, args.registry)
-    if config.network.enabled and args.registry in (None, config.network.registry):
+    key = global_cli.usable_node_key(create=False)  # one that cannot be used is said now
+    if (
+        key is not None
+        and config.network.enabled
+        and args.registry in (None, config.network.registry)
+    ):
         ui.note(t("Already taking part in desman-global."))
         return Outcome({"changed": False, "registry": address})
 
@@ -576,7 +581,7 @@ def _global_join(ctx: Context, args: JoinArgs) -> Outcome | Proposal:
         return Outcome({"changed": joined.changed, "registry": joined.registry})
 
     lines = [t("Take part in desman-global, registry {url}.", url=address)]
-    if global_cli.node_fingerprint() is None:
+    if key is None:
         lines.append(t("This machine gets a node key of its own (shown by its fingerprint only)."))
     warnings = [t("Nothing is lent until you choose it: `desman global donate PROVIDER`.")]
     return Proposal(lines, apply, warnings)

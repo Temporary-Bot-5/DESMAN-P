@@ -1044,6 +1044,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "Условия бесплатного тарифа {name} не проверены на работу для других, поэтому его нельзя отдать.",
     "{name}: {old} → {new}": "{name}: {old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} — не адрес реестра: https://host[:port][/path].",
+    "on, registry {url}": "включено, реестр {url}",
+    "{state}; lent: {names}": "{state}; отдано: {names}",
 }
 
 CLICK: dict[str, Forms] = {

@@ -27,10 +27,15 @@ class NetworkEntry(BaseModel):
 
 def record(conn: sqlite3.Connection, action: str, details: dict[str, Any] | None = None) -> None:
     with db.transaction(conn):
-        conn.execute(
-            "INSERT INTO network_log (action, details_json) VALUES (?, ?)",
-            (action, json.dumps(details or {}, ensure_ascii=False, sort_keys=True)),
-        )
+        write(conn, action, details)
+
+
+def write(conn: sqlite3.Connection, action: str, details: dict[str, Any] | None = None) -> None:
+    """`record` inside the caller's transaction: the entry and its change commit together."""
+    conn.execute(
+        "INSERT INTO network_log (action, details_json) VALUES (?, ?)",
+        (action, json.dumps(details or {}, ensure_ascii=False, sort_keys=True)),
+    )
 
 
 def entries(conn: sqlite3.Connection) -> list[NetworkEntry]:

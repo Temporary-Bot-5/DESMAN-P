@@ -799,6 +799,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "{name} के निःशुल्क स्तर की शर्तें दूसरों की सेवा के लिए जाँची नहीं गई हैं, इसलिए इसे उधार नहीं दिया जा सकता।",
     "{name}: {old} → {new}": "{name}: {old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} रजिस्ट्री का पता नहीं है: https://host[:port][/path]।",
+    "on, registry {url}": "चालू, रजिस्ट्री {url}",
+    "{state}; lent: {names}": "{state}; उधार दिया: {names}",
 }
 
 CLICK: dict[str, Forms] = {

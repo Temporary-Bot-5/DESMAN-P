@@ -748,6 +748,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "{name}'ın ücretsiz katmanının koşulları başkalarına hizmet için kontrol edilmedi, bu yüzden ödünç verilemez.",
     "{name}: {old} → {new}": "{name}: {old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} bir kayıt adresi değil: https://host[:port][/path].",
+    "on, registry {url}": "açık, kayıt {url}",
+    "{state}; lent: {names}": "{state}; ödünç verildi: {names}",
 }
 
 CLICK: dict[str, Forms] = {

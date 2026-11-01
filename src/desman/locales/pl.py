@@ -837,6 +837,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "Warunki darmowego planu {name} nie zostały sprawdzone pod kątem pracy dla innych, więc nie można go użyczyć.",
     "{name}: {old} → {new}": "{name}: {old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} nie jest adresem rejestru: https://host[:port][/path].",
+    "on, registry {url}": "włączone, rejestr {url}",
+    "{state}; lent: {names}": "{state}; użyczono: {names}",
 }
 
 CLICK: dict[str, Forms] = {

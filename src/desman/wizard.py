@@ -10,6 +10,7 @@ saved until the end; leaving with Ctrl+C or Esc saves nothing.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -91,9 +92,9 @@ def run(manager: ConfigManager) -> None:
     config.personalize = ask_personalize(config.personalize)
     if ui.confirm(t("Set up how the interlocutor talks to you?"), default=False):
         config.behaviour = ask_behaviour(config.behaviour, config)
-    network = ask_network(config)
-    manager.save_if_unchanged(config, seen)  # a `keys add` meanwhile is not lost
-    apply_network(manager, network, was_on=config.network.enabled)
+    entries, said = network_change(config, ask_network(config))
+    save(manager, config, seen, entries)  # a `keys add` meanwhile is not lost
+    said()
 
     ui.out("")
     ui.ok(t("Configuration saved to {path}", path=manager.config_path))
@@ -121,9 +122,9 @@ def run_section(manager: ConfigManager, section: str) -> None:
     elif section == "behaviour":
         config.behaviour = ask_behaviour(config.behaviour, config)
     elif section == "network":
-        network = ask_network(config)
-        manager.save_if_unchanged(config, seen)
-        apply_network(manager, network, was_on=config.network.enabled)
+        entries, said = network_change(config, ask_network(config))
+        save(manager, config, seen, entries)
+        said()
         return
     else:
         raise ValueError(f"no wizard section {section!r}")
@@ -461,8 +462,8 @@ class NetworkChoice:
 
 
 def ask_network(config: Config) -> NetworkChoice:
-    """Whether to take part in desman-global; applied by `apply_network` once the rest is
-    saved, as `desman global join|leave` would do it."""
+    """Whether to take part in desman-global; `network_change` applies it to the config as
+    `desman global join|leave` would, and it is saved with the rest."""
     ui.section(t("desman-global"))
     ui.note(
         t(
@@ -489,10 +490,37 @@ def ask_network(config: Config) -> NetworkChoice:
         return NetworkChoice(join=True, registry=address)
 
 
-def apply_network(manager: ConfigManager, choice: NetworkChoice, *, was_on: bool) -> None:
+def network_change(
+    config: Config, choice: NetworkChoice
+) -> tuple[list[tuple[str, dict[str, Any]]], Callable[[], None]]:
+    """`config` changed as the person chose (in place), the journal entries saying how, and
+    what to tell them once it is saved. Raises before anything is saved if the node's key
+    cannot be used."""
     from desman import global_cli  # it reaches the wizard through config_cli
 
+    was_on = config.network.enabled
     if choice.join and (not was_on or choice.registry is not None):
-        global_cli.print_joined(global_cli.join(manager, choice.registry))
-    elif not choice.join and was_on:
-        global_cli.print_left(global_cli.leave(manager))
+        key = global_cli.usable_node_key()
+        assert key is not None
+        joined, entry = global_cli.joining(config, choice.registry, key)
+        return ([entry] if entry else []), lambda: global_cli.print_joined(joined)
+    if not choice.join and was_on:
+        withdrawn, entry = global_cli.leaving(config)
+        return ([entry] if entry else []), lambda: global_cli.print_left(withdrawn)
+    return [], lambda: None
+
+
+def save(
+    manager: ConfigManager,
+    config: Config,
+    seen: str | None,
+    entries: list[tuple[str, dict[str, Any]]],
+) -> None:
+    """The wizard's config, and the network's journal entries with it: both or neither."""
+    if not entries:
+        manager.save_if_unchanged(config, seen)
+        return
+    from desman import global_cli
+
+    with global_cli.journal(None) as conn:
+        global_cli.commit(conn, entries, lambda: manager.save_if_unchanged(config, seen))

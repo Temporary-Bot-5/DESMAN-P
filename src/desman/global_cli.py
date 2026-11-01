@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,8 +55,12 @@ class Status:
         }
 
 
+Entry = tuple[str, dict[str, Any]]
+"""An entry of `network_log`: action, details."""
+
+
 @contextmanager
-def _journal(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+def journal(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
     """The database whose `network_log` records the change: the caller's, or the default one."""
     if conn is not None:
         yield conn
@@ -71,6 +75,30 @@ def _journal(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
         opened.close()
 
 
+def commit(conn: sqlite3.Connection, entries: list[Entry], save: Callable[[], None]) -> None:
+    """Save the config and journal its change together: the entries are written in the
+    transaction the config is saved in, so a save that fails journals nothing."""
+    with db.transaction(conn):
+        for action, details in entries:
+            netlog.write(conn, action, details)
+        save()
+
+
+@contextmanager
+def _change(
+    manager: ConfigManager, conn: sqlite3.Connection | None
+) -> Iterator[tuple[Config, list[Entry]]]:
+    """The config to change and the entries that say how, saved and journaled together under
+    the config's lock: two commands at once journal in the order they saved. Nothing is saved
+    when the block raises or journals nothing."""
+    with journal(conn) as db_conn, manager.locked():
+        config = manager.load()
+        entries: list[Entry] = []
+        yield config, entries
+        if entries:
+            commit(db_conn, entries, lambda: manager.save(config))
+
+
 def node_fingerprint(key_path: Path | None = None) -> str | None:
     """The node's fingerprint, without creating a key; None if there is none (or it is unusable)."""
     path = sign.default_node_key_path() if key_path is None else key_path
@@ -80,6 +108,17 @@ def node_fingerprint(key_path: Path | None = None) -> str | None:
         return sign.load_node_key(path).fingerprint
     except sign.KeyFileError:
         return None
+
+
+def usable_node_key(key_path: Path | None = None, *, create: bool = True) -> sign.NodeKey | None:
+    """The node's key (created if `create` and there is none), or why it cannot be used."""
+    path = sign.default_node_key_path() if key_path is None else key_path
+    try:
+        if create:
+            return sign.node_key(path)
+        return sign.load_node_key(path) if path.exists() or path.is_symlink() else None
+    except (sign.KeyFileError, OSError) as e:
+        raise click.ClickException(t("The node's key cannot be used: {error}", error=e)) from e
 
 
 def status(config: Config, key_path: Path | None = None) -> Status:
@@ -120,6 +159,32 @@ def join_registry(config: Config, registry: str | None) -> str:
     return found
 
 
+def joining(config: Config, registry: str | None, key: sign.NodeKey) -> tuple[Joined, Entry | None]:
+    """`config` switched on (changed in place), and its journal entry if anything changed."""
+    address = join_registry(config, registry)
+    before = config.network.model_copy(deep=True)
+    config.network.enabled = True
+    if registry is not None or config.network.registry is not None:
+        config.network.registry = address
+    if config.network == before:
+        return Joined(False, address, key.fingerprint), None
+    return Joined(True, address, key.fingerprint), (
+        "joined",
+        {"node": key.fingerprint, "registry": address},
+    )
+
+
+def leaving(config: Config) -> tuple[list[str] | None, Entry | None]:
+    """`config` switched off with nothing lent (changed in place): what was lent, None if it
+    was off already; and the journal entry."""
+    if not config.network.enabled and not config.network.donated:
+        return None, None
+    withdrawn = sorted(config.network.donated)
+    config.network.enabled = False
+    config.network.donated = {}
+    return withdrawn, ("left", {"withdrawn": withdrawn})
+
+
 def join(
     manager: ConfigManager,
     registry: str | None = None,
@@ -128,34 +193,21 @@ def join(
     key_path: Path | None = None,
 ) -> Joined:
     """Switch desman-global on, with the node's key (created the first time)."""
-    with manager.edit() as config:
-        address = join_registry(config, registry)
-        before = config.network.model_copy(deep=True)
-        try:
-            key = sign.node_key(key_path)
-        except (sign.KeyFileError, OSError) as e:
-            raise click.ClickException(t("The node's key cannot be used: {error}", error=e)) from e
-        config.network.enabled = True
-        if registry is not None or config.network.registry is not None:
-            config.network.registry = address
-        changed = config.network != before
-    if changed:
-        with _journal(conn) as journal:
-            netlog.record(journal, "joined", {"node": key.fingerprint, "registry": address})
-    return Joined(changed, address, key.fingerprint)
+    with _change(manager, conn) as (config, entries):
+        join_registry(config, registry)  # a bad address creates no key
+        key = usable_node_key(key_path)
+        assert key is not None
+        joined, entry = joining(config, registry, key)
+        entries += [entry] if entry else []
+    return joined
 
 
 def leave(manager: ConfigManager, *, conn: sqlite3.Connection | None = None) -> list[str] | None:
     """Switch desman-global off and take back every module lent: what was lent, None if it
     was off already. The node's key stays."""
-    with manager.edit() as config:
-        if not config.network.enabled and not config.network.donated:
-            return None
-        withdrawn = sorted(config.network.donated)
-        config.network.enabled = False
-        config.network.donated = {}
-    with _journal(conn) as journal:
-        netlog.record(journal, "left", {"withdrawn": withdrawn})
+    with _change(manager, conn) as (config, entries):
+        withdrawn, entry = leaving(config)
+        entries += [entry] if entry else []
     return withdrawn
 
 
@@ -221,20 +273,15 @@ def donate(
     conn: sqlite3.Connection | None = None,
 ) -> Lent:
     """Lend a provider (or change the quota of one lent already)."""
-    with manager.edit() as config:
+    with _change(manager, conn) as (config, entries):
         provider = donatable(config, name)
         old = config.network.donated.get(provider.id)
         new = donation(old or DEFAULT_DONATION, calls, tokens)
         config.network.donated[provider.id] = new
-    lent = Lent(provider.id, old, new)
-    if lent.changed:
-        with _journal(conn) as journal:
-            netlog.record(
-                journal,
-                "donated" if old is None else "quota",
-                {"provider": provider.id, **new.model_dump()},
-            )
-    return lent
+        if old != new:
+            action = "donated" if old is None else "quota"
+            entries.append((action, {"provider": provider.id, **new.model_dump()}))
+    return Lent(provider.id, old, new)
 
 
 def lent_provider(config: Config, name: str) -> str:
@@ -257,23 +304,21 @@ def set_quota(
     conn: sqlite3.Connection | None = None,
 ) -> Lent:
     """Change the quota of a module lent already."""
-    with manager.edit() as config:
+    with _change(manager, conn) as (config, entries):
         lent = lent_provider(config, name)
         old = config.network.donated[lent]
         new = donation(old, calls, tokens)
         config.network.donated[lent] = new
-    if old != new:
-        with _journal(conn) as journal:
-            netlog.record(journal, "quota", {"provider": lent, **new.model_dump()})
+        if old != new:
+            entries.append(("quota", {"provider": lent, **new.model_dump()}))
     return Lent(lent, old, new)
 
 
 def undonate(manager: ConfigManager, name: str, *, conn: sqlite3.Connection | None = None) -> Lent:
-    with manager.edit() as config:
+    with _change(manager, conn) as (config, entries):
         lent = lent_provider(config, name)
         old = config.network.donated.pop(lent)
-    with _journal(conn) as journal:
-        netlog.record(journal, "undonated", {"provider": lent})
+        entries.append(("undonated", {"provider": lent}))
     return Lent(lent, old, None)
 
 

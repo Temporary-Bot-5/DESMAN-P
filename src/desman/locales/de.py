@@ -802,6 +802,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "Die Bedingungen des kostenlosen Tarifs von {name} wurden nicht auf Dienste für andere geprüft, daher kann er nicht verliehen werden.",
     "{name}: {old} → {new}": "{name}: {old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} ist keine Registry-Adresse: https://host[:port][/path].",
+    "on, registry {url}": "ein, Registry {url}",
+    "{state}; lent: {names}": "{state}; verliehen: {names}",
 }
 
 CLICK: dict[str, Forms] = {

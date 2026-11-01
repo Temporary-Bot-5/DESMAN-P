@@ -746,6 +746,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "{name} の無料プランの規約は他者へのサービスについて確認されていないため、貸し出せません。",
     "{name}: {old} → {new}": "{name}：{old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} はレジストリのアドレスではありません：https://host[:port][/path]。",
+    "on, registry {url}": "オン、レジストリ {url}",
+    "{state}; lent: {names}": "{state}、貸し出し中：{names}",
 }
 
 CLICK: dict[str, Forms] = {

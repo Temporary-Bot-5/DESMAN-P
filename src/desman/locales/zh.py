@@ -736,6 +736,8 @@ MESSAGES: dict[str, Forms] = {
     "{name}'s free tier has not been checked for serving others, so it cannot be lent.": "{name} 的免费套餐条款尚未就为他人服务进行核查，因此不能借出。",
     "{name}: {old} → {new}": "{name}：{old} → {new}",
     "{url} is not a registry address: https://host[:port][/path].": "{url} 不是注册中心地址：https://host[:port][/path]。",
+    "on, registry {url}": "已开启，注册中心 {url}",
+    "{state}; lent: {names}": "{state}；已借出：{names}",
 }
 
 CLICK: dict[str, Forms] = {

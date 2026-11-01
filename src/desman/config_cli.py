@@ -29,7 +29,7 @@ from desman.config import (
     Permissions,
     open_config,
 )
-from desman.core import calls, db
+from desman.core import calls, db, netlog
 from desman.i18n import t, tn
 from desman.llm import check
 from desman.llm.openai_compat import key_id
@@ -100,6 +100,13 @@ def config_show(as_json: bool) -> None:
     print_config(manager.config_path, out)
 
 
+def _provider_name(provider_id: str) -> str:
+    try:
+        return providers.find(provider_id).name
+    except providers.UnknownProvider:
+        return provider_id
+
+
 def print_config(path: Path, out: dict[str, Any]) -> None:
     """`providers.describe()` of the config at `path`, for the person."""
     ui.out(Text(t("Config") + "  ", style="muted") + Text(str(path)))
@@ -114,6 +121,16 @@ def print_config(path: Path, out: dict[str, Any]) -> None:
     ui.out(Text(t("Personalisation") + "  ", style="muted") + Text(notes))
     behaviour = Behaviour.model_validate(out["behaviour"])
     ui.out(Text(t("Behaviour") + "  ", style="muted") + Text(behaviour_summary(behaviour)))
+    network = out["network"]
+    state = (
+        t("on, registry {url}", url=network["registry"] or t("not known yet"))
+        if network["enabled"]
+        else t("off")
+    )
+    if network["donated"]:
+        names = ", ".join(_provider_name(p) for p in sorted(network["donated"]))
+        state = t("{state}; lent: {names}", state=state, names=names)
+    ui.out(Text(t("desman-global") + "  ", style="muted") + Text(state))
 
     rows = ui.table(t("provider"), t("status"), t("keys"), t("settings"), title=t("Providers"))
     for row in out["providers"]:
@@ -186,7 +203,26 @@ def reset_question(manager: ConfigManager) -> str:
 def reset_config(manager: ConfigManager) -> None:
     path = manager.config_path
     target = path.resolve() if path.is_symlink() else None
-    manager.delete()
+    try:
+        network = manager.load().network
+    except ConfigError:  # a broken file can always be deleted
+        network = None
+    if network is not None and (network.enabled or network.donated):
+        # Leaving desman-global with it, journaled like `desman global leave`.
+        try:
+            conn = db.open_db()
+        except (db.SchemaVersionError, db.SchemaMismatchError) as e:
+            raise click.ClickException(str(e)) from e
+        try:
+            with db.transaction(conn):
+                netlog.write(
+                    conn, "left", {"withdrawn": sorted(network.donated), "by": "config reset"}
+                )
+                manager.delete()
+        finally:
+            conn.close()
+    else:
+        manager.delete()
     ui.ok(t("Deleted {path}. Run `desman config` to set DESMAN up again.", path=path))
     if target is not None and target.exists():
         ui.warn(

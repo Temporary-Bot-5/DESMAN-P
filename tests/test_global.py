@@ -386,3 +386,91 @@ def test_leave_from_the_chat_lists_what_is_taken_back(fake: FakeLLM) -> None:
     assert "Take back: Ollama" in result.output
     assert not saved().network.enabled and network_log()[-1][0] == "left"
     assert "is not lent" in result.output
+
+
+# ── Found in review ──────────────────────────────────────────────────────────
+
+
+def test_a_save_that_fails_journals_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    configured()
+
+    def broken(self: ConfigManager, config: Config) -> None:
+        raise OSError("disk full")
+
+    with monkeypatch.context() as m:  # never undo(): it would drop conftest's directories too
+        m.setattr(ConfigManager, "save", broken)
+        assert desman("global", "join", "--registry", REGISTRY).exit_code != 0
+    assert not saved().network.enabled and network_log() == []
+
+
+def test_a_journal_that_fails_saves_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    configured(settings=OLLAMA)
+    ok("global", "join", "--registry", REGISTRY)
+
+    def broken(conn: sqlite3.Connection, action: str, details: Any = None) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as m:
+        m.setattr(netlog, "write", broken)
+        assert desman("global", "donate", "ollama").exit_code != 0
+        assert desman("global", "leave").exit_code != 0
+    assert saved().network.enabled and saved().network.donated == {}
+    assert [a for a, _ in network_log()] == ["joined"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+def test_the_wizard_saves_nothing_when_the_key_cannot_be_used() -> None:
+    sign.node_key(node_key())
+    node_key().chmod(0o644)
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", REGISTRY)
+    assert result.exit_code == 1, result.output
+    assert "The node's key cannot be used" in result.output
+    assert not default_config_path().exists() and network_log() == []
+
+
+def test_config_reset_journals_leaving() -> None:
+    configured(settings=OLLAMA)
+    ok("global", "join", "--registry", REGISTRY)
+    ok("global", "donate", "ollama")
+    ok("config", "reset", "--yes")
+    assert network_log()[-1] == ("left", {"withdrawn": ["ollama"], "by": "config reset"})
+    assert not default_config_path().exists()
+    configured()  # off: nothing more to journal
+    ok("config", "reset", "--yes")
+    assert len(network_log()) == 3
+
+
+def test_config_show_says_what_desman_global_does() -> None:
+    configured(settings=OLLAMA)
+    assert "desman-global  off" in ok("config", "show").output
+    ok("global", "join", "--registry", REGISTRY)
+    ok("global", "donate", "ollama")
+    shown = ok("config", "show").output
+    assert f"desman-global  on, registry {REGISTRY}; lent: Ollama" in shown
+    out = json.loads(ok("config", "show", "--json").output)
+    assert out["network"] == {
+        "enabled": True,
+        "registry": REGISTRY,
+        "donated": {"ollama": LENT.model_dump()},
+    }
+
+
+def test_join_from_the_chat_brings_back_a_missing_key(fake: FakeLLM) -> None:
+    configured()
+    ok("global", "join", "--registry", REGISTRY)
+    node_key().unlink()
+    fake.on(CHAT, asks("global join"))
+    result = chat("join", "y")
+    assert "This machine gets a node key of its own" in result.output
+    assert node_key().exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+def test_join_from_the_chat_says_the_key_cannot_be_used(fake: FakeLLM) -> None:
+    configured()
+    ok("global", "join", "--registry", REGISTRY)
+    node_key().chmod(0o644)
+    fake.on(CHAT, asks("global join"))
+    result = chat("join")
+    assert "The node's key cannot be used" in result.output
+    assert "Apply this change?" not in result.output
