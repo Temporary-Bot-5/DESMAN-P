@@ -85,6 +85,8 @@ src/desman/
 │                  #   tokens, limits left, state); redrawn on coordinator steps and calls
 └── core/
     ├── states.py  # Subtask state machine: statuses, who may take which edge, transition()
+    ├── scheduler.py # Urgency = priority aged by the wait in its queue (`queued_at`), up to
+    │              #   CRITICAL − 1; claim and reviews follow it across every task (4.3)
     ├── retry.py   # Failure kinds and retry policy (escalate to human, never give up silently);
     │              #   Strategy per attempt number (feedback, rephrase, other model, decompose →
     │              #   combine), audited as attempt_started; Store.decompose() makes the parts

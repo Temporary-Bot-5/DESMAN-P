@@ -351,6 +351,13 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE subtasks ADD COLUMN review_token TEXT
         CHECK ((review_token IS NULL) = (review_owner IS NULL));
     """,
+    # 18 — when a subtask joined the queue it waits in (READY to run, REVIEW for a verdict): the
+    # scheduler ages waiting work by it (core/scheduler.py). Work already waiting is taken as
+    # queued at its last change
+    """
+    ALTER TABLE subtasks ADD COLUMN queued_at TEXT;
+    UPDATE subtasks SET queued_at = updated_at WHERE status IN ('ready', 'review');
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

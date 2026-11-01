@@ -706,3 +706,24 @@ def test_v16_database_with_a_review_in_progress_upgrades_to_review_tokens(tmp_pa
     with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
         conn.execute("UPDATE subtasks SET review_token = NULL WHERE id = ?", (subtask_id,))
     conn.close()
+
+
+def test_v17_database_with_waiting_work_upgrades_to_queue_times(tmp_path: Path) -> None:
+    """Work already waiting is taken as queued at its last change; work not in a queue has no
+    queue time. The scheduler then ages it like any other."""
+    path = tmp_path / "v17.db"
+    old = _db_at_version(path, 17)
+    task_id = add_task(old)
+    stamp = "2026-01-01T00:00:00.000Z"
+    ready = add_subtask(old, task_id, 0, status="ready", updated_at=stamp)
+    review = add_subtask(old, task_id, 1, status="review", updated_at=stamp)
+    pending = add_subtask(old, task_id, 2, status="pending", updated_at=stamp)
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    store = Store(conn, clock=lambda: db.parse_iso("2026-01-01T00:05:00.000Z"))
+    assert store.get_subtask(ready).queued_at == stamp
+    assert store.get_subtask(review).queued_at == stamp
+    assert store.get_subtask(pending).queued_at is None
+    assert store.urgency(store.get_subtask(ready)) == 50 + 5 * 10
+    conn.close()

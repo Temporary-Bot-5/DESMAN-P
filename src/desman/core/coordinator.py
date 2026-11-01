@@ -310,7 +310,14 @@ class Coordinator:
         if progressed:
             self._changed()
 
+        # Reviews and executions wait in one order (core/scheduler.py): results are judged first
+        # unless work more urgent than they are is ready to run; that runs first, they wait for
+        # the next tick. Equal urgency favours the review: its execution is paid for already.
+        ready = self.store.next_ready(task_id=task_id)
+        bar = None if ready is None else self.store.urgency(ready)
         for subtask in self.store.pending_reviews(task_id=task_id):
+            if bar is not None and self.store.urgency(subtask) < bar:
+                break
             token = self.store.reserve_review(
                 subtask.id, self.owner, seconds=self.review_seconds, abandoned=self.abandoned
             )
