@@ -134,7 +134,9 @@ LOOKUP = (
 
 LOOKED_UP = (
     'The manual\'s topics you asked for are in "manual": answer from them now, in your own '
-    "plain words; another lookup is not possible in this turn. "
+    "plain words; another lookup is not possible in this turn. Edits of the profile you "
+    'gave with the lookup, if any, are in "profile_edits_given": they will be made, never '
+    "repeat them. "
 )
 
 RETELL_SYSTEM = (
@@ -209,7 +211,7 @@ class Command(Noting):
 AnyTurn = Annotated[Reply | Clarify | NewTask | Command, Field(discriminator="type")]
 
 
-class Lookup(BaseModel):
+class Lookup(Noting):
     """A turn that asks for topics of the manual before answering (C.10). Never the turn the
     chat acts on: the interlocutor asks again with their texts."""
 
@@ -269,9 +271,20 @@ class Interlocutor:
         first = complete_json(self.llm, request, FirstTurn, heading=CHAT).root
         if not isinstance(first, Lookup):
             return first
-        payload["manual"] = {name: manual.BY_NAME[name].text for name in first.topics}
+        texts = {name: manual.BY_NAME[name].text for name in first.topics}
+        # The texts take the place of older messages: the request stays as large as the first.
+        budget -= sum(estimate_tokens(text) for text in texts.values())
+        payload["conversation"] = [said(m) for m in fit(history.messages, budget)]
+        payload["manual"] = texts
+        given = first.profile if self.profile is not None else []
+        if given:
+            payload["profile_edits_given"] = [e.model_dump() for e in given]
         request = self._request(INTERLOCUTOR_SYSTEM, CHAT, payload, looked_up=True)
-        return complete_json(self.llm, request, Turn, heading=CHAT).root
+        answer = complete_json(self.llm, request, Turn, heading=CHAT).root
+        if not given:
+            return answer
+        edits = given + [e for e in answer.profile if e not in given]  # what the lookup noted
+        return answer.model_copy(update={"profile": edits[:MAX_EDITS]})
 
     def retell(self, outcome: dict[str, Any]) -> str:
         """The outcome of a task (goal, status, result, what waits for the person) in words."""

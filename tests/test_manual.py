@@ -3,10 +3,12 @@ lookup turn that reads them."""
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from typing import Any
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 
@@ -14,8 +16,9 @@ from desman import chat, commands, manual, runs
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
+from desman.core.profile import Profile
 from desman.core.sessions import Role, Sessions
-from desman.interlocutor import CHAT, LOOKED_UP, LOOKUP
+from desman.interlocutor import CHAT, LOOKED_UP, LOOKUP, Interlocutor
 from desman.llm.base import Request
 from desman.llm.fake import FakeLLM
 from helpers import make_config
@@ -25,15 +28,47 @@ from helpers import make_config
 
 @pytest.mark.parametrize("topic", manual.TOPICS, ids=lambda topic: topic.name)
 def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
-    """Whatever a topic writes in backticks is a command of the catalog (`desman keys add`),
-    one of the chat's (`/compact`), or bare `desman`: nothing it names is made up."""
+    """Whatever a topic writes in backticks is a command of the CLI and the catalog, typed as
+    it would work (`desman models show MODEL`, `desman fail SUBTASK --note TEXT`), one of the
+    chat's (`/compact`), or bare `desman`: nothing it names is made up or incomplete."""
     chat_commands = set(chat._commands())
     for quoted in re.findall(r"`([^`]*)`", topic.text):
         if quoted == "desman" or quoted in chat_commands:
             continue
         assert quoted.startswith("desman "), f"{topic.name}: `{quoted}` is not a command"
-        assert commands.find(quoted) is not None, f"{topic.name}: no command `{quoted}`"
+        words = quoted.split()[1:]
+        name = list(itertools.takewhile(lambda w: not w.startswith("-") and not w.isupper(), words))
+        entry = commands.find(" ".join(name))
+        assert entry is not None, f"{topic.name}: no command `{quoted}`"
+        command = commands.cli_command(cli, entry.name)
+        assert command is not None, f"{topic.name}: `{quoted}` is not in the CLI"
+        assert typed(command, words[len(name) :]), f"{topic.name}: `{quoted}` would not run"
     assert topic.text.count("`") % 2 == 0, f"{topic.name}: an unclosed backtick"
+
+
+def typed(command: click.Command, words: list[str]) -> bool:
+    """Whether `words` (options; upper-case placeholders for values) are what `command` takes:
+    known options, each given its value, every required argument and option there."""
+    by_opt = {o: p for p in command.params for o in (*p.opts, *p.secondary_opts)}
+    arguments = [p for p in command.params if isinstance(p, click.Argument)]
+    seen: set[str | None] = set()
+    positional = 0
+    rest = iter(words)
+    for word in rest:
+        if word.isupper():
+            positional += 1
+        elif word in by_opt:
+            option = by_opt[word]
+            seen.add(option.name)
+            takes_value = isinstance(option, click.Option) and not option.is_flag
+            if takes_value and not next(rest, "").isupper():
+                return False  # an option that takes a value, without one
+        else:
+            return False
+    needed = [p.name for p in command.params if isinstance(p, click.Option) and p.required]
+    return sum(a.required for a in arguments) <= positional <= len(arguments) and all(
+        name in seen for name in needed
+    )
 
 
 @pytest.mark.parametrize("topic", manual.TOPICS, ids=lambda topic: topic.name)
@@ -138,3 +173,36 @@ def test_after_a_lookup_another_one_is_refused(fake: FakeLLM) -> None:
     assert len(turns(fake)) == 3  # the lookup, the turn with the texts, its one repair
     assert "made no sense" in result.output
     assert said() == [(Role.USER, "tell me about tasks")]  # the message is kept
+
+
+def test_profile_edits_given_with_a_lookup_are_kept(fake: FakeLLM) -> None:
+    config = make_config(language="en", configured=True)
+    config.personalize = True
+    ConfigManager(default_config_path()).save(config)
+    lookup = {"type": "lookup", "topics": ["profile"], "profile": [{"add": "Likes it short"}]}
+    answer = {
+        "type": "reply",
+        "text": "I keep notes.",
+        "profile": [{"add": "Likes it short"}, {"add": "Asks about DESMAN"}],
+    }
+    fake.on(CHAT, json.dumps(lookup), json.dumps(answer))
+    result = talk("forget nothing; how do you note things? and be short")
+    second = turns(fake)[1]
+    assert payload(second)["profile_edits_given"] == [{"add": "Likes it short"}]
+    notes = Profile(db.open_db(db.default_db_path())).notes()
+    assert [n.text for n in notes] == ["Likes it short", "Asks about DESMAN"]  # once each
+    assert "I keep notes." in result.output
+
+
+def test_the_topics_texts_take_the_place_of_older_messages() -> None:
+    sessions = Sessions(db.open_db(":memory:"))
+    session = None
+    for n in range(40):  # far more than the interlocutor's budget
+        session = sessions.add(session, Role.USER, f"message {n} " + "word " * 80).session_id
+    assert session is not None
+    llm = FakeLLM().on(CHAT, '{"type": "lookup", "topics": ["providers", "tasks"]}', REPLY)
+    Interlocutor(llm, "en").turn(sessions.history(session, last=100))
+    first, second = turns(llm)
+    assert len(second.prompt) <= len(first.prompt) + 400  # about as large as the first
+    assert len(payload(second)["conversation"]) < len(payload(first)["conversation"])
+    assert payload(second)["conversation"][-1] == payload(first)["conversation"][-1]

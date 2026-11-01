@@ -9,7 +9,8 @@ or two with a `lookup` turn, and gets their texts with the same message again
 The manual says only what DESMAN does now: never plans (those are in ROADMAP.md, written for
 developers). A change of code that changes what a topic says changes the topic in the same
 commit. A test checks it against the code: every command it names (written `desman ...` in
-backticks) is in the catalog, every chat command (`/...`) is the chat's, and each topic fits
+backticks, with its options and upper-case placeholders for arguments) is in the CLI and the
+catalog, every chat command (`/...`) is the chat's, and each topic fits
 `TOPIC_CHARS`.
 """
 
@@ -43,7 +44,7 @@ TOPICS: Final = (
         "fails, a simple template plan is used. For each subtask an executor model does the "
         "work, then a reviewer model accepts it or rejects it with feedback. Everything is "
         "kept in a database, so work survives a crash or a closed terminal: a stopped task "
-        "continues from its last checkpoint with `desman resume`. In the chat a task runs while "
+        "continues from its last checkpoint with `desman resume TASK`. In the chat a task runs while "
         "the chat waits; Ctrl+C stops it. `desman worker` works on every unfinished task.\n"
         "Subtask states: pending (waits for the subtasks it depends on), ready, running, "
         "review (waits for the reviewer), done, paused (a provider's limit was hit; it goes "
@@ -52,8 +53,8 @@ TOPICS: Final = (
         "cancelled), cancelled.\n"
         "A task is active while the system can still move on its own, needs_human when "
         "nothing moves until the person decides, done when every subtask is done, failed or "
-        "cancelled otherwise. `desman list` lists tasks, `desman status` shows one with its "
-        "subtasks, `desman audit` its full history, `desman stats` how well tasks go.",
+        "cancelled otherwise. `desman list` lists tasks, `desman status TASK` shows one with its "
+        "subtasks, `desman audit TASK` its full history, `desman stats` how well tasks go.",
     ),
     Topic(
         "retries",
@@ -67,9 +68,9 @@ TOPICS: Final = (
         "denied permission) goes to the person at once.\n"
         "DESMAN never gives up by itself: when the attempts run out the subtask waits for the "
         "person (needs_human). `desman inbox` lists what waits, with the reason. The person "
-        "decides: `desman retry` sends it back to work with fresh attempts (a note becomes a "
-        "hint to the next attempt), `desman accept` takes it as it is, `desman fail` gives "
-        "up on it (what depends on it is blocked), `desman cancel` stops the whole task. A "
+        "decides: `desman retry SUBTASK` sends it back to work with fresh attempts (a note becomes a "
+        "hint to the next attempt), `desman accept SUBTASK` takes it as it is, `desman fail SUBTASK --note TEXT` gives "
+        "up on it (what depends on it is blocked), `desman cancel TASK` stops the whole task. A "
         "failed subtask can still be sent back with retry. The chat tells when something "
         "comes to wait; asked there, each decision is confirmed by the person in a window.",
     ),
@@ -88,10 +89,10 @@ TOPICS: Final = (
         "is limited, work pauses until a quota resets, without spending attempts. The person "
         "may choose the model a role asks first with `desman tuning`.\n"
         "A local model (Ollama or llama.cpp on the person's machine) costs nothing and has "
-        "no quota but is slow, so it comes after the cloud models. `desman models show` says "
-        "whether a Hugging Face model fits the machine's memory, `desman models add` has the "
+        "no quota but is slow, so it comes after the cloud models. `desman models show MODEL` says "
+        "whether a Hugging Face model fits the machine's memory, `desman models add MODEL` has the "
         "server download one; agents may only suggest a model.\n"
-        "Keys: added by the person into a hidden field (`desman keys add`), never written in "
+        "Keys: added by the person into a hidden field (`desman keys add PROVIDER`), never written in "
         "the chat; never shown, sent to a model or logged. `desman keys list`, `desman keys "
         "check` (does a key work, what limits; spends nothing) and `desman usage` (calls and "
         "tokens per key) show them.",
@@ -126,7 +127,7 @@ TOPICS: Final = (
         "the test harness. DESMAN keeps what the person approved of each of them. While one "
         "of them differs from the approved version (an edit, an update), no task runs at "
         "all, and the chat says so. The person looks at what changed (`desman protected "
-        "show`, with the diff) and approves the files as they are (`desman protected "
+        "show --diff`) and approves the files as they are (`desman protected "
         "approve`), after which tasks run again. Agents cannot change these files or approve "
         "them; in the chat the approval is confirmed by the person in a window, after seeing "
         "which files changed.",
@@ -140,9 +141,9 @@ TOPICS: Final = (
         "tuning (given as a `desman tuning` command). It runs as an ordinary task without "
         "tools when the person asks (`desman proposals analyze`), never on protected files, "
         "keys or permissions. Its outcome: proposed, nothing (no change worth making) or "
-        "unusable. `desman proposals list` and `desman proposals show` show proposals; a "
+        "unusable. `desman proposals list` and `desman proposals show N` show proposals; a "
         "proposal never changes once made.\n"
-        "`desman proposals evaluate` runs a fixed benchmark on the current version and on it "
+        "`desman proposals evaluate N` runs a fixed benchmark on the current version and on it "
         "with the proposal, each in a separate copy of the source, and says which went "
         "better; by default on a scripted fake model (does it still work, what its prompts "
         "cost), with real on the person's models (spends their quota). The analyst sees "
