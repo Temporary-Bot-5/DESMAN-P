@@ -501,6 +501,9 @@ MESSAGES: dict[str, Forms] = {
     "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face から {model} について予期しない応答がありました：後でもう一度試してください。",
     "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "{host} の Ollama はこのマシン上になく、暗号化されずに接続されます：途中でリクエストが読まれたり書き換えられたり（別のモデルがダウンロードされたり）する可能性があります。",
     "Ollama keeps the downloaded model even if you leave without saving.": "保存せずに終了しても、ダウンロードしたモデルは Ollama に残ります。",
+    "Suggested models (nothing is downloaded until you add one):": "提案されたモデル（追加するまで何もダウンロードされません）:",
+    "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} 用の {model}、{size}: {reason}",
+    "To use it: {command}": "使うには: {command}",
 }
 
 CLICK: dict[str, Forms] = {

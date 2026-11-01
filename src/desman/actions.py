@@ -15,13 +15,15 @@ from typing import Any
 
 import click
 
+from desman import providers
 from desman.core import db
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.models import Subtask
-from desman.core.report import InboxItem, TaskReport
+from desman.core.report import InboxItem, ModelSuggestion, TaskReport
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import StaleStateError, Store
 from desman.i18n import t, tn
+from desman.llm import hub
 
 
 def open_existing(db_path: Path | None) -> Store:
@@ -106,6 +108,49 @@ def print_report(report: TaskReport) -> None:
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
+    for text in suggestion_lines(report.suggestions):
+        click.echo(text)
+
+
+def suggestion_lines(suggestions: list[ModelSuggestion]) -> list[str]:
+    """Models an executor suggested (ROADMAP 4.5b), with the command that adds one: nothing is
+    downloaded until the person runs it (or says "yes" in the chat's window)."""
+    if not suggestions:
+        return []
+    lines = [t("Suggested models (nothing is downloaded until you add one):")]
+    for s in suggestions:
+        lines.append(
+            "  "
+            + t(
+                "[{seq}] {model} for {server}, {size}: {reason}",
+                seq=s.seq,
+                model=s.model,
+                server=providers.find(s.server).name,
+                size=hub.size_text(s.size),
+                reason=one_line(s.reason, 200),
+            )
+        )
+        if s.fits is False:
+            lines.append(
+                "    "
+                + t("It does not fit in the free memory: it would run very slowly, or not at all.")
+            )
+        if s.gated:
+            page = hub.Ref(s.model.split(":", 1)[0]).page
+            lines.append(
+                "    "
+                + t(
+                    "{model} is gated: accept its license at {url}, then add a Hugging Face "
+                    "token with `desman keys add huggingface`.",
+                    model=s.model,
+                    url=page,
+                )
+            )
+        lines.append(
+            "    "
+            + t("To use it: {command}", command=f"desman models add {s.model} --server {s.server}")
+        )
+    return lines
 
 
 def print_summaries(summaries: list[TaskReport]) -> None:

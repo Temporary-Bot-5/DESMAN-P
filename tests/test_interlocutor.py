@@ -19,6 +19,7 @@ from desman.config import Config, ConfigManager, default_config_path
 from desman.core import db
 from desman.core.sessions import Kind, Message, Role, Sessions
 from desman.interlocutor import CHAT, RETELL, fit
+from desman.llm import hub
 from desman.llm.base import Request
 from desman.llm.fake import FakeLLM, Rejected, garbage
 from helpers import make_config
@@ -352,3 +353,45 @@ def test_the_session_s_tasks_share_one_web_client_closed_with_the_chat(
     )
     chat("find flights", "and once more")
     assert len(made) == 1 and made[0].is_closed
+
+
+def test_a_suggested_model_is_shown_and_retold(
+    fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ROADMAP 4.5b: the executor's suggestion reaches the person; nothing is downloaded."""
+    config = make_config(language="en", configured=True)
+    config.permissions.network_access = True
+    ConfigManager(default_config_path()).save(config)
+    repo = "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+    found = hub.Gguf(hub.Ref(repo, "Q4_K_M"), ("q4.gguf",), 4_700_000_000, False, ("Q4_K_M",))
+    asked: list[str] = []
+
+    def inspect(ref: hub.Ref, client: httpx.Client, token: str | None = None) -> hub.Gguf:
+        asked.append(ref.spec)
+        assert token is None  # the person's token never serves an agent's lookup
+        return found
+
+    monkeypatch.setattr(hub, "inspect", inspect)
+    monkeypatch.setattr(hub, "memory", lambda: hub.Memory(ram=16_000_000_000, video=None))
+    suggest = {"model": repo, "reason": "it writes code well"}
+    fake.on(CHAT, TASK_TURN).on("Plan task", PLAN).on(
+        "Execute subtask",
+        json.dumps({"tool_calls": [{"tool": "suggest_model", "args": suggest}]}),
+        json.dumps(RESULT),
+    ).on("Review subtask", ACCEPT).on(RETELL, '{"text": "Done; a local model is suggested."}')
+    result = chat("find cheap flights to Lisbon")
+    assert asked == [repo]
+    assert "Suggested models" in result.output
+    assert f"desman models add {repo}:Q4_K_M --server ollama" in result.output
+    [retold] = calls(fake, RETELL)
+    assert payload(retold)["suggested_models"] == [
+        {
+            "model": f"{repo}:Q4_K_M",
+            "server": "ollama",
+            "reason": "it writes code well",
+            "size": "4.7 GB",
+            "fits_in_free_memory": True,
+        }
+    ]
+    saved = ConfigManager(default_config_path()).load()
+    assert "OLLAMA_MODEL" not in saved.settings  # only the person's "yes" sets it

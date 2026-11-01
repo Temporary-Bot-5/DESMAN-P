@@ -536,6 +536,9 @@ MESSAGES: dict[str, Forms] = {
     "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face ने {model} के बारे में कुछ अनपेक्षित उत्तर दिया: बाद में फिर कोशिश करें।",
     "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "{host} पर Ollama इस मशीन पर नहीं है और उस तक बिना एन्क्रिप्शन के पहुँचा जाता है: रास्ते में अनुरोध पढ़ा या बदला जा सकता है (कोई और मॉडल डाउनलोड हो सकता है)।",
     "Ollama keeps the downloaded model even if you leave without saving.": "बिना सहेजे बाहर निकलने पर भी Ollama डाउनलोड किया गया मॉडल रखता है।",
+    "Suggested models (nothing is downloaded until you add one):": "सुझाए गए मॉडल (जब तक आप कोई जोड़ें नहीं, कुछ भी डाउनलोड नहीं होता):",
+    "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} के लिए {model}, {size}: {reason}",
+    "To use it: {command}": "इस्तेमाल करने के लिए: {command}",
 }
 
 CLICK: dict[str, Forms] = {

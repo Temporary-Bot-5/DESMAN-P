@@ -499,6 +499,9 @@ MESSAGES: dict[str, Forms] = {
     "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face가 {model}에 대해 예상치 못한 응답을 했습니다: 나중에 다시 시도하세요.",
     "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "{host}의 Ollama는 이 컴퓨터에 있지 않고 암호화 없이 연결됩니다: 도중에 요청을 읽거나 바꿀 수 있습니다(다른 모델이 내려받아짐).",
     "Ollama keeps the downloaded model even if you leave without saving.": "저장하지 않고 나가도 Ollama는 내려받은 모델을 유지합니다.",
+    "Suggested models (nothing is downloaded until you add one):": "제안된 모델 (추가하기 전에는 아무것도 다운로드되지 않습니다):",
+    "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server}용 {model}, {size}: {reason}",
+    "To use it: {command}": "사용하려면: {command}",
 }
 
 CLICK: dict[str, Forms] = {

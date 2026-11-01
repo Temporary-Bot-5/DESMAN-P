@@ -33,7 +33,7 @@ from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Sto
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
-from desman.llm import router
+from desman.llm import hub, router
 from desman.llm.base import LLM
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
@@ -214,11 +214,16 @@ def coordinator(
     http: httpx.Client | None = None,
     watch: Callable[[], None] | None = None,
 ) -> Coordinator:
+    http = client() if http is None else http
     return _coordinator(
         store,
         models,
         access=access,
-        tools=builtin_registry(web=web(config, store, http)),
+        tools=builtin_registry(
+            web=web(config, store, http),
+            # Without the person's token: see `core.tools.suggest_model_tool`.
+            models=lambda ref: hub.inspect(ref, http),
+        ),
         lease_seconds=lease_seconds,
         watch=watch,
     )

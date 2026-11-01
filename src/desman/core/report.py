@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +39,25 @@ class SubtaskReport(BaseModel):
     """Why it reached its current status, from the audit log (e.g. the escalation reason)."""
 
 
+class ModelSuggestion(BaseModel):
+    """A model an executor suggested with `suggest_model` (ROADMAP 4.5b): only a record; the
+    person adds it if they want it (`desman models add`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    seq: int
+    """The subtask whose executor suggested it."""
+    model: str
+    """`author/model:quant` on Hugging Face."""
+    server: Literal["ollama", "llamacpp"]
+    reason: str
+    size: int
+    memory: int
+    fits: bool | None
+    """In the free memory of the machine that ran the subtask, then; None: unknown."""
+    gated: bool
+
+
 class TaskReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -50,6 +70,9 @@ class TaskReport(BaseModel):
     total: int
     subtasks: list[SubtaskReport] = Field(default_factory=list)
     """Filled by `task_report`; empty in `task_summaries`."""
+    suggestions: list[ModelSuggestion] = Field(default_factory=list)
+    """Models suggested while it ran, one per model and server (the latest); filled by
+    `task_report`."""
 
 
 def task_report(store: Store, task_id: str) -> TaskReport:
@@ -78,7 +101,28 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     reason=reason,
                 )
             )
-        return _report(row, [s.status for s in subtasks], reports)
+        report = _report(row, [s.status for s in subtasks], reports)
+        return report.model_copy(update={"suggestions": suggestions(store, row["id"], seq_of)})
+
+
+def suggestions(store: Store, task_id: str, seq_of: dict[str, int]) -> list[ModelSuggestion]:
+    """The `model_suggested` entries of the task's audit, the latest per model and server."""
+    found: dict[tuple[str, str], ModelSuggestion] = {}
+    for subtask_id, details in store.conn.execute(
+        """SELECT subtask_id, details_json FROM audit_log
+           WHERE task_id = ? AND action = 'model_suggested' ORDER BY seq""",
+        (task_id,),
+    ):
+        try:
+            suggestion = ModelSuggestion.model_validate(
+                {**json.loads(details), "seq": seq_of[subtask_id]}
+            )
+        except ValueError:  # ValidationError is one
+            continue  # written by the tool itself; an entry it cannot have written is skipped
+        key = (suggestion.model, suggestion.server)
+        found.pop(key, None)  # the latest goes last
+        found[key] = suggestion
+    return list(found.values())
 
 
 def task_summaries(

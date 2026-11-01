@@ -42,6 +42,7 @@ import httpx
 from rich.text import Text
 
 from desman import commands, compaction, config_cli, providers, runs, ui, wizard
+from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -65,7 +66,7 @@ from desman.interlocutor import (
     excerpt,
 )
 from desman.live import Progress
-from desman.llm import router
+from desman.llm import hub, router
 from desman.llm.base import ProviderError
 from desman.llm.structured import StructuredOutputError
 from desman.planner import plan
@@ -565,6 +566,8 @@ class Chat:
                     ref=ref,
                 )
             )
+        for line in suggestion_lines(report.suggestions):
+            ui.note(line)
         result = self.store.final_result(task_id)
         outcome = {
             "goal": report.goal,
@@ -575,6 +578,17 @@ class Chat:
                 for i in waiting
             ],
         }
+        if report.suggestions:  # the person may ask for one: `models add`, with the window
+            outcome["suggested_models"] = [
+                {
+                    "model": s.model,
+                    "server": s.server,
+                    "reason": s.reason,
+                    "size": hub.size_text(s.size),
+                    "fits_in_free_memory": s.fits,
+                }
+                for s in report.suggestions
+            ]
         try:
             with self._for(calls.Role.INTERLOCUTOR):
                 retold = interlocutor.retell(outcome)

@@ -493,6 +493,9 @@ MESSAGES: dict[str, Forms] = {
     "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face 关于 {model} 的回答出乎意料：请稍后再试。",
     "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "位于 {host} 的 Ollama 不在本机，且连接未加密：请求在途中可能被读取或篡改（下载成另一个模型）。",
     "Ollama keeps the downloaded model even if you leave without saving.": "即使不保存就退出，Ollama 也会保留已下载的模型。",
+    "Suggested models (nothing is downloaded until you add one):": "建议的模型（在您添加之前不会下载任何内容）：",
+    "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {model}（用于 {server}），{size}：{reason}",
+    "To use it: {command}": "使用方法：{command}",
 }
 
 CLICK: dict[str, Forms] = {
