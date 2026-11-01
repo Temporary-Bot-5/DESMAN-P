@@ -11,7 +11,12 @@ from click.testing import CliRunner, Result
 
 from desman.cli import EXIT_DONE, EXIT_NEEDS_HUMAN, cli
 from desman.core import calls, db
+from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.retry import FailureKind
+from desman.core.states import Actor
+from desman.core.states import SubtaskStatus as S
 from desman.core.stats import collect
+from desman.core.store import Store
 from desman.llm.openai_compat import CallRecord
 
 ACCEPT = '{"verdict": "accept"}'
@@ -134,3 +139,60 @@ def test_stats_for_the_person(tmp_path: Path) -> None:
 def test_stats_without_a_database_says_so() -> None:
     result = desman("stats")
     assert result.exit_code == 1 and "no database" in result.output
+
+
+def test_a_review_to_be_tried_again_counts_as_failed() -> None:
+    """A transient reviewer failure below the limit keeps the subtask in review
+    (`review_interrupted`); past the limit it costs the attempt (`review_failed`)."""
+    store = Store(db.open_db(db.default_db_path()))
+    try:
+        task_id = store.create_task(
+            TaskSpec(goal="g", subtasks=[SubtaskSpec(description="s", acceptance_criteria="ok")])
+        )
+        claimed = store.claim("w", task_id=task_id)
+        assert claimed is not None and claimed.lease_token is not None
+        store.submit(claimed.id, claimed.lease_token, {"x": 1})
+        token = store.reserve_review(claimed.id, "w")
+        store.record_failure(
+            claimed.id,
+            S.REVIEW,
+            Actor.REVIEWER,
+            FailureKind.TRANSIENT,
+            reason="timeout",
+            action="review_failed",
+            review=token,
+        )
+        result = collect(store.conn)
+        actions = [r[0] for r in store.conn.execute("SELECT action FROM audit_log")]
+    finally:
+        store.conn.close()
+    assert "review_interrupted" in actions and "review_failed" not in actions
+    assert result.reviews == {"failed": 1} and result.failures == {"transient": 1}
+
+
+def test_work_on_an_older_task_is_shown_for_a_window(tmp_path: Path) -> None:
+    """The task was created before the window, its review came in it: not "nothing ran"."""
+    store = Store(db.open_db(db.default_db_path()))
+    try:
+        task_id = store.create_task(
+            TaskSpec(goal="g", subtasks=[SubtaskSpec(description="s", acceptance_criteria="ok")])
+        )
+        store.conn.execute(
+            "UPDATE tasks SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ?", (task_id,)
+        )
+        claimed = store.claim("w", task_id=task_id)
+        assert claimed is not None and claimed.lease_token is not None
+        store.submit(claimed.id, claimed.lease_token, {"x": 1})
+        store.transition(
+            claimed.id,
+            S.REVIEW,
+            S.DONE,
+            Actor.REVIEWER,
+            details={"verdict": "accept"},
+            action="verdict",
+        )
+    finally:
+        store.conn.close()
+    shown = desman("stats", "--since", "1h")
+    assert shown.exit_code == 0, shown.output
+    assert "Nothing ran" not in shown.output and "Reviews: accept 1." in shown.output

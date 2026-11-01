@@ -81,7 +81,8 @@ class Stats:
     subtasks: SubtaskCounts = field(default_factory=SubtaskCounts)
     strategies: list[StrategyUse] = field(default_factory=list)
     reviews: dict[str, int] = field(default_factory=dict)
-    """Verdicts (accept, retry, escalate) and reviews that failed to give one ("failed")."""
+    """Verdicts (accept, retry, escalate) and reviews that failed to give one ("failed"):
+    those that cost an attempt and those to be tried again (`review_interrupted`)."""
     failures: dict[str, int] = field(default_factory=dict)
     """Failed attempts and reviews, by `FailureKind`."""
     roles: list[RoleUse] = field(default_factory=list)
@@ -89,6 +90,19 @@ class Stats:
 
     def as_json(self) -> dict[str, Any]:
         return asdict(self)
+
+    @property
+    def empty(self) -> bool:
+        """Nothing happened in the window: no task created, no attempt, review, failure or
+        model call (an older task may still have been worked on in it)."""
+        return not (
+            self.tasks
+            or self.subtasks.total
+            or self.strategies
+            or self.reviews
+            or self.failures
+            or self.roles
+        )
 
 
 def collect(conn: sqlite3.Connection, since: datetime | None = None) -> Stats:
@@ -190,10 +204,10 @@ def _reviews(conn: sqlite3.Connection, start: str | None) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for action, details_json in conn.execute(
         f"""SELECT action, details_json FROM audit_log
-            WHERE action IN ('verdict', 'review_failed') AND {where}""",
+            WHERE action IN ('verdict', 'review_failed', 'review_interrupted') AND {where}""",
         args,
     ):
-        if action == "review_failed":
+        if action != "verdict":
             counts["failed"] += 1
         else:
             counts[str(json.loads(details_json).get("verdict", "?"))] += 1

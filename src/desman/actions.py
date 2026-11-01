@@ -394,7 +394,7 @@ def print_stats(stats: Stats, since: str) -> None:
             style="bold accent",
         )
     )
-    if not stats.tasks and not stats.roles:
+    if stats.empty:
         ui.note(t("Nothing has run yet.") if everything else t("Nothing ran in that time."))
         return
     if stats.tasks:
