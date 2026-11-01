@@ -22,6 +22,7 @@ from desman.core.audit import AuditEntry, check_history, history
 from desman.core.models import Subtask
 from desman.core.report import InboxItem, ModelSuggestion, TaskReport
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
+from desman.core.stats import Stats
 from desman.core.store import StaleStateError, Store
 from desman.i18n import t, tn
 from desman.llm import hub
@@ -401,3 +402,111 @@ def print_cancelled(result: Cancelled) -> None:
             status=result.status,
         )
     )
+
+
+# ── stats ────────────────────────────────────────────────────────────────────
+
+
+def print_stats(stats: Stats, since: str) -> None:
+    """`desman stats` for the person (ROADMAP 5.2); `since` as they gave it (e.g. 7d, all)."""
+    everything = since == "all"
+    ui.out(
+        Text(
+            t("Stats (all time)") if everything else t("Stats (last {since})", since=since),
+            style="bold accent",
+        )
+    )
+    if stats.empty:
+        ui.note(t("Nothing has run yet.") if everything else t("Nothing ran in that time."))
+        return
+    if stats.tasks:
+        ui.out(
+            tn(
+                sum(stats.tasks.values()),
+                "{n} task: {statuses}.",
+                "{n} tasks: {statuses}.",
+                statuses=_counts(stats.tasks),
+            )
+        )
+    sub = stats.subtasks
+    if sub.total:
+        ui.out(
+            t(
+                "Subtasks: {total}. Done: {done}, on the first try: {first} ({share}).",
+                total=sub.total,
+                done=sub.done,
+                first=sub.first_try,
+                share=_share(sub.first_try, sub.done),
+            )
+        )
+        ui.out(
+            t(
+                "Retried: {retried}, escalated to you: {escalated}, split into parts: {split}.",
+                retried=sub.retried,
+                escalated=sub.escalated,
+                split=sub.split,
+            )
+        )
+    if stats.reviews:
+        ui.out(t("Reviews: {verdicts}.", verdicts=_counts(stats.reviews)))
+    if stats.failures:
+        ui.out(t("Failures by kind: {kinds}.", kinds=_counts(stats.failures)))
+    if stats.strategies:
+        table = ui.table(t("strategy"), t("attempts"), t("accepted"), "%", title=t("Attempts"))
+        for use in stats.strategies:
+            table.add_row(
+                use.strategy, str(use.started), str(use.accepted), _share(use.accepted, use.started)
+            )
+        ui.out("")
+        ui.out(table)
+    if stats.roles:
+        table = ui.table(
+            t("role"),
+            t("calls"),
+            t("failed"),
+            t("tokens in"),
+            t("tokens out"),
+            title=t("Model calls by role"),
+        )
+        for role in stats.roles:
+            table.add_row(
+                role.role,
+                str(role.calls),
+                Text(str(role.failed), style="bad" if role.failed else "muted"),
+                f"{role.prompt_tokens:,}",
+                f"{role.completion_tokens:,}",
+            )
+        ui.out("")
+        ui.out(table)
+        table = ui.table(
+            t("provider"),
+            t("model"),
+            t("calls"),
+            t("failed"),
+            t("limited"),
+            t("tokens in"),
+            t("tokens out"),
+            t("average time"),
+            title=t("Model calls by model"),
+        )
+        for m in stats.models:
+            table.add_row(
+                m.provider,
+                m.model,
+                str(m.calls),
+                Text(str(m.failed), style="bad" if m.failed else "muted"),
+                Text(str(m.limited), style="warn" if m.limited else "muted"),
+                f"{m.prompt_tokens:,}",
+                f"{m.completion_tokens:,}",
+                f"{m.latency_ms / 1000:.1f} s",
+            )
+        ui.out("")
+        ui.out(table)
+
+
+def _counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{name} {n}" for name, n in counts.items())
+
+
+def _share(part: int, whole: int) -> str:
+    return f"{round(100 * part / whole)}%" if whole else "-"

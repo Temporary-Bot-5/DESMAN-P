@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -23,6 +24,7 @@ from desman.config_cli import (
     keys,
     language,
     load_config,
+    parse_window,
     permissions,
     personalize,
     run_wizard,
@@ -35,6 +37,7 @@ from desman.core.policy import Access
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report, task_summaries
 from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
+from desman.core.stats import collect
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
 from desman.i18n import t, tn
 from desman.info import print_project_info
@@ -713,6 +716,30 @@ def _has_paused(report: TaskReport) -> bool:
 
 
 # ── Operator decisions (a minimal subset of ROADMAP 5.1) ─────────────────────
+
+
+@cli.command("stats")
+@click.option(
+    "--since",
+    default="all",
+    show_default=True,
+    help="Window: e.g. 30m, 24h, 7d, or 'all'.",
+)
+@db_option
+@json_option
+def stats_command(since: str, db_path: Path | None, as_json: bool) -> None:
+    """How well tasks go: success, retries, reviews, failures, model calls and tokens by role
+    and by provider and model. A window counts what happened in it (tasks created since)."""
+    window = parse_window(since)
+    store = open_existing(db_path)
+    try:
+        result = collect(store.conn, None if window is None else datetime.now(UTC) - window)
+    finally:
+        store.conn.close()
+    if as_json:
+        click.echo(json.dumps(result.as_json(), ensure_ascii=False, indent=2))
+        return
+    actions.print_stats(result, since)
 
 
 @cli.command("inbox")
