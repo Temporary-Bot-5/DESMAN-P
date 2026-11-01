@@ -18,7 +18,8 @@ an *assignment* names an operator's key, its scopes and its term; releases are s
 root only. An operator signs tasks (scope `tasks`), moderation decisions and revocations of
 nodes (scope `moderation`), only while its assignment runs and is not revoked. A *revocation*
 names a key: nothing that key signed, nor anything resting on its assignment, is accepted from
-then on. The root itself cannot be revoked; replacing it is a change of `root.pub`.
+then on. The root itself cannot be revoked; replacing it is a change of `root.pub`. An
+operator's revocation of a key the root assigns afterwards gives way to the assignment.
 
 `Trust.receive()` is where a record enters: schema, signer, signature, authority, time, replay
 — and only a record that passed all of it is returned. Any failure is `Refused`, with a `Reason`
@@ -134,22 +135,38 @@ def create_node_key(path: Path) -> NodeKey:
         serialization.NoEncryption(),
     )
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    # Written whole under another name, then linked into place: a failed write leaves no
+    # half-written key behind, and the link fails if the file is there already.
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        if os.name != "nt":
-            os.fchmod(fd, 0o600)
-        os.write(fd, pem)
-        os.fsync(fd)
+        try:
+            if os.name != "nt":
+                os.fchmod(fd, 0o600)
+            os.write(fd, pem)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.link(tmp, path)
     finally:
-        os.close(fd)
+        tmp.unlink(missing_ok=True)
     return key
 
 
 def load_node_key(path: Path) -> NodeKey:
-    if os.name != "nt" and path.stat().st_mode & 0o077:
-        raise KeyFileError(f"{path} may be read by others; only its owner may (chmod 600 {path})")
+    # The permissions checked are those of the file read: one descriptor, never a link.
     try:
-        private = serialization.load_pem_private_key(path.read_bytes(), password=None)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as e:
+        raise KeyFileError(f"{path} cannot be opened (it must be a plain file): {e}") from e
+    with os.fdopen(fd, "rb") as file:
+        if os.name != "nt" and os.fstat(fd).st_mode & 0o077:
+            raise KeyFileError(
+                f"{path} may be read by others; only its owner may (chmod 600 {path})"
+            )
+        data = file.read()
+    try:
+        private = serialization.load_pem_private_key(data, password=None)
     except (ValueError, TypeError) as e:
         raise KeyFileError(f"{path} is not a private key: {e}") from e
     if not isinstance(private, Ed25519PrivateKey):
@@ -408,7 +425,20 @@ class MemorySeen:
 class Operator:
     key: Ed25519PublicKey
     scopes: frozenset[Scope]
-    assignment: Record
+    issued_at: datetime
+    expires_at: datetime
+    """The term of its latest assignment."""
+
+    def renewed(self, other: Operator) -> Operator:
+        """The later assignment counts; two of the same second, only what both allow."""
+        if other.issued_at != self.issued_at:
+            return other if other.issued_at > self.issued_at else self
+        return Operator(
+            self.key,
+            self.scopes & other.scopes,
+            self.issued_at,
+            min(self.expires_at, other.expires_at),
+        )
 
 
 def _utc_now() -> datetime:
@@ -430,7 +460,8 @@ class Trust:
         self._clock = clock
         self._seen: Seen = MemorySeen() if seen is None else seen
         self._operators: dict[str, Operator] = {}
-        self._revoked: set[str] = set()
+        self._revoked: dict[str, set[str]] = {}
+        """Revoked keys, with the keys that signed their revocations."""
         self._state: dict[str, bytes] = {}
         """Assignments and revocations accepted, by id: the canonical form of the signed record."""
 
@@ -450,9 +481,13 @@ class Trust:
             return Refused(reason, detail, id=record.id, signer=record.signer)
 
         if record.kind in STATE and record.id in self._state:
-            # Checked when it first came; the same bytes again change nothing.
+            # Its signature was checked when it first came, and its effect is in place; but
+            # what happened since (revocations, assignments) applies to it like to any other.
             if self._state[record.id] != canonical(signed.model_dump(mode="json")):
                 raise refuse(Reason.CONFLICT, "another record has this id")
+            if record.signer in self._revoked:
+                raise refuse(Reason.REVOKED, "the signer's key is revoked")
+            self._check_body(record)
             return record
 
         if record.signer in self._revoked:
@@ -469,17 +504,16 @@ class Trust:
 
         if isinstance(body, Assignment):
             target = body.fingerprint
-            if target in self._revoked:
-                raise refuse(Reason.REVOKED, "the assigned key is revoked")
-            if target == self.root_fingerprint:
-                raise refuse(Reason.NOT_ALLOWED, "the root is not an operator")
+            # An operator may not revoke an operator; one that did before the assignment came
+            # is overruled by the root's assignment.
+            self._revoked.pop(target, None)
+            new = Operator(
+                decode_public(body.key), body.scopes, record.issued_at, record.expires_at
+            )
             current = self._operators.get(target)
-            if current is None or current.assignment.issued_at <= record.issued_at:
-                self._operators[target] = Operator(
-                    decode_public(body.key), body.scopes, assignment=record
-                )
+            self._operators[target] = new if current is None else current.renewed(new)
         elif isinstance(body, Revocation):
-            self._revoked.add(body.key)
+            self._revoked.setdefault(body.key, set()).add(record.signer)
             self._operators.pop(body.key, None)
         elif not self._seen.add(record.id, record.expires_at, now):
             raise refuse(Reason.REPLAY, "this record was already received")
@@ -508,8 +542,7 @@ class Trust:
         def refuse(reason: Reason, detail: str) -> Refused:
             return Refused(reason, detail, id=record.id, signer=record.signer)
 
-        found = self._operators[record.signer]
-        term = found.assignment
+        term = found = self._operators[record.signer]
         needed = OPERATOR_KINDS.get(record.kind)
         if needed is None or needed not in found.scopes:
             raise refuse(Reason.NOT_ALLOWED, f"an operator without it may not sign {record.kind}")
@@ -519,18 +552,25 @@ class Trust:
             raise refuse(Reason.EXPIRED, "the operator's assignment has expired")
 
     def _check_body(self, record: Record) -> Assignment | Revocation | None:
+        def refuse(reason: Reason, detail: str) -> Refused:
+            return Refused(reason, detail, id=record.id, signer=record.signer)
+
         try:
             if record.kind is RecordKind.ASSIGNMENT:
-                return Assignment.model_validate(record.body)
+                assignment = Assignment.model_validate(record.body)
+                target = assignment.fingerprint
+                if target == self.root_fingerprint:
+                    raise refuse(Reason.NOT_ALLOWED, "the root is not an operator")
+                if self.root_fingerprint in self._revoked.get(target, ()):
+                    raise refuse(Reason.REVOKED, "the assigned key is revoked")
+                return assignment
             if record.kind is RecordKind.REVOCATION:
-                body = Revocation.model_validate(record.body)
-                if body.key == self.root_fingerprint:
-                    raise Refused(Reason.NOT_ALLOWED, "the root cannot be revoked", id=record.id)
-                if record.signer != self.root_fingerprint and body.key in self._operators:
-                    raise Refused(
-                        Reason.NOT_ALLOWED, "only the root revokes an operator", id=record.id
-                    )
-                return body
+                revocation = Revocation.model_validate(record.body)
+                if revocation.key == self.root_fingerprint:
+                    raise refuse(Reason.NOT_ALLOWED, "the root cannot be revoked")
+                if record.signer != self.root_fingerprint and revocation.key in self._operators:
+                    raise refuse(Reason.NOT_ALLOWED, "only the root revokes an operator")
+                return revocation
         except (ValidationError, KeyFileError) as e:
-            raise Refused(Reason.MALFORMED, str(e), id=record.id, signer=record.signer) from e
+            raise refuse(Reason.MALFORMED, str(e)) from e
         return None

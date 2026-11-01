@@ -362,3 +362,102 @@ def test_check_signature_names_the_key_it_expects(clock: FakeClock) -> None:
 
 def test_the_shipped_root_is_an_ed25519_key() -> None:
     assert len(sign.fingerprint(sign.load_root())) == 64
+
+
+# ── Found in review ──────────────────────────────────────────────────────────
+
+
+def test_a_failed_write_leaves_no_key_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / sign.NODE_KEY
+
+    def broken(fd: int, data: bytes) -> int:
+        raise OSError("disk full")
+
+    with monkeypatch.context() as m:
+        m.setattr(os, "write", broken)
+        with pytest.raises(OSError, match="disk full"):
+            sign.node_key(path)
+    assert list(tmp_path.iterdir()) == []
+    assert sign.node_key(path).fingerprint == sign.load_node_key(path).fingerprint
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX links")
+def test_a_node_key_behind_a_link_is_refused(tmp_path: Path) -> None:
+    real = tmp_path / "elsewhere.key"
+    sign.node_key(real)
+    path = tmp_path / sign.NODE_KEY
+    path.symlink_to(real)
+    with pytest.raises(sign.KeyFileError, match="plain file"):
+        sign.node_key(path)
+
+
+def test_a_revoked_operators_assignment_received_again_is_refused(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    op = NodeKey.generate()
+    assignment = sign.assign(root, op.public, {Scope.TASKS}, issued_at=clock(), lifetime=DAY)
+    trust.receive(assignment)
+    trust.receive(sign.revoke(root, op.fingerprint, "", issued_at=clock(), lifetime=DAY))
+    assert refused(trust, assignment) is Reason.REVOKED
+    assert trust.operator(op.fingerprint) is None
+
+
+def test_the_state_signed_by_a_revoked_operator_is_refused_again(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    op = operator(trust, root, clock)
+    node = NodeKey.generate()
+    by_op = sign.revoke(op, node.fingerprint, "", issued_at=clock(), lifetime=DAY)
+    trust.receive(by_op)
+    trust.receive(sign.revoke(root, op.fingerprint, "", issued_at=clock(), lifetime=DAY))
+    assert refused(trust, by_op) is Reason.REVOKED
+
+
+def test_an_operator_cannot_revoke_an_operator_whose_assignment_comes_later(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    op = operator(trust, root, clock)
+    other = NodeKey.generate()
+    early = sign.revoke(op, other.fingerprint, "coup", issued_at=clock(), lifetime=DAY)
+    trust.receive(early)  # not an operator yet: as far as this node knows, a node
+    assert trust.is_revoked(other.fingerprint)
+    trust.receive(sign.assign(root, other.public, {Scope.TASKS}, issued_at=clock(), lifetime=DAY))
+    assert not trust.is_revoked(other.fingerprint)
+    assert trust.receive(task(other, clock)).signer == other.fingerprint
+    assert refused(trust, early) is Reason.NOT_ALLOWED
+    assert not trust.is_revoked(other.fingerprint)
+
+
+@pytest.mark.parametrize("order", [(0, 1), (1, 0), (1, 0, 1, 0)])
+def test_assignments_of_the_same_second_grant_only_what_both_allow(
+    root: NodeKey, clock: FakeClock, order: tuple[int, ...]
+) -> None:
+    op = NodeKey.generate()
+    both = {Scope.TASKS, Scope.MODERATION}
+    records = [
+        sign.assign(root, op.public, both, issued_at=clock(), lifetime=30 * DAY),
+        sign.assign(root, op.public, {Scope.TASKS}, issued_at=clock(), lifetime=DAY),
+    ]
+    trust = Trust(root.public, clock=clock)
+    for i in order:
+        trust.receive(records[i])
+    found = trust.operator(op.fingerprint)
+    assert found is not None
+    assert found.scopes == {Scope.TASKS}
+    assert found.expires_at == clock() + DAY
+
+
+def test_an_older_assignment_received_again_changes_nothing(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    op = NodeKey.generate()
+    both = {Scope.TASKS, Scope.MODERATION}
+    old = sign.assign(root, op.public, both, issued_at=clock(), lifetime=DAY)
+    trust.receive(old)
+    clock.advance(1)
+    trust.receive(sign.assign(root, op.public, {Scope.TASKS}, issued_at=clock(), lifetime=DAY))
+    trust.receive(old)
+    found = trust.operator(op.fingerprint)
+    assert found is not None and found.scopes == {Scope.TASKS}
