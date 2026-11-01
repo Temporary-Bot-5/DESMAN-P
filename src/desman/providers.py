@@ -60,6 +60,10 @@ class Provider:
     model_env: str | None = None
     # The setting with the tokens of prompt and reply a local server takes (its context size).
     context_env: str | None = None
+    # Its key may be lent to desman-global (ADR 0004, decision 5): the node makes calls for
+    # others with it. Set only by a person who read the free tier's terms on serving third
+    # parties, with the link and the date in a comment. Never for a paid provider.
+    donatable: bool = False
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -382,6 +386,15 @@ def find_keyed(name: str) -> Provider:
 
 def by_key_env(env: str) -> Provider | None:
     return next((p for p in CLOUD + SERVICES if p.key_env is not None and p.key_env == env), None)
+
+
+def can_donate(p: Provider) -> bool:
+    """Whether the person may lend `p` to desman-global: a local server always (the machine is
+    theirs), a free cloud provider only if its terms were checked (`donatable`), a paid one
+    or a service that is not a model provider never."""
+    if p not in PROVIDERS or p.paid:
+        return False
+    return p.local or p.donatable
 
 
 def search_engines(config: Config) -> list[Provider]:

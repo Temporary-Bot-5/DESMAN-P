@@ -3,20 +3,22 @@
 Language, then a provider menu that stays open until "Done": pick a provider, add or remove
 its keys (several per provider are fine) or change its settings, pick the next one. Then the
 permissions, then personalisation: whether the interlocutor may study the conversation and keep
-notes about the person, and how it talks (`Config.behaviour`), which holds either way. Nothing
-is saved until the end; leaving with Ctrl+C or Esc saves nothing.
+notes about the person, and how it talks (`Config.behaviour`), which holds either way. Last,
+whether this machine takes part in desman-global (off unless the person says yes). Nothing is
+saved until the end; leaving with Ctrl+C or Esc saves nothing.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from rich.panel import Panel
 from rich.text import Text
 
 from desman import config as config_module
-from desman import i18n, providers, ui
-from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigManager, Permissions
+from desman import i18n, net, providers, ui
+from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigManager, Network, Permissions
 from desman.core import search
 from desman.i18n import t, tn
 from desman.providers import Provider
@@ -89,7 +91,9 @@ def run(manager: ConfigManager) -> None:
     config.personalize = ask_personalize(config.personalize)
     if ui.confirm(t("Set up how the interlocutor talks to you?"), default=False):
         config.behaviour = ask_behaviour(config.behaviour, config)
+    network = ask_network(config)
     manager.save_if_unchanged(config, seen)  # a `keys add` meanwhile is not lost
+    apply_network(manager, network, was_on=config.network.enabled)
 
     ui.out("")
     ui.ok(t("Configuration saved to {path}", path=manager.config_path))
@@ -100,7 +104,7 @@ def run(manager: ConfigManager) -> None:
     ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
 
 
-SECTIONS = ("providers", "permissions", "personalize", "behaviour")
+SECTIONS = ("providers", "permissions", "personalize", "behaviour", "network")
 """Parts of the wizard that can be opened on their own (from the chat, ADR 0003 §3)."""
 
 
@@ -116,6 +120,11 @@ def run_section(manager: ConfigManager, section: str) -> None:
         config.personalize = ask_personalize(config.personalize)
     elif section == "behaviour":
         config.behaviour = ask_behaviour(config.behaviour, config)
+    elif section == "network":
+        network = ask_network(config)
+        manager.save_if_unchanged(config, seen)
+        apply_network(manager, network, was_on=config.network.enabled)
+        return
     else:
         raise ValueError(f"no wizard section {section!r}")
     manager.save_if_unchanged(config, seen)
@@ -442,3 +451,48 @@ def ask_behaviour(current: Behaviour, config: Config) -> Behaviour:
         custom = custom[:BEHAVIOUR_CHARS]
     chosen["custom"] = "" if custom == "-" else custom
     return Behaviour.model_validate(chosen)
+
+
+@dataclass(frozen=True)
+class NetworkChoice:
+    join: bool
+    registry: str | None = None
+    """An address the person typed (asked only when none is known)."""
+
+
+def ask_network(config: Config) -> NetworkChoice:
+    """Whether to take part in desman-global; applied by `apply_network` once the rest is
+    saved, as `desman global join|leave` would do it."""
+    ui.section(t("desman-global"))
+    ui.note(
+        t(
+            "desman-global is an opt-in network of DESMANs on people's machines, coordinated by "
+            "the project's registry. It is off unless you say yes, and while it is off nothing "
+            "leaves this machine for it. Taking part lends nothing by itself: you choose each "
+            "model provider to lend, and its daily quota, with `desman global donate PROVIDER`."
+        )
+    )
+    if not ui.confirm(t("Take part in desman-global?"), default=config.network.enabled):
+        return NetworkChoice(join=False)
+    if config.network.registry is not None or net.DEFAULT_REGISTRY is not None:
+        return NetworkChoice(join=True)
+    while True:
+        address = ui.text(t("The registry's address, https://... ('-' for not now)")).strip()
+        if address in ("", "-"):
+            ui.note(t("Not now: desman-global stays off."))
+            return NetworkChoice(join=False)
+        try:
+            Network(registry=address)
+        except ValueError:
+            ui.error(t("{url} is not a registry address: https://host[:port][/path].", url=address))
+            continue
+        return NetworkChoice(join=True, registry=address)
+
+
+def apply_network(manager: ConfigManager, choice: NetworkChoice, *, was_on: bool) -> None:
+    from desman import global_cli  # it reaches the wizard through config_cli
+
+    if choice.join and (not was_on or choice.registry is not None):
+        global_cli.print_joined(global_cli.join(manager, choice.registry))
+    elif not choice.join and was_on:
+        global_cli.print_left(global_cli.leave(manager))

@@ -71,6 +71,10 @@ src/desman/
 ├── evaluation.py  # `proposals evaluate`: current version and proposed one (diff + settings)
 │                  #   in git worktrees of HEAD, each run as its own process; the diff checked
 │                  #   to change only the targets' texts; recorded once in `evaluations`
+├── global_cli.py  # `global [status]|join [--registry]|leave|donate P|undonate P|quota P`
+│                  #   (G.3): consent to desman-global, the node key, modules lent with daily
+│                  #   quotas (`providers.can_donate`: local always, free cloud only if
+│                  #   `donatable`, paid never); each change in `network_log`; sends nothing
 ├── tuning_cli.py  # `tuning`: the model each role asks first, the limits of the workflow
 │                  #   (`runs.TUNING_DEFAULTS` when unset); set by the person only
 ├── proposals_cli.py # `proposals [list]|show N|evaluate N [--real]|apply N|revert N` (and
@@ -82,7 +86,7 @@ src/desman/
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
-│                  #   consent, how the interlocutor talks)
+│                  #   consent, how the interlocutor talks, desman-global last)
 ├── providers.py   # known model providers (cloud; local: Ollama, llama.cpp, ready once
 │                  #   their model is set), readiness, key masking, key-file parsing
 ├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise);
@@ -140,6 +144,8 @@ src/desman/
     │              #   a session may be named; deleted = out of the lists, messages kept
     │              #   temporary (C.11): never listed, erase()d when its chat ends, sweep()
     │              #   after a crash; the database refuses to erase any other session
+    ├── netlog.py  # network_log: what desman-global did (joined, left, lent, quota); keys by
+    │              #   fingerprint, never a secret; append-only
     ├── operator.py # operator_log: what the person did outside tasks (chat commands confirmed
     │              #   or declined, keys by fingerprint, permissions); append-only
     ├── profile.py # User's profile (C.7): short notes for the interlocutor (≤20, ≤200 chars),
@@ -213,6 +219,8 @@ src/desman/
                    #   gated), check_access, free RAM/video memory, Ollama's pull; HF_TOKEN
                    #   goes to huggingface.co only. Downloads nothing unless the person said yes
 └── net/           # desman-global, the node's side (ADR 0004); never runs while it is off
+    ├── __init__.py # registry(config): the registry's address, None while it is off — the
+    │              #   one way to it; DEFAULT_REGISTRY (None until the owner's registry runs)
     ├── sign.py    # Ed25519: node.key (0600, shown by fingerprint only), canonical JSON, Signed
     │              #   Record; Trust.receive(): schema, signer, signature, scope, term, replay;
     │              #   root → operator (assignment) → record; revocations; Refused(Reason).
@@ -242,7 +250,7 @@ preemption, self-improvement or network features before their phase).
 ## Configuration
 
 - Single source: `config.json` via `ConfigManager` (`language`, `api_keys`, `settings`,
-  `permissions`, `personalize`, `behaviour`, `tuning`), opened with `open_config()`. It lives in the project folder (git-ignored,
+  `permissions`, `personalize`, `behaviour`, `tuning`, `network`), opened with `open_config()`. It lives in the project folder (git-ignored,
   0600); an installed package without one uses `~/.config/desman/config.json`. Override the
   directory with `DESMAN_CONFIG_DIR`.
 - No `.env`. Do not add a second configuration path.
@@ -252,7 +260,8 @@ preemption, self-improvement or network features before their phase).
 - `permissions` are set by the human only (`desman config`, `desman permissions`, or a chat
   request the human confirms in the window). Agents must never write them; they are the
   upper bound of the tool policy (`src/desman/policy.toml`, which is code: changed by people
-  through git, never by an agent).
+  through git, never by an agent). `network` (desman-global) likewise: set by the human only,
+  off by default; anything that talks to the registry gets its address from `net.registry()`.
 - A new CLI command also gets an entry in `commands.CATALOG` (a test requires it); the chat
   calls the same body function as the CLI, never the CLI itself.
 - A change that alters what DESMAN does for the person also updates the topic of
