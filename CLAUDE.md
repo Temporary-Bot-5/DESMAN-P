@@ -96,7 +96,8 @@ src/desman/
     ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
                    #        record_failure (the task's own retry policy, `TaskSpec.retry`,
                    #        applied atomically; no caller brings one), reserve_review
-                   #        heartbeat/checkpoint, recover_expired, resume_due, sweep,
+                   #        heartbeat/checkpoint, preempt (critical work takes over, 4.4),
+                   #        recover_expired, resume_due, sweep,
                    #        submit, task_status, cancel_task, failure propagation
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
                    #   fitted to a token budget, feedback on the previous attempt
@@ -133,6 +134,8 @@ src/desman/
     └── coordinator.py # Loop driving one task (`run`) or every task (`work`, a worker);
                        #   executor/reviewer are pluggable callables; a review is reserved first
                        #   (`Store.reserve_review`), so two workers never pay for one verdict
+                       #   an executor's step (heartbeat, tool call) yields to waiting critical
+                       #   work (`PreemptedError`), which runs at once; the dropped one resumes
 └── llm/
     ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
                    #   FailureKind (the coordinator maps them; agents just let them propagate)

@@ -7,6 +7,12 @@ The loop per tick:
        reserved first so that another worker does not pay for the same verdict
     3. claim the most urgent ready subtask, execute it, submit the result or record the failure
 
+While it executes work below CRITICAL, every step of the executor (a heartbeat, a tool call)
+looks for critical work waiting in the coordinator's scope. If there is some, the coordinator
+takes it and gives its own subtask back (`Store.preempt`, ROADMAP 4.4): the executor is stopped,
+the critical subtask runs at once, and the dropped one is claimed again later, resuming from its
+checkpoint with its tool calls replayed from the journal.
+
 Any number of coordinators and workers share one database: claims are atomic, status changes
 compare-and-swap, and each task's retry policy is stored with it (no caller brings its own).
 `run()` stops as soon as the task is no longer ACTIVE (done, failed, cancelled or waiting for the
@@ -36,13 +42,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from desman.core import calls, db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.effects import Effects
-from desman.core.models import Subtask, SubtaskSpec, Tools
+from desman.core.models import Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
     DEFAULT_REVIEW_SECONDS,
+    PreemptedError,
     StaleStateError,
     Store,
 )
@@ -139,7 +146,8 @@ class Work(BaseModel):
     the previous attempt. Everything the executor may build on."""
     heartbeat: Callable[[dict[str, Any] | None], None]
     """Call during long work; pass a checkpoint to save progress. Raises StaleStateError if the
-    lease was lost: stop and drop the work."""
+    lease was lost or the subtask was given up for critical work (`PreemptedError`, after the
+    checkpoint was saved): stop and drop the work."""
     tools: Toolbox
     """The only way to act: tool calls on the task's own workspace (and, once granted, more).
     A refused or mistaken call comes back as a failed ToolResult; every call is audited."""
@@ -169,6 +177,8 @@ class WorkResult(BaseModel):
     """Executions started (whatever came of them)."""
     reviewed: int = 0
     """Verdicts and review failures recorded."""
+    preempted: int = 0
+    """Executions given up for critical work (each resumes later)."""
     events: list[str] = Field(default_factory=list)
     """What the latest tick that moved something did: a worker runs for days, so its history
     is kept by the counters and the audit log, not here."""
@@ -228,6 +238,10 @@ class Coordinator:
         self.poll_seconds = poll_seconds
         self.executed = 0
         self.reviewed = 0
+        self.preempted = 0
+        """Subtasks this coordinator gave back for critical work."""
+        self._handover: Subtask | None = None
+        """The critical subtask claimed when the current execution was preempted."""
         self.watch = watch
         """Called whenever the task may look different (housekeeping, a claim, an execution, a
         review), so progress can be shown while `run()` works. It reads the state itself; the
@@ -282,11 +296,12 @@ class Coordinator:
         result = WorkResult()
         while max_ticks is None or result.ticks < max_ticks:
             result.ticks += 1
-            executed, reviewed = self.executed, self.reviewed
+            executed, reviewed, preempted = self.executed, self.reviewed, self.preempted
             events: list[str] = []
             progressed = self.tick(None, events)
             result.executed += self.executed - executed
             result.reviewed += self.reviewed - reviewed
+            result.preempted += self.preempted - preempted
             if progressed:
                 result.events = events
                 if on_tick is not None:
@@ -330,12 +345,14 @@ class Coordinator:
             self._changed()
 
         claimed = self.store.claim(self.owner, task_id=task_id, lease_seconds=self.lease_seconds)
-        if claimed is not None:
+        while claimed is not None:
             self._changed()
             self.executed += 1
-            self._execute(claimed, events)
+            self._execute(claimed, task_id, events)
             self._changed()
             progressed = True
+            # Preempted: the critical subtask is claimed already. It is never preempted itself.
+            claimed, self._handover = self._handover, None
         return progressed
 
     def _changed(self) -> None:
@@ -345,7 +362,9 @@ class Coordinator:
     def _for(self, role: calls.Role, subtask: Subtask) -> calls.Purpose:
         return calls.Purpose(role, task_id=subtask.task_id, subtask_id=subtask.id)
 
-    def _execute(self, subtask: Subtask, events: list[str]) -> None:
+    def _execute(self, subtask: Subtask, scope: str | None, events: list[str]) -> None:
+        """Run `subtask`; critical work waiting in `scope` (a task, or every task for None)
+        preempts it at the executor's next step, leaving the claimed one in `_handover`."""
         lease = subtask.lease_token
         assert lease is not None
         journal = Effects(self.store, subtask.id, lease)  # a rerun replays, never repeats
@@ -359,6 +378,16 @@ class Coordinator:
                 # A run resuming from the checkpoint skips the calls before it: so does the replay.
                 effects=None if checkpoint is None else journal.position,
             )
+            if subtask.priority >= Priority.CRITICAL:
+                return
+            critical = self.store.preempt(
+                subtask.id, lease, self.owner, task_id=scope, lease_seconds=self.lease_seconds
+            )
+            if critical is not None:  # audited as `preempted`; the checkpoint above is kept
+                self._handover = critical
+                self.preempted += 1
+                events.append(f"preempted {subtask.id} for {critical.id}")
+                raise PreemptedError(subtask.id, critical.id)
 
         outcome: Outcome
         try:
@@ -397,6 +426,8 @@ class Coordinator:
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
+        except PreemptedError:
+            return  # given back, and recorded, by the heartbeat
         except StaleStateError:
             self._discard(subtask, "lease lost during execution", events)
             return
@@ -435,6 +466,7 @@ class Coordinator:
                 )
                 events.append(f"{outcome.kind} {subtask.id} -> {moved.status}")
         except StaleStateError:  # e.g. cancelled while running
+            # (An executor that swallowed its preemption lands here too: its work is dropped.)
             self._discard(subtask, f"lease lost before {type(outcome).__name__.lower()}", events)
 
     def _toolbox(

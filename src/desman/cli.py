@@ -410,6 +410,7 @@ def worker(
             "owner": coordinator.owner,
             "executed": coordinator.executed,
             "reviewed": coordinator.reviewed,
+            "preempted": coordinator.preempted,
             "interrupted": interrupted,
         }
         click.echo(json.dumps(out, ensure_ascii=False, indent=2))
