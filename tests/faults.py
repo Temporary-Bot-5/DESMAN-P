@@ -126,6 +126,9 @@ class Shape:
 @dataclass
 class Report:
     seed: int
+    replay: str | None = None
+    """The command that reruns this exact simulation (default: the seed in the ordinary test,
+    which is right only for the default faults and shape)."""
     trace: list[str] = field(default_factory=list)
     """What happened, in order: the harness's faults and every audit entry (ids replaced by
     names, so two runs of one seed compare equal)."""
@@ -141,7 +144,7 @@ class Report:
         tail = "\n".join(self.trace[-lines:])
         return (
             f"seed {self.seed}: " + "; ".join(self.problems) + "\n"
-            f"replay: DESMAN_FAULT_SEED={self.seed} pytest tests/test_faults.py\n"
+            f"replay: {self.replay or f'DESMAN_FAULT_SEED={self.seed} pytest tests/test_faults.py'}\n"
             f"faults: {dict(self.faults)}\nlast {lines} steps:\n{tail}"
         )
 
@@ -254,7 +257,9 @@ class _Worker:
 
 
 class Simulation:
-    def __init__(self, path: Path, seed: int, faults: Faults, shape: Shape) -> None:
+    def __init__(
+        self, path: Path, seed: int, faults: Faults, shape: Shape, replay: str | None = None
+    ) -> None:
         self.path = path
         self.seed = seed
         self.faults = faults
@@ -275,12 +280,15 @@ class Simulation:
         """Task and subtask ids -> names for the trace."""
         self.ledger: list[tuple[str, int]] = []
         """(subtask id, execution) for every real run of the `note` effect."""
-        self.report = Report(seed)
+        self.report = Report(seed, replay=replay)
+        self.seen = 0
+        """The last audit entry already in the trace."""
 
     def roll(self, chance: float) -> bool:
         return self.rng.random() < chance
 
     def fault(self, worker: _Worker, kind: str) -> None:
+        self.record()  # what was committed before it, first
         self.report.faults[kind] += 1
         self.report.trace.append(f"{self.clock.now:%H:%M:%S} {worker.owner}: {kind}")
 
@@ -328,6 +336,8 @@ class Simulation:
             if worker.dead:
                 return True
             raise
+        finally:
+            self.record()
 
     def freeze(self, worker: _Worker) -> bool:
         """`worker` hangs: its lease and review reservation run out while the others work."""
@@ -375,14 +385,24 @@ class Simulation:
     def _task_ids(self) -> list[str]:
         return [r["id"] for r in self.observer.conn.execute("SELECT id FROM tasks ORDER BY rowid")]
 
-    def check(self) -> None:
-        """Every invariant, after the run: what is wrong goes to `report.problems`."""
-        store, report = self.observer, self.report
-        for row in store.conn.execute("SELECT * FROM audit_log ORDER BY seq"):
-            report.actions[row["action"]] += 1
+    def record(self) -> None:
+        """Audit entries committed since the last look go to the trace, so that it shows them
+        in order with the faults (called after each step and before each fault)."""
+        rows = self.observer.conn.execute(
+            "SELECT * FROM audit_log WHERE seq > ? ORDER BY seq", (self.seen,)
+        ).fetchall()
+        for row in rows:
+            self.seen = row["seq"]
+            self.report.actions[row["action"]] += 1
             who = self.names.get(row["subtask_id"]) or self.names.get(row["task_id"], "?")
             moved = f" {row['from_status']}->{row['to_status']}" if row["to_status"] else ""
-            report.trace.append(f"{row['ts'][11:19]} {who} {row['actor']} {row['action']}{moved}")
+            line = f"{row['ts'][11:19]} {who} {row['actor']} {row['action']}{moved}"
+            self.report.trace.append(line)
+
+    def check(self) -> None:
+        """Every invariant, after the run: what is wrong goes to `report.problems`."""
+        self.record()
+        store, report = self.observer, self.report
         for task_id in self._task_ids():
             name = self.names[task_id]
             status = store.task_status(task_id)
@@ -433,11 +453,18 @@ def _counted_ids() -> Iterator[None]:
 
 
 def simulate(
-    directory: Path, seed: int, faults: Faults | None = None, shape: Shape | None = None
+    directory: Path,
+    seed: int,
+    faults: Faults | None = None,
+    shape: Shape | None = None,
+    *,
+    replay: str | None = None,
 ) -> Report:
-    """One run in `directory` (its database and workspaces), checked: see `Report.problems`."""
+    """One run in `directory` (its database and workspaces), checked: see `Report.problems`.
+    `replay`: how to rerun it, for the report (see `Report.replay`)."""
     with _counted_ids():
-        sim = Simulation(directory / "desman.db", seed, faults or Faults(), shape or Shape())
+        db_path = directory / "desman.db"
+        sim = Simulation(db_path, seed, faults or Faults(), shape or Shape(), replay)
         try:
             return sim.run()
         finally:
