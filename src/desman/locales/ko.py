@@ -523,6 +523,37 @@ MESSAGES: dict[str, Forms] = {
     "Suggested models (nothing is downloaded until you add one):": "제안된 모델 (추가하기 전에는 아무것도 다운로드되지 않습니다):",
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server}용 {model}, {size}: {reason}",
     "To use it: {command}": "사용하려면: {command}",
+    # ── Protected files (5.3) ──
+    "Ask here to show the change or approve it.": "여기서 변경 내용을 보여 달라고 하거나 승인할 수 있습니다.",
+    "Approve the protected files as they are now, so tasks run again:": "보호된 파일을 지금 상태로 승인해 작업이 다시 실행되게 합니다:",
+    "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "이 파일들은 에이전트가 무엇을 할 수 있는지, 그 작업을 어떻게 평가하는지 정합니다. 직접 살펴본 변경만 승인하세요 (desman protected show --diff).",
+    "{n} protected file changed without your approval: nothing runs until you approve it.": (
+        "보호된 파일 {n}개가 승인 없이 변경되었습니다. 승인할 때까지 아무것도 실행되지 않습니다.",
+    ),
+    "Approve: desman protected approve [--note TEXT]": "승인: desman protected approve [--note 텍스트]",
+    "Approved {n} change: tasks run again.": (
+        "변경 {n}건을 승인했습니다. 작업이 다시 실행됩니다.",
+    ),
+    "changed": "변경됨",
+    "missing": "없음",
+    "put on the list": "목록에 추가됨",
+    "taken off the list": "목록에서 빠짐",
+    "Every protected file is as approved.": "모든 보호된 파일이 승인된 상태 그대로입니다.",
+    "See what changed: desman protected show --diff": "변경 내용 보기: desman protected show --diff",
+    "Nothing to approve: every protected file is as approved.": "승인할 것이 없습니다. 모든 보호된 파일이 승인된 상태 그대로입니다.",
+    "Cannot check the protected files: {error}": "보호된 파일을 확인할 수 없습니다: {error}",
+    "Approved: the release as shipped ({when}).": "승인됨: 배포된 그대로의 릴리스 ({when}).",
+    "Approved by you on {when}: {note}": "{when}에 직접 승인함: {note}",
+    "Approved by you on {when}.": "{when}에 직접 승인함.",
+    "What was approved is not known yet (nothing was approved on this database): compare with the release in git (git diff).": "무엇이 승인되었는지 아직 모릅니다 (이 데이터베이스에서는 아직 아무것도 승인되지 않았습니다). git의 릴리스와 비교하세요 (git diff).",
+    "{path}: no difference in the text.": "{path}: 텍스트에 차이가 없습니다.",
+    "Protected files changed without your approval: {files}. Nothing runs until you look at the change (`desman protected show --diff`) and approve it (`desman protected approve`).": "보호된 파일이 승인 없이 변경되었습니다: {files}. 변경 내용을 살펴보고 (`desman protected show --diff`) 승인할 때까지 (`desman protected approve`) 아무것도 실행되지 않습니다.",
+    "Protected files: the tool policy, the reviewer, the sandbox, the approval rules, the\ntest harness. A change nobody approved stops every run.": "보호된 파일: 도구 정책, 검토자, 샌드박스, 승인 규칙,\n테스트 하네스. 아무도 승인하지 않은 변경은 모든 실행을 멈춥니다.",
+    "Approve the protected files as they are now, so tasks run again. Look at the change\nfirst: desman protected show --diff.": "보호된 파일을 지금 상태로 승인해 작업이 다시 실행되게 합니다. 먼저\n변경 내용을 살펴보세요: desman protected show --diff.",
+    "Why: kept with the approval.": "이유: 승인과 함께 보관됩니다.",
+    "Database file (default: the usual one).": "데이터베이스 파일 (기본값: 평소의 것).",
+    "Whether every protected file is as you approved it; tasks run only then.": "모든 보호된 파일이 승인한 그대로인지 여부. 그럴 때만 작업이 실행됩니다.",
+    "Show what changed in each file.": "각 파일에서 무엇이 바뀌었는지 보여 줍니다.",
 }
 
 CLICK: dict[str, Forms] = {

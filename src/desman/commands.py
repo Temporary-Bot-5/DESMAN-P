@@ -33,7 +33,17 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, ValidationError
 from rich.text import Text
 
-from desman import actions, config_cli, i18n, local_models, models_cli, providers, ui, wizard
+from desman import (
+    actions,
+    config_cli,
+    i18n,
+    local_models,
+    models_cli,
+    protected_cli,
+    providers,
+    ui,
+    wizard,
+)
 from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigError, ConfigManager
 from desman.core import db
 from desman.core.report import inbox, task_report, task_summaries
@@ -226,6 +236,14 @@ class ConfigArgs(Args):
 
 
 Permission = Literal["admin_rights", "fs_outside_access", "network_access", "shell_execution"]
+
+
+class ProtectedShowArgs(Args):
+    diff: bool = Field(False, description="also show the person what changed in each file")
+
+
+class ProtectedApproveArgs(Args):
+    note: Note | None = Field(None, description="why, in the person's words")
 
 
 class PermissionArgs(Args):
@@ -462,6 +480,36 @@ def _permissions(ctx: Context, args: PermissionArgs) -> Outcome | Proposal:
                 "permissions": ctx.config().permissions.model_dump(),
             }
         )
+
+    return Proposal(lines, apply, warnings)
+
+
+def _protected_show(ctx: Context, args: ProtectedShowArgs) -> Outcome:
+    changes = protected_cli.current(ctx.store.conn)
+    protected_cli.print_state(ctx.store.conn, changes, with_diff=args.diff)
+    return Outcome(protected_cli.state_json(ctx.store.conn, changes))
+
+
+def _protected_approve(ctx: Context, args: ProtectedApproveArgs) -> Outcome | Proposal:
+    changes = protected_cli.current(ctx.store.conn)
+    if not changes:
+        protected_cli.print_approved([])
+        return Outcome({"approved": []})
+    lines = [
+        t("Approve the protected files as they are now, so tasks run again:"),
+        *("  " + line for line in protected_cli.change_lines(changes)),
+    ]
+    warnings = [
+        t(
+            "These files decide what agents may do and how their work is judged: approve only "
+            "a change you have looked at (desman protected show --diff)."
+        )
+    ]
+
+    def apply() -> Outcome:
+        done = protected_cli.approve_now(ctx.store.conn, args.note, expected=changes)
+        protected_cli.print_approved(done)
+        return Outcome({"approved": [c.model_dump(mode="json") for c in done]})
 
     return Proposal(lines, apply, warnings)
 
@@ -833,6 +881,24 @@ CATALOG: tuple[Entry, ...] = (
         BehaviourArgs,
         _behaviour_kind,
         _behaviour,
+    ),
+    Entry(
+        "protected show",
+        "Whether the protected files (tool policy, reviewer, sandbox, approval rules, test "
+        "harness) are as the person approved them; while one changed without approval, no task "
+        "runs. diff: show the person what changed.",
+        ProtectedShowArgs,
+        Kind.READ,
+        _protected_show,
+        aliases=("protected",),
+    ),
+    Entry(
+        "protected approve",
+        "Approve the protected files as they are now, so tasks run again; only when the person "
+        "asks for it. The person confirms, after seeing which files changed.",
+        ProtectedApproveArgs,
+        Kind.CHANGE,
+        _protected_approve,
     ),
     Entry(
         "models show",

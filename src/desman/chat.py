@@ -117,12 +117,15 @@ class Chat:
         self._gave_up: dict[str, int] = {}
         """Per session, the last message when a summary failed: until as much again is said,
         the older messages just fall out of the model's view."""
+        self._told_blocked: str | None = None
+        """The block of protected files last told (5.3): told again only when it changes."""
 
     def run(self) -> None:
         self._greet()
         try:
             while True:
                 self._tell_waiting()  # at the start, then after whatever was done
+                self._tell_blocked()
                 if (line := self.read()) is None:
                     break
                 command = line.strip()
@@ -383,6 +386,11 @@ class Chat:
         part = compaction.split(history, keep_tokens, incoming)
         if part is None:
             return None
+        try:
+            runs.guard(self.store)
+        except click.ClickException:  # told on its own (`_tell_blocked`): no summary for now
+            self._gave_up[self.session_id] = history.messages[-1].seq
+            return None
         task_id = self.store.create_task(
             compaction.spec(history, part),
             details={
@@ -488,6 +496,7 @@ class Chat:
 
     def _access(self, config: Config) -> Access | None:
         try:
+            runs.guard(self.store)
             return runs.executor_access(config)
         except click.ClickException as e:
             ui.error(e.message)
@@ -634,6 +643,19 @@ class Chat:
             self.waiting.new(),
             t("Ask here to retry, accept or fail one, or decide in the terminal: desman inbox."),
         )
+
+    def _tell_blocked(self) -> None:
+        """Protected files changed without the person's approval (5.3): tasks cannot run, so
+        the person hears it before asking for one, and how to look and approve, here too."""
+        try:
+            runs.guard(self.store)
+            said = None
+        except click.ClickException as e:
+            said = e.message
+        if said is not None and said != self._told_blocked:
+            ui.warn(said)
+            ui.note(t("Ask here to show the change or approve it."))
+        self._told_blocked = said
 
     def _show_last(self) -> None:
         assert self.session_id is not None

@@ -375,6 +375,33 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE subtasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'
         CHECK (kind IN ('text', 'code', 'analysis'));
     """,
+    # 21 — the protected files as the person approved them (ROADMAP 5.3, core/protected.py):
+    # each approval is a full snapshot, with each file's content for a diff. `release`: taken
+    # as approved on a database with no approval, because every file matched the shipped
+    # hashes. Append-only, like the logs
+    f"""
+    CREATE TABLE protected_approvals (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts      TEXT NOT NULL DEFAULT {_NOW_SQL},
+        source  TEXT NOT NULL CHECK (source IN ('release', 'operator')),
+        note    TEXT
+    ) STRICT;
+    CREATE TABLE protected_files (
+        approval_id  INTEGER NOT NULL REFERENCES protected_approvals(id),
+        path         TEXT NOT NULL,
+        sha256       TEXT CHECK (sha256 IS NULL OR length(sha256) = 64),
+        content      BLOB CHECK ((content IS NULL) = (sha256 IS NULL)),
+        PRIMARY KEY (approval_id, path)
+    ) STRICT;
+    CREATE TRIGGER protected_approvals_no_update BEFORE UPDATE ON protected_approvals
+        BEGIN SELECT RAISE(ABORT, 'protected_approvals is append-only'); END;
+    CREATE TRIGGER protected_approvals_no_delete BEFORE DELETE ON protected_approvals
+        BEGIN SELECT RAISE(ABORT, 'protected_approvals is append-only'); END;
+    CREATE TRIGGER protected_files_no_update BEFORE UPDATE ON protected_files
+        BEGIN SELECT RAISE(ABORT, 'protected_files is append-only'); END;
+    CREATE TRIGGER protected_files_no_delete BEFORE DELETE ON protected_files
+        BEGIN SELECT RAISE(ABORT, 'protected_files is append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

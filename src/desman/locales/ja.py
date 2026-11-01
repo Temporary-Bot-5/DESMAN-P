@@ -525,6 +525,37 @@ MESSAGES: dict[str, Forms] = {
     "Suggested models (nothing is downloaded until you add one):": "提案されたモデル（追加するまで何もダウンロードされません）:",
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} 用の {model}、{size}: {reason}",
     "To use it: {command}": "使うには: {command}",
+    # ── Protected files (5.3) ──
+    "Ask here to show the change or approve it.": "変更の表示や承認は、ここで頼めます。",
+    "Approve the protected files as they are now, so tasks run again:": "保護されたファイルを今の状態で承認し、タスクを再び実行できるようにします:",
+    "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "これらのファイルは、エージェントに何ができるか、その仕事がどう評価されるかを決めます。確認した変更だけを承認してください (desman protected show --diff)。",
+    "{n} protected file changed without your approval: nothing runs until you approve it.": (
+        "{n} 個の保護されたファイルが承認なしに変更されました。承認するまで何も実行されません。",
+    ),
+    "Approve: desman protected approve [--note TEXT]": "承認: desman protected approve [--note テキスト]",
+    "Approved {n} change: tasks run again.": (
+        "{n} 件の変更を承認しました。タスクは再び実行されます。",
+    ),
+    "changed": "変更あり",
+    "missing": "なし",
+    "put on the list": "リストに追加",
+    "taken off the list": "リストから削除",
+    "Every protected file is as approved.": "保護されたファイルはすべて承認どおりです。",
+    "See what changed: desman protected show --diff": "変更内容: desman protected show --diff",
+    "Nothing to approve: every protected file is as approved.": "承認するものはありません。保護されたファイルはすべて承認どおりです。",
+    "Cannot check the protected files: {error}": "保護されたファイルを確認できません: {error}",
+    "Approved: the release as shipped ({when}).": "承認済み: 配布されたままのリリース ({when})。",
+    "Approved by you on {when}: {note}": "{when} にあなたが承認: {note}",
+    "Approved by you on {when}.": "{when} にあなたが承認。",
+    "What was approved is not known yet (nothing was approved on this database): compare with the release in git (git diff).": "何が承認されたかはまだ分かりません (このデータベースではまだ何も承認されていません)。git のリリースと比べてください (git diff)。",
+    "{path}: no difference in the text.": "{path}: テキストに違いはありません。",
+    "Protected files changed without your approval: {files}. Nothing runs until you look at the change (`desman protected show --diff`) and approve it (`desman protected approve`).": "保護されたファイルが承認なしに変更されました: {files}。変更を確認し (`desman protected show --diff`)、承認する (`desman protected approve`) まで何も実行されません。",
+    "Protected files: the tool policy, the reviewer, the sandbox, the approval rules, the\ntest harness. A change nobody approved stops every run.": "保護されたファイル: ツールポリシー、レビュアー、サンドボックス、承認ルール、\nテストハーネス。誰も承認していない変更は、すべての実行を止めます。",
+    "Approve the protected files as they are now, so tasks run again. Look at the change\nfirst: desman protected show --diff.": "保護されたファイルを今の状態で承認し、タスクを再び実行できるようにします。まず\n変更を確認してください: desman protected show --diff。",
+    "Why: kept with the approval.": "理由: 承認とともに保存されます。",
+    "Database file (default: the usual one).": "データベースファイル (既定: いつものもの)。",
+    "Whether every protected file is as you approved it; tasks run only then.": "保護されたファイルがすべて承認したとおりかどうか。そのときだけタスクが実行されます。",
+    "Show what changed in each file.": "各ファイルで何が変わったかを表示します。",
 }
 
 CLICK: dict[str, Forms] = {

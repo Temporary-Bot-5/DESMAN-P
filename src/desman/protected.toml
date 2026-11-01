@@ -1,0 +1,30 @@
+# Protected files (ROADMAP 5.3; see src/desman/core/protected.py).
+#
+# What decides what agents may do and whether their work is good. A change to any of them, or
+# to this list, blocks every run until the person approves it (`desman protected show --diff`,
+# then `desman protected approve`). Changed by people through git, like policy.toml: a commit
+# that changes a file here updates its hash too (tests/test_protected.py prints the new line).
+# Hashes are SHA-256 of the file with LF line endings.
+
+# Relative to the package (src/desman).
+[package]
+# The tool policy and the code that enforces it.
+"policy.toml" = "5dc7ab410d2323db5df0dc2f2516179d5d9490af83c25e88e086089bd8f01c90"
+"core/policy.py" = "1caf70d8c136b9f93c484cdef80bf6359f17ece55ae7926318ed90630bc1be50"
+# The reviewer (and the executor it judges).
+"agents.py" = "32721ab471bb921c5aff1737d5561755532b78bf1a1d5b5c5e120d72897ee0f3"
+# Security rules: the sandbox for generated code, the workspace guard for files.
+"core/sandbox.py" = "94296cd60523f6e886146c901ba37e72c5c0ca53431afa02948908988da17252"
+"core/workspace.py" = "1f66943238f6bf62b4f3bb25868c3d7fabab29bb159ab2b27f2aa2163322cfc4"
+# Approval rules: who may take which edge (the operator's decisions), and this check.
+"core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
+"core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
+# The scripted model every test of agents runs on.
+"llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"
+
+# Relative to the source checkout; an installed package has no tests and does not check them.
+[checkout]
+# The test harness.
+"tests/conftest.py" = "b16bbf335a05b10228f9e9785f1a6745671690c7e1bf8ee9a8902ab28be1102f"
+"tests/faults.py" = "a036f2cda805b6ef0ad6048d5c9220878e80880cad04faa704800e451406f9cd"
+"tests/helpers.py" = "5cf62f2a06f09ae2e5bd630ef9a10d3214fbb5a75d7a6f096c5a5b5a4816fe2b"

@@ -20,7 +20,7 @@ import httpx
 from desman import providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config
-from desman.core import calls
+from desman.core import calls, protected
 from desman.core.coordinator import Coordinator, Labels
 from desman.core.effects import evidence
 from desman.core.models import Kind, Subtask
@@ -190,6 +190,26 @@ def executor_access(config: Config, *, stderr: bool = False) -> Access:
     return Access(policy, Role.EXECUTOR, switched_on(permissions.model_dump()))
 
 
+def guard(store: Store) -> None:
+    """Refuse to run while protected files changed without the person's approval (ROADMAP
+    5.3): called before any work starts, and again by every coordinator put together here."""
+    try:
+        protected.require(store.conn)
+    except protected.ProtectedError as e:
+        raise click.ClickException(t("Cannot check the protected files: {error}", error=e)) from e
+    except protected.Blocked as e:
+        raise click.ClickException(blocked(e.changes)) from e
+
+
+def blocked(changes: list[protected.Change]) -> str:
+    return t(
+        "Protected files changed without your approval: {files}. Nothing runs until you look "
+        "at the change (`desman protected show --diff`) and approve it (`desman protected "
+        "approve`).",
+        files=", ".join(c.path for c in changes),
+    )
+
+
 def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
     """The web tools' view of the config: the open sources, the engines the human set up (in
     `providers.SEARCH` order), the cache. The engines share `http`; a new client without it
@@ -245,6 +265,7 @@ def _coordinator(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     watch: Callable[[], None] | None = None,
 ) -> Coordinator:
+    guard(store)
     # A step may not outlast what holds the subtask while it waits: a slow local model gets a
     # longer lease and review reservation (each only as long as needed, since a longer one
     # delays taking over the work of a run that died elsewhere).
