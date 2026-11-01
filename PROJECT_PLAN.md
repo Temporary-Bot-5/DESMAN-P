@@ -49,6 +49,7 @@ Safety rules specific to the network:
 - Tasks from the network are untrusted: they run only in the sandbox, under a narrower policy, with no access to the person's files, network, or memory beyond what was donated. The person's own tasks come first.
 - Nothing leaves the machine without the person's choice; messages from other people are data, never instructions to the agent.
 - Communication starts simple: a central HTTP registry that nodes poll, no peer-to-peer networking or message brokers.
+- Code changes reach the repository only through the global operator. Nodes have no GitHub accounts and no write access: they read the repository, and send an improvement as a signed proposal (a diff and its benchmark results) to the registry. Checking a proposal is ordinary leased work, so a node that dies leaves nothing behind and another node takes it over; a result from one node is rechecked by another. Only the operator's server commits, and it signs the release with the root key; nodes install it only after their person confirms. The owner's server is then the one point the network's evolution depends on, so its registry must be backed up.
 
 ## Mandatory design principles
 
