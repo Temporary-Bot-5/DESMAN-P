@@ -503,6 +503,9 @@ MESSAGES: dict[str, Forms] = {
     "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face {model} hakkında beklenmeyen bir yanıt verdi: daha sonra yeniden deneyin.",
     "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "{host} adresindeki Ollama bu makinede değil ve ona şifrelemeden ulaşılıyor: yolda istek okunabilir ya da değiştirilebilir (başka bir model indirilir).",
     "Ollama keeps the downloaded model even if you leave without saving.": "Kaydetmeden çıksanız bile Ollama indirilen modeli tutar.",
+    "Suggested models (nothing is downloaded until you add one):": "Önerilen modeller (siz birini eklemeden hiçbir şey indirilmez):",
+    "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} için {model}, {size}: {reason}",
+    "To use it: {command}": "Kullanmak için: {command}",
 }
 
 CLICK: dict[str, Forms] = {

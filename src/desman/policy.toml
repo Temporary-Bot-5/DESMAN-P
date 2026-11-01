@@ -10,7 +10,12 @@
 # (src/desman/core/sandbox.py); without a working sandbox it is never offered.
 # web_search and web_fetch also need the human's network_access switch; web_search also a
 # search engine (a Tavily key or a SearXNG server).
-tools = ["read_file", "write_file", "list_files", "run_command", "web_search", "web_fetch"]
+# suggest_model asks Hugging Face what a model is (network_access too) and only records a
+# suggestion for the person: nothing is downloaded, the config is not changed.
+tools = [
+    "read_file", "write_file", "list_files", "run_command", "web_search", "web_fetch",
+    "suggest_model",
+]
 
 # The planner and the reviewer use no tools yet.
 [roles.planner]

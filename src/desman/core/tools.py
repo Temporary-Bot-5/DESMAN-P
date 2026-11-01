@@ -10,6 +10,8 @@ subtask's `Toolbox`, which
   bounded by the human's permissions) and what can run here (`Tool.ready`: `run_command`
   needs a working sandbox), and records every refusal;
 - keeps each tool within its `max_calls` for the execution (the web tools have one);
+- gives a tool that declares `records` an audit entry of its own holding what it returned
+  (`suggest_model`: the person reads the suggestion in `desman status`);
 - checks the subtask's lease before running anything, so work whose lease was lost has no more
   effects (StaleStateError propagates, the coordinator discards the work);
 - records every call in the audit, with long arguments cut short; arguments a tool declares
@@ -33,6 +35,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Annotated, Any, Final, Generic, Literal, Protocol, TypeVar, get_args
 
+import httpx
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -54,6 +57,7 @@ from desman.core.web import (
     WebError,
 )
 from desman.core.workspace import PathEscapeError, Workspace
+from desman.llm import hub
 
 __all__ = ["Access", "Permission"]  # re-exported: tools are declared with a Permission
 
@@ -114,6 +118,9 @@ class Tool(Generic[A]):
     told the call was interrupted and its effects are unknown."""
     max_calls: int | None = None
     """Calls allowed per execution of a subtask (one Toolbox); None: no limit."""
+    records: str | None = None
+    """The action of an audit entry of its own, holding what a successful call returned (its
+    long strings cut): for a tool whose output is meant for the person, not just the model."""
 
     def spec(self) -> dict[str, Any]:
         """How the tool is shown to a model."""
@@ -268,6 +275,12 @@ class Toolbox:
             raise
         else:
             self.record("tool_called", {**summary, "ok": True})
+            if tool.records is not None:
+                # Meant for the person: only while the lease holds (a lookup may outlast it,
+                # and work whose lease was lost must leave nothing that looks valid). The
+                # heartbeat renews it, so it still holds for the entry written next.
+                self.guard()
+                self.record(tool.records, summarize(output))
             result = ToolResult(ok=True, output=output)
         if journal is not None:
             journal.finish(result)
@@ -544,10 +557,110 @@ def web_tools(web: Web) -> list[Tool[Any]]:
     ]
 
 
-def builtin_registry(sandbox: Sandbox | None = None, web: Web | None = None) -> Registry:
+# ── A model to suggest (ROADMAP 4.5b) ───────────────────────────────────────
+
+ModelLookup = Callable[[hub.Ref], hub.Gguf]
+"""What a model on Hugging Face is (`hub.inspect`); raises `hub.HubError`."""
+MAX_SUGGESTIONS: Final = 2
+"""Per execution of a subtask: a suggestion is for the person to read, not a search."""
+
+
+class SuggestModelArgs(_Args):
+    model: str = Field(
+        min_length=3,
+        max_length=200,
+        description="A GGUF model on Hugging Face: author/model, or author/model:quantization "
+        "(e.g. Q4_K_M).",
+    )
+    server: Literal["ollama", "llamacpp"] = Field(
+        default="ollama", description="The local server that would run it."
+    )
+    reason: Annotated[str, StringConstraints(strip_whitespace=True)] = Field(
+        min_length=1,
+        max_length=AUDIT_TEXT,  # kept whole in the audit
+        description="Why it suits this kind of work, in one sentence for the person.",
+    )
+
+
+def suggest_model_tool(
+    look_up: ModelLookup | None = None, memory: Callable[[], hub.Memory] = hub.memory
+) -> Tool[SuggestModelArgs]:
+    """`suggest_model`: an executor may only *suggest* a model; nothing is downloaded and the
+    config is not changed. The suggestion is recorded in the audit (`model_suggested`), and the
+    person adds the model if they want it (`desman models add`, or the chat's window).
+
+    `look_up` is asked without the person's Hugging Face token: what a model learns of the hub
+    is what anyone sees (a private repository of theirs stays unknown to it). None: a client
+    of its own for each call."""
+
+    def find(ref: hub.Ref) -> hub.Gguf:
+        if look_up is not None:
+            return look_up(ref)
+        with httpx.Client() as client:
+            return hub.inspect(ref, client)
+
+    def run(args: SuggestModelArgs, workspace: Workspace) -> dict[str, Any]:
+        try:
+            ref = hub.parse(args.model)
+        except ValueError:
+            raise ToolError(
+                f"{args.model!r} is not a Hugging Face model: write author/model or "
+                "author/model:quantization"
+            ) from None
+        try:
+            model = find(ref)
+        except hub.HubError as e:
+            raise ToolError(_hub_problem(e)) from None
+        return {
+            "model": model.ref.spec,
+            "server": args.server,
+            "reason": " ".join(args.reason.split()),
+            "size": model.size,
+            "memory": model.memory,
+            "fits": hub.fits(model, memory()),
+            "gated": model.gated,
+            "note": "Suggested to the person; nothing was downloaded or changed.",
+        }
+
+    return Tool(
+        name="suggest_model",
+        description="Suggest to the person a model from Hugging Face (GGUF) for their local "
+        "server, when this kind of work would be done clearly better by it than by the "
+        "models at hand. It downloads nothing and changes nothing: the person reads the "
+        "suggestion and decides. Returns {model, size (bytes to download), memory (bytes "
+        "needed to run), fits (in the machine's free memory; null: unknown), gated}. Do not "
+        "wait for it: finish the subtask with what you have.",
+        args=SuggestModelArgs,
+        permission=Permission.NETWORK,
+        run=run,
+        repeatable=True,
+        max_calls=MAX_SUGGESTIONS,
+        records="model_suggested",
+    )
+
+
+def _hub_problem(e: hub.HubError) -> str:
+    """Why a model cannot be suggested, for the model that asked."""
+    match e.problem:
+        case hub.Problem.NOT_FOUND | hub.Problem.NO_ACCESS:
+            return f"{e.ref.spec} is not on Hugging Face (or not public)"
+        case hub.Problem.NOT_GGUF:
+            return f"{e.ref.spec} has no GGUF files: only GGUF models can run locally"
+        case hub.Problem.NO_QUANT | hub.Problem.CHOOSE_QUANT:
+            have = ", ".join(e.quants) or "none"
+            return f"{e.ref.repo}: name one of its quantizations as author/model:QUANT ({have})"
+        case hub.Problem.UNREACHABLE:
+            return "Hugging Face cannot be reached right now"
+    return f"{e.ref.spec}: {e.problem.value}"
+
+
+def builtin_registry(
+    sandbox: Sandbox | None = None, web: Web | None = None, models: ModelLookup | None = None
+) -> Registry:
     """The tools every DESMAN has. A new registry each time: registering is not global.
     Whether the sandbox works is checked only when `run_command` may be used. Without `web`
-    nothing is cached and no search engine is configured."""
+    nothing is cached and no search engine is configured. `models`: how `suggest_model` asks
+    Hugging Face (None: a client of its own)."""
     return Registry(
         [
             READ_FILE,
@@ -555,5 +668,6 @@ def builtin_registry(sandbox: Sandbox | None = None, web: Web | None = None) -> 
             LIST_FILES,
             run_command_tool(sandbox if sandbox is not None else Sandbox()),
             *web_tools(web if web is not None else Web()),
+            suggest_model_tool(models),
         ]
     )

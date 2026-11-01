@@ -85,6 +85,7 @@ def test_registry_refuses_duplicate_and_bad_names() -> None:
         "run_command",
         "web_search",
         "web_fetch",
+        "suggest_model",
     ]
     assert builtin_registry() is not registry  # registering is never global
 

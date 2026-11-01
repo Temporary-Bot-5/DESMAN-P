@@ -128,7 +128,9 @@ src/desman/
     ├── workspace.py   # Per-task directory + path guard: all agent file access goes through
     │                  #   Workspace (no absolute paths, `..`, symlinks; atomic writes)
     ├── tools.py   # Tool registry: Tool (args schema, Permission), Registry, built-in file
-    │              #   tools; Toolbox per subtask (only allowed tools, lease guard, audit)
+    │              #   tools; Toolbox per subtask (only allowed tools, lease guard, audit);
+    │              #   suggest_model: an agent only suggests a HF model (audit `model_suggested`,
+    │              #   shown by `status` and the chat; the person runs `models add`)
     ├── policy.py  # Access = role's tools in `src/desman/policy.toml` ∩ human's `permissions`;
     │              #   refusals audited (tool_refused), admin calls marked elevated
     ├── effects.py # Call journal (D6): intent → run → result per tool call; a rerun of an
