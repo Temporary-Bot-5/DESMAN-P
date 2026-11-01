@@ -20,6 +20,7 @@ BANNER = """████░░█████░█████░█░░░�
 
 def _commands() -> list[tuple[str, str]]:
     return [
+        ("desman -c / -t", t("continue the last chat / a chat that is not kept")),
         (t('desman run "GOAL"'), t("plan and run a task")),
         ("desman list / status", t("tasks and their progress")),
         ("desman inbox", t("what waits for your decision")),

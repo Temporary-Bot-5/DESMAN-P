@@ -87,7 +87,8 @@ src/desman/
 │                  #   language (ADR 0002); catalogs in locales/ (ru, zh, es, pt, de, fr, ja,
 │                  #   ko, pl, tr, uk, hi)
 ├── info.py        # Banner / project info
-├── chat.py        # The chat of bare `desman`: continues the last session; /help, /new,
+├── chat.py        # The chat of bare `desman`: a new session (`-c` continues the last one,
+│                  #   `-t` a temporary chat, erased when it ends); /help, /new,
 │                  #   /sessions, /rename, /compact, /profile, /delete, /exit; each message gets the interlocutor's turn; a task turn
 │                  #   runs a task of the session while the chat waits, then it is retold; a
 │                  #   command turn goes through the catalog: the window and the person's "yes"
@@ -133,6 +134,8 @@ src/desman/
     │              #   message | summary | event, task link); a session starts with its first message
     │              #   history(): the latest summary and the messages after those it covers
     │              #   a session may be named; deleted = out of the lists, messages kept
+    │              #   temporary (C.11): never listed, erase()d when its chat ends, sweep()
+    │              #   after a crash; the database refuses to erase any other session
     ├── operator.py # operator_log: what the person did outside tasks (chat commands confirmed
     │              #   or declined, keys by fingerprint, permissions); append-only
     ├── profile.py # User's profile (C.7): short notes for the interlocutor (≤20, ≤200 chars),

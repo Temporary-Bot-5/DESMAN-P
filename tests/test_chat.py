@@ -30,10 +30,15 @@ def configured() -> None:
     ConfigManager(default_config_path()).save(make_config(language="en", configured=True))
 
 
-def chat(*lines: str) -> Result:
-    result = CliRunner().invoke(cli, [], input="".join(f"{line}\n" for line in lines))
+def chat(*lines: str, args: tuple[str, ...] = ()) -> Result:
+    result = CliRunner().invoke(cli, list(args), input="".join(f"{line}\n" for line in lines))
     assert result.exit_code == 0, result.output
     return result
+
+
+def again(*lines: str) -> Result:
+    """`desman -c`: the chat continuing the last session."""
+    return chat(*lines, args=("-c",))
 
 
 def stored() -> Sessions:
@@ -109,7 +114,7 @@ def test_message_checks_match_the_enums(
 # ── Bare `desman` ────────────────────────────────────────────────────────────
 
 
-def test_messages_are_kept_and_the_chat_continues_the_last_session() -> None:
+def test_messages_are_kept_and_every_chat_starts_a_new_session() -> None:
     configured()
     first = chat("find cheap flights to Lisbon", "/exit", "never read")
     assert "New session" in first.output
@@ -118,8 +123,20 @@ def test_messages_are_kept_and_the_chat_continues_the_last_session() -> None:
     assert info.opening == "find cheap flights to Lisbon" and info.messages == 1
 
     second = chat("and back on Sunday")
-    assert "Continuing the session" in second.output
-    assert "find cheap flights to Lisbon" in second.output  # the last messages are shown
+    assert "New session" in second.output and "Continuing the session" not in second.output
+    assert "find cheap flights" not in second.output
+    assert [s.opening for s in stored().recent()] == [
+        "and back on Sunday",
+        "find cheap flights to Lisbon",
+    ]
+
+
+def test_c_continues_the_last_session() -> None:
+    configured()
+    chat("find cheap flights to Lisbon")
+    result = again("and back on Sunday")
+    assert "Continuing the session" in result.output
+    assert "find cheap flights to Lisbon" in result.output  # the last messages are shown
     [info] = stored().recent()
     assert info.messages == 2
 
@@ -127,7 +144,7 @@ def test_messages_are_kept_and_the_chat_continues_the_last_session() -> None:
 def test_new_starts_a_session_with_the_next_message() -> None:
     configured()
     chat("first")
-    result = chat("/new", "/new", "second")
+    result = again("/new", "/new", "second")
     assert "New session: it starts with your next message" in result.output
     assert "This session is new already" in result.output
     assert [s.opening for s in stored().recent()] == ["second", "first"]
@@ -142,9 +159,9 @@ def test_leaving_without_writing_leaves_no_session() -> None:
 def test_sessions_switches_to_the_chosen_one() -> None:
     configured()
     chat("about flights")
-    chat("/new", "about trains")
+    chat("about trains")
     # Listed newest first: 1 is "about trains" (current), 2 is "about flights".
-    result = chat("/sessions", "2", "more on flights")
+    result = again("/sessions", "2", "more on flights")
     assert "Which session?" in result.output and "current" in result.output
     assert "Switched to the session" in result.output
     flights, trains = stored().recent()  # the one written to last comes first
@@ -189,7 +206,7 @@ def test_every_session_stays_reachable_page_by_page(monkeypatch: pytest.MonkeyPa
     configured()
     chat("oldest", "/new", "middle", "/new", "newest")
     # Page 1: newest (current), middle, "earlier sessions…" (3); page 2: oldest (1).
-    result = chat("/sessions", "3", "1", "back to the oldest")
+    result = again("/sessions", "3", "1", "back to the oldest")
     assert "earlier sessions…" in result.output
     assert "Switched to the session" in result.output
     assert [s.opening for s in stored().recent()] == ["oldest", "newest", "middle"]
@@ -282,7 +299,7 @@ def test_rename_names_the_session_in_the_list() -> None:
     chat("find flights to Oslo", "/rename Trip to Oslo")
     [session] = stored().recent()
     assert session.title == "Trip to Oslo"
-    listed = chat("/sessions")
+    listed = again("/sessions")
     [row] = [line for line in listed.output.splitlines() if "· current" in line]
     assert "Trip to Oslo" in row and "find flights" not in row
     assert operator_log() == [("operator_session_renamed", {"title": "Trip to Oslo"})]
@@ -293,7 +310,7 @@ def test_rename_without_a_name_asks_for_one_and_dash_names_it_back() -> None:
     result = chat("find flights to Oslo", "/rename", "Oslo")
     assert "Name of this session" in result.output
     assert stored().recent()[0].title == "Oslo"
-    chat("/rename -")
+    again("/rename -")
     assert stored().recent()[0].title is None
 
 
@@ -316,20 +333,160 @@ def test_nothing_to_rename_or_delete_before_the_first_message() -> None:
 def test_delete_asks_then_the_chat_starts_afresh() -> None:
     configured()
     chat("find flights to Oslo")
-    declined = chat("/delete", "n")
+    declined = again("/delete", "n")
     assert "Its messages stay in the database" in declined.output
     assert "Nothing changed." in declined.output and len(stored().recent()) == 1
-    deleted = chat("/delete", "y", "something else")
+    deleted = again("/delete", "y", "something else")
     assert "Session deleted." in deleted.output
     [left] = stored().recent()
     assert left.opening == "something else"
     assert [action for action, _ in operator_log()] == ["operator_session_deleted"]
     # The deleted session is never continued, and its messages are still there.
-    again = chat()
-    assert "find flights" not in again.output
+    continued = again()
+    assert "find flights" not in continued.output
     conn = db.open_db(db.default_db_path())
     assert (
         conn.execute("SELECT COUNT(*) FROM messages WHERE text LIKE 'find flights%'").fetchone()[0]
         == 1
     )
     conn.close()
+
+
+# ── Temporary chats (C.11) ───────────────────────────────────────────────────
+
+
+def temporary(*lines: str) -> Result:
+    """`desman -t`."""
+    return chat(*lines, args=("-t",))
+
+
+def texts() -> list[str]:
+    conn = db.open_db(db.default_db_path())
+    try:
+        return [r[0] for r in conn.execute("SELECT text FROM messages ORDER BY seq")]
+    finally:
+        conn.close()
+
+
+def test_a_temporary_chat_is_erased_when_it_ends_and_never_listed() -> None:
+    configured()
+    chat("a kept one")
+    result = temporary("a secret plan", "/help")
+    assert "Temporary chat" in result.output
+    assert texts() == ["a kept one"]  # its messages are gone, the kept session's stay
+    assert [s.opening for s in stored().recent()] == ["a kept one"]
+    assert "a secret plan" not in again().output  # `-c` continues the kept one
+    conn = db.open_db(db.default_db_path())
+    [row] = conn.execute("SELECT temporary, owner FROM sessions WHERE temporary = 1")
+    assert row["owner"]  # the row stays: tasks and calls of the chat may name it
+    conn.close()
+
+
+def test_a_temporary_chat_has_no_commands_about_kept_sessions() -> None:
+    configured()
+    result = temporary("/help", "hello", "/sessions", "/rename X", "/compact", "/delete")
+    for name in ("/sessions", "/rename", "/compact", "/delete"):
+        assert f"{name} is not available in a temporary chat" in result.output
+    assert "start a new temporary chat" in result.output
+    assert texts() == []
+
+
+def test_new_in_a_temporary_chat_erases_the_one_before(sessions: Sessions) -> None:
+    lines = iter(["first secret", "/new", "second secret"])
+    chat_ = Chat(sessions, read=lambda: next(lines, None), temporary=True)
+    seen: list[list[str]] = []
+    erase = sessions.erase
+
+    def watched(session_id: str) -> None:
+        seen.append([m.text for m in sessions.messages(session_id)])
+        erase(session_id)
+
+    sessions.erase = watched  # type: ignore[method-assign]
+    chat_.run()
+    assert seen == [["first secret"], ["second secret"]]  # at /new, then at the end
+    assert sessions.conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+
+
+def test_what_a_crashed_temporary_chat_left_is_erased_by_the_next_chat(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+
+    from desman.core import sessions as sessions_module
+
+    dead = f"{socket.gethostname()}:{2**22 + 12345}"  # above any pid_max: no such process
+    monkeypatch.setattr(sessions_module, "current_owner", lambda: dead)
+    left = sessions.add(None, Role.USER, "left behind", temporary=True).session_id
+    monkeypatch.setattr(sessions_module, "current_owner", lambda: "elsewhere:1")
+    alive = sessions.add(None, Role.USER, "another machine's", temporary=True).session_id
+    assert sessions.sweep() == 1
+    assert sessions.messages(left) == [] and len(sessions.messages(alive)) == 1
+
+
+def test_only_a_temporary_session_s_messages_may_be_erased(sessions: Sessions) -> None:
+    kept = sessions.add(None, Role.USER, "kept").session_id
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        sessions.erase(kept)
+    with pytest.raises(sqlite3.IntegrityError, match="temporary from its start"):
+        sessions.conn.execute(
+            "UPDATE sessions SET temporary = 1, owner = 'x:1' WHERE id = ?", (kept,)
+        )
+    with pytest.raises(sqlite3.IntegrityError):  # a temporary session always has its owner
+        sessions.conn.execute("INSERT INTO sessions (id, temporary) VALUES ('t', 1)")
+    assert [m.text for m in sessions.messages(kept)] == ["kept"]
+
+
+def test_a_temporary_chat_keeps_no_profile_and_no_cached_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from desman import runs
+    from desman.llm.fake import FakeLLM
+
+    llm = FakeLLM().on("Chat turn", '{"type": "reply", "text": "Hi!", "profile": [{"add": "x"}]}')
+    asked: list[bool] = []
+
+    def models(config: object, conn: object, **kwargs: object) -> runs.Models:
+        asked.append(bool(kwargs.get("cache", True)))
+        return runs.Models(llm, None)
+
+    monkeypatch.setattr(runs, "models", models)
+    config = make_config(language="en", configured=True)
+    config.personalize = True
+    ConfigManager(default_config_path()).save(config)
+    assert "Hi!" in temporary("hello").output
+    assert asked == [False]
+    [request] = llm.calls
+    assert '"profile"' not in request.prompt  # the model was told nothing of the notes
+    conn = db.open_db(db.default_db_path())
+    assert conn.execute("SELECT COUNT(*) FROM profile_notes").fetchone()[0] == 0
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    "args", [["-t", "list"], ["-c", "status", "x"], ["-c", "-t"]], ids=" ".join
+)
+def test_c_and_t_are_for_the_chat_alone(args: list[str]) -> None:
+    configured()
+    result = CliRunner().invoke(cli, args, input="hello\n")
+    assert result.exit_code == 2 and "-c" in result.output
+    assert not db.default_db_path().exists() or texts() == []
+
+
+def test_a_temporary_chat_s_command_is_journaled_without_its_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from desman import runs
+    from desman.llm.fake import FakeLLM
+
+    turn = '{"type": "command", "name": "run", "args": {"goal": "plan my secret trip"}}'
+    llm = FakeLLM().on("Chat turn", turn)
+    monkeypatch.setattr(runs, "models", lambda config, conn, **_: runs.Models(llm, None))
+    configured()
+    temporary("run it", "n")
+    assert operator_log() == [
+        ("operator_declined", {"command": "run", "args_given": ["goal"], "temporary": True})
+    ]
+    conn = db.open_db(db.default_db_path())
+    dumped = "\n".join(conn.iterdump())
+    conn.close()
+    assert "secret trip" not in dumped and "run it" not in dumped  # nowhere in the database

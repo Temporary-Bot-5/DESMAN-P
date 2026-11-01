@@ -154,7 +154,10 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Bare `desman` opens the chat and continues the last session. Each message gets one "
+        "Bare `desman` opens the chat in a new session; `desman -c` continues the last one and "
+        "`/sessions` any earlier one. `desman -t` opens a temporary chat: nothing said there is "
+        "kept, it is erased when the chat ends (its tasks stay, like any task), and it keeps no "
+        "profile notes and no summaries. Each message gets one "
         "turn of the interlocutor: an answer, a question back, a task, or a DESMAN command. "
         "A command that shows something runs at once; one that changes something is shown "
         "in a window and done only after the person's yes; a key or a section of the wizard "

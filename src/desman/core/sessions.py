@@ -10,6 +10,10 @@ and the messages after those it covers.
 A session exists from its first message on: `/new` only starts a fresh one, so leaving the chat
 without writing anything leaves no empty session behind. The person may name a session and
 delete it: a deleted session leaves the lists and is never continued, but its messages stay.
+
+A temporary session (C.11, `desman -t`) is the exception: it is never listed, and its messages
+are erased (`erase`) when the chat that holds it ends, or by the next chat once that one is
+certainly gone (`sweep`, after a crash). The database refuses to erase any other session.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict
 
 from desman.core import db
+from desman.core.owner import current_owner, owner_is_gone
 from desman.core.store import Clock
 
 
@@ -105,18 +110,26 @@ class Sessions:
         kind: Kind = Kind.MESSAGE,
         task_id: str | None = None,
         covers: int | None = None,
+        temporary: bool = False,
     ) -> Message:
-        """Append a message; `session_id` None starts a new session with it. A summary says
-        which messages it `covers`."""
+        """Append a message; `session_id` None starts a new session with it, `temporary` one if
+        asked (this process holds it). A summary says which messages it `covers`."""
         if (covers is not None) != (kind is Kind.SUMMARY):
             raise ValueError("a summary, and only a summary, covers earlier messages")
         now = db.to_iso(self.clock())
         with db.transaction(self.conn):
             if session_id is None:
                 session_id = uuid.uuid4().hex
-                self.conn.execute(
-                    "INSERT INTO sessions (id, created_at) VALUES (?, ?)", (session_id, now)
-                )
+                if temporary:  # the columns are newer than the table (migration 24)
+                    self.conn.execute(
+                        "INSERT INTO sessions (id, created_at, temporary, owner) "
+                        "VALUES (?, ?, 1, ?)",
+                        (session_id, now, current_owner()),
+                    )
+                else:
+                    self.conn.execute(
+                        "INSERT INTO sessions (id, created_at) VALUES (?, ?)", (session_id, now)
+                    )
             columns: dict[str, str | int | None] = {
                 "session_id": session_id,
                 "at": now,
@@ -209,6 +222,23 @@ class Sessions:
                 (now, session_id),
             )
 
+    def erase(self, session_id: str) -> None:
+        """Erase the messages of a temporary session (the database refuses any other)."""
+        with db.transaction(self.conn):
+            self.conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+
+    def sweep(self) -> int:
+        """Erase what temporary sessions left behind when their chat could not (it crashed, its
+        terminal was closed): only of a chat certainly gone. How many were erased."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT s.id, s.owner FROM sessions s JOIN messages m ON m.session_id = s.id "
+            "WHERE s.temporary = 1"
+        ).fetchall()
+        gone = [r["id"] for r in rows if owner_is_gone(r["owner"])]
+        for session_id in gone:
+            self.erase(session_id)
+        return len(gone)
+
     def get(self, session_id: str) -> SessionInfo | None:
         """A session that is not deleted, or None."""
         found = self._infos("AND s.id = ?", (session_id,), limit=1, offset=0)
@@ -228,7 +258,7 @@ class Sessions:
                              WHERE u.session_id = s.id AND u.role = 'user'
                              ORDER BY u.seq LIMIT 1), '') AS opening
             FROM sessions s JOIN messages m ON m.session_id = s.id
-            WHERE s.deleted_at IS NULL {where}
+            WHERE s.deleted_at IS NULL AND s.temporary = 0 {where}
             GROUP BY s.id
             ORDER BY MAX(m.seq) DESC
             LIMIT ? OFFSET ?

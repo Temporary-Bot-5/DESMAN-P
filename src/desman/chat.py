@@ -1,6 +1,7 @@
 """The chat that bare `desman` opens after the banner (ROADMAP phase C, ADR 0003).
 
-It continues the session written to last. A line starting with `/` is one of the chat's own
+It starts a new session (`desman -c` continues the last one, `/sessions` any earlier one;
+`desman -t` opens a temporary chat, erased when it ends). A line starting with `/` is one of the chat's own
 commands (`/help` lists them); anything else is a message, saved in the session and answered by
 the interlocutor (`desman.interlocutor`, C.3) with one turn: a reply, a question back, a task
 or a command. A task is an ordinary task of the session: planned, run by the coordinator while
@@ -86,8 +87,12 @@ LISTED_SESSIONS = 20
 _EARLIER = "earlier"  # not a session id: those are uuid hex
 
 
-def _commands() -> dict[str, str]:
-    return {
+KEPT_ONLY = ("/sessions", "/rename", "/compact", "/delete")
+"""The chat's commands about kept sessions: a temporary chat has none of them."""
+
+
+def _commands(temporary: bool = False) -> dict[str, str]:
+    every = {
         "/help": t("the chat's commands"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
@@ -97,21 +102,38 @@ def _commands() -> dict[str, str]:
         "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
+    if temporary:
+        every["/new"] = t("start a new temporary chat (this one is erased)")
+    return {name: what for name, what in every.items() if not (temporary and name in KEPT_ONLY)}
 
 
 class Chat:
-    def __init__(self, sessions: Sessions, read: Callable[[], str | None] | None = None) -> None:
+    def __init__(
+        self,
+        sessions: Sessions,
+        read: Callable[[], str | None] | None = None,
+        *,
+        resume: bool = False,
+        temporary: bool = False,
+    ) -> None:
+        if resume and temporary:
+            raise ValueError("a temporary chat never continues a session")
         self.sessions = sessions
+        self.temporary = temporary
+        """Nothing said is kept (C.11): the session is erased when the chat ends; no profile
+        notes, no summaries, no cached replies."""
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
-        self.read = read or (lambda: ui.line(_commands()))
+        self.read = read or (lambda: ui.line(_commands(temporary)))
         self.models: runs.Models | None = None
         """Built at the first message that needs them, again when the config changes."""
         self._models_for: Config | None = None
         self._http: httpx.Client | None = None
         """The web tools' client, shared by the session's tasks and closed with the chat."""
-        latest = sessions.latest()
+        latest = sessions.latest() if resume else None
         self.session_id: str | None = latest.id if latest else None
+        """A new session (it starts with the first message) unless asked to continue the last
+        one (`desman -c`); /sessions continues any."""
         self.waiting = InboxWatch(self.store)
         """What waits for the person's decision: told at the start, then as it comes (5.1)."""
         self._gave_up: dict[str, int] = {}
@@ -121,6 +143,7 @@ class Chat:
         """The block of protected files last told (5.3): told again only when it changes."""
 
     def run(self) -> None:
+        self.sessions.sweep()  # what a temporary chat that crashed left behind
         self._greet()
         try:
             while True:
@@ -139,6 +162,12 @@ class Chat:
         finally:
             if self._http is not None:
                 self._http.close()
+            self._erase()
+
+    def _erase(self) -> None:
+        """A temporary chat's session, erased: when it ends or a new one starts."""
+        if self.temporary and self.session_id is not None:
+            self.sessions.erase(self.session_id)
 
     # ── Messages ─────────────────────────────────────────────────────────────
 
@@ -155,20 +184,21 @@ class Chat:
             )
         models = None if config is None else self._models(config)
         if config is None or models is None:
-            self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
+            self.session_id = self._add_user(text)
             return
-        notes = self.profile.notes() if config.personalize else None
+        personal = config.personalize and not self.temporary  # a temporary chat notes nothing
+        notes = self.profile.notes() if personal else None
         interlocutor = Interlocutor(
             models.for_(calls.Role.INTERLOCUTOR), config.language, notes, config.behaviour
         )
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
-        if self.session_id is not None:  # before the message: what it says comes after
+        if self.session_id is not None and not self.temporary:  # nothing kept, nothing summarised
             before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
             after = self._gave_up.get(self.session_id, 0)
             incoming = estimate_tokens(text)
             if compaction.needed(before, after=after, extra=incoming):
                 self._compact(before, models, incoming=incoming)
-        self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
+        self.session_id = self._add_user(text)
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
             with self._for(calls.Role.INTERLOCUTOR):
@@ -184,7 +214,7 @@ class Chat:
                 )
             )
             return
-        if config.personalize:  # off: the model was told nothing of it, and nothing is kept
+        if personal:  # off: the model was told nothing of it, and nothing is kept
             self._note(turn.profile, config)
             interlocutor.profile = self.profile.notes()  # a task's retelling follows them
         if isinstance(turn, Reply):
@@ -195,6 +225,11 @@ class Chat:
             self._task(turn, config, models, interlocutor)
         else:
             self._command(turn, config, models, interlocutor)
+
+    def _add_user(self, text: str) -> str:
+        """The person's message, kept in the session (a new one with the first message)."""
+        added = self.sessions.add(self.session_id, Role.USER, text, temporary=self.temporary)
+        return added.session_id
 
     def _config(self) -> Config | None:
         try:
@@ -208,7 +243,8 @@ class Chat:
         if self.models is None or config != self._models_for:
             self.models, self._models_for = None, None
             try:
-                self.models = runs.models(config, self.sessions.conn)
+                # A temporary chat's replies are not kept in the cache either.
+                self.models = runs.models(config, self.sessions.conn, cache=not self.temporary)
                 self._models_for = config
             except router.NoProvider:
                 ui.warn(
@@ -342,9 +378,13 @@ class Chat:
         self, entry: commands.Entry, args: commands.Args, done: bool, before: Config | None
     ) -> None:
         """The operator's journal: the command, confirmed or declined, and what it changed in
-        the config (a key by its fingerprint, a permission by its name)."""
+        the config (a key by its fingerprint, a permission by its name). A temporary chat's
+        command is kept without its arguments' values: a goal or a note is the chat's text."""
         conn = self.store.conn
-        details = {"command": entry.name, "args": args.model_dump(mode="json")}
+        given = args.model_dump(mode="json", exclude_defaults=True)
+        details: dict[str, Any] = {"command": entry.name, "args": args.model_dump(mode="json")}
+        if self.temporary:  # the decision is the person's, kept; what the chat said is not
+            details = {"command": entry.name, "args_given": sorted(given), "temporary": True}
         action = "operator_command" if done else "operator_declined"
         operator.record(conn, action, details, session_id=self.session_id)
         for change, about in commands.config_changes(before, self._saved_config()):
@@ -632,6 +672,15 @@ class Chat:
                 )
 
     def _greet(self) -> None:
+        if self.temporary:
+            ui.note(
+                t(
+                    "Temporary chat: what is said here is not kept and is erased when you "
+                    "leave; tasks you ask for stay, like any task. /help lists the chat's "
+                    "commands."
+                )
+            )
+            return
         if self.session_id is None:
             ui.note(t("New session. /help lists the chat's commands."))
             return
@@ -686,6 +735,9 @@ class Chat:
     def _slash(self, line: str) -> bool:
         """Run a chat command; False when it ends the chat."""
         name = line.split()[0].lower()
+        if self.temporary and name in KEPT_ONLY:
+            ui.error(t("{name} is not available in a temporary chat", name=name))
+            return True
         if name == "/exit":
             return False
         if name == "/help":
@@ -709,7 +761,7 @@ class Chat:
     def _help(self) -> None:
         commands = ui.table("", "")
         commands.show_header = False
-        for name, what in _commands().items():
+        for name, what in _commands(self.temporary).items():
             commands.add_row(Text(name, style="key"), Text(what, style="muted"))
         ui.out(commands)
         ui.note(t("Anything else you write is a message."))
@@ -718,6 +770,7 @@ class Chat:
         if self.session_id is None:
             ui.note(t("This session is new already."))
             return
+        self._erase()
         self.session_id = None
         ui.ok(t("New session: it starts with your next message."))
 
