@@ -13,6 +13,7 @@ dependencies = [
     "rich>=13.7",
     "questionary>=2.0",
     "prompt_toolkit>=3.0",  # questionary's own base; the chat's line uses it directly
+    "cryptography>=42",  # Ed25519 signatures of desman-global (ADR 0004)
 ]
 
 [project.optional-dependencies]
@@ -35,7 +36,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-desman = ["policy.toml", "protected.toml"]
+desman = ["policy.toml", "protected.toml", "net/root.pub"]
 
 [tool.ruff]
 target-version = "py311"
