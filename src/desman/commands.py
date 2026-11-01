@@ -444,15 +444,14 @@ def _resume(ctx: Context, args: TaskArgs) -> Proposal:
 WORKER_TASKS = 50
 """At most this many unfinished tasks are worked on by one `worker` request in the chat; the
 window says how many are left for the next one."""
-WORKER_SCAN = 1000
-"""How many unfinished tasks the chat's worker looks at to choose the most urgent."""
 
 
 def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     """The chat's worker: the unfinished tasks in turn, most urgent first (the oldest among
     equals), each as `resume` runs it (live progress, retold), until none has work left. It does
     not wait for new tasks: that is the CLI's `desman worker`, in a terminal of its own."""
-    active = task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=WORKER_SCAN)
+    # Every unfinished task is a candidate: the most urgent may be the oldest.
+    active = task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=None)
     if not active:
         return Outcome({"unfinished_tasks": 0})
     in_order = sorted(reversed(active), key=lambda r: -r.priority)  # stable: oldest first

@@ -325,6 +325,21 @@ def test_blocked_subtask_names_what_blocks_it(tmp_path: Path) -> None:
     assert "blocked by [0] fetch data (failed)" in desman("status", task_id).output
 
 
+def test_summaries_without_a_limit_read_every_page() -> None:
+    from desman.core.report import task_summaries
+
+    s = store()
+    for i in range(130):  # more than one page of 100
+        s.create_task(
+            TaskSpec(
+                goal=f"goal {i}", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")]
+            )
+        )
+    every = task_summaries(s, status=TaskStatus.ACTIVE, limit=None)
+    assert len(every) == 130 and every[-1].goal == "goal 0"  # the oldest too
+    assert len(task_summaries(s, limit=None)) == 130
+
+
 def test_list_limit_does_not_load_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
     s = store()
     for i in range(30):
