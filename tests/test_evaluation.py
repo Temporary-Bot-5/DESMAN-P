@@ -483,3 +483,47 @@ def test_evaluate_command_refusals(checkout: Path, monkeypatch: pytest.MonkeyPat
     started = proposals.start(s, spec, None)
     refused = desman("proposals", "evaluate", str(started.id))
     assert refused.exit_code == 1 and "Cannot evaluate proposal" in refused.output
+
+
+# ── What the analyst sees of it ──────────────────────────────────────────────
+
+
+def test_the_analyst_sees_how_earlier_proposals_did(checkout: Path, tmp_path: Path) -> None:
+    from test_improve import a_failure
+
+    a_failure(tmp_path)
+    s = store()
+    p = a_proposal(s, checkout)
+    assert improve.evaluated(s.conn, p) == {}
+    result = bench.run(Store(db.open_db(tmp_path / "bench.db")), "fake", Tuning())
+    data = result.model_dump(mode="json")
+    proposals.record_evaluation(s.conn, p.id, mode="fake", commit="c1", verdict="same", base=data)
+    proposals.record_evaluation(
+        s.conn, p.id, mode="fake", commit="c2", verdict="worse", base=data, candidate=data
+    )
+    proposals.record_evaluation(
+        s.conn, p.id, mode="real", commit="c2", verdict="failed", reason="it\x1btook too long"
+    )
+    spec = improve.spec(s, None)
+    assert spec is not None
+    [earlier] = spec.subtasks[0].inputs["earlier_proposals"]
+    real, fake = earlier["evaluation"]
+    # The newest of each mode, real models first; a reason without control characters.
+    assert real == {"models": "real", "verdict": "failed", "reason": "ittook too long"}
+    assert fake["models"] == "fake" and fake["verdict"] == "worse"
+    assert fake["current"] == fake["proposed"] == bench.metrics(result)
+    assert "settings" not in earlier  # it changed a prompt only
+
+
+def test_the_analyst_sees_the_values_an_earlier_proposal_gave(
+    checkout: Path, tmp_path: Path
+) -> None:
+    from test_improve import a_failure
+
+    a_failure(tmp_path)
+    s = store()
+    a_proposal(s, checkout, [Change(target="tuning.max_subtasks", value=3)])
+    spec = improve.spec(s, None)
+    assert spec is not None
+    [earlier] = spec.subtasks[0].inputs["earlier_proposals"]
+    assert earlier["settings"] == [{"setting": "tuning.max_subtasks", "old": None, "new": 3}]
