@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 desman = "desman.cli:cli"
+desman-registry = "desman.registry.cli:cli"
 
 [build-system]
 requires = ["setuptools>=68"]

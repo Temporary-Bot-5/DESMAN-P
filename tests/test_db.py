@@ -84,13 +84,11 @@ def test_newer_schema_is_refused(conn: sqlite3.Connection) -> None:
         db.migrate(conn)
 
 
-def test_failed_migration_leaves_database_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_migration_leaves_database_untouched() -> None:
     broken = (*db.MIGRATIONS, "CREATE TABLE extra (x INTEGER) STRICT; INSERT INTO nope VALUES (1);")
-    monkeypatch.setattr(db, "MIGRATIONS", broken)
-    monkeypatch.setattr(db, "SCHEMA_VERSION", len(broken))
     conn = db.connect(":memory:")
     with pytest.raises(sqlite3.OperationalError):
-        db.migrate(conn)
+        db.migrate(conn, broken)
     # The real migrations committed, the broken one rolled back completely.
     assert db.schema_version(conn) == len(broken) - 1
     assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'extra'").fetchone() is None

@@ -580,28 +580,29 @@ def schema_version(conn: sqlite3.Connection) -> int:
     return version
 
 
-def migrate(conn: sqlite3.Connection) -> int:
+def migrate(conn: sqlite3.Connection, migrations: tuple[str, ...] = MIGRATIONS) -> int:
     """Apply pending migrations, each in its own transaction. Safe to call repeatedly and from
-    several processes at once.
+    several processes at once. `migrations`: another database's own list (the registry's).
 
     Returns the number of migrations this call applied.
     """
+    latest = len(migrations)
     applied = 0
     while True:
         # The version is read under the write lock, so another migrator cannot change it between
         # the read and the migration (two fresh `init-db` runs would otherwise both see v0).
         with transaction(conn):
             current = schema_version(conn)
-            if current > SCHEMA_VERSION:
+            if current > latest:
                 raise SchemaVersionError(
-                    f"database schema v{current} is newer than this DESMAN (v{SCHEMA_VERSION}); "
+                    f"database schema v{current} is newer than this DESMAN (v{latest}); "
                     "upgrade DESMAN"
                 )
-            if current == SCHEMA_VERSION:
+            if current == latest:
                 return applied
             # executescript() would COMMIT on its own, so run statements one by one inside the
             # transaction; user_version is bumped in the same transaction as the schema change.
-            for statement in _split_sql(MIGRATIONS[current]):
+            for statement in _split_sql(migrations[current]):
                 conn.execute(statement)
             conn.execute(f"PRAGMA user_version = {current + 1}")
         applied += 1
@@ -630,11 +631,11 @@ class SchemaMismatchError(RuntimeError):
     """The database's tables do not match what its schema version promises."""
 
 
-def expected_schema() -> dict[str, list[str]]:
+def expected_schema(migrations: tuple[str, ...] = MIGRATIONS) -> dict[str, list[str]]:
     """Columns per table that the migrations produce, built from scratch in memory."""
     reference = sqlite3.connect(":memory:", isolation_level=None)
     try:
-        for script in MIGRATIONS:
+        for script in migrations:
             for statement in _split_sql(script):
                 reference.execute(statement)
         return _columns(reference)
@@ -642,11 +643,11 @@ def expected_schema() -> dict[str, list[str]]:
         reference.close()
 
 
-def expected_triggers() -> set[str]:
+def expected_triggers(migrations: tuple[str, ...] = MIGRATIONS) -> set[str]:
     """Trigger names the migrations produce (they carry invariants such as append-only audit)."""
     reference = sqlite3.connect(":memory:", isolation_level=None)
     try:
-        for script in MIGRATIONS:
+        for script in migrations:
             for statement in _split_sql(script):
                 reference.execute(statement)
         return _triggers(reference)
@@ -668,13 +669,18 @@ def _columns(conn: sqlite3.Connection) -> dict[str, list[str]]:
     return {t: sorted(r[1] for r in conn.execute(f"PRAGMA table_info({t})")) for t in tables}
 
 
-def verify_schema(conn: sqlite3.Connection) -> None:
+def verify_schema(
+    conn: sqlite3.Connection,
+    migrations: tuple[str, ...] = MIGRATIONS,
+    *,
+    fresh: str = "`desman init-db`",
+) -> None:
     """Refuse databases whose columns or triggers differ from the current schema.
 
     Happens with a database created by an unreleased development revision whose migration was
     later changed; failing here with a clear message beats a KeyError deep inside a task run.
     """
-    expected, actual = expected_schema(), _columns(conn)
+    expected, actual = expected_schema(migrations), _columns(conn)
     problems = []
     for table, columns in expected.items():
         have = actual.get(table)
@@ -685,13 +691,13 @@ def verify_schema(conn: sqlite3.Connection) -> None:
             problems.append(f"{table}: missing {', '.join(missing)}")
         if extra := sorted(set(have) - set(columns)):
             problems.append(f"{table}: unexpected {', '.join(extra)}")
-    if missing_triggers := sorted(expected_triggers() - _triggers(conn)):
+    if missing_triggers := sorted(expected_triggers(migrations) - _triggers(conn)):
         problems.append(f"missing triggers {', '.join(missing_triggers)}")
     if problems:
         raise SchemaMismatchError(
             f"database schema does not match v{schema_version(conn)} ({'; '.join(problems)}). "
-            "It was probably created by a development revision; move it away and run "
-            "`desman init-db` to start fresh."
+            f"It was probably created by a development revision; move it away and run "
+            f"{fresh} to start fresh."
         )
 
 
