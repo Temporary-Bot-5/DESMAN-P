@@ -141,7 +141,7 @@ def test_a_head_that_moved_after_the_plan_stops_it(checkout: Path) -> None:
     p = a_proposal(s, checkout)
     plan = applying.plan_apply(s.conn, p, Tuning(), repo=checkout)
     git(checkout, "commit", "-q", "--allow-empty", "-m", "meanwhile")
-    with pytest.raises(applying.ApplyError, match="HEAD moved"):
+    with pytest.raises(applying.ApplyError, match="branch or HEAD changed"):
         applying.carry_out(s.conn, plan, open_config())
     assert proposals.applications(s.conn, p.id) == []
 
@@ -423,3 +423,60 @@ def test_the_chat_applies_only_after_the_window(
     revert_window = reverting.handler(ctx, args)
     assert isinstance(revert_window, commands.Proposal)
     assert revert_window.lines[0] == f"Revert proposal {p.id}:"
+
+
+# ── What happens meanwhile (review of #71) ───────────────────────────────────
+
+
+def test_no_hook_of_the_checkout_runs(checkout: Path) -> None:
+    """`--no-verify` leaves prepare-commit-msg and others running; none may change what was
+    checked, or run at all."""
+    hooks = checkout / ".git" / "hooks"
+    marker = checkout.parent / "hook-ran"
+    for name in ("prepare-commit-msg", "post-commit", "post-checkout", "post-merge"):
+        hook = hooks / name
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"echo {name} >> {marker}\n"
+            'echo "# sneaked" >> src/desman/agents.py && git add src/desman/agents.py\n'
+        )
+        hook.chmod(0o755)
+    s = store()
+    p = a_proposal(s, checkout)
+    done = apply(s, p, checkout)
+    assert not marker.exists()
+    assert done.commit is not None
+    assert git(checkout, "show", "--name-only", "--format=", done.commit).split() == [PLANNER]
+    revert(s, p, checkout)
+    assert not marker.exists()
+
+
+def test_another_branch_at_the_same_commit_is_not_moved(checkout: Path) -> None:
+    s = store()
+    p = a_proposal(s, checkout)
+    plan = applying.plan_apply(s.conn, p, Tuning(), repo=checkout)
+    git(checkout, "checkout", "-q", "-b", "other")
+    with pytest.raises(applying.ApplyError, match="branch or HEAD changed"):
+        applying.carry_out(s.conn, plan, open_config())
+    assert git(checkout, "rev-parse", "main").strip() == git(checkout, "rev-parse", "other").strip()
+
+
+def test_the_settings_are_put_back_when_the_commit_fails(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = store()
+    p = a_proposal(
+        s, checkout, [rules_change(checkout), Change(target="tuning.max_subtasks", value=3)]
+    )
+    plan = applying.plan_apply(s.conn, p, open_config().load().tuning, repo=checkout)
+    before = head(checkout)
+
+    def fail(repo: Path, head: str, commit: str) -> None:
+        assert open_config().load().tuning.max_subtasks == 3  # set before the commit
+        raise applying.ApplyError("no")
+
+    monkeypatch.setattr(applying, "_forward", fail)
+    with pytest.raises(applying.ApplyError, match="no"):
+        applying.carry_out(s.conn, plan, open_config())
+    assert open_config().load().tuning.max_subtasks is None
+    assert head(checkout) == before and proposals.applications(s.conn, p.id) == []

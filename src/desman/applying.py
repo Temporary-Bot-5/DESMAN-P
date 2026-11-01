@@ -15,7 +15,7 @@ touch only the files the commit changed, then a fast-forward. Each setting goes 
 value it had, unless the person changed it since (it is then left as it is, and said).
 
 Each is recorded once (`core.proposals.record_application`), with its entry in the operator's
-journal; the database takes applied and reverted only in turn. A process killed after the
+journal; the database takes applied and reverted only in turn. No hook of the checkout runs. A process killed after the
 commit and before the record leaves the commit unrecorded: applying again is then refused (its
 files are no longer the proposal's base), and the person reverts that commit with git. Processes already running (a
 worker, the chat) keep the prompts they loaded until they start again; settings are read anew
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -41,6 +42,7 @@ from desman import evaluation, improve
 from desman.config import ConfigError, ConfigManager, Tuning
 from desman.core import proposals
 from desman.core.proposals import Application, Proposal, Status
+from desman.i18n import t
 
 Action = Literal["applied", "reverted"]
 
@@ -83,10 +85,20 @@ def plan_apply(
 ) -> Plan:
     """What applying `proposal` would do; raises `ApplyError` when it cannot be applied."""
     if proposal.status is not Status.PROPOSED:
-        raise ApplyError(f"proposal {proposal.id} proposes nothing ({proposal.status})")
+        raise ApplyError(
+            t("proposal {id} proposes nothing ({status})", id=proposal.id, status=proposal.status)
+        )
     last = proposals.last_application(conn, proposal.id)
+    if last is not None and last.action == "applied" and last.commit is not None:
+        raise ApplyError(
+            t(
+                "proposal {id} is already applied (commit {commit})",
+                id=proposal.id,
+                commit=last.commit[:12],
+            )
+        )
     if last is not None and last.action == "applied":
-        raise ApplyError(f"proposal {proposal.id} is already applied{_in(last.commit)}")
+        raise ApplyError(t("proposal {id} is already applied", id=proposal.id))
     try:
         evaluation.proposed_tuning(tuning, proposal)  # the values are still valid
     except evaluation.EvaluationError as e:
@@ -107,8 +119,11 @@ def plan_apply(
     ]
     if differ:  # checked again on the commit's own files (`_commit_apply`)
         raise ApplyError(
-            f"the proposal was made from other versions of {', '.join(differ)} than HEAD has: "
-            "ask for a new analysis"
+            t(
+                "the proposal was made from other versions of {files} than HEAD has: ask for a "
+                "new analysis",
+                files=", ".join(differ),
+            )
         )
     return Plan(proposal, "applied", last, repo, head, branch, files, settings)
 
@@ -119,7 +134,7 @@ def plan_revert(
     """What reverting `proposal` would do; raises `ApplyError` when it cannot be reverted."""
     last = proposals.last_application(conn, proposal.id)
     if last is None or last.action != "applied":
-        raise ApplyError(f"proposal {proposal.id} is not applied")
+        raise ApplyError(t("proposal {id} is not applied", id=proposal.id))
     settings, left = [], []
     for item in last.details.get("settings", []):
         now = _get(tuning, item["setting"])
@@ -134,8 +149,12 @@ def plan_revert(
         _git(repo, "merge-base", "--is-ancestor", last.commit, head)
     except ApplyError:
         raise ApplyError(
-            f"commit {last.commit[:12]} of proposal {proposal.id} is not in the history of the "
-            "checkout's HEAD: revert it with git by hand"
+            t(
+                "commit {commit} of proposal {id} is not in the history of the checkout's HEAD: "
+                "revert it with git by hand",
+                commit=last.commit[:12],
+                id=proposal.id,
+            )
         ) from None
     files = sorted(
         _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", last.commit).split()
@@ -144,14 +163,10 @@ def plan_revert(
     return Plan(proposal, "reverted", last, repo, head, branch, files, settings, left)
 
 
-def _in(commit: str | None) -> str:
-    return f" (commit {commit[:12]})" if commit else ""
-
-
 def _targets(proposal: Proposal) -> list[str]:
     found = [str(c.get("target")) for c in proposal.details.get("changes", [])]
     if not found or any(t not in improve.BY_ID for t in found):
-        raise ApplyError(f"proposal {proposal.id} names no known targets for its diff")
+        raise ApplyError(t("proposal {id} names no known targets for its diff", id=proposal.id))
     return found
 
 
@@ -175,8 +190,10 @@ def _clean(repo: Path, files: list[str]) -> None:
     status = _git(repo, "status", "--porcelain", "--untracked-files=all", "--", *files)
     if status.strip():
         raise ApplyError(
-            f"there are uncommitted changes in {', '.join(files)}: commit them or put them "
-            "aside first"
+            t(
+                "there are uncommitted changes in {files}: commit them or put them aside first",
+                files=", ".join(files),
+            )
         )
 
 
@@ -190,30 +207,33 @@ def carry_out(
     *,
     session_id: str | None = None,
 ) -> Application:
-    """Do what `plan` says, if nothing it rests on changed: the commit (made in a worktree,
-    then the checkout fast-forwarded to it), then the settings, then the record."""
+    """Do what `plan` says, if nothing it rests on changed: the settings (each only if it
+    still has the value the plan showed), then the commit (made in a worktree, then the
+    checkout fast-forwarded to it), then the record. If the commit fails, the settings are
+    put back."""
     if proposals.last_application(conn, plan.proposal.id) != plan.last:
-        raise ApplyError(f"proposal {plan.proposal.id} was applied or reverted meanwhile")
-    try:  # a broken config, or a setting changed since, is found before any commit
-        tuning = manager.load().tuning
-    except ConfigError as e:
-        raise ApplyError(str(e)) from e
-    for item in plan.settings:
-        if _get(tuning, item["setting"]) != item["old"]:
-            raise ApplyError(f"the setting {item['setting']} changed since: look again")
-    commit = None
+        raise ApplyError(t("proposal {id} was applied or reverted meanwhile", id=plan.proposal.id))
     if plan.repo is not None:
-        assert plan.head is not None
-        if _git(plan.repo, "rev-parse", "HEAD").strip() != plan.head:
-            raise ApplyError("the checkout's HEAD moved since: look again")
+        _unmoved(plan)
         _clean(plan.repo, plan.files)
-        with _worktrees(plan.repo, plan.head, 2 if plan.action == "applied" else 1) as trees:
-            if plan.action == "applied":
-                commit = _commit_apply(plan, trees[0], trees[1])
-            else:
-                commit = _commit_revert(plan, trees[0])
-            _forward(plan.repo, plan.head, commit)
     settings = _set(manager, plan.settings)
+    commit = None
+    try:
+        if plan.repo is not None:
+            assert plan.head is not None
+            count = 2 if plan.action == "applied" else 1
+            with _worktrees(plan.repo, plan.head, count) as trees:
+                if plan.action == "applied":
+                    commit = _commit_apply(plan, trees[0], trees[1])
+                else:
+                    commit = _commit_revert(plan, trees[0])
+                _unmoved(plan)
+                _forward(plan.repo, plan.head, commit)
+    except BaseException:
+        back = [{"setting": i["setting"], "old": i["new"], "new": i["old"]} for i in settings]
+        with contextlib.suppress(ApplyError, ConfigError):
+            _set(manager, back)
+        raise
     details: dict[str, Any] = {"files": plan.files, "settings": settings}
     if plan.left:
         details["left"] = plan.left
@@ -227,6 +247,14 @@ def carry_out(
         details=details,
         session_id=session_id,
     )
+
+
+def _unmoved(plan: Plan) -> None:
+    """The checkout is on the HEAD and the branch the plan showed."""
+    assert plan.repo is not None
+    _, head, branch = _checkout(plan.repo)
+    if (head, branch) != (plan.head, plan.branch):
+        raise ApplyError(t("the checkout's branch or HEAD changed since: look again"))
 
 
 def _commit_apply(plan: Plan, base: Path, tree: Path) -> str:
@@ -257,8 +285,11 @@ def _commit_revert(plan: Plan, tree: Path) -> str:
         _git(tree, "revert", "--no-commit", applied)
     except ApplyError:
         raise ApplyError(
-            f"later commits changed the same lines as commit {applied[:12]}: revert it with "
-            "git by hand"
+            t(
+                "later commits changed the same lines as commit {commit}: revert it with git by "
+                "hand",
+                commit=applied[:12],
+            )
         ) from None
     p = plan.proposal
     message = (
@@ -271,17 +302,23 @@ def _commit_revert(plan: Plan, tree: Path) -> str:
 
 
 def _commit(tree: Path, message: str, files: list[str]) -> str:
-    """Commit what is staged in `tree`, after checking it is exactly a change to `files`.
-    Hooks are not run: what is committed was built and checked by code, and the person's
-    hooks could change it after the check, or take any time."""
+    """Commit what is staged in `tree`, after checking it is exactly a change to `files`; the
+    commit must hold that very tree. No hook runs (`_git`): what is committed was built and
+    checked by code, and a hook could change it after the check, or take any time."""
     staged = set(_git(tree, "diff", "--cached", "--name-only").split())
     if staged != set(files):
-        raise ApplyError("the commit would change other files than the proposal's")
+        raise ApplyError(t("the commit would change other files than the proposal's"))
     rest = _git(tree, "status", "--porcelain", "--untracked-files=all", "--ignored")
     if any(not line.startswith("M  ") for line in rest.splitlines()):
-        raise ApplyError("the worktree holds changes that would not be committed")
-    _git(tree, *_identity(tree), "commit", "--quiet", "--no-verify", "--file", "-", stdin=message)
-    return _git(tree, "rev-parse", "HEAD").strip()
+        raise ApplyError(t("the worktree holds changes that would not be committed"))
+    checked = _git(tree, "write-tree").strip()
+    parent = _git(tree, "rev-parse", "HEAD").strip()
+    _git(tree, *_identity(tree), "commit", "--quiet", "--file", "-", stdin=message)
+    commit = _git(tree, "rev-parse", "HEAD").strip()
+    made = _git(tree, "rev-parse", f"{commit}^{{tree}}", f"{commit}^").split()
+    if made != [checked, parent]:
+        raise ApplyError(t("the commit is not what was checked"))
+    return commit
 
 
 def _identity(tree: Path) -> tuple[str, ...]:
@@ -297,11 +334,13 @@ def _identity(tree: Path) -> tuple[str, ...]:
 def _forward(repo: Path, head: str, commit: str) -> None:
     """Move the checkout from `head` to `commit`, its child, without merging anything."""
     if _git(repo, "rev-parse", f"{commit}^").strip() != head:
-        raise ApplyError("the commit was not made on the checkout's HEAD")
+        raise ApplyError(t("the commit was not made on the checkout's HEAD"))
     try:
         _git(repo, "merge", "--ff-only", "--quiet", commit)
     except ApplyError as e:
-        raise ApplyError(f"the checkout could not be moved to the new commit: {e}") from e
+        raise ApplyError(
+            t("the checkout could not be moved to the new commit: {error}", error=e)
+        ) from e
 
 
 @contextlib.contextmanager
@@ -324,10 +363,16 @@ def _worktrees(repo: Path, commit: str, count: int) -> Iterator[list[Path]]:
             _git(repo, "worktree", "prune")
 
 
+HOOKS_OFF = ("-c", f"core.hooksPath={os.devnull}")
+"""Every git call runs without the checkout's hooks: `--no-verify` leaves some running
+(prepare-commit-msg, post-commit, post-checkout, post-merge), and any could change what was
+checked."""
+
+
 def _git(where: Path, *args: str, stdin: str | None = None) -> str:
     try:
         done = subprocess.run(
-            ["git", "-C", str(where), *args],
+            ["git", "-C", str(where), *HOOKS_OFF, *args],
             input=stdin,
             capture_output=True,
             text=True,
@@ -347,31 +392,35 @@ def _git(where: Path, *args: str, stdin: str | None = None) -> str:
 def _get(tuning: Tuning, setting_id: str) -> Any:
     setting = improve.SETTINGS_BY_ID.get(setting_id)
     if setting is None:
-        raise ApplyError(f"unknown setting {setting_id!r}")
+        raise ApplyError(t("unknown setting {name}", name=setting_id))
     if setting.is_model:
         return getattr(tuning.models, setting.name)
     return getattr(tuning, setting.name)
 
 
 def _set(manager: ConfigManager, settings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Give the settings their new values, under the config's lock; what each was before it is
-    recorded as it was then (`old`), which a revert restores."""
+    """Give each setting its `new` value, under the config's lock, only if every one still has
+    its `old` value (the one the person was shown): otherwise nothing is written. Returns what
+    was changed."""
     if not settings:
         return []
-    done = []
-    with manager.edit() as config:
-        data = config.tuning.model_dump()
-        for item in settings:
-            setting = improve.SETTINGS_BY_ID[item["setting"]]
-            done.append(
-                {"setting": setting.id, "old": _get(config.tuning, setting.id), "new": item["new"]}
-            )
-            if setting.is_model:
-                data["models"][setting.name] = item["new"]
-            else:
-                data[setting.name] = item["new"]
-        try:
-            config.tuning = Tuning.model_validate(data)
-        except ValidationError as e:
-            raise ApplyError(f"the settings are not valid: {e}") from e
-    return done
+    try:
+        with manager.edit() as config:
+            data = config.tuning.model_dump()
+            for item in settings:
+                setting = improve.SETTINGS_BY_ID[item["setting"]]
+                if _get(config.tuning, setting.id) != item["old"]:
+                    raise ApplyError(
+                        t("the setting {name} changed since: look again", name=setting.id)
+                    )
+                if setting.is_model:
+                    data["models"][setting.name] = item["new"]
+                else:
+                    data[setting.name] = item["new"]
+            try:
+                config.tuning = Tuning.model_validate(data)
+            except ValidationError as e:
+                raise ApplyError(t("the settings are not valid: {error}", error=e)) from e
+    except ConfigError as e:
+        raise ApplyError(str(e)) from e
+    return [{"setting": i["setting"], "old": i["old"], "new": i["new"]} for i in settings]
