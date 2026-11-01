@@ -217,3 +217,31 @@ def test_a_review_as_urgent_as_the_ready_work_goes_first(store: Store, clock: Fa
     coordinator = Coordinator(store, log.execute, log.review, sleep=clock.sleep)
     assert coordinator.tick(None, [])
     assert log.calls == ["review high", "execute low"]
+
+
+def test_work_a_verdict_unlocks_goes_before_less_urgent_reviews(
+    store: Store, clock: FakeClock
+) -> None:
+    """Accepting `first` makes its critical dependent ready: it runs before the LOW review."""
+    store.create_task(
+        TaskSpec(
+            goal="g",
+            priority=Priority.HIGH,
+            subtasks=[
+                SubtaskSpec(description="first", acceptance_criteria="ok"),
+                SubtaskSpec(
+                    description="then",
+                    acceptance_criteria="ok",
+                    depends_on=[0],
+                    priority=Priority.CRITICAL,
+                ),
+            ],
+        )
+    )
+    claimed = claim(store)
+    store.transition(claimed.id, S.RUNNING, S.REVIEW, A.EXECUTOR, lease=claimed.lease_token)
+    in_review(store, "low", Priority.LOW)
+    log = Log()
+    coordinator = Coordinator(store, log.execute, log.review, sleep=clock.sleep)
+    assert coordinator.tick(None, [])
+    assert log.calls == ["review first", "execute then"]
