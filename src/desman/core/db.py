@@ -426,6 +426,29 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER proposals_no_delete BEFORE DELETE ON proposals
         BEGIN SELECT RAISE(ABORT, 'proposals are kept'); END;
     """,
+    # 23 — evaluations of proposals (ROADMAP 5.5, desman/evaluation.py): the benchmark run on
+    # the version at `commit` and on it with the proposal, each run's result as it reported it,
+    # and the verdict; `failed` when the evaluation could not be finished (`reason`). Written
+    # once when the evaluation ends, never changed or removed: a proposal may be evaluated
+    # again, and every evaluation stays
+    f"""
+    CREATE TABLE evaluations (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        proposal_id INTEGER NOT NULL REFERENCES proposals(id),
+        created_at  TEXT NOT NULL DEFAULT {_NOW_SQL},
+        mode        TEXT NOT NULL CHECK (mode IN ('fake', 'real')),
+        git_commit  TEXT NOT NULL,
+        verdict     TEXT NOT NULL CHECK (verdict IN ('better', 'worse', 'same', 'failed')),
+        reason      TEXT CHECK ((reason IS NOT NULL) = (verdict = 'failed')),
+        base_json   TEXT CHECK (base_json IS NULL OR json_valid(base_json)),
+        candidate_json TEXT CHECK (candidate_json IS NULL OR json_valid(candidate_json))
+    ) STRICT;
+    CREATE INDEX evaluations_proposal ON evaluations(proposal_id);
+    CREATE TRIGGER evaluations_no_update BEFORE UPDATE ON evaluations
+        BEGIN SELECT RAISE(ABORT, 'evaluations are append-only'); END;
+    CREATE TRIGGER evaluations_no_delete BEFORE DELETE ON evaluations
+        BEGIN SELECT RAISE(ABORT, 'evaluations are append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

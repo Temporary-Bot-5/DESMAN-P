@@ -1,5 +1,6 @@
 """The Improvement Analyst (ROADMAP 5.4): from what went wrong, a proposed change to DESMAN,
-as a diff for the person to read. It applies nothing (evaluation is 5.5, applying 5.6).
+as a diff for the person to read. It applies nothing (`desman.evaluation` runs it on the
+benchmark, 5.5; applying is 5.6).
 
 The analysis is an ordinary task, like a chat summary: one subtask of kind analysis, an
 executor and a reviewer, retries by the retry policy. It has no tools (`Tools.NONE`): it reads
@@ -432,8 +433,8 @@ def render(
         old = current(target, package)
         if read is not None and read.get(target.id) != old:
             raise Unfit(f"{target.id} changed since the analysis read it")
-        new = _checked(target, old, change.value)
-        texts[target.path] = _replace(texts[target.path], target, new)
+        new = checked(target, old, change.value)
+        texts[target.path] = replace(texts[target.path], target, new)
         made.append(
             {"target": target.id, "file": SOURCE_PREFIX + target.path, "old": old, "new": new}
         )
@@ -441,20 +442,22 @@ def render(
     base = {}
     for path, text in texts.items():
         before = (package / path).read_text(encoding="utf-8")
-        name = SOURCE_PREFIX + path
-        base[name] = hashlib.sha256(before.encode()).hexdigest()
-        lines = difflib.unified_diff(
-            before.splitlines(keepends=True),
-            text.splitlines(keepends=True),
-            f"a/{name}",
-            f"b/{name}",
-        )
-        parts.append(f"diff --git a/{name} b/{name}\n" + "".join(lines))
+        base[SOURCE_PREFIX + path] = hashlib.sha256(before.encode()).hexdigest()
+        parts.append(file_diff(path, before, text))
     details: dict[str, Any] = {"changes": made, "base": base}
     if settings:
         details["settings"] = settings
         details["command"] = tuning_command(settings)
     return "".join(parts), details
+
+
+def file_diff(path: str, before: str, after: str) -> str:
+    """The diff of one file of the package (`path` relative to it), as `git apply` takes it."""
+    name = SOURCE_PREFIX + path
+    lines = difflib.unified_diff(
+        before.splitlines(keepends=True), after.splitlines(keepends=True), f"a/{name}", f"b/{name}"
+    )
+    return f"diff --git a/{name} b/{name}\n" + "".join(lines)
 
 
 def _setting_change(change: Change, shown: dict[str, Any] | None) -> dict[str, Any]:
@@ -491,7 +494,8 @@ def tuning_command(settings: list[dict[str, Any]]) -> str:
     return " ".join(shlex.quote(w) for w in words)
 
 
-def _checked(target: Target, old: str, value: int | str | None) -> str:
+def checked(target: Target, old: str, value: int | str | None) -> str:
+    """`value` as the target's new text, if it may be one (`Unfit` if not)."""
     if not isinstance(value, str):
         raise Unfit(f"{target.id} is a text")
     # The text is glued to others: its spaces at either end stay as they were.
@@ -533,7 +537,7 @@ def _assignment(module: ast.Module, name: str) -> ast.Assign | ast.AnnAssign:
     return found[0]
 
 
-def _replace(text: str, target: Target, value: str) -> str:
+def replace(text: str, target: Target, value: str) -> str:
     """`text` with the target's assignment giving `value`; everything else exactly as it was."""
     module = ast.parse(text)
     node = _assignment(module, target.name)

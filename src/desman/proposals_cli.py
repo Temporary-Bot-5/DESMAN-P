@@ -1,7 +1,9 @@
-"""`desman proposals`: what the Improvement Analyst proposed (ROADMAP 5.4).
+"""`desman proposals`: what the Improvement Analyst proposed (ROADMAP 5.4), and how it did on
+the benchmark (5.5).
 
 `list` and `show` read; `analyze` (in `desman.cli`, next to `run`, whose way of driving a task
-it shares) runs an analysis task. Every command first settles the analyses whose task has
+it shares) runs an analysis task; `evaluate` runs the benchmark on the current version and on
+the proposed one (`desman.evaluation`). Every command first settles the analyses whose task has
 ended since (`improve.settle`), so one finished by `resume` or a worker shows up too. Nothing
 here applies a proposal. The chat calls the same functions.
 """
@@ -17,13 +19,14 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import actions, improve, ui
-from desman.config import Config
+from desman import actions, bench, evaluation, improve, ui
+from desman.config import Config, ConfigError, open_config
 from desman.config_cli import json_option, parse_window
-from desman.core import db, proposals
-from desman.core.proposals import Proposal, Status
+from desman.core import calls, db, proposals
+from desman.core.proposals import Evaluation, Proposal, Status
 from desman.core.store import Store
 from desman.i18n import t, tn
+from desman.llm import router
 from desman.protected_cli import db_option
 
 
@@ -70,6 +73,110 @@ def show_command(proposal: int, db_path: Path | None = None, as_json: bool = Fal
         print_proposal(store, found)
     finally:
         store.conn.close()
+
+
+@proposals_group.command("evaluate")
+@click.argument("proposal", type=click.IntRange(min=1))
+@click.option(
+    "--real",
+    is_flag=True,
+    help="Run the benchmark on your models (spends their quota) instead of the scripted fake "
+    "model.",
+)
+@click.option("--provider", "provider_name", default=None, help="With --real: the provider.")
+@click.option("--model", default=None, help="With --real: the model.")
+@db_option
+@json_option
+def evaluate_command(
+    proposal: int,
+    real: bool = False,
+    provider_name: str | None = None,
+    model: str | None = None,
+    db_path: Path | None = None,
+    as_json: bool = False,
+) -> None:
+    """Run the benchmark on the current version of DESMAN and on it with PROPOSAL, each in a
+    git worktree of its own, and compare them. Nothing is applied.
+
+    By default the scripted fake model answers: it shows whether the proposed version still
+    works, and what its prompts cost. With --real your models answer, which shows whether the
+    work goes better and spends their quota.
+    """
+    if not real and (provider_name is not None or model is not None):
+        raise click.UsageError(t("--provider and --model are for --real"))
+    store = actions.open_existing(db_path)
+    try:
+        improve.settle(store)
+        found = find(store, proposal)
+        done = evaluate_now(
+            store, found, real=real, provider=provider_name, model=model, quiet=as_json
+        )
+        if as_json:
+            click.echo(json.dumps(evaluation_json(done), ensure_ascii=False, indent=2))
+            return
+        print_evaluation(done)
+    finally:
+        store.conn.close()
+
+
+def evaluate_now(
+    store: Store,
+    proposal: Proposal,
+    *,
+    real: bool,
+    provider: str | None = None,
+    model: str | None = None,
+    quiet: bool = False,
+) -> Evaluation:
+    """Evaluate `proposal` (`evaluation.evaluate`), telling the person what runs."""
+    try:  # the person's tuning is the current version's, also with the fake
+        config = open_config().load()
+    except ConfigError as e:
+        raise click.ClickException(str(e)) from e
+    if real:  # fail fast, before any worktree is made
+        try:
+            first = router.lineup(config, calls.Role.EXECUTOR, provider, model)[0]
+        except router.NoProvider as e:
+            raise click.ClickException(str(e)) from e
+        if first.provider.paid:
+            ui.warn(
+                t("{name} is a paid provider: every call is billed.", name=first.provider.name),
+                stderr=quiet,
+            )
+    if not quiet:
+        ui.note(
+            tn(
+                len(bench.CASES),
+                "The benchmark ({n} task) runs on the current version, then on the proposed "
+                "one, each in a git worktree of its own.",
+                "The benchmark ({n} tasks) runs on the current version, then on the proposed "
+                "one, each in a git worktree of its own.",
+            )
+        )
+
+    def on_run(side: evaluation.Side) -> None:
+        if quiet:
+            return
+        ui.note(
+            t("Running the current version…")
+            if side == "base"
+            else t("Running the proposed version…")
+        )
+
+    try:
+        return evaluation.evaluate(
+            store.conn,
+            proposal,
+            mode="real" if real else "fake",
+            tuning=config.tuning,
+            provider=provider,
+            model=model,
+            on_run=on_run,
+        )
+    except evaluation.EvaluationError as e:
+        raise click.ClickException(
+            t("Cannot evaluate proposal {id}: {reason}", id=proposal.id, reason=e)
+        ) from e
 
 
 def find(store: Store, proposal_id: int) -> Proposal:
@@ -202,12 +309,92 @@ def print_proposal(store: Store, p: Proposal) -> None:
         for item in settings:
             ui.out(Text(f"  {item['setting']}: {_value(item['old'])} → {_value(item['new'])}"))
         ui.note(t("Make it yourself if you agree: {command}", command=p.details["command"]))
+    found = proposals.evaluations(store.conn, p.id)
+    if found:
+        print_evaluation(found[0])
+        if len(found) > 1:
+            ui.note(
+                tn(
+                    len(found) - 1,
+                    "{n} earlier evaluation (see --json)",
+                    "{n} earlier evaluations (see --json)",
+                )
+            )
+    else:
+        ui.note(t("Not evaluated yet: desman proposals evaluate {id}", id=p.id))
     ui.note(
         t(
-            "Nothing was applied. Evaluating and applying proposals comes later (ROADMAP "
-            "5.5, 5.6); until then a person may apply the diff with git."
+            "Nothing was applied. Applying proposals comes later (ROADMAP 5.6); until then a "
+            "person may apply the diff with git."
         )
     )
+
+
+def verdict_label(verdict: str) -> str:
+    return {
+        "better": t("the proposed version did better"),
+        "worse": t("the proposed version did worse"),
+        "same": t("no clear difference"),
+        "failed": t("could not be finished"),
+    }.get(verdict, verdict)
+
+
+def metric_label(metric: str) -> str:
+    return {
+        "tasks_done": t("tasks done"),
+        "escalated": t("subtasks left to the person"),
+        "plan_fallbacks": t("plans the model failed"),
+        "rejected": t("results rejected by the reviewer"),
+        "attempts": t("attempts"),
+        "first_try": t("subtasks done at the first try"),
+        "subtasks": t("subtasks"),
+        "calls": t("model calls"),
+        "failed_calls": t("failed model calls"),
+        "tokens": t("tokens"),
+    }.get(metric, metric)
+
+
+def print_evaluation(e: Evaluation) -> None:
+    mode = t("the scripted fake model") if e.mode == "fake" else t("your models")
+    ui.out(
+        Text(
+            t(
+                "Evaluation {n} ({mode}, commit {commit}): {verdict}",
+                n=e.id,
+                mode=mode,
+                commit=e.commit[:12],
+                verdict=verdict_label(e.verdict),
+            ),
+            style="bold",
+        )
+    )
+    if e.reason:
+        ui.warn(e.reason)
+    base, candidate = evaluation.metrics_of(e)
+    if base is not None:
+        table = ui.table("", t("current version"), t("proposed version"))
+        for metric in bench.METRICS:
+            old = str(base[metric.id])
+            new = "—" if candidate is None else str(candidate[metric.id])
+            table.add_row(metric_label(metric.id), old, new)
+        ui.out(table)
+    if e.verdict == "failed":
+        return
+    if e.mode == "fake":
+        ui.note(
+            t(
+                "The fake model answers the same whatever the prompt says: this shows that the "
+                "proposed version still works, and what its prompts cost. Whether the work goes "
+                "better shows on your models: --real."
+            )
+        )
+    else:
+        ui.note(
+            t(
+                "One run of real models is noisy: a small difference may be chance. Evaluating "
+                "again adds another run."
+            )
+        )
 
 
 def _value(value: Any) -> str:
@@ -223,4 +410,12 @@ def listing_json(found: list[Proposal]) -> list[dict[str, Any]]:
 
 def proposal_json(store: Store, p: Proposal) -> dict[str, Any]:
     path = improve.file_for(store.conn, p)
-    return p.model_dump(mode="json") | {"file": None if path is None else str(path)}
+    return p.model_dump(mode="json") | {
+        "file": None if path is None else str(path),
+        "evaluations": [evaluation_json(e) for e in proposals.evaluations(store.conn, p.id)],
+    }
+
+
+def evaluation_json(e: Evaluation) -> dict[str, Any]:
+    base, candidate = evaluation.metrics_of(e)
+    return e.model_dump(mode="json") | {"metrics": {"base": base, "candidate": candidate}}

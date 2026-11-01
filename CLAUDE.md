@@ -66,9 +66,15 @@ src/desman/
 │                  #   with new texts, code builds the diff; or SETTINGS (`Config.tuning`),
 │                  #   checked against what it was shown, given as a `desman tuning` command.
 │                  #   Applies nothing
+├── bench.py       # The benchmark (5.5): fixed goals planned and worked to the end on a DB of
+│                  #   its own, no tools; `python -m desman.bench` reports a Result; compare()
+│                  #   says which run went better. Protected, like evaluation.py
+├── evaluation.py  # `proposals evaluate`: current version and proposed one (diff + settings)
+│                  #   in git worktrees of HEAD, each run as its own process; the diff checked
+│                  #   to change only the targets' texts; recorded once in `evaluations`
 ├── tuning_cli.py  # `tuning`: the model each role asks first, the limits of the workflow
 │                  #   (`runs.TUNING_DEFAULTS` when unset); set by the person only
-├── proposals_cli.py # `proposals [list]|show N` (and `analyze` in cli.py, beside `run`)
+├── proposals_cli.py # `proposals [list]|show N|evaluate N [--real]` (and `analyze` in cli.py)
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
@@ -147,7 +153,8 @@ src/desman/
     ├── policy.py  # Access = role's tools in `src/desman/policy.toml` ∩ human's `permissions`;
     │              #   refusals audited (tool_refused), admin calls marked elevated
     ├── proposals.py # The analyst's proposals: analysing → proposed | nothing | unusable, settled
-    │              #   once, never changed; the failures and plan fallbacks an analysis reads
+    │              #   once, never changed; the failures and plan fallbacks an analysis reads;
+    │              #   their evaluations (append-only)
     ├── protected.py # Protected files (5.3): `src/desman/protected.toml` lists them with SHA-256;
     │              #   approved snapshots in the DB; a change nobody approved blocks every run
     │              #   (`runs.guard`) until `desman protected approve`; a new DB takes the release
