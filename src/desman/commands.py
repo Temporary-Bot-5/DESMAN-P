@@ -35,6 +35,7 @@ from rich.text import Text
 
 from desman import (
     actions,
+    applying,
     config_cli,
     i18n,
     improve,
@@ -607,7 +608,7 @@ def _proposals_list(ctx: Context, args: ProposalsListArgs) -> Outcome:
     improve.settle(ctx.store)
     found = proposals.listing(ctx.store.conn, args.limit)
     proposals_cli.print_listing(ctx.store, found)
-    return Outcome(proposals_cli.listing_json(found))
+    return Outcome(proposals_cli.listing_json(ctx.store, found))
 
 
 def _proposals_show(ctx: Context, args: ProposalShowArgs) -> Outcome:
@@ -683,6 +684,29 @@ def _proposals_evaluate(ctx: Context, args: EvaluateArgs) -> Proposal:
         return Outcome(proposals_cli.evaluation_json(done))
 
     return Proposal([line], apply)
+
+
+def _proposals_apply(ctx: Context, args: ProposalShowArgs) -> Proposal:
+    return _apply_or_revert(ctx, args.proposal, "applied")
+
+
+def _proposals_revert(ctx: Context, args: ProposalShowArgs) -> Proposal:
+    return _apply_or_revert(ctx, args.proposal, "reverted")
+
+
+def _apply_or_revert(ctx: Context, proposal: int, action: applying.Action) -> Proposal:
+    """The window shows what the plan does, checked; the "yes" carries out that plan only if
+    nothing it rests on changed meanwhile (`applying.carry_out`)."""
+    improve.settle(ctx.store)
+    found = proposals_cli.find(ctx.store, proposal)
+    plan = proposals_cli.plan_now(ctx.store, found, ctx.manager, action)
+
+    def apply() -> Outcome:
+        done = proposals_cli.carry_out_now(ctx.store, plan, ctx.manager, ctx.session_id())
+        proposals_cli.print_application(done)
+        return Outcome(proposals_cli.application_json(done))
+
+    return Proposal(proposals_cli.plan_lines(plan), apply, proposals_cli.cautions(ctx.store, plan))
 
 
 def _run(ctx: Context, args: RunArgs) -> Proposal:
@@ -1090,7 +1114,8 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "proposals show",
-        "One proposal: what it changes and why, and its diff. Nothing is applied.",
+        "One proposal: what it changes and why, its diff, its evaluations, and whether it is "
+        "applied.",
         ProposalShowArgs,
         Kind.READ,
         _proposals_show,
@@ -1113,6 +1138,24 @@ CATALOG: tuple[Entry, ...] = (
         EvaluateArgs,
         Kind.CHANGE,
         _proposals_evaluate,
+    ),
+    Entry(
+        "proposals apply",
+        "Apply one proposal, only when the person asks for it: its diff becomes a git commit of "
+        "the checkout DESMAN runs from and its settings are changed. The person confirms, after "
+        "seeing the commit and the settings; running workers and chats keep the old prompts "
+        "until they start again.",
+        ProposalShowArgs,
+        Kind.CHANGE,
+        _proposals_apply,
+    ),
+    Entry(
+        "proposals revert",
+        "Take back an applied proposal, only when the person asks for it: a commit reverting "
+        "its commit, and its settings as they were. The person confirms.",
+        ProposalShowArgs,
+        Kind.CHANGE,
+        _proposals_revert,
     ),
     Entry(
         "models show",

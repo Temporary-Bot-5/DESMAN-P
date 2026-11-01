@@ -148,8 +148,13 @@ TOPICS: Final = (
         "better; by default on a scripted fake model (does it still work, what its prompts "
         "cost), with real on the person's models (spends their quota). The analyst sees "
         "how earlier proposals did.\n"
-        "Nothing is applied by DESMAN itself: the person decides, applies a diff with git "
-        "and runs a settings command themselves.",
+        "Nothing is applied by DESMAN itself: only the person applies a proposal, with "
+        "`desman proposals apply N` (in the chat after confirming in a window). Its diff "
+        "becomes a git commit of the checkout DESMAN runs from, on its branch, and its "
+        "settings are changed; refused if the person has uncommitted changes in those files. "
+        "Workers and chats already running keep the old prompts until they start again. "
+        "`desman proposals revert N` takes it back: a commit reverting that one, and the "
+        "settings as they were (unless the person changed them since).",
     ),
     Topic(
         "chat",

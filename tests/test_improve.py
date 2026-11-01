@@ -306,7 +306,7 @@ def test_analyze_proposes_a_diff_and_applies_nothing(tmp_path: Path) -> None:
     assert "Analysing the failures as task" in result.output
     assert "Proposal 1: proposed" in result.output
     assert "Never ask for a seat map." in result.output
-    assert "Nothing was applied." in result.output
+    assert "Not applied. If you agree, apply it: desman proposals apply 1" in result.output
     assert (improve.PACKAGE / "planner.py").read_text() == planner
     [p] = proposals.listing(store().conn)
     assert p.status is Status.PROPOSED and p.diff is not None
@@ -349,7 +349,7 @@ def test_a_proposed_setting_is_made_by_the_person_with_the_command(tmp_path: Pat
     result = desman("proposals", "analyze", "--fake-llm", script(tmp_path, [analysis(change)]))
     assert result.exit_code == EXIT_DONE, result.output
     assert "tuning.max_attempts: default → 6" in result.output
-    assert "Make it yourself if you agree: desman tuning --max-attempts 6" in result.output
+    assert "If you agree, apply it: desman proposals apply 1" in result.output
     [p] = proposals.listing(store().conn)
     assert improve.changed(p) == ["planner.criteria_rules", "tuning.max_attempts"]
     text = (db.default_db_path().parent / "proposals" / "1.diff").read_text()
