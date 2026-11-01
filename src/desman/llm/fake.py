@@ -6,8 +6,9 @@ steps, served one per call, in order:
     llm = FakeLLM('{"answer": 42}', garbage("fenced"), RateLimit(retry_after=30), Timeout())
 
 A step is a reply (a plain string is shorthand for one), or a failure that raises the same
-`ProviderError` a real client would: a timeout, a 429, an exhausted quota, a 5xx, a 4xx. A
-step can also be a function of the request, for replies that depend on the prompt.
+`ProviderError` a real client would: a timeout, a 429, an exhausted quota, a 5xx, a 4xx, a
+refused reply. A step can also be a function of the request, for replies that depend on the
+prompt.
 
 Calls from different roles interleave, so a fake can route by prompt instead of by order:
 
@@ -36,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.llm.base import (
     Completion,
+    GenerationFailed,
     ProviderRejected,
     ProviderTimeout,
     ProviderUnavailable,
@@ -91,7 +93,13 @@ class Rejected(_Step):
         return status
 
 
-AnyStep = Reply | Timeout | RateLimit | Quota | ServerError | Rejected
+class ToolUseFailed(_Step):
+    """The provider refused the model's own reply (Groq's `tool_use_failed`)."""
+
+    type: Literal["tool_use_failed"] = "tool_use_failed"
+
+
+AnyStep = Reply | Timeout | RateLimit | Quota | ServerError | Rejected | ToolUseFailed
 Step = Annotated[AnyStep, Field(discriminator="type")]
 StepLike = AnyStep | str
 Responder = Callable[[Request], StepLike]
@@ -219,6 +227,8 @@ class FakeLLM:
             raise ProviderUnavailable(self.name, step.status)
         if isinstance(step, Rejected):
             raise ProviderRejected(self.name, step.status, step.message)
+        if isinstance(step, ToolUseFailed):
+            raise GenerationFailed(self.name, "tool_use_failed")
         self.sleep(step.latency)
         text, finish = step.text, step.finish_reason
         if request.max_tokens is not None and estimate_tokens(text) > request.max_tokens:

@@ -162,6 +162,7 @@ def _coordinator(
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
+        providers=(models.llm.name, None if models.other is None else models.other.name),
         decomposer=decomposer(models.llm),
         access=access,
         tools=tools,

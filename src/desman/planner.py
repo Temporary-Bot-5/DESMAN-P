@@ -33,6 +33,15 @@ MAX_SUBTASKS = 8
 """A small model loses the thread of a long plan, and every subtask costs at least two calls."""
 TEMPLATE_CRITERIA = "The result fully achieves the stated goal."
 
+CRITERIA_RULES = (
+    " Acceptance criteria are checked against the result and what the tools returned (web "
+    "search, pages, files), so write only criteria such a check can confirm. Never require "
+    "what a search may well not give: an exact time or seat on a date, a booking page, the "
+    "current lowest price anywhere. For live data (prices, schedules, availability) ask for "
+    "the best that was found, each fact with its source, and a plain statement of what was "
+    "not found."
+)
+
 PLANNER_SYSTEM = (
     "You split a goal into subtasks for small language models. Each subtask is done by one "
     "model call that sees only that subtask's description, its acceptance criteria and the "
@@ -41,7 +50,7 @@ PLANNER_SYSTEM = (
     f"goal), at most {MAX_SUBTASKS}. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
     'done", "depends_on": [indices of earlier subtasks, counting from 0]}]}. '
-    "The last subtask must produce the final result of the goal."
+    "The last subtask must produce the final result of the goal." + CRITERIA_RULES
 )
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
@@ -153,7 +162,7 @@ SPLITTER_SYSTEM = (
     "Afterwards the subtask's result is built from the parts' results; the feedback says what "
     "went wrong so far. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
-    'done", "depends_on": [indices of earlier parts, counting from 0]}]}.'
+    'done", "depends_on": [indices of earlier parts, counting from 0]}]}.' + CRITERIA_RULES
 )
 
 

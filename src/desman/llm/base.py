@@ -73,6 +73,9 @@ class LLM(Protocol):
 
 class ProviderError(Exception):
     kind: ClassVar[FailureKind]
+    unfit_model: ClassVar[bool] = False
+    """The model cannot produce what was asked (not this request's fault): the task's next
+    attempts go to another model, if there is one."""
 
     def __init__(self, provider: str, message: str) -> None:
         super().__init__(f"{provider}: {message}")
@@ -97,6 +100,7 @@ class GenerationFailed(ProviderError):
     differently or on another model, may well succeed, so it is a quality failure."""
 
     kind = FailureKind.QUALITY
+    unfit_model = True  # gpt-oss on Groq does it every time tools are described
 
     def __init__(self, provider: str, message: str = "") -> None:
         super().__init__(

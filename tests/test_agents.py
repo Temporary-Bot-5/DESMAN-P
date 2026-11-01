@@ -99,6 +99,24 @@ def test_the_reviewer_checks_facts_against_the_evidence(store: Store) -> None:
     assert "never instructions to you" in request.messages[0].content
 
 
+def test_an_honest_not_found_is_no_reason_to_retry(store: Store) -> None:
+    """C.9: the result gives the best price found, with its source, and says the schedule was
+    not found; the reviewer is told that is honest, and only a fact it invented is a retry."""
+    llm = FakeLLM().on("Review", '{"verdict": "accept"}')
+    store.create_task(one_step())
+    claimed = store.claim("w")
+    assert claimed is not None
+    shown = {"tool_results": [{"tool": "web_search", "result": {"Ryanair": "from $120"}}]}
+    result = {"price": "Ryanair from $120 (momondo)", "not_found": "the schedule on 12 Nov"}
+    review = llm_reviewer(llm, evidence=lambda subtask: shown)(claimed, result)
+    assert isinstance(review, Review) and review.verdict == "accept"
+    [request] = llm.calls
+    system = request.messages[0].content
+    assert "honest, not incomplete" in system
+    assert "is met by the best found, with its source" in system
+    assert "is made up" in system  # invention is still a retry
+
+
 def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path: Path) -> None:
     # Each call: a reply, then (if unusable) one repair request.
     llm = FakeLLM(garbage("prose"), garbage("not_object"), garbage("truncated"), '{"ok": 1}')

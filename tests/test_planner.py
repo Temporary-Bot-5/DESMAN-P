@@ -14,7 +14,14 @@ from desman.core.audit import check_history, history
 from desman.core.models import Priority
 from desman.core.store import Store
 from desman.llm.fake import FakeLLM, RateLimit, garbage
-from desman.planner import MAX_SUBTASKS, PLAN, TEMPLATE_CRITERIA, plan
+from desman.planner import (
+    CRITERIA_RULES,
+    MAX_SUBTASKS,
+    PLAN,
+    SPLITTER_SYSTEM,
+    TEMPLATE_CRITERIA,
+    plan,
+)
 
 
 def sub(description: str, *depends_on: int) -> dict[str, Any]:
@@ -45,6 +52,17 @@ def test_the_models_plan_becomes_the_task_graph() -> None:
     [call] = llm.calls
     assert call.prompt.startswith(f"{PLAN}:\nwrite an essay")
     assert str(MAX_SUBTASKS) in call.messages[0].content  # the limit is in the instructions
+
+
+def test_criteria_are_ones_the_tools_can_confirm() -> None:
+    """C.9: a plan that asked for a flight's exact time on a date sent an honest result back
+    until the attempts ran out. The planner and the splitter are told what a criterion may ask."""
+    llm = FakeLLM(reply(sub("find cheap tickets")))
+    plan(llm, "find cheap tickets Berlin - Lisbon", Priority.NORMAL)
+    [call] = llm.calls
+    assert call.messages[0].content.endswith(CRITERIA_RULES)
+    assert SPLITTER_SYSTEM.endswith(CRITERIA_RULES)
+    assert "with its source" in CRITERIA_RULES and "not found" in CRITERIA_RULES
 
 
 def test_a_broken_graph_gets_the_repair_request_with_the_reason() -> None:
