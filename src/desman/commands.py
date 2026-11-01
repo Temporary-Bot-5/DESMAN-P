@@ -442,18 +442,22 @@ def _resume(ctx: Context, args: TaskArgs) -> Proposal:
 
 
 WORKER_TASKS = 50
-"""At most this many unfinished tasks are worked on by one `worker` request in the chat."""
+"""At most this many unfinished tasks are worked on by one `worker` request in the chat; the
+window says how many are left for the next one."""
+WORKER_SCAN = 1000
+"""How many unfinished tasks the chat's worker looks at to choose the most urgent."""
 
 
 def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
-    """The chat's worker: every unfinished task in turn, oldest first, each as `resume` runs it
-    (live progress, retold), until none has work left. It does not wait for new tasks: that is
-    the CLI's `desman worker`, in a terminal of its own."""
-    active = task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=WORKER_TASKS)
+    """The chat's worker: the unfinished tasks in turn, most urgent first (the oldest among
+    equals), each as `resume` runs it (live progress, retold), until none has work left. It does
+    not wait for new tasks: that is the CLI's `desman worker`, in a terminal of its own."""
+    active = task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=WORKER_SCAN)
     if not active:
         return Outcome({"unfinished_tasks": 0})
-    oldest_first = list(reversed(active))
-    ids = [report.id for report in oldest_first]
+    in_order = sorted(reversed(active), key=lambda r: -r.priority)  # stable: oldest first
+    chosen, left = in_order[:WORKER_TASKS], len(in_order) - WORKER_TASKS
+    ids = [report.id for report in chosen]
 
     def apply() -> Outcome:
         for task_id in ids:
@@ -461,9 +465,9 @@ def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
         return Outcome(None)
 
     lines = [t("Work on the unfinished tasks in turn, until none has work left ({n}):", n=len(ids))]
-    lines += [
-        f"  {ctx.store.short_id(r.id)}  {actions.one_line(r.goal, 100)}" for r in oldest_first
-    ]
+    lines += [f"  {ctx.store.short_id(r.id)}  {actions.one_line(r.goal, 100)}" for r in chosen]
+    if left > 0:
+        lines.append(t("Not taken this time (ask again, or run `desman worker`): {n}", n=left))
     return Proposal(lines, apply)
 
 

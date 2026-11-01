@@ -170,6 +170,8 @@ class WorkResult(BaseModel):
     reviewed: int = 0
     """Verdicts and review failures recorded."""
     events: list[str] = Field(default_factory=list)
+    """What the latest tick that moved something did: a worker runs for days, so its history
+    is kept by the counters and the audit log, not here."""
 
 
 class Coordinator:
@@ -275,15 +277,18 @@ class Coordinator:
     ) -> WorkResult:
         """Work on every task, as a worker: until interrupted, or with `until_idle` until there
         is nothing to do and nobody else holds work (paused work is waited for only without it).
-        `on_tick` sees the result so far after every tick that moved something."""
+        `on_tick` sees the result so far after every tick that moved something (its `events`
+        are that tick's)."""
         result = WorkResult()
         while max_ticks is None or result.ticks < max_ticks:
             result.ticks += 1
             executed, reviewed = self.executed, self.reviewed
-            progressed = self.tick(None, result.events)
+            events: list[str] = []
+            progressed = self.tick(None, events)
             result.executed += self.executed - executed
             result.reviewed += self.reviewed - reviewed
             if progressed:
+                result.events = events
                 if on_tick is not None:
                     on_tick(result)
                 continue
@@ -306,14 +311,15 @@ class Coordinator:
             self._changed()
 
         for subtask in self.store.pending_reviews(task_id=task_id):
-            if not self.store.reserve_review(
+            token = self.store.reserve_review(
                 subtask.id, self.owner, seconds=self.review_seconds, abandoned=self.abandoned
-            ):
+            )
+            if token is None:
                 continue  # another worker is on it, or it was decided meanwhile
             try:
-                progressed |= self._review(subtask, events)
+                progressed |= self._review(subtask, token, events)
             finally:
-                self.store.release_review(subtask.id, self.owner)  # a no-op after a verdict
+                self.store.release_review(subtask.id, token)  # a no-op after a verdict
             self._changed()
 
         claimed = self.store.claim(self.owner, task_id=task_id, lease_seconds=self.lease_seconds)
@@ -471,7 +477,9 @@ class Coordinator:
         self.store.note(subtask.id, Actor.EXECUTOR, "decomposition_failed", {"reason": reason})
         return False
 
-    def _review(self, subtask: Subtask, events: list[str]) -> bool:
+    def _review(self, subtask: Subtask, token: str, events: list[str]) -> bool:
+        """Review the submitted result under the reservation `token`; the verdict is written
+        only while the reservation is still ours."""
         review: Review | Failure
         artifact = self.store.latest_artifact(subtask.id)
         try:
@@ -512,6 +520,7 @@ class Coordinator:
                     reason=review.reason,
                     paused_until=review.paused_until,
                     action="review_failed",
+                    review=token,
                 )
             elif review.verdict is Verdict.ACCEPT:
                 moved = self.store.transition(
@@ -522,6 +531,7 @@ class Coordinator:
                     reason=review.feedback or None,
                     details=verdict,
                     action="verdict",
+                    review=token,
                 )
             elif review.verdict is Verdict.RETRY:
                 moved = self.store.record_failure(
@@ -532,6 +542,7 @@ class Coordinator:
                     reason=review.feedback or "rejected by reviewer",
                     details=verdict,
                     action="verdict",
+                    review=token,
                 )
             elif review.verdict is Verdict.ESCALATE:
                 moved = self.store.transition(
@@ -542,9 +553,19 @@ class Coordinator:
                     reason=review.feedback or "escalated by reviewer",
                     details=verdict,
                     action="verdict",
+                    review=token,
                 )
-        except StaleStateError:
-            return False  # another reviewer got there first
+        except StaleStateError as e:
+            # Decided by someone else, or our reservation ran out and was taken over: the
+            # verdict is thrown away, and the history says so.
+            events.append(f"lost review {subtask.id}")
+            self.store.note(
+                subtask.id,
+                Actor.REVIEWER,
+                "review_discarded",
+                {"reason": str(e), "owner": self.owner, **verdict},
+            )
+            return False
         self.reviewed += 1
         events.append(f"reviewed {subtask.id} -> {moved.status}")
         return True
