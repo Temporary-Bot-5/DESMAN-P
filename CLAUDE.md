@@ -225,7 +225,20 @@ src/desman/
     │              #   Record; Trust.receive(): schema, signer, signature, scope, term, replay;
     │              #   root → operator (assignment) → record; revocations; Refused(Reason).
     │              #   Protected
+    ├── request.py # Signed requests to the registry: method, path, body hash, time, nonce by the
+    │              #   node key; verify_request() refuses forged, stale, replayed. Protected
+    ├── protocol.py # Paths and bodies node ↔ registry (Pydantic): capabilities lent (provider,
+    │              #   model, key fingerprint, quotas), never a key
     └── root.pub   # The root's public key (its private half: the owner's server). Protected
+└── registry/      # desman-registry (G.4), the owner's server; reads no config.json, keeps no key
+    ├── store.py   # Its own SQLite and migrations (core.db helpers): nodes, root-signed records
+    │              #   handed out, nonces, registry_log (append-only)
+    ├── server.py  # Registry.handle() (tests: MockTransport) behind ThreadingHTTPServer on
+    │              #   127.0.0.1; every request verified first, refusals journaled
+    ├── admin.py   # assign / revoke signed by root.key (checked against root.pub and as a node
+    │              #   would), backup (SQLite backup API)
+    └── cli.py     # `desman-registry serve|backup|assign|revoke|nodes|log`
+                   #   ($DESMAN_REGISTRY_DIR, $DESMAN_REGISTRY_LANGUAGE); docs/registry-deploy.md
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it

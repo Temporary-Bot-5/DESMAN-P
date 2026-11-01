@@ -1,0 +1,202 @@
+# Running desman-registry on a server
+
+`desman-registry` is the registry of desman-global (ADR 0004). Nodes register with it, send
+heartbeats and fetch the records signed by the root. It runs on the owner's server and speaks
+plain HTTP on `127.0.0.1`. **TLS comes from a reverse proxy** in front of it (Caddy or nginx,
+both described below). Never expose the plain port to the internet.
+
+What the registry keeps, in its own directory (`~/.local/share/desman-registry`, or
+`$DESMAN_REGISTRY_DIR`, or `--dir`):
+
+| File | What it is |
+|---|---|
+| `registry.db` | SQLite: nodes, signed records, nonces, the journal |
+| `root.key` | The root's private key. **Readable by its owner only (0600). Keep an offline copy.** |
+| `operator.key` | The registry's own operator key, created by the first `assign` |
+
+The registry reads no `config.json` and keeps no API key. Nodes send only their public key,
+what they lend (provider, model, fingerprint of the API key) and signatures.
+
+## 1. Install
+
+```bash
+sudo useradd --system --create-home --home-dir /srv/desman desman
+sudo -iu desman
+git clone https://github.com/Temporary-Bot-5/DESMAN-P.git
+cd DESMAN-P
+python3 -m venv .venv && .venv/bin/pip install -e .
+```
+
+The clock matters: a request signed more than 5 minutes away from the server's time is
+refused. Keep NTP on (`timedatectl` should show `System clock synchronized: yes`).
+
+## 2. The root key
+
+The root key signs assignments of operators and revocations. Its public half is
+`src/desman/net/root.pub` in the repository, and nodes trust nothing else. Put the private half
+in the registry's directory:
+
+```bash
+install -m 700 -d ~/.local/share/desman-registry
+install -m 600 /path/to/root.key ~/.local/share/desman-registry/root.key
+```
+
+A key whose public half is not `root.pub` is refused before anything is signed. **Make an
+offline copy of `root.key`** (an encrypted USB stick in a drawer, not another server). If it is
+lost, nothing new can be signed. If it leaks, `root.pub` has to change in a release, and every
+person has to approve that change on their machine (`desman protected approve`).
+
+## 3. Assign the registry's operator
+
+```bash
+.venv/bin/desman-registry assign            # the registry's own key, all scopes, 90 days
+.venv/bin/desman-registry log
+```
+
+`assign PUBLIC_KEY.pem --scope tasks --days 30` assigns someone else's key instead. Renew the
+assignment before it ends: run the same command again.
+
+## 4. Run it as a service
+
+`/etc/systemd/system/desman-registry.service`:
+
+```ini
+[Unit]
+Description=desman-registry
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=desman
+WorkingDirectory=/srv/desman/DESMAN-P
+ExecStart=/srv/desman/DESMAN-P/.venv/bin/desman-registry serve --host 127.0.0.1 --port 8470
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/desman/.local/share/desman-registry
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now desman-registry
+journalctl -u desman-registry -f
+```
+
+## 5. TLS in front of it
+
+The proxy must pass the request path and query **unchanged**: the node signs them, and a
+rewritten path is refused as forged. It must also pass the `X-Desman-*` headers as they are.
+Bodies are small (at most 64 KiB).
+
+### Caddy (certificates automatic)
+
+`/etc/caddy/Caddyfile`:
+
+```caddyfile
+registry.example.org {
+    request_body {
+        max_size 64KB
+    }
+    reverse_proxy 127.0.0.1:8470
+}
+```
+
+### nginx (with certbot)
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name registry.example.org;
+    ssl_certificate     /etc/letsencrypt/live/registry.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/registry.example.org/privkey.pem;
+
+    client_max_body_size 64k;
+
+    location / {
+        proxy_pass http://127.0.0.1:8470;   # no URI after the port: the path stays as sent
+        proxy_set_header Host $host;
+        proxy_read_timeout 30s;
+    }
+}
+```
+
+Only ports 80 and 443 need to be open: `sudo ufw allow 80,443/tcp`. Leave port 8470 closed.
+
+### Tailscale Funnel (no domain, no open ports)
+
+A machine behind a home router can be reached without port forwarding and without publishing
+its address: Tailscale Funnel gives it a stable `https://NAME.TAILNET.ts.net` with TLS and
+passes the path unchanged. Funnel serves ports 443, 8443 and 10000; take another one if 443 is
+used already (`--https=8443`, then the address carries `:8443`).
+
+```bash
+tailscale funnel --bg 8470            # or: tailscale funnel --bg --https=8443 8470
+tailscale funnel status
+tailscale funnel --https=443 off      # to take it down
+```
+
+The first time, Tailscale may ask to allow Funnel for the tailnet in its admin console. Inside
+the tailnet the name resolves to the machine's 100.x address, so to test the public path from
+the machine itself, resolve it with a public DNS server (`dig @1.1.1.1 NAME.TAILNET.ts.net`)
+and pass that address to `curl --resolve`. The registry is reachable only while the machine
+is on; nodes wait with backoff and go on with their own work meanwhile.
+
+People point their nodes at it with `desman global join --registry https://registry.example.org`.
+Once the address is final it becomes `net.DEFAULT_REGISTRY` in a release.
+
+## 6. Watching it
+
+```bash
+desman-registry nodes            # who takes part, what they lend, when seen last
+desman-registry log --limit 100  # registrations, departures, assignments, revocations, refusals
+desman-registry revoke FINGERPRINT --reason "why"   # a node or an operator, signed by the root
+```
+
+Every refused request is journaled with the reason and the key it claimed. A burst of
+`forged` or `replay` entries from one key usually means a broken clock or a copied `node.key`.
+
+## 7. Backups and restoring
+
+`backup` takes a consistent copy while the server runs (SQLite backup API), readable by its
+owner only:
+
+```bash
+desman-registry backup /srv/desman/backups/registry-$(date +%F).db
+```
+
+A daily timer (`crontab -e` as `desman`):
+
+```cron
+15 3 * * * /srv/desman/DESMAN-P/.venv/bin/desman-registry backup /srv/desman/backups/registry-$(date +\%F).db
+```
+
+Copy the backups off the server. To restore one:
+
+```bash
+sudo systemctl stop desman-registry
+cd ~/.local/share/desman-registry
+mv registry.db registry.db.broken; rm -f registry.db-wal registry.db-shm
+install -m 600 /srv/desman/backups/registry-2026-11-01.db registry.db
+sleep 300   # see below
+sudo systemctl start desman-registry
+```
+
+The copy does not know the nonces seen after it was taken. A request is good for 5 minutes, so
+start the restored registry at least 5 minutes after stopping the old one: by then no request
+it saw can be replayed. Records signed after the backup are lost with it. Sign them again: a
+revocation, for one, must be redone at once.
+
+## 8. Updating
+
+```bash
+sudo -iu desman
+cd DESMAN-P && git pull && .venv/bin/pip install -e .
+exit
+sudo systemctl restart desman-registry
+```
+
+The registry migrates its database on start. Take a backup first.

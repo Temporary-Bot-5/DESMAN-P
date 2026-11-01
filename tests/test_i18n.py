@@ -20,6 +20,7 @@ from desman import i18n, providers
 from desman.cli import cli
 from desman.config import Config, open_config
 from desman.locales import CLICK_DEVELOPER_ONLY, ru
+from desman.registry.cli import cli as registry_cli
 
 SOURCE = Path(__file__).parent.parent / "src" / "desman"
 
@@ -50,7 +51,7 @@ def source_messages() -> dict[str, str | None]:
                     and isinstance(plural.value, str)
                 ), f"{path.name}:{node.lineno}: tn(n, literal, literal)"
                 found[singular.value] = plural.value
-    for obj, attr in i18n._help_fields(cli):
+    for obj, attr in [*i18n._help_fields(cli), *i18n._help_fields(registry_cli)]:
         text = i18n._ORIGINAL.get((id(obj), attr), getattr(obj, attr))
         if text:
             found.setdefault(i18n.help_key(text), None)
