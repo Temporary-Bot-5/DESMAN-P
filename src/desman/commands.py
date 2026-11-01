@@ -23,6 +23,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -37,6 +38,7 @@ from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigError, Confi
 from desman.core import db
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
+from desman.core.stats import collect
 from desman.core.store import Store
 from desman.i18n import t, tn
 from desman.llm import hub
@@ -161,6 +163,10 @@ class UsageArgs(Args):
     since: Annotated[str, StringConstraints(pattern=r"^(all|[1-9]\d*[mhd])$")] = "24h"
 
 
+class StatsArgs(Args):
+    since: Annotated[str, StringConstraints(pattern=r"^(all|[1-9]\d*[mhd])$")] = "all"
+
+
 class LanguageArgs(Args):
     code: Annotated[str, StringConstraints(min_length=1, max_length=40)] | None = Field(
         None, description="a language code such as ru, or its name"
@@ -282,6 +288,13 @@ def _usage(ctx: Context, args: UsageArgs) -> Outcome:
     return Outcome(
         [{k: v for k, v in r.items() if k != "key"} for r in config_cli.usage_json(config, rows)]
     )
+
+
+def _stats(ctx: Context, args: StatsArgs) -> Outcome:
+    window = config_cli.parse_window(args.since)
+    result = collect(ctx.store.conn, None if window is None else datetime.now(UTC) - window)
+    actions.print_stats(result, args.since)
+    return Outcome(result.as_json())
 
 
 def _keys_list(ctx: Context, args: NoArgs) -> Outcome:
@@ -726,6 +739,15 @@ CATALOG: tuple[Entry, ...] = (
         UsageArgs,
         Kind.READ,
         _usage,
+    ),
+    Entry(
+        "stats",
+        "How well tasks go: tasks by outcome, subtasks done on the first try, retries, "
+        "reviews, failures, attempts by strategy, model calls and tokens by role and by model; "
+        'since e.g. "7d", "all".',
+        StatsArgs,
+        Kind.READ,
+        _stats,
     ),
     Entry(
         "run",

@@ -39,7 +39,7 @@ src/desman/
 ├── cli.py         # Click entry point: `desman` (banner, then the chat), `config`, `help`,
 │                  #   `init-db`, and the task
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
-│                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`;
+│                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`; `stats`;
 │                  #   `worker`: every task's subtasks until stopped (N at once on one database)
 ├── actions.py     # Bodies of the task commands (data functions + printers), shared by the CLI
 │                  #   and the chat's catalog; problems are click.ClickException
@@ -121,6 +121,8 @@ src/desman/
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
                    #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
+    ├── stats.py   # `desman stats` (5.2): outcomes, first tries, retries, verdicts, failures,
+    │              #   attempts by strategy, calls/tokens by role and model; read only
     ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
                    #   every status change was recorded (D7)
     ├── calls.py   # model_calls log (per provider/key usage, limits seen); `desman usage`;
