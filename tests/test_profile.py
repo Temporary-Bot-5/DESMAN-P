@@ -413,7 +413,7 @@ def test_how_it_talks_is_changed_in_profile_and_in_the_wizard(fake: FakeLLM) -> 
     )
     assert ("operator_behaviour", {"changed": ["length", "tone", "custom"]}) in journal()
     # The wizard: language, providers Done, permissions, then personalisation and how it talks.
-    done = str(len(providers.PROVIDERS + providers.SEARCH) + 1)
+    done = str(len(providers.PROVIDERS + providers.SERVICES) + 1)
     answers = ["1", done, "", "", "", "", "n", "y", "2", "", "", "-"]
     wizard = CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
     assert wizard.exit_code == 0, wizard.output

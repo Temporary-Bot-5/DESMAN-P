@@ -58,6 +58,9 @@ src/desman/
 │                  #   `language [CODE]`, `permissions [--grant|--revoke]`, `personalize [on|off]`,
 │                  #   `behaviour [--length|--tone|--style|--custom|--reset]`, `usage`; bodies as
 │                  #   functions the chat's catalog calls too
+├── models_cli.py  # `models show|add MODEL`: a Hugging Face GGUF model for a local server
+├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
+│                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
 │                  #   consent, how the interlocutor talks)
 ├── providers.py   # known model providers (cloud; local: Ollama, llama.cpp, ready once
@@ -165,9 +168,12 @@ src/desman/
                    #   reported kept as blocked_until: shared by workers, outlives restarts;
                    #   Local: a local server paced by the machine (one request at a time, a
                    #   file lock; not while the load is high; left alone after no answer)
-    └── check.py   # `desman keys check`: is a key accepted, limits reported, catalog models the
+    ├── check.py   # `desman keys check`: is a key accepted, limits reported, catalog models the
                    #   provider does not list; a local server: running, serves its model;
                    #   spends no tokens
+    └── hub.py     # Hugging Face: parse author/model[:quant], inspect (GGUF files, size,
+                   #   gated), check_access, free RAM/video memory, Ollama's pull; HF_TOKEN
+                   #   goes to huggingface.co only. Downloads nothing unless the person said yes
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it

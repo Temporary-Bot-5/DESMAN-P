@@ -154,6 +154,7 @@ def _providers_menu(s: _Session) -> None:
             (t("Paid: billed per use"), providers.PAID),
             (t("Local"), providers.LOCAL),
             (t("Web search (for the web_search tool)"), providers.SEARCH),
+            (t("Models for local servers"), providers.HUB),
         ):
             choices.append(ui.Heading(title))
             choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
@@ -207,16 +208,54 @@ def _provider_menu(s: _Session, p: Provider) -> None:
                     current or t("not set"),
                 )
             )
+        if p.local:
+            actions.append(ui.Choice(t("Download a model from Hugging Face"), "hub"))
         actions.append(ui.Choice(t("Back"), None))
         action = ui.select(p.name, actions)
         if action is None:
             return
-        if action == "add":
+        if action == "hub":
+            _download(s, p)
+        elif action == "add":
             _add_key(s, p)
         elif action == "remove":
             _remove_key(s, p)
         else:
             _set(s, p, action)
+
+
+def _download(s: _Session, p: Provider) -> None:
+    """A model from Hugging Face for local server `p`: its size and the free memory first, then
+    the person's "yes", then the download."""
+    import click
+    import httpx
+
+    from desman import local_models
+    from desman.llm import hub
+
+    text = ui.text(
+        t("Model on Hugging Face (author/model or author/model:Q4_K_M); Enter to cancel")
+    )
+    if not text:
+        return
+    try:
+        ref = local_models.parse(text)
+        with httpx.Client() as client:
+            found = local_models.look_up(s.config, ref, client)
+            lines, warnings = local_models.describe(found, hub.memory())
+            planned, cautions = local_models.plan(s.config, found, p)
+            for line in lines + planned:
+                ui.note(line)
+            for warning in warnings + cautions:
+                ui.warn(warning)
+            if not ui.confirm(t("Download it and use it?"), default=not warnings):
+                return
+            local_models.fetch(s.config, found, p, client)
+    except click.ClickException as e:
+        ui.warn(e.format_message())
+        return
+    name = local_models.use(s.config, found, p)
+    ui.ok(t("{server} model set to {model}.", server=p.name, model=name))
 
 
 def _show_keys(config: Config, p: Provider) -> None:
@@ -232,7 +271,7 @@ def _show_keys(config: Config, p: Provider) -> None:
 
 def _add_key(s: _Session, p: Provider) -> None:
     assert p.key_env is not None
-    if not s.privacy_ok:
+    if not s.privacy_ok and not p.hub:  # a Hugging Face token reads listings: no task data
         ui.out(
             Panel(
                 Text(

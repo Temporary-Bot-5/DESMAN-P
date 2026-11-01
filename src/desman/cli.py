@@ -41,6 +41,7 @@ from desman.info import print_project_info
 from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
+from desman.models_cli import models
 from desman.planner import Planned, plan, template_plan
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -133,6 +134,7 @@ cli.add_command(language)
 cli.add_command(permissions)
 cli.add_command(personalize)
 cli.add_command(behaviour)
+cli.add_command(models)
 
 
 @cli.command("init-db")

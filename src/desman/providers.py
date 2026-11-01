@@ -1,6 +1,6 @@
 """The model providers DESMAN knows: what each needs from `config.json`, and which are ready.
-The web search engines of the `web_search` tool (`SEARCH`) are configured the same way, but are
-never asked for a model.
+The web search engines of the `web_search` tool (`SEARCH`) and Hugging Face (`HUB`, where models
+for the local servers come from) are configured the same way, but are never asked for a model.
 
 One list for the wizard, `desman config show`, `desman keys` and the router (2.2+). Variable
 names follow each provider's own documentation, so a key copied from its console goes under the
@@ -52,6 +52,8 @@ class Provider:
     max_tokens: int | None = None
     # A web search engine for the web_search tool (core/search.py), not a model provider.
     search: bool = False
+    # Where models for the local servers come from (llm/hub.py), not a model provider.
+    hub: bool = False
     # Seconds a request may take: a local model on a CPU writes far slower than a cloud one.
     timeout: float = 60.0
     # The setting naming the model a local server serves (the person chooses it, no catalog).
@@ -338,6 +340,22 @@ SEARCH = (
 )
 
 
+# Hugging Face: its token reads a private or gated model's listing (ROADMAP 4.5b). Optional:
+# public models need none.
+HUB = (
+    Provider(
+        "huggingface",
+        "Hugging Face",
+        "https://huggingface.co/settings/tokens",
+        "HF_TOKEN",
+        hub=True,
+    ),
+)
+
+SERVICES = SEARCH + HUB
+"""Configured like providers, never asked for a model."""
+
+
 class UnknownProvider(LookupError):
     pass
 
@@ -353,16 +371,17 @@ def find(name: str) -> Provider:
 
 
 def find_keyed(name: str) -> Provider:
-    """Like `find`, but also a search engine: what `desman keys` manages keys for."""
+    """Like `find`, but also a search engine or Hugging Face: what `desman keys` manages keys
+    for."""
     wanted = name.strip().lower()
-    for p in SEARCH:
+    for p in SERVICES:
         if wanted in (p.id, p.name.lower(), (p.key_env or "").lower()):
             return p
     return find(name)
 
 
 def by_key_env(env: str) -> Provider | None:
-    return next((p for p in CLOUD + SEARCH if p.key_env is not None and p.key_env == env), None)
+    return next((p for p in CLOUD + SERVICES if p.key_env is not None and p.key_env == env), None)
 
 
 def search_engines(config: Config) -> list[Provider]:
@@ -456,7 +475,7 @@ def parse_key_file(text: str) -> list[tuple[str, str]]:
 
 def describe(config: Config) -> dict[str, Any]:
     """The config with every secret masked: what `desman config show` prints."""
-    every = PROVIDERS + SEARCH
+    every = PROVIDERS + SERVICES
     known = {p.key_env for p in every} | {s.env for p in every for s in p.settings}
     rows = []
     for p in every:
@@ -466,6 +485,7 @@ def describe(config: Config) -> dict[str, Any]:
             "local": p.local,
             "paid": p.paid,
             "search": p.search,
+            "hub": p.hub,
         }
         if p.key_env is not None:
             row["key_env"] = p.key_env
