@@ -109,8 +109,9 @@ class Context:
 
     store: Store
     manager: ConfigManager
-    start_task: Callable[[str, str], None]
-    """(title, goal): plan a task of the session and run it."""
+    start_task: Callable[[str, str, bool], None]
+    """(title, goal, runs_code): plan a task of the session and run it; with runs_code it
+    must run code (`planner.must_run`)."""
     resume_task: Callable[[str], None]
     """(task id): run the task further."""
     session_id: Callable[[], str | None] = lambda: None
@@ -183,6 +184,7 @@ class CancelArgs(Args):
 class RunArgs(Args):
     goal: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
     title: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
+    runs_code: bool = False
 
 
 class UsageArgs(Args):
@@ -867,7 +869,7 @@ def _run(ctx: Context, args: RunArgs) -> Proposal:
     title = args.title or actions.one_line(args.goal, 60)
 
     def apply() -> Outcome:
-        ctx.start_task(title, args.goal)
+        ctx.start_task(title, args.goal, args.runs_code)
         return Outcome(None)
 
     return Proposal([t("Start a task: {goal}", goal=actions.one_line(args.goal, 300))], apply)

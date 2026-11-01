@@ -4,10 +4,14 @@
   the task's retelling, so where its work is never rests on a model's word;
 - `for_retelling()`: the same files with their texts, fitted to a budget, for the retelling to
   copy from (`interlocutor.unbacked_code` checks that it did);
-- `hand_over()`: copies of an earlier task's files in a new task's workspace, under
-  `from-<ref>/`, when the person's request builds on them (`NewTask.files_from`).
+- `handover()` / `hand_over()`: copies of an earlier task's files in a new task's workspace,
+  under `from-<ref>/`, when the person's request builds on them (`NewTask.files_from`). What is
+  copied is decided before planning (the goal names it); the copy is made in the transaction
+  that creates the task (`Store.create_task(also=...)`), so no worker sees the task before its
+  files are there, and a copy that fails leaves no task.
 
-Everything goes through `Workspace`: its path guard, no links, atomic writes. A task that never
+Everything goes through `Workspace`: its path guard, no links (hard links neither), atomic
+writes. A task that never
 had a workspace is not given one by being looked at.
 """
 
@@ -87,24 +91,46 @@ def for_retelling(
     return told
 
 
-def hand_over(root: Path, source: str, target: str, ref: str) -> list[str]:
-    """Copies of `source`'s files in `target`'s workspace under `from-<ref>/`; the paths made,
-    within `MAX_HANDED` files and `MAX_HANDED_BYTES` bytes (the rest is left out)."""
-    workspace = _workspace(root, source)
-    if workspace is None:
-        return []
+@dataclass(frozen=True)
+class Handover:
+    """What of an earlier task's files a new task gets: decided once, before planning, so the
+    goal names exactly what is copied."""
+
+    source: str
+    ref: str
+    taken: list[File]
+    left: list[File]
+    """Over `MAX_HANDED` files or `MAX_HANDED_BYTES` bytes: not copied, and the person is told."""
+
+    def paths(self) -> list[str]:
+        """Where the copies are in the new task's workspace."""
+        return [f"from-{self.ref}/{f.path}" for f in self.taken]
+
+
+def handover(root: Path, source: str, ref: str) -> Handover:
+    """The files of task `source` a new task may get, within the limits, in path order."""
+    taken: list[File] = []
+    left: list[File] = []
+    used = 0
+    for file in listing(root, source):
+        if len(taken) >= MAX_HANDED or used + file.size > MAX_HANDED_BYTES:
+            left.append(file)
+            continue
+        taken.append(file)
+        used += file.size
+    return Handover(source, ref, taken, left)
+
+
+def hand_over(root: Path, target: str, given: Handover) -> list[str]:
+    """Copy what `given` takes into `target`'s workspace; the paths made. A file that cannot be
+    read back as it was listed (changed, gone, linked meanwhile) raises: the new task must not
+    start on files its goal names but it does not have."""
+    workspace = Workspace(root, given.source)
     into = Workspace(root, target)
     made: list[str] = []
-    used = 0
-    for path in workspace.files():
-        if len(made) >= MAX_HANDED:
-            break
-        try:
-            data = workspace.read(path)
-        except (OSError, PathEscapeError):
-            continue
-        if used + len(data) > MAX_HANDED_BYTES:
-            continue
-        made.append(into.write(f"from-{ref}/{path}", data))
-        used += len(data)
+    for file, path in zip(given.taken, given.paths(), strict=True):
+        data = workspace.read(file.path)
+        if len(data) != file.size:
+            raise OSError(f"{file.path!r} of task {given.ref} changed while it was copied")
+        made.append(into.write(path, data))
     return made

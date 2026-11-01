@@ -89,13 +89,16 @@ INTERLOCUTOR_SYSTEM = (
     '{"type": "reply", "text": "..."} to answer: greetings, questions about the conversation '
     "or about what DESMAN can do, anything you can answer from what was said;\n"
     '{"type": "clarify", "question": "..."} when the request is too unclear to act on;\n'
-    '{"type": "task", "title": "a few words", "goal": "...", "files_from"?: ["task id"]} when '
+    '{"type": "task", "title": "a few words", "goal": "...", "files_from"?: ["task id"], '
+    '"runs_code"?: true} when '
     "the person wants something done that needs work (finding, writing, saving, running, "
     "testing, computing, checking). The goal is all the workers see: never refer to the "
     "conversation, write into the goal every detail the person gave. Files a task wrote stay "
     "with that task: when the work builds on them (test, change or run what an earlier task "
     "wrote), put that task's id, as DESMAN's messages name it, into \"files_from\" (at most "
-    f"{MAX_FILES_FROM}); the workers then get copies of its files. "
+    f"{MAX_FILES_FROM}); the workers then get copies of its files. Give "
+    '"runs_code": true when the work must run code or a command and tell what came of it '
+    "(testing a program, a crash test, measuring): it is then done only if it really ran. "
     "Work is always a task turn, never a command: the person asked for it already;\n"
     '{"type": "command", "name": "...", "args": {...}} when the person wants DESMAN itself to '
     "do something or show something: its settings, API keys, permissions, language, the list "
@@ -235,6 +238,8 @@ class NewTask(Noting):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
     goal: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
     files_from: list[TaskRef] = Field(default_factory=list, max_length=MAX_FILES_FROM)
+    runs_code: bool = False
+    """The work must run code: the task is held to it whatever the plan says (`must_run`)."""
     """Earlier tasks of the session whose files the new one gets copies of (the chat checks
     they are the session's own)."""
 

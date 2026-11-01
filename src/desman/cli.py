@@ -46,7 +46,7 @@ from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.models_cli import models
-from desman.planner import Planned, plan, template_plan
+from desman.planner import Planned, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
 from desman.tuning_cli import tuning
@@ -279,6 +279,12 @@ def model_options(command: F) -> F:
     "the template is used), template makes the goal itself the only subtask (the default "
     "with --fake-llm).",
 )
+@click.option(
+    "--runs-code",
+    is_flag=True,
+    help="The work must run code: it is done only once run_command really ran it, whatever "
+    "the plan (without the shell_execution permission it waits for you).",
+)
 @run_options
 @db_option
 @json_option
@@ -287,6 +293,7 @@ def run(
     spec_path: Path | None,
     priority: str | None,
     plan_mode: str | None,
+    runs_code: bool,
     fake_script: Path | None,
     provider_name: str | None,
     model: str | None,
@@ -330,6 +337,8 @@ def run(
             spec = planned.spec
         elif level is not None:
             spec = spec.model_copy(update={"priority": level})
+        if runs_code:  # held to it whatever the plan, the template's too
+            spec = must_run(spec)
         details = planned.details() if planned else None
         task_id = store.create_task(spec, details=details)
         if not as_json:

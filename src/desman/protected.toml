@@ -15,7 +15,7 @@
 "agents.py" = "6f6a4b511332cb9a2a41b7158ab8f9e0add95b5594e6b4c15b91f3520feea077"
 # Security rules: the sandbox for generated code, the workspace guard for files.
 "core/sandbox.py" = "94296cd60523f6e886146c901ba37e72c5c0ca53431afa02948908988da17252"
-"core/workspace.py" = "1f66943238f6bf62b4f3bb25868c3d7fabab29bb159ab2b27f2aa2163322cfc4"
+"core/workspace.py" = "2a8775f29cbb12cee517649cc3651e82ba449d3340c40622ce9d78f62f009d43"
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"

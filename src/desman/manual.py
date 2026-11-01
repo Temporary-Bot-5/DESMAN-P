@@ -68,7 +68,7 @@ TOPICS: Final = (
         "Running code (a test, a crash test, checking what a program prints) needs the "
         "run_command tool, which needs the person's shell_execution switch (`desman "
         "permissions`) and a working sandbox. A subtask that must run code is marked so by the "
-        "planner: without the tool it waits for the person at once, with the reason, and "
+        "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with the reason, and "
         "with it its result counts only if the code really ran. No part of DESMAN reports "
         "what code would print without running it.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
