@@ -126,6 +126,25 @@ server {
 
 Only ports 80 and 443 need to be open: `sudo ufw allow 80,443/tcp`. Leave port 8470 closed.
 
+### Tailscale Funnel (no domain, no open ports)
+
+A machine behind a home router can be reached without port forwarding and without publishing
+its address: Tailscale Funnel gives it a stable `https://NAME.TAILNET.ts.net` with TLS and
+passes the path unchanged. Funnel serves ports 443, 8443 and 10000; take another one if 443 is
+used already (`--https=8443`, then the address carries `:8443`).
+
+```bash
+tailscale funnel --bg 8470            # or: tailscale funnel --bg --https=8443 8470
+tailscale funnel status
+tailscale funnel --https=443 off      # to take it down
+```
+
+The first time, Tailscale may ask to allow Funnel for the tailnet in its admin console. Inside
+the tailnet the name resolves to the machine's 100.x address, so to test the public path from
+the machine itself, resolve it with a public DNS server (`dig @1.1.1.1 NAME.TAILNET.ts.net`)
+and pass that address to `curl --resolve`. The registry is reachable only while the machine
+is on; nodes wait with backoff and go on with their own work meanwhile.
+
 People point their nodes at it with `desman global join --registry https://registry.example.org`.
 Once the address is final it becomes `net.DEFAULT_REGISTRY` in a release.
 

@@ -250,7 +250,10 @@ def _no_body(body: bytes, caller: request.Caller) -> None:
 def handler_for(registry: Registry) -> type[BaseHTTPRequestHandler]:
     class RegistryHandler(BaseHTTPRequestHandler):
         server_version = "desman-registry"
-        sys_version = ""
+
+        def version_string(self) -> str:
+            return self.server_version  # no Python version on the wire
+
         timeout = SOCKET_TIMEOUT
         # HTTP/1.0: one request per connection, so a refused body never lingers on it.
 
