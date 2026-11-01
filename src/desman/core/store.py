@@ -23,7 +23,7 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
-from desman.core.models import Subtask, SubtaskSpec, TaskSpec, Tools
+from desman.core.models import Priority, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
 from desman.core.scheduler import DEFAULT_AGING, Aging
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
@@ -45,6 +45,15 @@ DEFAULT_REVIEW_SECONDS = 120
 
 class StaleStateError(RuntimeError):
     """The subtask is no longer in the expected state (or no longer held by this executor)."""
+
+
+class PreemptedError(StaleStateError):
+    """The executor gave its subtask back to READY for critical work (`Store.preempt`): stop and
+    drop the work, like after a lost lease. Progress up to the last checkpoint is kept."""
+
+    def __init__(self, subtask_id: str, by: str) -> None:
+        self.by = by
+        super().__init__(f"subtask {subtask_id} preempted by critical work {by}")
 
 
 class PauseNotOverError(StaleStateError):
@@ -304,44 +313,113 @@ class Store:
         executor must present it to leave RUNNING.
         """
         check_transition(S.READY, S.RUNNING, Actor.EXECUTOR)
-        lease_token = _new_id()
-        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         with db.transaction(self.conn):
-            # Times are taken after the write lock is held: waiting for it must not eat the lease.
-            lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
-            self._promote_ready()
-            now = self._now()
-            chosen = self.conn.execute(
-                f"""SELECT id, {self.aging.urgency_sql()} AS urgency FROM subtasks
-                    WHERE status = 'ready' {scope}
-                    ORDER BY urgency DESC, queued_at, seq LIMIT 1""",
-                (now, *params),
-            ).fetchone()
-            if chosen is None:
-                return None
-            row = self.conn.execute(
-                """UPDATE subtasks
-                    SET status = 'running', lease_owner = ?, lease_token = ?, lease_until = ?,
-                        updated_at = ?, queued_at = NULL
-                    WHERE id = ? AND status = 'ready'
-                    RETURNING *""",
-                (owner, lease_token, lease_until, now, chosen["id"]),
-            ).fetchone()
-            subtask = Subtask.from_row(row)  # the write lock is held: nothing moved it
-            self._audit(
-                Actor.EXECUTOR,
-                "claim",
-                subtask=subtask,
-                from_status=S.READY,
-                to_status=S.RUNNING,
-                details={
-                    "owner": owner,
-                    "lease": lease_token,
-                    "lease_until": lease_until,
-                    "urgency": chosen["urgency"],
-                },
-            )
+            return self._claim(owner, task_id, lease_seconds)
+
+    def _claim(
+        self,
+        owner: str,
+        task_id: str | None,
+        lease_seconds: int,
+        *,
+        min_priority: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> Subtask | None:
+        """The body of `claim`, only among work of at least `min_priority`. Needs a transaction."""
+        lease_token = _new_id()
+        # Times are taken after the write lock is held: waiting for it must not eat the lease.
+        lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
+        self._promote_ready()
+        now = self._now()
+        scope = "AND task_id = ?" if task_id else ""
+        params: list[Any] = [task_id] if task_id else []
+        if min_priority is not None:
+            scope += " AND priority >= ?"
+            params.append(min_priority)
+        chosen = self.conn.execute(
+            f"""SELECT id, {self.aging.urgency_sql()} AS urgency FROM subtasks
+                WHERE status = 'ready' {scope}
+                ORDER BY urgency DESC, queued_at, seq LIMIT 1""",
+            (now, *params),
+        ).fetchone()
+        if chosen is None:
+            return None
+        row = self.conn.execute(
+            """UPDATE subtasks
+                SET status = 'running', lease_owner = ?, lease_token = ?, lease_until = ?,
+                    updated_at = ?, queued_at = NULL
+                WHERE id = ? AND status = 'ready'
+                RETURNING *""",
+            (owner, lease_token, lease_until, now, chosen["id"]),
+        ).fetchone()
+        subtask = Subtask.from_row(row)  # the write lock is held: nothing moved it
+        self._audit(
+            Actor.EXECUTOR,
+            "claim",
+            subtask=subtask,
+            from_status=S.READY,
+            to_status=S.RUNNING,
+            details={
+                "owner": owner,
+                "lease": lease_token,
+                "lease_until": lease_until,
+                "urgency": chosen["urgency"],
+                **(details or {}),
+            },
+        )
         return subtask
+
+    def preempt(
+        self,
+        subtask_id: str,
+        lease: str,
+        owner: str,
+        *,
+        task_id: str | None = None,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> Subtask | None:
+        """Cooperative preemption (ROADMAP 4.4, D5): critical work is ready (of any task, or of
+        `task_id`) while the executor holding `lease` runs work below CRITICAL. In one
+        transaction `owner` claims the most urgent critical subtask and gives its own back to
+        READY (`preempted`: no attempt spent, the checkpoint kept). Returns the claimed subtask,
+        or None when there is nothing to yield to; with one, the caller drops its work and runs
+        the claimed subtask instead.
+
+        One executor yields per critical subtask: the claim is atomic, so the others find
+        nothing left. Critical work itself is never preempted. Raises StaleStateError if `lease`
+        no longer holds the subtask.
+        """
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
+        waiting = self.conn.execute(  # without the write lock: almost always nothing waits
+            f"SELECT 1 FROM subtasks WHERE status = 'ready' AND priority >= ? {scope} LIMIT 1",
+            (int(Priority.CRITICAL), *params),
+        ).fetchone()
+        if waiting is None:
+            return None
+        with db.transaction(self.conn):
+            self._hold(subtask_id, lease)
+            if self.get_subtask(subtask_id).priority >= Priority.CRITICAL:
+                return None
+            claimed = self._claim(
+                owner,
+                task_id,
+                lease_seconds,
+                min_priority=int(Priority.CRITICAL),
+                details={"preempting": subtask_id},
+            )
+            if claimed is None:
+                return None  # another executor took it meanwhile
+            self._apply(
+                subtask_id,
+                S.RUNNING,
+                S.READY,
+                Actor.EXECUTOR,
+                lease=lease,
+                reason=f"critical work {claimed.id} is waiting",
+                details={"by": claimed.id, "by_task": claimed.task_id},
+                action="preempted",
+            )
+        return claimed
 
     def transition(
         self,
