@@ -564,16 +564,24 @@ def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> run
     choice = models.choice
     if as_json or choice is None:
         return models
-    assert choice.provider.key_env is not None
-    ui.note(
-        tn(
-            len(config.keys(choice.provider.key_env)),
-            "Using {provider} · {model} ({n} key)",
-            "Using {provider} · {model} ({n} keys)",
-            provider=choice.provider.name,
-            model=choice.model,
+    if choice.provider.key_env is None:
+        ui.note(
+            t(
+                "Using {provider} · {model} (on this machine)",
+                provider=choice.provider.name,
+                model=choice.model,
+            )
         )
-    )
+    else:
+        ui.note(
+            tn(
+                len(config.keys(choice.provider.key_env)),
+                "Using {provider} · {model} ({n} key)",
+                "Using {provider} · {model} ({n} keys)",
+                provider=choice.provider.name,
+                model=choice.model,
+            )
+        )
     reviewer = models.first(calls.Role.REVIEWER)
     if reviewer is not None and reviewer.label != choice.label:
         ui.note(

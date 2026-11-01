@@ -47,7 +47,6 @@ MESSAGES: dict[str, Forms] = {
     "Do not ask for confirmation.": "Não pedir confirmação.",
     "API keys: list, add, remove, import (always shown masked).": "Chaves de API: list, add, remove, import (sempre mostradas ocultas).",
     "How many keys each provider has, and what each spent in the last 24 hours.": "Quantas chaves cada provedor tem e quanto cada uma gastou nas últimas 24 horas.",
-    "Ask each provider whether its keys work and what limits it reports. Spends no tokens.": "Pergunta a cada provedor se as chaves funcionam e quais limites ele informa. Não gasta tokens.",
     "Add an API key to PROVIDER (id, name or variable, e.g. groq). Several per provider.": "Adiciona uma chave de API a PROVIDER (id, nome ou variável, ex.: groq). Pode haver várias por provedor.",
     "A name to tell this key apart, e.g. 'work'.": "Um nome para identificar esta chave, ex.: 'work'.",
     "Read the key from standard input.": "Ler a chave da entrada padrão.",
@@ -98,7 +97,6 @@ MESSAGES: dict[str, Forms] = {
     "Task is active again. Continue with: desman resume {ref}": "A tarefa está ativa de novo. Para continuar: desman resume {ref}",
     "Task is {status}.": "A tarefa está {status}.",
     "no provider is configured: add a key with `desman keys add PROVIDER`": "nenhum provedor configurado: adicione uma chave com `desman keys add PROVIDER`",
-    "{name} is local: local models are not supported yet": "{name} é local: modelos locais ainda não são suportados",
     "{name} is not configured: add a key with `desman keys add {id}`": "{name} não está configurado: adicione uma chave com `desman keys add {id}`",
     "{name} is not configured: add a key with `desman keys add {id}` and set its settings in `desman config`": "{name} não está configurado: adicione uma chave com `desman keys add {id}` e preencha as configurações dele em `desman config`",
     "only paid providers are configured ({names}), and DESMAN never picks a paid one by itself: choose it with --provider, e.g. --provider {id}": "só há provedores pagos configurados ({names}), e o DESMAN nunca escolhe um pago sozinho: escolha com --provider, ex.: --provider {id}",
@@ -489,6 +487,14 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Mais alguma coisa, com suas palavras; um texto vazio limpa.",
     "Everything back to the interlocutor's judgement.": "Tudo volta ao critério do interlocutor.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Se o interlocutor analisa suas conversas e mantém notas: mostrar, on ou off.",
+    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Um modelo na sua própria máquina: gratuito e privado, mas lento. Inicie {name}, defina o modelo que ele serve e verifique-o com `desman keys check {id}`. O DESMAN o usa quando os modelos na nuvem não podem atender uma chamada. Como iniciá-lo: {url}",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Perguntar a cada provedor se suas chaves funcionam e quais limites ele informa, e a cada servidor\nlocal se está em execução e serve seu modelo. Não gasta tokens.",
+    "Download the model with `ollama pull {model}`.": "Baixe o modelo com `ollama pull {model}`.",
+    "It serves: {models}": "Ele serve: {models}",
+    "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Inicie-o com `llama-server -m MODEL.gguf --port 8080`, ou defina seu endereço em `desman config`.",
+    "Start it with `ollama serve`, or set its address in `desman config`.": "Inicie-o com `ollama serve`, ou defina seu endereço em `desman config`.",
+    "Using {provider} · {model} (on this machine)": "Usando {provider} · {model} (nesta máquina)",
+    "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} não tem modelo definido: escolha um em `desman config` (o endereço do servidor e o tamanho do contexto também ficam lá)",
 }
 
 CLICK: dict[str, Forms] = {

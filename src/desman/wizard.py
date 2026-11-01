@@ -124,6 +124,11 @@ def run_section(manager: ConfigManager, section: str) -> None:
 
 def _status(config: Config, p: Provider) -> str:
     if p.key_env is None:
+        missing = [s.label for s in p.settings if not s.default and not config.settings.get(s.env)]
+        if p.local and missing:
+            return t("needs {what}", what=", ".join(missing))
+        if p.local:
+            return f"{p.model(config)} ✓"
         values = [config.settings.get(s.env) or s.default for s in p.settings]
         return " ".join(v for v in values if v) or t("not set")
     n = len(config.keys(p.key_env or ""))
@@ -172,6 +177,17 @@ def _provider_menu(s: _Session, p: Provider) -> None:
                 "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo "
                 "and others for you, without keys or accounts. How to start one: {doc}",
                 doc=SEARXNG_DOC,
+            )
+        )
+    if p.local:
+        ui.note(
+            t(
+                "A model on your own machine: free and private, but slow. Start {name}, set the "
+                "model it serves, then check it with `desman keys check {id}`. DESMAN asks it "
+                "when the cloud models cannot take a call. How to start it: {url}",
+                name=p.name,
+                id=p.id,
+                url=p.url,
             )
         )
     while True:

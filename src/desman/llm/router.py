@@ -3,7 +3,9 @@
 Every role (planner, executor, reviewer, decomposer, interlocutor) gets its own *lineup*: the
 models of the ready free providers, best for that role first (`catalog.need`: what the role
 asks of a model, for the executor what its subtask's kind asks, then a model that keeps to JSON, then the provider's place in
-`providers.PREFERENCE`, then the model's place in the catalog). A paid provider is used only
+`providers.PREFERENCE`, then the model's place in the catalog). A local model (ROADMAP 4.5a:
+Ollama, llama.cpp), once its model is set, comes after every cloud one: it costs nothing and
+has no quota, but it is slow, so it takes the calls the cloud ones cannot. A paid provider is used only
 when asked for (`--provider`); then the lineup is that provider's models. `--model` pins one
 model: the lineup is that model alone.
 
@@ -21,7 +23,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
@@ -58,11 +60,15 @@ def choose(config: Config, wanted: str | None = None) -> Provider:
             provider = providers.find(wanted)
         except providers.UnknownProvider as e:
             raise NoProvider(str(e)) from e
-        if provider.local:
-            raise NoProvider(
-                t("{name} is local: local models are not supported yet", name=provider.name)
-            )
         if not provider.is_ready(config):
+            if provider.local:
+                raise NoProvider(
+                    t(
+                        "{name} has no model set: choose one in `desman config` (the server's "
+                        "address and context size are there too)",
+                        name=provider.name,
+                    )
+                )
             if provider.settings:
                 raise NoProvider(
                     t(
@@ -97,19 +103,22 @@ def choose(config: Config, wanted: str | None = None) -> Provider:
 
 
 def _free(config: Config) -> list[Provider]:
-    """The ready free providers in the preference order."""
+    """The ready free providers in the preference order, the local ones last."""
     ready = {p.id: p for p in providers.ready(config) if not p.paid}
-    return [ready[pid] for pid in providers.PREFERENCE if pid in ready]
+    cloud = [ready[pid] for pid in providers.PREFERENCE if pid in ready]
+    return cloud + [p for p in ready.values() if p.local]
 
 
 @dataclass(frozen=True)
 class Choice:
     provider: Provider
     model: str
+    known: catalog.Model | None = field(default=None, compare=False)
+    """What is known of a local model (its context, from the settings); None: the catalog's."""
 
     @property
     def spec(self) -> catalog.Model:
-        return catalog.model(self.provider, self.model)
+        return self.known or catalog.model(self.provider, self.model)
 
     @property
     def label(self) -> str:
@@ -129,15 +138,27 @@ def lineup(
     `NoProvider` (with what to do about it)."""
     first = choose(config, provider)
     if model is not None:
-        return [Choice(first, model)]
+        return [_choice(config, first, model)]
     pool = [first] if provider is not None else _free(config)
     need = catalog.need(role, kind)
     ranked = [
-        (need not in m.strengths, not m.strict_json, place, order, Choice(p, m.id))
+        (p.local, need not in c.spec.strengths, not c.spec.strict_json, place, order, c)
         for place, p in enumerate(pool)
-        for order, m in enumerate(catalog.models_of(p))
+        for order, c in enumerate(_choices(config, p))
     ]
-    return [row[-1] for row in sorted(ranked, key=lambda row: row[:4])]
+    return [row[-1] for row in sorted(ranked, key=lambda row: row[:5])]
+
+
+def _choices(config: Config, p: Provider) -> list[Choice]:
+    if p.local:
+        return [_choice(config, p, p.model(config))]
+    return [Choice(p, m.id) for m in catalog.models_of(p)]
+
+
+def _choice(config: Config, p: Provider, model: str) -> Choice:
+    if p.local:
+        return Choice(p, model, catalog.local_model(model, p.context(config)))
+    return Choice(p, model)
 
 
 def other_lineup(choices: Sequence[Choice]) -> list[Choice]:
@@ -159,15 +180,16 @@ def connect(
     on_call: Callable[[CallRecord], None] | None = None,
     client: httpx.Client | None = None,
 ) -> OpenAICompatible:
-    """The client of one model: every key of its provider."""
+    """The client of one model: every key of its provider (a local server takes none)."""
     chosen = choice.provider
-    assert chosen.key_env is not None
+    keys = [""] if chosen.key_env is None else [k.value for k in config.keys(chosen.key_env)]
     return OpenAICompatible(
         chosen.id,
         chosen.endpoint(config),
-        [k.value for k in config.keys(chosen.key_env)],
+        keys,
         choice.model,
         client=client,
+        timeout=chosen.timeout,
         on_call=on_call,
         auth=chosen.auth,
         send_temperature=chosen.send_temperature,

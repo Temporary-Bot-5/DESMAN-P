@@ -36,7 +36,7 @@ from desman.i18n import t
 from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.cache import Cached
-from desman.llm.limiter import Buckets, Limited
+from desman.llm.limiter import Buckets, Limited, Local
 from desman.planner import decomposer
 
 
@@ -95,8 +95,13 @@ def models(
         # One client per model, shared by the roles: its keys' state (refused, limited) is one.
         if choice.label not in clients:
             api = router.connect(config, choice, on_call=recorder, client=client)
-            keys = max(1, len(api.keys))
-            paced = Limited(api, buckets, choice.label, choice.spec.rpm * keys, sleep=sleep)
+            paced: LLM
+            if choice.provider.local:  # paced by the machine, not by a rate
+                server = f"{choice.provider.id}@{api.base_url}"
+                paced = Local(api, buckets, choice.label, server, sleep=sleep)
+            else:
+                keys = max(1, len(api.keys))
+                paced = Limited(api, buckets, choice.label, choice.spec.rpm * keys, sleep=sleep)
             backed = router.Backoff(paced, sleep=sleep)
             clients[choice.label] = Cached(backed, conn, choice.model) if cache else backed
         return clients[choice.label]

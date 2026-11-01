@@ -52,7 +52,6 @@ MESSAGES: dict[str, Forms] = {
     "Do not ask for confirmation.": "Не питати підтвердження.",
     "API keys: list, add, remove, import (always shown masked).": "API-ключі: list, add, remove, import (завжди показуються прихованими).",
     "How many keys each provider has, and what each spent in the last 24 hours.": "Скільки ключів у кожного провайдера і скільки кожен витратив за 24 години.",
-    "Ask each provider whether its keys work and what limits it reports. Spends no tokens.": "Запитати в кожного провайдера, чи працюють ключі та які в них ліміти. Токени не витрачаються.",
     "Add an API key to PROVIDER (id, name or variable, e.g. groq). Several per provider.": "Додати API-ключ провайдеру PROVIDER (id, назва або змінна, наприклад groq). Можна кілька.",
     "A name to tell this key apart, e.g. 'work'.": "Назва, щоб відрізняти ключ, наприклад 'work'.",
     "Read the key from standard input.": "Прочитати ключ зі стандартного вводу.",
@@ -107,7 +106,6 @@ MESSAGES: dict[str, Forms] = {
     "Task is active again. Continue with: desman resume {ref}": "Задача знову активна. Продовжити: desman resume {ref}",
     "Task is {status}.": "Статус задачі — {status}.",
     "no provider is configured: add a key with `desman keys add PROVIDER`": "жоден провайдер не налаштований: додайте ключ через `desman keys add PROVIDER`",
-    "{name} is local: local models are not supported yet": "{name} — локальний провайдер: локальні моделі поки не підтримуються",
     "{name} is not configured: add a key with `desman keys add {id}`": "{name} не налаштований: додайте ключ через `desman keys add {id}`",
     "{name} is not configured: add a key with `desman keys add {id}` and set its settings in `desman config`": "{name} не налаштований: додайте ключ через `desman keys add {id}` і заповніть його налаштування в `desman config`",
     "only paid providers are configured ({names}), and DESMAN never picks a paid one by itself: choose it with --provider, e.g. --provider {id}": "налаштовано лише платних провайдерів ({names}), а платного DESMAN сам не обирає: вкажіть його через --provider, наприклад --provider {id}",
@@ -516,6 +514,14 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Щось іще, вашими словами; порожній текст очищує.",
     "Everything back to the interlocutor's judgement.": "Усе назад на розсуд співрозмовника.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Чи аналізує співрозмовник ваші розмови й чи веде нотатки: показати, on або off.",
+    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Модель на вашому комп'ютері: безкоштовно й приватно, але повільно. Запустіть {name}, вкажіть модель, яку він надає, і перевірте її командою `desman keys check {id}`. DESMAN звертається до неї, коли хмарні моделі не можуть прийняти виклик. Як запустити: {url}",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Запитати кожного провайдера, чи працюють його ключі та які ліміти він повідомляє, а кожен локальний\nсервер — чи запущений він і чи надає свою модель. Токени не витрачаються.",
+    "Download the model with `ollama pull {model}`.": "Завантажте модель: `ollama pull {model}`.",
+    "It serves: {models}": "Він надає: {models}",
+    "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Запустіть його: `llama-server -m MODEL.gguf --port 8080` — або вкажіть його адресу в `desman config`.",
+    "Start it with `ollama serve`, or set its address in `desman config`.": "Запустіть його: `ollama serve` — або вкажіть його адресу в `desman config`.",
+    "Using {provider} · {model} (on this machine)": "Використовується {provider} · {model} (на цьому комп'ютері)",
+    "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "У {name} не вказано модель: виберіть її в `desman config` (там же адреса сервера й розмір контексту)",
 }
 
 CLICK: dict[str, Forms] = {

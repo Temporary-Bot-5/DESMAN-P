@@ -47,7 +47,6 @@ MESSAGES: dict[str, Forms] = {
     "Do not ask for confirmation.": "不要求确认。",
     "API keys: list, add, remove, import (always shown masked).": "API 密钥：list、add、remove、import（始终以遮蔽形式显示）。",
     "How many keys each provider has, and what each spent in the last 24 hours.": "每个提供商有多少密钥，以及每个密钥在过去 24 小时的消耗。",
-    "Ask each provider whether its keys work and what limits it reports. Spends no tokens.": "询问每个提供商其密钥是否有效以及报告的限额。不消耗令牌。",
     "Add an API key to PROVIDER (id, name or variable, e.g. groq). Several per provider.": "为提供商 PROVIDER（id、名称或变量名，例如 groq）添加 API 密钥。每个提供商可以有多个。",
     "A name to tell this key apart, e.g. 'work'.": "用于区分此密钥的名称，例如 'work'。",
     "Read the key from standard input.": "从标准输入读取密钥。",
@@ -90,7 +89,6 @@ MESSAGES: dict[str, Forms] = {
     "Task is active again. Continue with: desman resume {ref}": "任务已重新激活。继续：desman resume {ref}",
     "Task is {status}.": "任务状态为 {status}。",
     "no provider is configured: add a key with `desman keys add PROVIDER`": "没有配置任何提供商：用 `desman keys add PROVIDER` 添加密钥",
-    "{name} is local: local models are not supported yet": "{name} 是本地提供商：暂不支持本地模型",
     "{name} is not configured: add a key with `desman keys add {id}`": "{name} 未配置：用 `desman keys add {id}` 添加密钥",
     "{name} is not configured: add a key with `desman keys add {id}` and set its settings in `desman config`": "{name} 未配置：用 `desman keys add {id}` 添加密钥，并在 `desman config` 中填写其设置",
     "only paid providers are configured ({names}), and DESMAN never picks a paid one by itself: choose it with --provider, e.g. --provider {id}": "只配置了付费提供商（{names}），而 DESMAN 从不自行选择付费提供商：请用 --provider 指定，例如 --provider {id}",
@@ -443,6 +441,14 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "其他要求，用你自己的话；空文本表示清除。",
     "Everything back to the interlocutor's judgement.": "全部交回对话者自行判断。",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "对话者是否分析你的对话并记录信息：查看、on 或 off。",
+    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "运行在你自己机器上的模型：免费且私密，但速度慢。启动 {name}，设置它提供的模型，然后用 `desman keys check {id}` 检查。当云端模型无法接受调用时，DESMAN 会使用它。启动方法：{url}",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "询问每个提供商其密钥是否可用、报告了哪些限额，并询问每个本地\n服务器是否在运行、是否提供其模型。不消耗 token。",
+    "Download the model with `ollama pull {model}`.": "用 `ollama pull {model}` 下载该模型。",
+    "It serves: {models}": "它提供：{models}",
+    "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "用 `llama-server -m MODEL.gguf --port 8080` 启动它，或在 `desman config` 中设置它的地址。",
+    "Start it with `ollama serve`, or set its address in `desman config`.": "用 `ollama serve` 启动它，或在 `desman config` 中设置它的地址。",
+    "Using {provider} · {model} (on this machine)": "使用 {provider} · {model}（在本机上）",
+    "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} 未设置模型：请在 `desman config` 中选择一个（服务器地址和上下文大小也在那里）",
 }
 
 CLICK: dict[str, Forms] = {

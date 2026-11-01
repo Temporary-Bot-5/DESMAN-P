@@ -60,7 +60,8 @@ src/desman/
 │                  #   functions the chat's catalog calls too
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
 │                  #   consent, how the interlocutor talks)
-├── providers.py   # known model providers, readiness, key masking, key-file parsing
+├── providers.py   # known model providers (cloud; local: Ollama, llama.cpp, ready once
+│                  #   their model is set), readiness, key masking, key-file parsing
 ├── ui.py          # rich output + prompts (arrow menus in a terminal, numbered otherwise);
 │                  #   the chat's line (prompt_toolkit: `/` lists the chat's commands, Tab)
 ├── i18n.py        # t()/tn(): messages, command help and Click's own text in the configured
@@ -161,9 +162,12 @@ src/desman/
                    #   Backoff: quick blips (5xx, drops, limits ≤10 s) retried before they cost an
                    #   attempt; slow failures never (a lease is not renewed while waiting)
     ├── limiter.py # Token bucket per provider/model in the DB (rate_buckets), limits a provider
-                   #   reported kept as blocked_until: shared by workers, outlives restarts
+                   #   reported kept as blocked_until: shared by workers, outlives restarts;
+                   #   Local: a local server paced by the machine (one request at a time, a
+                   #   file lock; not while the load is high; left alone after no answer)
     └── check.py   # `desman keys check`: is a key accepted, limits reported, catalog models the
-                   #   provider does not list; spends no tokens
+                   #   provider does not list; a local server: running, serves its model;
+                   #   spends no tokens
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it

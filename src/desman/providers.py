@@ -52,12 +52,43 @@ class Provider:
     max_tokens: int | None = None
     # A web search engine for the web_search tool (core/search.py), not a model provider.
     search: bool = False
+    # Seconds a request may take: a local model on a CPU writes far slower than a cloud one.
+    timeout: float = 60.0
+    # The setting naming the model a local server serves (the person chooses it, no catalog).
+    model_env: str | None = None
+    # The setting with the tokens of prompt and reply a local server takes (its context size).
+    context_env: str | None = None
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
 
+    def setting(self, config: Config, env: str) -> str:
+        """A setting's value, or its default."""
+        default = next((s.default for s in self.settings if s.env == env), "")
+        return config.settings.get(env) or default
+
     def endpoint(self, config: Config) -> str:
-        return self.base_url.format(**config.settings).rstrip("/")
+        values = {**config.settings, **{s.env: self.setting(config, s.env) for s in self.settings}}
+        url = self.base_url.format(**values).rstrip("/")
+        if self.local and "://" not in url:  # OLLAMA_HOST is often written `host:port`
+            url = "http://" + url
+        return url
+
+    def model(self, config: Config) -> str:
+        """The model asked when none is chosen: for a local server, the one in the settings."""
+        if self.model_env is not None:
+            return self.setting(config, self.model_env)
+        return self.default_model
+
+    def context(self, config: Config) -> int | None:
+        """A local server's context size from the settings (None: not local, or not a number)."""
+        if self.context_env is None:
+            return None
+        try:
+            value = int(self.setting(config, self.context_env))
+        except ValueError:
+            return None
+        return value if value > 0 else None
 
     def is_ready(self, config: Config) -> bool:
         """Everything it needs is configured."""
@@ -227,20 +258,46 @@ PREFERENCE = (
     "vercel",
 )
 
+LOCAL_TIMEOUT = 240.0
+"""Seconds a local model may take to answer: long, but less than a subtask's lease (300 s by
+default), which nobody renews while the executor waits on its model."""
+LOCAL_CONTEXT = "4096"
+"""What Ollama and llama-server give a model unless told otherwise; a longer prompt is cut."""
+
+# Models on the person's own machine, through the server's OpenAI-compatible API. Used only
+# once a model is set, and after the cloud ones (`llm.router`): free and private, but slow.
 LOCAL = (
     Provider(
         "ollama",
         "Ollama",
         "https://ollama.com",
-        settings=(Setting("OLLAMA_HOST", "Host", "http://localhost:11434"),),
+        settings=(
+            Setting("OLLAMA_HOST", "Host", "http://localhost:11434"),
+            Setting("OLLAMA_MODEL", "Model"),
+            Setting("OLLAMA_CONTEXT", "Context (tokens)", LOCAL_CONTEXT),
+        ),
         local=True,
+        base_url="{OLLAMA_HOST}/v1",
+        auth=(),
+        timeout=LOCAL_TIMEOUT,
+        model_env="OLLAMA_MODEL",
+        context_env="OLLAMA_CONTEXT",
     ),
     Provider(
         "llamacpp",
         "llama.cpp",
-        "https://github.com/ggml-org/llama.cpp",
-        settings=(Setting("LLAMA_CPP_PATH", "Path"),),
+        "https://github.com/ggml-org/llama.cpp/tree/master/tools/server",
+        settings=(
+            Setting("LLAMA_CPP_URL", "Server URL", "http://localhost:8080"),
+            Setting("LLAMA_CPP_MODEL", "Model"),
+            Setting("LLAMA_CPP_CONTEXT", "Context (tokens)", LOCAL_CONTEXT),
+        ),
         local=True,
+        base_url="{LLAMA_CPP_URL}/v1",
+        auth=(),
+        timeout=LOCAL_TIMEOUT,
+        model_env="LLAMA_CPP_MODEL",
+        context_env="LLAMA_CPP_CONTEXT",
     ),
 )
 
@@ -300,9 +357,9 @@ def search_engines(config: Config) -> list[Provider]:
 
 
 def ready(config: Config) -> list[Provider]:
-    """Cloud providers with everything they need, in list order. Local ones are not offered
-    yet: nothing checks that a local server is running."""
-    return [p for p in CLOUD if p.is_ready(config)]
+    """Model providers with everything they need, in list order: a local one once its model
+    is set (whether its server runs is found out by calling it, or by `desman keys check`)."""
+    return [p for p in PROVIDERS if p.is_ready(config)]
 
 
 def label(text: str) -> str:
@@ -402,7 +459,7 @@ def describe(config: Config) -> dict[str, Any]:
                 {"value": mask(k.value), "label": label(k.label)} for k in config.keys(p.key_env)
             ]
         row["settings"] = {s.env: config.settings.get(s.env) or None for s in p.settings}
-        row["ready"] = p.is_ready(config) if not p.local else None
+        row["ready"] = p.is_ready(config)
         rows.append(row)
     return {
         "schema_version": config.schema_version,

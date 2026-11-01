@@ -112,6 +112,16 @@ def models_of(provider: Provider) -> tuple[Model, ...]:
     return CATALOG.get(provider.id) or (Model(provider.default_model),)
 
 
+LOCAL_RPM = 60
+"""A local server has no rate limit; it is paced by the machine instead (`llm.limiter.Local`)."""
+
+
+def local_model(model_id: str, context: int | None) -> Model:
+    """A model on the person's machine: whatever they chose, so nothing is known of it but its
+    context (from the settings). Small local models often stray from a requested format."""
+    return Model(model_id, context or 4_096, strict_json=False, rpm=LOCAL_RPM)
+
+
 def model(provider: Provider, model_id: str) -> Model:
     """What the catalog knows of `model_id` (one given with --model may be unknown to it: then
     the cautious defaults, at the pace of the provider's default model)."""

@@ -47,7 +47,6 @@ MESSAGES: dict[str, Forms] = {
     "Do not ask for confirmation.": "Onay isteme.",
     "API keys: list, add, remove, import (always shown masked).": "API anahtarları: list, add, remove, import (her zaman maskelenmiş gösterilir).",
     "How many keys each provider has, and what each spent in the last 24 hours.": "Her sağlayıcının kaç anahtarı olduğu ve her birinin son 24 saatte ne harcadığı.",
-    "Ask each provider whether its keys work and what limits it reports. Spends no tokens.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini sorar. Token harcamaz.",
     "Add an API key to PROVIDER (id, name or variable, e.g. groq). Several per provider.": "PROVIDER sağlayıcısına (id, ad veya değişken, ör. groq) bir API anahtarı ekler. Sağlayıcı başına birden fazla olabilir.",
     "A name to tell this key apart, e.g. 'work'.": "Bu anahtarı ayırt etmek için bir ad, ör. 'work'.",
     "Read the key from standard input.": "Anahtarı standart girdiden oku.",
@@ -90,7 +89,6 @@ MESSAGES: dict[str, Forms] = {
     "Task is active again. Continue with: desman resume {ref}": "Görev yeniden etkin. Devam etmek için: desman resume {ref}",
     "Task is {status}.": "Görev durumu {status}.",
     "no provider is configured: add a key with `desman keys add PROVIDER`": "yapılandırılmış sağlayıcı yok: `desman keys add PROVIDER` ile bir anahtar ekleyin",
-    "{name} is local: local models are not supported yet": "{name} yereldir: yerel modeller henüz desteklenmiyor",
     "{name} is not configured: add a key with `desman keys add {id}`": "{name} yapılandırılmamış: `desman keys add {id}` ile bir anahtar ekleyin",
     "{name} is not configured: add a key with `desman keys add {id}` and set its settings in `desman config`": "{name} yapılandırılmamış: `desman keys add {id}` ile bir anahtar ekleyin ve ayarlarını `desman config` içinde girin",
     "only paid providers are configured ({names}), and DESMAN never picks a paid one by itself: choose it with --provider, e.g. --provider {id}": "yalnızca ücretli sağlayıcılar yapılandırılmış ({names}) ve DESMAN ücretli bir sağlayıcıyı asla kendiliğinden seçmez: --provider ile seçin, ör. --provider {id}",
@@ -453,6 +451,14 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Başka bir şey, kendi sözlerinle; boş metin temizler.",
     "Everything back to the interlocutor's judgement.": "Her şey yeniden muhatabın takdirine.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Muhatap konuşmalarını inceleyip not tutuyor mu: göster, on veya off.",
+    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Kendi makinenizde bir model: ücretsiz ve gizli, ama yavaş. {name} sunucusunu başlatın, sunduğu modeli ayarlayın, sonra `desman keys check {id}` ile kontrol edin. DESMAN, bulut modelleri bir çağrıyı alamadığında ona sorar. Nasıl başlatılır: {url}",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini, her yerel\nsunucuya da çalışıp çalışmadığını ve modelini sunup sunmadığını sor. Token harcamaz.",
+    "Download the model with `ollama pull {model}`.": "Modeli `ollama pull {model}` ile indirin.",
+    "It serves: {models}": "Sunduğu modeller: {models}",
+    "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "`llama-server -m MODEL.gguf --port 8080` ile başlatın ya da adresini `desman config` içinde ayarlayın.",
+    "Start it with `ollama serve`, or set its address in `desman config`.": "`ollama serve` ile başlatın ya da adresini `desman config` içinde ayarlayın.",
+    "Using {provider} · {model} (on this machine)": "{provider} · {model} kullanılıyor (bu makinede)",
+    "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} için model ayarlanmamış: `desman config` içinde birini seçin (sunucunun adresi ve bağlam boyutu da orada)",
 }
 
 CLICK: dict[str, Forms] = {
