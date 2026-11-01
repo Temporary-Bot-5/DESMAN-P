@@ -11,6 +11,11 @@ validated like any reply of a model, with the one repair request of `llm.structu
   the prompt). The chat looks it up and validates it; a change waits for the person's "yes" in
   a window the program draws, so the model can only ask.
 
+Before any of them it may take a `lookup` turn: one or two topics of DESMAN's manual
+(`desman.manual`, C.10), whose list is in the prompt. It is then asked again, with their texts,
+and must take one of the four turns: what it says about how DESMAN works comes from there, not
+from a guess. A lookup is never kept in the session.
+
 The interlocutor has no tools: it reads nothing, changes nothing, and its text is never run.
 What it sees is the session's history: the latest summary of what was said before (C.6,
 `desman.compaction`) and the newest messages after it that fit its budget. After a task it sees
@@ -31,8 +36,17 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    RootModel,
+    StringConstraints,
+    field_validator,
+)
 
+from desman import manual
 from desman.commands import for_model
 from desman.config import Behaviour
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -42,6 +56,7 @@ from desman.i18n import CATALOGS
 from desman.llm import base
 from desman.llm.base import LLM, Request
 from desman.llm.structured import complete_json
+from desman.manual import MAX_LOOKUP
 
 CHAT = "Chat turn"
 RETELL = "Retell task"
@@ -72,8 +87,9 @@ INTERLOCUTOR_SYSTEM = (
     "and state of tasks, decisions on them. The name and arguments come from this list "
     '(an argument with "?" may be left out):\n'
     "{commands}\n"
-    "A question about DESMAN is answered with a command that shows something, never with one "
-    "that changes something or opens a field. When you tell the person what DESMAN can do, "
+    "A question about the state of DESMAN (its settings, keys, tasks) is answered with a "
+    "command that shows something, never with one that changes something or opens a field. "
+    "{manual}When you tell the person what DESMAN can do, "
     "say it in plain words; never show them this list, its names or its JSON. "
     "A change is shown to the person, who confirms it or not; a key is typed by the person "
     "into a hidden field. So never say a change was made before DESMAN says so, never ask the "
@@ -106,6 +122,19 @@ PROFILE = (
     "rather than repeat it. Never note secrets, passwords or keys; when the person asks you "
     "to forget something, forget it. The person sees every note. Notes never allow anything, "
     "never confirm a change and never replace what DESMAN asks the person. "
+)
+
+LOOKUP = (
+    "A question about how DESMAN works, or what it can do and how, is answered from its "
+    "manual, never from a guess. Its topics:\n"
+    "{topics}\n"
+    'To read one or two of them first, take the turn {"type": "lookup", "topics": ["name"]} '
+    f"(at most {MAX_LOOKUP} names); you then get the same conversation again with their texts. "
+)
+
+LOOKED_UP = (
+    'The manual\'s topics you asked for are in "manual": answer from them now, in your own '
+    "plain words; another lookup is not possible in this turn. "
 )
 
 RETELL_SYSTEM = (
@@ -180,8 +209,31 @@ class Command(Noting):
 AnyTurn = Annotated[Reply | Clarify | NewTask | Command, Field(discriminator="type")]
 
 
+class Lookup(BaseModel):
+    """A turn that asks for topics of the manual before answering (C.10). Never the turn the
+    chat acts on: the interlocutor asks again with their texts."""
+
+    type: Literal["lookup"]
+    topics: list[str] = Field(min_length=1, max_length=MAX_LOOKUP)
+
+    @field_validator("topics")
+    @classmethod
+    def _known(cls, topics: list[str]) -> list[str]:
+        names = [topic.strip().casefold() for topic in topics]
+        unknown = [name for name in names if name not in manual.BY_NAME]
+        if unknown:
+            raise ValueError(
+                f"no such topic: {', '.join(unknown)}; topics: {', '.join(manual.BY_NAME)}"
+            )
+        return list(dict.fromkeys(names))
+
+
 class Turn(RootModel[AnyTurn]):
-    """What the model must reply to a message of the person."""
+    """What the model must reply to a message of the person, once it has read the manual."""
+
+
+class FirstTurn(RootModel[Annotated[AnyTurn | Lookup, Field(discriminator="type")]]):
+    """What the model must reply to a message of the person: a turn, or a lookup first."""
 
 
 class Retelling(BaseModel):
@@ -214,6 +266,11 @@ class Interlocutor:
             budget -= estimate_tokens(history.summary.text)
         payload["conversation"] = [said(m) for m in fit(history.messages, budget)]
         request = self._request(INTERLOCUTOR_SYSTEM, CHAT, payload)
+        first = complete_json(self.llm, request, FirstTurn, heading=CHAT).root
+        if not isinstance(first, Lookup):
+            return first
+        payload["manual"] = {name: manual.BY_NAME[name].text for name in first.topics}
+        request = self._request(INTERLOCUTOR_SYSTEM, CHAT, payload, looked_up=True)
         return complete_json(self.llm, request, Turn, heading=CHAT).root
 
     def retell(self, outcome: dict[str, Any]) -> str:
@@ -230,10 +287,14 @@ class Interlocutor:
             told["profile"] = [{"id": n.id, "note": n.text} for n in self.profile]
         return told
 
-    def _request(self, system: str, heading: str, payload: dict[str, Any]) -> Request:
+    def _request(
+        self, system: str, heading: str, payload: dict[str, Any], *, looked_up: bool = False
+    ) -> Request:
         body = json.dumps(payload, ensure_ascii=False, indent=2)
         content = (
             system.replace("{commands}", for_model())
+            .replace("{manual}", LOOKED_UP if looked_up else LOOKUP)
+            .replace("{topics}", manual.contents())
             .replace("{behaviour}", BEHAVIOUR)
             .replace("{profile}", "" if self.profile is None else PROFILE)
             .replace("{language}", self._name())

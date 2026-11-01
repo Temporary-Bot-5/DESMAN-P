@@ -1,0 +1,206 @@
+"""The interlocutor's manual of DESMAN (ROADMAP C.10): what it may tell the person about how
+DESMAN works, so that it never has to make it up.
+
+Short texts for the model, in English like every prompt, one per topic. The interlocutor's
+prompt lists only the topics, a line each (small models have little context); it asks for one
+or two with a `lookup` turn, and gets their texts with the same message again
+(`desman.interlocutor`).
+
+The manual says only what DESMAN does now: never plans (those are in ROADMAP.md, written for
+developers). A change of code that changes what a topic says changes the topic in the same
+commit. A test checks it against the code: every command it names (written `desman ...` in
+backticks) is in the catalog, every chat command (`/...`) is the chat's, and each topic fits
+`TOPIC_CHARS`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Final
+
+TOPIC_CHARS: Final = 1600
+"""The longest a topic's text may be: two of them have to fit a small model's context."""
+
+MAX_LOOKUP: Final = 2
+"""The most topics one lookup may ask for."""
+
+
+@dataclass(frozen=True)
+class Topic:
+    name: str
+    about: str
+    """What it is about, in the line the interlocutor's prompt lists it with."""
+    text: str
+
+
+TOPICS: Final = (
+    Topic(
+        "tasks",
+        "how work is planned, run and checked; the states of tasks and subtasks",
+        "Work the person asks for becomes a task. A planner model splits its goal into at "
+        "most 8 subtasks (by default; the tuning may change it) that may depend on each other, "
+        "each tagged text, code or analysis, which picks the executor's model; if planning "
+        "fails, a simple template plan is used. For each subtask an executor model does the "
+        "work, then a reviewer model accepts it or rejects it with feedback. Everything is "
+        "kept in a database, so work survives a crash or a closed terminal: a stopped task "
+        "continues from its last checkpoint with `desman resume`. In the chat a task runs while "
+        "the chat waits; Ctrl+C stops it. `desman worker` works on every unfinished task.\n"
+        "Subtask states: pending (waits for the subtasks it depends on), ready, running, "
+        "review (waits for the reviewer), done, paused (a provider's limit was hit; it goes "
+        "on by itself when the limit resets), needs_human (waits for the person's decision), "
+        "failed (the person gave up on it), blocked (something it depends on failed or was "
+        "cancelled), cancelled.\n"
+        "A task is active while the system can still move on its own, needs_human when "
+        "nothing moves until the person decides, done when every subtask is done, failed or "
+        "cancelled otherwise. `desman list` lists tasks, `desman status` shows one with its "
+        "subtasks, `desman audit` its full history, `desman stats` how well tasks go.",
+    ),
+    Topic(
+        "retries",
+        "what happens after a failed attempt; what waits for the person's decision",
+        "A rejected or unusable attempt is tried again, each time differently: with the "
+        "reviewer's feedback, then with the instructions reworded, then with another model, "
+        "then the subtask is split into 2-4 smaller parts whose results are combined. By "
+        "default a subtask gets 5 attempts and 5 interruptions (network errors, crashes); "
+        "the tuning may change both. A provider's limit costs no attempt: the subtask is "
+        "paused until the limit resets. A failure retrying cannot help (a refused key, a "
+        "denied permission) goes to the person at once.\n"
+        "DESMAN never gives up by itself: when the attempts run out the subtask waits for the "
+        "person (needs_human). `desman inbox` lists what waits, with the reason. The person "
+        "decides: `desman retry` sends it back to work with fresh attempts (a note becomes a "
+        "hint to the next attempt), `desman accept` takes it as it is, `desman fail` gives "
+        "up on it (what depends on it is blocked), `desman cancel` stops the whole task. A "
+        "failed subtask can still be sent back with retry. The chat tells when something "
+        "comes to wait; asked there, each decision is confirmed by the person in a window.",
+    ),
+    Topic(
+        "providers",
+        "models, API keys, free tiers, limits and local models",
+        "DESMAN works through language models of providers whose API keys the person added. "
+        "By default only free tiers are used: free quotas are small and change, so every "
+        "provider is treated as unreliable. Paid providers (OpenAI, Anthropic, DeepSeek, xAI) "
+        "are never chosen by themselves, only when the person names one for a run.\n"
+        "Each role (planner, executor, reviewer, interlocutor) has a lineup of models, best "
+        "for it first. A call that hits a limit, an outage, a refused key or too small a "
+        "context moves to the next model; a provider with several keys uses all of them. "
+        "Calls are paced to each model's free rate, and limits a provider reports are kept "
+        "in the database, so they hold across restarts and parallel workers. When everything "
+        "is limited, work pauses until a quota resets, without spending attempts. The person "
+        "may choose the model a role asks first with `desman tuning`.\n"
+        "A local model (Ollama or llama.cpp on the person's machine) costs nothing and has "
+        "no quota but is slow, so it comes after the cloud models. `desman models show` says "
+        "whether a Hugging Face model fits the machine's memory, `desman models add` has the "
+        "server download one; agents may only suggest a model.\n"
+        "Keys: added by the person into a hidden field (`desman keys add`), never written in "
+        "the chat; never shown, sent to a model or logged. `desman keys list`, `desman keys "
+        "check` (does a key work, what limits; spends nothing) and `desman usage` (calls and "
+        "tokens per key) show them.",
+    ),
+    Topic(
+        "permissions",
+        "what agents may do, their tools, the sandbox and the web",
+        "Agents act only through tools, and each tool needs two things: the role may use it "
+        "(a policy file that people change in the source, never an agent), and the person's "
+        "switch for what it needs is on. The switches are network_access, shell_execution, "
+        "fs_outside_access and admin_rights; all are off until the person turns them on "
+        "(`desman permissions`, or the setup wizard). Only the person sets them; in the chat "
+        "a change is confirmed in a window.\n"
+        "Only the executor has tools now: reading, writing and listing files in its task's "
+        "own folder (always allowed; nothing outside it, no links); run_command "
+        "(shell_execution), which runs code only in a sandbox with no network, a cleared "
+        "environment and limits of time and memory, and is not offered at all where the "
+        "sandbox cannot run; web_search and web_fetch (network_access): reading public pages "
+        "only, results marked untrusted; web_search asks Wikipedia, Stack Overflow, arXiv and "
+        "GitHub, and the whole web only through the person's SearXNG server or a Tavily "
+        "key); suggest_model, which "
+        "only records a suggestion for the person. Every tool call is recorded, and a refused "
+        "one too, with the reason. The planner, the reviewer and the interlocutor have no "
+        "tools. admin_rights is for test machines: while it is on, every run warns.",
+    ),
+    Topic(
+        "protected",
+        "what judges the agents, and why tasks may be blocked",
+        "Some files decide what agents may do and whether their work is good: the tool "
+        "policy and its code, the reviewer and the executor, the sandbox, the guard of the "
+        "task folders, the rules of who may decide what, the benchmark and its comparison, "
+        "the test harness. DESMAN keeps what the person approved of each of them. While one "
+        "of them differs from the approved version (an edit, an update), no task runs at "
+        "all, and the chat says so. The person looks at what changed (`desman protected "
+        "show`, with the diff) and approves the files as they are (`desman protected "
+        "approve`), after which tasks run again. Agents cannot change these files or approve "
+        "them; in the chat the approval is confirmed by the person in a window, after seeing "
+        "which files changed.",
+    ),
+    Topic(
+        "proposals",
+        "the Improvement Analyst, its proposed changes and their evaluation",
+        "The Improvement Analyst studies what went wrong (failures, reviewers' feedback, "
+        "plans that fell back to the template, the totals of stats) and proposes a change to "
+        "DESMAN: new texts for some of its prompts (shown as a diff), or settings of the "
+        "tuning (given as a `desman tuning` command). It runs as an ordinary task without "
+        "tools when the person asks (`desman proposals analyze`), never on protected files, "
+        "keys or permissions. Its outcome: proposed, nothing (no change worth making) or "
+        "unusable. `desman proposals list` and `desman proposals show` show proposals; a "
+        "proposal never changes once made.\n"
+        "`desman proposals evaluate` runs a fixed benchmark on the current version and on it "
+        "with the proposal, each in a separate copy of the source, and says which went "
+        "better; by default on a scripted fake model (does it still work, what its prompts "
+        "cost), with real on the person's models (spends their quota). The analyst sees "
+        "how earlier proposals did.\n"
+        "Nothing is applied by DESMAN itself: the person decides, applies a diff with git "
+        "and runs a settings command themselves.",
+    ),
+    Topic(
+        "chat",
+        "sessions, the chat's own commands, how long conversations are kept",
+        "Bare `desman` opens the chat and continues the last session. Each message gets one "
+        "turn of the interlocutor: an answer, a question back, a task, or a DESMAN command. "
+        "A command that shows something runs at once; one that changes something is shown "
+        "in a window and done only after the person's yes; a key or a section of the wizard "
+        "is typed by the person into a window. Every confirmed or declined change is kept "
+        "in the operator's journal.\n"
+        "The chat's own commands: `/help`, `/new` (a new session), `/sessions` (pick an "
+        "earlier one), `/rename`, `/compact`, `/profile`, `/delete` (out of the list; its "
+        "messages stay in the database), `/exit`. Typing / lists them.\n"
+        "The interlocutor sees only the newest messages that fit its budget; older ones are "
+        "summarised by a small task of their own (`/compact` does it now) and it sees the "
+        "summary. A summary that fails leaves the older messages out of its view. A pasted "
+        "API key is cut from a message before anything keeps it.",
+    ),
+    Topic(
+        "profile",
+        "how the interlocutor talks, and the notes it keeps about the person",
+        "How the interlocutor talks is the person's setting: length of answers (short, "
+        "detailed), tone (formal, informal), style (simple, technical) and their own words; "
+        "`desman behaviour` shows and changes it (in the chat, after the person's yes). It "
+        "holds in every session.\n"
+        "Personalisation is off unless the person agrees (`desman personalize`, or the "
+        "wizard). With it on, the interlocutor keeps short notes about the person between "
+        "conversations (at most 20, one line each): how they like to be answered, their "
+        "interests, requests they make often. Every change is shown when made, the person "
+        "sees, changes and erases them in `/profile`, and turning it off hides them. Notes "
+        "never hold secrets, never allow anything and never confirm a change. The journal "
+        "records that a note changed, never its text.",
+    ),
+    Topic(
+        "data",
+        "where DESMAN keeps its configuration, database and task files",
+        "The configuration (language, API keys, permissions, behaviour, personalisation, "
+        "tuning) is one file, config.json, readable only by its owner: in the project folder, "
+        "or in ~/.config/desman/ for an installed package. `desman config` is the setup "
+        "wizard, `desman config show` shows it without keys, `desman config reset` deletes it "
+        "after the person's yes.\n"
+        "Tasks, their history, the chat's sessions, the profile, model calls and limits are "
+        "in a SQLite database, ~/.local/share/desman/desman.db; each task's files are in a "
+        "folder of its own in workspaces/ next to it. `desman init-db` creates the database "
+        "or brings it up to date. Everything stays on the person's machine; only the "
+        "requests to model providers, to Hugging Face and, when allowed, to the web leave it.",
+    ),
+)
+
+BY_NAME: Final = {topic.name: topic for topic in TOPICS}
+
+
+def contents() -> str:
+    """The topics as the interlocutor's prompt lists them."""
+    return "\n".join(f"- {topic.name}: {topic.about}" for topic in TOPICS)
