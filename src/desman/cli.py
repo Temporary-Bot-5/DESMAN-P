@@ -565,11 +565,19 @@ def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> run
     if as_json or choice is None:
         return models
     if choice.provider.key_env is None:
+        url = choice.provider.endpoint(config)
         ui.note(
             t(
                 "Using {provider} · {model} (on this machine)",
                 provider=choice.provider.name,
                 model=choice.model,
+            )
+            if providers.on_this_machine(url)
+            else t(
+                "Using {provider} · {model} (server at {url})",
+                provider=choice.provider.name,
+                model=choice.model,
+                url=url,
             )
         )
     else:

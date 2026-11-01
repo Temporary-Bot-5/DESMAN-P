@@ -29,7 +29,7 @@ from desman.core.policy import Access, PolicyError, Role, default_policy, switch
 from desman.core.retry import strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
-from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
@@ -53,6 +53,9 @@ class Models:
     kinds: Mapping[Kind, tuple[LLM, LLM | None]] = field(default_factory=dict)
     """The executor's main and other models for subtasks of each kind (ROADMAP 4.5); a kind
     not in it (all of them, for a fake) asks `llm` and `other`."""
+    step_seconds: int = 0
+    """The longest one step of an agent may wait on its models (0: unknown, a fake). A lease
+    or a review's reservation shorter than that could run out while nobody can renew it."""
 
     def for_(self, role: calls.Role) -> LLM:
         return self.roles.get(role, self.llm)
@@ -88,6 +91,7 @@ def models(
     and `model` narrow the choice like `desman run --provider/--model`; only a pinned `model`
     leaves no other model for retries. Raises `router.NoProvider`."""
     clients: dict[str, LLM] = {}
+    timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
 
@@ -95,7 +99,9 @@ def models(
         # One client per model, shared by the roles: its keys' state (refused, limited) is one.
         if choice.label not in clients:
             api = router.connect(config, choice, on_call=recorder, client=client)
+            timeouts.append(api.timeout)
             paced: LLM
+            server = None
             if choice.provider.local:  # paced by the machine, not by a rate
                 server = f"{choice.provider.id}@{api.base_url}"
                 paced = Local(api, buckets, choice.label, server, sleep=sleep)
@@ -103,7 +109,9 @@ def models(
                 keys = max(1, len(api.keys))
                 paced = Limited(api, buckets, choice.label, choice.spec.rpm * keys, sleep=sleep)
             backed = router.Backoff(paced, sleep=sleep)
-            clients[choice.label] = Cached(backed, conn, choice.model) if cache else backed
+            clients[choice.label] = (
+                Cached(backed, conn, choice.model, server=server) if cache else backed
+            )
         return clients[choice.label]
 
     def chain(choices: list[router.Choice]) -> router.Fallback:
@@ -125,7 +133,23 @@ def models(
         roles,
         others[0] if others else None,
         kinds,
+        step_seconds(max(timeouts, default=0.0)),
     )
+
+
+CALLS_PER_STEP = 2
+"""Model calls one step of an agent may make in a row: its request and one repair request
+(`llm.structured.complete_json`)."""
+WAITS_PER_CALL = 30.0
+"""Seconds a call may spend besides the model's answer: quick repeats (`router.Backoff`) and
+waiting its turn (`llm.limiter`)."""
+
+
+def step_seconds(timeout: float) -> int:
+    """How long one step may take when each call may take up to `timeout` seconds."""
+    if timeout <= 0:
+        return 0
+    return int(CALLS_PER_STEP * (timeout + WAITS_PER_CALL) + WAITS_PER_CALL)
 
 
 def label(llm: LLM) -> str:
@@ -216,12 +240,16 @@ def _coordinator(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     watch: Callable[[], None] | None = None,
 ) -> Coordinator:
+    # A step may not outlast what holds the subtask while it waits: a slow local model gets a
+    # longer lease and review reservation (each only as long as needed, since a longer one
+    # delays taking over the work of a run that died elsewhere).
     return Coordinator(
         store,
         llm_executor(models.llm, models.other, by_kind=models.kinds),
         llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
         owner=current_owner(),
-        lease_seconds=lease_seconds,
+        lease_seconds=max(lease_seconds, models.step_seconds),
+        review_seconds=max(DEFAULT_REVIEW_SECONDS, models.step_seconds),
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),

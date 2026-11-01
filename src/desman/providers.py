@@ -97,6 +97,20 @@ class Provider:
         return all(config.settings.get(s.env) for s in self.settings if not s.default)
 
 
+def on_this_machine(url: str) -> bool:
+    """`url` names this machine (localhost, a loopback address): what is sent there stays here."""
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url if "://" in url else "http://" + url).hostname or ""
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 FREE = (
     Provider(
         "nvidia",

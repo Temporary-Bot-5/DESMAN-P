@@ -447,7 +447,6 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "그 밖의 것, 당신의 말로; 빈 텍스트는 지웁니다.",
     "Everything back to the interlocutor's judgement.": "모두 대화 상대의 판단으로 되돌립니다.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "대화 상대가 대화를 분석하고 메모하는지: 보기, on 또는 off.",
-    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "내 컴퓨터에서 실행되는 모델: 무료이고 비공개지만 느립니다. {name}을(를) 시작하고 제공하는 모델을 설정한 뒤 `desman keys check {id}`로 확인하세요. 클라우드 모델이 호출을 받을 수 없을 때 DESMAN이 이 모델을 사용합니다. 시작 방법: {url}",
     "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "각 제공자에게 키가 작동하는지, 어떤 한도를 알려 주는지 묻고, 각 로컬\n서버에는 실행 중인지, 모델을 제공하는지 묻습니다. 토큰을 쓰지 않습니다.",
     "Download the model with `ollama pull {model}`.": "`ollama pull {model}`로 모델을 내려받으세요.",
     "It serves: {models}": "제공 중: {models}",
@@ -455,6 +454,13 @@ MESSAGES: dict[str, Forms] = {
     "Start it with `ollama serve`, or set its address in `desman config`.": "`ollama serve`로 시작하거나 `desman config`에서 주소를 설정하세요.",
     "Using {provider} · {model} (on this machine)": "{provider} · {model} 사용 중 (이 컴퓨터에서)",
     "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name}에 모델이 설정되지 않았습니다: `desman config`에서 선택하세요 (서버 주소와 컨텍스트 크기도 거기 있습니다)",
+    "A model on your own machine: free, private while its server runs here, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "내 컴퓨터에서 실행되는 모델: 무료이고, 서버가 여기서 실행되는 동안은 비공개지만 느립니다. {name}을(를) 시작하고 제공하는 모델을 설정한 뒤 `desman keys check {id}`로 확인하세요. 클라우드 모델이 호출을 받을 수 없을 때 DESMAN이 이 모델을 사용합니다. 시작 방법: {url}",
+    "Using {provider} · {model} (server at {url})": "{provider} · {model} 사용 중 (서버: {url})",
+    "not running at {url}": "{url}에서 실행 중이 아닙니다",
+    "running, but it does not serve {model}": "실행 중이지만 {model}을(를) 제공하지 않습니다",
+    "unexpected HTTP {status}": "예상치 못한 HTTP {status}",
+    "unexpected reply: is this an Ollama or llama.cpp server?": "예상치 못한 응답: Ollama 또는 llama.cpp 서버가 맞나요?",
+    "{url} is not this machine: tasks' prompts, context and data will be sent there.": "{url}은(는) 이 컴퓨터가 아닙니다: 작업의 프롬프트, 컨텍스트, 데이터가 그곳으로 전송됩니다.",
 }
 
 CLICK: dict[str, Forms] = {

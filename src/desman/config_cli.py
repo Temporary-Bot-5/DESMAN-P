@@ -638,10 +638,11 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
     for r in results:
         p = providers.find(r.provider)
         name = p.name if p.local else f"{p.name} #{r.number}"
-        if not r.ok:
+        if not r.ok and p.local:
+            ui.warn(f"{name}: {_local_problem(r)}")
+            _local_hint(p, r)
+        elif not r.ok:
             ui.warn(f"{name}: {r.detail}")
-            if p.local:
-                _local_hint(p, r)
         elif r.unlisted and r.provider not in warned:  # the same for each key of a provider
             warned.add(r.provider)
             ui.warn(
@@ -657,6 +658,18 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
     for p in targets:
         if p.limits_url:
             ui.note(t("{name} limits and quotas: {url}", name=p.name, url=p.limits_url))
+
+
+def _local_problem(r: check.KeyCheck) -> str:
+    """What is wrong with a local server, in the person's language (`detail` stays English for
+    --json)."""
+    if r.http_status is None:
+        return t("not running at {url}", url=r.url)
+    if r.default_model_listed is False:
+        return t("running, but it does not serve {model}", model=r.model)
+    if r.http_status != 200:
+        return t("unexpected HTTP {status}", status=r.http_status)
+    return t("unexpected reply: is this an Ollama or llama.cpp server?")
 
 
 def _local_hint(p: providers.Provider, r: check.KeyCheck) -> None:

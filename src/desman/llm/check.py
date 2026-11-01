@@ -39,6 +39,8 @@ class KeyCheck:
     """The model looked for: the provider's default, or the one set for a local server."""
     served: tuple[str, ...] = ()
     """What a local server serves, when it does not serve the model set for it."""
+    url: str = ""
+    """Where a local server was looked for."""
 
 
 def check(
@@ -118,7 +120,7 @@ def _check_local(
 ) -> KeyCheck:
     base = provider.endpoint(config)
     model = provider.model(config)
-    result = partial(KeyCheck, provider.id, 1, "", model=model)
+    result = partial(KeyCheck, provider.id, 1, "", model=model, url=base)
     try:
         response = client.get(f"{base}/models", timeout=timeout)
     except httpx.HTTPError as e:

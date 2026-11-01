@@ -451,7 +451,6 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Başka bir şey, kendi sözlerinle; boş metin temizler.",
     "Everything back to the interlocutor's judgement.": "Her şey yeniden muhatabın takdirine.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Muhatap konuşmalarını inceleyip not tutuyor mu: göster, on veya off.",
-    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Kendi makinenizde bir model: ücretsiz ve gizli, ama yavaş. {name} sunucusunu başlatın, sunduğu modeli ayarlayın, sonra `desman keys check {id}` ile kontrol edin. DESMAN, bulut modelleri bir çağrıyı alamadığında ona sorar. Nasıl başlatılır: {url}",
     "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini, her yerel\nsunucuya da çalışıp çalışmadığını ve modelini sunup sunmadığını sor. Token harcamaz.",
     "Download the model with `ollama pull {model}`.": "Modeli `ollama pull {model}` ile indirin.",
     "It serves: {models}": "Sunduğu modeller: {models}",
@@ -459,6 +458,13 @@ MESSAGES: dict[str, Forms] = {
     "Start it with `ollama serve`, or set its address in `desman config`.": "`ollama serve` ile başlatın ya da adresini `desman config` içinde ayarlayın.",
     "Using {provider} · {model} (on this machine)": "{provider} · {model} kullanılıyor (bu makinede)",
     "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} için model ayarlanmamış: `desman config` içinde birini seçin (sunucunun adresi ve bağlam boyutu da orada)",
+    "A model on your own machine: free, private while its server runs here, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Kendi makinenizde bir model: ücretsiz, sunucusu burada çalıştığı sürece gizli, ama yavaş. {name} sunucusunu başlatın, sunduğu modeli ayarlayın, sonra `desman keys check {id}` ile kontrol edin. DESMAN, bulut modelleri bir çağrıyı alamadığında ona sorar. Nasıl başlatılır: {url}",
+    "Using {provider} · {model} (server at {url})": "{provider} · {model} kullanılıyor (sunucu: {url})",
+    "not running at {url}": "{url} adresinde çalışmıyor",
+    "running, but it does not serve {model}": "çalışıyor, ama {model} modelini sunmuyor",
+    "unexpected HTTP {status}": "beklenmeyen HTTP {status}",
+    "unexpected reply: is this an Ollama or llama.cpp server?": "beklenmeyen yanıt: bu bir Ollama ya da llama.cpp sunucusu mu?",
+    "{url} is not this machine: tasks' prompts, context and data will be sent there.": "{url} bu makine değil: görevlerin istemleri, bağlamı ve verileri oraya gönderilecek.",
 }
 
 CLICK: dict[str, Forms] = {

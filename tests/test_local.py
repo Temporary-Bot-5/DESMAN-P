@@ -19,7 +19,7 @@ from desman.config import ConfigManager, default_config_path
 from desman.core.calls import Role
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.states import TaskStatus
-from desman.core.store import Store
+from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.llm import check, limiter, router
 from desman.llm.base import (
     Completion,
@@ -380,3 +380,97 @@ def test_run_names_the_local_model(monkeypatch: pytest.MonkeyPatch) -> None:
     result = desman("run", "answer the question", "--plan", "template")
     assert result.exit_code == 0, result.output
     assert "Using Ollama · llama3.2 (on this machine)" in result.output
+
+
+# ── Devin's review of #56 ────────────────────────────────────────────────────
+
+
+def test_a_slow_model_gets_a_lease_and_review_reservation_that_outlast_its_step(
+    store: Store, clock: FakeClock
+) -> None:
+    def build(config: Any) -> Any:
+        models = runs.models(config, store.conn, clock=clock, sleep=clock.sleep, cache=False)
+        return models, runs.summarizer(store, models)
+
+    models, coordinator = build(make_config(api_keys={"GROQ_API_KEY": GROQ}, settings=OLLAMA))
+    # Two calls (a request and its repair), each with its waits, and a margin.
+    assert models.step_seconds == 2 * (providers.LOCAL_TIMEOUT + 30) + 30
+    assert coordinator.lease_seconds == models.step_seconds
+    assert coordinator.review_seconds == models.step_seconds
+    models, coordinator = build(make_config(api_keys={"GROQ_API_KEY": GROQ}))
+    assert coordinator.lease_seconds == DEFAULT_LEASE_SECONDS  # already long enough
+    assert coordinator.review_seconds == models.step_seconds > DEFAULT_REVIEW_SECONDS
+    fake = runs.summarizer(store, runs.Models(FakeLLM(), None))
+    assert fake.review_seconds == DEFAULT_REVIEW_SECONDS
+
+
+def test_another_server_does_not_get_the_replies_of_the_first(
+    store: Store, clock: FakeClock
+) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url.host))
+        return ok()
+
+    def ask(url: str) -> None:
+        config = make_config(settings={"LLAMA_CPP_MODEL": "assistant", "LLAMA_CPP_URL": url})
+        models = runs.models(
+            config,
+            store.conn,
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            clock=clock,
+            sleep=clock.sleep,
+        )
+        llm: Any = models.for_(Role.PLANNER)
+        reply = llm.complete(REQUEST)
+        llm.accept(REQUEST, reply)
+
+    ask("http://localhost:8080")
+    ask("http://localhost:8080")  # kept
+    ask("http://gpu-box:8080")
+    assert seen == ["localhost", "gpu-box"]
+
+
+def test_only_a_loopback_address_is_this_machine() -> None:
+    for url in ("http://localhost:11434", "127.0.0.1:8080", "http://[::1]:8080", "a.localhost"):
+        assert providers.on_this_machine(url), url
+    for url in ("http://gpu-box:8080", "http://192.168.1.5:11434", "10.0.0.2:8080", ""):
+        assert not providers.on_this_machine(url), url
+
+
+def test_run_says_where_a_remote_local_server_is(monkeypatch: pytest.MonkeyPatch) -> None:
+    ConfigManager(default_config_path()).save(
+        make_config(settings={**OLLAMA, "OLLAMA_HOST": "gpu-box:11434"})
+    )
+    real = httpx.Client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][-1]["content"]
+        return ok('{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}')
+
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    )
+    result = desman("run", "answer the question", "--plan", "template")
+    assert result.exit_code == 0, result.output
+    assert "Using Ollama · llama3.2 (server at http://gpu-box:11434/v1)" in result.output
+
+
+def test_keys_check_words_local_problems_in_the_persons_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ConfigManager(default_config_path()).save(make_config(language="ru", settings=OLLAMA))
+    real = httpx.Client
+
+    def refused(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(refused), **kw)
+    )
+    result = desman("keys", "check", "ollama")
+    assert result.exit_code == 1
+    assert "не запущен по адресу http://localhost:11434/v1" in result.output
+    [row] = json.loads(desman("keys", "check", "--json").output)
+    assert row["detail"].startswith("not running at")  # --json stays English

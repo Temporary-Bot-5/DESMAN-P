@@ -441,7 +441,6 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "其他要求，用你自己的话；空文本表示清除。",
     "Everything back to the interlocutor's judgement.": "全部交回对话者自行判断。",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "对话者是否分析你的对话并记录信息：查看、on 或 off。",
-    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "运行在你自己机器上的模型：免费且私密，但速度慢。启动 {name}，设置它提供的模型，然后用 `desman keys check {id}` 检查。当云端模型无法接受调用时，DESMAN 会使用它。启动方法：{url}",
     "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "询问每个提供商其密钥是否可用、报告了哪些限额，并询问每个本地\n服务器是否在运行、是否提供其模型。不消耗 token。",
     "Download the model with `ollama pull {model}`.": "用 `ollama pull {model}` 下载该模型。",
     "It serves: {models}": "它提供：{models}",
@@ -449,6 +448,13 @@ MESSAGES: dict[str, Forms] = {
     "Start it with `ollama serve`, or set its address in `desman config`.": "用 `ollama serve` 启动它，或在 `desman config` 中设置它的地址。",
     "Using {provider} · {model} (on this machine)": "使用 {provider} · {model}（在本机上）",
     "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} 未设置模型：请在 `desman config` 中选择一个（服务器地址和上下文大小也在那里）",
+    "A model on your own machine: free, private while its server runs here, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "运行在你自己机器上的模型：免费，只要服务器在本机运行就是私密的，但速度慢。启动 {name}，设置它提供的模型，然后用 `desman keys check {id}` 检查。当云端模型无法接受调用时，DESMAN 会使用它。启动方法：{url}",
+    "Using {provider} · {model} (server at {url})": "使用 {provider} · {model}（服务器位于 {url}）",
+    "not running at {url}": "未在 {url} 运行",
+    "running, but it does not serve {model}": "正在运行，但未提供 {model}",
+    "unexpected HTTP {status}": "意外的 HTTP {status}",
+    "unexpected reply: is this an Ollama or llama.cpp server?": "意外的回复：这是 Ollama 或 llama.cpp 服务器吗？",
+    "{url} is not this machine: tasks' prompts, context and data will be sent there.": "{url} 不是本机：任务的提示词、上下文和数据将发送到那里。",
 }
 
 CLICK: dict[str, Forms] = {

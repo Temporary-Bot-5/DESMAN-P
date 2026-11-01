@@ -449,7 +449,6 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "その他、あなたの言葉で。空のテキストで消去します。",
     "Everything back to the interlocutor's judgement.": "すべて対話役の判断に戻します。",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "対話役が会話を分析しメモを付けるかどうか：表示、on または off。",
-    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "自分のマシン上のモデル：無料でプライベートですが、低速です。{name} を起動し、提供するモデルを設定してから `desman keys check {id}` で確認してください。クラウドのモデルが呼び出しを受けられないとき、DESMAN はこれを使います。起動方法：{url}",
     "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "各プロバイダーにキーが使えるか、どんな制限を報告しているかを、各ローカル\nサーバーに起動しているか、モデルを提供しているかを確認します。トークンは消費しません。",
     "Download the model with `ollama pull {model}`.": "`ollama pull {model}` でモデルをダウンロードしてください。",
     "It serves: {models}": "提供中：{models}",
@@ -457,6 +456,13 @@ MESSAGES: dict[str, Forms] = {
     "Start it with `ollama serve`, or set its address in `desman config`.": "`ollama serve` で起動するか、`desman config` でアドレスを設定してください。",
     "Using {provider} · {model} (on this machine)": "{provider} · {model} を使用（このマシン上）",
     "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} にモデルが設定されていません：`desman config` で選んでください（サーバーのアドレスとコンテキストサイズもそこにあります）",
+    "A model on your own machine: free, private while its server runs here, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "自分のマシン上のモデル：無料で、サーバーがここで動いている限りプライベートですが、低速です。{name} を起動し、提供するモデルを設定してから `desman keys check {id}` で確認してください。クラウドのモデルが呼び出しを受けられないとき、DESMAN はこれを使います。起動方法：{url}",
+    "Using {provider} · {model} (server at {url})": "{provider} · {model} を使用（サーバー: {url}）",
+    "not running at {url}": "{url} で起動していません",
+    "running, but it does not serve {model}": "起動していますが、{model} を提供していません",
+    "unexpected HTTP {status}": "予期しない HTTP {status}",
+    "unexpected reply: is this an Ollama or llama.cpp server?": "予期しない応答：Ollama または llama.cpp のサーバーですか？",
+    "{url} is not this machine: tasks' prompts, context and data will be sent there.": "{url} はこのマシンではありません：タスクのプロンプト、コンテキスト、データはそこへ送られます。",
 }
 
 CLICK: dict[str, Forms] = {

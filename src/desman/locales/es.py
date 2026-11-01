@@ -487,7 +487,6 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Algo más, con tus palabras; un texto vacío lo borra.",
     "Everything back to the interlocutor's judgement.": "Todo vuelve al criterio del interlocutor.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Si el interlocutor analiza tus conversaciones y guarda notas: mostrar, on u off.",
-    "A model on your own machine: free and private, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Un modelo en tu propia máquina: gratis y privado, pero lento. Inicia {name}, indica el modelo que sirve y compruébalo con `desman keys check {id}`. DESMAN lo usa cuando los modelos en la nube no pueden atender una llamada. Cómo iniciarlo: {url}",
     "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Preguntar a cada proveedor si sus claves funcionan y qué límites informa, y a cada servidor\nlocal si está en marcha y sirve su modelo. No gasta tokens.",
     "Download the model with `ollama pull {model}`.": "Descarga el modelo con `ollama pull {model}`.",
     "It serves: {models}": "Sirve: {models}",
@@ -495,6 +494,13 @@ MESSAGES: dict[str, Forms] = {
     "Start it with `ollama serve`, or set its address in `desman config`.": "Inícialo con `ollama serve`, o indica su dirección en `desman config`.",
     "Using {provider} · {model} (on this machine)": "Usando {provider} · {model} (en esta máquina)",
     "{name} has no model set: choose one in `desman config` (the server's address and context size are there too)": "{name} no tiene modelo: elige uno en `desman config` (allí están también la dirección del servidor y el tamaño del contexto)",
+    "A model on your own machine: free, private while its server runs here, but slow. Start {name}, set the model it serves, then check it with `desman keys check {id}`. DESMAN asks it when the cloud models cannot take a call. How to start it: {url}": "Un modelo en tu propia máquina: gratis, privado mientras su servidor funcione aquí, pero lento. Inicia {name}, indica el modelo que sirve y compruébalo con `desman keys check {id}`. DESMAN lo usa cuando los modelos en la nube no pueden atender una llamada. Cómo iniciarlo: {url}",
+    "Using {provider} · {model} (server at {url})": "Usando {provider} · {model} (servidor en {url})",
+    "not running at {url}": "no está en marcha en {url}",
+    "running, but it does not serve {model}": "está en marcha, pero no sirve {model}",
+    "unexpected HTTP {status}": "HTTP {status} inesperado",
+    "unexpected reply: is this an Ollama or llama.cpp server?": "respuesta inesperada: ¿es un servidor de Ollama o llama.cpp?",
+    "{url} is not this machine: tasks' prompts, context and data will be sent there.": "{url} no es esta máquina: los prompts, el contexto y los datos de las tareas se enviarán allí.",
 }
 
 CLICK: dict[str, Forms] = {
