@@ -495,6 +495,10 @@ MESSAGES: dict[str, Forms] = {
     "{model}: {size} to download, about {memory} of memory to run": "{model}: 내려받기 {size}, 실행에 약 {memory} 메모리",
     "{server} model set to {model}.": "{server} 모델을 {model}(으)로 설정했습니다.",
     "{text!r} is not a Hugging Face model: write author/model, or author/model:quantization (e.g. Q4_K_M)": "{text!r}은(는) Hugging Face 모델이 아닙니다: author/model 또는 author/model:양자화(예: Q4_K_M)로 쓰세요",
+    "Download it anyway?": "그래도 내려받을까요?",
+    "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face가 {model}에 대해 예상치 못한 응답을 했습니다: 나중에 다시 시도하세요.",
+    "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "{host}의 Ollama는 이 컴퓨터에 있지 않고 암호화 없이 연결됩니다: 도중에 요청을 읽거나 바꿀 수 있습니다(다른 모델이 내려받아짐).",
+    "Ollama keeps the downloaded model even if you leave without saving.": "저장하지 않고 나가도 Ollama는 내려받은 모델을 유지합니다.",
 }
 
 CLICK: dict[str, Forms] = {

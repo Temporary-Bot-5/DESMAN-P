@@ -317,7 +317,8 @@ def _models_add(ctx: Context, args: ModelAddArgs) -> Proposal:
     server = local_models.target(args.server)
     with httpx.Client() as client:
         found = local_models.look_up(config, ref, client)
-    lines, warnings = local_models.describe(found, hub.memory())
+    machine = hub.memory()
+    lines, warnings = local_models.describe(found, machine)
     planned, cautions = local_models.plan(config, found, server)
 
     def apply() -> Outcome:
@@ -328,7 +329,9 @@ def _models_add(ctx: Context, args: ModelAddArgs) -> Proposal:
         ui.ok(t("{server} model set to {model}.", server=server.name, model=name))
         return Outcome({"server": server.id, "model": name})
 
-    return Proposal(lines + planned, apply, warnings + cautions)
+    # Too large for the memory: the "yes" has to be to that (the CLI's --force).
+    question = t("Download it anyway?") if hub.fits(found, machine) is False else None
+    return Proposal(lines + planned, apply, warnings + cautions, question)
 
 
 def _config_show(ctx: Context, args: NoArgs) -> Outcome:

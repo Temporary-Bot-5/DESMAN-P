@@ -499,6 +499,10 @@ MESSAGES: dict[str, Forms] = {
     "{model}: {size} to download, about {memory} of memory to run": "{model}: indirilecek {size}, çalışmak için yaklaşık {memory} bellek",
     "{server} model set to {model}.": "{server} modeli {model} olarak ayarlandı.",
     "{text!r} is not a Hugging Face model: write author/model, or author/model:quantization (e.g. Q4_K_M)": "{text!r} bir Hugging Face modeli değil: author/model ya da author/model:niceleme yazın (ör. Q4_K_M)",
+    "Download it anyway?": "Yine de indirilsin mi?",
+    "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face {model} hakkında beklenmeyen bir yanıt verdi: daha sonra yeniden deneyin.",
+    "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "{host} adresindeki Ollama bu makinede değil ve ona şifrelemeden ulaşılıyor: yolda istek okunabilir ya da değiştirilebilir (başka bir model indirilir).",
+    "Ollama keeps the downloaded model even if you leave without saving.": "Kaydetmeden çıksanız bile Ollama indirilen modeli tutar.",
 }
 
 CLICK: dict[str, Forms] = {

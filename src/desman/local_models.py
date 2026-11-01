@@ -110,6 +110,11 @@ def problem(e: hub.HubError) -> str:
                 model=name,
                 url=url,
             )
+        case hub.Problem.UNEXPECTED:
+            return t(
+                "Hugging Face answered with something unexpected about {model}: try again later.",
+                model=name,
+            )
     return t("Hugging Face cannot be reached right now.")
 
 
@@ -146,23 +151,27 @@ def describe(model: hub.Gguf, machine: hub.Memory) -> tuple[list[str], list[str]
 def plan(config: Config, model: hub.Gguf, server: Provider) -> tuple[list[str], list[str]]:
     """What adding `model` to `server` does: (lines, warnings)."""
     if server.id == "ollama":
+        host = server.setting(config, "OLLAMA_HOST")
         lines = [
-            t(
-                "Ollama at {host} downloads it, then DESMAN uses it as the Ollama model.",
-                host=server.setting(config, "OLLAMA_HOST"),
-            )
+            t("Ollama at {host} downloads it, then DESMAN uses it as the Ollama model.", host=host)
         ]
-        warnings = (
-            [
+        warnings = []
+        if model.gated:
+            warnings.append(
                 t(
                     "Ollama downloads a gated model with its own key: add Ollama's key to your "
                     "Hugging Face account first ({url}).",
                     url=OLLAMA_KEYS,
                 )
-            ]
-            if model.gated
-            else []
-        )
+            )
+        if not providers.on_this_machine(host) and not host.lower().startswith("https://"):
+            warnings.append(
+                t(
+                    "Ollama at {host} is not on this machine and is reached without encryption: "
+                    "on the way, the request can be read or changed (another model downloaded).",
+                    host=host,
+                )
+            )
         return lines, warnings
     lines = [
         t(
@@ -204,6 +213,11 @@ def fetch(
         host = "http://" + host
     reported: set[str] = set()
 
+    def clean(text: str) -> str:
+        """Ollama's own words, with anything key-shaped cut out (it is never sent a key, but
+        what it prints is not ours to vouch for)."""
+        return providers.redact_keys(text, config)[0]
+
     def step(s: hub.Step) -> None:
         if s.total and s.completed is not None:
             tenth = 10 * s.completed // s.total
@@ -219,13 +233,17 @@ def fetch(
                 )
         elif s.status and s.status not in reported:
             reported.add(s.status)
-            show(s.status)  # Ollama's own words
+            show(clean(s.status))  # Ollama's own words
 
     try:
         hub.pull(host, model.ref, client, step)
     except hub.PullFailed as e:
         raise click.ClickException(
-            t("Ollama could not download {model}: {error}", model=model.ref.spec, error=e)
+            t(
+                "Ollama could not download {model}: {error}",
+                model=model.ref.spec,
+                error=clean(str(e)),
+            )
         ) from None
 
 
