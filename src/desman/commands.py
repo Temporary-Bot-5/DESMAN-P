@@ -37,15 +37,17 @@ from desman import (
     actions,
     config_cli,
     i18n,
+    improve,
     local_models,
     models_cli,
+    proposals_cli,
     protected_cli,
     providers,
     ui,
     wizard,
 )
 from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigError, ConfigManager
-from desman.core import db
+from desman.core import db, proposals
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
@@ -246,6 +248,18 @@ class ProtectedShowArgs(Args):
 
 class ProtectedApproveArgs(Args):
     note: Note | None = Field(None, description="why, in the person's words")
+
+
+class ProposalsListArgs(Args):
+    limit: Annotated[int, Field(ge=1, le=100)] = 20
+
+
+class ProposalShowArgs(Args):
+    proposal: Annotated[int, Field(ge=1)] = Field(description="the proposal's number")
+
+
+class AnalyzeArgs(Args):
+    since: Annotated[str, StringConstraints(pattern=r"^(all|[1-9]\d*[mhd])$")] = "all"
 
 
 class PermissionArgs(Args):
@@ -519,6 +533,60 @@ def _protected_approve(ctx: Context, args: ProtectedApproveArgs) -> Outcome | Pr
 
 
 # ── Tasks ────────────────────────────────────────────────────────────────────
+
+
+def _proposals_list(ctx: Context, args: ProposalsListArgs) -> Outcome:
+    improve.settle(ctx.store)
+    found = proposals.listing(ctx.store.conn, args.limit)
+    proposals_cli.print_listing(ctx.store, found)
+    return Outcome(proposals_cli.listing_json(found))
+
+
+def _proposals_show(ctx: Context, args: ProposalShowArgs) -> Outcome:
+    improve.settle(ctx.store)
+    found = proposals_cli.find(ctx.store, args.proposal)
+    proposals_cli.print_proposal(ctx.store, found)
+    return Outcome(proposals_cli.proposal_json(ctx.store, found))
+
+
+def _proposals_analyze(ctx: Context, args: AnalyzeArgs) -> Outcome | Proposal:
+    start = proposals_cli.since_of(args.since)
+    improve.settle(ctx.store)
+    under_way = proposals.analysing(ctx.store.conn)
+    if under_way:
+        line = t(
+            "Continue the analysis of the failures already under way (task {ref}).",
+            ref=ctx.store.short_id(under_way[0].task_id),
+        )
+    elif improve.spec(ctx.store, start) is None:
+        proposals_cli.print_nothing_to_analyse()
+        return Outcome({"proposal": None})
+    elif start is None:
+        line = t(
+            "Have the Improvement Analyst study every failure kept and propose a change to "
+            "DESMAN's prompts or workflow, as a diff to read. It runs as a task and spends "
+            "model calls; nothing is applied."
+        )
+    else:
+        line = t(
+            "Have the Improvement Analyst study the failures of the last {since} and propose a "
+            "change to DESMAN's prompts or workflow, as a diff to read. It runs as a task and "
+            "spends model calls; nothing is applied.",
+            since=args.since,
+        )
+
+    def apply() -> Outcome:
+        analysis = proposals_cli.prepare(ctx.store, start)
+        if analysis is None:
+            proposals_cli.print_nothing_to_analyse()
+            return Outcome({"proposal": None})
+        proposals_cli.print_start(ctx.store, analysis)
+        ctx.resume_task(analysis.proposal.task_id)
+        found = proposals_cli.finish(ctx.store, analysis.proposal.id)
+        proposals_cli.print_proposal(ctx.store, found)
+        return Outcome(proposals_cli.proposal_json(ctx.store, found))
+
+    return Proposal([line], apply)
 
 
 def _run(ctx: Context, args: RunArgs) -> Proposal:
@@ -903,6 +971,31 @@ CATALOG: tuple[Entry, ...] = (
         ProtectedApproveArgs,
         Kind.CHANGE,
         _protected_approve,
+    ),
+    Entry(
+        "proposals list",
+        "Changes to DESMAN's prompts and workflow the Improvement Analyst proposed, newest "
+        "first, with their state (being analysed, proposed, nothing to propose, unusable).",
+        ProposalsListArgs,
+        Kind.READ,
+        _proposals_list,
+        aliases=("proposals",),
+    ),
+    Entry(
+        "proposals show",
+        "One proposal: what it changes and why, and its diff. Nothing is applied.",
+        ProposalShowArgs,
+        Kind.READ,
+        _proposals_show,
+    ),
+    Entry(
+        "proposals analyze",
+        'Have the Improvement Analyst study the failures (since e.g. "7d", "all") and '
+        "propose a change to DESMAN's prompts or workflow as a diff; it runs as a task and "
+        "applies nothing. The person confirms.",
+        AnalyzeArgs,
+        Kind.CHANGE,
+        _proposals_analyze,
     ),
     Entry(
         "models show",

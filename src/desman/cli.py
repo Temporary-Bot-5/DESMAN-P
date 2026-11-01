@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, actions, i18n, providers, runs, ui
+from desman import __version__, actions, i18n, proposals_cli, providers, runs, ui
 from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
 from desman.config import ConfigError, open_config
@@ -46,6 +46,7 @@ from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.models_cli import models
 from desman.planner import Planned, plan, template_plan
+from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -140,6 +141,7 @@ cli.add_command(personalize)
 cli.add_command(behaviour)
 cli.add_command(models)
 cli.add_command(protected_group, name="protected")
+cli.add_command(proposals_group, name="proposals")
 
 
 @cli.command("init-db")
@@ -551,6 +553,76 @@ class _Source:
     model: str | None = None
 
 
+@proposals_group.command("analyze")
+@click.option(
+    "--since",
+    default="all",
+    show_default=True,
+    help="Read the failures of this window: e.g. 24h, 7d, or 'all'.",
+)
+@run_options
+@db_option
+@json_option
+def analyze(
+    since: str,
+    fake_script: Path | None,
+    provider_name: str | None,
+    model: str | None,
+    wait: bool,
+    lease_seconds: int,
+    db_path: Path | None,
+    as_json: bool,
+    no_cache: bool,
+) -> None:
+    """Have the Improvement Analyst study the failures and propose a change to DESMAN's
+    prompts or workflow, as a diff. Nothing is applied.
+
+    The analysis is a task like any other (no tools): if it stops, `desman resume` continues
+    it, and `desman proposals` shows the proposal once it has ended. Same exit codes as `run`.
+    """
+    start = proposals_cli.since_of(since)
+    source = _provider(fake_script, provider_name, model, as_json)  # fail fast
+    access = _executor_access(as_json)
+    path = db_path or db.default_db_path()
+    try:
+        store = Store(db.open_db(path))
+    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
+        raise click.ClickException(str(e)) from e
+    try:
+        runs.guard(store)  # before any model is asked
+        analysis = proposals_cli.prepare(store, start)
+        if analysis is None:
+            if as_json:
+                click.echo(json.dumps({"proposal": None}, indent=2))
+            else:
+                proposals_cli.print_nothing_to_analyse()
+            return
+        models = _attach(source, store, cache=not no_cache, as_json=as_json)
+        if not as_json:
+            proposals_cli.print_start(store, analysis)
+            sys.stdout.flush()
+        proposal_id = analysis.proposal.id
+
+        def then(as_json: bool) -> tuple[str, Any]:
+            found = proposals_cli.finish(store, proposal_id)
+            if not as_json:
+                proposals_cli.print_proposal(store, found)
+            return "proposal", proposals_cli.proposal_json(store, found)
+
+        _drive(
+            store,
+            models,
+            access,
+            analysis.proposal.task_id,
+            wait,
+            lease_seconds,
+            as_json,
+            then=then,
+        )
+    finally:
+        store.conn.close()
+
+
 def _provider(
     fake_script: Path | None, provider_name: str | None, model: str | None, as_json: bool
 ) -> _Source:
@@ -666,7 +738,10 @@ def _drive(
     lease_seconds: int,
     as_json: bool,
     plan_details: dict[str, Any] | None = None,
+    then: Callable[[bool], tuple[str, Any]] | None = None,
 ) -> None:
+    """Run the task and report it. `then(as_json)` comes after the run: what it returns joins
+    the JSON output as (key, data); without --json it prints, after the task's report."""
     coordinator = runs.coordinator(
         store, models, access, load_config().load(), lease_seconds=lease_seconds
     )
@@ -681,9 +756,14 @@ def _drive(
         if plan_details is not None:
             out["plan"] = plan_details
         out["task"] = report.model_dump(mode="json")
+        if then is not None:
+            key, data = then(True)
+            out[key] = data
         click.echo(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         print_report(report)
+        if then is not None:
+            then(False)
         if result.paused_until:
             click.echo(
                 t(

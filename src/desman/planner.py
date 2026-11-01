@@ -52,17 +52,21 @@ KIND_RULES = (
     'comparing, judging, working something out) or "text" (writing, answering, finding facts).'
 )
 
-PLANNER_SYSTEM = (
+PLANNER_RULES = (
     "You split a goal into subtasks for small language models. Each subtask is done by one "
     "model call that sees only that subtask's description, its acceptance criteria and the "
     "results of the subtasks it depends on, never the goal itself, so every description must "
     "make sense on its own. Use as few subtasks as the goal needs (one is fine for a simple "
-    f"goal), at most {MAX_SUBTASKS}. Reply with a single JSON object: "
+    "goal). Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
     'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier subtasks, '
     "counting from 0]}]}. The last subtask must produce the final result of the goal."
-    + KIND_RULES
-    + CRITERIA_RULES
+)
+"""The planner's own instructions. Like `KIND_RULES`, `CRITERIA_RULES` and the limits, a plain
+value the Improvement Analyst may propose to change (`improve.TARGETS`)."""
+
+PLANNER_SYSTEM = (
+    PLANNER_RULES + f" Never more than {MAX_SUBTASKS} subtasks." + KIND_RULES + CRITERIA_RULES
 )
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
@@ -169,16 +173,20 @@ SPLIT = "Split subtask"
 """Prompt heading: fake scripts route on it."""
 MAX_PARTS = 4
 
-SPLITTER_SYSTEM = (
+SPLITTER_RULES = (
     "A subtask failed review several times. Split it into smaller parts that are easier to get "
-    f"right: at least 2, at most {MAX_PARTS}. Each part is done by one model call that sees "
-    "only that part's description, its acceptance criteria, the subtask's inputs and the "
-    "results of the parts it depends on, so every description must make sense on its own. "
-    "Afterwards the subtask's result is built from the parts' results; the feedback says what "
-    "went wrong so far. Reply with a single JSON object: "
-    '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
-    'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier parts, '
-    "counting from 0]}]}." + KIND_RULES + CRITERIA_RULES
+    "right. Each part is done by one model call that sees only that part's description, its "
+    "acceptance criteria, the subtask's inputs and the results of the parts it depends on, so "
+    "every description must make sense on its own. Afterwards the subtask's result is built "
+    "from the parts' results; the feedback says what went wrong so far. Reply with a single "
+    'JSON object: {"subtasks": [{"description": "what to do", "acceptance_criteria": "how to '
+    'tell it is done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier '
+    "parts, counting from 0]}]}."
+)
+"""The splitter's own instructions (a target of the Improvement Analyst, like the planner's)."""
+
+SPLITTER_SYSTEM = (
+    SPLITTER_RULES + f" Make at least 2 parts, at most {MAX_PARTS}." + KIND_RULES + CRITERIA_RULES
 )
 
 
