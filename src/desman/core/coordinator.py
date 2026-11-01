@@ -55,7 +55,7 @@ from desman.core.store import (
 )
 from desman.core.tools import Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
-from desman.llm.base import ProviderError, among
+from desman.llm.base import ProviderError, among, noticing_unfit
 
 S = SubtaskStatus
 
@@ -107,6 +107,9 @@ Outcome = Success | Failure
 
 ONE_MODEL: Strategies = functools.partial(strategy_for, other_model=False)
 """The coordinator's default: no other model to switch to, so none is claimed in the audit."""
+
+RUN_TOOL = "run_command"
+"""The tool a subtask marked `runs_code` must call: what it reports rests on what that printed."""
 
 ERROR_TYPE = "error"
 """A result `{"type": "error", "reason": ...}` is the executor saying it could not do the work."""
@@ -416,8 +419,20 @@ class Coordinator:
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
-                can_split = self.decomposer is not None and subtask.parent_id is None
+                # A split would let parts hand in what only running the code can tell.
+                can_split = (
+                    self.decomposer is not None
+                    and subtask.parent_id is None
+                    and not subtask.runs_code
+                )
                 strategy = self.strategies(attempt, split=can_split, **avoid)
+            tools = self._toolbox(subtask, journal, heartbeat)
+            if subtask.runs_code and strategy is not Strategy.COMBINE:
+                missing = tools.refusal(RUN_TOOL)
+                if missing is not None:
+                    # No model is asked: whatever it handed in could not rest on a run.
+                    self._cannot_run(subtask, lease, missing, events)
+                    return
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
@@ -430,7 +445,7 @@ class Coordinator:
                 subtask=subtask,
                 context=context,
                 heartbeat=heartbeat,
-                tools=self._toolbox(subtask, journal, heartbeat),
+                tools=tools,
                 unfit=unfit,
             )
             if strategy is Strategy.DECOMPOSE:
@@ -442,7 +457,13 @@ class Coordinator:
                 )
                 work = work.model_copy(update={"context": context})
                 self._started(subtask, context)
-            with calls.for_(self._for(calls.Role.EXECUTOR, subtask)):
+
+            def unfit_heard(label: str) -> None:
+                self.store.note(
+                    subtask.id, Actor.EXECUTOR, "model_unfit", {"unfit_provider": label}
+                )
+
+            with calls.for_(self._for(calls.Role.EXECUTOR, subtask)), noticing_unfit(unfit_heard):
                 returned = self.executor(work)
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
@@ -465,6 +486,15 @@ class Coordinator:
         if isinstance(outcome, Success) and is_error_report(outcome.content):
             # Not a result: a failed attempt, never something a reviewer could accept.
             outcome = Failure(kind=FailureKind.QUALITY, reason=_error_reason(outcome.content))
+        elif isinstance(outcome, Success) and subtask.runs_code and not self._ran(journal):
+            # What running the code printed, told without running it, is made up.
+            outcome = Failure(
+                kind=FailureKind.QUALITY,
+                reason=(
+                    f"the result was handed in without a successful {RUN_TOOL} call: this "
+                    f"subtask must run the code with {RUN_TOOL} and report what it printed"
+                ),
+            )
         try:
             if isinstance(outcome, Success):
                 self.store.submit(subtask.id, lease, outcome.content)
@@ -508,6 +538,34 @@ class Coordinator:
             guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
             journal=journal,
         )
+
+    def _ran(self, journal: Effects) -> bool:
+        """Whether this execution called `run_command` and got its result back."""
+        for row in self.store.effects(journal.subtask_id, journal.execution):
+            if row["tool"] != RUN_TOOL or row["state"] != "done":
+                continue
+            if json.loads(row["result_json"]).get("ok") is True:
+                return True
+        return False
+
+    def _cannot_run(self, subtask: Subtask, lease: str, why: str, events: list[str]) -> None:
+        """A subtask that must run code, without the tool to run it: the person decides (turn
+        the permission on and retry, or settle it otherwise). No attempt is spent."""
+        try:
+            moved = self.store.record_failure(
+                subtask.id,
+                S.RUNNING,
+                Actor.EXECUTOR,
+                FailureKind.PERMANENT,
+                lease=lease,
+                reason=f"this subtask must run code, but {why}",
+                action="tool_unavailable",
+                details={"tool": RUN_TOOL},
+            )
+        except StaleStateError:
+            self._discard(subtask, "lease lost before the missing tool was recorded", events)
+            return
+        events.append(f"permanent {subtask.id} -> {moved.status}")
 
     def _started(self, subtask: Subtask, context: Context) -> None:
         self.store.note(

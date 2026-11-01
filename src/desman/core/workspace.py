@@ -143,14 +143,21 @@ class Workspace:
             target = self.root.joinpath(*parts)
             if not target.is_file():
                 raise FileNotFoundError(f"no file {path!r} in workspace")
+            if target.stat().st_nlink > 1:
+                raise PathEscapeError(f"{path!r} has other hard links")
             return target.read_bytes()
         with self._parent(parts, create=False) as parent:
             # O_NONBLOCK: a FIFO planted under this name must not hang the open.
             flags = os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _BINARY | _NONBLOCK
             fd = _open(parts[-1], flags, parent, path)
             with os.fdopen(fd, "rb") as f:
-                if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                info = os.fstat(f.fileno())
+                if not stat.S_ISREG(info.st_mode):
                     raise PathEscapeError(f"{path!r} is not a regular file")
+                # A hard link is the file itself, wherever its other names are: generated
+                # code could have linked one from outside the workspace.
+                if info.st_nlink > 1:
+                    raise PathEscapeError(f"{path!r} has other hard links")
                 return f.read()
 
     def read_text(self, path: str) -> str:
@@ -173,8 +180,8 @@ class Workspace:
     def files(self) -> list[str]:
         """Regular files in the workspace, as sorted `/`-separated relative paths.
 
-        Names the guard would refuse (generated code can create any name) are left out, so
-        everything listed can be read back."""
+        Names the guard would refuse (generated code can create any name) and files with other
+        hard links are left out, so everything listed can be read back."""
         if self.root.is_symlink():  # os.walk would follow the top directory
             return []
         found = []
@@ -183,6 +190,8 @@ class Workspace:
             for name in filenames:
                 full = base / name
                 if name.startswith(_TMP_PREFIX) or full.is_symlink() or not full.is_file():
+                    continue
+                if full.lstat().st_nlink > 1:  # never read back (see `read`)
                     continue
                 relative = full.relative_to(self.root).as_posix()
                 try:

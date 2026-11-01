@@ -17,7 +17,9 @@ can simply let these propagate. Real HTTP clients (2.2) raise the same classes.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import ClassVar, Literal, Protocol
 
@@ -75,6 +77,27 @@ def among(label: str, labels: Collection[str]) -> bool:
     return label in labels or label.split("/", 1)[0] in labels
 
 
+_unfit_sink: ContextVar[Callable[[str], None] | None] = ContextVar("unfit_sink", default=None)
+
+
+@contextmanager
+def noticing_unfit(sink: Callable[[str], None]) -> Iterator[None]:
+    """Inside, `sink` hears of every model a lineup moved past as unable to answer
+    (`ProviderError.unfit_model`): the coordinator keeps it in the task's history."""
+    token = _unfit_sink.set(sink)
+    try:
+        yield
+    finally:
+        _unfit_sink.reset(token)
+
+
+def unfit_seen(label: str) -> None:
+    """Tell whoever listens (`noticing_unfit`) that the model `label` proved unfit."""
+    sink = _unfit_sink.get()
+    if sink is not None:
+        sink(label)
+
+
 class LLM(Protocol):
     name: str
 
@@ -125,8 +148,9 @@ class GenerationFailed(ProviderError):
     def __init__(self, provider: str, message: str = "") -> None:
         super().__init__(
             provider,
-            "the model's reply was refused: it called a tool natively instead of answering "
-            "in text (write the JSON object as the reply)" + (f": {message}" if message else ""),
+            "the provider rejected the model's reply because it called a tool natively instead "
+            "of answering in text (a quirk of this model, not a refusal of the work; write the "
+            "JSON object as the reply)" + (f": {message}" if message else ""),
         )
 
 

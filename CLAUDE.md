@@ -117,6 +117,9 @@ src/desman/
 │                  #   executor's per subtask Kind, each model
 │                  #   paced, backed off, cached; executor access, web tools, coordinator),
 │                  #   shared by `run`/`resume`/`worker` and the chat
+├── task_files.py  # A task's files for the chat (through Workspace): listed with their folder
+│                  #   by code after a retelling, given to the retelling to copy from, copied
+│                  #   into a later task of the same chat (`NewTask.files_from` → from-REF/)
 ├── live.py        # Live progress of a chat task: subtask bar, a line per module (role, calls,
 │                  #   tokens, limits left, state); redrawn on coordinator steps and calls
 └── core/
@@ -130,6 +133,8 @@ src/desman/
     ├── models.py  # TaskSpec/SubtaskSpec (validated DAG; retry budgets and `Tools` kept with
                    #   the task: `none` = no tools for whoever runs it), Subtask, Priority,
                    #   Kind (text | code | analysis: picks the executor's model)
+                   #   `runs_code`: done only through a successful run_command (coordinator
+                   #   checks; without the tool → needs_human at once; never split)
     ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
                    #        record_failure (the task's own retry policy, `TaskSpec.retry`,
                    #        applied atomically; no caller brings one), reserve_review

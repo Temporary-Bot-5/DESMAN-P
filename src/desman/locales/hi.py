@@ -430,6 +430,18 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} is paused by a provider limit until {until}. `desman resume {ref}` continues it.": "कार्य {ref} प्रदाता की सीमा के कारण {until} तक रुका है। `desman resume {ref}` इसे जारी रखता है।",
     "Task {ref} is {status}.": "कार्य {ref}: {status}।",
     "The model could not retell the result; here it is as it is:": "मॉडल परिणाम का सार नहीं बता सका; यह रहा परिणाम जैसा है:",
+    "Some files of task {source} are too many or too large to copy, so the new task does not get them: {files}": "कार्य {source} की कुछ फ़ाइलें बहुत अधिक या बहुत बड़ी हैं, इसलिए नए कार्य को वे नहीं मिलेंगी: {files}",
+    "The files of an earlier task could not be copied, so the task was not started: {error}": "पिछले कार्य की फ़ाइलें कॉपी नहीं हो सकीं, इसलिए कार्य शुरू नहीं हुआ: {error}",
+    "The work must run code: it is done only once run_command really ran it, whatever the plan (without the shell_execution permission it waits for you).": "काम को कोड चलाना है: यह तभी पूरा होता है जब run_command ने उसे सच में चलाया हो, योजना चाहे जो हो (shell_execution अनुमति के बिना यह आपकी प्रतीक्षा करता है)।",
+    "Task {ref} got copies of the files of task {source}: {files}": "कार्य {ref} को कार्य {source} की फ़ाइलों की प्रतियाँ मिलीं: {files}",
+    "Task {ref} is not a task of this chat, so its files are not given.": "कार्य {ref} इस चैट का कार्य नहीं है, इसलिए उसकी फ़ाइलें नहीं दी गईं।",
+    "The retelling showed code that task {ref} did not produce, so it is not shown.": "सारांश में ऐसा कोड दिखाया गया जो कार्य {ref} ने नहीं बनाया था, इसलिए वह नहीं दिखाया गया।",
+    "The result as it is:": "परिणाम जैसा है:",
+    "Files of task {ref} are in {folder}:": "कार्य {ref} की फ़ाइलें {folder} में हैं:",
+    "…and {n} more file": (
+        "…और {n} फ़ाइल",
+        "…और {n} फ़ाइलें",
+    ),
     "New session. /help lists the chat's commands.": "नया सत्र। /help चैट के कमांड दिखाता है।",
     "Continuing the session of {when} ({n} message). /new starts another, /help lists the chat's commands.": (
         "{when} का सत्र जारी है ({n} संदेश)। /new दूसरा शुरू करता है, /help चैट के कमांड दिखाता है।",

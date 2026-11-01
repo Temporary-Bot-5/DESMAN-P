@@ -403,7 +403,7 @@ def test_the_chat_applies_only_after_the_window(
     before = head(checkout)
     session = Sessions(s.conn).add(None, Role.USER, "apply proposal 1").session_id
     ctx = commands.Context(
-        s, open_config(), lambda title, goal: None, lambda task: None, lambda: session
+        s, open_config(), lambda title, goal, runs_code: None, lambda task: None, lambda: session
     )
     entry = commands.find("proposals apply")
     assert entry is not None

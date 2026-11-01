@@ -180,7 +180,8 @@ def test_arguments_are_validated_without_quoting_them() -> None:
 def test_the_prompt_lists_every_command_with_its_arguments() -> None:
     text = commands.for_model()
     for entry in commands.CATALOG:
-        assert f"- {entry.name} " in text
+        assert f"- {entry.name} " in text or f"- {entry.name}: " in text
+    assert "- help: " in text and "{}" not in text  # no arguments: none shown, never "{}"
     assert '"task": string' in text and '"note"?: string' in text
     assert "groq" in text  # keys add names the providers
 

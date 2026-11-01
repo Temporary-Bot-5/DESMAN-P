@@ -36,6 +36,7 @@ from desman.llm.base import (
     RateLimited,
     Request,
     among,
+    noticing_unfit,
 )
 from desman.llm.cache import Cached
 from desman.llm.fake import (
@@ -155,12 +156,29 @@ def test_any_provider_trouble_moves_the_call_on(trouble: ServerError | Rejected 
     assert lineup.complete(REQUEST).provider == "b"
 
 
-def test_the_models_own_failure_is_left_to_the_retry_policy() -> None:
-    second = FakeLLM("ok", name="b")
-    lineup = router.Fallback(members(FakeLLM(ToolUseFailed(), name="a"), second))
+def test_a_model_unable_to_answer_hands_the_call_on_and_is_not_asked_again() -> None:
+    """A native tool call where text was asked (gpt-oss on Groq) is the model's quirk, not the
+    work's fault: the next model answers within the same attempt, and the lineup keeps away
+    from the unfit one; whoever listens hears of it, to keep it in the task's history."""
+    first = FakeLLM(ToolUseFailed(), "never asked again", name="a")
+    second = FakeLLM("ok", "ok again", name="b")
+    lineup = router.Fallback(members(first, second))
+    heard: list[str] = []
+    with noticing_unfit(heard.append):
+        assert lineup.complete(REQUEST).provider == "b"
+        assert lineup.complete(REQUEST).provider == "b"
+    assert len(first.calls) == 1 and heard == ["a"]
+
+
+def test_the_last_model_s_own_failure_is_left_to_the_retry_policy() -> None:
+    lineup = router.Fallback(members(FakeLLM(ToolUseFailed(), name="a")))
     with pytest.raises(GenerationFailed):
         lineup.complete(REQUEST)
-    assert second.calls == []
+    both = router.Fallback(
+        members(FakeLLM(ToolUseFailed(), name="a"), FakeLLM(ToolUseFailed(), name="b"))
+    )
+    with pytest.raises(GenerationFailed):  # the one left is unfit too: nothing is hidden
+        both.complete(REQUEST)
 
 
 def test_when_every_model_fails_a_limit_wins_and_the_soonest_one() -> None:
@@ -521,15 +539,16 @@ def test_an_unfit_model_is_told_apart_from_the_other_models_of_its_provider(
     assert coordinator.run(task_id).status is TaskStatus.DONE
     assert store.unfit_providers(task_id) == {"groq/openai/gpt-oss-20b"}
     executed = [(host, model) for host, model, what in seen if what == "Execute subtask"]
+    # The lineup's next model answers in the same attempt: the quirk costs no attempt.
     assert executed == [
         ("api.groq.com", "openai/gpt-oss-20b"),
-        ("openrouter.ai", "nvidia/nemotron-3.5-lightning:free"),
+        ("api.groq.com", "openai/gpt-oss-120b"),
     ]
     assert check_history(store.conn, task_id) == []
     strategies = [
         e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
     ]
-    assert strategies == ["first", "other_model"]
+    assert strategies == ["first"]
 
 
 def test_a_pinned_model_leaves_no_other(store: Store, clock: FakeClock) -> None:
@@ -734,7 +753,7 @@ def test_an_unfit_model_is_avoided_by_the_kind_that_asks_it(store: Store, clock:
         for e in history(store.conn, task_id)
         if e.action == "attempt_started"
     ]
-    assert strategies == [(code.id, "first"), (code.id, "other_model"), (text.id, "first")]
+    assert strategies == [(code.id, "first"), (text.id, "first")]  # no attempt spent on it
 
 
 def test_run_names_the_models_for_code_and_analysis(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -46,6 +46,7 @@ from desman.llm.base import (
     RateLimited,
     Request,
     among,
+    unfit_seen,
 )
 from desman.llm.openai_compat import CallRecord, OpenAICompatible
 from desman.providers import Provider
@@ -249,9 +250,13 @@ class Fallback:
 
     A model the task found unfit (`Request.avoid`) is skipped, and so is one whose context is
     too small for the request (unless that leaves none: then the rest are tried all the same).
-    A provider error moves the call to the next model, except a quality one
-    (`GenerationFailed`): that is the model's own answer, judged by the retry policy (which may
-    switch models for the next attempt). Nor does a slow failure (`ProviderError.slow`, set by
+    A provider error moves the call to the next model, except a quality one: that is the
+    model's own answer, judged by the retry policy (which may switch models for the next
+    attempt). A model unable to answer such a request at all (`ProviderError.unfit_model`:
+    `GenerationFailed`, a native tool call where text was asked) is the exception: the call
+    moves on, and this lineup does not ask that model again, so an attempt (the only one that
+    combines a split subtask's parts, say) is not lost to a quirk. When it was the last model
+    left, its error is raised as it is. Nor does a slow failure (`ProviderError.slow`, set by
     `Backoff`: one call that took over `QUICK_FAILURE` seconds), for the reason `Backoff` does
     not repeat one: nobody renews the subtask's lease while it waits. When the models tried failed, the error raised is a
     limit if any model was limited (the soonest one: the subtask pauses until then), else a
@@ -266,6 +271,8 @@ class Fallback:
         self.name = first.name
         self.label = first.name if choice is None else choice.label
         self._last: tuple[Completion, LLM] | None = None
+        self._unfit: set[str] = set()
+        """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
 
     @property
     def choices(self) -> list[Choice]:
@@ -273,16 +280,27 @@ class Fallback:
 
     def complete(self, request: Request) -> Completion:
         need = estimated_tokens(request)
-        fit = [m for m in self.members if m[1] is None or not among(m[1].label, request.avoid)]
+        fit = [
+            (llm, choice)
+            for llm, choice in self.members
+            if (choice is None or not among(choice.label, request.avoid))
+            and (choice.label if choice is not None else llm.name) not in self._unfit
+        ]
         fit = fit or self.members
         large = [m for m in fit if m[1] is None or m[1].spec.context >= need]
+        members = large or fit
         errors: list[ProviderError] = []
-        for llm, _choice in large or fit:
+        for i, (llm, choice) in enumerate(members):
             try:
                 reply = llm.complete(request)
             except ProviderError as e:
                 if e.kind is FailureKind.QUALITY:
-                    raise
+                    if not e.unfit_model or i == len(members) - 1:
+                        raise
+                    label = llm.name if choice is None else choice.label
+                    self._unfit.add(label)
+                    unfit_seen(label)  # kept in the task's history: later runs avoid it too
+                    continue
                 errors.append(e)
                 if e.slow:
                     break

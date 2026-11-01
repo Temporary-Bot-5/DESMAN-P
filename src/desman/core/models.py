@@ -52,6 +52,9 @@ class SubtaskSpec(BaseModel):
     priority: int | None = None
     """Defaults to the task's priority."""
     kind: Kind = Kind.TEXT
+    runs_code: bool = False
+    """It must run code and report what it printed: only an execution that called `run_command`
+    hands in a result (the coordinator checks), and without that tool it waits for the person."""
 
 
 class TaskSpec(BaseModel):
@@ -114,6 +117,7 @@ class Subtask(BaseModel):
     queued_at: str | None = None
     """When it joined the queue it is in (READY or REVIEW); the scheduler ages it from then."""
     kind: Kind = Kind.TEXT
+    runs_code: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -139,4 +143,5 @@ class Subtask(BaseModel):
             review_until=row["review_until"],
             queued_at=row["queued_at"],
             kind=Kind(row["kind"]),
+            runs_code=bool(row["runs_code"]),
         )
