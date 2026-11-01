@@ -129,12 +129,10 @@ def evaluate_now(
     quiet: bool = False,
 ) -> Evaluation:
     """Evaluate `proposal` (`evaluation.evaluate`), telling the person what runs."""
-    try:
+    try:  # the person's tuning is the current version's, also with the fake
         config = open_config().load()
     except ConfigError as e:
-        if real:
-            raise click.ClickException(str(e)) from e
-        config = Config()
+        raise click.ClickException(str(e)) from e
     if real:  # fail fast, before any worktree is made
         try:
             first = router.lineup(config, calls.Role.EXECUTOR, provider, model)[0]

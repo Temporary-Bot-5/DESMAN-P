@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import tempfile
 from collections.abc import Callable
@@ -35,7 +36,7 @@ import desman
 from desman import runs
 from desman.config import Config, ConfigError, Tuning, open_config
 from desman.core import calls, db
-from desman.core.models import Tools
+from desman.core.models import Kind, Tools
 from desman.core.stats import collect
 from desman.core.store import Store
 from desman.llm import router
@@ -54,6 +55,9 @@ Mode = Literal["fake", "real"]
 class Case:
     id: str
     goal: str
+    kind: Kind = Kind.TEXT
+    """What its work is: the fake tags its plan's subtasks so, which picks the executor's
+    model as a real plan would."""
 
 
 CASES: tuple[Case, ...] = (
@@ -66,11 +70,13 @@ CASES: tuple[Case, ...] = (
         "code",
         "Write a Python function is_palindrome(text) that ignores case, spaces and punctuation, "
         "with three example calls and the result of each.",
+        Kind.CODE,
     ),
     Case(
         "compare",
         "Compare an array and a linked list for inserting into the middle and for reading the "
         "n-th element, and say which to choose for each of the two.",
+        Kind.ANALYSIS,
     ),
     Case(
         "steps",
@@ -119,7 +125,9 @@ def run(
         models = runs.Models(Recorded(fake(), store.conn), None)
     else:
         assert config is not None
-        models = runs.models(config, store.conn, provider=provider, model=model, cache=False)
+        # The models each role asks first are part of the tuning being evaluated.
+        tuned = config.model_copy(update={"tuning": tuning})
+        models = runs.models(tuned, store.conn, provider=provider, model=model, cache=False)
     coordinator = runs.summarizer(store, models, tuning)
     cases = []
     for case in CASES:
@@ -155,33 +163,37 @@ _PLAN_FORMAT = ('"subtasks"', '"description"', '"acceptance_criteria"', '"depend
 """What a planner's prompt asks the reply to hold; the fake plans only when it is all there."""
 
 
+_LIMIT = re.compile(r"Never more than (\d+) subtasks")
+_KINDS = {case.goal: case.kind for case in CASES}
+
+
 def fake() -> FakeLLM:
-    """A model that does what the prompt asks, the same way every time: a two-step plan (when
-    the planner's prompt asks for the plan's format), an answer, an acceptance."""
+    """A model that does what the prompt asks, the same way every time: a plan of two steps
+    (one, when the prompt allows only one; tagged with the case's kind; only when the planner's
+    prompt asks for the plan's format), an answer, an acceptance."""
 
     def planned(request: Request) -> str:
         system = next((m.content for m in request.messages if m.role == "system"), "")
         if not all(word in system for word in _PLAN_FORMAT):
             return garbage("prose").text
         goal = request.prompt.removeprefix(f"{PLAN}:\n")
-        return json.dumps(
-            {
-                "subtasks": [
-                    {
-                        "description": f"Gather what is needed for: {goal}",
-                        "acceptance_criteria": "The material needed is listed.",
-                        "kind": "text",
-                        "depends_on": [],
-                    },
-                    {
-                        "description": f"From the material, do this: {goal}",
-                        "acceptance_criteria": "The goal is fully achieved.",
-                        "kind": "text",
-                        "depends_on": [0],
-                    },
-                ]
-            }
-        )
+        kind = _KINDS.get(goal, Kind.TEXT).value
+        limit = _LIMIT.search(system)
+        final = {
+            "description": f"From the material, do this: {goal}",
+            "acceptance_criteria": "The goal is fully achieved.",
+            "kind": kind,
+            "depends_on": [0],
+        }
+        if limit is not None and int(limit.group(1)) < 2:
+            return json.dumps({"subtasks": [final | {"depends_on": []}]})
+        gather = {
+            "description": f"Gather what is needed for: {goal}",
+            "acceptance_criteria": "The material needed is listed.",
+            "kind": kind,
+            "depends_on": [],
+        }
+        return json.dumps({"subtasks": [gather, final]})
 
     return (
         FakeLLM(name="fake")
@@ -296,7 +308,11 @@ def compare(base: Result, candidate: Result) -> Verdict:
 def main(argv: list[str] | None = None) -> int:
     """`python -m desman.bench --mode fake|real [--tuning JSON] [--provider P] [--model M]`:
     runs the benchmark on a new database in a temporary folder and prints its `Result` as JSON.
-    Real mode reads the config (`DESMAN_CONFIG_DIR`), and writes nothing to it."""
+    Real mode reads the config (`DESMAN_CONFIG_DIR`), and writes nothing to it.
+
+    Not a command for people: `desman.evaluation` runs it in a worktree. What it says on
+    stderr when it cannot run becomes the reason an evaluation failed, which the database
+    keeps as it is, like every stored reason (untranslated)."""
     parser = argparse.ArgumentParser(prog="desman.bench")
     parser.add_argument("--mode", choices=["fake", "real"], required=True)
     parser.add_argument("--tuning", default="{}", help="The tuning to run with (JSON).")

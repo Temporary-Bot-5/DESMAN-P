@@ -20,7 +20,7 @@ from click.testing import CliRunner, Result
 
 from desman import bench, evaluation, improve, runs
 from desman.cli import cli
-from desman.config import Config, Tuning
+from desman.config import Config, ModelChoices, Tuning, default_config_path
 from desman.core import db, proposals
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.proposals import Proposal, Status
@@ -141,6 +141,15 @@ def test_the_benchmark_runs_every_case_on_the_fake() -> None:
     # Nothing in the benchmark may use a tool.
     tools = {r[0] for r in s.conn.execute("SELECT tools FROM tasks")}
     assert tools == {"none"}
+    # Each case's subtasks are of its kind, so the executor's model for that kind is asked.
+    kinds = dict(
+        s.conn.execute(
+            """SELECT json_extract(a.details_json, '$.benchmark'), group_concat(DISTINCT s.kind)
+               FROM audit_log a JOIN subtasks s ON s.task_id = a.task_id
+               WHERE a.action = 'task_created' GROUP BY a.task_id"""
+        ).fetchall()
+    )
+    assert kinds == {c.id: c.kind.value for c in bench.CASES}
 
 
 def test_the_fake_does_not_plan_without_the_format() -> None:
@@ -159,23 +168,25 @@ def test_the_fake_does_not_plan_without_the_format() -> None:
 
 def test_the_benchmark_follows_the_tuning() -> None:
     result = bench.run(store(), "fake", Tuning(max_subtasks=1))
-    # A two-step plan does not fit in one subtask: every goal falls back to the template.
-    assert all(c.plan == "template" for c in result.cases)
-    assert bench.metrics(result)["plan_fallbacks"] == len(bench.CASES)
+    # The fake plans within the limit its prompt states, as a model asked for it would.
+    assert all(c.plan == "llm" and c.subtasks == 1 for c in result.cases)
+    assert bench.metrics(result)["plan_fallbacks"] == 0
 
 
 def test_real_mode_asks_the_configured_models(monkeypatch: pytest.MonkeyPatch) -> None:
     asked: list[dict[str, Any]] = []
 
     def models(config: Config, conn: Any, **kwargs: Any) -> runs.Models:
-        asked.append(kwargs)
+        asked.append({"tuning": config.tuning} | kwargs)
         return runs.Models(bench.Recorded(bench.fake(), conn), None)
 
     monkeypatch.setattr(runs, "models", models)
-    result = bench.run(store(), "real", Tuning(), config=Config(), provider="groq", model="m")
+    # The tuning evaluated, the model each role asks first included, is what picks the models.
+    tuning = Tuning(models=ModelChoices(reviewer="groq/other-model"), max_subtasks=3)
+    result = bench.run(store(), "real", tuning, config=Config(), provider="groq", model="m")
     assert result.mode == "real" and bench.metrics(result)["tasks_done"] == len(bench.CASES)
     # Its own database is new: nothing cached is reused.
-    assert asked == [{"provider": "groq", "model": "m", "cache": False}]
+    assert asked == [{"tuning": tuning, "provider": "groq", "model": "m", "cache": False}]
 
 
 def test_real_mode_without_a_provider_reports_it(capsys: pytest.CaptureFixture[str]) -> None:
@@ -277,8 +288,10 @@ def test_the_proposed_settings_are_what_the_proposed_version_runs_with(checkout:
     found = evaluate(s, p, checkout)
     old, new = evaluation.metrics_of(found)
     assert old is not None and new is not None
-    assert old["plan_fallbacks"] == 0 and new["plan_fallbacks"] == len(bench.CASES)
-    assert found.verdict == "worse"
+    assert old["subtasks"] == 2 * len(bench.CASES) and new["subtasks"] == len(bench.CASES)
+    assert new["plan_fallbacks"] == 0
+    # The same goals done in fewer attempts.
+    assert found.verdict == "better"
 
 
 def test_the_current_version_runs_with_the_persons_tuning(checkout: Path) -> None:
@@ -289,7 +302,7 @@ def test_the_current_version_runs_with_the_persons_tuning(checkout: Path) -> Non
     )
     old, new = evaluation.metrics_of(found)
     assert old is not None and new is not None
-    assert old["plan_fallbacks"] == new["plan_fallbacks"] == len(bench.CASES)
+    assert old["subtasks"] == new["subtasks"] == len(bench.CASES)
 
 
 def test_a_proposal_made_from_other_files_is_not_evaluated(checkout: Path) -> None:
@@ -309,7 +322,7 @@ def edited_diff(repo: Path, edit: Any) -> tuple[str, dict[str, Any]]:
     diff, details = improve.render([rules_change(repo)], package(repo))
     name = improve.SOURCE_PREFIX + "planner.py"
     before = (repo / name).read_text()
-    after = edit(improve._replace(before, BY_ID["planner.rules"], details["changes"][0]["new"]))
+    after = edit(improve.replace(before, BY_ID["planner.rules"], details["changes"][0]["new"]))
     lines = difflib.unified_diff(
         before.splitlines(keepends=True), after.splitlines(keepends=True), f"a/{name}", f"b/{name}"
     )
@@ -322,7 +335,7 @@ def test_a_diff_changing_more_than_the_targets_is_refused(checkout: Path) -> Non
         checkout, lambda text: text.replace("MAX_SUBTASKS = 8", "MAX_SUBTASKS = 9")
     )
     p = proposal(s, diff, details)
-    with pytest.raises(evaluation.EvaluationError, match="changes more than the targets"):
+    with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
         evaluate(s, p, checkout)
     assert proposals.evaluations(s.conn, p.id) == []
 
@@ -330,9 +343,9 @@ def test_a_diff_changing_more_than_the_targets_is_refused(checkout: Path) -> Non
 def test_a_diff_giving_other_texts_than_proposed_is_refused(checkout: Path) -> None:
     s = store()
     diff, details = improve.render([rules_change(checkout)], package(checkout))
-    details["changes"][0]["new"] = "something else"
+    details["changes"][0]["new"] += " Something else."
     p = proposal(s, diff, details)
-    with pytest.raises(evaluation.EvaluationError, match="proposed texts"):
+    with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
         evaluate(s, p, checkout)
 
 
@@ -345,8 +358,32 @@ def test_a_diff_touching_another_file_is_refused(checkout: Path) -> None:
         before.splitlines(keepends=True), after.splitlines(keepends=True), f"a/{name}", f"b/{name}"
     )
     p = proposal(s, f"diff --git a/{name} b/{name}\n" + "".join(lines), {"changes": []})
-    with pytest.raises(evaluation.EvaluationError, match="the diff changes src/desman/agents.py"):
+    with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
         evaluate(s, p, checkout)
+
+
+def test_a_patch_is_never_applied(checkout: Path) -> None:
+    """A diff that git would apply to more than it shows (here: a new file beside the change)
+    is not what code builds from the proposal's texts, so nothing of it runs."""
+    s = store()
+    diff, details = improve.render([rules_change(checkout)], package(checkout))
+    extra = (
+        "diff --git a/src/desman/sitecustomize.py b/src/desman/sitecustomize.py\n"
+        "new file mode 100644\n--- /dev/null\n+++ b/src/desman/sitecustomize.py\n"
+        "@@ -0,0 +1 @@\n+raise SystemExit('ran')\n"
+    )
+    p = proposal(s, diff + extra, details)
+    with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
+        evaluate(s, p, checkout)
+
+
+def test_a_target_text_that_may_not_be_one_is_refused(checkout: Path) -> None:
+    s = store()
+    p = a_proposal(s, checkout)
+    details = p.details | {"changes": [p.details["changes"][0] | {"new": "no format"}]}
+    q = proposal(s, p.diff or "", details)
+    with pytest.raises(evaluation.EvaluationError, match="must still contain"):
+        evaluate(s, q, checkout)
 
 
 def test_a_run_that_fails_is_recorded_as_failed(checkout: Path, tmp_path: Path) -> None:
@@ -437,6 +474,10 @@ def test_evaluate_command_refusals(checkout: Path, monkeypatch: pytest.MonkeyPat
     assert no_provider.exit_code == 1 and "current version" not in no_provider.output
     assert proposals.evaluations(s.conn, p.id) == []
     missing = desman("proposals", "evaluate", "99")
+    default_config_path().write_text("{not json")
+    broken = desman("proposals", "evaluate", str(p.id))
+    assert broken.exit_code == 1 and "not valid JSON" in broken.output
+    default_config_path().unlink()
     assert missing.exit_code == 1 and "No proposal 99" in missing.output
     spec = TaskSpec(goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")])
     started = proposals.start(s, spec, None)

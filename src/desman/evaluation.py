@@ -2,16 +2,18 @@
 version of DESMAN and on it with the proposal, each in a git worktree of its own, and compared.
 
 Both runs start from the same commit (HEAD of the checkout DESMAN runs from): the current
-version is that commit as it is; the proposed one is that commit with the proposal's diff
-applied and its settings changed. The proposal must have been made from the files that commit
+version is that commit as it is; the proposed one is that commit with the proposal's change
+made and its settings changed. The proposal must have been made from the files that commit
 has (`details.base`, their SHA-256), or it answers another text and is not evaluated. Each run
 is a process of its own (`python -m desman.bench`) with the worktree's code first on its path,
 a database of its own in a temporary folder, and the config only in real mode (read, never
 written). The worktrees are removed afterwards.
 
-Before the proposed version runs, code checks again what the diff changed: only the targets'
-files (`improve.TARGETS`), and in them only the targets' texts, to the values the proposal
-names. Nothing else of the proposed version can differ from the current one.
+The proposed version is made by code, never by applying the diff (a patch can do more than it
+shows): the targets' new texts are checked again and put into the commit's files the way the
+diff was built, and the diff that makes must be the proposal's exactly. Then git must see only
+those files changed, and in them only the targets' texts. Nothing else of the proposed version
+can differ from the current one.
 
 What was found is recorded once (`core.proposals.record_evaluation`): both runs' results and
 the verdict, or why the evaluation failed. Nothing is applied (5.6): the person reads it.
@@ -80,7 +82,7 @@ def evaluate(
             trees.append(tree)
         _check_base(base_tree, proposal, commit)
         if proposal.diff:
-            _apply(candidate_tree, proposal)
+            _build(candidate_tree, proposal)
             _check_changes(base_tree, candidate_tree, proposal)
         results: dict[Side, bench.Result] = {}
         sides: tuple[tuple[Side, Path, Tuning], ...] = (
@@ -174,20 +176,36 @@ def _check_base(tree: Path, proposal: Proposal, commit: str) -> None:
         )
 
 
-def _apply(tree: Path, proposal: Proposal) -> None:
-    assert proposal.diff is not None
-    patch = tree.parent / f"{tree.name}.diff"
-    patch.write_text(proposal.diff, encoding="utf-8")
-    try:
-        allowed = {improve.SOURCE_PREFIX + t.path for t in improve.TARGETS}
-        touched = set(_git(tree, "apply", "--numstat", str(patch)).split("\n")) - {""}
-        files = {line.split("\t")[-1] for line in touched}
-        if not files <= allowed:
-            raise EvaluationError(f"the diff changes {', '.join(sorted(files - allowed))}")
-        _git(tree, "apply", "--check", str(patch))
-        _git(tree, "apply", str(patch))
-    finally:
-        patch.unlink(missing_ok=True)
+def _build(tree: Path, proposal: Proposal) -> None:
+    """Make the proposed version in `tree` by code, never by applying the diff: each target's
+    new text checked (`improve.checked`) and put into the commit's file (`improve.replace`), as
+    the diff was built. The diff that makes must be the proposal's, to the byte, so what runs
+    is what the person reads; and afterwards git must see only those files changed."""
+    texts: dict[str, str] = {}
+    package = tree / "src" / "desman"
+    for change in proposal.details.get("changes", []):
+        target = improve.BY_ID.get(str(change.get("target")))
+        if target is None:
+            raise EvaluationError(f"unknown target {change.get('target')!r}")
+        if target.path not in texts:
+            texts[target.path] = (package / target.path).read_text(encoding="utf-8")
+        try:
+            new = improve.checked(target, improve.current(target, package), change.get("new"))
+            texts[target.path] = improve.replace(texts[target.path], target, new)
+        except improve.Unfit as e:
+            raise EvaluationError(str(e)) from e
+    built = "".join(
+        improve.file_diff(path, (package / path).read_text(encoding="utf-8"), text)
+        for path, text in texts.items()
+    )
+    if built != proposal.diff:
+        raise EvaluationError("the diff is not the one the proposal's texts make")
+    for path, text in texts.items():
+        (package / path).write_text(text, encoding="utf-8")
+    status = _git(tree, "status", "--porcelain", "--untracked-files=all", "--ignored")
+    expected = {f" M {improve.SOURCE_PREFIX}{path}" for path in texts}
+    if set(status.splitlines()) != expected:
+        raise EvaluationError("the proposed version differs from the commit in other files")
 
 
 def _check_changes(base: Path, candidate: Path, proposal: Proposal) -> None:
