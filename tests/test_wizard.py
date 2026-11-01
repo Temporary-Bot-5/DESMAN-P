@@ -19,13 +19,13 @@ from desman.cli import cli
 from desman.config import ConfigManager, Permissions, default_config_path
 from helpers import flat_keys, make_config
 
-DONE = str(len(providers.PROVIDERS + providers.SEARCH) + 1)
+DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1)
 KEEP_PERMISSIONS = ("", "", "", "")
 KEEP_PERSONAL = ("", "")  # personalisation as it was; how it talks: not set up now
 
 
 def menu(provider_id: str) -> str:
-    return str(1 + [p.id for p in providers.PROVIDERS + providers.SEARCH].index(provider_id))
+    return str(1 + [p.id for p in providers.PROVIDERS + providers.SERVICES].index(provider_id))
 
 
 def wizard(*answers: str) -> Result:
@@ -107,21 +107,21 @@ def test_cloudflare_asks_for_its_account_id() -> None:
 
 def test_local_setting_can_be_cleared() -> None:
     saved().save(make_config(settings={"OLLAMA_HOST": "http://box:11434"}))
-    # Ollama's menu: 1 = set Host, 2 = Model, 3 = Context, 4 = Back.
-    result = wizard("1", menu("ollama"), "1", "-", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    # Ollama's menu: 1 = set Host, 2 = Model, 3 = Context, 4 = Hugging Face, 5 = Back.
+    result = wizard("1", menu("ollama"), "1", "-", "5", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
     assert result.exit_code == 0, result.output
     assert "OLLAMA_HOST" not in saved().load().settings
 
 
 def test_a_local_server_elsewhere_is_said_to_receive_the_data() -> None:
-    # Ollama's menu: 1 = set Host, 4 = Back.
+    # Ollama's menu: 1 = set Host, 5 = Back.
     result = wizard(
-        "1", menu("ollama"), "1", "gpu-box:11434", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+        "1", menu("ollama"), "1", "gpu-box:11434", "5", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
     )
     assert result.exit_code == 0, result.output
     assert "gpu-box:11434 is not this machine" in " ".join(result.output.split())
     result = wizard(
-        "1", menu("ollama"), "1", "127.0.0.1:11434", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+        "1", menu("ollama"), "1", "127.0.0.1:11434", "5", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
     )
     assert "is not this machine" not in " ".join(result.output.split())
 

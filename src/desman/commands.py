@@ -28,16 +28,18 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import click
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, ValidationError
 from rich.text import Text
 
-from desman import actions, config_cli, i18n, providers, ui, wizard
+from desman import actions, config_cli, i18n, local_models, models_cli, providers, ui, wizard
 from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigError, ConfigManager
 from desman.core import db
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
+from desman.llm import hub
 from desman.llm.openai_compat import key_id
 
 
@@ -169,6 +171,16 @@ class ProviderArgs(Args):
     provider: Annotated[str, StringConstraints(min_length=1, max_length=40)] | None = None
 
 
+class ModelArgs(Args):
+    model: Annotated[str, StringConstraints(min_length=3, max_length=200)] = Field(
+        description="a Hugging Face model: author/model or author/model:quantization"
+    )
+
+
+class ModelAddArgs(ModelArgs):
+    server: Literal["ollama", "llamacpp"] = "ollama"
+
+
 class KeyAddArgs(Args):
     provider: Annotated[str, StringConstraints(min_length=1, max_length=40)]
     label: Annotated[str, StringConstraints(max_length=60)] = ""
@@ -288,6 +300,35 @@ def _keys_check(ctx: Context, args: ProviderArgs) -> Outcome:
     targets, results = config_cli.check_keys(ctx.config(), args.provider)
     config_cli.print_checks(targets, results)
     return Outcome(json.loads(json.dumps([asdict(r) for r in results], default=str)))
+
+
+def _models_show(ctx: Context, args: ModelArgs) -> Outcome:
+    ref = local_models.parse(args.model)
+    with httpx.Client() as client:
+        found = local_models.look_up(ctx.config(), ref, client)
+    machine = hub.memory()
+    models_cli.print_model(found, machine)
+    return Outcome(models_cli.model_json(found, machine))
+
+
+def _models_add(ctx: Context, args: ModelAddArgs) -> Proposal:
+    config = ctx.config()
+    ref = local_models.parse(args.model)
+    server = local_models.target(args.server)
+    with httpx.Client() as client:
+        found = local_models.look_up(config, ref, client)
+    lines, warnings = local_models.describe(found, hub.memory())
+    planned, cautions = local_models.plan(config, found, server)
+
+    def apply() -> Outcome:
+        with httpx.Client() as client:
+            local_models.fetch(ctx.config(), found, server, client)
+        with ctx.manager.edit() as saved:
+            name = local_models.use(saved, found, server)
+        ui.ok(t("{server} model set to {model}.", server=server.name, model=name))
+        return Outcome({"server": server.id, "model": name})
+
+    return Proposal(lines + planned, apply, warnings + cautions)
 
 
 def _config_show(ctx: Context, args: NoArgs) -> Outcome:
@@ -662,7 +703,7 @@ def _config_reset(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 
 # ── The catalog ──────────────────────────────────────────────────────────────
 
-_KEYED = [p.id for p in providers.CLOUD + providers.SEARCH if p.key_env is not None]
+_KEYED = [p.id for p in providers.CLOUD + providers.SERVICES if p.key_env is not None]
 
 CATALOG: tuple[Entry, ...] = (
     Entry("help", "List DESMAN's commands for the person.", NoArgs, Kind.READ, _help),
@@ -767,6 +808,23 @@ CATALOG: tuple[Entry, ...] = (
         BehaviourArgs,
         _behaviour_kind,
         _behaviour,
+    ),
+    Entry(
+        "models show",
+        "What a model on Hugging Face is (GGUF only): its size and whether it fits in the "
+        "machine's free memory. Downloads nothing.",
+        ModelArgs,
+        Kind.READ,
+        _models_show,
+    ),
+    Entry(
+        "models add",
+        "Have a local server (ollama or llamacpp) download a model from Hugging Face and make "
+        "it that server's model; its size and the free memory are shown first. The person "
+        "confirms.",
+        ModelAddArgs,
+        Kind.CHANGE,
+        _models_add,
     ),
     Entry(
         "keys list",

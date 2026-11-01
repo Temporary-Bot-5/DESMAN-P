@@ -134,6 +134,8 @@ def print_config(path: Path, out: dict[str, Any]) -> None:
             name.append(f" · {t('paid')}", style="warn")
         if row["search"]:
             name.append(f" · {t('web search')}", style="muted")
+        if row.get("hub"):
+            name.append(f" · {t('models for local servers')}", style="muted")
         rows.add_row(name, status, keys, settings)
     ui.out("")
     ui.out(rows)
@@ -508,7 +510,7 @@ def key_rows(config: Config, db_path: Path | None = None) -> list[dict[str, Any]
     """Each provider with keys, its keys masked and what each spent in the last 24 hours."""
     spent = {u.key_id: u for u in _usage(db_path, timedelta(hours=24))}
     rows: list[dict[str, Any]] = []
-    for p in providers.CLOUD + tuple(s for s in providers.SEARCH if s.key_env is not None):
+    for p in providers.CLOUD + tuple(s for s in providers.SERVICES if s.key_env is not None):
         assert p.key_env is not None
         keys = []
         for i, k in enumerate(config.keys(p.key_env), 1):
@@ -530,6 +532,7 @@ def key_rows(config: Config, db_path: Path | None = None) -> list[dict[str, Any]
                 "env": p.key_env,
                 "paid": p.paid,
                 "search": p.search,
+                "hub": p.hub,
                 "ready": p.is_ready(config),
                 "keys": keys,
             }
@@ -553,6 +556,8 @@ def print_key_rows(rows: list[dict[str, Any]]) -> None:
         shown = r["name"] + (f" · {t('paid')}" if r["paid"] else "")
         if r["search"]:
             shown += f" · {t('web search')}"
+        if r["hub"]:
+            shown += f" · {t('models for local servers')}"
         if not r["keys"]:
             table.add_row(Text(shown, style="muted"), "", Text("-", style="muted"), "", "", "")
         for k in r["keys"]:
