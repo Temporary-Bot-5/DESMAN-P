@@ -339,9 +339,10 @@ def test_timeouts_and_server_errors_are_transient(store: Store, clock: FakeClock
 
 def test_persistent_outage_ends_with_the_human(store: Store, clock: FakeClock) -> None:
     llm = FakeLLM(ServerError(), repeat_last=True, clock=clock, sleep=clock.sleep)
-    task_id = store.create_task(one_step())
-    policy = RetryPolicy(max_transient=3)
-    result = coordinator(store, clock, llm, policy=policy).run(task_id)
+    task_id = store.create_task(
+        one_step().model_copy(update={"retry": RetryPolicy(max_transient=3)})
+    )
+    result = coordinator(store, clock, llm).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
     [sub] = store.list_subtasks(task_id)
     assert sub.status is S.NEEDS_HUMAN

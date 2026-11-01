@@ -39,7 +39,8 @@ src/desman/
 ├── cli.py         # Click entry point: `desman` (banner, then the chat), `config`, `help`,
 │                  #   `init-db`, and the task
 │                  #   commands `run`, `resume`, `status`, `list`, `audit` (--json, exit codes),
-│                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`
+│                  #   operator decisions `inbox`, `retry`, `accept`, `fail`, `cancel`;
+│                  #   `worker`: every task's subtasks until stopped (N at once on one database)
 ├── actions.py     # Bodies of the task commands (data functions + printers), shared by the CLI
 │                  #   and the chat's catalog; problems are click.ClickException
 ├── commands.py    # The chat's catalog of every CLI command (a test checks both ways): about
@@ -88,9 +89,11 @@ src/desman/
     │              #   Strategy per attempt number (feedback, rephrase, other model, decompose →
     │              #   combine), audited as attempt_started; Store.decompose() makes the parts
     ├── db.py      # sqlite3 connection, transactions, append-only migrations
-    ├── models.py  # TaskSpec/SubtaskSpec (validated DAG), Subtask read model, Priority
+    ├── models.py  # TaskSpec/SubtaskSpec (validated DAG; retry budgets and `Tools` kept with
+                   #   the task: `none` = no tools for whoever runs it), Subtask, Priority
     ├── store.py   # Store: create_task, claim (atomic, lease token), transition (CAS + audit),
-                   #        record_failure (retry policy applied atomically)
+                   #        record_failure (the task's own retry policy, `TaskSpec.retry`,
+                   #        applied atomically; no caller brings one), reserve_review
                    #        heartbeat/checkpoint, recover_expired, resume_due, sweep,
                    #        submit, task_status, cancel_task, failure propagation
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
@@ -125,7 +128,9 @@ src/desman/
     │              #   key), the human's SearXNG, Tavily. Official APIs only, never pages for people
     ├── sandbox.py # Generated code runs only under bwrap: no network, only /usr (read-only) and
     │              #   the workspace, cleared env, rlimits, timeout; unavailable → nothing runs
-    └── coordinator.py # Loop driving one task; executor/reviewer are pluggable callables
+    └── coordinator.py # Loop driving one task (`run`) or every task (`work`, a worker);
+                       #   executor/reviewer are pluggable callables; a review is reserved first
+                       #   (`Store.reserve_review`), so two workers never pay for one verdict
 └── llm/
     ├── base.py    # Provider interface: Request/Completion, ProviderError subclasses carry a
                    #   FailureKind (the coordinator maps them; agents just let them propagate)

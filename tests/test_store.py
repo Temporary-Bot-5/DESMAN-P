@@ -345,18 +345,16 @@ def test_human_restart_resets_attempts(store: Store) -> None:
 
 
 def test_executor_failures_use_lease_and_transient_budget(store: Store) -> None:
-    store.create_task(spec(sub("a")))
-    policy = RetryPolicy(max_transient=2)
+    store.create_task(spec(sub("a")).model_copy(update={"retry": RetryPolicy(max_transient=2)}))
     first = claim(store)
     with pytest.raises(ValueError, match="lease="):
-        store.record_failure(first.id, S.RUNNING, A.EXECUTOR, FailureKind.TRANSIENT, policy=policy)
+        store.record_failure(first.id, S.RUNNING, A.EXECUTOR, FailureKind.TRANSIENT)
     retried = store.record_failure(
         first.id,
         S.RUNNING,
         A.EXECUTOR,
         FailureKind.TRANSIENT,
         lease=first.lease_token,
-        policy=policy,
     )
     assert (retried.status, retried.attempts) == (S.READY, Attempts(transient=1))
     second = claim(store)
@@ -366,7 +364,6 @@ def test_executor_failures_use_lease_and_transient_budget(store: Store) -> None:
         A.EXECUTOR,
         FailureKind.TRANSIENT,
         lease=second.lease_token,
-        policy=policy,
     )
     assert escalated.status is S.NEEDS_HUMAN
 
@@ -467,13 +464,14 @@ def test_late_heartbeat_before_recovery_still_counts(store: Store, clock: FakeCl
 
 
 def test_subtask_that_keeps_killing_executors_goes_to_human(store: Store, clock: FakeClock) -> None:
-    store.create_task(spec(sub("poison")))
-    policy = RetryPolicy(max_transient=3)
+    store.create_task(
+        spec(sub("poison")).model_copy(update={"retry": RetryPolicy(max_transient=3)})
+    )
     statuses = []
     for _ in range(3):
         claim(store)
         clock.advance(DEFAULT_LEASE_SECONDS + 1)
-        [recovered] = store.recover_expired(policy)
+        [recovered] = store.recover_expired()
         statuses.append(recovered.status)
     assert statuses == [S.READY, S.READY, S.NEEDS_HUMAN]
     assert store.claim("w") is None
@@ -792,18 +790,13 @@ def test_housekeeping_can_be_scoped_to_a_task(store: Store, clock: FakeClock) ->
 
 
 def test_transient_review_failure_keeps_the_artifact_in_review(store: Store) -> None:
-    store.create_task(spec(sub("a")))
+    store.create_task(spec(sub("a")).model_copy(update={"retry": RetryPolicy(max_transient=2)}))
     claimed = claim(store)
     assert claimed.lease_token is not None
     store.submit(claimed.id, claimed.lease_token, {"x": 1})
-    policy = RetryPolicy(max_transient=2)
-    kept = store.record_failure(
-        claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT, policy=policy
-    )
+    kept = store.record_failure(claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT)
     assert (kept.status, kept.attempts) == (S.REVIEW, Attempts(transient=1))
-    escalated = store.record_failure(
-        claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT, policy=policy
-    )
+    escalated = store.record_failure(claimed.id, S.REVIEW, A.REVIEWER, FailureKind.TRANSIENT)
     assert escalated.status is S.NEEDS_HUMAN
 
 

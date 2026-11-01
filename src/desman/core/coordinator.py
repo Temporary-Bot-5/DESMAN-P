@@ -1,11 +1,15 @@
-"""Coordinator: drives one task until the system has nothing left to do on its own.
+"""Coordinator: drives one task until the system has nothing left to do on its own, or works
+on every task as a worker (`desman worker`, ROADMAP 4.1).
 
 The loop per tick:
     1. housekeeping: requeue expired leases, end pauses that are over
-    2. review whatever waits for a verdict (no re-execution after a reviewer crash)
+    2. review whatever waits for a verdict (no re-execution after a reviewer crash), each review
+       reserved first so that another worker does not pay for the same verdict
     3. claim the most urgent ready subtask, execute it, submit the result or record the failure
 
-It stops as soon as the task is no longer ACTIVE (done, failed, cancelled or waiting for the
+Any number of coordinators and workers share one database: claims are atomic, status changes
+compare-and-swap, and each task's retry policy is stored with it (no caller brings its own).
+`run()` stops as soon as the task is no longer ACTIVE (done, failed, cancelled or waiting for the
 operator). Termination is guaranteed: every quality or transient failure spends a bounded budget
 and ends in NEEDS_HUMAN, and blocked dependents are settled immediately. The one open-ended wait
 is a provider pause; by default the coordinator returns instead of sleeping through it.
@@ -32,16 +36,25 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from desman.core import calls, db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.effects import Effects
-from desman.core.models import Subtask, SubtaskSpec
+from desman.core.models import Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
-from desman.core.retry import FailureKind, RetryPolicy, Strategies, Strategy, strategy_for
+from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
-from desman.core.store import DEFAULT_LEASE_SECONDS, StaleStateError, Store
+from desman.core.store import (
+    DEFAULT_LEASE_SECONDS,
+    DEFAULT_REVIEW_SECONDS,
+    StaleStateError,
+    Store,
+)
 from desman.core.tools import Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import ProviderError
 
 S = SubtaskStatus
+
+DEFAULT_POLL_SECONDS = 5.0
+"""How often a coordinator with nothing to do looks again while others hold work (a worker's
+lease is renewed by its heartbeats, so waiting for it to run out would wait far too long)."""
 
 
 class Success(BaseModel):
@@ -148,6 +161,17 @@ class RunResult(BaseModel):
     events: list[str] = Field(default_factory=list)
 
 
+class WorkResult(BaseModel):
+    """What `Coordinator.work()` did before it stopped."""
+
+    ticks: int = 0
+    executed: int = 0
+    """Executions started (whatever came of them)."""
+    reviewed: int = 0
+    """Verdicts and review failures recorded."""
+    events: list[str] = Field(default_factory=list)
+
+
 class Coordinator:
     def __init__(
         self,
@@ -156,8 +180,8 @@ class Coordinator:
         reviewer: Reviewer,
         *,
         owner: str = "coordinator",
-        policy: RetryPolicy | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        review_seconds: int = DEFAULT_REVIEW_SECONDS,
         context_budget_tokens: int = DEFAULT_BUDGET_TOKENS,
         workspaces: Path | None = None,
         tools: Registry | None = None,
@@ -167,21 +191,25 @@ class Coordinator:
         providers: tuple[str, str | None] | None = None,
         decomposer: Decomposer | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        poll_seconds: float = DEFAULT_POLL_SECONDS,
         watch: Callable[[], None] | None = None,
     ) -> None:
         self.store = store
         self.executor = executor
         self.reviewer = reviewer
         self.owner = owner
-        self.policy = policy
+        """Lease and review reservations are taken under this name: unique per process when
+        several share a database (`core.owner.current_owner`)."""
         self.lease_seconds = lease_seconds
+        self.review_seconds = review_seconds
         self.context_budget_tokens = context_budget_tokens
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
         self.tools = tools
         """The registry executors may call into; the built-in tools by default."""
         self.access = access
         """What the executor may use: its tool policy within the human's permissions. By
-        default the shipped policy with every switch off (the workspace tools only)."""
+        default the shipped policy with every switch off (the workspace tools only). A task
+        made with `Tools.NONE` gets no tools at all, whatever this says."""
         self.abandoned = abandoned
         """Tells whether a lease owner is certainly gone, so its work is taken back at once
         instead of after the lease expires (see core/owner.py)."""
@@ -195,6 +223,9 @@ class Coordinator:
         self.decomposer = decomposer
         """Without one, subtasks are never split."""
         self.sleep = sleep
+        self.poll_seconds = poll_seconds
+        self.executed = 0
+        self.reviewed = 0
         self.watch = watch
         """Called whenever the task may look different (housekeeping, a claim, an execution, a
         review), so progress can be shown while `run()` works. It reads the state itself; the
@@ -218,12 +249,14 @@ class Coordinator:
             result.status = self.store.task_status(task_id)
             if progressed or result.status is not TaskStatus.ACTIVE:
                 continue
-            # Nothing could move. Either someone else's lease is still running (another worker,
-            # or our own previous process that crashed) or only paused work is left.
-            lease_until = self._earliest(task_id, "running", "lease_until")
+            # Nothing could move. Either someone else holds work (a worker's lease or review, or
+            # our own previous process that crashed) or only paused work is left.
+            held_until = self._held_until(task_id)
             pause_until = self._earliest(task_id, "paused", "paused_until")
-            if lease_until is not None and (pause_until is None or lease_until <= pause_until):
-                self.sleep(self._seconds_until(lease_until) + 0.001)  # bounded by the lease
+            if held_until is not None and (pause_until is None or held_until <= pause_until):
+                # Look again soon (a live holder finishes long before its lease would run out),
+                # at the latest just after the hold ends.
+                self.sleep(min(self.poll_seconds, self._seconds_until(held_until) + 0.001))
                 continue
             if pause_until is None:
                 raise RuntimeError(f"task {task_id} is active but nothing can move")  # a bug
@@ -233,12 +266,39 @@ class Coordinator:
             self.sleep(self._seconds_until(pause_until))
         return result
 
-    def tick(self, task_id: str, events: list[str]) -> bool:
-        """One pass; returns whether anything moved."""
-        # Only this task: `policy` belongs to this run, other tasks may have their own.
-        recovered, resumed = self.store.sweep(
-            self.policy, task_id=task_id, abandoned=self.abandoned
-        )
+    def work(
+        self,
+        *,
+        until_idle: bool = False,
+        max_ticks: int | None = None,
+        on_tick: Callable[[WorkResult], None] | None = None,
+    ) -> WorkResult:
+        """Work on every task, as a worker: until interrupted, or with `until_idle` until there
+        is nothing to do and nobody else holds work (paused work is waited for only without it).
+        `on_tick` sees the result so far after every tick that moved something."""
+        result = WorkResult()
+        while max_ticks is None or result.ticks < max_ticks:
+            result.ticks += 1
+            executed, reviewed = self.executed, self.reviewed
+            progressed = self.tick(None, result.events)
+            result.executed += self.executed - executed
+            result.reviewed += self.reviewed - reviewed
+            if progressed:
+                if on_tick is not None:
+                    on_tick(result)
+                continue
+            if until_idle and self._held_until(None) is None:
+                break
+            pause_until = self._earliest(None, "paused", "paused_until")
+            wait = self.poll_seconds
+            if pause_until is not None:
+                wait = min(wait, self._seconds_until(pause_until) + 0.001)
+            self.sleep(wait)
+        return result
+
+    def tick(self, task_id: str | None, events: list[str]) -> bool:
+        """One pass over the task (or every task, for None); returns whether anything moved."""
+        recovered, resumed = self.store.sweep(task_id=task_id, abandoned=self.abandoned)
         events += [f"recovered {s.id}" for s in recovered]
         events += [f"resumed {s.id}" for s in resumed]
         progressed = bool(recovered or resumed)
@@ -246,12 +306,20 @@ class Coordinator:
             self._changed()
 
         for subtask in self.store.pending_reviews(task_id=task_id):
-            progressed |= self._review(subtask, events)
+            if not self.store.reserve_review(
+                subtask.id, self.owner, seconds=self.review_seconds, abandoned=self.abandoned
+            ):
+                continue  # another worker is on it, or it was decided meanwhile
+            try:
+                progressed |= self._review(subtask, events)
+            finally:
+                self.store.release_review(subtask.id, self.owner)  # a no-op after a verdict
             self._changed()
 
         claimed = self.store.claim(self.owner, task_id=task_id, lease_seconds=self.lease_seconds)
         if claimed is not None:
             self._changed()
+            self.executed += 1
             self._execute(claimed, events)
             self._changed()
             progressed = True
@@ -345,7 +413,6 @@ class Coordinator:
                     lease=lease,
                     reason=outcome.reason,
                     paused_until=outcome.paused_until,
-                    policy=self.policy,
                     action="execution_failed",
                     details=(
                         None
@@ -366,10 +433,11 @@ class Coordinator:
         def record(action: str, details: dict[str, Any]) -> None:
             self.store.note(subtask.id, Actor.EXECUTOR, action, details)
 
+        granted = self.store.tools(subtask.task_id) is Tools.GRANTED
         return Toolbox(
             Workspace(self.workspaces, subtask.task_id),
-            self.tools,
-            access=self.access,
+            self.tools if granted else Registry(),
+            access=self.access if granted else None,
             record=record,
             guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
             journal=journal,
@@ -443,7 +511,6 @@ class Coordinator:
                     review.kind,
                     reason=review.reason,
                     paused_until=review.paused_until,
-                    policy=self.policy,
                     action="review_failed",
                 )
             elif review.verdict is Verdict.ACCEPT:
@@ -463,7 +530,6 @@ class Coordinator:
                     Actor.REVIEWER,
                     FailureKind.QUALITY,
                     reason=review.feedback or "rejected by reviewer",
-                    policy=self.policy,
                     details=verdict,
                     action="verdict",
                 )
@@ -479,6 +545,7 @@ class Coordinator:
                 )
         except StaleStateError:
             return False  # another reviewer got there first
+        self.reviewed += 1
         events.append(f"reviewed {subtask.id} -> {moved.status}")
         return True
 
@@ -508,10 +575,24 @@ class Coordinator:
         avoid_other = other is not None and other in unfit
         return {"avoid_main": main in unfit and not avoid_other, "avoid_other": avoid_other}
 
-    def _earliest(self, task_id: str, status: str, column: str) -> str | None:
+    def _earliest(self, task_id: str | None, status: str, column: str) -> str | None:
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         row = self.store.conn.execute(
-            f"SELECT MIN({column}) FROM subtasks WHERE task_id = ? AND status = ?",
-            (task_id, status),
+            f"SELECT MIN({column}) FROM subtasks WHERE status = ? {scope}",
+            (status, *params),
+        ).fetchone()
+        moment: str | None = row[0]
+        return moment
+
+    def _held_until(self, task_id: str | None) -> str | None:
+        """When the earliest hold of someone else ends: a running lease or a review reserved by
+        another owner (ours would be taken over, not waited for). None if nobody holds work."""
+        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
+        row = self.store.conn.execute(
+            f"""SELECT MIN(CASE WHEN status = 'running' THEN lease_until ELSE review_until END)
+                FROM subtasks
+                WHERE (status = 'running' OR (status = 'review' AND review_owner != ?)) {scope}""",
+            (self.owner, *params),
         ).fetchone()
         moment: str | None = row[0]
         return moment

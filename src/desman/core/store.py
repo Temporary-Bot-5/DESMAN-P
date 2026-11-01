@@ -22,7 +22,7 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
-from desman.core.models import Subtask, SubtaskSpec, TaskSpec
+from desman.core.models import Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.states import transition as check_transition
@@ -37,6 +37,8 @@ Clock = Callable[[], datetime]
 DEFAULT_LEASE_SECONDS = 300
 DEFAULT_PAUSE_SECONDS = 60
 """Pause used when a provider hits its limits without saying when they reset."""
+DEFAULT_REVIEW_SECONDS = 120
+"""How long a reservation of a review lasts (`reserve_review`): a review is one model call."""
 
 
 class StaleStateError(RuntimeError):
@@ -91,9 +93,19 @@ class Store:
         with db.transaction(self.conn):
             now = self._now()  # after the lock: creation order matches commit order
             self.conn.execute(
-                "INSERT INTO tasks (id, goal, priority, created_at, session_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (task_id, spec.goal, spec.priority, now, session_id),
+                """INSERT INTO tasks (id, goal, priority, created_at, session_id, max_attempts,
+                                      max_transient, tools)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    spec.goal,
+                    spec.priority,
+                    now,
+                    session_id,
+                    spec.retry.max_attempts,
+                    spec.retry.max_transient,
+                    spec.tools.value,
+                ),
             )
             for seq, (subtask_id, sub) in enumerate(zip(ids, spec.subtasks, strict=True)):
                 self.conn.execute(
@@ -126,6 +138,8 @@ class Store:
                     **({"session": session_id} if session_id is not None else {}),
                     "goal": spec.goal,
                     "priority": spec.priority,
+                    "retry": spec.retry.model_dump(),
+                    "tools": spec.tools.value,
                     "subtasks": ids,
                 },
             )
@@ -185,6 +199,22 @@ class Store:
             raise AmbiguousIdError(f"{kind} id {prefix!r} is ambiguous: {shown}")
         row: sqlite3.Row = rows[0]
         return row
+
+    def policy(self, task_id: str) -> RetryPolicy:
+        """The task's own retry budgets (`TaskSpec.retry`)."""
+        row = self.conn.execute(
+            "SELECT max_attempts, max_transient FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"task {task_id} not found")
+        return RetryPolicy(max_attempts=row["max_attempts"], max_transient=row["max_transient"])
+
+    def tools(self, task_id: str) -> Tools:
+        """What the task's executor may use (`TaskSpec.tools`)."""
+        row = self.conn.execute("SELECT tools FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if row is None:
+            raise NotFoundError(f"task {task_id} not found")
+        return Tools(row["tools"])
 
     def task_status(self, task_id: str) -> TaskStatus:
         rows = self.conn.execute(
@@ -357,11 +387,11 @@ class Store:
         lease: str | None = None,
         reason: str | None = None,
         paused_until: str | None = None,
-        policy: RetryPolicy | None = None,
         action: str = "failure",
         details: dict[str, Any] | None = None,
     ) -> Subtask:
-        """Apply the retry policy to a failed attempt: retry, pause or escalate to the operator.
+        """Apply the task's retry policy to a failed attempt: retry, pause or escalate to the
+        operator.
 
         Counters are read and written in one transaction, so concurrent failures cannot lose a count.
         A transient failure during REVIEW is the reviewer's, not the work's: the subtask stays in
@@ -369,7 +399,7 @@ class Store:
         """
         with db.transaction(self.conn):
             current = self.get_subtask(subtask_id)
-            decision = decide(kind, current.attempts, policy)
+            decision = decide(kind, current.attempts, self.policy(current.task_id))
             if src is S.REVIEW and kind is FailureKind.TRANSIENT and decision.status is S.READY:
                 return self._count_review_interruption(
                     current,
@@ -408,7 +438,8 @@ class Store:
                 f"subtask {current.id} is {current.status}, expected {S.REVIEW} (review interrupted)"
             )
         row = self.conn.execute(
-            """UPDATE subtasks SET attempts_quality = ?, attempts_transient = ?, updated_at = ?
+            """UPDATE subtasks SET attempts_quality = ?, attempts_transient = ?, updated_at = ?,
+                                  review_owner = NULL, review_until = NULL
                WHERE id = ? AND status = 'review' RETURNING *""",
             (attempts.quality, attempts.transient, self._now(), current.id),
         ).fetchone()
@@ -662,7 +693,6 @@ class Store:
 
     def recover_expired(
         self,
-        policy: RetryPolicy | None = None,
         *,
         task_id: str | None = None,
         abandoned: Callable[[str], bool] | None = None,
@@ -672,9 +702,9 @@ class Store:
 
         Each recovery counts as a transient failure, so a subtask that keeps killing its executor
         ends up with the operator instead of looping forever. The checkpoint is kept, so the next
-        executor resumes from it. `policy` is charged to every subtask recovered, so pass
-        `task_id` when the policy belongs to one task's run. `abandoned` must only answer True
-        when it is certain: a live executor that loses its lease has its work discarded.
+        executor resumes from it. Each task's own policy is charged, so any worker may recover
+        any task. `abandoned` must only answer True when it is certain: a live executor that
+        loses its lease has its work discarded.
         """
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         recovered: list[Subtask] = []
@@ -696,7 +726,7 @@ class Store:
                 )
                 if not (expired or gone):
                     continue
-                decision = decide(FailureKind.TRANSIENT, stuck.attempts, policy)
+                decision = decide(FailureKind.TRANSIENT, stuck.attempts, self.policy(stuck.task_id))
                 why = (
                     f"lease expired at {stuck.lease_until}"
                     if expired
@@ -757,7 +787,8 @@ class Store:
 
         Review needs no lease: it only reads the submitted result, and the verdict is a
         compare-and-swap from REVIEW. If a reviewer dies, the subtask simply stays here and is
-        reviewed again without re-running the work.
+        reviewed again without re-running the work. A reviewer reserves one first
+        (`reserve_review`), so another worker does not spend a model call on the same verdict.
         """
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         rows = self.conn.execute(
@@ -767,15 +798,60 @@ class Store:
         ).fetchall()
         return [Subtask.from_row(r) for r in rows]
 
+    def reserve_review(
+        self,
+        subtask_id: str,
+        owner: str,
+        *,
+        seconds: int = DEFAULT_REVIEW_SECONDS,
+        abandoned: Callable[[str], bool] | None = None,
+    ) -> bool:
+        """Reserve the review of a subtask in REVIEW for `owner`; False if it left REVIEW or
+        another reviewer holds it. A reservation that ran out, or whose owner `abandoned` says
+        is certainly gone, is taken over. Not a status change, so not audited (like a heartbeat):
+        the verdict is. It ends with the verdict, or with `release_review`."""
+        with db.transaction(self.conn):
+            now = self._now()
+            row = self.conn.execute(
+                "SELECT status, review_owner, review_until FROM subtasks WHERE id = ?",
+                (subtask_id,),
+            ).fetchone()
+            if row is None or row["status"] != S.REVIEW.value:
+                return False
+            holder = row["review_owner"]
+            if (
+                holder is not None
+                and holder != owner
+                and row["review_until"] >= now
+                and not (abandoned is not None and abandoned(holder))
+            ):
+                return False
+            until = db.to_iso(self.clock() + timedelta(seconds=seconds))
+            self.conn.execute(
+                """UPDATE subtasks SET review_owner = ?, review_until = ?
+                   WHERE id = ? AND status = 'review'""",
+                (owner, until, subtask_id),
+            )
+        return True
+
+    def release_review(self, subtask_id: str, owner: str) -> None:
+        """End `owner`'s reservation of a review it did not finish (e.g. interrupted)."""
+        with db.transaction(self.conn):
+            self.conn.execute(
+                """UPDATE subtasks SET review_owner = NULL, review_until = NULL
+                   WHERE id = ? AND review_owner = ?""",
+                (subtask_id, owner),
+            )
+
     def sweep(
         self,
-        policy: RetryPolicy | None = None,
         *,
         task_id: str | None = None,
         abandoned: Callable[[str], bool] | None = None,
     ) -> tuple[list[Subtask], list[Subtask]]:
-        """Scheduler housekeeping: (requeued or escalated expired leases, resumed pauses)."""
-        recovered = self.recover_expired(policy, task_id=task_id, abandoned=abandoned)
+        """Scheduler housekeeping: (requeued or escalated expired leases, resumed pauses). Each
+        task's own policy applies, so a sweep of every task (`task_id` None) is fair to all."""
+        recovered = self.recover_expired(task_id=task_id, abandoned=abandoned)
         return recovered, self.resume_due(task_id=task_id)
 
     # ── Side effects (core/effects.py) ───────────────────────────────────────
@@ -934,6 +1010,8 @@ class Store:
         params: list[Any] = [dst.value, now]
         if src is S.RUNNING:
             sets += ["lease_owner = NULL", "lease_token = NULL", "lease_until = NULL"]
+        if src is S.REVIEW:
+            sets += ["review_owner = NULL", "review_until = NULL"]
         if dst is S.PAUSED:
             if paused_until is None:
                 paused_until = db.to_iso(self.clock() + timedelta(seconds=DEFAULT_PAUSE_SECONDS))
