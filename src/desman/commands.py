@@ -99,6 +99,8 @@ class Context:
     """(title, goal): plan a task of the session and run it."""
     resume_task: Callable[[str], None]
     """(task id): run the task further."""
+    session_id: Callable[[], str | None] = lambda: None
+    """The chat's session now: for the operator's journal."""
 
     def config(self) -> Config:
         try:
@@ -507,7 +509,9 @@ def _protected_approve(ctx: Context, args: ProtectedApproveArgs) -> Outcome | Pr
     ]
 
     def apply() -> Outcome:
-        done = protected_cli.approve_now(ctx.store.conn, args.note, expected=changes)
+        done = protected_cli.approve_now(
+            ctx.store.conn, args.note, expected=changes, session_id=ctx.session_id()
+        )
         protected_cli.print_approved(done)
         return Outcome({"approved": [c.model_dump(mode="json") for c in done]})
 

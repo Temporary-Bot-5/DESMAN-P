@@ -284,4 +284,5 @@ def _coordinator(
         access=access,
         tools=tools,
         watch=watch,
+        gate=functools.partial(guard, store),  # a running worker stops at a later change too
     )

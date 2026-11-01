@@ -300,6 +300,7 @@ class Chat:
                 NewTask(type="task", title=title, goal=goal), config, models, interlocutor
             ),
             resume_task=lambda task_id: self._resume(task_id, config, models, interlocutor),
+            session_id=lambda: self.session_id,
         )
         try:
             made = entry.handler(context, args)
@@ -388,8 +389,7 @@ class Chat:
             return None
         try:
             runs.guard(self.store)
-        except click.ClickException:  # told on its own (`_tell_blocked`): no summary for now
-            self._gave_up[self.session_id] = history.messages[-1].seq
+        except click.ClickException:  # told on its own (`_tell_blocked`); tried again later
             return None
         task_id = self.store.create_task(
             compaction.spec(history, part),
@@ -527,6 +527,12 @@ class Chat:
                     http=self._http,
                     watch=progress.refresh,
                 ).run(task_id)
+        except click.ClickException as e:  # protected files changed while it ran (5.3)
+            ui.error(e.message)
+            self._event(
+                t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
+            )
+            return
         except KeyboardInterrupt:
             self._event(
                 t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id

@@ -347,6 +347,45 @@ def test_a_coordinator_cannot_be_put_together_while_blocked(here: Package) -> No
         runs.summarizer(store, runs.Models(FakeLLM(), None))
 
 
+def test_a_running_worker_stops_at_a_later_change(here: Package) -> None:
+    """A change made while a worker runs stops it before its next step, holding nothing: the
+    rest of the work waits for the approval."""
+    import functools
+
+    from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.states import SubtaskStatus
+    from desman.core.store import Store
+
+    store = Store(db.open_db(":memory:"))
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="first", acceptance_criteria="ok"),
+                SubtaskSpec(description="second", acceptance_criteria="ok"),
+            ],
+        )
+    )
+
+    def execute(work: Work) -> Success:
+        here.edit("agents.py", b"REVIEW = 'changed while running'\n")
+        return Success(content={"done": work.subtask.description})
+
+    coordinator = Coordinator(
+        store,
+        execute,
+        lambda subtask, artifact: Review(verdict=Verdict.ACCEPT),
+        gate=functools.partial(runs.guard, store),
+    )
+    with pytest.raises(Exception, match="Protected files changed"):
+        coordinator.work(until_idle=True)
+    statuses = sorted(s.status for s in store.list_subtasks(task_id))
+    assert coordinator.executed == 1
+    assert SubtaskStatus.READY in statuses  # the second was never claimed
+    assert all(s.lease_owner is None for s in store.list_subtasks(task_id))
+
+
 # ── The chat ─────────────────────────────────────────────────────────────────
 
 
@@ -392,6 +431,8 @@ def test_the_chat_approves_only_after_the_window(fake: FakeLLM, here: Package) -
     assert "Approved 1 change: tasks run again." in accepted.output
     conn = db.open_db()
     assert protected.changes(conn) == []
+    [approval] = [e for e in operator.entries(conn) if e.action == "operator_protected_approved"]
+    assert approval.session_id is not None  # the session the person said yes in
     actions = [e.action for e in operator.entries(conn)]
     assert actions == [
         "operator_declined",
