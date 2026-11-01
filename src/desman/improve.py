@@ -706,7 +706,7 @@ def write_file(conn: sqlite3.Connection, proposal: Proposal) -> Path | None:
         header.append(f"# Setting {item['setting']}: {item['old']} -> {item['new']}")
     if proposal.details.get("command"):
         header.append(f"# The settings change with: {proposal.details['command']}")
-    header.append("# Nothing is applied by DESMAN: this is for a person to read.")
+    header.append(f"# Only the person applies it: desman proposals apply {proposal.id}")
     content = "\n".join(header) + "\n\n" + proposal.diff
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")

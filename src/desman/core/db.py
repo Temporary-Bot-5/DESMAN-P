@@ -465,6 +465,35 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         WHEN NOT EXISTS (SELECT 1 FROM sessions WHERE id = OLD.session_id AND temporary = 1)
         BEGIN SELECT RAISE(ABORT, 'messages are append-only'); END;
     """,
+    # 25 — a proposal applied and reverted by the person (ROADMAP 5.6, desman/applying.py):
+    # each time, the commit made (none when only settings changed), the HEAD it was made on
+    # and its branch, and in `details_json` the files and the settings changed. Applied and
+    # reverted in turn, starting with applied, only a proposed change; never changed or removed
+    f"""
+    CREATE TABLE applications (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        proposal_id INTEGER NOT NULL REFERENCES proposals(id),
+        created_at  TEXT NOT NULL DEFAULT {_NOW_SQL},
+        action      TEXT NOT NULL CHECK (action IN ('applied', 'reverted')),
+        git_commit  TEXT,
+        base_commit TEXT CHECK ((base_commit IS NULL) = (git_commit IS NULL)),
+        branch      TEXT CHECK (branch IS NULL OR git_commit IS NOT NULL),
+        details_json TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details_json))
+    ) STRICT;
+    CREATE INDEX applications_proposal ON applications(proposal_id);
+    CREATE TRIGGER applications_in_turn BEFORE INSERT ON applications
+        WHEN NEW.action = COALESCE((SELECT action FROM applications
+                                    WHERE proposal_id = NEW.proposal_id
+                                    ORDER BY id DESC LIMIT 1), 'reverted')
+        BEGIN SELECT RAISE(ABORT, 'a proposal is applied and reverted in turn'); END;
+    CREATE TRIGGER applications_proposed_only BEFORE INSERT ON applications
+        WHEN (SELECT status FROM proposals WHERE id = NEW.proposal_id) IS NOT 'proposed'
+        BEGIN SELECT RAISE(ABORT, 'only a proposed change is applied'); END;
+    CREATE TRIGGER applications_no_update BEFORE UPDATE ON applications
+        BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
+    CREATE TRIGGER applications_no_delete BEFORE DELETE ON applications
+        BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

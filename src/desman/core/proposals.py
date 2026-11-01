@@ -6,7 +6,8 @@ a diff). Its proposal is a row from the moment the task is created: `analysing` 
 runs, then settled once, when its result is read: `proposed` (with the diff), `nothing` (the
 analyst found nothing worth changing) or `unusable` (the task ended without a result fit to
 use, and `reason` says why). A settled proposal never changes (a trigger refuses it), so the
-diff the person reads is the one that was proposed. Nothing here applies anything.
+diff the person reads is the one that was proposed. Applying it is the person's
+(`desman.applying`); here it is only recorded.
 
 The task is marked in its `task_created` entry (`PURPOSE`), so its own failures are never
 evidence for the next analysis. The task and its row are written in one transaction, which
@@ -23,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from desman.core import db
+from desman.core import db, operator
 from desman.core.models import TaskSpec
 from desman.core.store import Store
 
@@ -329,3 +330,88 @@ def evaluations(
         )
         for r in rows
     ]
+
+
+# ── Applying and reverting (ROADMAP 5.6) ─────────────────────────────────────
+
+
+class Application(BaseModel):
+    """A proposal applied or reverted by the person (`desman.applying`), as it was recorded."""
+
+    id: int
+    proposal_id: int
+    created_at: str
+    action: str
+    """applied, or reverted (in turn, starting with applied)."""
+    commit: str | None
+    """The commit made; None when only settings changed."""
+    base: str | None
+    """The HEAD it was made on."""
+    branch: str | None
+    """The branch the checkout was on (None: a detached HEAD, or no commit)."""
+    details: dict[str, Any]
+    """`files` the commit changed; `settings` changed ({setting, old, new}); `left`: settings
+    a revert left as they were, because the person had changed them since."""
+
+
+def record_application(
+    conn: sqlite3.Connection,
+    proposal_id: int,
+    action: str,
+    *,
+    commit: str | None,
+    base: str | None,
+    branch: str | None,
+    details: dict[str, Any],
+    session_id: str | None = None,
+) -> Application:
+    """Record what was done, with its entry in the operator's journal, in one transaction. The
+    database refuses it unless the proposal is proposed and `action` comes in turn."""
+    with db.transaction(conn):
+        cursor = conn.execute(
+            """INSERT INTO applications (proposal_id, action, git_commit, base_commit, branch,
+                                         details_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                proposal_id,
+                action,
+                commit,
+                base,
+                branch,
+                json.dumps(details, ensure_ascii=False),
+            ),
+        )
+        operator.write(
+            conn,
+            f"operator_proposal_{action}",
+            {"proposal": proposal_id, "commit": commit, "settings": details.get("settings", [])},
+            session_id=session_id,
+        )
+    found = applications(conn, proposal_id)
+    assert found and found[0].id == cursor.lastrowid
+    return found[0]
+
+
+def applications(conn: sqlite3.Connection, proposal_id: int) -> list[Application]:
+    """What was done with the proposal, newest first."""
+    rows = conn.execute(
+        "SELECT * FROM applications WHERE proposal_id = ? ORDER BY id DESC", (proposal_id,)
+    ).fetchall()
+    return [
+        Application(
+            id=r["id"],
+            proposal_id=r["proposal_id"],
+            created_at=r["created_at"],
+            action=r["action"],
+            commit=r["git_commit"],
+            base=r["base_commit"],
+            branch=r["branch"],
+            details=json.loads(r["details_json"]),
+        )
+        for r in rows
+    ]
+
+
+def last_application(conn: sqlite3.Connection, proposal_id: int) -> Application | None:
+    found = applications(conn, proposal_id)
+    return found[0] if found else None

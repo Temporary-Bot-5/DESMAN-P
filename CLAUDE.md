@@ -64,8 +64,7 @@ src/desman/
 ├── improve.py     # Improvement Analyst (5.4): an ordinary task without tools reads failures,
 │                  #   names TARGETS (planner prompts in plain constants; never a protected file)
 │                  #   with new texts, code builds the diff; or SETTINGS (`Config.tuning`),
-│                  #   checked against what it was shown, given as a `desman tuning` command.
-│                  #   Applies nothing
+│                  #   checked against what it was shown. Applies nothing (applying.py)
 ├── bench.py       # The benchmark (5.5): fixed goals planned and worked to the end on a DB of
 │                  #   its own, no tools; `python -m desman.bench` reports a Result; compare()
 │                  #   says which run went better. Protected, like evaluation.py
@@ -74,7 +73,12 @@ src/desman/
 │                  #   to change only the targets' texts; recorded once in `evaluations`
 ├── tuning_cli.py  # `tuning`: the model each role asks first, the limits of the workflow
 │                  #   (`runs.TUNING_DEFAULTS` when unset); set by the person only
-├── proposals_cli.py # `proposals [list]|show N|evaluate N [--real]` (and `analyze` in cli.py)
+├── proposals_cli.py # `proposals [list]|show N|evaluate N [--real]|apply N|revert N` (and
+│                  #   `analyze` in cli.py)
+├── applying.py    # `proposals apply|revert` (5.6): only the person's command; the diff becomes a
+│                  #   git commit built by code in a worktree (as evaluation builds it), then the
+│                  #   checkout fast-forwarded; settings into `tuning`; revert = `git revert` the
+│                  #   same way. Recorded in `applications` (in turn). Protected
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation

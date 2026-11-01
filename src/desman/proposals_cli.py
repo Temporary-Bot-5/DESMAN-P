@@ -3,9 +3,10 @@ the benchmark (5.5).
 
 `list` and `show` read; `analyze` (in `desman.cli`, next to `run`, whose way of driving a task
 it shares) runs an analysis task; `evaluate` runs the benchmark on the current version and on
-the proposed one (`desman.evaluation`). Every command first settles the analyses whose task has
-ended since (`improve.settle`), so one finished by `resume` or a worker shows up too. Nothing
-here applies a proposal. The chat calls the same functions.
+the proposed one (`desman.evaluation`); `apply` and `revert` are the person's (5.6,
+`desman.applying`): a git commit of the checkout, and the settings. Every command first settles
+the analyses whose task has ended since (`improve.settle`), so one finished by `resume` or a
+worker shows up too. The chat calls the same functions.
 """
 
 from __future__ import annotations
@@ -19,11 +20,11 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import actions, bench, evaluation, improve, ui
-from desman.config import Config, ConfigError, open_config
-from desman.config_cli import json_option, parse_window
+from desman import actions, applying, bench, evaluation, improve, ui
+from desman.config import Config, ConfigError, ConfigManager, open_config
+from desman.config_cli import json_option, load_config, parse_window
 from desman.core import calls, db, proposals
-from desman.core.proposals import Evaluation, Proposal, Status
+from desman.core.proposals import Application, Evaluation, Proposal, Status
 from desman.core.store import Store
 from desman.i18n import t, tn
 from desman.llm import router
@@ -34,7 +35,7 @@ from desman.protected_cli import db_option
 @click.pass_context
 def proposals_group(ctx: click.Context) -> None:
     """Changes to DESMAN's prompts and workflow that the Improvement Analyst proposed from
-    the failures. Nothing is applied."""
+    the failures. Only you apply one (apply), and you can take it back (revert)."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(list_command)
 
@@ -50,7 +51,7 @@ def list_command(limit: int = 20, db_path: Path | None = None, as_json: bool = F
         improve.settle(store)
         found = proposals.listing(store.conn, limit)
         if as_json:
-            click.echo(json.dumps(listing_json(found), ensure_ascii=False, indent=2))
+            click.echo(json.dumps(listing_json(store, found), ensure_ascii=False, indent=2))
             return
         print_listing(store, found)
     finally:
@@ -117,6 +118,140 @@ def evaluate_command(
         print_evaluation(done)
     finally:
         store.conn.close()
+
+
+@proposals_group.command("apply")
+@click.argument("proposal", type=click.IntRange(min=1))
+@db_option
+@json_option
+def apply_command(proposal: int, db_path: Path | None = None, as_json: bool = False) -> None:
+    """Apply PROPOSAL: its diff becomes a git commit of the checkout DESMAN runs from, on the
+    branch it is on, and its settings are changed. Nothing else is touched; if you have
+    uncommitted changes in those files, nothing is done. Take it back with `revert`."""
+    _apply_or_revert(proposal, "applied", db_path, as_json)
+
+
+@proposals_group.command("revert")
+@click.argument("proposal", type=click.IntRange(min=1))
+@db_option
+@json_option
+def revert_command(proposal: int, db_path: Path | None = None, as_json: bool = False) -> None:
+    """Take back PROPOSAL, applied before: a commit reverting its commit, and its settings as
+    they were (those you changed since are left as they are)."""
+    _apply_or_revert(proposal, "reverted", db_path, as_json)
+
+
+def _apply_or_revert(
+    proposal: int, action: applying.Action, db_path: Path | None, as_json: bool
+) -> None:
+    manager = load_config()
+    store = actions.open_existing(db_path)
+    try:
+        improve.settle(store)
+        found = find(store, proposal)
+        plan = plan_now(store, found, manager, action)
+        if not as_json:
+            for line in cautions(store, plan):
+                ui.warn(line)
+        done = carry_out_now(store, plan, manager)
+        if as_json:
+            click.echo(json.dumps(application_json(done), ensure_ascii=False, indent=2))
+            return
+        print_application(done)
+    finally:
+        store.conn.close()
+
+
+def plan_now(
+    store: Store, proposal: Proposal, manager: ConfigManager, action: applying.Action
+) -> applying.Plan:
+    """What applying or reverting `proposal` would do (`applying.plan_apply`/`plan_revert`)."""
+    try:
+        tuning = manager.load().tuning
+    except ConfigError as e:
+        raise click.ClickException(str(e)) from e
+    plan = applying.plan_apply if action == "applied" else applying.plan_revert
+    try:
+        return plan(store.conn, proposal, tuning)
+    except applying.ApplyError as e:
+        raise _refused(proposal.id, action, e) from e
+
+
+def carry_out_now(
+    store: Store, plan: applying.Plan, manager: ConfigManager, session_id: str | None = None
+) -> Application:
+    try:
+        return applying.carry_out(store.conn, plan, manager, session_id=session_id)
+    except applying.ApplyError as e:
+        raise _refused(plan.proposal.id, plan.action, e) from e
+
+
+def _refused(proposal_id: int, action: applying.Action, e: Exception) -> click.ClickException:
+    if action == "applied":
+        return click.ClickException(
+            t("Cannot apply proposal {id}: {reason}", id=proposal_id, reason=e)
+        )
+    return click.ClickException(
+        t("Cannot revert proposal {id}: {reason}", id=proposal_id, reason=e)
+    )
+
+
+def plan_lines(plan: applying.Plan) -> list[str]:
+    """What the plan does, for the person (the chat's window)."""
+    p = plan.proposal
+    lines = [
+        t("Apply proposal {id}:", id=p.id)
+        if plan.action == "applied"
+        else t("Revert proposal {id}:", id=p.id)
+    ]
+    if plan.repo is not None:
+        files = ", ".join(plan.files)
+        if plan.action == "applied" and plan.branch is not None:
+            lines.append(
+                t("a commit changing {files} on branch {branch}", files=files, branch=plan.branch)
+            )
+        elif plan.action == "applied":
+            lines.append(t("a commit changing {files} on the detached HEAD", files=files))
+        else:
+            assert plan.last is not None and plan.last.commit is not None
+            lines.append(
+                t(
+                    "a commit reverting {commit} ({files}) on {branch}",
+                    commit=plan.last.commit[:12],
+                    files=files,
+                    branch=plan.branch or "HEAD",
+                )
+            )
+        lines.append(t("in the checkout at {path}", path=plan.repo))
+    for item in plan.settings:
+        lines.append(f"{item['setting']}: {_value(item['old'])} → {_value(item['new'])}")
+    if plan.left:
+        lines.append(t("Left as you changed them since: {settings}", settings=", ".join(plan.left)))
+    return lines
+
+
+def cautions(store: Store, plan: applying.Plan) -> list[str]:
+    """What the person should know before applying: how the proposal did on the benchmark, and
+    that running processes keep the prompts they loaded."""
+    found = []
+    if plan.action == "applied":
+        done = proposals.evaluations(store.conn, plan.proposal.id)
+        if not done:
+            found.append(
+                t(
+                    "Proposal {id} was not evaluated: desman proposals evaluate {id}",
+                    id=plan.proposal.id,
+                )
+            )
+        elif done[0].verdict in ("worse", "failed"):
+            found.append(
+                t("Its last evaluation: {verdict}.", verdict=verdict_label(done[0].verdict))
+            )
+    if plan.repo is not None:
+        found.append(
+            t("Workers and chats already running keep the old prompts until they start again.")
+        )
+    return found
 
 
 def evaluate_now(
@@ -264,7 +399,11 @@ def print_listing(store: Store, found: list[Proposal]) -> None:
     for p in found:
         when = db.parse_iso(p.created_at).astimezone().strftime("%Y-%m-%d %H:%M")
         what = ", ".join(targets(p)) or actions.one_line(p.summary or p.reason or "", 70)
-        ui.out(Text(f"{p.id:>4}  {when}  {status_label(p.status)}  {what}".rstrip()))
+        state = status_label(p.status)
+        last = proposals.last_application(store.conn, p.id)
+        if last is not None:
+            state += " · " + (t("applied") if last.action == "applied" else t("reverted"))
+        ui.out(Text(f"{p.id:>4}  {when}  {state}  {what}".rstrip()))
     ui.note(t("See one: desman proposals show NUMBER"))
 
 
@@ -308,7 +447,6 @@ def print_proposal(store: Store, p: Proposal) -> None:
         ui.note(tn(len(settings), "{n} change to a setting:", "{n} changes to settings:"))
         for item in settings:
             ui.out(Text(f"  {item['setting']}: {_value(item['old'])} → {_value(item['new'])}"))
-        ui.note(t("Make it yourself if you agree: {command}", command=p.details["command"]))
     found = proposals.evaluations(store.conn, p.id)
     if found:
         print_evaluation(found[0])
@@ -322,12 +460,60 @@ def print_proposal(store: Store, p: Proposal) -> None:
             )
     else:
         ui.note(t("Not evaluated yet: desman proposals evaluate {id}", id=p.id))
-    ui.note(
-        t(
-            "Nothing was applied. Applying proposals comes later (ROADMAP 5.6); until then a "
-            "person may apply the diff with git."
+    print_state(store, p)
+
+
+def print_state(store: Store, p: Proposal) -> None:
+    """Whether the proposal is applied, and how to change that."""
+    last = proposals.last_application(store.conn, p.id)
+    if last is not None and last.action == "applied":
+        if last.commit is not None:
+            ui.note(
+                t(
+                    "Applied in commit {commit}. Take it back: desman proposals revert {id}",
+                    commit=last.commit[:12],
+                    id=p.id,
+                )
+            )
+        else:
+            ui.note(t("Applied. Take it back: desman proposals revert {id}", id=p.id))
+    elif last is not None:
+        ui.note(t("Reverted. Apply it again: desman proposals apply {id}", id=p.id))
+    else:
+        ui.note(t("Not applied. If you agree, apply it: desman proposals apply {id}", id=p.id))
+
+
+def print_application(a: Application) -> None:
+    applied = a.action == "applied"
+    if a.commit is not None:
+        ui.ok(
+            t("Proposal {id} applied in commit {commit}.", id=a.proposal_id, commit=a.commit[:12])
+            if applied
+            else t(
+                "Proposal {id} reverted in commit {commit}.", id=a.proposal_id, commit=a.commit[:12]
+            )
         )
-    )
+    else:
+        ui.ok(
+            t("Proposal {id} applied.", id=a.proposal_id)
+            if applied
+            else t("Proposal {id} reverted.", id=a.proposal_id)
+        )
+    for item in a.details.get("settings", []):
+        ui.out(Text(f"  {item['setting']}: {_value(item['old'])} → {_value(item['new'])}"))
+    if a.details.get("left"):
+        ui.warn(
+            t(
+                "Left as you changed them since: {settings}",
+                settings=", ".join(a.details["left"]),
+            )
+        )
+    if applied:
+        ui.note(t("Take it back: desman proposals revert {id}", id=a.proposal_id))
+
+
+def application_json(a: Application) -> dict[str, Any]:
+    return a.model_dump(mode="json")
 
 
 def verdict_label(verdict: str) -> str:
@@ -401,11 +587,17 @@ def _value(value: Any) -> str:
     return t("default") if value is None else str(value)
 
 
-def listing_json(found: list[Proposal]) -> list[dict[str, Any]]:
+def listing_json(store: Store, found: list[Proposal]) -> list[dict[str, Any]]:
     return [
-        p.model_dump(mode="json", exclude={"diff", "details"}) | {"targets": targets(p)}
+        p.model_dump(mode="json", exclude={"diff", "details"})
+        | {"targets": targets(p), "applied": _applied(store, p)}
         for p in found
     ]
+
+
+def _applied(store: Store, p: Proposal) -> bool:
+    last = proposals.last_application(store.conn, p.id)
+    return last is not None and last.action == "applied"
 
 
 def proposal_json(store: Store, p: Proposal) -> dict[str, Any]:
@@ -413,6 +605,7 @@ def proposal_json(store: Store, p: Proposal) -> dict[str, Any]:
     return p.model_dump(mode="json") | {
         "file": None if path is None else str(path),
         "evaluations": [evaluation_json(e) for e in proposals.evaluations(store.conn, p.id)],
+        "applications": [application_json(a) for a in proposals.applications(store.conn, p.id)],
     }
 
 
