@@ -39,6 +39,7 @@ from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+from desman.global_cli import global_group
 from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
@@ -161,6 +162,7 @@ cli.add_command(tuning)
 cli.add_command(models)
 cli.add_command(protected_group, name="protected")
 cli.add_command(proposals_group, name="proposals")
+cli.add_command(global_group, name="global")
 
 
 @cli.command("init-db")

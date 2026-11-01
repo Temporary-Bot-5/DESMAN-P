@@ -90,7 +90,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -201,6 +201,54 @@ class Tuning(BaseModel):
         return self != Tuning()
 
 
+RegistryUrl = Annotated[
+    str,
+    StringConstraints(
+        pattern=r"^(https://[A-Za-z0-9.-]+(:\d+)?|http://(localhost|127\.0\.0\.1)(:\d+)?)(/[^\s]*)?$",
+        max_length=200,
+    ),
+]
+"""The registry of desman-global: HTTPS, or plain HTTP to this machine (a registry under test)."""
+
+DONATION_BOUNDS: dict[str, tuple[int, int]] = {
+    "calls_per_day": (1, 100_000),
+    "tokens_per_day": (1_000, 100_000_000),
+}
+"""The least and the most a donated module's daily quota may be."""
+
+
+def _quota(name: str) -> Any:
+    low, high = DONATION_BOUNDS[name]
+    return Field(ge=low, le=high)
+
+
+class Donation(BaseModel):
+    """A model provider the person lends to desman-global, and how much of it a day (ADR 0004,
+    decision 5). The key stays on this machine: the node makes the calls itself."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    calls_per_day: StrictInt = _quota("calls_per_day")
+    tokens_per_day: StrictInt = _quota("tokens_per_day")
+
+
+class Network(BaseModel):
+    """desman-global (ADR 0004): off unless the person joined. Like `permissions`, changed by
+    the person only (`desman global ...`, the wizard, or a chat request they confirm); agents
+    never write it. While it is off, nothing is sent to the registry (`net.registry()`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: StrictBool = False
+    registry: RegistryUrl | None = None
+    """None: the address DESMAN ships with (`net.DEFAULT_REGISTRY`)."""
+    donated: dict[str, Donation] = Field(default_factory=dict)
+    """By provider id."""
+
+    def is_set(self) -> bool:
+        return self != Network()
+
+
 class ApiKey(BaseModel):
     """One key of a provider. A provider may have several (e.g. two accounts' free tiers)."""
 
@@ -215,7 +263,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -229,6 +277,7 @@ class Config(BaseModel):
     personalize: StrictBool = False
     behaviour: Behaviour = Field(default_factory=Behaviour)
     tuning: Tuning = Field(default_factory=Tuning)
+    network: Network = Field(default_factory=Network)
 
     def keys(self, env: str) -> list[ApiKey]:
         return list(self.api_keys.get(env, []))
@@ -266,6 +315,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     2: a list of keys per provider, `api_keys: {ENV: [{"value": ..., "label": ...}]}`.
     3: `personalize` (off unless it says otherwise) and `behaviour`.
     4: `tuning` (empty: DESMAN's defaults).
+    5: `network` (desman-global off).
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -302,6 +352,8 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         version = 3  # `personalize` and `behaviour` have defaults
     if version == 3:
         version = 4  # `tuning` has a default
+    if version == 4:
+        version = 5  # `network` has a default: off
     if data.get("profile") in (True, False):
         # Written by a 3 before its release (62d084b): `profile`, on unless it said otherwise,
         # was never the person's consent, so `personalize` stays as the file says, off if unsaid.

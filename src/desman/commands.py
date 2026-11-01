@@ -37,6 +37,7 @@ from desman import (
     actions,
     applying,
     config_cli,
+    global_cli,
     i18n,
     improve,
     local_models,
@@ -55,6 +56,7 @@ from desman.config import (
     ConfigError,
     ConfigManager,
     ModelChoices,
+    RegistryUrl,
     Tuning,
 )
 from desman.core import db, proposals
@@ -270,9 +272,32 @@ class TuningArgs(Args):
         )
 
 
+ProviderName = Annotated[str, StringConstraints(min_length=1, max_length=40)]
+Calls = Annotated[int, Field(ge=1, le=100_000)]
+Tokens = Annotated[int, Field(ge=1_000, le=100_000_000)]
+
+
+class JoinArgs(Args):
+    registry: RegistryUrl | None = Field(None, description="the registry's https address")
+
+
+class DonateArgs(Args):
+    provider: ProviderName
+    calls: Calls | None = Field(None, description="calls a day")
+    tokens: Tokens | None = Field(None, description="tokens a day")
+
+
+class UndonateArgs(Args):
+    provider: ProviderName
+
+
+class QuotaArgs(DonateArgs):
+    pass
+
+
 class ConfigArgs(Args):
-    section: Literal["providers", "permissions", "personalize", "behaviour"] | None = Field(
-        None, description="one section of the setup wizard; none: the whole wizard"
+    section: Literal["providers", "permissions", "personalize", "behaviour", "network"] | None = (
+        Field(None, description="one section of the setup wizard; none: the whole wizard")
     )
 
 
@@ -530,6 +555,135 @@ def _tuning(ctx: Context, args: TuningArgs) -> Outcome | Proposal:
         return Outcome({"changed": True, "tuning": tuning_cli.tuning_json(now)})
 
     return Proposal([t("How the work is done:")] + lines, apply)
+
+
+def _global_status(ctx: Context, args: NoArgs) -> Outcome:
+    found = global_cli.status(ctx.config())
+    global_cli.print_status(found)
+    return Outcome(found.as_json())
+
+
+def _global_join(ctx: Context, args: JoinArgs) -> Outcome | Proposal:
+    config = ctx.config()
+    address = global_cli.join_registry(config, args.registry)
+    key = global_cli.usable_node_key(create=False)  # one that cannot be used is said now
+    if (
+        key is not None
+        and config.network.enabled
+        and args.registry in (None, config.network.registry)
+    ):
+        ui.note(t("Already taking part in desman-global."))
+        return Outcome({"changed": False, "registry": address})
+
+    def apply() -> Outcome:
+        joined = global_cli.join(ctx.manager, args.registry, conn=ctx.store.conn)
+        global_cli.print_joined(joined)
+        return Outcome({"changed": joined.changed, "registry": joined.registry})
+
+    lines = [t("Take part in desman-global, registry {url}.", url=address)]
+    if key is None:
+        lines.append(t("This machine gets a node key of its own (shown by its fingerprint only)."))
+    warnings = [t("Nothing is lent until you choose it: `desman global donate PROVIDER`.")]
+    return Proposal(lines, apply, warnings)
+
+
+def _global_leave(ctx: Context, args: NoArgs) -> Outcome | Proposal:
+    network = ctx.config().network
+    if not network.enabled and not network.donated:
+        ui.note(t("desman-global is off already."))
+        return Outcome({"changed": False})
+
+    def apply() -> Outcome:
+        withdrawn = global_cli.leave(ctx.manager, conn=ctx.store.conn)
+        global_cli.print_left(withdrawn)
+        return Outcome({"changed": withdrawn is not None, "withdrawn": withdrawn or []})
+
+    lines = [t("Stop taking part in desman-global.")]
+    lines += [
+        t("Take back: {name}", name=global_cli.provider_name(p)) for p in sorted(network.donated)
+    ]
+    return Proposal(lines, apply)
+
+
+def _lent_outcome(lent: global_cli.Lent) -> Outcome:
+    quota = None if lent.new is None else lent.new.model_dump()
+    return Outcome({"provider": lent.provider, "changed": lent.changed, "quota": quota})
+
+
+def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
+    config = ctx.config()
+    provider = global_cli.donatable(config, args.provider)
+    old = config.network.donated.get(provider.id)
+    new = global_cli.donation(old or global_cli.DEFAULT_DONATION, args.calls, args.tokens)
+    if old == new:
+        ui.note(t("Nothing changed."))
+        return _lent_outcome(global_cli.Lent(provider.id, old, new))
+
+    def apply() -> Outcome:
+        lent = global_cli.donate(
+            ctx.manager, args.provider, args.calls, args.tokens, conn=ctx.store.conn
+        )
+        global_cli.print_lent(lent)
+        return _lent_outcome(lent)
+
+    quota = global_cli.quota_text(new)
+    if old is None:
+        lines = [t("Lend {name} to desman-global: {quota}.", name=provider.name, quota=quota)]
+    else:
+        lines = [
+            t(
+                "{name}: {old} → {new}",
+                name=provider.name,
+                old=global_cli.quota_text(old),
+                new=quota,
+            )
+        ]
+    warnings = [t("Others' tasks will use it, up to the quota; its key stays on this machine.")]
+    return Proposal(lines, apply, warnings)
+
+
+def _global_undonate(ctx: Context, args: UndonateArgs) -> Proposal:
+    lent = global_cli.lent_provider(ctx.config(), args.provider)
+
+    def apply() -> Outcome:
+        done = global_cli.undonate(ctx.manager, args.provider, conn=ctx.store.conn)
+        global_cli.print_lent(done)
+        return _lent_outcome(done)
+
+    name = global_cli.provider_name(lent)
+    return Proposal([t("Take {name} back from desman-global.", name=name)], apply)
+
+
+def _quota_kind(args: QuotaArgs) -> Kind:
+    return Kind.READ if args.calls is None and args.tokens is None else Kind.CHANGE
+
+
+def _global_quota(ctx: Context, args: QuotaArgs) -> Outcome | Proposal:
+    config = ctx.config()
+    lent = global_cli.lent_provider(config, args.provider)
+    old = config.network.donated[lent]
+    if args.calls is None and args.tokens is None:
+        ui.out(f"{global_cli.provider_name(lent)}: {global_cli.quota_text(old)}")
+        return Outcome({"provider": lent, "quota": old.model_dump()})
+    new = global_cli.donation(old, args.calls, args.tokens)
+    if new == old:
+        ui.note(t("Nothing changed."))
+        return _lent_outcome(global_cli.Lent(lent, old, new))
+
+    def apply() -> Outcome:
+        done = global_cli.set_quota(
+            ctx.manager, args.provider, args.calls, args.tokens, conn=ctx.store.conn
+        )
+        global_cli.print_lent(done)
+        return _lent_outcome(done)
+
+    line = t(
+        "{name}: {old} → {new}",
+        name=global_cli.provider_name(lent),
+        old=global_cli.quota_text(old),
+        new=global_cli.quota_text(new),
+    )
+    return Proposal([line], apply)
 
 
 def _permissions_kind(args: PermissionArgs) -> Kind:
@@ -939,6 +1093,8 @@ def _config(ctx: Context, args: ConfigArgs) -> Proposal:
         line = t("Open the setup wizard at personalisation: whether the agent keeps notes.")
     elif args.section == "behaviour":
         line = t("Open the setup wizard at how the interlocutor talks.")
+    elif args.section == "network":
+        line = t("Open the setup wizard at desman-global: whether this machine takes part.")
     else:
         line = t("Open the whole setup wizard: language, model providers and keys, permissions.")
     return Proposal([line], apply, question=t("Open it?"))
@@ -1158,6 +1314,56 @@ CATALOG: tuple[Entry, ...] = (
         _proposals_revert,
     ),
     Entry(
+        "global status",
+        "Whether this machine takes part in desman-global (the opt-in network of DESMANs), "
+        "its node key's fingerprint, the registry, and which model providers it lends with "
+        "their daily quotas.",
+        NoArgs,
+        Kind.READ,
+        _global_status,
+        aliases=("global",),
+    ),
+    Entry(
+        "global join",
+        "Take part in desman-global, only when the person asks for it: creates this node's "
+        "key the first time; lends nothing by itself. The person confirms.",
+        JoinArgs,
+        Kind.CHANGE,
+        _global_join,
+    ),
+    Entry(
+        "global leave",
+        "Stop taking part in desman-global and take back every provider lent; the node key "
+        "stays. The person confirms.",
+        NoArgs,
+        Kind.CHANGE,
+        _global_leave,
+    ),
+    Entry(
+        "global donate",
+        "Lend a model provider of this machine to desman-global with a daily quota of calls "
+        "and tokens (its key never leaves the machine; a local server, or a free provider whose "
+        "terms allow it; never a paid one). Only when the person asks. The person confirms.",
+        DonateArgs,
+        Kind.CHANGE,
+        _global_donate,
+    ),
+    Entry(
+        "global undonate",
+        "Take a lent provider back from desman-global. The person confirms.",
+        UndonateArgs,
+        Kind.CHANGE,
+        _global_undonate,
+    ),
+    Entry(
+        "global quota",
+        "Without calls/tokens: show a lent provider's daily quota. With them: change it (the "
+        "person confirms).",
+        QuotaArgs,
+        _quota_kind,
+        _global_quota,
+    ),
+    Entry(
         "models show",
         "What a model on Hugging Face is (GGUF only): its size and whether it fits in the "
         "machine's free memory. Downloads nothing.",
@@ -1214,7 +1420,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "config",
         "Open the setup wizard, or one section of it (providers: keys and settings; "
-        "permissions; personalize; behaviour), for the person to fill in; only when they ask to set DESMAN up or to "
+        "permissions; personalize; behaviour; network: desman-global), for the person to fill in; only when they ask to set DESMAN up or to "
         "change settings. To show providers, keys or settings use keys list or config show.",
         ConfigArgs,
         Kind.INPUT,
@@ -1368,6 +1574,16 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
             if getattr(old.tuning.models, r) != getattr(new.tuning.models, r)
         ]
         changes.append(("operator_tuning", {"changed": parts}))
+    if old.network != new.network:  # which parts, by name; quotas are not secret
+        parts = [
+            n for n in ("enabled", "registry") if getattr(old.network, n) != getattr(new.network, n)
+        ]
+        parts += [
+            f"donated.{p}"
+            for p in sorted(set(old.network.donated) | set(new.network.donated))
+            if old.network.donated.get(p) != new.network.donated.get(p)
+        ]
+        changes.append(("operator_network", {"changed": parts}))
     if before is not None and after is None:
         changes.append(("operator_config_deleted", {}))
     return changes

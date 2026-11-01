@@ -160,7 +160,7 @@ def test_v14_database_upgrades_to_the_profile(tmp_path: Path) -> None:
 
 def test_a_config_from_before_asks_nothing_and_keeps_no_notes() -> None:
     config = Config.model_validate(upgrade({"schema_version": 2, "language": "ru"}))
-    assert config.schema_version == 4 and config.personalize is False
+    assert config.schema_version == 5 and config.personalize is False
     assert not config.behaviour.is_set()
 
 
@@ -414,7 +414,7 @@ def test_how_it_talks_is_changed_in_profile_and_in_the_wizard(fake: FakeLLM) -> 
     assert ("operator_behaviour", {"changed": ["length", "tone", "custom"]}) in journal()
     # The wizard: language, providers Done, permissions, then personalisation and how it talks.
     done = str(len(providers.PROVIDERS + providers.SERVICES) + 1)
-    answers = ["1", done, "", "", "", "", "n", "y", "2", "", "", "-"]
+    answers = ["1", done, "", "", "", "", "n", "y", "2", "", "", "-", ""]  # desman-global: off
     wizard = CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
     assert wizard.exit_code == 0, wizard.output
     config = saved()

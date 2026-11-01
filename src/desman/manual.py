@@ -205,6 +205,26 @@ TOPICS: Final = (
         "or brings it up to date. Everything stays on the person's machine; only the "
         "requests to model providers, to Hugging Face and, when allowed, to the web leave it.",
     ),
+    Topic(
+        "global",
+        "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
+        "desman-global is a network of DESMANs on people's machines, coordinated by the "
+        "project's registry. It is off unless the person joins: the last step of the wizard, "
+        "or `desman global join` (`desman global join --registry URL` while no address is known). Joining "
+        "gives this machine a node key (node.key next to the database, readable by its owner "
+        "only; only its fingerprint is ever shown) and lends nothing by itself.\n"
+        "The person chooses each model provider to lend, with a daily quota of calls and "
+        "tokens: `desman global donate PROVIDER --calls N --tokens N`, changed with "
+        "`desman global quota PROVIDER`, taken back with `desman global undonate PROVIDER`. "
+        "A lent key never leaves the machine: the node itself makes the calls. A local "
+        "server can be lent; a free cloud provider only once its terms were checked for "
+        "serving others (none is yet); a paid one never. `desman global leave` takes back "
+        "everything and switches it off; the key stays. `desman global status` shows all of "
+        "it. Every change is written to the network's journal.\n"
+        "This version sends nothing at all: it does not connect to the registry yet, so "
+        "joining changes no behaviour. In the chat each change needs the person's yes in "
+        "the window.",
+    ),
 )
 
 BY_NAME: Final = {topic.name: topic for topic in TOPICS}

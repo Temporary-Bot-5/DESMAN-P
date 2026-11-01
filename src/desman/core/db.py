@@ -494,6 +494,21 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER applications_no_delete BEFORE DELETE ON applications
         BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
     """,
+    # 26 — the network's journal (ROADMAP G.3, ADR 0004 decision 12): joining and leaving
+    # desman-global, modules lent and taken back, later every record sent or received and every
+    # one refused. Keys by fingerprint, never a secret; append-only, like operator_log
+    f"""
+    CREATE TABLE network_log (
+        seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts            TEXT NOT NULL DEFAULT {_NOW_SQL},
+        action        TEXT NOT NULL,
+        details_json  TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details_json))
+    ) STRICT;
+    CREATE TRIGGER network_log_no_update BEFORE UPDATE ON network_log
+        BEGIN SELECT RAISE(ABORT, 'network_log is append-only'); END;
+    CREATE TRIGGER network_log_no_delete BEFORE DELETE ON network_log
+        BEGIN SELECT RAISE(ABORT, 'network_log is append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

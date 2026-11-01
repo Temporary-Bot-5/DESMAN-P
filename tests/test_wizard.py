@@ -5,7 +5,8 @@ engines (`providers.SEARCH`), under section
 headings that take no number, then Done. A provider without
 keys goes straight to the key prompt; one with keys opens its menu: 1 add, 2 remove, then its
 settings, then Back. Permissions follow: four Y/N questions, Enter keeps the current value;
-then personalisation (Y/N) and whether to set up how the interlocutor talks (Y/N).
+then personalisation (Y/N), whether to set up how the interlocutor talks (Y/N) and whether to
+take part in desman-global (Y/N).
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from helpers import flat_keys, make_config
 
 DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1)
 KEEP_PERMISSIONS = ("", "", "", "")
-KEEP_PERSONAL = ("", "")  # personalisation as it was; how it talks: not set up now
+KEEP_PERSONAL = ("", "", "")  # personalisation as it was; how it talks: not set up now;
+# desman-global as it was (off)
 
 
 def menu(provider_id: str) -> str:
