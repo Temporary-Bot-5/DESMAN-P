@@ -210,7 +210,7 @@ preemption, self-improvement or network features before their phase).
 - Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
   (HTTP goes through `httpx.MockTransport`)
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
-  except in lock-contention tests, the subprocess crash tests (`tests/test_crash.py`) and the
+  except in lock-contention tests, the subprocess crash and reassignment tests (`tests/test_crash.py`, `tests/test_reassign.py`) and the
   real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
