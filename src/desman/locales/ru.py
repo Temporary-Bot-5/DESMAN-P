@@ -769,6 +769,10 @@ MESSAGES: dict[str, Forms] = {
     "{model}: {size} to download, about {memory} of memory to run": "{model}: {size} для скачивания, около {memory} памяти для работы",
     "{server} model set to {model}.": "Модель {server}: {model}.",
     "{text!r} is not a Hugging Face model: write author/model, or author/model:quantization (e.g. Q4_K_M)": "{text!r} — не модель Hugging Face: напишите author/model или author/model:квантизация (например, Q4_K_M)",
+    "Download it anyway?": "Всё равно скачать?",
+    "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face ответил о {model} что-то неожиданное: попробуйте позже.",
+    "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "Ollama по адресу {host} не на этом компьютере, и связь с ним не шифруется: по дороге запрос можно прочитать или изменить (скачается другая модель).",
+    "Ollama keeps the downloaded model even if you leave without saving.": "Ollama оставит скачанную модель, даже если выйти без сохранения.",
 }
 
 CLICK: dict[str, Forms] = {

@@ -105,9 +105,32 @@ def test_a_quantization_asked_for_and_a_split_file() -> None:
     parts = [
         {"rfilename": f"Q8_0/model-Q8_0-0000{i}-of-00002.gguf", "size": 4 * GB} for i in (1, 2)
     ]
-    model = inspect(lambda r: listing(SIBLINGS + parts), f"{REPO}:q8_0")
+    model = inspect(lambda r: listing(SIBLINGS[:2] + parts), f"{REPO}:q8_0")
     assert model.ref.quant == "Q8_0"
-    assert model.size == 3 * GB + 8 * GB and len(model.files) == 3
+    assert model.size == 8 * GB and model.files == tuple(p["rfilename"] for p in parts)
+
+
+def test_alternative_files_of_a_quantization_are_not_added_up() -> None:
+    """Devin's review of #57: a server takes one of them; memory must hold the largest."""
+    parts = [
+        {"rfilename": f"Q8_0/model-Q8_0-0000{i}-of-00002.gguf", "size": 4 * GB} for i in (1, 2)
+    ]
+    model = inspect(lambda r: listing(SIBLINGS + parts), f"{REPO}:Q8_0")
+    assert model.size == 8 * GB and len(model.files) == 2  # not 3 + 8
+    small = [{"rfilename": "other/Llama-3.2-3B-Instruct-Q4_K_M.gguf", "size": GB}]
+    model = inspect(lambda r: listing(SIBLINGS + small))
+    assert model.size == 2 * GB and model.files == ("Llama-3.2-3B-Instruct-Q4_K_M.gguf",)
+
+
+@pytest.mark.parametrize("size", ["2GB", None, -1, True])
+def test_a_listing_without_a_usable_size_is_unexpected(size: object) -> None:
+    siblings = [{"rfilename": "model-Q4_K_M.gguf", "size": size}]
+    with pytest.raises(hub.HubError) as e:
+        inspect(lambda r: listing(siblings))
+    assert e.value.problem is hub.Problem.UNEXPECTED
+    with pytest.raises(hub.HubError) as e:
+        inspect(lambda r: httpx.Response(200, json={"siblings": "none"}))
+    assert e.value.problem is hub.Problem.UNEXPECTED
 
 
 @pytest.mark.parametrize(
@@ -156,6 +179,11 @@ def test_a_gated_model_needs_a_token_and_its_license_accepted() -> None:
     with pytest.raises(hub.HubError) as e:
         hub.check_access(model, client(handler(403)), TOKEN)
     assert e.value.problem is hub.Problem.LICENSE
+    for status, problem in ((404, hub.Problem.NOT_FOUND), (500, hub.Problem.UNREACHABLE)):
+        with pytest.raises(hub.HubError) as e:  # Devin's review of #57: not let through
+            hub.check_access(model, client(handler(status)), TOKEN)
+        assert e.value.problem is problem
+    hub.check_access(model, client(handler(200)), TOKEN)
     hub.check_access(model, client(handler(302)), TOKEN)  # a redirect to the file: allowed
     assert heads[-1].url.path == f"/{REPO}/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
     assert heads[-1].headers["authorization"] == f"Bearer {TOKEN}"
@@ -349,3 +377,68 @@ def test_the_wizard_downloads_a_model_after_yes(web: list[httpx.Request]) -> Non
     assert result.exit_code == 0, result.output
     assert "2.0 GB to download" in " ".join(result.output.split())
     assert saved().settings["OLLAMA_MODEL"] == f"hf.co/{REPO}:Q4_K_M"
+
+
+# ── Devin's review of #57 ────────────────────────────────────────────────────
+
+
+def test_what_ollama_prints_is_shown_without_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    import click
+
+    from desman import local_models
+
+    leaked = "hf_" + "Leak3d" * 7
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "huggingface.co":
+            return listing()
+        return pull_lines({"status": f"pulling with {TOKEN}"}, {"error": f"denied {leaked}"})
+
+    config = make_config(api_keys={"HF_TOKEN": TOKEN})
+    model = hub.Gguf(hub.Ref(REPO, "Q4_K_M"), ("f.gguf",), GB, False, ("Q4_K_M",))
+    shown: list[str] = []
+    with pytest.raises(click.ClickException) as e:
+        local_models.fetch(
+            config, model, providers.find("ollama"), client(handler), show=shown.append
+        )
+    assert shown and TOKEN not in shown[0] and providers.REDACTED in shown[0]
+    assert leaked not in e.value.message and providers.REDACTED in e.value.message
+
+
+def test_a_remote_ollama_over_plain_http_is_warned_about() -> None:
+    from desman import local_models
+
+    model = hub.Gguf(hub.Ref(REPO, "Q4_K_M"), ("f.gguf",), GB, False, ("Q4_K_M",))
+    ollama = providers.find("ollama")
+    for host, warned in (
+        ("http://gpu-box:11434", True),
+        ("gpu-box:11434", True),
+        ("https://gpu-box:11434", False),
+        ("http://127.0.0.1:11434", False),
+    ):
+        _, warnings = local_models.plan(make_config(settings={"OLLAMA_HOST": host}), model, ollama)
+        assert any("without encryption" in w for w in warnings) is warned, host
+
+
+def test_too_large_for_the_memory_the_window_asks_to_download_anyway(
+    interlocutor: FakeLLM, web: list[httpx.Request], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hub, "memory", lambda: hub.Memory(ram=GB, video=None))
+    interlocutor.on(CHAT, asks("models add", model=REPO))
+    result = chat("get me a model", "n")
+    out = " ".join(result.output.split())
+    assert "does not fit in the free memory" in out and "Download it anyway?" in out
+    assert "Apply this change?" not in out
+    assert not any(r.url.host == "localhost" for r in web)
+
+
+def test_the_wizard_says_ollama_keeps_what_it_downloaded(web: list[httpx.Request]) -> None:
+    from test_wizard import DONE, KEEP_PERMISSIONS, KEEP_PERSONAL, menu, wizard
+
+    result = wizard(
+        "1", menu("ollama"), "4", REPO, "y", "5", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+    )
+    assert result.exit_code == 0, result.output
+    assert "Ollama keeps the downloaded model even if you leave without saving." in " ".join(
+        result.output.split()
+    )

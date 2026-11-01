@@ -489,6 +489,10 @@ MESSAGES: dict[str, Forms] = {
     "{model}: {size} to download, about {memory} of memory to run": "{model}：下载 {size}，运行约需 {memory} 内存",
     "{server} model set to {model}.": "{server} 的模型已设为 {model}。",
     "{text!r} is not a Hugging Face model: write author/model, or author/model:quantization (e.g. Q4_K_M)": "{text!r} 不是 Hugging Face 模型：请写成 author/model 或 author/model:量化（例如 Q4_K_M）",
+    "Download it anyway?": "仍然下载？",
+    "Hugging Face answered with something unexpected about {model}: try again later.": "Hugging Face 关于 {model} 的回答出乎意料：请稍后再试。",
+    "Ollama at {host} is not on this machine and is reached without encryption: on the way, the request can be read or changed (another model downloaded).": "位于 {host} 的 Ollama 不在本机，且连接未加密：请求在途中可能被读取或篡改（下载成另一个模型）。",
+    "Ollama keeps the downloaded model even if you leave without saving.": "即使不保存就退出，Ollama 也会保留已下载的模型。",
 }
 
 CLICK: dict[str, Forms] = {

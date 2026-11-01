@@ -100,6 +100,7 @@ class Problem(StrEnum):
     LICENSE = "license"  # gated: the license is not accepted for this token yet
     TOKEN = "token"  # gated: a token is needed
     UNREACHABLE = "unreachable"
+    UNEXPECTED = "unexpected"  # an answer that is not the listing it should be
 
 
 class HubError(Exception):
@@ -154,14 +155,18 @@ def inspect(ref: Ref, client: httpx.Client, token: str | None = None) -> Gguf:
     except ValueError:
         raise HubError(Problem.UNREACHABLE, ref) from None
     siblings = data.get("siblings") if isinstance(data, dict) else None
-    files = {
-        str(s["rfilename"]): int(s.get("size") or 0)
-        for s in siblings or []
-        if isinstance(s, dict)
-        and str(s.get("rfilename", "")).lower().endswith(".gguf")
+    if not isinstance(siblings, list):
+        raise HubError(Problem.UNEXPECTED, ref)
+    files: dict[str, int] = {}
+    for s in siblings:
+        name = str(s.get("rfilename", "")) if isinstance(s, dict) else ""
         # A vision model's projector is not the model.
-        and "mmproj" not in str(s.get("rfilename", "")).lower()
-    }
+        if not name.lower().endswith(".gguf") or "mmproj" in name.lower():
+            continue
+        size = s.get("size")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise HubError(Problem.UNEXPECTED, ref)  # a size is what the check is for
+        files[name] = size
     if not files:
         raise HubError(Problem.NOT_GGUF, ref)
     by_quant: dict[str, list[str]] = {}
@@ -180,7 +185,15 @@ def inspect(ref: Ref, client: httpx.Client, token: str | None = None) -> Gguf:
         wanted = quants[0]
     else:  # several, or none named (the servers find a file by its quantization's name)
         raise HubError(Problem.CHOOSE_QUANT, ref, quants)
-    chosen = tuple(sorted(by_quant[wanted]))
+    # Files of one quantization: the parts of a split file belong together; separate files
+    # are alternatives, of which a server takes one. The largest is what memory must hold.
+    models: dict[str, list[str]] = {}
+    for name in by_quant[wanted]:
+        models.setdefault(_SPLIT.sub(".gguf", name), []).append(name)
+    chosen = max(
+        (tuple(sorted(parts)) for parts in models.values()),
+        key=lambda parts: (sum(files[f] for f in parts), parts),
+    )
     return Gguf(
         Ref(ref.repo, wanted),
         chosen,
@@ -197,7 +210,8 @@ def _gated(data: object) -> bool:
 
 def check_access(model: Gguf, client: httpx.Client, token: str | None) -> None:
     """For a gated model: may this token download it? Asks for the first file's headers only
-    (no redirect followed, nothing downloaded). Raises `HubError` (TOKEN, LICENSE)."""
+    (no redirect followed, nothing downloaded). Raises `HubError`: TOKEN, LICENSE, NOT_FOUND
+    or UNREACHABLE; only an answer that leads to the file lets the model through."""
     if not model.gated:
         return
     if not token:
@@ -207,10 +221,15 @@ def check_access(model: Gguf, client: httpx.Client, token: str | None) -> None:
         response = client.head(url, headers=_headers(token), timeout=TIMEOUT)
     except httpx.HTTPError:
         raise HubError(Problem.UNREACHABLE, model.ref) from None
-    if response.status_code == 401:
+    status = response.status_code
+    if status == 401:
         raise HubError(Problem.TOKEN, model.ref)
-    if response.status_code == 403:
+    if status == 403:
         raise HubError(Problem.LICENSE, model.ref)
+    if status == 404:
+        raise HubError(Problem.NOT_FOUND, model.ref)
+    if status not in (200, 301, 302, 303, 307, 308):
+        raise HubError(Problem.UNREACHABLE, model.ref)
 
 
 # ── The machine's memory ─────────────────────────────────────────────────────

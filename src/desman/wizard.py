@@ -248,7 +248,10 @@ def _download(s: _Session, p: Provider) -> None:
                 ui.note(line)
             for warning in warnings + cautions:
                 ui.warn(warning)
-            if not ui.confirm(t("Download it and use it?"), default=not warnings):
+            if p.id == "ollama":  # the pull is done at once; the settings when the wizard ends
+                ui.note(t("Ollama keeps the downloaded model even if you leave without saving."))
+            question = t("Download it anyway?") if warnings else t("Download it and use it?")
+            if not ui.confirm(question, default=not warnings):
                 return
             local_models.fetch(s.config, found, p, client)
     except click.ClickException as e:
