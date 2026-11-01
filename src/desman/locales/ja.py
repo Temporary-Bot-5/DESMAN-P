@@ -259,6 +259,8 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "計画中…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "モデルが計画を作れなかったため、ゴールそのものが唯一のサブタスクです: {error}",
     "Retries may also use {provider} · {model}": "再試行では {provider} · {model} も使うことがあります",
+    "Plans and reviews by {provider} · {model}": "計画とレビュー: {provider} · {model}",
+    "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} は DESMAN のカタログにある次のモデルを提供していません: {models}。これらへの呼び出しは失敗し、次のモデルに回されます。",
     "part of {seq}": "{seq} の一部",
     "web search": "ウェブ検索",
     "Web search (for the web_search tool)": "ウェブ検索（web_search ツール用）",

@@ -6,6 +6,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -279,20 +280,22 @@ def run(
         raise click.UsageError(t("GOAL is empty"))
     spec = _load_spec(spec_path) if spec_path is not None else None
     level = None if priority is None else int(Priority[priority.upper()])
-    llm, other = _provider(fake_script, provider_name, model, as_json)  # fail fast
+    source = _provider(fake_script, provider_name, model, as_json)  # fail fast
     access = _executor_access(as_json)
     path = db_path or db.default_db_path()
     try:
         store = Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
-    models = _attach(llm, other, store, cache=not no_cache)
+    models = _attach(source, store, cache=not no_cache, as_json=as_json)
     try:
         planned: Planned | None = None
         if spec is None:
             assert goal is not None
             by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
-            planned = _plan(models.llm, goal, level, by_model=by_model, as_json=as_json)
+            planned = _plan(
+                models.for_(calls.Role.PLANNER), goal, level, by_model=by_model, as_json=as_json
+            )
             spec = planned.spec
         elif level is not None:
             spec = spec.model_copy(update={"priority": level})
@@ -335,10 +338,10 @@ def resume(
     otherwise when its lease expires. Finished subtasks are never redone. Same exit codes as
     `run`.
     """
-    llm, other = _provider(fake_script, provider_name, model, as_json)
+    source = _provider(fake_script, provider_name, model, as_json)
     access = _executor_access(as_json)
     store = open_existing(db_path)
-    models = _attach(llm, other, store, cache=not no_cache)
+    models = _attach(source, store, cache=not no_cache, as_json=as_json)
     try:
         task_id = find_task(store, task)
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
@@ -381,10 +384,10 @@ def worker(
     the same one as another worker. A worker that is stopped or killed leaves nothing behind:
     another worker, or `resume`, takes its subtask back.
     """
-    llm, other = _provider(fake_script, provider_name, model, as_json)
+    source = _provider(fake_script, provider_name, model, as_json)
     access = _executor_access(as_json)
     store = open_existing(db_path)
-    models = _attach(llm, other, store, cache=not no_cache)
+    models = _attach(source, store, cache=not no_cache, as_json=as_json)
     interrupted = False
     try:
         coordinator = runs.coordinator(
@@ -516,61 +519,82 @@ def _load_spec(spec_path: Path) -> TaskSpec:
         ) from e
 
 
+@dataclass(frozen=True)
+class _Source:
+    """Where a run's models come from: a fake script, or the config (narrowed by --provider
+    and --model)."""
+
+    fake: LLM | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
 def _provider(
     fake_script: Path | None, provider_name: str | None, model: str | None, as_json: bool
-) -> tuple[LLM, LLM | None]:
-    """The LLM of the run and, for retries with another model (ROADMAP 2.9), another free
-    provider. Only when the provider was not chosen by hand: --provider/--model mean that one."""
+) -> _Source:
+    """Checks that the run can have models before anything else happens (fail fast)."""
     if fake_script is not None:
         if provider_name is not None or model is not None:
             raise click.UsageError(t("--fake-llm replaces the provider: drop --provider/--model"))
         try:
-            return FakeLLM.from_file(fake_script, sleep=time.sleep), None  # latency is real
+            return _Source(FakeLLM.from_file(fake_script, sleep=time.sleep))  # latency is real
         except (ValidationError, ValueError) as e:
             raise click.ClickException(
                 t("{path}: not a valid fake LLM script:\n{error}", path=fake_script, error=e)
             ) from e
-    config = load_config().load()
     try:
-        llm, choice = router.build(config, provider_name, model)
+        router.lineup(load_config().load(), calls.Role.EXECUTOR, provider_name, model)
     except router.NoProvider as e:
         raise click.ClickException(str(e)) from e
-    if not as_json:
+    return _Source(provider=provider_name, model=model)
+
+
+def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> runs.Models:
+    """The run's models (`runs.models`: a lineup per role), said to the operator. The fake is
+    not wrapped: its scripts test the retry policy and count every call."""
+    if source.fake is not None:
+        return runs.Models(source.fake, None)
+    config = load_config().load()
+    try:
+        models = runs.models(
+            config, store.conn, provider=source.provider, model=source.model, cache=cache
+        )
+    except router.NoProvider as e:
+        raise click.ClickException(str(e)) from e
+    choice = models.choice
+    if as_json or choice is None:
+        return models
+    assert choice.provider.key_env is not None
+    ui.note(
+        tn(
+            len(config.keys(choice.provider.key_env)),
+            "Using {provider} · {model} ({n} key)",
+            "Using {provider} · {model} ({n} keys)",
+            provider=choice.provider.name,
+            model=choice.model,
+        )
+    )
+    reviewer = models.first(calls.Role.REVIEWER)
+    if reviewer is not None and reviewer.label != choice.label:
         ui.note(
-            tn(
-                len(llm.keys),
-                "Using {provider} · {model} ({n} key)",
-                "Using {provider} · {model} ({n} keys)",
-                provider=choice.provider.name,
-                model=choice.model,
+            t(
+                "Plans and reviews by {provider} · {model}",
+                provider=reviewer.provider.name,
+                model=reviewer.model,
             )
         )
-        if choice.provider.paid:
-            ui.warn(
-                t("{name} is a paid provider: every call is billed.", name=choice.provider.name)
-            )
-            ui.warn(providers.untested_note())
-    alternative = None
-    if provider_name is None and model is None:
-        alternative = router.alternative(config, choice)
-    if alternative is not None and not as_json:
+    if choice.provider.paid:
+        ui.warn(t("{name} is a paid provider: every call is billed.", name=choice.provider.name))
+        ui.warn(providers.untested_note())
+    if models.other_choice is not None:
         ui.note(
             t(
                 "Retries may also use {provider} · {model}",
-                provider=alternative[1].provider.name,
-                model=alternative[1].model,
+                provider=models.other_choice.provider.name,
+                model=models.other_choice.model,
             )
         )
-    # Blips are retried here; the fake is not wrapped: its scripts test the retry policy.
-    other = router.Backoff(alternative[0]) if alternative is not None else None
-    return router.Backoff(llm), other
-
-
-def _attach(llm: LLM, other: LLM | None, store: Store, *, cache: bool) -> runs.Models:
-    return runs.Models(
-        runs.attach(llm, store.conn, cache=cache),
-        None if other is None else runs.attach(other, store.conn, cache=cache),
-    )
+    return models
 
 
 def _executor_access(as_json: bool) -> Access:

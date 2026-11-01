@@ -55,7 +55,7 @@ from desman.core.store import (
 )
 from desman.core.tools import Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
-from desman.llm.base import ProviderError
+from desman.llm.base import ProviderError, among
 
 S = SubtaskStatus
 
@@ -88,8 +88,9 @@ class Failure(BaseModel):
     paused_until: str | None = None
     """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
     unfit_provider: str | None = None
-    """The provider whose model cannot answer this kind of request (`ProviderError.unfit_model`):
-    the task's next attempts go to another model, if there is one."""
+    """The model that cannot answer this kind of request (`ProviderError.unfit_model`), as
+    `provider/model` (the provider alone when the error does not say): the task's next attempts
+    go to another model, if there is one."""
 
     @field_validator("paused_until", mode="before")
     @classmethod
@@ -151,6 +152,9 @@ class Work(BaseModel):
     tools: Toolbox
     """The only way to act: tool calls on the task's own workspace (and, once granted, more).
     A refused or mistaken call comes back as a failed ToolResult; every call is audited."""
+    unfit: frozenset[str] = frozenset()
+    """The models an execution of this task found unfit (`Failure.unfit_provider`): an executor
+    with a lineup of models does not ask them (`Request.avoid`)."""
 
 
 Executor = Callable[[Work], Outcome]
@@ -230,8 +234,9 @@ class Coordinator:
         there is no other model to switch to, so the audit never claims a switch that did not
         happen; pass `strategy_for` when the executor has one."""
         self.providers = providers
-        """The names of the providers the executor asks: the main one and the other model of
-        `strategies` (None if there is none). Without them no model is avoided as unfit."""
+        """The labels of the models the executor asks (`provider/model`, or a provider's name):
+        the main one and the other model of `strategies` (None if there is none). Without them
+        no model is avoided as unfit."""
         self.decomposer = decomposer
         """Without one, subtasks are never split."""
         self.sleep = sleep
@@ -392,7 +397,8 @@ class Coordinator:
         outcome: Outcome
         try:
             attempt = subtask.attempts.quality + 1
-            avoid = self._avoid(subtask.task_id)
+            unfit = frozenset(self.store.unfit_providers(subtask.task_id))
+            avoid = self._avoid(unfit)
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
@@ -411,6 +417,7 @@ class Coordinator:
                 context=context,
                 heartbeat=heartbeat,
                 tools=self._toolbox(subtask, journal, heartbeat),
+                unfit=unfit,
             )
             if strategy is Strategy.DECOMPOSE:
                 if self._decompose(work, lease, events):
@@ -622,18 +629,17 @@ class Coordinator:
             kind=error.kind,
             reason=f"{type(error).__name__}: {error}",
             paused_until=None if until is None else db.to_iso(until),
-            unfit_provider=error.provider if error.unfit_model else None,
+            unfit_provider=error.label if error.unfit_model else None,
         )
 
-    def _avoid(self, task_id: str) -> dict[str, bool]:
+    def _avoid(self, unfit: frozenset[str]) -> dict[str, bool]:
         """Which of the executor's models an execution of the task found unfit (C.9): the
         other one is then not switched to; the main one is not asked while the other is fit."""
         if self.providers is None:
             return {}
-        unfit = self.store.unfit_providers(task_id)
         main, other = self.providers
-        avoid_other = other is not None and other in unfit
-        return {"avoid_main": main in unfit and not avoid_other, "avoid_other": avoid_other}
+        avoid_other = other is not None and among(other, unfit)
+        return {"avoid_main": among(main, unfit) and not avoid_other, "avoid_other": avoid_other}
 
     def _earliest(self, task_id: str | None, status: str, column: str) -> str | None:
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())

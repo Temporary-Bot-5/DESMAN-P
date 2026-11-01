@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from desman.config import Config
+from desman.llm import catalog
 from desman.llm.openai_compat import key_id
 from desman.providers import Provider
 
@@ -27,6 +28,8 @@ class KeyCheck:
     detail: str  # short, human-readable
     models: int | None = None
     default_model_listed: bool | None = None
+    unlisted: tuple[str, ...] = ()
+    """The provider's other models in the catalog (`llm.catalog`) that it does not list."""
     limits: dict[str, Any] = field(default_factory=dict)
 
 
@@ -86,13 +89,16 @@ def _check_key(
     if not isinstance(models, list):  # an HTML page from a proxy is not an answer
         return result(ok=False, http_status=200, detail=_UNEXPECTED, limits=limits)
     ids = [str(m.get("id", "")) for m in models if isinstance(m, dict)]
-    listed = any(i.removeprefix("models/") == provider.default_model for i in ids)
+    served = {i.removeprefix("models/") for i in ids}
+    listed = provider.default_model in served
+    others = [m.id for m in catalog.models_of(provider) if m.id != provider.default_model]
     return result(
         ok=True,
         http_status=200,
         detail="accepted",
         models=len(ids),
         default_model_listed=listed,
+        unlisted=tuple(m for m in others if m not in served),
         limits=limits,
     )
 

@@ -264,8 +264,9 @@ def test_a_chat_task_shows_its_progress_and_every_call_is_attributed(
             [KEY],
             "llama",
             client=httpx.Client(transport=httpx.MockTransport(handler)),
+            on_call=calls.recorder(conn),
         )
-        return runs.Models(runs.attach(llm, conn, cache=False), None)
+        return runs.Models(llm, None)
 
     monkeypatch.setattr(runs, "models", models)
     ConfigManager(default_config_path()).save(config_with_keys())

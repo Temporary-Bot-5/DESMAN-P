@@ -261,6 +261,8 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Planlanıyor…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Model bir plan yapamadı, bu yüzden tek alt görev hedefin kendisi: {error}",
     "Retries may also use {provider} · {model}": "Yeniden denemeler {provider} · {model} da kullanabilir",
+    "Plans and reviews by {provider} · {model}": "Planlar ve incelemeler: {provider} · {model}",
+    "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name}, DESMAN kataloğundaki şu modelleri listelemiyor: {models}. Bunlara yapılan çağrılar başarısız olur ve sonraki modele geçer.",
     "part of {seq}": "{seq} parçası",
     "web search": "web araması",
     "Web search (for the web_search tool)": "Web araması (web_search aracı için)",

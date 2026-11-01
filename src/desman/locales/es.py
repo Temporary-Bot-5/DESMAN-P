@@ -280,6 +280,8 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Planificando…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "El modelo no hizo un plan, así que el objetivo es la única subtarea: {error}",
     "Retries may also use {provider} · {model}": "Los reintentos también pueden usar {provider} · {model}",
+    "Plans and reviews by {provider} · {model}": "Planes y revisiones con {provider} · {model}",
+    "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} no ofrece estos modelos del catálogo de DESMAN: {models}. Las llamadas a ellos fallarán y pasarán al siguiente modelo.",
     "part of {seq}": "parte de {seq}",
     "web search": "búsqueda web",
     "Web search (for the web_search tool)": "Búsqueda web (para la herramienta web_search)",

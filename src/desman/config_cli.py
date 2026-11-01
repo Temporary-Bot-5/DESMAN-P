@@ -634,10 +634,21 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
         table.add_row(p.name, str(r.number), status, str(r.models or ""), default)
     ui.out(table)
     ui.out("")
+    warned: set[str] = set()
     for r in results:
         name = f"{providers.find(r.provider).name} #{r.number}"
         if not r.ok:
             ui.warn(f"{name}: {r.detail}")
+        elif r.unlisted and r.provider not in warned:  # the same for each key of a provider
+            warned.add(r.provider)
+            ui.warn(
+                t(
+                    "{name} does not list these models of DESMAN's catalog: {models}. Calls "
+                    "to them fail and go to the next model.",
+                    name=providers.find(r.provider).name,
+                    models=", ".join(r.unlisted),
+                )
+            )
         if r.limits:
             ui.note(f"{name}: " + ", ".join(f"{k}: {v}" for k, v in r.limits.items()))
     for p in targets:

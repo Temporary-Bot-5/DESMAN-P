@@ -17,6 +17,7 @@ from desman import providers
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import calls, db
+from desman.core.calls import Role
 from desman.core.retry import FailureKind
 from desman.llm import check, router
 from desman.llm.base import (
@@ -226,7 +227,8 @@ def test_router_choice() -> None:
     cloudflare = make_config(
         api_keys={"CLOUDFLARE_API_TOKEN": "t"}, settings={"CLOUDFLARE_ACCOUNT_ID": "acc1"}
     )
-    llm, choice = router.build(cloudflare, model="@cf/x")
+    [choice] = router.lineup(cloudflare, Role.EXECUTOR, model="@cf/x")
+    llm = router.connect(cloudflare, choice)
     assert llm.base_url == "https://api.cloudflare.com/client/v4/accounts/acc1/ai/v1"
     assert choice.model == "@cf/x" and llm.model == "@cf/x"
 
@@ -318,12 +320,18 @@ def test_keys_check(mock_http: Callable[[Handler], None]) -> None:
     assert result.exit_code == 1, result.output  # one key is refused
     assert "free requests today: 3 of 50" in result.output
     assert "x-ratelimit-limit-requests: 1000" in result.output
+    # The catalog's other Groq models are not listed: said once, though Groq has two keys.
+    unlisted = "openai/gpt-oss-120b, llama-3.3-70b-versatile"
+    assert (
+        result.output.count(f"GROQ does not list these models of DESMAN's catalog: {unlisted}") == 1
+    )
     out = {
         (r["provider"], r["number"]): r
         for r in json.loads(desman("keys", "check", "--json").output)
     }
     assert out[("groq", 1)]["ok"] and out[("groq", 1)]["default_model_listed"]
     assert out[("groq", 1)]["models"] == 2
+    assert out[("groq", 1)]["unlisted"] == ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
     assert not out[("groq", 2)]["ok"] and out[("groq", 2)]["http_status"] == 401
     assert out[("openrouter", 1)]["ok"]
     for output in (result.output, desman("keys", "check", "--json").output):
@@ -506,7 +514,8 @@ def test_anthropic_requests_follow_its_rules(mock_http: Callable[[Handler], None
 
     mock_http(handler)
     config = make_config(api_keys={"ANTHROPIC_API_KEY": ANTHROPIC_KEY})
-    llm, choice = router.build(config, "anthropic")
+    choice = router.lineup(config, Role.EXECUTOR, "anthropic")[0]
+    llm = router.connect(config, choice)
     assert choice.model == "claude-haiku-5-5"
     llm.complete(REQUEST)
     [sent] = seen

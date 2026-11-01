@@ -23,6 +23,7 @@ from desman.cli import EXIT_DONE, cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
 from desman.core.audit import check_history, history
+from desman.core.calls import Role
 from desman.core.coordinator import Coordinator
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import RetryPolicy, Strategy, strategy_for
@@ -132,37 +133,46 @@ GROQ = "gsk_" + "a" * 48
 OPENROUTER = "sk-or-" + "b" * 48
 
 
-def test_the_alternative_is_the_next_ready_free_provider() -> None:
+def _other(config: Any, provider: str | None = None) -> list[str]:
+    return [c.label for c in router.other_lineup(router.lineup(config, Role.EXECUTOR, provider))]
+
+
+def test_the_other_model_is_the_best_one_on_another_provider() -> None:
     config = make_config(api_keys={"GROQ_API_KEY": GROQ, "OPENROUTER_API_KEY": OPENROUTER})
-    _, groq = router.build(config)
-    found = router.alternative(config, groq)
-    assert found is not None and found[1].provider.id == "openrouter"
-    _, openrouter = router.build(config, "openrouter")
-    found = router.alternative(config, openrouter)
-    assert found is not None and found[1].provider.id == "groq"
-    assert router.alternative(make_config(api_keys={"GROQ_API_KEY": GROQ}), groq) is None
+    main = router.lineup(config, Role.EXECUTOR)[0]
+    assert main.label == "groq/openai/gpt-oss-20b"
+    other = _other(config)
+    assert other[0] == "openrouter/nvidia/nemotron-3.5-lightning:free"
+    assert main.label not in other and "groq/openai/gpt-oss-120b" in other  # then the rest
+    assert _other(config, "openrouter") == []  # its only model is the main one
 
 
-def test_a_paid_provider_is_never_the_alternative() -> None:
+def test_without_another_provider_the_other_model_is_the_next_one_of_the_same() -> None:
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ})
+    assert _other(config) == ["groq/openai/gpt-oss-120b", "groq/llama-3.3-70b-versatile"]
+
+
+def test_a_paid_provider_is_never_the_other_model() -> None:
     config = make_config(api_keys={"GROQ_API_KEY": GROQ, "DEEPSEEK_API_KEY": "sk-" + "c" * 40})
-    _, groq = router.build(config)
-    assert router.alternative(config, groq) is None
+    assert all(label.startswith("groq/") for label in _other(config))
 
 
 @pytest.mark.parametrize("pinned", [[], ["--provider", "groq"]])
-def test_run_switches_provider_for_the_fourth_attempt(
+def test_run_switches_model_for_the_fourth_attempt(
     monkeypatch: pytest.MonkeyPatch, pinned: list[str]
 ) -> None:
     ConfigManager(default_config_path()).save(
         make_config(api_keys={"GROQ_API_KEY": GROQ, "OPENROUTER_API_KEY": OPENROUTER})
     )
     executed_on: list[str] = []
+    executed_models: list[str] = []
     reviews = iter([REJECT, REJECT, REJECT, ACCEPT])
 
     def handler(request: httpx.Request) -> httpx.Response:
         prompt = json.loads(request.content)["messages"][-1]["content"]
         if prompt.startswith("Execute"):
             executed_on.append(request.url.host)
+            executed_models.append(json.loads(request.content)["model"])
         # Each result differs: the same result reviewed again would get the cached verdict.
         text = next(reviews) if prompt.startswith("Review") else f'{{"v": {len(executed_on)}}}'
         return httpx.Response(
@@ -180,9 +190,10 @@ def test_run_switches_provider_for_the_fourth_attempt(
     )
     result = CliRunner().invoke(cli, ["run", "g", "--plan", "template", *pinned])
     assert result.exit_code == EXIT_DONE, result.output
-    if pinned:  # the operator chose groq: every attempt stays there
-        assert "Retries may also use" not in result.output
+    if pinned:  # the operator chose groq: every attempt stays there, on another of its models
+        assert "Retries may also use GROQ · openai/gpt-oss-120b" in result.output
         assert executed_on == ["api.groq.com"] * 4
+        assert executed_models[-1] == "openai/gpt-oss-120b"
     else:
         assert "Retries may also use OpenRouter" in result.output
         assert executed_on == ["api.groq.com"] * 3 + ["openrouter.ai"]
@@ -196,7 +207,7 @@ def test_run_switches_provider_for_the_fourth_attempt(
         ]
     finally:
         conn.close()
-    assert strategies[-1] == ("rephrase" if pinned else "other_model")
+    assert strategies[-1] == "other_model"
 
 
 def test_a_coordinator_without_another_model_never_claims_a_switch(

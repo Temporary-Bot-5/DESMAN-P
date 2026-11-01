@@ -149,7 +149,9 @@ class Chat:
             self.session_id = self.sessions.add(self.session_id, Role.USER, text).session_id
             return
         notes = self.profile.notes() if config.personalize else None
-        interlocutor = Interlocutor(models.llm, config.language, notes, config.behaviour)
+        interlocutor = Interlocutor(
+            models.for_(calls.Role.INTERLOCUTOR), config.language, notes, config.behaviour
+        )
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
         if self.session_id is not None:  # before the message: what it says comes after
             before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
@@ -442,7 +444,7 @@ class Chat:
             return
         ui.note(t("Planning…"))
         with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
-            planned = plan(models.llm, turn.goal)
+            planned = plan(models.for_(calls.Role.PLANNER), turn.goal)
         if planned.error is not None:
             ui.warn(
                 t(

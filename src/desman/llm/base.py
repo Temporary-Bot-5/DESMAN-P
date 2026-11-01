@@ -17,6 +17,7 @@ can simply let these propagate. Real HTTP clients (2.2) raise the same classes.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import ClassVar, Literal, Protocol
 
@@ -40,6 +41,9 @@ class Request(BaseModel):
     """None: the provider's default model."""
     max_tokens: int | None = Field(default=None, gt=0)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    avoid: frozenset[str] = frozenset()
+    """Models found unfit for the task (`provider/model` labels, `among`): a lineup of several
+    models does not ask them. Never sent to a provider, not part of a cached request."""
 
     @property
     def prompt(self) -> str:
@@ -65,6 +69,12 @@ class Completion(BaseModel):
     """"length" when the reply was cut off by max_tokens."""
 
 
+def among(label: str, labels: Collection[str]) -> bool:
+    """`label` (`provider/model`, or a provider's name) is one of `labels`, or its provider is:
+    entries written before models were told apart (ROADMAP 4.5) name a provider only."""
+    return label in labels or label.split("/", 1)[0] in labels
+
+
 class LLM(Protocol):
     name: str
 
@@ -80,6 +90,16 @@ class ProviderError(Exception):
     def __init__(self, provider: str, message: str) -> None:
         super().__init__(f"{provider}: {message}")
         self.provider = provider
+        self.model: str | None = None
+        """The model the refused request was for, when the client knows it."""
+        self.slow = False
+        """The call that failed took long (`router.Backoff` says so): a lineup does not hand
+        the request on, since nobody renews the subtask's lease meanwhile."""
+
+    @property
+    def label(self) -> str:
+        """`provider/model` (like `router.Choice.label`), or the provider alone."""
+        return self.provider if self.model is None else f"{self.provider}/{self.model}"
 
     def paused_until(self, now: datetime) -> datetime | None:
         """For LIMIT errors: when to try again; None lets the store use its default pause."""

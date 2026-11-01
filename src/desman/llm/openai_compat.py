@@ -120,6 +120,9 @@ class OpenAICompatible:
         self.send_temperature = send_temperature
         self.max_tokens = max_tokens
         self.paid = paid
+        self.pace: Callable[[], None] | None = None
+        """Called before every request sent (one per key tried): the rate limiter
+        (`llm.limiter.Limited`) waits there, or raises `RateLimited` and nothing is sent."""
 
     def complete(self, request: Request) -> Completion:
         model = request.model or self.model
@@ -143,6 +146,8 @@ class OpenAICompatible:
         if not usable:
             raise self._all_aside(now)
         for i in usable:
+            if self.pace is not None:
+                self.pace()  # outside the try: a wait for the bucket sets no key aside
             try:
                 return self._attempt(i, model, body, prompt_hash)
             except ProviderRejected as e:
@@ -240,6 +245,7 @@ class OpenAICompatible:
             record(None, completion)
             return completion
         error = self._error(response)
+        error.model = model
         record(error)
         raise error
 
