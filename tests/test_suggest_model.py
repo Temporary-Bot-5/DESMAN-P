@@ -22,7 +22,7 @@ from desman.core.coordinator import Coordinator
 from desman.core.policy import Permission, executor_access
 from desman.core.report import ModelSuggestion, task_report
 from desman.core.states import TaskStatus
-from desman.core.store import Store
+from desman.core.store import StaleStateError, Store
 from desman.core.tools import (
     MAX_SUGGESTIONS,
     Registry,
@@ -198,3 +198,36 @@ def test_the_executor_suggests_and_the_person_reads_it_in_status(
 
 def test_no_suggestion_no_lines() -> None:
     assert suggestion_lines([]) == []
+
+
+def test_a_suggestion_is_not_recorded_once_the_lease_is_lost(tmp_path: Path) -> None:
+    """A lookup may outlast the lease: work another worker took over leaves no suggestion."""
+    lost = False
+
+    def look_up(ref: hub.Ref) -> hub.Gguf:
+        nonlocal lost
+        found = Hub().look_up(ref)
+        lost = True  # the lease expired while Hugging Face answered
+        return found
+
+    def guard() -> None:
+        if lost:
+            raise StaleStateError("lease lost")
+
+    recorded: list[Any] = []
+    box = Toolbox(
+        Workspace(tmp_path, "t1"),
+        Registry([suggest_model_tool(look_up, lambda: PLENTY)]),
+        access=executor_access([Permission.NETWORK]),
+        record=lambda action, details: recorded.append((action, details)),
+        guard=guard,
+    )
+    with pytest.raises(StaleStateError):
+        box.call(ToolCall(tool="suggest_model", args=SUGGESTION))
+    assert "model_suggested" not in [action for action, _ in recorded]
+
+
+def test_a_blank_reason_is_refused(tmp_path: Path) -> None:
+    box = toolbox(tmp_path, registry(Hub()), Permission.NETWORK)
+    result = box.call(ToolCall(tool="suggest_model", args={**SUGGESTION, "reason": "   "}))
+    assert not result.ok and "reason" in (result.error or "")

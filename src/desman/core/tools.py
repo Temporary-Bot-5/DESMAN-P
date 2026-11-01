@@ -276,6 +276,10 @@ class Toolbox:
         else:
             self.record("tool_called", {**summary, "ok": True})
             if tool.records is not None:
+                # Meant for the person: only while the lease holds (a lookup may outlast it,
+                # and work whose lease was lost must leave nothing that looks valid). The
+                # heartbeat renews it, so it still holds for the entry written next.
+                self.guard()
                 self.record(tool.records, summarize(output))
             result = ToolResult(ok=True, output=output)
         if journal is not None:
@@ -571,7 +575,7 @@ class SuggestModelArgs(_Args):
     server: Literal["ollama", "llamacpp"] = Field(
         default="ollama", description="The local server that would run it."
     )
-    reason: str = Field(
+    reason: Annotated[str, StringConstraints(strip_whitespace=True)] = Field(
         min_length=1,
         max_length=AUDIT_TEXT,  # kept whole in the audit
         description="Why it suits this kind of work, in one sentence for the person.",
