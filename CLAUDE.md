@@ -212,6 +212,12 @@ src/desman/
     └── hub.py     # Hugging Face: parse author/model[:quant], inspect (GGUF files, size,
                    #   gated), check_access, free RAM/video memory, Ollama's pull; HF_TOKEN
                    #   goes to huggingface.co only. Downloads nothing unless the person said yes
+└── net/           # desman-global, the node's side (ADR 0004); never runs while it is off
+    ├── sign.py    # Ed25519: node.key (0600, shown by fingerprint only), canonical JSON, Signed
+    │              #   Record; Trust.receive(): schema, signer, signature, scope, term, replay;
+    │              #   root → operator (assignment) → record; revocations; Refused(Reason).
+    │              #   Protected
+    └── root.pub   # The root's public key (its private half: the owner's server). Protected
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it

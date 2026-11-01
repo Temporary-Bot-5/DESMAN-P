@@ -24,6 +24,9 @@
 "evaluation.py" = "19eb7c8f68e10c0a6dcd1382f212fe9b4b6b23b4c5065588b5d6de565f7872ca"
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
 "applying.py" = "a7251c4fe2ca14af45eeebb5624ccf8e4fa20dfe77f539b9ee06b576ddc0b750"
+# desman-global (ADR 0004): the root of trust and the code that checks signatures by it.
+"net/root.pub" = "1212bec4b18e53e1025fd017bfe26f2a2416e5180cd262724e3a175594372a2d"
+"net/sign.py" = "d88a9c7c282a1051c5abedaf192f55cc27380f9e2c5628021fdbaa86bbf2197a"
 # The scripted model every test of agents runs on.
 "llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"
 
