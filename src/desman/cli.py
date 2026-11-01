@@ -405,6 +405,7 @@ def worker(
             coordinator.work(
                 until_idle=until_idle,
                 on_tick=None if as_json else _worker_progress(coordinator, watch),
+                on_idle=None if as_json else lambda: _tell_waiting(watch),
             )
         except KeyboardInterrupt:
             interrupted = True
@@ -454,6 +455,7 @@ def _tell_waiting(watch: InboxWatch) -> None:
     actions.print_waiting(
         watch.new(), t("Decide with: desman retry|accept|fail <ref> [--note TEXT]")
     )
+    sys.stdout.flush()
 
 
 @cli.command()

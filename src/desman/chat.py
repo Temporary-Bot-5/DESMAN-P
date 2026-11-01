@@ -120,9 +120,11 @@ class Chat:
 
     def run(self) -> None:
         self._greet()
-        self._tell_waiting(everything=True)
         try:
-            while (line := self.read()) is not None:
+            while True:
+                self._tell_waiting()  # at the start, then after whatever was done
+                if (line := self.read()) is None:
+                    break
                 command = line.strip()
                 if not command:
                     continue
@@ -131,7 +133,6 @@ class Chat:
                         return
                     continue
                 self._message(line)  # kept as typed: indentation may matter (code, a list)
-                self._tell_waiting()
         finally:
             if self._http is not None:
                 self._http.close()
@@ -539,6 +540,7 @@ class Chat:
         report = task_report(self.store, task_id)
         paused_until = _paused_until(report)
         waiting = [item for item in inbox(self.store) if item.task_id == task_id]
+        self.waiting.told(waiting)  # shown below: not again as a notice
         if report.status is TaskStatus.DONE:
             self._event(t("Task {ref} is done.", ref=ref), task_id)
         elif report.status is TaskStatus.NEEDS_HUMAN:
@@ -624,13 +626,12 @@ class Chat:
         )
         self._show_last()
 
-    def _tell_waiting(self, everything: bool = False) -> None:
-        """Subtasks that came to wait for the person since the last look. The session's own
-        tasks are retold as they settle, so after the first look only the others are told
-        (a worker's, another session's, a `desman run`'s)."""
-        items = self.waiting.new(besides_session=None if everything else self.session_id)
+    def _tell_waiting(self) -> None:
+        """Subtasks that came to wait for the person since the last look, from any task: a
+        worker's, another session's, a `desman run`'s, and this session's own unless the chat
+        has just retold them (`_outcome` marks those told)."""
         actions.print_waiting(
-            items,
+            self.waiting.new(),
             t("Ask here to retry, accept or fail one, or decide in the terminal: desman inbox."),
         )
 

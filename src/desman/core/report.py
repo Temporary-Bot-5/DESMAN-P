@@ -241,22 +241,16 @@ class InboxWatch:
         self.store = store
         self._seen: set[tuple[str, int]] = set()
 
-    def new(self, *, besides_session: str | None = None) -> list[InboxItem]:
-        """Items not told yet. `besides_session`: leave out the tasks of that chat session (the
-        chat retells its own tasks); they count as told, not kept for later."""
+    def new(self) -> list[InboxItem]:
+        """Items not told yet."""
         items = inbox(self.store)
         fresh = [i for i in items if (i.subtask_id, i.version) not in self._seen]
         self._seen = {(i.subtask_id, i.version) for i in items}  # resolved ones are forgotten
-        if besides_session is not None and fresh:
-            ids = sorted({i.task_id for i in fresh})
-            rows = self.store.conn.execute(
-                f"SELECT id FROM tasks WHERE id IN ({', '.join('?' * len(ids))})"
-                " AND session_id = ?",
-                [*ids, besides_session],
-            ).fetchall()
-            own = {r[0] for r in rows}
-            fresh = [i for i in fresh if i.task_id not in own]
         return fresh
+
+    def told(self, items: list[InboxItem]) -> None:
+        """Items shown another way (the chat retelling its task): not new any more."""
+        self._seen |= {(i.subtask_id, i.version) for i in items}
 
 
 def _reason(store: Store, sub: Subtask, by_id: dict[str, Subtask]) -> str | None:

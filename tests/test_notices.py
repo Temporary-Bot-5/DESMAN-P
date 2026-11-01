@@ -15,13 +15,15 @@ from desman.chat import Chat
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
+from desman.core.coordinator import Coordinator
 from desman.core.models import SubtaskSpec, TaskSpec
-from desman.core.report import InboxWatch
+from desman.core.report import InboxWatch, inbox
 from desman.core.retry import FailureKind
 from desman.core.sessions import Role, Sessions
-from desman.core.states import Actor, SubtaskStatus
+from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from helpers import make_config
+from test_worker import accept, ok
 
 S = SubtaskStatus
 
@@ -62,15 +64,42 @@ def test_a_watch_tells_each_situation_once(store: Store) -> None:
     assert again.reason is not None and again.reason.startswith("401 again")
 
 
-def test_a_watch_can_leave_out_one_sessions_tasks(store: Store) -> None:
-    session_id = Sessions(store.conn).add(None, Role.USER, "hello").session_id
-    own = store.create_task(spec("ours"), session_id=session_id)
-    other = store.create_task(spec("theirs"))
-    escalate(store, own)
-    escalate(store, other)
+def test_what_was_shown_another_way_is_not_new(store: Store) -> None:
+    escalate(store, store.create_task(spec("retold")))
+    escalate(store, store.create_task(spec("not yet")))
     watch = InboxWatch(store)
-    assert [i.goal for i in watch.new(besides_session=session_id)] == ["theirs"]
-    assert watch.new() == []  # the left-out one counts as told
+    watch.told([i for i in inbox(store) if i.goal == "retold"])
+    assert [i.goal for i in watch.new()] == ["not yet"]
+
+
+def test_an_idle_worker_still_tells_what_others_sent_to_the_person(
+    store: Store, clock: FakeClock
+) -> None:
+    """Another process escalates while this worker has nothing to do: it hears of it."""
+    task_id = store.create_task(spec("elsewhere"))
+    claimed = store.claim("other", task_id=task_id)  # held by another worker
+    assert claimed is not None and claimed.lease_token is not None
+    watch = InboxWatch(store)
+    told: list[str] = []
+
+    def idle() -> None:
+        told.extend(i.goal for i in watch.new())
+
+    def sleep(seconds: float) -> None:
+        clock.sleep(seconds)
+        if store.task_status(task_id) is not TaskStatus.NEEDS_HUMAN:
+            store.record_failure(
+                claimed.id,
+                S.RUNNING,
+                Actor.EXECUTOR,
+                FailureKind.PERMANENT,
+                lease=claimed.lease_token,
+                reason="401",
+            )
+
+    coordinator = Coordinator(store, ok, accept, owner="w", sleep=sleep)
+    coordinator.work(max_ticks=2, on_idle=idle)  # idle twice: nothing of its own to do
+    assert told == ["elsewhere"]
 
 
 def fake_script(tmp_path: Path) -> Path:
@@ -115,11 +144,11 @@ def test_the_chat_tells_what_waits_then_what_comes_from_elsewhere(
     escalate(store, store.create_task(spec("from before"), session_id=session_id))
     own = store.create_task(spec("asked here"), session_id=session_id)
     other = store.create_task(spec("from a worker"))
-    said = iter(["first", "second", None])
+    said = iter(["/help", "first", None])
 
     def read() -> str | None:
         line = next(said)
-        if line == "first":  # while the person types: one of theirs, one from elsewhere
+        if line == "/help":  # while the person types: one of theirs, one from elsewhere
             escalate(store, own)
             escalate(store, other)
         return line
@@ -132,9 +161,9 @@ def test_the_chat_tells_what_waits_then_what_comes_from_elsewhere(
         Chat(sessions, read=read).run()
     finally:
         conn.close()
-    # At the start everything waiting, the session's own too; after that only what is not the
-    # session's: its own tasks are retold by the chat as they settle.
-    assert told == ["from before", "from a worker"]
+    # Without a model the chat retells nothing, so its own task is told as a notice too.
+    assert told[0] == "from before"
+    assert sorted(told[1:]) == ["asked here", "from a worker"]  # both told after /help
 
 
 def test_the_chat_shows_what_waits_when_it_opens() -> None:
