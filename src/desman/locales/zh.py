@@ -76,6 +76,8 @@ MESSAGES: dict[str, Forms] = {
     "held by {owner} until {until}": "由 {owner} 持有至 {until}",
     "paused until {until}": "暂停至 {until}",
     "Nothing is waiting for you.": "没有等待你决定的事项。",
+    "{n} subtask waits for your decision:": ("{n} 个子任务等待你的决定：",),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "可以在这里要求重试、接受或放弃其中一个，或在终端中决定：desman inbox。",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "做出决定：desman retry|accept|fail <ref> [--note 文本]",
     "say why it failed": "请说明失败原因",
     "it changed meanwhile, try again: {error}": "期间发生了变化，请重试：{error}",

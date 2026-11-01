@@ -76,6 +76,8 @@ MESSAGES: dict[str, Forms] = {
     "held by {owner} until {until}": "{until} zamanına kadar {owner} tarafından tutuluyor",
     "paused until {until}": "{until} zamanına kadar duraklatıldı",
     "Nothing is waiting for you.": "Kararınızı bekleyen bir şey yok.",
+    "{n} subtask waits for your decision:": ("{n} alt görev kararınızı bekliyor:",),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Burada yeniden denemeyi, kabul etmeyi veya başarısız saymayı isteyin ya da terminalde karar verin: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Karar verin: desman retry|accept|fail <ref> [--note METİN]",
     "say why it failed": "neden başarısız olduğunu yazın",
     "it changed meanwhile, try again: {error}": "bu arada değişti, tekrar deneyin: {error}",

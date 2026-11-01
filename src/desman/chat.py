@@ -41,14 +41,14 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import commands, compaction, config_cli, providers, runs, ui, wizard
+from desman import actions, commands, compaction, config_cli, providers, runs, ui, wizard
 from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.policy import Access
 from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
-from desman.core.report import TaskReport, inbox, task_report
+from desman.core.report import InboxWatch, TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
@@ -112,6 +112,8 @@ class Chat:
         """The web tools' client, shared by the session's tasks and closed with the chat."""
         latest = sessions.latest()
         self.session_id: str | None = latest.id if latest else None
+        self.waiting = InboxWatch(self.store)
+        """What waits for the person's decision: told at the start, then as it comes (5.1)."""
         self._gave_up: dict[str, int] = {}
         """Per session, the last message when a summary failed: until as much again is said,
         the older messages just fall out of the model's view."""
@@ -119,7 +121,10 @@ class Chat:
     def run(self) -> None:
         self._greet()
         try:
-            while (line := self.read()) is not None:
+            while True:
+                self._tell_waiting()  # at the start, then after whatever was done
+                if (line := self.read()) is None:
+                    break
                 command = line.strip()
                 if not command:
                     continue
@@ -535,6 +540,7 @@ class Chat:
         report = task_report(self.store, task_id)
         paused_until = _paused_until(report)
         waiting = [item for item in inbox(self.store) if item.task_id == task_id]
+        self.waiting.told(waiting)  # shown below: not again as a notice
         if report.status is TaskStatus.DONE:
             self._event(t("Task {ref} is done.", ref=ref), task_id)
         elif report.status is TaskStatus.NEEDS_HUMAN:
@@ -619,6 +625,15 @@ class Chat:
             )
         )
         self._show_last()
+
+    def _tell_waiting(self) -> None:
+        """Subtasks that came to wait for the person since the last look, from any task: a
+        worker's, another session's, a `desman run`'s, and this session's own unless the chat
+        has just retold them (`_outcome` marks those told)."""
+        actions.print_waiting(
+            self.waiting.new(),
+            t("Ask here to retry, accept or fail one, or decide in the terminal: desman inbox."),
+        )
 
     def _show_last(self) -> None:
         assert self.session_id is not None
