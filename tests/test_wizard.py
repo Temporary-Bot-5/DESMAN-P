@@ -107,10 +107,23 @@ def test_cloudflare_asks_for_its_account_id() -> None:
 
 def test_local_setting_can_be_cleared() -> None:
     saved().save(make_config(settings={"OLLAMA_HOST": "http://box:11434"}))
-    # Ollama's menu: 1 = set Host, 2 = Back.
-    result = wizard("1", menu("ollama"), "1", "-", "2", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    # Ollama's menu: 1 = set Host, 2 = Model, 3 = Context, 4 = Back.
+    result = wizard("1", menu("ollama"), "1", "-", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
     assert result.exit_code == 0, result.output
     assert "OLLAMA_HOST" not in saved().load().settings
+
+
+def test_a_local_server_elsewhere_is_said_to_receive_the_data() -> None:
+    # Ollama's menu: 1 = set Host, 4 = Back.
+    result = wizard(
+        "1", menu("ollama"), "1", "gpu-box:11434", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+    )
+    assert result.exit_code == 0, result.output
+    assert "gpu-box:11434 is not this machine" in " ".join(result.output.split())
+    result = wizard(
+        "1", menu("ollama"), "1", "127.0.0.1:11434", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+    )
+    assert "is not this machine" not in " ".join(result.output.split())
 
 
 def test_declining_privacy_adds_no_key() -> None:

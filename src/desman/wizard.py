@@ -124,6 +124,11 @@ def run_section(manager: ConfigManager, section: str) -> None:
 
 def _status(config: Config, p: Provider) -> str:
     if p.key_env is None:
+        missing = [s.label for s in p.settings if not s.default and not config.settings.get(s.env)]
+        if p.local and missing:
+            return t("needs {what}", what=", ".join(missing))
+        if p.local:
+            return f"{p.model(config)} ✓"
         values = [config.settings.get(s.env) or s.default for s in p.settings]
         return " ".join(v for v in values if v) or t("not set")
     n = len(config.keys(p.key_env or ""))
@@ -172,6 +177,18 @@ def _provider_menu(s: _Session, p: Provider) -> None:
                 "SearXNG is a search engine you run yourself: it asks Google, Bing, DuckDuckGo "
                 "and others for you, without keys or accounts. How to start one: {doc}",
                 doc=SEARXNG_DOC,
+            )
+        )
+    if p.local:
+        ui.note(
+            t(
+                "A model on your own machine: free, private while its server runs here, but "
+                "slow. Start {name}, set the model it serves, then check it with `desman keys "
+                "check {id}`. DESMAN asks it when the cloud models cannot take a call. How to "
+                "start it: {url}",
+                name=p.name,
+                id=p.id,
+                url=p.url,
             )
         )
     while True:
@@ -308,6 +325,16 @@ def _set(s: _Session, p: Provider, setting: Any) -> None:
         s.config.settings[setting.env] = value
         if p.id == "searxng":
             _check_searxng(value)
+    if p.local and setting.env not in (p.model_env, p.context_env):
+        address = p.setting(s.config, setting.env)
+        if not providers.on_this_machine(address):
+            ui.warn(
+                t(
+                    "{url} is not this machine: tasks' prompts, context and data will be sent "
+                    "there.",
+                    url=address,
+                )
+            )
 
 
 def _check_searxng(url: str) -> None:

@@ -220,7 +220,7 @@ def test_router_choice() -> None:
     assert router.choose(config, "mistral").id == "mistral"
     with pytest.raises(router.NoProvider, match="desman keys add google"):
         router.choose(config, "google")
-    with pytest.raises(router.NoProvider, match="local"):
+    with pytest.raises(router.NoProvider, match="Ollama has no model set"):
         router.choose(config, "ollama")
     with pytest.raises(router.NoProvider, match="no provider is configured"):
         router.choose(make_config())

@@ -49,9 +49,13 @@ class Cached:
         model: str,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        server: str | None = None,
     ) -> None:
         self.inner = llm
         self.name = llm.name
+        self.server = server
+        """Where a local model runs: a model name is the person's own choice, and another server
+        may serve another model under it, so its replies are kept apart."""
         self.conn = conn
         self.model = model
         self.clock = clock
@@ -102,4 +106,4 @@ class Cached:
             )
 
     def _key(self, request: Request) -> str:
-        return request_key(self.name, self.model, request)
+        return request_key(self.server or self.name, self.model, request)

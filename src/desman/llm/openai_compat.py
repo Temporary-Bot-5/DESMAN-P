@@ -1,4 +1,5 @@
-"""A client for OpenAI-compatible chat APIs (every cloud provider in `providers.CLOUD`).
+"""A client for OpenAI-compatible chat APIs (every cloud provider in `providers.CLOUD`, and the
+local servers of `providers.LOCAL`, which take no key: their one "key" is empty).
 
 One `complete()` is one chat completion. HTTP outcomes become the typed errors of
 `llm/base.py`, so the retry policy can tell a bad key from a rate limit from an outage:
@@ -204,7 +205,7 @@ class OpenAICompatible:
                 CallRecord(
                     provider=self.name,
                     model=completion.model if completion else model,
-                    key_id=key_id(key),
+                    key_id=key_id(key) if key else None,
                     prompt_hash=prompt_hash,
                     response_hash=text_hash(completion.text) if completion else None,
                     # From the response, not the completion: a 200 without usable text may

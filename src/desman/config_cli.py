@@ -117,7 +117,7 @@ def print_config(path: Path, out: dict[str, Any]) -> None:
 
     rows = ui.table(t("provider"), t("status"), t("keys"), t("settings"), title=t("Providers"))
     for row in out["providers"]:
-        if row["local"]:
+        if row["local"] and not row["ready"]:
             status = Text(t("local"), style="muted")
         elif row["ready"]:
             status = Text(t("ready"), style="good")
@@ -584,7 +584,8 @@ def print_key_rows(rows: list[dict[str, Any]]) -> None:
 @click.argument("provider", required=False)
 @json_option
 def keys_check(provider: str | None, as_json: bool) -> None:
-    """Ask each provider whether its keys work and what limits it reports. Spends no tokens."""
+    """Ask each provider whether its keys work and what limits it reports, and each local
+    server whether it runs and serves its model. Spends no tokens."""
     targets, results = check_keys(load_config().load(), provider)
     if as_json:
         click.echo(json.dumps([asdict(r) for r in results], indent=2, default=str))
@@ -597,12 +598,9 @@ def keys_check(provider: str | None, as_json: bool) -> None:
 def check_keys(
     config: Config, provider: str | None
 ) -> tuple[list[providers.Provider], list[check.KeyCheck]]:
-    """The providers asked (`provider`, or every ready one) and what they said of each key."""
-    targets = (
-        [_provider(provider, search=False)]
-        if provider
-        else [p for p in providers.CLOUD if p.is_ready(config)]
-    )
+    """The providers asked (`provider`, or every ready one) and what they said of each key
+    (of a local server: whether it runs and serves its model)."""
+    targets = [_model_provider(provider)] if provider else providers.ready(config)
     if not targets:
         raise click.ClickException(t("no keys to check: add one with `desman keys add PROVIDER`"))
     results = []
@@ -623,21 +621,27 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
             if r.ok
             else Text(t("failed ({status})", status=r.http_status or t("no reply")), style="bad")
         )
+        model = r.model or p.default_model
         default = (
             ""
             if r.default_model_listed is None
             else Text(
-                p.default_model + ("" if r.default_model_listed else " " + t("(not listed)")),
+                model + ("" if r.default_model_listed else " " + t("(not listed)")),
                 style="good" if r.default_model_listed else "warn",
             )
         )
-        table.add_row(p.name, str(r.number), status, str(r.models or ""), default)
+        number = "-" if p.local else str(r.number)
+        table.add_row(p.name, number, status, str(r.models or ""), default)
     ui.out(table)
     ui.out("")
     warned: set[str] = set()
     for r in results:
-        name = f"{providers.find(r.provider).name} #{r.number}"
-        if not r.ok:
+        p = providers.find(r.provider)
+        name = p.name if p.local else f"{p.name} #{r.number}"
+        if not r.ok and p.local:
+            ui.warn(f"{name}: {_local_problem(r)}")
+            _local_hint(p, r)
+        elif not r.ok:
             ui.warn(f"{name}: {r.detail}")
         elif r.unlisted and r.provider not in warned:  # the same for each key of a provider
             warned.add(r.provider)
@@ -652,7 +656,47 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
         if r.limits:
             ui.note(f"{name}: " + ", ".join(f"{k}: {v}" for k, v in r.limits.items()))
     for p in targets:
-        ui.note(t("{name} limits and quotas: {url}", name=p.name, url=p.limits_url))
+        if p.limits_url:
+            ui.note(t("{name} limits and quotas: {url}", name=p.name, url=p.limits_url))
+
+
+def _local_problem(r: check.KeyCheck) -> str:
+    """What is wrong with a local server, in the person's language (`detail` stays English for
+    --json)."""
+    if r.http_status is None:
+        return t("not running at {url}", url=r.url)
+    if r.default_model_listed is False:
+        return t("running, but it does not serve {model}", model=r.model)
+    if r.http_status != 200:
+        return t("unexpected HTTP {status}", status=r.http_status)
+    return t("unexpected reply: is this an Ollama or llama.cpp server?")
+
+
+def _local_hint(p: providers.Provider, r: check.KeyCheck) -> None:
+    """What to do about a local server that is not ready."""
+    if r.http_status is None:
+        if p.id == "ollama":
+            ui.note(t("Start it with `ollama serve`, or set its address in `desman config`."))
+        else:
+            ui.note(
+                t(
+                    "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address "
+                    "in `desman config`."
+                )
+            )
+    elif r.default_model_listed is False:
+        if r.served:
+            ui.note(t("It serves: {models}", models=", ".join(r.served)))
+        if p.id == "ollama":
+            ui.note(t("Download the model with `ollama pull {model}`.", model=r.model))
+
+
+def _model_provider(name: str) -> providers.Provider:
+    """A model provider, cloud or local, by any of its names."""
+    try:
+        return providers.find(name)
+    except providers.UnknownProvider as e:
+        raise click.BadParameter(str(e), param_hint="PROVIDER") from e
 
 
 # ── desman usage ────────────────────────────────────────────────────────────
