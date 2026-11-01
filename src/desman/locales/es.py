@@ -83,6 +83,11 @@ MESSAGES: dict[str, Forms] = {
     "held by {owner} until {until}": "en manos de {owner} hasta {until}",
     "paused until {until}": "en pausa hasta {until}",
     "Nothing is waiting for you.": "Nada espera tu decisión.",
+    "{n} subtask waits for your decision:": (
+        "{n} subtarea espera tu decisión:",
+        "{n} subtareas esperan tu decisión:",
+    ),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Pide aquí reintentar, aceptar o dar por fallida una, o decide en la terminal: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Decide con: desman retry|accept|fail <ref> [--note TEXTO]",
     "say why it failed": "indica por qué falló",
     "it changed meanwhile, try again: {error}": "cambió mientras tanto, vuelve a intentarlo: {error}",

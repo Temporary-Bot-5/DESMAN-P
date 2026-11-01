@@ -91,6 +91,12 @@ MESSAGES: dict[str, Forms] = {
     "held by {owner} until {until}": "у {owner} до {until}",
     "paused until {until}": "пауза до {until}",
     "Nothing is waiting for you.": "Ніщо не чекає вашого рішення.",
+    "{n} subtask waits for your decision:": (
+        "{n} підзадача чекає на ваше рішення:",
+        "{n} підзадачі чекають на ваше рішення:",
+        "{n} підзадач чекають на ваше рішення:",
+    ),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Попросіть тут повторити, прийняти чи провалити її або вирішіть у терміналі: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Рішення: desman retry|accept|fail <ref> [--note ТЕКСТ]",
     "say why it failed": "напишіть, чому не вдалося",
     "it changed meanwhile, try again: {error}": "за цей час щось змінилося, повторіть: {error}",

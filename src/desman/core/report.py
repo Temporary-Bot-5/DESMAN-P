@@ -232,6 +232,33 @@ def inbox(store: Store) -> list[InboxItem]:
     return items
 
 
+class InboxWatch:
+    """What reached the inbox since the watch last looked (ROADMAP 5.1: the operator hears of
+    it without asking). An item is new once per situation: a subtask retried that comes back is
+    told again, since its status version changed. The first look tells everything waiting."""
+
+    def __init__(self, store: Store) -> None:
+        self.store = store
+        self._seen: set[tuple[str, int]] = set()
+
+    def new(self, *, besides_session: str | None = None) -> list[InboxItem]:
+        """Items not told yet. `besides_session`: leave out the tasks of that chat session (the
+        chat retells its own tasks); they count as told, not kept for later."""
+        items = inbox(self.store)
+        fresh = [i for i in items if (i.subtask_id, i.version) not in self._seen]
+        self._seen = {(i.subtask_id, i.version) for i in items}  # resolved ones are forgotten
+        if besides_session is not None and fresh:
+            ids = sorted({i.task_id for i in fresh})
+            rows = self.store.conn.execute(
+                f"SELECT id FROM tasks WHERE id IN ({', '.join('?' * len(ids))})"
+                " AND session_id = ?",
+                [*ids, besides_session],
+            ).fetchall()
+            own = {r[0] for r in rows}
+            fresh = [i for i in fresh if i.task_id not in own]
+        return fresh
+
+
 def _reason(store: Store, sub: Subtask, by_id: dict[str, Subtask]) -> str | None:
     """Why `sub` reached its current status, from the last audit entry that put it there."""
     last = store.conn.execute(

@@ -121,6 +121,7 @@ src/desman/
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
                    #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)
+    │              #   InboxWatch: what came to wait for the person (worker, chat; 5.1)
     ├── audit.py   # Task history as AuditEntry list; check_history() replays it to prove
                    #   every status change was recorded (D7)
     ├── calls.py   # model_calls log (per provider/key usage, limits seen); `desman usage`;

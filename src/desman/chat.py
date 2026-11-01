@@ -41,14 +41,14 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import commands, compaction, config_cli, providers, runs, ui, wizard
+from desman import actions, commands, compaction, config_cli, providers, runs, ui, wizard
 from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.policy import Access
 from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
-from desman.core.report import TaskReport, inbox, task_report
+from desman.core.report import InboxWatch, TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
@@ -112,12 +112,15 @@ class Chat:
         """The web tools' client, shared by the session's tasks and closed with the chat."""
         latest = sessions.latest()
         self.session_id: str | None = latest.id if latest else None
+        self.waiting = InboxWatch(self.store)
+        """What waits for the person's decision: told at the start, then as it comes (5.1)."""
         self._gave_up: dict[str, int] = {}
         """Per session, the last message when a summary failed: until as much again is said,
         the older messages just fall out of the model's view."""
 
     def run(self) -> None:
         self._greet()
+        self._tell_waiting(everything=True)
         try:
             while (line := self.read()) is not None:
                 command = line.strip()
@@ -128,6 +131,7 @@ class Chat:
                         return
                     continue
                 self._message(line)  # kept as typed: indentation may matter (code, a list)
+                self._tell_waiting()
         finally:
             if self._http is not None:
                 self._http.close()
@@ -619,6 +623,16 @@ class Chat:
             )
         )
         self._show_last()
+
+    def _tell_waiting(self, everything: bool = False) -> None:
+        """Subtasks that came to wait for the person since the last look. The session's own
+        tasks are retold as they settle, so after the first look only the others are told
+        (a worker's, another session's, a `desman run`'s)."""
+        items = self.waiting.new(besides_session=None if everything else self.session_id)
+        actions.print_waiting(
+            items,
+            t("Ask here to retry, accept or fail one, or decide in the terminal: desman inbox."),
+        )
 
     def _show_last(self) -> None:
         assert self.session_id is not None
