@@ -97,6 +97,10 @@ src/desman/
 │                  #   "Chat turn", "Retell task". Talks as `Config.behaviour` says (always);
 │                  #   with `Config.personalize` it also sees the profile and any turn may edit
 │                  #   it (`profile`: add | change | forget, ≤3), the chat applies and shows them
+│                  #   A `lookup` turn first (≤2 topics of `manual`) → asked again with their texts
+├── manual.py      # The interlocutor's manual (C.10): a short English text per topic of what
+│                  #   DESMAN does now (never plans); its prompt lists only the topics. A test
+│                  #   checks the commands it names and the size of each topic
 ├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
 │                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
 │                  #   message that `covers` them; failed → they fall out of view, with a note
@@ -238,6 +242,8 @@ preemption, self-improvement or network features before their phase).
   through git, never by an agent).
 - A new CLI command also gets an entry in `commands.CATALOG` (a test requires it); the chat
   calls the same body function as the CLI, never the CLI itself.
+- A change that alters what DESMAN does for the person also updates the topic of
+  `src/desman/manual.py` that describes it, in the same commit (the interlocutor answers from it).
 - Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
   (confirmation, `--yes` skips it) and `keys add` (the hidden key; `--stdin` for scripts) may
   prompt. A key is never accepted as a command-line argument.
