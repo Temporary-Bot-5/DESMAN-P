@@ -8,8 +8,9 @@ own (`Kind.SUMMARY`) that says up to which message it `covers`.
 
 The summary is made by an ordinary task for the modules, like any other: one subtask, an
 executor and a reviewer, retries by the retry policy, accepted replies cached. It has no tools
-(`runs.summarizer`): the conversation it reads may hold anything, and nothing in it can make
-the summary act. A summary includes the previous one, so only the latest one counts.
+(`Tools.NONE`, whoever runs it: the chat or a worker): the conversation it reads may hold
+anything, and nothing in it can make the summary act. A summary includes the previous one, so
+only the latest one counts.
 
 Here is what to summarise and how to read the result; the chat runs the task and decides when.
 """
@@ -21,7 +22,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
-from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.models import SubtaskSpec, TaskSpec, Tools
 from desman.core.sessions import History, Message
 from desman.interlocutor import HISTORY_TOKENS, said
 
@@ -147,6 +148,7 @@ def spec(history: History, part: Part) -> TaskSpec:
         subtasks=[
             SubtaskSpec(description=DESCRIPTION, acceptance_criteria=CRITERIA, inputs=inputs)
         ],
+        tools=Tools.NONE,  # whoever runs it (the chat, a worker): the messages may say anything
     )
 
 

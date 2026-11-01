@@ -18,6 +18,8 @@ from click.testing import CliRunner
 from desman.cli import cli
 from desman.core import db, operator
 from desman.core.audit import check_history, history
+from desman.core.models import Tools
+from desman.core.retry import RetryPolicy
 from desman.core.sessions import Kind, Role, Sessions
 from desman.core.states import SubtaskStatus
 from desman.core.store import Store
@@ -660,4 +662,22 @@ def test_v13_database_with_messages_upgrades_to_summaries(tmp_path: Path) -> Non
     first = history.messages[0].seq
     sessions.add(session_id, Role.DESMAN, "they want flights", kind=Kind.SUMMARY, covers=first)
     assert [m.text for m in sessions.history(session_id).messages] == ["task started"]
+    conn.close()
+
+
+def test_v15_database_with_work_in_review_upgrades_to_workers(tmp_path: Path) -> None:
+    path = tmp_path / "v15.db"
+    old = _db_at_version(path, 15)
+    task_id = add_task(old)
+    subtask_id = add_subtask(old, task_id, status="review")
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    store = Store(conn)
+    # An older task gets the default budgets and the tools the run grants.
+    assert store.policy(task_id) == RetryPolicy()
+    assert store.tools(task_id) is Tools.GRANTED
+    assert store.get_subtask(subtask_id).review_owner is None
+    assert store.reserve_review(subtask_id, "w1")
+    assert not store.reserve_review(subtask_id, "w2")
     conn.close()

@@ -441,6 +441,32 @@ def _resume(ctx: Context, args: TaskArgs) -> Proposal:
     return Proposal([line], apply)
 
 
+WORKER_TASKS = 50
+"""At most this many unfinished tasks are worked on by one `worker` request in the chat."""
+
+
+def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
+    """The chat's worker: every unfinished task in turn, oldest first, each as `resume` runs it
+    (live progress, retold), until none has work left. It does not wait for new tasks: that is
+    the CLI's `desman worker`, in a terminal of its own."""
+    active = task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=WORKER_TASKS)
+    if not active:
+        return Outcome({"unfinished_tasks": 0})
+    oldest_first = list(reversed(active))
+    ids = [report.id for report in oldest_first]
+
+    def apply() -> Outcome:
+        for task_id in ids:
+            ctx.resume_task(task_id)
+        return Outcome(None)
+
+    lines = [t("Work on the unfinished tasks in turn, until none has work left ({n}):", n=len(ids))]
+    lines += [
+        f"  {ctx.store.short_id(r.id)}  {actions.one_line(r.goal, 100)}" for r in oldest_first
+    ]
+    return Proposal(lines, apply)
+
+
 _DECISIONS = {
     "retry": (SubtaskStatus.READY, "operator_retry", "retry requested by operator"),
     "accept": (SubtaskStatus.DONE, "operator_accept", "accepted by operator"),
@@ -668,6 +694,15 @@ CATALOG: tuple[Entry, ...] = (
         TaskArgs,
         Kind.CHANGE,
         _resume,
+    ),
+    Entry(
+        "worker",
+        "Work on every unfinished task in turn until none has work left (the CLI's worker keeps "
+        "waiting for new work in a terminal of its own; in the chat it stops when idle). The "
+        "person confirms.",
+        NoArgs,
+        Kind.CHANGE,
+        _worker,
     ),
     Entry(
         "retry",

@@ -326,6 +326,22 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         updated_at  TEXT NOT NULL
     ) STRICT;
     """,
+    # 16 — several workers on one database (ROADMAP 4.1). A task keeps its own retry budgets, so
+    # whoever recovers its subtasks charges them by the task's policy, not their own; and the
+    # tools its executor may have (`none`: a chat summary, whose input may say anything). A
+    # review in progress is reserved by its reviewer for a short while: two workers do not pay
+    # for the same verdict
+    """
+    ALTER TABLE tasks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts >= 1);
+    ALTER TABLE tasks ADD COLUMN max_transient INTEGER NOT NULL DEFAULT 5
+        CHECK (max_transient >= 1);
+    ALTER TABLE tasks ADD COLUMN tools TEXT NOT NULL DEFAULT 'granted'
+        CHECK (tools IN ('granted', 'none'));
+    ALTER TABLE subtasks ADD COLUMN review_owner TEXT;
+    ALTER TABLE subtasks ADD COLUMN review_until TEXT
+        CHECK ((review_until IS NULL) = (review_owner IS NULL)
+               AND (review_until IS NULL OR status = 'review'));
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

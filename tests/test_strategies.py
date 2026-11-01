@@ -121,7 +121,7 @@ def test_a_transient_retry_keeps_the_strategy(store: Store, clock: FakeClock) ->
 
     main = FakeLLM().on("Execute", ServerError(status=503), '{"v": 1}')
     main.on("Review", ACCEPT)
-    task_id = run(store, clock, main, None, policy=RetryPolicy())
+    task_id = run(store, clock, main, None)
     started = [e.details for e in history(store.conn, task_id) if e.action == "attempt_started"]
     assert started == [{"attempt": 1, "strategy": "first"}] * 2
 
@@ -302,9 +302,11 @@ def test_an_unfit_other_model_is_not_switched_to_again(store: Store, clock: Fake
     main = FakeLLM(name="groq").on("Execute", *[f'{{"v": {n}}}' for n in range(5)])
     main.on("Review", REJECT, REJECT, REJECT, ACCEPT, ACCEPT)
     other = FakeLLM(name="google").on("Execute", ToolUseFailed())
-    task_id = store.create_task(two_steps())
     # Six attempts and no split: the fifth and the next subtask's fourth would have asked other.
-    c = coordinator(store, clock, main, other, policy=RetryPolicy(max_attempts=6))
+    task_id = store.create_task(
+        two_steps().model_copy(update={"retry": RetryPolicy(max_attempts=6)})
+    )
+    c = coordinator(store, clock, main, other)
     assert c.run(task_id).status is TaskStatus.DONE
     assert len(executions(other)) == 1
     assert started(store, task_id) == [
@@ -318,8 +320,10 @@ def test_a_provider_new_to_the_task_is_tried_after_all(store: Store, clock: Fake
 
     groq = FakeLLM(name="groq").on("Execute", ToolUseFailed()).on("Review", ACCEPT)
     google = FakeLLM(name="google").on("Execute", ToolUseFailed())
-    task_id = store.create_task(one_step())
-    first = coordinator(store, clock, groq, google, policy=RetryPolicy(max_attempts=2))
+    task_id = store.create_task(
+        one_step().model_copy(update={"retry": RetryPolicy(max_attempts=2)})
+    )
+    first = coordinator(store, clock, groq, google)
     assert first.run(task_id).status is TaskStatus.NEEDS_HUMAN
     assert store.unfit_providers(task_id) == {"groq", "google"}
     # The operator changes the providers and sends the subtask back: both new to this task.

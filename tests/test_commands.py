@@ -428,6 +428,38 @@ def test_resume_continues_a_task_after_yes(fake: FakeLLM) -> None:
     assert f"Continue task {task_id[:8]}" in result.output and "Done now." in result.output
 
 
+def test_worker_works_on_every_unfinished_task_after_yes(fake: FakeLLM) -> None:
+    store = Store(db.open_db())
+    try:
+        spec = TaskSpec(
+            goal="first goal", subtasks=[SubtaskSpec(description="a", acceptance_criteria="ok")]
+        )
+        first = store.create_task(spec)
+        second = store.create_task(spec.model_copy(update={"goal": "second goal"}))
+    finally:
+        store.conn.close()
+    fake.on(CHAT, asks("worker"))
+    fake.on("Execute subtask", '{"ok": true}', repeat_last=True)
+    fake.on("Review subtask", '{"verdict": "accept"}', repeat_last=True)
+    fake.on(RETELL, '{"text": "One done."}', repeat_last=True)
+    result = chat("do everything that waits", "y")
+    assert "Work on the unfinished tasks in turn, until none has work left (2):" in result.output
+    assert result.output.index("first goal") < result.output.index("second goal")  # oldest first
+    store = Store(db.open_db())
+    try:
+        assert {store.task_status(first), store.task_status(second)} == {TaskStatus.DONE}
+    finally:
+        store.conn.close()
+
+
+def test_worker_with_nothing_unfinished_changes_nothing(fake: FakeLLM) -> None:
+    fake.on(CHAT, asks("worker"), '{"type": "reply", "text": "Nothing waits."}')
+    result = chat("do everything that waits", "and?")
+    assert "Nothing waits." in result.output
+    assert "Apply this change?" not in result.output  # nothing to confirm
+    assert '"unfinished_tasks": 0' in conversation()[1].text
+
+
 # ── Problems ─────────────────────────────────────────────────────────────────
 
 

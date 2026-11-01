@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from desman.core.retry import Attempts
+from desman.core.retry import Attempts, RetryPolicy
 from desman.core.states import SubtaskStatus
 
 
@@ -20,6 +20,16 @@ class Priority(IntEnum):
     NORMAL = 50
     HIGH = 100
     CRITICAL = 200
+
+
+class Tools(StrEnum):
+    """What a task's executor may use."""
+
+    GRANTED = "granted"
+    """The run's access: the tool policy within the human's permissions."""
+    NONE = "none"
+    """No tools at all, whatever the permissions: work that reads text which may say anything
+    (a chat summary), so nothing written in it can make the work act."""
 
 
 class SubtaskSpec(BaseModel):
@@ -36,6 +46,10 @@ class TaskSpec(BaseModel):
     goal: str = Field(min_length=1)
     priority: int = Priority.NORMAL
     subtasks: list[SubtaskSpec] = Field(min_length=1)
+    retry: RetryPolicy = Field(default_factory=RetryPolicy)
+    """The task's retry budgets, kept with it: whoever recovers or judges its subtasks (any
+    worker, any run) charges them by this policy."""
+    tools: Tools = Tools.GRANTED
 
     @model_validator(mode="after")
     def _dependencies_form_a_dag(self) -> Self:
@@ -82,6 +96,9 @@ class Subtask(BaseModel):
     accepted_attempt: int | None = None
     parent_id: str | None = None
     """Set on the parts of a subtask that was split (`Store.decompose`)."""
+    review_owner: str | None = None
+    review_until: str | None = None
+    """A review in progress: who reserved it and until when (`Store.reserve_review`)."""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -103,4 +120,6 @@ class Subtask(BaseModel):
             attempts=Attempts(quality=row["attempts_quality"], transient=row["attempts_transient"]),
             accepted_attempt=row["accepted_attempt"],
             parent_id=row["parent_id"],
+            review_owner=row["review_owner"],
+            review_until=row["review_until"],
         )

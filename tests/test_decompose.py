@@ -222,8 +222,10 @@ def test_a_part_is_never_split_again(store: Store, clock: FakeClock) -> None:
         .on("Review", *[REJECT] * 9, ACCEPT, repeat_last=True)
         .on(SPLIT, split_reply("a", "b"))
     )
-    task_id = store.create_task(one_step())
-    result = coordinator(store, clock, llm, policy=RetryPolicy(max_attempts=6)).run(task_id)
+    task_id = store.create_task(
+        one_step().model_copy(update={"retry": RetryPolicy(max_attempts=6)})
+    )
+    result = coordinator(store, clock, llm).run(task_id)
     assert result.status is TaskStatus.DONE
     assert len(store.list_subtasks(task_id)) == 3  # one split only
     part_a = [s for seq, s in strategies(store, task_id) if seq == "[1]"]

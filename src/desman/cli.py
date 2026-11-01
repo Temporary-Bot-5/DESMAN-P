@@ -28,7 +28,7 @@ from desman.config_cli import (
     usage,
 )
 from desman.core import calls, db
-from desman.core.coordinator import RunResult
+from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult
 from desman.core.models import Priority, TaskSpec
 from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
@@ -178,6 +178,17 @@ def json_option(command: F) -> F:
 
 def run_options(command: F) -> F:
     command = click.option(
+        "--wait",
+        is_flag=True,
+        help="Sleep through provider pauses instead of returning (exit code 4) when only "
+        "paused work is left.",
+    )(command)
+    return model_options(command)
+
+
+def model_options(command: F) -> F:
+    """How a run's agents are driven: shared by `run`, `resume` and `worker`."""
+    command = click.option(
         "--no-cache",
         is_flag=True,
         help="Ask the model even when the same request already has an accepted reply "
@@ -202,12 +213,6 @@ def run_options(command: F) -> F:
         default=None,
         help="Drive the agents with a scripted fake provider (JSON script, see desman.llm.fake). "
         "Scripted latency and timeouts take real time.",
-    )(command)
-    command = click.option(
-        "--wait",
-        is_flag=True,
-        help="Sleep through provider pauses instead of returning (exit code 4) when only "
-        "paused work is left.",
     )(command)
     command = click.option(
         "--lease-seconds",
@@ -339,6 +344,100 @@ def resume(
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
+
+
+@cli.command()
+@click.option(
+    "--until-idle",
+    is_flag=True,
+    help="Stop once no task has work left that a worker could do (by default the worker keeps "
+    "waiting for new work, and for paused work to resume).",
+)
+@click.option(
+    "--poll-seconds",
+    type=click.FloatRange(min=0.1),
+    default=DEFAULT_POLL_SECONDS,
+    show_default=True,
+    help="How often a worker with nothing to do looks for work again.",
+)
+@model_options
+@db_option
+@json_option
+def worker(
+    until_idle: bool,
+    poll_seconds: float,
+    fake_script: Path | None,
+    provider_name: str | None,
+    model: str | None,
+    lease_seconds: int,
+    db_path: Path | None,
+    as_json: bool,
+    no_cache: bool,
+) -> None:
+    """Work on the subtasks of every task until stopped (Ctrl+C).
+
+    Several workers may run at once, in separate terminals, on one database: each takes the
+    most urgent ready subtask of any task and reviews results waiting for a verdict, and never
+    the same one as another worker. A worker that is stopped or killed leaves nothing behind:
+    another worker, or `resume`, takes its subtask back.
+    """
+    llm, other = _provider(fake_script, provider_name, model, as_json)
+    access = _executor_access(as_json)
+    store = open_existing(db_path)
+    models = _attach(llm, other, store, cache=not no_cache)
+    interrupted = False
+    try:
+        coordinator = runs.coordinator(
+            store, models, access, load_config().load(), lease_seconds=lease_seconds
+        )
+        coordinator.poll_seconds = poll_seconds
+        if not as_json:
+            ui.note(t("Worker {owner} started. Ctrl+C stops it.", owner=coordinator.owner))
+            sys.stdout.flush()
+        try:
+            coordinator.work(
+                until_idle=until_idle,
+                on_tick=None if as_json else _worker_progress(coordinator),
+            )
+        except KeyboardInterrupt:
+            interrupted = True
+        except ScriptExhausted as e:
+            raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
+    finally:
+        store.conn.close()
+    if as_json:
+        out = {
+            "owner": coordinator.owner,
+            "executed": coordinator.executed,
+            "reviewed": coordinator.reviewed,
+            "interrupted": interrupted,
+        }
+        click.echo(json.dumps(out, ensure_ascii=False, indent=2))
+        return
+    ui.note(
+        t(
+            "Worker stopped. Executions: {executed}, reviews: {reviewed}.",
+            executed=coordinator.executed,
+            reviewed=coordinator.reviewed,
+        )
+    )
+
+
+def _worker_progress(coordinator: Coordinator) -> Callable[[object], None]:
+    """A line whenever the worker's counts change (not on housekeeping alone)."""
+    last = (0, 0)
+
+    def show(_: object) -> None:
+        nonlocal last
+        now = (coordinator.executed, coordinator.reviewed)
+        if now != last:
+            last = now
+            ui.note(
+                t("Executions: {executed}, reviews: {reviewed}.", executed=now[0], reviewed=now[1])
+            )
+            sys.stdout.flush()
+
+    return show
 
 
 @cli.command()

@@ -32,13 +32,14 @@ S = SubtaskStatus
 K = FailureKind
 
 
-def chain(*names: str) -> TaskSpec:
+def chain(*names: str, retry: RetryPolicy | None = None) -> TaskSpec:
     return TaskSpec(
         goal="g",
         subtasks=[
             SubtaskSpec(description=n, acceptance_criteria="ok", depends_on=[i - 1] if i else [])
             for i, n in enumerate(names)
         ],
+        retry=retry or RetryPolicy(),
     )
 
 
@@ -161,8 +162,8 @@ def test_crashing_executor_is_bounded(store: Store, clock: FakeClock) -> None:
     def crash(work: Work) -> Success:
         raise RuntimeError("segfault, sort of")
 
-    task_id = store.create_task(chain("a"))
-    result = coordinator(store, clock, crash, policy=RetryPolicy(max_transient=3)).run(task_id)
+    task_id = store.create_task(chain("a", retry=RetryPolicy(max_transient=3)))
+    result = coordinator(store, clock, crash).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
     [subtask] = store.list_subtasks(task_id)
     assert subtask.attempts == Attempts(transient=3)
@@ -175,10 +176,8 @@ def test_failing_reviewer_is_bounded(store: Store, clock: FakeClock) -> None:
     def broken(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
         raise ConnectionError("provider down")
 
-    task_id = store.create_task(chain("a"))
-    result = coordinator(store, clock, reviewer=broken, policy=RetryPolicy(max_transient=2)).run(
-        task_id
-    )
+    task_id = store.create_task(chain("a", retry=RetryPolicy(max_transient=2)))
+    result = coordinator(store, clock, reviewer=broken).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
 
 
@@ -361,7 +360,7 @@ def test_run_does_not_touch_other_tasks(store: Store, clock: FakeClock) -> None:
     assert stuck is not None
     mine = store.create_task(chain("mine"))
     clock.advance(DEFAULT_LEASE_SECONDS + 1)  # the other task's lease has expired meanwhile
-    result = coordinator(store, clock, policy=RetryPolicy(max_transient=1)).run(mine)
+    result = coordinator(store, clock).run(mine)
     assert result.status is TaskStatus.DONE
     untouched = store.get_subtask(stuck.id)
     # Not recovered, and certainly not escalated under this run's tiny budget.
@@ -414,8 +413,8 @@ def test_unknown_verdict_is_a_reviewer_failure_not_an_escalation(
     def confused(subtask: Subtask, artifact: dict[str, Any] | None) -> Any:
         return {"verdict": "maybe"}
 
-    task_id = store.create_task(chain("a"))
-    co = coordinator(store, clock, reviewer=confused, policy=RetryPolicy(max_transient=2))
+    task_id = store.create_task(chain("a", retry=RetryPolicy(max_transient=2)))
+    co = coordinator(store, clock, reviewer=confused)
     assert co.run(task_id).status is TaskStatus.NEEDS_HUMAN
     reasons = [r["details_json"] for r in store.audit_log(task_id) if r["actor"] == "reviewer"]
     assert any("ValidationError" in r for r in reasons)
@@ -426,8 +425,8 @@ def test_executor_returning_garbage_is_a_transient_failure(store: Store, clock: 
     def sloppy(work: Work) -> Any:
         return {"content": "not wrapped"}
 
-    task_id = store.create_task(chain("a"))
-    co = coordinator(store, clock, sloppy, policy=RetryPolicy(max_transient=1))
+    task_id = store.create_task(chain("a", retry=RetryPolicy(max_transient=1)))
+    co = coordinator(store, clock, sloppy)
     assert co.run(task_id).status is TaskStatus.NEEDS_HUMAN
     assert any("returned dict" in r["details_json"] for r in store.audit_log(task_id))
 
@@ -445,8 +444,8 @@ def test_bad_provider_deadline_does_not_crash_the_loop(store: Store, clock: Fake
     def bad_deadline(work: Work) -> Failure:
         return Failure(kind=K.LIMIT, reason="429", paused_until="soon")  # raises inside executor
 
-    task_id = store.create_task(chain("a"))
-    co = coordinator(store, clock, bad_deadline, policy=RetryPolicy(max_transient=2))
+    task_id = store.create_task(chain("a", retry=RetryPolicy(max_transient=2)))
+    co = coordinator(store, clock, bad_deadline)
     assert co.run(task_id).status is TaskStatus.NEEDS_HUMAN
 
 
