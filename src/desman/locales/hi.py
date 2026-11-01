@@ -105,6 +105,11 @@ MESSAGES: dict[str, Forms] = {
         "{n} कार्य: {statuses}।",
         "{n} कार्य: {statuses}।",
     ),
+    "{n} subtask waits for your decision:": (
+        "{n} उप-कार्य आपके निर्णय की प्रतीक्षा में है:",
+        "{n} उप-कार्य आपके निर्णय की प्रतीक्षा में हैं:",
+    ),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "यहीं किसी को दोबारा चलाने, स्वीकारने या विफल करने को कहें, या टर्मिनल में तय करें: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "निर्णय लें: desman retry|accept|fail <ref> [--note पाठ]",
     "say why it failed": "बताएँ कि यह क्यों विफल हुआ",
     "it changed meanwhile, try again: {error}": "इस बीच कुछ बदल गया, फिर से कोशिश करें: {error}",

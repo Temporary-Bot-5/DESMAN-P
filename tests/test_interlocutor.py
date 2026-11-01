@@ -203,6 +203,7 @@ def test_what_waits_for_the_operator_is_shown_with_its_decisions(fake: FakeLLM) 
     assert "waits for you" in result.output
     assert "needs_human" in result.output and "Which dates? None were given." in result.output
     assert "desman retry|accept|fail" in result.output and "desman resume" in result.output
+    assert "subtask waits for your decision" not in result.output  # retold: not again as a notice
     outcome = payload(calls(fake, RETELL)[0])
     assert outcome["status"] == "needs_human" and outcome["result"] is None
     [waiting] = outcome["waiting_for_the_person"]

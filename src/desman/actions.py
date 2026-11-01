@@ -259,6 +259,28 @@ def print_inbox(items: list[InboxItem]) -> None:
     click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
 
 
+def print_waiting(items: list[InboxItem], hint: str) -> None:
+    """Subtasks that came to wait for the operator while they were not asking (ROADMAP 5.1):
+    a worker's terminal and the chat show them as they arrive. `hint`: how to decide there."""
+    if not items:
+        return
+    ui.warn(
+        tn(
+            len(items),
+            "{n} subtask waits for your decision:",
+            "{n} subtasks wait for your decision:",
+        )
+    )
+    for item in items:
+        ui.out(
+            Text(f"  {item.ref}  ", style="key")
+            + Text(f"{item.status}  {one_line(item.description, 50)}  [{one_line(item.goal, 40)}]")
+        )
+        if item.reason:
+            ui.note(f"    {one_line(item.reason, 110)}")
+    ui.note(hint)
+
+
 @dataclass(frozen=True)
 class Pending:
     """A decision on a subtask, checked but not made: the subtask as the operator saw it."""

@@ -95,6 +95,8 @@ MESSAGES: dict[str, Forms] = {
     "role": "役割",
     "strategy": "戦略",
     "{n} task: {statuses}.": ("{n} 件のタスク: {statuses}。",),
+    "{n} subtask waits for your decision:": ("{n} 件のサブタスクがあなたの判断を待っています:",),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "ここで再試行・承認・失敗を頼むか、ターミナルで判断してください: desman inbox。",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "判断: desman retry|accept|fail <ref> [--note テキスト]",
     "say why it failed": "失敗した理由を書いてください",
     "it changed meanwhile, try again: {error}": "その間に変更がありました。もう一度試してください: {error}",

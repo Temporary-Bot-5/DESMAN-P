@@ -34,7 +34,7 @@ from desman.core import calls, db
 from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult
 from desman.core.models import Kind, Priority, TaskSpec
 from desman.core.policy import Access
-from desman.core.report import TaskReport, inbox, task_report, task_summaries
+from desman.core.report import InboxWatch, TaskReport, inbox, task_report, task_summaries
 from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
@@ -399,13 +399,16 @@ def worker(
             store, models, access, load_config().load(), lease_seconds=lease_seconds
         )
         coordinator.poll_seconds = poll_seconds
+        watch = InboxWatch(store)
         if not as_json:
             ui.note(t("Worker {owner} started. Ctrl+C stops it.", owner=coordinator.owner))
+            _tell_waiting(watch)  # what already waits, then what comes to
             sys.stdout.flush()
         try:
             coordinator.work(
                 until_idle=until_idle,
-                on_tick=None if as_json else _worker_progress(coordinator),
+                on_tick=None if as_json else _worker_progress(coordinator, watch),
+                on_idle=None if as_json else lambda: _tell_waiting(watch),
             )
         except KeyboardInterrupt:
             interrupted = True
@@ -432,8 +435,9 @@ def worker(
     )
 
 
-def _worker_progress(coordinator: Coordinator) -> Callable[[object], None]:
-    """A line whenever the worker's counts change (not on housekeeping alone)."""
+def _worker_progress(coordinator: Coordinator, watch: InboxWatch) -> Callable[[object], None]:
+    """A line whenever the worker's counts change (not on housekeeping alone), and whatever
+    came to wait for the operator since the last look (any worker's, any task's)."""
     last = (0, 0)
 
     def show(_: object) -> None:
@@ -444,9 +448,17 @@ def _worker_progress(coordinator: Coordinator) -> Callable[[object], None]:
             ui.note(
                 t("Executions: {executed}, reviews: {reviewed}.", executed=now[0], reviewed=now[1])
             )
-            sys.stdout.flush()
+        _tell_waiting(watch)
+        sys.stdout.flush()
 
     return show
+
+
+def _tell_waiting(watch: InboxWatch) -> None:
+    actions.print_waiting(
+        watch.new(), t("Decide with: desman retry|accept|fail <ref> [--note TEXT]")
+    )
+    sys.stdout.flush()
 
 
 @cli.command()

@@ -114,6 +114,12 @@ MESSAGES: dict[str, Forms] = {
         "{n} задачі: {statuses}.",
         "{n} задач: {statuses}.",
     ),
+    "{n} subtask waits for your decision:": (
+        "{n} підзадача чекає на ваше рішення:",
+        "{n} підзадачі чекають на ваше рішення:",
+        "{n} підзадач чекають на ваше рішення:",
+    ),
+    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Попросіть тут повторити, прийняти чи провалити її або вирішіть у терміналі: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Рішення: desman retry|accept|fail <ref> [--note ТЕКСТ]",
     "say why it failed": "напишіть, чому не вдалося",
     "it changed meanwhile, try again: {error}": "за цей час щось змінилося, повторіть: {error}",
