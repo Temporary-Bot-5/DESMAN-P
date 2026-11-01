@@ -88,8 +88,9 @@ class Failure(BaseModel):
     paused_until: str | None = None
     """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
     unfit_provider: str | None = None
-    """The provider whose model cannot answer this kind of request (`ProviderError.unfit_model`):
-    the task's next attempts go to another model, if there is one."""
+    """The model that cannot answer this kind of request (`ProviderError.unfit_model`), as
+    `provider/model` (the provider alone when the error does not say): the task's next attempts
+    go to another model, if there is one."""
 
     @field_validator("paused_until", mode="before")
     @classmethod
@@ -230,8 +231,9 @@ class Coordinator:
         there is no other model to switch to, so the audit never claims a switch that did not
         happen; pass `strategy_for` when the executor has one."""
         self.providers = providers
-        """The names of the providers the executor asks: the main one and the other model of
-        `strategies` (None if there is none). Without them no model is avoided as unfit."""
+        """The labels of the models the executor asks (`provider/model`, or a provider's name):
+        the main one and the other model of `strategies` (None if there is none). Without them
+        no model is avoided as unfit."""
         self.decomposer = decomposer
         """Without one, subtasks are never split."""
         self.sleep = sleep
@@ -622,7 +624,7 @@ class Coordinator:
             kind=error.kind,
             reason=f"{type(error).__name__}: {error}",
             paused_until=None if until is None else db.to_iso(until),
-            unfit_provider=error.provider if error.unfit_model else None,
+            unfit_provider=error.label if error.unfit_model else None,
         )
 
     def _avoid(self, task_id: str) -> dict[str, bool]:

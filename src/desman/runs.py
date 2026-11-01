@@ -1,17 +1,18 @@
 """What a run of the local operator is made of, shared by `desman run`/`resume` and the chat.
 
 The operator (ADR 0003) is the coordinator with its planner, executor and reviewer. Here it is
-put together from the config: the models (a provider and, for retries with another model,
-another free one), the executor's access (the tool policy within the human's permissions) and
-its tools.
+put together from the config: the models (a lineup per role, `llm.router`, and for retries with
+another model the executor's other lineup), the executor's access (the tool policy within the
+human's permissions) and its tools.
 """
 
 from __future__ import annotations
 
 import functools
 import sqlite3
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import datetime
 
 import click
 import httpx
@@ -34,40 +35,78 @@ from desman.i18n import t
 from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.cache import Cached
-from desman.llm.openai_compat import OpenAICompatible
+from desman.llm.limiter import Buckets, Limited
 from desman.planner import decomposer
 
 
 @dataclass(frozen=True)
 class Models:
     llm: LLM
+    """The executor's models; every role without its own (`roles`) asks them too."""
     other: LLM | None
-    """Another free provider for "other model" retries (ROADMAP 2.9); None if there is none."""
+    """For "other model" retries (ROADMAP 2.9); None if there is no other model."""
     choice: router.Choice | None = None
-    """None for a fake."""
+    """The executor's first model; None for a fake."""
+    roles: Mapping[calls.Role, LLM] = field(default_factory=dict)
+    other_choice: router.Choice | None = None
+
+    def for_(self, role: calls.Role) -> LLM:
+        return self.roles.get(role, self.llm)
+
+    def first(self, role: calls.Role) -> router.Choice | None:
+        """The model `role` asks first (None for a fake)."""
+        choices = getattr(self.for_(role), "choices", None)
+        return choices[0] if choices else None
 
 
-def models(config: Config, conn: sqlite3.Connection, *, cache: bool = True) -> Models:
-    """The preferred ready provider and another one, as the chat uses them: quick blips retried,
-    calls logged and accepted replies kept in the database. Raises `router.NoProvider`."""
-    llm, choice = router.build(config)
-    alternative = router.alternative(config, choice)
-    other = router.Backoff(alternative[0]) if alternative is not None else None
+def models(
+    config: Config,
+    conn: sqlite3.Connection,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    cache: bool = True,
+    client: httpx.Client | None = None,
+    clock: Callable[[], datetime] | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> Models:
+    """A lineup of models per role (`router.lineup`), each model paced by the rate limiter in
+    the database, quick blips retried, calls logged and accepted replies kept there. `provider`
+    and `model` narrow the choice like `desman run --provider/--model`; only a pinned `model`
+    leaves no other model for retries. Raises `router.NoProvider`."""
+    clients: dict[str, LLM] = {}
+    buckets = Buckets(conn, clock)
+    recorder = calls.recorder(conn)
+
+    def member(choice: router.Choice) -> LLM:
+        # One client per model, shared by the roles: its keys' state (refused, limited) is one.
+        if choice.label not in clients:
+            api = router.connect(config, choice, on_call=recorder, client=client)
+            keys = max(1, len(api.keys))
+            paced = Limited(api, buckets, choice.label, choice.spec.rpm * keys, sleep=sleep)
+            backed = router.Backoff(paced, sleep=sleep)
+            clients[choice.label] = Cached(backed, conn, choice.model) if cache else backed
+        return clients[choice.label]
+
+    def chain(choices: list[router.Choice]) -> router.Fallback:
+        return router.Fallback([(member(c), c) for c in choices])
+
+    lineups = {role: router.lineup(config, role, provider, model) for role in calls.Role}
+    roles = {role: chain(choices) for role, choices in lineups.items()}
+    executor = lineups[calls.Role.EXECUTOR]
+    others = [] if model is not None else router.other_lineup(executor)
     return Models(
-        attach(router.Backoff(llm), conn, cache=cache),
-        None if other is None else attach(other, conn, cache=cache),
-        choice,
+        roles[calls.Role.EXECUTOR],
+        chain(others) if others else None,
+        executor[0],
+        roles,
+        others[0] if others else None,
     )
 
 
-def attach(llm: LLM, conn: sqlite3.Connection, *, cache: bool) -> LLM:
-    """A real provider logs every call (`desman usage`) and keeps accepted replies (`llm.cache`)
-    in the task database. The fake does neither: its scripts count every call."""
-    client = llm.inner if isinstance(llm, router.Backoff) else llm
-    if not isinstance(client, OpenAICompatible):
-        return llm
-    client.on_call = calls.recorder(conn)
-    return Cached(llm, conn, client.model) if cache else llm
+def label(llm: LLM) -> str:
+    """How the coordinator tells the executor's models apart (`Failure.unfit_provider`)."""
+    return str(getattr(llm, "label", llm.name))
 
 
 def executor_access(config: Config, *, stderr: bool = False) -> Access:
@@ -156,14 +195,14 @@ def _coordinator(
     return Coordinator(
         store,
         llm_executor(models.llm, models.other),
-        llm_reviewer(models.llm, evidence=functools.partial(evidence, store)),
+        llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
         owner=current_owner(),
         lease_seconds=lease_seconds,
         abandoned=owner_is_gone,  # a run killed on this machine is taken over at once
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
-        providers=(models.llm.name, None if models.other is None else models.other.name),
-        decomposer=decomposer(models.llm),
+        providers=(label(models.llm), None if models.other is None else label(models.other)),
+        decomposer=decomposer(models.for_(calls.Role.DECOMPOSER)),
         access=access,
         tools=tools,
         watch=watch,

@@ -240,6 +240,7 @@ class OpenAICompatible:
             record(None, completion)
             return completion
         error = self._error(response)
+        error.model = model
         record(error)
         raise error
 

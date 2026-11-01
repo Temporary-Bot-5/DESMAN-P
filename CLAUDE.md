@@ -79,8 +79,9 @@ src/desman/
 ├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
 │                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
 │                  #   message that `covers` them; failed → they fall out of view, with a note
-├── runs.py        # A run put together from the config (models, executor access, web tools,
-│                  #   coordinator), shared by `run`/`resume` and the chat
+├── runs.py        # A run put together from the config (models: a lineup per role, each model
+│                  #   paced, backed off, cached; executor access, web tools, coordinator),
+│                  #   shared by `run`/`resume`/`worker` and the chat
 ├── live.py        # Live progress of a chat task: subtask bar, a line per module (role, calls,
 │                  #   tokens, limits left, state); redrawn on coordinator steps and calls
 └── core/
@@ -147,10 +148,18 @@ src/desman/
                    #   one repair request showing the model its errors, then StructuredOutputError
     ├── cache.py   # Cached: accepted replies by exact request (response_cache, 7 days);
                    #   complete_json() accepts, garbage is never kept; --no-cache skips it
-    ├── router.py  # provider/model for a run (--provider, PREFERENCE), built from the config
+    ├── catalog.py # Models per provider (default first): context, strict JSON, strengths
+                   #   (code, text, analysis), free-tier rpm; NEEDS: what each role asks
+    ├── router.py  # lineup(): a role's models, best first (need, JSON, PREFERENCE, catalog);
+                   #   --provider narrows it, --model pins one; other_lineup() for "other model"
+                   #   Fallback: a call moves to the next model on a limit, outage, refused key,
+                   #   too small a context (not on the model's own failure, nor a slow one)
                    #   Backoff: quick blips (5xx, drops, limits ≤10 s) retried before they cost an
                    #   attempt; slow failures never (a lease is not renewed while waiting)
-    └── check.py   # `desman keys check`: is a key accepted, limits reported; spends no tokens
+    ├── limiter.py # Token bucket per provider/model in the DB (rate_buckets), limits a provider
+                   #   reported kept as blocked_until: shared by workers, outlives restarts
+    └── check.py   # `desman keys check`: is a key accepted, limits reported, catalog models the
+                   #   provider does not list; spends no tokens
 ```
 
 Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` next to it

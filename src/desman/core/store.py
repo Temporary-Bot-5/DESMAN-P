@@ -987,9 +987,10 @@ class Store:
     # ── Side effects (core/effects.py) ───────────────────────────────────────
 
     def unfit_providers(self, task_id: str) -> set[str]:
-        """The providers an execution of the task failed as unable to answer (`unfit_provider`
-        in its `execution_failed` entry). Read from the audit, so a resumed run does not ask
-        them again either; by name, so a provider that is new to the task is still tried."""
+        """The models an execution of the task failed as unable to answer (`unfit_provider` in
+        its `execution_failed` entry: `provider/model`, or a provider's name). Read from the
+        audit, so a resumed run does not ask them again either; by label, so a model that is new
+        to the task is still tried."""
         rows = self.conn.execute(
             """SELECT DISTINCT json_extract(details_json, '$.unfit_provider') FROM audit_log
                WHERE task_id = ? AND action = 'execution_failed'

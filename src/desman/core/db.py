@@ -358,6 +358,17 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE subtasks ADD COLUMN queued_at TEXT;
     UPDATE subtasks SET queued_at = updated_at WHERE status IN ('ready', 'review');
     """,
+    # 19 — the pace of each provider's model (ROADMAP 4.5, llm/limiter.py): a token bucket per
+    # provider/model, and until when a limit the provider reported keeps it aside. Shared by the
+    # workers on the database and kept across restarts
+    """
+    CREATE TABLE rate_buckets (
+        scope TEXT PRIMARY KEY,
+        tokens REAL NOT NULL CHECK (tokens >= 0),
+        updated_at TEXT NOT NULL,
+        blocked_until TEXT
+    );
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

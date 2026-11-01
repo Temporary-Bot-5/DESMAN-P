@@ -111,10 +111,9 @@ def internet(monkeypatch: pytest.MonkeyPatch) -> Internet:
     def client() -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(world))
 
-    build, alternative = router.build, router.alternative
-    monkeypatch.setattr(router, "build", lambda *a, **kw: build(*a, **kw, client=client()))
+    connect = router.connect
     monkeypatch.setattr(
-        router, "alternative", lambda *a, **kw: alternative(*a, **kw, client=client())
+        router, "connect", lambda *a, **kw: connect(*a, **{**kw, "client": client()})
     )
     monkeypatch.setattr(chat_module, "client", client)  # the web tools' engines
     return world

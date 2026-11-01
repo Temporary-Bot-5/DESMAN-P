@@ -296,6 +296,8 @@ MESSAGES: dict[str, Forms] = {
     "Planning…": "Складаю план…",
     "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не склала план, тому єдина підзадача — сама мета: {error}",
     "Retries may also use {provider} · {model}": "Повторні спроби можуть використовувати й {provider} · {model}",
+    "Plans and reviews by {provider} · {model}": "Плани й перевірки: {provider} · {model}",
+    "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} не надає ці моделі з каталогу DESMAN: {models}. Виклики до них не пройдуть і перейдуть до наступної моделі.",
     "part of {seq}": "частина {seq}",
     "web search": "вебпошук",
     "Web search (for the web_search tool)": "Вебпошук (для інструмента web_search)",

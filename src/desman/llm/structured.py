@@ -8,8 +8,9 @@ its own reply and what was wrong with it; a second failure raises `StructuredOut
 Only one repair: every call spends free quota, and a model that fails twice in a row is better
 served by the retry policy (another attempt, later another strategy, ROADMAP 2.9).
 
-A reply that fits is kept by `llm.cache.Cached` (when the LLM is one), so the same request
-asked again is answered without a call; an unusable reply is never kept.
+A reply that fits is kept by `llm.cache.Cached` (when the LLM is one, or a `router.Fallback` of
+them: the model that wrote it keeps it), so the same request asked again is answered without a
+call; an unusable reply is never kept.
 
 The repair message starts with the original heading ("Execute subtask (repair):"), so prompt
 routes of a fake (`FakeLLM().on("Execute", ...)`) serve it from the same queue.
@@ -27,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from desman.llm.base import LLM, Completion, Message, Request
 from desman.llm.cache import Cached
+from desman.llm.router import Fallback
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -91,7 +93,7 @@ def complete_json(
 
 def _accept(llm: LLM, request: Request, reply: Completion) -> None:
     """A reply that fits the schema is worth keeping (`llm.cache`); an unusable one never."""
-    if isinstance(llm, Cached):
+    if isinstance(llm, (Cached, Fallback)):  # a lineup passes it on to the model that wrote it
         llm.accept(request, reply)
 
 

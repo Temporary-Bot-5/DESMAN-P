@@ -80,6 +80,13 @@ class ProviderError(Exception):
     def __init__(self, provider: str, message: str) -> None:
         super().__init__(f"{provider}: {message}")
         self.provider = provider
+        self.model: str | None = None
+        """The model the refused request was for, when the client knows it."""
+
+    @property
+    def label(self) -> str:
+        """`provider/model` (like `router.Choice.label`), or the provider alone."""
+        return self.provider if self.model is None else f"{self.provider}/{self.model}"
 
     def paused_until(self, now: datetime) -> datetime | None:
         """For LIMIT errors: when to try again; None lets the store use its default pause."""
