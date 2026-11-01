@@ -326,3 +326,26 @@ def test_a_continued_session_shows_the_start_of_its_summary(fake: FakeLLM) -> No
     result = chat("/exit")
     assert "Summary of the older messages:" in result.output
     assert "The person plans a trip to Lisbon" in result.output
+
+
+def test_a_protected_change_during_a_summary_leaves_the_chat_open(
+    fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Protected files changed while the summary ran (5.3): its next step is refused, the
+    summary task is cancelled, the chat goes on, and the summary is tried again later."""
+    import click
+
+    said_before("I plan a trip to Lisbon in May", "short one")
+    summarised(fake).on(CHAT, REPLY)
+
+    def guard(store: Store) -> None:
+        if calls(fake, "Execute subtask"):
+            raise click.ClickException("Protected files changed without your approval: x")
+
+    monkeypatch.setattr(runs, "guard", guard)
+    result = chat("/compact", "hotels?")
+    assert "Summarised" not in result.output
+    assert "Protected files changed without your approval" in result.output
+    sessions = stored()
+    [task_id] = [r["id"] for r in sessions.conn.execute("SELECT id FROM tasks")]
+    assert Store(sessions.conn).task_status(task_id) is TaskStatus.CANCELLED

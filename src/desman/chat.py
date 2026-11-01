@@ -401,17 +401,21 @@ class Chat:
         )  # not a task of the session: the person did not ask for it, it is never retold
         ui.note(t("Summarising the older messages of this session…"))
         summary = None
+        blocked = False
         try:
             runs.summarizer(self.store, models).run(task_id)
             if self.store.task_status(task_id) is TaskStatus.DONE:
                 summary = compaction.summary_of(self.store.final_result(task_id))
         except KeyboardInterrupt:
             pass
+        except click.ClickException:  # protected files changed meanwhile: told on its own
+            blocked = True
         if self.store.task_status(task_id) not in (TaskStatus.DONE, TaskStatus.CANCELLED):
             # Waiting for a decision or a quota: nobody needs it any more, it leaves the inbox.
             self.store.cancel_task(task_id, "the chat went on without this summary")
         if summary is None:
-            self._gave_up[self.session_id] = history.messages[-1].seq
+            if not blocked:  # once approved, a summary is tried again
+                self._gave_up[self.session_id] = history.messages[-1].seq
             self._event(
                 t(
                     "The older messages could not be summarised, so the model sees only the "
