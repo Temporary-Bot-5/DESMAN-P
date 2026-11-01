@@ -290,7 +290,9 @@ def test_heartbeat_keeps_the_node_seen_and_logs_only_changes(
     ]
 
 
-def test_only_a_registered_node_is_served(registry: Registry, clock: FakeClock) -> None:
+def test_only_a_registered_node_is_served(
+    registry: Registry, clock: FakeClock, db_path: Path
+) -> None:
     node = Node(registry, clock)
     for answer in (
         node.heartbeat(),
@@ -299,6 +301,11 @@ def test_only_a_registered_node_is_served(registry: Registry, clock: FakeClock) 
     ):
         assert answer.status_code == 403
         assert answer.json()["error"] == "not_registered"
+    with store.connection(db_path) as conn:
+        refused = store.entries(conn)
+    assert [(e.action, e.node, e.details["reason"]) for e in refused] == [
+        ("refused", node.fingerprint, "not_registered")
+    ] * 3
 
 
 def test_leaving_takes_back_what_was_lent(
@@ -318,7 +325,7 @@ def test_leaving_takes_back_what_was_lent(
     assert node.heartbeat().status_code == 200
     with store.connection(db_path) as conn:
         entries = store.entries(conn)
-    assert [e.action for e in entries] == ["registered", "left", "registered"]
+    assert [e.action for e in entries] == ["registered", "left", "refused", "registered"]
     assert entries[-1].details["again"] is True
 
 

@@ -9,7 +9,10 @@ Every request is checked before anything else (`net.request.verify_request`): si
 time, nonce; then whether its key is revoked; then its body against `net.protocol`. A refusal
 is answered with a `protocol.Problem` and written to the journal with the key it claimed.
 Only `REGISTER` is open to a key the registry has not seen; everything else needs a node that
-takes part (`active`).
+takes part (`active`), and a signed request from one that does not is a refusal like any other.
+
+What is answered before the signature is read (an unknown path, another method, a body over
+`protocol.MAX_BODY`) is not journaled: nobody could be named, and anyone could fill the journal.
 """
 
 from __future__ import annotations
@@ -68,6 +71,10 @@ def _problem(status: int, error: str, detail: str = "") -> Reply:
     return Reply(status, protocol.Problem(error=error, detail=detail).model_dump())
 
 
+class _NotRegistered(Exception):
+    """A signed request from a key that does not take part (never registered, or left)."""
+
+
 def _ok(model: BaseModel) -> Reply:
     return Reply(HTTPStatus.OK, model.model_dump(mode="json"))
 
@@ -116,14 +123,19 @@ class Registry:
                     raise Refused(Reason.REVOKED, "this key is revoked", signer=caller.fingerprint)
                 return handler(conn, caller, body, now)
             except Refused as e:
-                with db.transaction(conn):
-                    store.log(
-                        conn,
-                        "refused",
-                        e.signer,
-                        {"reason": e.reason.value, "method": method, "path": target[:200]},
-                    )
+                self._refused(conn, e.signer, e.reason.value, method, target)
                 return _problem(_STATUS.get(e.reason, HTTPStatus.UNAUTHORIZED), e.reason.value)
+            except _NotRegistered:
+                self._refused(conn, caller.fingerprint, NOT_REGISTERED, method, target)
+                return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
+
+    def _refused(
+        self, conn: sqlite3.Connection, signer: str | None, reason: str, method: str, target: str
+    ) -> None:
+        with db.transaction(conn):
+            store.log(
+                conn, "refused", signer, {"reason": reason, "method": method, "path": target[:200]}
+            )
 
     # ── Routes ───────────────────────────────────────────────────────────────
 
@@ -161,9 +173,11 @@ class Registry:
             )
         return self._state(caller.fingerprint)
 
-    def _active(self, conn: sqlite3.Connection, caller: request.Caller) -> store.Node | None:
+    def _active(self, conn: sqlite3.Connection, caller: request.Caller) -> store.Node:
         found = store.node(conn, caller.fingerprint)
-        return found if found is not None and found.status == "active" else None
+        if found is None or found.status != "active":
+            raise _NotRegistered
+        return found
 
     def _alive(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
@@ -171,8 +185,6 @@ class Registry:
         asked = _body(protocol.Heartbeat, body, caller)
         with db.transaction(conn):
             found = self._active(conn, caller)
-            if found is None:
-                return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
             conn.execute(
                 "UPDATE nodes SET last_seen = ? WHERE fingerprint = ?",
                 (db.to_iso(now), caller.fingerprint),
@@ -197,7 +209,7 @@ class Registry:
         with db.transaction(conn):
             found = store.node(conn, caller.fingerprint)
             if found is None:
-                return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
+                raise _NotRegistered
             if found.status == "left":
                 return _ok(protocol.Left(node=caller.fingerprint, changed=False))
             conn.execute(
@@ -213,8 +225,7 @@ class Registry:
     ) -> Reply:
         _no_body(body, caller)
         with db.read_snapshot(conn):
-            if self._active(conn, caller) is None:
-                return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
+            self._active(conn, caller)
             records = store.handed_out(conn, now)
         return _ok(protocol.TrustState(records=records))
 
