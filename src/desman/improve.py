@@ -648,12 +648,17 @@ def file_for(conn: sqlite3.Connection, proposal: Proposal) -> Path | None:
 
 def write_file(conn: sqlite3.Connection, proposal: Proposal) -> Path | None:
     """The proposal's diff as a file (`git apply` skips the comment lines before it); None when
-    there is no diff or no folder for it. The database keeps the diff either way."""
+    there is no diff or no folder for it. The database keeps the diff either way. The path is
+    code's (`<id>.diff` beside the database), never the model's; the file is DESMAN's record of
+    the proposal, like its row, not something an agent writes."""
     path = file_for(conn, proposal)
     if path is None or proposal.diff is None:
         return None
+    # Only what code wrote or checked: the model's own words (its summary) stay in the
+    # database and `desman proposals show`; the diff and the settings were built and checked
+    # by code from the targets and the values shown (`render`).
     header = [f"# DESMAN proposal {proposal.id} (task {proposal.task_id})"]
-    header += [f"# {line}" for line in (proposal.summary or "").splitlines()]
+    header.append(f"# Why: desman proposals show {proposal.id}")
     for item in proposal.details.get("settings", []):
         header.append(f"# Setting {item['setting']}: {item['old']} -> {item['new']}")
     if proposal.details.get("command"):

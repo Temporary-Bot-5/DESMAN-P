@@ -314,6 +314,7 @@ def test_analyze_proposes_a_diff_and_applies_nothing(tmp_path: Path) -> None:
     path = db.default_db_path().parent / "proposals" / "1.diff"
     text = path.read_text()
     assert text.startswith("# DESMAN proposal 1") and text.endswith(p.diff)
+    assert p.summary is not None and p.summary not in text  # the model's words stay in the DB
 
     listed = desman("proposals")
     assert "proposed  planner.criteria_rules" in listed.output
