@@ -122,6 +122,16 @@ def test_alternative_files_of_a_quantization_are_not_added_up() -> None:
     assert model.size == 2 * GB and model.files == ("Llama-3.2-3B-Instruct-Q4_K_M.gguf",)
 
 
+def test_a_file_whole_and_in_parts_are_alternatives() -> None:
+    """Devin's review of #58: the same stem whole and split is not one model of both sizes."""
+    whole = {"rfilename": "x-Q4_K_M.gguf", "size": 5 * GB}
+    parts = [{"rfilename": f"x-Q4_K_M-0000{i}-of-00002.gguf", "size": 2 * GB} for i in (1, 2)]
+    model = inspect(lambda r: listing([whole, *parts]))
+    assert model.size == 5 * GB and model.files == ("x-Q4_K_M.gguf",)  # not 9 GB
+    model = inspect(lambda r: listing([{**whole, "size": 3 * GB}, *parts]))
+    assert model.size == 4 * GB and len(model.files) == 2
+
+
 @pytest.mark.parametrize("size", ["2GB", None, -1, True])
 def test_a_listing_without_a_usable_size_is_unexpected(size: object) -> None:
     siblings = [{"rfilename": "model-Q4_K_M.gguf", "size": size}]

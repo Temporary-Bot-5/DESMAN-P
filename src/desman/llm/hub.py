@@ -187,9 +187,11 @@ def inspect(ref: Ref, client: httpx.Client, token: str | None = None) -> Gguf:
         raise HubError(Problem.CHOOSE_QUANT, ref, quants)
     # Files of one quantization: the parts of a split file belong together; separate files
     # are alternatives, of which a server takes one. The largest is what memory must hold.
-    models: dict[str, list[str]] = {}
+    # A file whole and the same file in parts (both may be there) are two alternatives too.
+    models: dict[tuple[str, bool], list[str]] = {}
     for name in by_quant[wanted]:
-        models.setdefault(_SPLIT.sub(".gguf", name), []).append(name)
+        key = (_SPLIT.sub(".gguf", name), _SPLIT.search(name) is not None)
+        models.setdefault(key, []).append(name)
     chosen = max(
         (tuple(sorted(parts)) for parts in models.values()),
         key=lambda parts: (sum(files[f] for f in parts), parts),
