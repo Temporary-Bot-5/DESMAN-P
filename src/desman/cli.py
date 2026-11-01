@@ -46,6 +46,7 @@ from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.models_cli import models
 from desman.planner import Planned, plan, template_plan
+from desman.protected_cli import protected_group
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -138,6 +139,7 @@ cli.add_command(permissions)
 cli.add_command(personalize)
 cli.add_command(behaviour)
 cli.add_command(models)
+cli.add_command(protected_group, name="protected")
 
 
 @cli.command("init-db")
@@ -292,8 +294,9 @@ def run(
         store = Store(db.open_db(path))
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
-    models = _attach(source, store, cache=not no_cache, as_json=as_json)
     try:
+        runs.guard(store)  # before any model is asked
+        models = _attach(source, store, cache=not no_cache, as_json=as_json)
         planned: Planned | None = None
         if spec is None:
             assert goal is not None
@@ -346,8 +349,9 @@ def resume(
     source = _provider(fake_script, provider_name, model, as_json)
     access = _executor_access(as_json)
     store = open_existing(db_path)
-    models = _attach(source, store, cache=not no_cache, as_json=as_json)
     try:
+        runs.guard(store)  # before any model is asked
+        models = _attach(source, store, cache=not no_cache, as_json=as_json)
         task_id = find_task(store, task)
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
@@ -392,9 +396,10 @@ def worker(
     source = _provider(fake_script, provider_name, model, as_json)
     access = _executor_access(as_json)
     store = open_existing(db_path)
-    models = _attach(source, store, cache=not no_cache, as_json=as_json)
     interrupted = False
     try:
+        runs.guard(store)  # before any model is asked
+        models = _attach(source, store, cache=not no_cache, as_json=as_json)
         coordinator = runs.coordinator(
             store, models, access, load_config().load(), lease_seconds=lease_seconds
         )

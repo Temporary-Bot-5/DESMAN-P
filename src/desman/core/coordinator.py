@@ -211,6 +211,7 @@ class Coordinator:
         sleep: Callable[[float], None] = time.sleep,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
         watch: Callable[[], None] | None = None,
+        gate: Callable[[], None] | None = None,
     ) -> None:
         self.store = store
         self.executor = executor
@@ -254,6 +255,10 @@ class Coordinator:
         """Called whenever the task may look different (housekeeping, a claim, an execution, a
         review), so progress can be shown while `run()` works. It reads the state itself; the
         model calls in between are watched through `calls.watching`."""
+        self.gate = gate
+        """Called before every tick, before anything is swept, reserved or claimed: whatever it
+        raises stops `run()` and `work()` with nothing held (protected files that changed
+        since the start, ROADMAP 5.3)."""
 
     def run(
         self, task_id: str, *, wait_for_pauses: bool = False, max_ticks: int = 10_000
@@ -330,6 +335,8 @@ class Coordinator:
 
     def tick(self, task_id: str | None, events: list[str]) -> bool:
         """One pass over the task (or every task, for None); returns whether anything moved."""
+        if self.gate is not None:
+            self.gate()
         recovered, resumed = self.store.sweep(task_id=task_id, abandoned=self.abandoned)
         events += [f"recovered {s.id}" for s in recovered]
         events += [f"resumed {s.id}" for s in resumed]

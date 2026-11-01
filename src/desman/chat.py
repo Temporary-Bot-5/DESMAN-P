@@ -117,12 +117,15 @@ class Chat:
         self._gave_up: dict[str, int] = {}
         """Per session, the last message when a summary failed: until as much again is said,
         the older messages just fall out of the model's view."""
+        self._told_blocked: str | None = None
+        """The block of protected files last told (5.3): told again only when it changes."""
 
     def run(self) -> None:
         self._greet()
         try:
             while True:
                 self._tell_waiting()  # at the start, then after whatever was done
+                self._tell_blocked()
                 if (line := self.read()) is None:
                     break
                 command = line.strip()
@@ -297,6 +300,7 @@ class Chat:
                 NewTask(type="task", title=title, goal=goal), config, models, interlocutor
             ),
             resume_task=lambda task_id: self._resume(task_id, config, models, interlocutor),
+            session_id=lambda: self.session_id,
         )
         try:
             made = entry.handler(context, args)
@@ -383,6 +387,10 @@ class Chat:
         part = compaction.split(history, keep_tokens, incoming)
         if part is None:
             return None
+        try:
+            runs.guard(self.store)
+        except click.ClickException:  # told on its own (`_tell_blocked`); tried again later
+            return None
         task_id = self.store.create_task(
             compaction.spec(history, part),
             details={
@@ -393,17 +401,21 @@ class Chat:
         )  # not a task of the session: the person did not ask for it, it is never retold
         ui.note(t("Summarising the older messages of this session…"))
         summary = None
+        blocked = False
         try:
             runs.summarizer(self.store, models).run(task_id)
             if self.store.task_status(task_id) is TaskStatus.DONE:
                 summary = compaction.summary_of(self.store.final_result(task_id))
         except KeyboardInterrupt:
             pass
+        except click.ClickException:  # protected files changed meanwhile: told on its own
+            blocked = True
         if self.store.task_status(task_id) not in (TaskStatus.DONE, TaskStatus.CANCELLED):
             # Waiting for a decision or a quota: nobody needs it any more, it leaves the inbox.
             self.store.cancel_task(task_id, "the chat went on without this summary")
         if summary is None:
-            self._gave_up[self.session_id] = history.messages[-1].seq
+            if not blocked:  # once approved, a summary is tried again
+                self._gave_up[self.session_id] = history.messages[-1].seq
             self._event(
                 t(
                     "The older messages could not be summarised, so the model sees only the "
@@ -488,6 +500,7 @@ class Chat:
 
     def _access(self, config: Config) -> Access | None:
         try:
+            runs.guard(self.store)
             return runs.executor_access(config)
         except click.ClickException as e:
             ui.error(e.message)
@@ -518,6 +531,12 @@ class Chat:
                     http=self._http,
                     watch=progress.refresh,
                 ).run(task_id)
+        except click.ClickException as e:  # protected files changed while it ran (5.3)
+            ui.error(e.message)
+            self._event(
+                t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
+            )
+            return
         except KeyboardInterrupt:
             self._event(
                 t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
@@ -634,6 +653,19 @@ class Chat:
             self.waiting.new(),
             t("Ask here to retry, accept or fail one, or decide in the terminal: desman inbox."),
         )
+
+    def _tell_blocked(self) -> None:
+        """Protected files changed without the person's approval (5.3): tasks cannot run, so
+        the person hears it before asking for one, and how to look and approve, here too."""
+        try:
+            runs.guard(self.store)
+            said = None
+        except click.ClickException as e:
+            said = e.message
+        if said is not None and said != self._told_blocked:
+            ui.warn(said)
+            ui.note(t("Ask here to show the change or approve it."))
+        self._told_blocked = said
 
     def _show_last(self) -> None:
         assert self.session_id is not None

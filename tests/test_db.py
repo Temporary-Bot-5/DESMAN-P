@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from desman.cli import cli
-from desman.core import db, operator
+from desman.core import db, operator, protected
 from desman.core.audit import check_history, history
 from desman.core.models import Tools
 from desman.core.retry import RetryPolicy
@@ -727,3 +727,19 @@ def test_v17_database_with_waiting_work_upgrades_to_queue_times(tmp_path: Path) 
     assert store.get_subtask(pending).queued_at is None
     assert store.urgency(store.get_subtask(ready)) == 50 + 5 * 10
     conn.close()
+
+
+def test_v20_database_with_tasks_upgrades_to_protected_approvals(tmp_path: Path) -> None:
+    """A database from before protected files has no approval: the first check takes the
+    release as approved (its files match the shipped hashes), and its tasks are untouched."""
+    path = tmp_path / "v20.db"
+    old = _db_at_version(path, 20)
+    task_id = add_task(old)
+    old.close()
+    conn = db.open_db(path)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    assert conn.execute("SELECT count(*) FROM protected_approvals").fetchone()[0] == 0
+    assert protected.changes(conn) == []
+    [row] = conn.execute("SELECT source FROM protected_approvals").fetchall()
+    assert row["source"] == "release"
+    assert conn.execute("SELECT id FROM tasks").fetchone()["id"] == task_id

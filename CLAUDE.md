@@ -59,6 +59,7 @@ src/desman/
 │                  #   `behaviour [--length|--tone|--style|--custom|--reset]`, `usage`; bodies as
 │                  #   functions the chat's catalog calls too
 ├── models_cli.py  # `models show|add MODEL`: a Hugging Face GGUF model for a local server
+├── protected_cli.py # `protected show [--diff]|approve [--note]`: bodies shared with the chat
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
@@ -136,6 +137,9 @@ src/desman/
     │              #   shown by `status` and the chat; the person runs `models add`)
     ├── policy.py  # Access = role's tools in `src/desman/policy.toml` ∩ human's `permissions`;
     │              #   refusals audited (tool_refused), admin calls marked elevated
+    ├── protected.py # Protected files (5.3): `src/desman/protected.toml` lists them with SHA-256;
+    │              #   approved snapshots in the DB; a change nobody approved blocks every run
+    │              #   (`runs.guard`) until `desman protected approve`; a new DB takes the release
     ├── effects.py # Call journal (D6): intent → run → result per tool call; a rerun of an
     │              #   interrupted execution replays results (from its checkpoint) instead of acting
     ├── web.py     # web_search and web_fetch: GET only, public addresses only (checked, then
@@ -185,7 +189,8 @@ Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` ne
 (override the directory with `DESMAN_DATA_DIR`). Never touch files on an agent's behalf except
 through `Workspace`, and let executors act only through tool calls (`Work.tools`): a new
 capability is a new `Tool` with the permission it needs, never a direct call in an agent.
-Every tool call is journaled (`core/effects.py`); a tool safe to run twice declares `repeatable`. Generated code runs only through `Sandbox` (the `run_command` tool), never with `subprocess` directly. Never edit a
+A commit that changes a file listed in `src/desman/protected.toml` updates its hash there
+(`tests/test_protected.py` prints the line); agents never touch that list or its approvals. Every tool call is journaled (`core/effects.py`); a tool safe to run twice declares `repeatable`. Generated code runs only through `Sandbox` (the `run_command` tool), never with `subprocess` directly. Never edit a
 migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
 backfill if needed) and test upgrading a database built with the previous migrations. Keep the `subtasks.status` CHECK in
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,

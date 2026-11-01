@@ -527,6 +527,37 @@ MESSAGES: dict[str, Forms] = {
     "Suggested models (nothing is downloaded until you add one):": "Önerilen modeller (siz birini eklemeden hiçbir şey indirilmez):",
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} için {model}, {size}: {reason}",
     "To use it: {command}": "Kullanmak için: {command}",
+    # ── Protected files (5.3) ──
+    "Ask here to show the change or approve it.": "Değişikliği göstermesini ya da onaylamasını buradan isteyin.",
+    "Approve the protected files as they are now, so tasks run again:": "Korunan dosyaları şimdiki halleriyle onaylayın, böylece görevler yeniden çalışır:",
+    "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "Bu dosyalar ajanların neler yapabileceğine ve işlerinin nasıl değerlendirileceğine karar verir: yalnızca incelediğiniz bir değişikliği onaylayın (desman protected show --diff).",
+    "{n} protected file changed without your approval: nothing runs until you approve it.": (
+        "{n} korunan dosya onayınız olmadan değişti: onaylayana kadar hiçbir şey çalışmaz.",
+    ),
+    "Approve: desman protected approve [--note TEXT]": "Onayla: desman protected approve [--note METİN]",
+    "Approved {n} change: tasks run again.": (
+        "{n} değişiklik onaylandı: görevler yeniden çalışıyor.",
+    ),
+    "changed": "değişti",
+    "missing": "eksik",
+    "put on the list": "listeye eklendi",
+    "taken off the list": "listeden çıkarıldı",
+    "Every protected file is as approved.": "Korunan tüm dosyalar onaylandığı gibi.",
+    "See what changed: desman protected show --diff": "Neyin değiştiğini görün: desman protected show --diff",
+    "Nothing to approve: every protected file is as approved.": "Onaylanacak bir şey yok: korunan tüm dosyalar onaylandığı gibi.",
+    "Cannot check the protected files: {error}": "Korunan dosyalar denetlenemiyor: {error}",
+    "Approved: the release as shipped ({when}).": "Onaylandı: sürüm, yayımlandığı haliyle ({when}).",
+    "Approved by you on {when}: {note}": "{when} tarihinde sizin tarafınızdan onaylandı: {note}",
+    "Approved by you on {when}.": "{when} tarihinde sizin tarafınızdan onaylandı.",
+    "What was approved is not known yet (nothing was approved on this database): compare with the release in git (git diff).": "Neyin onaylandığı henüz bilinmiyor (bu veritabanında henüz hiçbir şey onaylanmadı): git'teki sürümle karşılaştırın (git diff).",
+    "{path}: no difference in the text.": "{path}: metinde fark yok.",
+    "Protected files changed without your approval: {files}. Nothing runs until you look at the change (`desman protected show --diff`) and approve it (`desman protected approve`).": "Korunan dosyalar onayınız olmadan değişti: {files}. Değişikliğe bakıp (`desman protected show --diff`) onaylayana kadar (`desman protected approve`) hiçbir şey çalışmaz.",
+    "Protected files: the tool policy, the reviewer, the sandbox, the approval rules, the\ntest harness. A change nobody approved stops every run.": "Korunan dosyalar: araç politikası, gözden geçiren, korumalı alan, onay kuralları,\ntest düzeneği. Kimsenin onaylamadığı bir değişiklik her çalıştırmayı durdurur.",
+    "Approve the protected files as they are now, so tasks run again. Look at the change\nfirst: desman protected show --diff.": "Korunan dosyaları şimdiki halleriyle onaylayın, böylece görevler yeniden çalışır. Önce\ndeğişikliğe bakın: desman protected show --diff.",
+    "Why: kept with the approval.": "Neden: onayla birlikte saklanır.",
+    "Database file (default: the usual one).": "Veritabanı dosyası (varsayılan: her zamanki).",
+    "Whether every protected file is as you approved it; tasks run only then.": "Korunan her dosyanın onayladığınız gibi olup olmadığı; görevler yalnızca o zaman çalışır.",
+    "Show what changed in each file.": "Her dosyada neyin değiştiğini göster.",
 }
 
 CLICK: dict[str, Forms] = {
