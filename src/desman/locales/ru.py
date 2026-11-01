@@ -508,6 +508,8 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "Модель не составила план, поэтому единственная подзадача — сама цель: {error}",
     "Retries may also use {provider} · {model}": "Повторные попытки могут использовать и {provider} · {model}",
     "Plans and reviews by {provider} · {model}": "Планы и проверки: {provider} · {model}",
+    "Code by {provider} · {model}": "Код: {provider} · {model}",
+    "Analysis by {provider} · {model}": "Разбор: {provider} · {model}",
     "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} не отдаёт эти модели из каталога DESMAN: {models}. Вызовы к ним не пройдут и уйдут следующей модели.",
     "part of {seq}": "часть {seq}",
     "web search": "веб-поиск",

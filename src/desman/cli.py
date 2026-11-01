@@ -30,7 +30,7 @@ from desman.config_cli import (
 )
 from desman.core import calls, db
 from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult
-from desman.core.models import Priority, TaskSpec
+from desman.core.models import Kind, Priority, TaskSpec
 from desman.core.policy import Access
 from desman.core.report import TaskReport, inbox, task_report, task_summaries
 from desman.core.sessions import Sessions
@@ -583,6 +583,18 @@ def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> run
                 model=reviewer.model,
             )
         )
+    code = _first_for(models, Kind.CODE)
+    if code is not None and code.label != choice.label:
+        ui.note(t("Code by {provider} · {model}", provider=code.provider.name, model=code.model))
+    analysis = _first_for(models, Kind.ANALYSIS)
+    if analysis is not None and analysis.label != choice.label:
+        ui.note(
+            t(
+                "Analysis by {provider} · {model}",
+                provider=analysis.provider.name,
+                model=analysis.model,
+            )
+        )
     if choice.provider.paid:
         ui.warn(t("{name} is a paid provider: every call is billed.", name=choice.provider.name))
         ui.warn(providers.untested_note())
@@ -595,6 +607,12 @@ def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> run
             )
         )
     return models
+
+
+def _first_for(models: runs.Models, kind: Kind) -> router.Choice | None:
+    """The model the executor asks first for a subtask of `kind` (None for a fake)."""
+    choices: list[router.Choice] = getattr(models.executor(kind)[0], "choices", [])
+    return choices[0] if choices else None
 
 
 def _executor_access(as_json: bool) -> Access:

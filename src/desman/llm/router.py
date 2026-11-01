@@ -1,8 +1,8 @@
 """Which models a run asks, built from the config (ROADMAP 2.2, 4.5).
 
 Every role (planner, executor, reviewer, decomposer, interlocutor) gets its own *lineup*: the
-models of the ready free providers, best for that role first (`catalog.NEEDS`: what the role
-asks of a model, then a model that keeps to JSON, then the provider's place in
+models of the ready free providers, best for that role first (`catalog.need`: what the role
+asks of a model, for the executor what its subtask's kind asks, then a model that keeps to JSON, then the provider's place in
 `providers.PREFERENCE`, then the model's place in the catalog). A paid provider is used only
 when asked for (`--provider`); then the lineup is that provider's models. `--model` pins one
 model: the lineup is that model alone.
@@ -29,6 +29,7 @@ import httpx
 from desman import providers
 from desman.config import Config
 from desman.core.calls import Role
+from desman.core.models import Kind
 from desman.core.retry import FailureKind
 from desman.i18n import t
 from desman.llm import catalog
@@ -117,14 +118,20 @@ class Choice:
 
 
 def lineup(
-    config: Config, role: Role, provider: str | None = None, model: str | None = None
+    config: Config,
+    role: Role,
+    provider: str | None = None,
+    model: str | None = None,
+    *,
+    kind: Kind | None = None,
 ) -> list[Choice]:
-    """The models `role` asks, best first. Raises `NoProvider` (with what to do about it)."""
+    """The models `role` asks, best first; the executor's for a subtask of `kind`. Raises
+    `NoProvider` (with what to do about it)."""
     first = choose(config, provider)
     if model is not None:
         return [Choice(first, model)]
     pool = [first] if provider is not None else _free(config)
-    need = catalog.NEEDS[role]
+    need = catalog.need(role, kind)
     ranked = [
         (need not in m.strengths, not m.strict_json, place, order, Choice(p, m.id))
         for place, p in enumerate(pool)

@@ -297,6 +297,8 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "Model nie przygotował planu, więc jedynym podzadaniem jest sam cel: {error}",
     "Retries may also use {provider} · {model}": "Ponowne próby mogą też używać {provider} · {model}",
     "Plans and reviews by {provider} · {model}": "Plany i przeglądy: {provider} · {model}",
+    "Code by {provider} · {model}": "Kod: {provider} · {model}",
+    "Analysis by {provider} · {model}": "Analizy: {provider} · {model}",
     "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} nie udostępnia tych modeli z katalogu DESMAN: {models}. Wywołania do nich się nie powiodą i przejdą do następnego modelu.",
     "part of {seq}": "część {seq}",
     "web search": "wyszukiwanie w sieci",

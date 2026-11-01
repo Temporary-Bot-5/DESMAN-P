@@ -369,6 +369,12 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         blocked_until TEXT
     );
     """,
+    # 20 — what sort of work a subtask is (ROADMAP 4.5, `models.Kind`): its executor's model is
+    # picked by it. Subtasks made before were not told apart: text, the general sort
+    """
+    ALTER TABLE subtasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'
+        CHECK (kind IN ('text', 'code', 'analysis'));
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

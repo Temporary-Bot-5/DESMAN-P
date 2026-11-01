@@ -11,7 +11,7 @@ from conftest import FakeClock
 from desman.agents import EXECUTOR_SYSTEM_COMBINE, llm_executor, llm_reviewer
 from desman.core.audit import check_history, history
 from desman.core.coordinator import Coordinator
-from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.models import Kind, SubtaskSpec, TaskSpec
 from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -195,6 +195,30 @@ def test_the_fifth_attempt_splits_and_the_parent_combines(store: Store, clock: F
     report = task_report(store, task_id)
     assert [s.part_of for s in report.subtasks] == [None, 0, 0]
     assert report.subtasks[0].depends_on == [1, 2]
+
+
+def test_the_parts_of_a_code_subtask_are_code_unless_tagged(store: Store, clock: FakeClock) -> None:
+    """The split model sees the kind; parts it leaves untagged keep it (ROADMAP 4.5)."""
+    results = iter(range(100))
+    parts = [
+        {"description": "first half", "acceptance_criteria": "ok"},
+        {"description": "explain it", "acceptance_criteria": "ok", "kind": "text"},
+    ]
+    llm = (
+        FakeLLM()
+        .on("Execute", lambda request: f'{{"v": {next(results)}}}', repeat_last=True)
+        .on("Review", REJECT, REJECT, REJECT, REJECT, ACCEPT, repeat_last=True)
+        .on(SPLIT, json.dumps({"subtasks": parts}))
+    )
+    spec = TaskSpec(
+        goal="g",
+        subtasks=[SubtaskSpec(description="hard", acceptance_criteria="c", kind=Kind.CODE)],
+    )
+    task_id = store.create_task(spec)
+    assert coordinator(store, clock, llm).run(task_id).status is TaskStatus.DONE
+    assert [s.kind for s in store.list_subtasks(task_id)] == [Kind.CODE, Kind.CODE, Kind.TEXT]
+    [split] = [r for r in llm.calls if r.prompt.startswith(SPLIT)]
+    assert json.loads(split.prompt.partition(":\n")[2])["kind"] == "code"
 
 
 def test_an_unusable_split_falls_back_to_a_normal_attempt(store: Store, clock: FakeClock) -> None:

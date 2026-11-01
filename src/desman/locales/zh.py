@@ -254,6 +254,8 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "模型没有制定出计划，因此目标本身是唯一的子任务：{error}",
     "Retries may also use {provider} · {model}": "重试时也可能使用 {provider} · {model}",
     "Plans and reviews by {provider} · {model}": "规划和审查：{provider} · {model}",
+    "Code by {provider} · {model}": "代码：{provider} · {model}",
+    "Analysis by {provider} · {model}": "分析：{provider} · {model}",
     "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} 未列出 DESMAN 目录中的这些模型：{models}。对它们的调用会失败，并转给下一个模型。",
     "part of {seq}": "属于 {seq}",
     "web search": "网络搜索",

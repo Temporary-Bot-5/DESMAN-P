@@ -11,7 +11,7 @@ from click.testing import CliRunner, Result
 from desman.cli import EXIT_DONE, cli
 from desman.core import db
 from desman.core.audit import check_history, history
-from desman.core.models import Priority
+from desman.core.models import Kind, Priority
 from desman.core.store import Store
 from desman.llm.fake import FakeLLM, RateLimit, garbage
 from desman.planner import (
@@ -20,6 +20,7 @@ from desman.planner import (
     PLAN,
     SPLITTER_SYSTEM,
     TEMPLATE_CRITERIA,
+    Split,
     plan,
 )
 
@@ -52,6 +53,35 @@ def test_the_models_plan_becomes_the_task_graph() -> None:
     [call] = llm.calls
     assert call.prompt.startswith(f"{PLAN}:\nwrite an essay")
     assert str(MAX_SUBTASKS) in call.messages[0].content  # the limit is in the instructions
+
+
+def test_each_subtask_is_tagged_with_its_kind() -> None:
+    """The kind picks the executor's model (ROADMAP 4.5); untagged work is text."""
+    llm = FakeLLM(
+        reply(
+            {**sub("write the parser"), "kind": "code"},
+            {**sub("compare", 0), "kind": "analysis"},
+            sub("sum up", 1),
+        )
+    )
+    planned = plan(llm, "parse logs")
+    assert [s.kind for s in planned.spec.subtasks] == [Kind.CODE, Kind.ANALYSIS, Kind.TEXT]
+    for kind in Kind:  # the model is told every kind
+        assert f'"{kind.value}"' in llm.calls[0].messages[0].content
+        assert f'"{kind.value}"' in SPLITTER_SYSTEM
+
+
+def test_an_unknown_kind_gets_the_repair_request() -> None:
+    llm = FakeLLM(reply({**sub("x"), "kind": "poetry"}), reply({**sub("x"), "kind": "text"}))
+    planned = plan(llm, "goal")
+    assert planned.source == "llm" and len(llm.calls) == 2
+    assert "kind" in llm.calls[1].messages[-1].content
+
+
+def test_an_untagged_part_is_of_the_split_subtasks_kind() -> None:
+    split = Split.model_validate({"subtasks": [sub("a"), {**sub("b", 0), "kind": "analysis"}]})
+    assert [p.kind for p in split.parts(Kind.CODE)] == [Kind.CODE, Kind.ANALYSIS]
+    assert [p.kind for p in split.parts()] == [Kind.TEXT, Kind.ANALYSIS]
 
 
 def test_criteria_are_ones_the_tools_can_confirm() -> None:

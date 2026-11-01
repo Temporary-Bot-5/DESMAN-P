@@ -12,7 +12,7 @@ import sqlite3
 from pydantic import BaseModel, ConfigDict, Field
 
 from desman.core import db
-from desman.core.models import Subtask
+from desman.core.models import Kind, Subtask
 from desman.core.retry import Attempts
 from desman.core.states import SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.store import Store
@@ -29,6 +29,8 @@ class SubtaskReport(BaseModel):
     depends_on: list[int]
     part_of: int | None = None
     """For a part of a split subtask (ROADMAP 2.9b): the subtask's seq."""
+    kind: Kind = Kind.TEXT
+    """What sort of work it is: its executor's model is picked by it (ROADMAP 4.5)."""
     lease_owner: str | None
     lease_until: str | None
     paused_until: str | None
@@ -69,6 +71,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     attempts=sub.attempts,
                     depends_on=sorted(seq_of[d] for d in store.dependencies(sub.id)),
                     part_of=None if sub.parent_id is None else seq_of[sub.parent_id],
+                    kind=sub.kind,
                     lease_owner=sub.lease_owner,
                     lease_until=sub.lease_until,
                     paused_until=sub.paused_until,

@@ -281,6 +281,8 @@ MESSAGES: dict[str, Forms] = {
     "The model did not make a plan, so the goal is the only subtask: {error}": "मॉडल ने योजना नहीं बनाई, इसलिए स्वयं लक्ष्य ही एकमात्र उप-कार्य है: {error}",
     "Retries may also use {provider} · {model}": "पुनः प्रयासों में {provider} · {model} भी इस्तेमाल हो सकता है",
     "Plans and reviews by {provider} · {model}": "योजनाएँ और समीक्षाएँ: {provider} · {model}",
+    "Code by {provider} · {model}": "कोड: {provider} · {model}",
+    "Analysis by {provider} · {model}": "विश्लेषण: {provider} · {model}",
     "{name} does not list these models of DESMAN's catalog: {models}. Calls to them fail and go to the next model.": "{name} DESMAN की सूची के ये मॉडल उपलब्ध नहीं कराता: {models}। इन्हें किए गए कॉल विफल होंगे और अगले मॉडल पर जाएँगे।",
     "part of {seq}": "{seq} का भाग",
     "web search": "वेब खोज",

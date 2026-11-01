@@ -12,7 +12,8 @@ feedback is shown to the next attempt.
 Each attempt of the executor follows the strategy its number picks (`core.retry.Strategy`): the
 first try and the one with the reviewer's feedback use the instructions below as they are; a
 rephrased attempt gets them worded differently at a higher temperature; "other model" asks the
-`other` LLM (another provider), when there is one; "combine" builds the result of a split
+`other` LLM (another provider), when there is one. A subtask of a kind with its own models
+(`by_kind`, ROADMAP 4.5) asks those; "combine" builds the result of a split
 subtask from its parts (the split itself is `planner.decomposer`).
 
 The executor acts only through tools (`core.tools`): instead of a result it may reply
@@ -28,7 +29,7 @@ go back as "Execute subtask (tool results)", served by the same route.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
@@ -43,7 +44,7 @@ from desman.core.coordinator import (
     Work,
     is_error_report,
 )
-from desman.core.models import Subtask
+from desman.core.models import Kind, Subtask
 from desman.core.retry import FailureKind, Strategy
 from desman.core.tools import ToolCall
 from desman.llm.base import LLM, Message, Request
@@ -117,77 +118,89 @@ REVIEWER_EVIDENCE = (
 )
 
 
-def llm_executor(llm: LLM, other: LLM | None = None) -> Executor:
-    """`other` serves the attempts whose strategy is another model (if None, `llm` does)."""
+def llm_executor(
+    llm: LLM,
+    other: LLM | None = None,
+    *,
+    by_kind: Mapping[Kind, tuple[LLM, LLM | None]] | None = None,
+) -> Executor:
+    """`other` serves the attempts whose strategy is another model (if None, `llm` does).
+    `by_kind`: the main and other models for subtasks of a kind; a kind not in it asks `llm`
+    and `other`."""
 
     def execute(work: Work) -> Success | Failure:
-        context = work.context
-        prompt = {
-            "subtask": context.description,
-            "acceptance_criteria": context.acceptance_criteria,
-            "inputs": context.inputs,
-            "results_of_dependencies": [
-                {"subtask": d.description, "result": d.content, "truncated": d.truncated}
-                for d in context.dependencies
-            ],
-            "checkpoint": context.checkpoint,
-            "attempt": context.attempt,
-            "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
-        }
-        tools = work.tools.specs()
-        if tools:
-            prompt["tools"] = tools
-        model, system, temperature = llm, EXECUTOR_SYSTEM, 0.0
-        if context.strategy is Strategy.OTHER_MODEL and other is not None:
-            model = other
-        elif context.strategy in (Strategy.REPHRASE, Strategy.OTHER_MODEL):
-            # Without another model to ask, the best one can do differently is rephrase.
-            system, temperature = EXECUTOR_SYSTEM_REPHRASED, REPHRASE_TEMPERATURE
-        elif context.strategy is Strategy.COMBINE:
-            system = EXECUTOR_SYSTEM_COMBINE
-        if tools:
-            system += TOOLS_INSTRUCTIONS
-        request = _request(system, EXECUTE, prompt, temperature).model_copy(
-            update={"avoid": work.unfit}
-        )
-        for _round in range(MAX_TOOL_ROUNDS + 1):
-            try:
-                # An error report is not cached: the next task asking the same may succeed.
-                reply = complete_json(
-                    model,
-                    request,
-                    _Result,
-                    heading=EXECUTE,
-                    keep=lambda r: not is_error_report(r.root),
-                )
-            except StructuredOutputError as e:
-                # The problem only: the reply may echo anything (it is in the call log).
-                return Failure(kind=FailureKind.QUALITY, reason=f"unusable reply: {e.problem}")
-            calls = reply.calls()
-            if calls is None:
-                return Success(content=reply.root)
-            if _round == MAX_TOOL_ROUNDS:
-                break
-            results = [
-                {"tool": call.tool, **work.tools.call(call).model_dump(exclude_none=True)}
-                for call in calls
-            ]
-            body = json.dumps(results, ensure_ascii=False, indent=2)
-            request = request.model_copy(
-                update={
-                    "messages": [
-                        *request.messages,
-                        Message(role="assistant", content=json.dumps(reply.root)),
-                        Message(role="user", content=f"{TOOL_RESULTS}:\n{body}"),
-                    ]
-                }
-            )
-        return Failure(
-            kind=FailureKind.QUALITY,
-            reason=f"still calling tools after {MAX_TOOL_ROUNDS} rounds, no result",
-        )
+        return _execute(work, *(by_kind or {}).get(work.subtask.kind, (llm, other)))
 
     return execute
+
+
+def _execute(work: Work, llm: LLM, other: LLM | None) -> Success | Failure:
+    """One attempt of the executor, with the models of its subtask's kind."""
+    context = work.context
+    prompt = {
+        "subtask": context.description,
+        "acceptance_criteria": context.acceptance_criteria,
+        "inputs": context.inputs,
+        "results_of_dependencies": [
+            {"subtask": d.description, "result": d.content, "truncated": d.truncated}
+            for d in context.dependencies
+        ],
+        "checkpoint": context.checkpoint,
+        "attempt": context.attempt,
+        "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
+    }
+    tools = work.tools.specs()
+    if tools:
+        prompt["tools"] = tools
+    model, system, temperature = llm, EXECUTOR_SYSTEM, 0.0
+    if context.strategy is Strategy.OTHER_MODEL and other is not None:
+        model = other
+    elif context.strategy in (Strategy.REPHRASE, Strategy.OTHER_MODEL):
+        # Without another model to ask, the best one can do differently is rephrase.
+        system, temperature = EXECUTOR_SYSTEM_REPHRASED, REPHRASE_TEMPERATURE
+    elif context.strategy is Strategy.COMBINE:
+        system = EXECUTOR_SYSTEM_COMBINE
+    if tools:
+        system += TOOLS_INSTRUCTIONS
+    request = _request(system, EXECUTE, prompt, temperature).model_copy(
+        update={"avoid": work.unfit}
+    )
+    for _round in range(MAX_TOOL_ROUNDS + 1):
+        try:
+            # An error report is not cached: the next task asking the same may succeed.
+            reply = complete_json(
+                model,
+                request,
+                _Result,
+                heading=EXECUTE,
+                keep=lambda r: not is_error_report(r.root),
+            )
+        except StructuredOutputError as e:
+            # The problem only: the reply may echo anything (it is in the call log).
+            return Failure(kind=FailureKind.QUALITY, reason=f"unusable reply: {e.problem}")
+        calls = reply.calls()
+        if calls is None:
+            return Success(content=reply.root)
+        if _round == MAX_TOOL_ROUNDS:
+            break
+        results = [
+            {"tool": call.tool, **work.tools.call(call).model_dump(exclude_none=True)}
+            for call in calls
+        ]
+        body = json.dumps(results, ensure_ascii=False, indent=2)
+        request = request.model_copy(
+            update={
+                "messages": [
+                    *request.messages,
+                    Message(role="assistant", content=json.dumps(reply.root)),
+                    Message(role="user", content=f"{TOOL_RESULTS}:\n{body}"),
+                ]
+            }
+        )
+    return Failure(
+        kind=FailureKind.QUALITY,
+        reason=f"still calling tools after {MAX_TOOL_ROUNDS} rounds, no result",
+    )
 
 
 def llm_reviewer(llm: LLM, evidence: Callable[[Subtask], dict[str, Any]] | None = None) -> Reviewer:
