@@ -244,6 +244,10 @@ preemption, self-improvement or network features before their phase).
   real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
+- Fault injection (`tests/faults.py`, ROADMAP 4.6): seeded simulation of several workers with
+  crashes, hangs and provider failures, then invariants; a failing seed replays with
+  `DESMAN_FAULT_SEED=N pytest tests/test_faults.py`. A change to the coordinator or the store
+  is worth a longer hunt: `DESMAN_FAULT_SEEDS=500`
 - Idempotency test: re-run same subtask → no duplicate side effects
 
 ## What NOT To Do
