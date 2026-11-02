@@ -717,6 +717,7 @@ MESSAGES: dict[str, Forms] = {
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global のレジストリがこのノードを拒否しました（{error}）。{seconds} 秒後に再試行します。よくある原因は時計のずれです。",
     "This node's key is revoked: it no longer talks to desman-global. Your own work goes on.": "このノードの鍵は失効しています。今後 desman-global とは通信しません。あなた自身の作業は続行されます。",
     "The registry was not told: the node's key cannot be used, so nothing was sent. It stops listing this node once it falls silent.": "レジストリには通知していません。ノードの鍵が使えないため、何も送信されませんでした。このノードが応答しなくなれば、レジストリは一覧から外します。",
+    "The database was busy: how the registry was told is not in the network's journal. desman-global is off all the same.": "データベースが使用中でした。レジストリへの通知結果はネットワークの記録に残っていません。それでも desman-global はオフになっています。",
     "The registry could not be told ({error}); it may list this node a while longer. Nothing more is sent to it.": "レジストリに通知できませんでした（{error}）。しばらくはこのノードが一覧に残るかもしれません。今後は何も送信しません。",
     "Off: nothing leaves this machine for desman-global. `desman global join` switches it on; lending a module is `desman global donate PROVIDER`.": "オフ：desman-global のためにこのマシンから出ていくものはありません。`desman global join` でオンになります。モジュールの貸し出しは `desman global donate PROVIDER` です。",
     "Open the setup wizard at desman-global: whether this machine takes part.": "セットアップウィザードを desman-global で開く：このマシンが参加するかどうか。",

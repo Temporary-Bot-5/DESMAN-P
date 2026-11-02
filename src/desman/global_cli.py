@@ -189,6 +189,8 @@ class Left:
     """The registry heard the goodbye (or did not list the node anyway)."""
     unheard: str | None = None
     """Why it was not told: `NO_KEY` (nothing sent), no answer, or its refusal."""
+    journaled: bool = True
+    """How the goodbye went is in `network_log` (False: the database was busy)."""
 
 
 def leaving(config: Config) -> tuple[Left | None, list[Entry]]:
@@ -214,27 +216,38 @@ def farewell(
 ) -> Left | None:
     """Once `leaving`'s config is saved: tell the registry this node leaves (G.5), sent once,
     and journal how it went. A goodbye that is not heard is not sent again: the registry
-    stops listing a node that falls silent."""
+    stops listing a node that falls silent. Callers hold the config's lock, so a `join`
+    meanwhile waits and is never undone by this goodbye arriving after it."""
     if left is None or left.registry is None:
         return left
     path = sign.default_node_key_path() if key_path is None else key_path
     try:
         key = sign.load_node_key(path)
     except (sign.KeyFileError, OSError):
-        with journal(conn) as db_conn:
-            netlog.record(db_conn, "leave_not_sent", {"registry": left.registry, "why": NO_KEY})
-        return replace(left, unheard=NO_KEY)
+        details = {"registry": left.registry, "why": NO_KEY}
+        return replace(left, unheard=NO_KEY, journaled=_journal(conn, "leave_not_sent", details))
     unheard = node.tell_left(left.registry, key, transport=transport)
-    details: dict[str, Any] = {
-        "registry": left.registry,
-        "node": key.fingerprint,
-        "heard": unheard is None,
-    }
+    sent: dict[str, Any] = {"registry": left.registry, "node": key.fingerprint}
+    sent["heard"] = unheard is None
     if unheard is not None:
-        details["error"] = unheard
-    with journal(conn) as db_conn:
-        netlog.record(db_conn, "leave_sent", details)
-    return replace(left, told=unheard is None, unheard=unheard)
+        sent["error"] = unheard
+    return replace(
+        left,
+        told=unheard is None,
+        unheard=unheard,
+        journaled=_journal(conn, "leave_sent", sent),
+    )
+
+
+def _journal(conn: sqlite3.Connection | None, action: str, details: dict[str, Any]) -> bool:
+    """An entry written after the config was saved: a busy database must not turn a leave
+    that happened into an error (the next `leave` finds it off and could not tell again)."""
+    try:
+        with journal(conn) as db_conn:
+            netlog.record(db_conn, action, details)
+    except sqlite3.OperationalError:
+        return False
+    return True
 
 
 def join(
@@ -263,10 +276,13 @@ def leave(
 ) -> Left | None:
     """Switch desman-global off and take back every module lent, then tell the registry: what
     was taken back, None if it was off already. The node's key stays."""
-    with _change(manager, conn) as (config, entries):
-        left, found = leaving(config)
-        entries += found
-    return farewell(left, conn=conn, transport=transport, key_path=key_path)
+    with journal(conn) as db_conn, manager.locked():
+        config = manager.load()
+        left, entries = leaving(config)
+        if entries:
+            commit(db_conn, entries, lambda: manager.save(config))
+        # Still under the lock: the goodbye cannot land after a `join` that followed.
+        return farewell(left, conn=db_conn, transport=transport, key_path=key_path)
 
 
 def donatable(config: Config, name: str) -> Provider:
@@ -463,6 +479,13 @@ def print_left(left: Left | None) -> None:
                 "The registry could not be told ({error}); it may list this node a while "
                 "longer. Nothing more is sent to it.",
                 error=left.unheard,
+            )
+        )
+    if not left.journaled:
+        ui.warn(
+            t(
+                "The database was busy: how the registry was told is not in the network's "
+                "journal. desman-global is off all the same."
             )
         )
     ui.note(t("The node's key stays; delete it yourself if you want it gone."))

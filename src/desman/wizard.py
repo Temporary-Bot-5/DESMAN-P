@@ -10,6 +10,7 @@ saved until the end; leaving with Ctrl+C or Esc saves nothing.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -92,8 +93,8 @@ def run(manager: ConfigManager) -> None:
     config.personalize = ask_personalize(config.personalize)
     if ui.confirm(t("Set up how the interlocutor talks to you?"), default=False):
         config.behaviour = ask_behaviour(config.behaviour, config)
-    entries, said = network_change(config, ask_network(config))
-    save(manager, config, seen, entries)  # a `keys add` meanwhile is not lost
+    entries, settle, said = network_change(config, ask_network(config))
+    save(manager, config, seen, entries, settle)  # a `keys add` meanwhile is not lost
     said()
 
     ui.out("")
@@ -122,8 +123,8 @@ def run_section(manager: ConfigManager, section: str) -> None:
     elif section == "behaviour":
         config.behaviour = ask_behaviour(config.behaviour, config)
     elif section == "network":
-        entries, said = network_change(config, ask_network(config))
-        save(manager, config, seen, entries)
+        entries, settle, said = network_change(config, ask_network(config))
+        save(manager, config, seen, entries, settle)
         said()
         return
     else:
@@ -490,12 +491,16 @@ def ask_network(config: Config) -> NetworkChoice:
         return NetworkChoice(join=True, registry=address)
 
 
+Settle = Callable[[sqlite3.Connection], None]
+"""What runs once the wizard's config is saved, still under the config's lock."""
+
+
 def network_change(
     config: Config, choice: NetworkChoice
-) -> tuple[list[tuple[str, dict[str, Any]]], Callable[[], None]]:
-    """`config` changed as the person chose (in place), the journal entries saying how, and
-    what to do once it is saved (leaving: the registry's goodbye) and tell them. Raises before anything is saved if the node's key
-    cannot be used."""
+) -> tuple[list[tuple[str, dict[str, Any]]], Settle | None, Callable[[], None]]:
+    """`config` changed as the person chose (in place), the journal entries saying how, what
+    to do once it is saved (leaving: the registry's goodbye), and what to tell them then.
+    Raises before anything is saved if the node's key cannot be used."""
     from desman import global_cli  # it reaches the wizard through config_cli
 
     was_on = config.network.enabled
@@ -503,12 +508,17 @@ def network_change(
         key = global_cli.usable_node_key()
         assert key is not None
         joined, entry = global_cli.joining(config, choice.registry, key)
-        return ([entry] if entry else []), lambda: global_cli.print_joined(joined)
+        return ([entry] if entry else []), None, lambda: global_cli.print_joined(joined)
     if not choice.join and was_on:
         left, entries = global_cli.leaving(config)
-        # The goodbye only once the config is saved off: a save refused sends nothing.
-        return entries, lambda: global_cli.print_left(global_cli.farewell(left))
-    return [], lambda: None
+        done = [left]
+
+        def settle(conn: sqlite3.Connection) -> None:
+            # Only once the config is saved off: a save refused sends nothing.
+            done[0] = global_cli.farewell(left, conn=conn)
+
+        return entries, settle, lambda: global_cli.print_left(done[0])
+    return [], None, lambda: None
 
 
 def save(
@@ -516,12 +526,17 @@ def save(
     config: Config,
     seen: str | None,
     entries: list[tuple[str, dict[str, Any]]],
+    settle: Settle | None = None,
 ) -> None:
-    """The wizard's config, and the network's journal entries with it: both or neither."""
-    if not entries:
+    """The wizard's config, and the network's journal entries with it: both or neither.
+    `settle` runs after the save under the same lock, so no `join` slips in between."""
+    if not entries and settle is None:
         manager.save_if_unchanged(config, seen)
         return
     from desman import global_cli
 
-    with global_cli.journal(None) as conn:
-        global_cli.commit(conn, entries, lambda: manager.save_if_unchanged(config, seen))
+    with global_cli.journal(None) as conn, manager.locked():
+        manager.check_unchanged(seen)
+        global_cli.commit(conn, entries, lambda: manager.save(config))
+        if settle is not None:
+            settle(conn)

@@ -5,7 +5,9 @@ in process, behind `httpx.MockTransport` (ADR 0004, decision 14)."""
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import sqlite3
 import time
 from collections.abc import Callable, Iterator
@@ -594,13 +596,83 @@ def test_a_wizard_whose_save_is_refused_says_no_goodbye(
     manager.save(Settings().config)
     seen = manager.snapshot()
     config = manager.load()
-    entries, said = wizard.network_change(config, wizard.NetworkChoice(join=False))
+    entries, settle, said = wizard.network_change(config, wizard.NetworkChoice(join=False))
     other = manager.load()
     other.language = "de"
     manager.save(other)  # `desman language de` meanwhile
     with pytest.raises(ConfigError, match="nothing was saved"):
-        wizard.save(manager, config, seen, entries)
+        wizard.save(manager, config, seen, entries, settle)
     assert world.requests == [] and manager.load().network.enabled
+
+
+def _lock_is_held(manager: ConfigManager) -> bool:
+    lock = manager.config_path.parent / f".{manager.config_path.name}.lock"
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    return False
+
+
+@pytest.mark.parametrize("via", ["leave", "wizard"])
+def test_the_goodbye_is_sent_under_the_configs_lock(
+    via: str, world: World, tmp_path: Path, conn: sqlite3.Connection, key: sign.NodeKey
+) -> None:
+    """A `join` right after the save waits for the goodbye, so a late goodbye never marks
+    the node left after it joined again."""
+    from desman import wizard
+
+    manager = ConfigManager(tmp_path / "config.json")
+    manager.save(Settings().config)
+    held: list[bool] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        held.append(_lock_is_held(manager))
+        return world.handle(request)
+
+    transport = httpx.MockTransport(handle)
+    if via == "leave":
+        global_cli.leave(manager, conn=conn, transport=transport, key_path=tmp_path / "node.key")
+    else:
+        seen = manager.snapshot()
+        config = manager.load()
+        entries, _, said = wizard.network_change(config, wizard.NetworkChoice(join=False))
+        left, _ = global_cli.leaving(manager.load())
+
+        def settle(c: sqlite3.Connection) -> None:
+            global_cli.farewell(left, conn=c, transport=transport, key_path=tmp_path / "node.key")
+
+        wizard.save(manager, config, seen, entries, settle)
+    assert held == [True] and not manager.load().network.enabled
+
+
+def test_a_busy_journal_after_the_save_still_leaves(
+    world: World,
+    clock: FakeClock,
+    tmp_path: Path,
+    conn: sqlite3.Connection,
+    key: sign.NodeKey,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = netlog.record
+
+    def busy_for_goodbyes(c: sqlite3.Connection, action: str, details: Any = None) -> None:
+        if action == "leave_sent":
+            raise sqlite3.OperationalError("database is locked")
+        record(c, action, details)
+
+    clock.now = datetime.now(UTC)  # leaving signs with the real time
+    manager = ConfigManager(tmp_path / "config.json")
+    manager.save(Settings().config)
+    monkeypatch.setattr(netlog, "record", busy_for_goodbyes)
+    left = global_cli.leave(
+        manager, conn=conn, transport=world.transport, key_path=tmp_path / "node.key"
+    )
+    assert left == global_cli.Left(["ollama"], REGISTRY, told=True, journaled=False)
+    assert not manager.load().network.enabled and actions(conn)[-1] == "left"
 
 
 def test_leave_from_the_command_line_warns_when_the_registry_did_not_hear() -> None:
