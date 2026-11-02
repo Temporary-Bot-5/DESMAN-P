@@ -12,7 +12,8 @@ against the root (`sign.Trust`). Nothing else is sent yet; tasks from the networ
   connection, a timeout, 5xx, 429, a reply that is not what the protocol says) is tried again
   later, each time waiting twice as long (`RETRY_FIRST` up to `RETRY_MAX`), like a model's
   provider. A contact (its two requests together) gets `TIMEOUT` seconds: the second request
-  only what the first left, and none at all once they are spent.
+  only what the first left, and none at all once they are spent; a reply still arriving when
+  they are spent is given up, however steadily it trickles in.
 - A refusal by the registry is told by its word (`protocol.Problem.error`): `not_registered`
   (it forgot the node, or the node left elsewhere) registers again at once; `revoked` stops the
   node until the worker is restarted; anything else (a clock that is off, mostly) waits like a
@@ -159,26 +160,38 @@ def _call(
     headers = request.sign_request(key, method, target, content, now=now)
     if content:
         headers["Content-Type"] = "application/json"
+    built = client.build_request(
+        method,
+        _origin(registry) + target,
+        content=content,
+        headers=headers,
+        timeout=httpx.Timeout(left),
+    )
     try:
-        reply = client.request(
-            method,
-            _origin(registry) + target,
-            content=content,
-            headers=headers,
-            timeout=httpx.Timeout(left),
-        )
+        reply = client.send(built, stream=True)
+        try:
+            # httpx times each read, not the whole reply: a registry that dribbles it out
+            # would keep the worker waiting, so the deadline is checked after every piece.
+            received = bytearray()
+            for piece in reply.iter_bytes():
+                received += piece
+                if time.monotonic() >= deadline:
+                    raise _Unreachable("ContactTimeout")
+        finally:
+            reply.close()
     except httpx.HTTPError as e:
         raise _Unreachable(type(e).__name__) from e
+    body_bytes = bytes(received)
     if reply.status_code == 429 or reply.status_code >= 500:
         raise _Unreachable(f"HTTP {reply.status_code}")
     if reply.status_code != 200:
         try:
-            problem = protocol.Problem.model_validate_json(reply.content)
+            problem = protocol.Problem.model_validate_json(body_bytes)
         except ValidationError:
             raise _Unreachable(f"HTTP {reply.status_code}") from None
         raise _Problem(problem.error[:64])
     try:
-        return answer.model_validate_json(reply.content)
+        return answer.model_validate_json(body_bytes)
     except ValidationError:
         raise _Unreachable("bad_reply") from None
 

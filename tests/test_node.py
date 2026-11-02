@@ -492,6 +492,39 @@ def test_a_contact_gets_one_timeout_for_both_its_requests(
     assert event.detail == "ContactTimeout" and given == [node.TIMEOUT]
 
 
+def test_a_reply_that_trickles_in_is_given_up_at_the_deadline(
+    make_node: Callable[..., Node], world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """httpx times each read, so a registry sending a byte now and then would never time out
+    by itself; the contact's own deadline stops it."""
+    now = [1000.0]
+    pieces: list[int] = []
+
+    class Trickle(httpx.SyncByteStream):
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+
+        def __iter__(self) -> Iterator[bytes]:
+            for i in range(len(self.body)):
+                now[0] += 1.0  # each byte well inside any read timeout
+                pieces.append(i)
+                yield self.body[i : i + 1]
+
+    class Slow(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            reply = world.transport.handle_request(request)
+            reply.read()
+            return httpx.Response(
+                reply.status_code, headers=reply.headers, stream=Trickle(reply.content)
+            )
+
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    event = make_node(transport=Slow()).poll()
+    assert event is not None and event.change is Change.UNREACHABLE
+    assert event.detail == "ContactTimeout"
+    assert len(pieces) == node.TIMEOUT  # read until the deadline, not a byte more
+
+
 def test_without_a_usable_key_nothing_is_sent(
     make_node: Callable[..., Node], world: World, tmp_path: Path, conn: sqlite3.Connection
 ) -> None:
