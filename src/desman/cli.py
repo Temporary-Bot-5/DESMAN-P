@@ -31,7 +31,7 @@ from desman.config_cli import (
     usage,
 )
 from desman.core import calls, db
-from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult
+from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult, WorkResult
 from desman.core.models import Kind, Priority, TaskSpec
 from desman.core.policy import Access
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report, task_summaries
@@ -46,6 +46,7 @@ from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.models_cli import models
+from desman.net import node
 from desman.planner import Planned, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
@@ -432,25 +433,38 @@ def worker(
     try:
         runs.guard(store)  # before any model is asked
         models = _attach(source, store, cache=not no_cache, as_json=as_json)
+        manager = load_config()
         coordinator = runs.coordinator(
-            store, models, access, load_config().load(), lease_seconds=lease_seconds
+            store, models, access, manager.load(), lease_seconds=lease_seconds
         )
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)
+        network = node.Node(store.conn, manager.load)
         if not as_json:
             ui.note(t("Worker {owner} started. Ctrl+C stops it.", owner=coordinator.owner))
             _tell_waiting(watch)  # what already waits, then what comes to
             sys.stdout.flush()
+        progress = None if as_json else _worker_progress(coordinator, watch)
+
+        def ticked(result: WorkResult) -> None:
+            if progress is not None:
+                progress(result)
+            _keep_in_touch(network, as_json)
+
+        def idle() -> None:
+            if not as_json:
+                _tell_waiting(watch)
+            _keep_in_touch(network, as_json)
+
         try:
-            coordinator.work(
-                until_idle=until_idle,
-                on_tick=None if as_json else _worker_progress(coordinator, watch),
-                on_idle=None if as_json else lambda: _tell_waiting(watch),
-            )
+            _keep_in_touch(network, as_json)
+            coordinator.work(until_idle=until_idle, on_tick=ticked, on_idle=idle)
         except KeyboardInterrupt:
             interrupted = True
         except ScriptExhausted as e:
             raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
+        finally:
+            network.close()
     finally:
         store.conn.close()
     if as_json:
@@ -489,6 +503,44 @@ def _worker_progress(coordinator: Coordinator, watch: InboxWatch) -> Callable[[o
         sys.stdout.flush()
 
     return show
+
+
+def _keep_in_touch(network: node.Node, as_json: bool) -> None:
+    """desman-global between the worker's steps (G.5): a contact when it is due, and what
+    changed told to the person. The network never stops the worker's own work."""
+    event = network.poll()
+    if event is None or as_json:
+        return
+    if event.change is node.Change.CONNECTED:
+        ui.ok(t("In touch with the desman-global registry {url}.", url=event.registry))
+    elif event.change is node.Change.UNREACHABLE:
+        ui.warn(
+            t(
+                "The desman-global registry cannot be reached ({error}); trying again in "
+                "{seconds} s. Your own work goes on.",
+                error=event.detail,
+                seconds=round(event.retry_in or 0),
+            )
+        )
+    elif event.change is node.Change.REFUSED:
+        ui.warn(
+            t(
+                "The desman-global registry refused this node ({error}); trying again in "
+                "{seconds} s. A clock that is off is the usual cause.",
+                error=event.detail,
+                seconds=round(event.retry_in or 0),
+            )
+        )
+    elif event.change is node.Change.REVOKED:
+        ui.warn(
+            t(
+                "This node's key is revoked: it no longer talks to desman-global. "
+                "Your own work goes on."
+            )
+        )
+    elif event.change is node.Change.NO_KEY:
+        ui.warn(t("The node's key cannot be used: {error}", error=event.detail))
+    sys.stdout.flush()
 
 
 def _tell_waiting(watch: InboxWatch) -> None:

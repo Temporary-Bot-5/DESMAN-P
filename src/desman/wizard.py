@@ -505,8 +505,8 @@ def network_change(
         joined, entry = global_cli.joining(config, choice.registry, key)
         return ([entry] if entry else []), lambda: global_cli.print_joined(joined)
     if not choice.join and was_on:
-        withdrawn, entry = global_cli.leaving(config)
-        return ([entry] if entry else []), lambda: global_cli.print_left(withdrawn)
+        left, entries = global_cli.leaving(config)
+        return entries, lambda: global_cli.print_left(left)
     return [], lambda: None
 
 

@@ -7,8 +7,9 @@ lent and switches it off, while the key stays until the person deletes it. A mod
 never leaves the machine, a paid provider is never lent, and a free cloud provider only once
 its terms were checked (`providers.can_donate`).
 
-Nothing here talks to the registry: that comes with G.5, through `net.registry()`, which has
-no address while desman-global is off. Every change is written to `network_log`. The commands
+Only leaving talks to the registry here: it says goodbye while desman-global is still on
+(`node.tell_left`); the rest of the contact is the worker's (`net.node`, G.5). Both get the
+address from `net.registry()`, which has none while desman-global is off. Every change is written to `network_log`. The commands
 are non-interactive; the chat calls the same functions after the person's "yes".
 """
 
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import httpx
 from rich.text import Text
 
 from desman import net, providers, ui
@@ -30,7 +32,7 @@ from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog
 from desman.i18n import t
-from desman.net import sign
+from desman.net import node, sign
 from desman.providers import Provider
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -174,15 +176,53 @@ def joining(config: Config, registry: str | None, key: sign.NodeKey) -> tuple[Jo
     )
 
 
-def leaving(config: Config) -> tuple[list[str] | None, Entry | None]:
-    """`config` switched off with nothing lent (changed in place): what was lent, None if it
-    was off already; and the journal entry."""
-    if not config.network.enabled and not config.network.donated:
+@dataclass(frozen=True)
+class Left:
+    withdrawn: list[str]
+    """What was lent and is taken back."""
+    unheard: str | None = None
+    """Why the registry could not be told (None: it heard, or there was no one to tell)."""
+
+
+def goodbye(
+    config: Config,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    key_path: Path | None = None,
+) -> tuple[str | None, Entry | None]:
+    """Tell the registry this node leaves, while desman-global is still on (G.5): why it
+    could not be told, and the journal entry. Nothing is sent without a registry or a key."""
+    address = net.registry(config)
+    path = sign.default_node_key_path() if key_path is None else key_path
+    if address is None or not path.exists():
         return None, None
+    try:
+        key = sign.load_node_key(path)
+    except (sign.KeyFileError, OSError):
+        return None, None
+    unheard = node.tell_left(address, key, transport=transport)
+    details: dict[str, Any] = {"registry": address, "node": key.fingerprint, "heard": not unheard}
+    if unheard:
+        details["error"] = unheard
+    return unheard, ("leave_sent", details)
+
+
+def leaving(
+    config: Config,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    key_path: Path | None = None,
+) -> tuple[Left | None, list[Entry]]:
+    """`config` switched off with nothing lent (changed in place), after the registry was told:
+    what was taken back, None if it was off already; and the journal entries."""
+    if not config.network.enabled and not config.network.donated:
+        return None, []
+    unheard, told = goodbye(config, transport=transport, key_path=key_path)
     withdrawn = sorted(config.network.donated)
     config.network.enabled = False
     config.network.donated = {}
-    return withdrawn, ("left", {"withdrawn": withdrawn})
+    entries = [told] if told else []
+    return Left(withdrawn, unheard), entries + [("left", {"withdrawn": withdrawn})]
 
 
 def join(
@@ -202,13 +242,19 @@ def join(
     return joined
 
 
-def leave(manager: ConfigManager, *, conn: sqlite3.Connection | None = None) -> list[str] | None:
-    """Switch desman-global off and take back every module lent: what was lent, None if it
-    was off already. The node's key stays."""
+def leave(
+    manager: ConfigManager,
+    *,
+    conn: sqlite3.Connection | None = None,
+    transport: httpx.BaseTransport | None = None,
+    key_path: Path | None = None,
+) -> Left | None:
+    """Tell the registry, switch desman-global off and take back every module lent: what was
+    taken back, None if it was off already. The node's key stays."""
     with _change(manager, conn) as (config, entries):
-        withdrawn, entry = leaving(config)
-        entries += [entry] if entry else []
-    return withdrawn
+        left, found = leaving(config, transport=transport, key_path=key_path)
+        entries += found
+    return left
 
 
 def donatable(config: Config, name: str) -> Provider:
@@ -322,6 +368,14 @@ def undonate(manager: ConfigManager, name: str, *, conn: sqlite3.Connection | No
     return Lent(lent, old, None)
 
 
+def left_json(left: Left | None) -> dict[str, Any]:
+    return {
+        "changed": left is not None,
+        "withdrawn": [] if left is None else left.withdrawn,
+        "registry_told": left is not None and left.unheard is None,
+    }
+
+
 # ── Output ───────────────────────────────────────────────────────────────────
 
 
@@ -355,7 +409,8 @@ def print_status(found: Status) -> None:
     if found.enabled:
         ui.note(
             t(
-                "Nothing is sent yet: the connection to the registry is still being built. "
+                "While `desman worker` runs, this node registers with the registry, says it "
+                "is alive and fetches the revocations; nothing else is sent yet. "
                 "`desman global leave` takes everything back."
             )
         )
@@ -376,13 +431,21 @@ def print_joined(joined: Joined) -> None:
     ui.note(t("This node's key: {fingerprint}", fingerprint=joined.node))
 
 
-def print_left(withdrawn: list[str] | None) -> None:
-    if withdrawn is None:
+def print_left(left: Left | None) -> None:
+    if left is None:
         ui.note(t("desman-global is off already."))
         return
     ui.ok(t("desman-global is off; nothing lent any more."))
-    for provider_id in withdrawn:
+    for provider_id in left.withdrawn:
         ui.ok(t("Taken back: {name}", name=provider_name(provider_id)))
+    if left.unheard:
+        ui.warn(
+            t(
+                "The registry could not be told ({error}); it may list this node a while "
+                "longer. Nothing more is sent to it.",
+                error=left.unheard,
+            )
+        )
     ui.note(t("The node's key stays; delete it yourself if you want it gone."))
 
 
@@ -447,11 +510,11 @@ def join_command(registry: str | None, as_json: bool) -> None:
 @json_option
 def leave_command(as_json: bool) -> None:
     """Stop taking part in desman-global and take back everything lent. The key stays."""
-    withdrawn = leave(load_config())
+    left = leave(load_config())
     if as_json:
-        click.echo(json.dumps({"changed": withdrawn is not None, "withdrawn": withdrawn or []}))
+        click.echo(json.dumps(left_json(left)))
     else:
-        print_left(withdrawn)
+        print_left(left)
 
 
 calls_option = click.option("--calls", type=int, metavar="N", help="Calls a day (1–100000).")

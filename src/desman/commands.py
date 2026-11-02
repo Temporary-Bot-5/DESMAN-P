@@ -596,9 +596,9 @@ def _global_leave(ctx: Context, args: NoArgs) -> Outcome | Proposal:
         return Outcome({"changed": False})
 
     def apply() -> Outcome:
-        withdrawn = global_cli.leave(ctx.manager, conn=ctx.store.conn)
-        global_cli.print_left(withdrawn)
-        return Outcome({"changed": withdrawn is not None, "withdrawn": withdrawn or []})
+        left = global_cli.leave(ctx.manager, conn=ctx.store.conn)
+        global_cli.print_left(left)
+        return Outcome(global_cli.left_json(left))
 
     lines = [t("Stop taking part in desman-global.")]
     lines += [

@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
 from desman import i18n
@@ -22,6 +23,23 @@ def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(CONFIG_DIR_ENV, str(config_dir))
     monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path / "data"))
     return config_dir
+
+
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+@pytest.fixture(autouse=True)
+def no_internet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real HTTP request leaves this machine in no test: it fails as a dropped connection
+    would. Tests pass `httpx.MockTransport`; a few talk to a server on 127.0.0.1."""
+    real = httpx.HTTPTransport.handle_request
+
+    def guarded(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        if request.url.host not in _LOOPBACK:
+            raise httpx.ConnectError(f"no internet in tests: {request.url.host}", request=request)
+        return real(self, request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
 
 
 @pytest.fixture(autouse=True)

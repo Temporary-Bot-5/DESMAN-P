@@ -35,6 +35,6 @@
 # Relative to the source checkout; an installed package has no tests and does not check them.
 [checkout]
 # The test harness.
-"tests/conftest.py" = "b16bbf335a05b10228f9e9785f1a6745671690c7e1bf8ee9a8902ab28be1102f"
+"tests/conftest.py" = "3efb39eadde50efa779159f822ea99816431b82c6efd36e121e123b5fbfb541b"
 "tests/faults.py" = "a036f2cda805b6ef0ad6048d5c9220878e80880cad04faa704800e451406f9cd"
 "tests/helpers.py" = "5cf62f2a06f09ae2e5bd630ef9a10d3214fbb5a75d7a6f096c5a5b5a4816fe2b"
