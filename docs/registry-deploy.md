@@ -174,6 +174,8 @@ desman-registry owner NODE NAME            # nodes of one owner never recheck ea
 ```
 
 `job add` signs with `operator.key`, which must be assigned the `tasks` scope (section 3).
+A job's term ends with the operator's assignment at the latest; once it ends, `again` is
+refused: add the job anew.
 A node does the job (a lease of 10 minutes, kept alive by the node), then a node of **another
 owner** reviews the result. Accepted, the job is done. The job comes to the inbox when the
 review rejects the result (`disputed`), when nodes say twice that they cannot do it

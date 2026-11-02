@@ -159,6 +159,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER results_no_delete BEFORE DELETE ON results
         BEGIN SELECT RAISE(ABORT, 'results are append-only'); END;
     """,
+    # 3 — whose node did the work, as it was when the result came: a later `owner` cannot make
+    # a node of the same owner its reviewer
+    """
+    ALTER TABLE results ADD COLUMN owner TEXT;
+    """,
 )
 
 

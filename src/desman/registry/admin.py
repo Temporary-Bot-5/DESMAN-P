@@ -166,15 +166,22 @@ def add_job(
     now: datetime,
     root_pub: Path | None = None,
 ) -> work.JobRow:
-    """Sign the job as a `task` record and keep it, if a node would accept it."""
+    """Sign the job as a `task` record and keep it, if a node would accept it. Its term ends
+    with the operator's assignment at the latest: after that nodes refuse what it signed."""
+    root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
+    lifetime = timedelta(days=days)
+    assigned = store.trust(conn, root, now).operator(operator.fingerprint)
+    if assigned is not None:
+        lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
+    if lifetime <= timedelta(0):
+        raise AdminError(t("A node would refuse it: {error}", error="the assignment has ended"))
     signed = sign.sign(
         operator,
         sign.RecordKind.TASK,
         job.model_dump(mode="json"),
         issued_at=now,
-        lifetime=timedelta(days=days),
+        lifetime=lifetime,
     )
-    root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
     try:
         return work.add(conn, signed, root, now)
     except sign.Refused as e:
@@ -194,6 +201,7 @@ def settle(
     conn: sqlite3.Connection, prefix: str, decision: work.Decision, *, now: datetime
 ) -> work.JobRow:
     job_id = find_job(conn, prefix)
+    work.expire(conn, now)  # decided on where the job is now, not where nodes last left it
     try:
         return work.settle(conn, job_id, decision, now)
     except work.SettleError as e:

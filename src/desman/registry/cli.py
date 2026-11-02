@@ -427,6 +427,7 @@ def jobs(ctx: click.Context, status: str | None, as_json: bool) -> None:
     """The operator's jobs and where each one is."""
     conn = _open_db(ctx)
     try:
+        work.expire(conn, _now())  # leases nodes left to lapse, even with no node calling
         found = work.jobs(conn, status)
     finally:
         conn.close()
@@ -446,6 +447,7 @@ def inbox(ctx: click.Context, as_json: bool) -> None:
     """Jobs waiting for the operator's word (`job settle`)."""
     conn = _open_db(ctx)
     try:
+        work.expire(conn, _now())  # a job that lost its last lease belongs here already
         found = work.jobs(conn, "operator")
     finally:
         conn.close()
@@ -467,6 +469,7 @@ def job_show(ctx: click.Context, job_id: str, as_json: bool) -> None:
     """A job, and every result and verdict nodes handed in for it."""
     conn = _open_db(ctx)
     try:
+        work.expire(conn, _now())
         try:
             found = work.job(conn, admin.find_job(conn, job_id))
         except admin.AdminError as e:

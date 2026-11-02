@@ -482,3 +482,132 @@ def test_cli_job_add_needs_the_operator_key(registry_dir: Path, root_pub: Path) 
     assert result.exit_code == 1
     assert "cannot be used" in result.output
     assert not (registry_dir / store.OPERATOR_KEY).exists()  # never created to sign a job
+
+
+# ── Review round 1 (Devin) ───────────────────────────────────────────────────
+
+
+def test_a_result_that_validates_fits_a_request_however_it_is_escaped(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    add_job(db_path, operator, clock)
+    a = node(registry, clock)
+    lent = claim(a)
+    assert lent is not None
+    common = {"job": "0" * 32, "lease": "0" * 32, "outcome": "done"}
+    with pytest.raises(ValueError, match="over"):
+        protocol.Result.model_validate(common | {"output": "é" * 50_000})
+    with pytest.raises(ValueError, match="over"):
+        protocol.Result.model_validate(
+            common | {"files": [{"path": "a.txt", "text": "😀" * 14_000}]}
+        )
+    # As much as validates, sent the most expanded way (json.dumps escapes non-ASCII).
+    output = "é" * ((protocol.MAX_RESULT_BYTES - 1000) // 6)
+    files = [{"path": "b.txt", "text": "😀" * 70}]
+    protocol.Result.model_validate(common | {"output": output, "files": files})
+    answer = hand_in(a, lent, output=output, files=files)
+    assert answer.status_code == 200, answer.text
+
+
+def test_the_inbox_sees_a_job_whose_last_lease_lapsed_with_no_node_calling(
+    registry: Registry,
+    registry_dir: Path,
+    db_path: Path,
+    root: sign.NodeKey,
+    root_pub: Path,
+    clock: FakeClock,
+) -> None:
+    clock.now = datetime.now(UTC) - timedelta(hours=2)
+    key = sign.NodeKey.generate()
+    with store.connection(db_path) as conn:
+        admin.assign(conn, root, key.public, {sign.Scope.TASKS}, days=30, now=clock())
+    job_id = add_job(db_path, key, clock)
+    for _ in range(work.MAX_LOST):
+        assert claim(node(registry, clock)) is not None
+        clock.advance(LEASE + 1)
+    assert status(db_path, job_id) == ("execute", None)  # nobody swept yet
+    shown = registry_cli("inbox")
+    assert job_id[:8] in shown.output
+    assert status(db_path, job_id) == ("operator", "leases_lost")
+
+
+def test_again_is_refused_once_the_jobs_record_has_expired(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    job_id = add_job(db_path, operator, clock, days=1)
+    a, b = node(registry, clock), node(registry, clock)
+    lent = claim(a)
+    assert lent is not None
+    hand_in(a, lent)
+    check = claim(b)
+    assert check is not None
+    hand_in(b, check, accept=False)
+    clock.advance(timedelta(days=1).total_seconds())
+    with store.connection(db_path) as conn:
+        with pytest.raises(admin.AdminError, match="expired"):
+            admin.settle(conn, job_id, "again", now=clock())
+        assert admin.settle(conn, job_id, "accept", now=clock()).status == "accepted"
+
+
+def test_a_jobs_term_ends_with_the_operators_assignment(
+    db_path: Path, root: sign.NodeKey, root_pub: Path, clock: FakeClock
+) -> None:
+    key = sign.NodeKey.generate()
+    with store.connection(db_path) as conn:
+        done = admin.assign(conn, root, key.public, {sign.Scope.TASKS}, days=1, now=clock())
+        added = admin.add_job(
+            conn, key, protocol.Job(description="x", acceptance_criteria="y"), days=7, now=clock()
+        )
+    assert added.signed.record.expires_at == done.expires_at
+
+
+def test_a_later_owner_does_not_make_the_same_owner_a_reviewer(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    add_job(db_path, operator, clock)
+    a, b, c = node(registry, clock), node(registry, clock), node(registry, clock)
+    with store.connection(db_path) as conn:
+        admin.set_owner(conn, a.fingerprint, "alice")
+        admin.set_owner(conn, b.fingerprint, "alice")
+    lent = claim(a)
+    assert lent is not None
+    hand_in(a, lent)
+    with store.connection(db_path) as conn:
+        admin.set_owner(conn, a.fingerprint, "bob")  # a's result was alice's when it came
+    assert claim(b) is None
+    with store.connection(db_path) as conn:
+        admin.set_owner(conn, c.fingerprint, "bob")
+    assert claim(c) is None  # nor does bob review what is now bob's node
+    d = node(registry, clock)
+    assert claim(d) is not None
+
+
+def test_a_record_past_its_own_term_is_refused(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    add_job(db_path, operator, clock)
+    a = node(registry, clock)
+    lent = claim(a)
+    assert lent is not None
+    stale = sign.sign(
+        a.key,
+        sign.RecordKind.RESULT,
+        {"job": lent["task"]["record"]["id"], "lease": lent["lease"], "outcome": "done"},
+        issued_at=clock() - timedelta(minutes=2),
+        lifetime=timedelta(minutes=1),
+    )
+    answer = hand_in(a, lent, stale)
+    assert answer.status_code == 401 and answer.json()["error"] == "expired"
+
+
+def test_a_registry_of_the_second_schema_is_upgraded(tmp_path: Path) -> None:
+    path = tmp_path / "v2.db"
+    conn = db.connect(path)
+    db.migrate(conn, store.MIGRATIONS[:2])
+    conn.close()
+    upgraded = store.open_registry(path)
+    try:
+        columns = {r["name"] for r in upgraded.execute("PRAGMA table_info(results)")}
+        assert "owner" in columns
+    finally:
+        upgraded.close()

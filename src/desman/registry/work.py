@@ -200,7 +200,8 @@ def _end_lease(
 
 def expire(conn: sqlite3.Connection, now: datetime) -> None:
     """Leases past their time end; a job that lost too many goes to the operator; a job past its
-    record's term (and lent to nobody) is `expired`. Its own transaction."""
+    record's term (and lent to nobody) is `expired`. Its own transaction. Run before anything
+    that lends or hands in, and before the operator reads or decides (nothing else sweeps)."""
     moment = db.to_iso(now)
     with db.transaction(conn):
         lapsed = conn.execute(
@@ -243,14 +244,19 @@ def _lendable(believed: sign.Trust, found: JobRow) -> bool:
     return True
 
 
-def _owner_of_result(conn: sqlite3.Connection, result_id: str | None) -> str | None:
+def _owners_of_result(conn: sqlite3.Connection, result_id: str | None) -> set[str] | None:
+    """Whose node did the work: its owner when the result came and its owner now (the operator
+    may have named one since). None if there is no such result."""
     if result_id is None:
         return None
-    row = conn.execute("SELECT node FROM results WHERE id = ?", (result_id,)).fetchone()
+    row = conn.execute("SELECT node, owner FROM results WHERE id = ?", (result_id,)).fetchone()
     if row is None:
         return None
+    owners = {row["owner"] or row["node"]}
     done_by = store.node(conn, row["node"])
-    return None if done_by is None else done_by.owned_by
+    if done_by is not None:
+        owners.add(done_by.owned_by)
+    return owners
 
 
 def claim(
@@ -292,8 +298,10 @@ def claim(
                 ).fetchone()
                 if tried is not None:
                     continue
-            elif _owner_of_result(conn, found.result) in (None, caller.owned_by):
-                continue
+            else:
+                owners = _owners_of_result(conn, found.result)
+                if owners is None or caller.owned_by in owners:
+                    continue
             if not _lendable(believed, found):
                 continue
             return _lend(conn, caller, found, now)
@@ -379,6 +387,8 @@ def hand_in(
         sign.check_signature(signed, sign.decode_public(caller.public_key))
         if record.issued_at > now + sign.SKEW:
             raise refuse(Reason.NOT_YET, f"issued at {record.issued_at.isoformat()}")
+        if now >= record.expires_at:
+            raise refuse(Reason.EXPIRED, f"expired at {record.expires_at.isoformat()}")
         found = job(conn, lease["job"])
         assert found is not None  # a lease always names a job (foreign key)
         body: protocol.Result | protocol.Verdict
@@ -402,12 +412,13 @@ def hand_in(
             raise refuse(Reason.MALFORMED, "another job or lease")
         try:
             conn.execute(
-                "INSERT INTO results (id, job, node, lease, kind, round, outcome, signed_json,"
-                " received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO results (id, job, node, owner, lease, kind, round, outcome,"
+                " signed_json, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record.id,
                     found.id,
                     caller.fingerprint,
+                    caller.owned_by,
                     given.lease,
                     record.kind.value,
                     lease["round"],
@@ -525,6 +536,8 @@ def settle(conn: sqlite3.Connection, job_id: str, decision: Decision, now: datet
             decision == "accept" and found.result is None
         ):
             raise SettleError(found.status)
+        if decision == "again" and db.parse_iso(found.expires_at) <= now:
+            raise SettleError("expired")  # nodes would refuse its record: sign a new job
         if decision == "accept":
             conn.execute("UPDATE jobs SET status = 'accepted' WHERE id = ?", (found.id,))
         elif decision == "again":

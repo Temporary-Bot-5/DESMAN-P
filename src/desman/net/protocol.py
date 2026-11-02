@@ -8,6 +8,7 @@ provider, its model and the fingerprint of the API key (`openai_compat.key_id`),
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Annotated, Final, Literal
 
@@ -26,7 +27,9 @@ HAND_IN: Final = "/v1/work/hand-in"
 
 MAX_BODY: Final = 256 * 1024
 MAX_RESULT_BYTES: Final = 160 * 1024
-"""A result's text and files together, in UTF-8: what fits a request with room to spare."""
+"""A result's text and files together, as JSON strings with every non-ASCII character escaped
+(`\\uXXXX`, the longest any serializer writes them): what fits a request (`MAX_BODY`) with
+room to spare, however the node encodes it."""
 MAX_INPUT_BYTES: Final = 32 * 1024
 MAX_CAPABILITIES: Final = 32
 HEARTBEAT_SECONDS: Final = 300
@@ -132,8 +135,9 @@ FilePath = Annotated[
 ]
 
 
-def _utf8(*texts: str) -> int:
-    return sum(len(text.encode("utf-8")) for text in texts)
+def _encoded(*texts: str) -> int:
+    """Bytes the texts take as JSON strings at worst (ASCII-escaped)."""
+    return sum(len(json.dumps(text, ensure_ascii=True)) for text in texts)
 
 
 class Job(BaseModel):
@@ -149,7 +153,7 @@ class Job(BaseModel):
 
     @model_validator(mode="after")
     def _inputs_fit(self) -> Job:
-        if _utf8(*self.inputs.values()) > MAX_INPUT_BYTES:
+        if _encoded(*self.inputs.values()) > MAX_INPUT_BYTES:
             raise ValueError(f"the inputs are over {MAX_INPUT_BYTES} bytes")
         return self
 
@@ -218,7 +222,7 @@ class Result(BaseModel):
     def _fits(self) -> Result:
         if len({f.path for f in self.files}) != len(self.files):
             raise ValueError("the same file twice")
-        if _utf8(self.output, *(f.text for f in self.files)) > MAX_RESULT_BYTES:
+        if _encoded(self.output, *(f.text for f in self.files)) > MAX_RESULT_BYTES:
             raise ValueError(f"the result is over {MAX_RESULT_BYTES} bytes")
         return self
 
