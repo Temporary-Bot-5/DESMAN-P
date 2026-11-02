@@ -171,12 +171,16 @@ def _call(
         reply = client.send(built, stream=True)
         try:
             # httpx times each read, not the whole reply: a registry that dribbles it out
-            # would keep the worker waiting, so the deadline is checked after every piece.
+            # would keep the worker waiting, so the deadline is checked after every piece,
+            # and once more at the end (a reply's ending can come late, after its last
+            # byte). One read may still outlast the deadline, by its own timeout at most.
             received = bytearray()
             for piece in reply.iter_bytes():
                 received += piece
                 if time.monotonic() >= deadline:
                     raise _Unreachable("ContactTimeout")
+            if time.monotonic() >= deadline:
+                raise _Unreachable("ContactTimeout")
         finally:
             reply.close()
     except httpx.HTTPError as e:
