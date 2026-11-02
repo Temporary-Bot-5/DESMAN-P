@@ -822,6 +822,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}; उधार दिया: {names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "कोई नोड इसे अस्वीकार कर देगा: {error}",
+    "A node would refuse it: the assignment has ended.": "कोई नोड इसे अस्वीकार कर देगा: नियुक्ति समाप्त हो चुकी है।",
     "Action": "कार्रवाई",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "सुनने का पता; TLS देने वाले रिवर्स प्रॉक्सी के पीछे 127.0.0.1 ही रखें।",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "रोके जाने तक नोड्स को जवाब दें (सादा HTTP: TLS रिवर्स प्रॉक्सी देता है)।",

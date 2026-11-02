@@ -174,7 +174,7 @@ def add_job(
     if assigned is not None:
         lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
     if lifetime <= timedelta(0):
-        raise AdminError(t("A node would refuse it: {error}", error="the assignment has ended"))
+        raise AdminError(t("A node would refuse it: the assignment has ended."))
     signed = sign.sign(
         operator,
         sign.RecordKind.TASK,

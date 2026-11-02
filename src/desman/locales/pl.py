@@ -861,6 +861,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}; użyczono: {names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "Węzeł by go odrzucił: {error}",
+    "A node would refuse it: the assignment has ended.": "Węzeł by go odrzucił: przydział wygasł.",
     "Action": "Działanie",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Adres nasłuchiwania; zostaw 127.0.0.1 za odwrotnym proxy, które zapewnia TLS.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Odpowiadaj węzłom aż do zatrzymania (zwykły HTTP: TLS zapewnia odwrotne proxy).",

@@ -861,6 +861,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}; віддано: {names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "Вузол відхилив би її: {error}",
+    "A node would refuse it: the assignment has ended.": "Вузол відхилив би її: призначення закінчилося.",
     "Action": "Дія",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Адреса для прийому з'єднань; залиште 127.0.0.1 за зворотним проксі, який дає TLS.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Відповідати вузлам, доки не зупинять (звичайний HTTP: TLS дає зворотний проксі).",

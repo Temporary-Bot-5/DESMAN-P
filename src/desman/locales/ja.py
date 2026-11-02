@@ -766,6 +766,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}、貸し出し中：{names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "ノードはこれを拒否します: {error}",
+    "A node would refuse it: the assignment has ended.": "ノードはこれを拒否します: 割り当ての期限が切れています。",
     "Action": "操作",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "待ち受けるアドレス。TLS を提供するリバースプロキシの背後では 127.0.0.1 のままにしてください。",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "停止されるまでノードに応答します（素の HTTP：TLS はリバースプロキシが提供）。",

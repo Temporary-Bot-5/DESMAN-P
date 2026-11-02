@@ -768,6 +768,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}; ödünç verildi: {names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "Bir düğüm bunu reddederdi: {error}",
+    "A node would refuse it: the assignment has ended.": "Bir düğüm bunu reddederdi: atamanın süresi doldu.",
     "Action": "Eylem",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Dinlenecek adres; TLS sağlayan ters vekil sunucunun arkasında 127.0.0.1 olarak bırakın.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Durdurulana kadar düğümlere yanıt ver (düz HTTP: TLS'yi ters vekil sağlar).",

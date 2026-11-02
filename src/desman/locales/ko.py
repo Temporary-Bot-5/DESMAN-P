@@ -764,6 +764,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}; 빌려줌: {names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "노드라면 거부합니다: {error}",
+    "A node would refuse it: the assignment has ended.": "노드라면 거부합니다: 할당이 만료되었습니다.",
     "Action": "동작",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "수신 대기할 주소입니다. TLS를 제공하는 리버스 프록시 뒤에서는 127.0.0.1로 두세요.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "중지될 때까지 노드에 응답합니다(일반 HTTP: TLS는 리버스 프록시가 제공).",

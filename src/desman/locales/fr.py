@@ -825,6 +825,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state} ; prêté : {names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "Un nœud le refuserait : {error}",
+    "A node would refuse it: the assignment has ended.": "Un nœud le refuserait : l’affectation a pris fin.",
     "Action": "Action",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Adresse d'écoute ; gardez 127.0.0.1 derrière le proxy inverse qui fournit TLS.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Répondre aux nœuds jusqu'à l'arrêt (HTTP simple : TLS est fourni par le proxy inverse).",

@@ -756,6 +756,7 @@ MESSAGES: dict[str, Forms] = {
     "{state}; lent: {names}": "{state}；已借出：{names}",
     # ── desman-registry (G.4) ─────────────────────────────────────────────────
     "A node would refuse it: {error}": "节点会拒绝它：{error}",
+    "A node would refuse it: the assignment has ended.": "节点会拒绝它：指派已到期。",
     "Action": "操作",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "监听地址；在提供 TLS 的反向代理之后请保持 127.0.0.1。",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "持续响应节点直到被停止（普通 HTTP：TLS 由反向代理提供）。",
