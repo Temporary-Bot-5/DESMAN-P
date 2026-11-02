@@ -11,7 +11,8 @@ against the root (`sign.Trust`). Nothing else is sent yet; tasks from the networ
 - The node's own work never waits for the network. A registry that cannot be reached (no
   connection, a timeout, 5xx, 429, a reply that is not what the protocol says) is tried again
   later, each time waiting twice as long (`RETRY_FIRST` up to `RETRY_MAX`), like a model's
-  provider; a contact takes at most `TIMEOUT` seconds.
+  provider. A contact (its two requests together) gets `TIMEOUT` seconds: the second request
+  only what the first left, and none at all once they are spent.
 - A refusal by the registry is told by its word (`protocol.Problem.error`): `not_registered`
   (it forgot the node, or the node left elsewhere) registers again at once; `revoked` stops the
   node until the worker is restarted; anything else (a clock that is off, mostly) waits like a
@@ -21,13 +22,14 @@ against the root (`sign.Trust`). Nothing else is sent yet; tasks from the networ
   record and reason in a worker's life). A heartbeat that changes nothing is not: one every few
   minutes would bury the rest.
 
-`tell_left` is `desman global leave`'s goodbye: sent once, while desman-global is still on.
+`tell_left` is `desman global leave`'s goodbye: sent once, after the config was saved off.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -146,14 +148,25 @@ def _call(
     body: BaseModel | None,
     answer: type[M],
     now: datetime,
+    deadline: float,
 ) -> M:
+    """One request, given what is left until `deadline` (`time.monotonic()`)."""
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise _Unreachable("ContactTimeout")
     content = b"" if body is None else body.model_dump_json(exclude_none=True).encode("utf-8")
     target = _target(registry, path)
     headers = request.sign_request(key, method, target, content, now=now)
     if content:
         headers["Content-Type"] = "application/json"
     try:
-        reply = client.request(method, _origin(registry) + target, content=content, headers=headers)
+        reply = client.request(
+            method,
+            _origin(registry) + target,
+            content=content,
+            headers=headers,
+            timeout=httpx.Timeout(left),
+        )
     except httpx.HTTPError as e:
         raise _Unreachable(type(e).__name__) from e
     if reply.status_code == 429 or reply.status_code >= 500:
@@ -180,7 +193,17 @@ def tell_left(
     """Tell the registry this node leaves; None when it heard, otherwise why not."""
     with httpx.Client(transport=transport, timeout=TIMEOUT, follow_redirects=False) as client:
         try:
-            _call(client, key, registry, "POST", protocol.LEAVE, None, protocol.Left, clock())
+            _call(
+                client,
+                key,
+                registry,
+                "POST",
+                protocol.LEAVE,
+                None,
+                protocol.Left,
+                clock(),
+                time.monotonic() + TIMEOUT,
+            )
         except _Unreachable as e:
             return str(e)
         except _Problem as e:
@@ -307,6 +330,7 @@ class Node:
     ) -> Event | None:
         lent = capabilities(config)
         client = self._http()
+        deadline = time.monotonic() + TIMEOUT
         first = not self.registered
         if first:
             state = _call(
@@ -318,6 +342,7 @@ class Node:
                 protocol.Register(capabilities=lent),
                 protocol.NodeState,
                 now,
+                deadline,
             )
             self.registered = True
             self._sent = lent
@@ -337,6 +362,7 @@ class Node:
                 protocol.Heartbeat(capabilities=lent if changed else None),
                 protocol.NodeState,
                 now,
+                deadline,
             )
             if changed:
                 self._sent = lent
@@ -345,7 +371,9 @@ class Node:
                     "capabilities_sent",
                     {"registry": address, "capabilities": _dump(lent)},
                 )
-        trust = _call(client, key, address, "GET", protocol.TRUST, None, protocol.TrustState, now)
+        trust = _call(
+            client, key, address, "GET", protocol.TRUST, None, protocol.TrustState, now, deadline
+        )
         revoked = self._receive(address, key, trust)
         if revoked:
             return self._stop(address, key, "the trust list revokes this node")
@@ -394,8 +422,8 @@ class Node:
     def _once(self, mark: tuple[str, str], action: str, details: dict[str, Any]) -> None:
         if mark in self._journaled:
             return
+        netlog.record(self.conn, action, details)  # a busy journal: tried again next poll
         self._journaled.add(mark)
-        netlog.record(self.conn, action, details)
 
     def _retry(self, now: datetime) -> float:
         self.failures += 1

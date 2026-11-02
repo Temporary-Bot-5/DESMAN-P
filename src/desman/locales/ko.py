@@ -714,6 +714,7 @@ MESSAGES: dict[str, Forms] = {
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "desman-global 레지스트리에 연결할 수 없습니다({error}). {seconds}초 후 다시 시도합니다. 내 작업은 계속 진행됩니다.",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global 레지스트리가 이 노드를 거부했습니다({error}). {seconds}초 후 다시 시도합니다. 보통 시계가 맞지 않는 것이 원인입니다.",
     "This node's key is revoked: it no longer talks to desman-global. Your own work goes on.": "이 노드의 키가 폐기되었습니다. 더 이상 desman-global과 통신하지 않습니다. 내 작업은 계속 진행됩니다.",
+    "The registry was not told: the node's key cannot be used, so nothing was sent. It stops listing this node once it falls silent.": "레지스트리에 알리지 못했습니다. 노드 키를 사용할 수 없어 아무것도 보내지 않았습니다. 이 노드가 응답하지 않으면 레지스트리는 목록에서 제외합니다.",
     "The registry could not be told ({error}); it may list this node a while longer. Nothing more is sent to it.": "레지스트리에 알리지 못했습니다({error}). 레지스트리가 한동안 이 노드를 계속 표시할 수 있습니다. 더 이상 아무것도 보내지 않습니다.",
     "Off: nothing leaves this machine for desman-global. `desman global join` switches it on; lending a module is `desman global donate PROVIDER`.": "꺼짐: desman-global을 위해 이 컴퓨터에서 나가는 것은 없습니다. `desman global join`으로 켭니다. 모듈 빌려주기: `desman global donate PROVIDER`.",
     "Open the setup wizard at desman-global: whether this machine takes part.": "설정 마법사를 desman-global 단계에서 열기: 이 컴퓨터의 참여 여부.",

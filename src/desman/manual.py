@@ -243,7 +243,8 @@ TOPICS: Final = (
         "alive every few minutes and fetches the revocations (checked against the root "
         "key). No tasks come or go yet. An unreachable registry is tried again later, "
         "waiting longer each time, while the worker's own work goes on; a revoked node "
-        "falls silent. `desman global leave` tells the registry first. In the chat each "
+        "falls silent. `desman global leave` switches it off, then tells the registry. In "
+        "the chat each "
         "change needs the person's yes in the window.",
     ),
 )

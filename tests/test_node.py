@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -432,6 +433,63 @@ def test_a_busy_journal_never_stops_the_worker(
     assert found.next_at == clock() + node.RETRY_FIRST
 
 
+def test_a_record_the_busy_journal_missed_is_journaled_next_time(
+    make_node: Callable[..., Node],
+    world: World,
+    clock: FakeClock,
+    conn: sqlite3.Connection,
+    root: sign.NodeKey,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with store.connection(world.registry.path) as c:
+        admin.revoke(c, root, "ab" * 32, "lost", now=clock())
+    record = netlog.record
+
+    def busy_for_records(c: sqlite3.Connection, action: str, details: Any = None) -> None:
+        if action == "record_received":
+            raise sqlite3.OperationalError("database is locked")
+        record(c, action, details)
+
+    found = make_node()
+    with monkeypatch.context() as m:
+        m.setattr(netlog, "record", busy_for_records)
+        assert found.poll() is None
+    assert "record_received" not in actions(conn)
+    clock.advance(node.RETRY_FIRST.total_seconds())
+    found.poll()
+    assert actions(conn).count("record_received") == 1
+
+
+def test_a_contact_gets_one_timeout_for_both_its_requests(
+    make_node: Callable[..., Node], world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow registration leaves the trust list only what is left of `TIMEOUT`; once it is
+    spent, the second request is not sent at all."""
+    now = [1000.0]
+    spent: list[float] = []
+    given: list[float] = []
+
+    class Slow(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            given.append(request.extensions["timeout"]["read"])
+            now[0] += spent.pop(0)
+            return world.transport.handle_request(request)
+
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    found = make_node(transport=Slow())
+    spent[:] = [6.0, 0.0]
+    event = found.poll()
+    assert event is not None and event.change is Change.CONNECTED
+    assert given == [node.TIMEOUT, node.TIMEOUT - 6.0]
+    # The heartbeat spends it all: the trust list is not asked for.
+    found.next_at = None
+    given.clear()
+    spent[:] = [node.TIMEOUT]
+    event = found.poll()
+    assert event is not None and event.change is Change.UNREACHABLE
+    assert event.detail == "ContactTimeout" and given == [node.TIMEOUT]
+
+
 def test_without_a_usable_key_nothing_is_sent(
     make_node: Callable[..., Node], world: World, tmp_path: Path, conn: sqlite3.Connection
 ) -> None:
@@ -469,7 +527,7 @@ def test_the_network_never_stops_the_workers_own_work(tmp_path: Path) -> None:
 # ── Leaving ──────────────────────────────────────────────────────────────────
 
 
-def test_leaving_tells_the_registry_first(
+def test_leaving_saves_off_then_tells_the_registry(
     world: World, clock: FakeClock, key: sign.NodeKey, tmp_path: Path, conn: sqlite3.Connection,
     make_node: Callable[..., Node],
 ) -> None:  # fmt: skip
@@ -480,13 +538,14 @@ def test_leaving_tells_the_registry_first(
     left = global_cli.leave(
         manager, conn=conn, transport=world.transport, key_path=tmp_path / "node.key"
     )
-    assert left == global_cli.Left(["ollama"], None)
+    assert left == global_cli.Left(["ollama"], REGISTRY, told=True)
     there = registered(world, key.fingerprint)
     assert there is not None and there.status == "left"
     assert log(conn)[-2:] == [
-        ("leave_sent", {"registry": REGISTRY, "node": key.fingerprint, "heard": True}),
         ("left", {"withdrawn": ["ollama"]}),
+        ("leave_sent", {"registry": REGISTRY, "node": key.fingerprint, "heard": True}),
     ]
+    assert global_cli.left_json(left)["registry_told"] is True
     assert not manager.load().network.enabled
     # Off already: nothing is sent again.
     sent = len(world.requests)
@@ -503,10 +562,45 @@ def test_leaving_without_the_registry_still_leaves(
     left = global_cli.leave(
         manager, conn=conn, transport=world.transport, key_path=tmp_path / "node.key"
     )
-    assert left == global_cli.Left(["ollama"], "ConnectError")
+    assert left == global_cli.Left(["ollama"], REGISTRY, unheard="ConnectError")
     assert not manager.load().network.enabled
-    assert log(conn)[-2][1]["heard"] is False
+    assert log(conn)[-1][1]["heard"] is False
     assert global_cli.left_json(left)["registry_told"] is False
+
+
+def test_leaving_without_a_usable_key_says_nothing_was_sent(
+    world: World, tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    manager.save(Settings().config)
+    left = global_cli.leave(
+        manager, conn=conn, transport=world.transport, key_path=tmp_path / "missing.key"
+    )
+    assert left == global_cli.Left(["ollama"], REGISTRY, unheard=global_cli.NO_KEY)
+    assert world.requests == [] and not manager.load().network.enabled
+    assert log(conn)[-1] == ("leave_not_sent", {"registry": REGISTRY, "why": global_cli.NO_KEY})
+    assert global_cli.left_json(left)["registry_told"] is False
+
+
+def test_a_wizard_whose_save_is_refused_says_no_goodbye(
+    world: World, tmp_path: Path, conn: sqlite3.Connection, key: sign.NodeKey
+) -> None:
+    """The config changed elsewhere while the wizard was open: its "leave" saves nothing, so
+    the registry must still list the node."""
+    from desman import wizard
+    from desman.config import ConfigError
+
+    manager = ConfigManager(tmp_path / "config.json")
+    manager.save(Settings().config)
+    seen = manager.snapshot()
+    config = manager.load()
+    entries, said = wizard.network_change(config, wizard.NetworkChoice(join=False))
+    other = manager.load()
+    other.language = "de"
+    manager.save(other)  # `desman language de` meanwhile
+    with pytest.raises(ConfigError, match="nothing was saved"):
+        wizard.save(manager, config, seen, entries)
+    assert world.requests == [] and manager.load().network.enabled
 
 
 def test_leave_from_the_command_line_warns_when_the_registry_did_not_hear() -> None:

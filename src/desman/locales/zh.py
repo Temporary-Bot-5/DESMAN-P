@@ -706,6 +706,7 @@ MESSAGES: dict[str, Forms] = {
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "无法连接 desman-global 注册中心（{error}）；{seconds} 秒后重试。您自己的工作照常进行。",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global 注册中心拒绝了本节点（{error}）；{seconds} 秒后重试。通常是时钟不准导致的。",
     "This node's key is revoked: it no longer talks to desman-global. Your own work goes on.": "本节点的密钥已被吊销：它不再与 desman-global 通信。您自己的工作照常进行。",
+    "The registry was not told: the node's key cannot be used, so nothing was sent. It stops listing this node once it falls silent.": "未通知注册中心：节点密钥无法使用，因此没有发送任何内容。该节点停止响应后，注册中心将不再列出它。",
     "The registry could not be told ({error}); it may list this node a while longer. Nothing more is sent to it.": "未能通知注册中心（{error}）；它可能还会列出本节点一段时间。不再向它发送任何内容。",
     "Off: nothing leaves this machine for desman-global. `desman global join` switches it on; lending a module is `desman global donate PROVIDER`.": "已关闭：没有任何内容从这台机器发往 desman-global。`desman global join` 打开它；借出模块：`desman global donate PROVIDER`。",
     "Open the setup wizard at desman-global: whether this machine takes part.": "在 desman-global 处打开设置向导：这台机器是否加入。",

@@ -494,7 +494,7 @@ def network_change(
     config: Config, choice: NetworkChoice
 ) -> tuple[list[tuple[str, dict[str, Any]]], Callable[[], None]]:
     """`config` changed as the person chose (in place), the journal entries saying how, and
-    what to tell them once it is saved. Raises before anything is saved if the node's key
+    what to do once it is saved (leaving: the registry's goodbye) and tell them. Raises before anything is saved if the node's key
     cannot be used."""
     from desman import global_cli  # it reaches the wizard through config_cli
 
@@ -506,7 +506,8 @@ def network_change(
         return ([entry] if entry else []), lambda: global_cli.print_joined(joined)
     if not choice.join and was_on:
         left, entries = global_cli.leaving(config)
-        return entries, lambda: global_cli.print_left(left)
+        # The goodbye only once the config is saved off: a save refused sends nothing.
+        return entries, lambda: global_cli.print_left(global_cli.farewell(left))
     return [], lambda: None
 
 
