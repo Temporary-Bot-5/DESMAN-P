@@ -252,18 +252,23 @@ def test_leave_takes_everything_back_and_keeps_the_key() -> None:
     assert not network.enabled and network.donated == {} and network.registry == REGISTRY
     assert net.registry(saved()) is None
     assert sign.load_node_key(node_key()).fingerprint == fingerprint
-    assert network_log()[-1] == ("left", {"withdrawn": ["ollama"]})
+    # Saved off first, then the goodbye (no registry to reach in tests).
+    assert network_log()[-2] == ("left", {"withdrawn": ["ollama"]})
+    assert network_log()[-1][0] == "leave_sent" and network_log()[-1][1]["heard"] is False
     # Joining again: the same key.
     assert fingerprint in ok("global", "join").output
 
 
-def test_nothing_reaches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No request at all from any of it (G.3 has no registry client; off, there is no address)."""
+def test_only_leaving_reaches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Of all these commands only `leave` sends anything: its goodbye to the registry, once
+    the config is saved off (G.5). The rest is the worker's (tests/test_node.py)."""
+    sent: list[tuple[str, str]] = []
 
-    def no_requests(self: Any, request: httpx.Request) -> httpx.Response:
-        raise AssertionError(f"a request to {request.url}")
+    def record(self: Any, request: httpx.Request) -> httpx.Response:
+        sent.append((request.method, str(request.url)))
+        raise httpx.ConnectError("not in tests", request=request)
 
-    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", no_requests)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", record)
     configured(settings=OLLAMA)
     for args in (
         ("global", "status"),
@@ -273,8 +278,10 @@ def test_nothing_reaches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
         ("global", "undonate", "ollama"),
         ("global", "leave"),
         ("global", "status", "--json"),
+        ("global", "leave"),
     ):
         ok(*args)
+    assert sent == [("POST", REGISTRY + "/v1/nodes/leave")]
 
 
 # ── The journal ──────────────────────────────────────────────────────────────
@@ -384,7 +391,7 @@ def test_leave_from_the_chat_lists_what_is_taken_back(fake: FakeLLM) -> None:
     result = chat("leave", "y", "quota?")
     assert "Stop taking part in desman-global." in result.output
     assert "Take back: Ollama" in result.output
-    assert not saved().network.enabled and network_log()[-1][0] == "left"
+    assert not saved().network.enabled and network_log()[-2][0] == "left"
     assert "is not lent" in result.output
 
 

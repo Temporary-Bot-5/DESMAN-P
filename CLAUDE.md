@@ -74,7 +74,8 @@ src/desman/
 ├── global_cli.py  # `global [status]|join [--registry]|leave|donate P|undonate P|quota P`
 │                  #   (G.3): consent to desman-global, the node key, modules lent with daily
 │                  #   quotas (`providers.can_donate`: local always, free cloud only if
-│                  #   `donatable`, paid never); each change in `network_log`; sends nothing
+│                  #   `donatable`, paid never); each change in `network_log`; only `leave`
+│                  #   talks to the registry (says goodbye while still on)
 ├── tuning_cli.py  # `tuning`: the model each role asks first, the limits of the workflow
 │                  #   (`runs.TUNING_DEFAULTS` when unset); set by the person only
 ├── proposals_cli.py # `proposals [list]|show N|evaluate N [--real]|apply N|revert N` (and
@@ -234,6 +235,10 @@ src/desman/
     │              #   node key; verify_request() refuses forged, stale, replayed. Protected
     ├── protocol.py # Paths and bodies node ↔ registry (Pydantic): capabilities lent (provider,
     │              #   model, key fingerprint, quotas), never a key
+    ├── node.py    # The node in the network (G.5): `Node.poll()` between a worker's steps —
+    │              #   register with what is lent, heartbeat, trust list checked by `Trust`;
+    │              #   config re-read before each contact; backoff; revoked → silent;
+    │              #   `tell_left` for `global leave`; all in `network_log`
     └── root.pub   # The root's public key (its private half: the owner's server). Protected
 └── registry/      # desman-registry (G.4), the owner's server; reads no config.json, keeps no key
     ├── store.py   # Its own SQLite and migrations (core.db helpers): nodes, root-signed records

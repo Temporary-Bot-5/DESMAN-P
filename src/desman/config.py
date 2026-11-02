@@ -471,8 +471,10 @@ class ConfigManager:
         """Save, unless the file changed since `seen` was taken (another command wrote it
         while, say, the wizard was open). Raises ConfigError then; nothing is written."""
         with self.locked():
-            if self.snapshot() != seen:
-                raise ConfigError(
-                    self.config_path, "it changed while this was open; nothing was saved"
-                )
+            self.check_unchanged(seen)
             self.save(config)
+
+    def check_unchanged(self, seen: str | None) -> None:
+        """ConfigError if the file changed since `seen` was taken; call it under `locked()`."""
+        if self.snapshot() != seen:
+            raise ConfigError(self.config_path, "it changed while this was open; nothing was saved")

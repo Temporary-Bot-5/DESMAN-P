@@ -239,9 +239,13 @@ TOPICS: Final = (
         "serving others (none is yet); a paid one never. `desman global leave` takes back "
         "everything and switches it off; the key stays. `desman global status` shows all of "
         "it. Every change is written to the network's journal.\n"
-        "This version sends nothing at all: it does not connect to the registry yet, so "
-        "joining changes no behaviour. In the chat each change needs the person's yes in "
-        "the window.",
+        "While `desman worker` runs, the node registers with what it lends, says it is "
+        "alive every few minutes and fetches the revocations (checked against the root "
+        "key). No tasks come or go yet. An unreachable registry is tried again later, "
+        "waiting longer each time, while the worker's own work goes on; a revoked node "
+        "falls silent. `desman global leave` switches it off, then tells the registry. In "
+        "the chat each "
+        "change needs the person's yes in the window.",
     ),
 )
 
