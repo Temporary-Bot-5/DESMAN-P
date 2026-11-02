@@ -1,5 +1,7 @@
-"""What the owner does on the registry's server (ADR 0004; ROADMAP G.4): assign an operator,
-revoke a key, back the database up. The bodies of `desman-registry assign|revoke|backup`.
+"""What the owner does on the registry's server (ADR 0004; ROADMAP G.4, G.6): assign an
+operator, revoke a key, back the database up; as the operator, add jobs and settle those that
+wait for a person, and say whose node is whose. The bodies of `desman-registry assign|revoke|
+backup|job|owner`.
 
 Assignments and revocations are signed by the root key, which lives on this server only
 (`root.key` in the registry's directory, readable by its owner only). A key that is not the
@@ -21,10 +23,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
 from desman.i18n import t
-from desman.net import sign
-from desman.registry import store
+from desman.net import protocol, sign
+from desman.registry import store, work
 
 ASSIGNMENT_DAYS: Final = 90
+JOB_DAYS: Final = 7
 REVOCATION_LIFETIME: Final = timedelta(days=3650)
 """A revocation is honoured past its term anyway; the term only has to be valid."""
 
@@ -140,3 +143,83 @@ def backup(source: Path, dest: Path) -> None:
     except BaseException:
         dest.unlink(missing_ok=True)
         raise
+
+
+# ── Work (G.6) ───────────────────────────────────────────────────────────────
+
+
+def load_operator_key(path: Path) -> sign.NodeKey:
+    """The operator's private key (the registry's own, `operator.key`, unless told otherwise);
+    never created here: an operator signs only once the root assigned it."""
+    try:
+        return sign.load_node_key(path)
+    except (sign.KeyFileError, OSError) as e:
+        raise AdminError(t("The key cannot be used: {error}", error=str(e))) from e
+
+
+def add_job(
+    conn: sqlite3.Connection,
+    operator: sign.NodeKey,
+    job: protocol.Job,
+    *,
+    days: int,
+    now: datetime,
+    root_pub: Path | None = None,
+) -> work.JobRow:
+    """Sign the job as a `task` record and keep it, if a node would accept it."""
+    signed = sign.sign(
+        operator,
+        sign.RecordKind.TASK,
+        job.model_dump(mode="json"),
+        issued_at=now,
+        lifetime=timedelta(days=days),
+    )
+    root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
+    try:
+        return work.add(conn, signed, root, now)
+    except sign.Refused as e:
+        raise AdminError(t("A node would refuse it: {error}", error=str(e))) from e
+
+
+def find_job(conn: sqlite3.Connection, prefix: str) -> str:
+    found = work.find(conn, prefix)
+    if not found:
+        raise AdminError(t("No job {id}.", id=prefix))
+    if len(found) > 1:
+        raise AdminError(t("More than one job starts with {id}; give more of it.", id=prefix))
+    return found[0]
+
+
+def settle(
+    conn: sqlite3.Connection, prefix: str, decision: work.Decision, *, now: datetime
+) -> work.JobRow:
+    job_id = find_job(conn, prefix)
+    try:
+        return work.settle(conn, job_id, decision, now)
+    except work.SettleError as e:
+        raise AdminError(
+            t(
+                "Job {id} is {status}: it cannot be settled with {decision}.",
+                id=job_id,
+                status=e.status,
+                decision=decision,
+            )
+        ) from e
+
+
+def find_node(conn: sqlite3.Connection, prefix: str) -> str:
+    """A registered node by its fingerprint or the start of it (as `nodes` shows it)."""
+    if not prefix or any(c not in "0123456789abcdef" for c in prefix):
+        raise AdminError(t("No node {key}.", key=prefix))
+    found = [n.fingerprint for n in store.nodes(conn) if n.fingerprint.startswith(prefix)]
+    if not found:
+        raise AdminError(t("No node {key}.", key=prefix))
+    if len(found) > 1:
+        raise AdminError(t("More than one node starts with {key}; give more of it.", key=prefix))
+    return found[0]
+
+
+def set_owner(conn: sqlite3.Connection, prefix: str, owner: str | None) -> str:
+    fingerprint = find_node(conn, prefix)
+    work.set_owner(conn, fingerprint, owner)
+    return fingerprint

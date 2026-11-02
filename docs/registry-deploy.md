@@ -159,6 +159,30 @@ desman-registry revoke FINGERPRINT --reason "why"   # a node or an operator, sig
 Every refused request is journaled with the reason and the key it claimed. A burst of
 `forged` or `replay` entries from one key usually means a broken clock or a copied `node.key`.
 
+### Jobs for the network (G.6)
+
+The operator offers work to nodes as signed jobs; each job is one self-contained subtask.
+
+```bash
+desman-registry job add --description "What to do" --acceptance "How it is judged" \
+    [--kind text|code|analysis] [--runs-code] [--input NAME=TEXT ...] [--days 7]
+desman-registry jobs [--status operator]   # every job and where it is
+desman-registry inbox                      # jobs waiting for your word
+desman-registry job show JOB               # the job, each result and verdict handed in
+desman-registry job settle JOB accept|again|drop
+desman-registry owner NODE NAME            # nodes of one owner never recheck each other
+```
+
+`job add` signs with `operator.key`, which must be assigned the `tasks` scope (section 3).
+A node does the job (a lease of 10 minutes, kept alive by the node), then a node of **another
+owner** reviews the result. Accepted, the job is done. The job comes to the inbox when the
+review rejects the result (`disputed`), when nodes say twice that they cannot do it
+(`failed`), or when three nodes take it and fall silent (`leases_lost`). Nothing in the inbox
+is decided without you. `again` lends the job from the start.
+
+Until you say otherwise, every node counts as its own owner. Name your own machines with
+`owner`, or they will recheck each other's work.
+
 ## 7. Backups and restoring
 
 `backup` takes a consistent copy while the server runs (SQLite backup API), readable by its

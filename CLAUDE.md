@@ -245,9 +245,12 @@ src/desman/
     │              #   handed out, nonces, registry_log (append-only)
     ├── server.py  # Registry.handle() (tests: MockTransport) behind ThreadingHTTPServer on
     │              #   127.0.0.1; every request verified first, refusals journaled
+    ├── work.py    # Jobs (G.6): an operator's `task` record lent with a lease and token
+    │              #   (claim | extend | hand-in), done, then rechecked by another owner's node;
+    │              #   rejected, failed or leases lost → the operator's inbox (`job settle`)
     ├── admin.py   # assign / revoke signed by root.key (checked against root.pub and as a node
-    │              #   would), backup (SQLite backup API)
-    └── cli.py     # `desman-registry serve|backup|assign|revoke|nodes|log`
+    │              #   would), backup (SQLite backup API); job add / settle, owner
+    └── cli.py     # `desman-registry serve|backup|assign|revoke|nodes|log|job|jobs|inbox|owner`
                    #   ($DESMAN_REGISTRY_DIR, $DESMAN_REGISTRY_LANGUAGE); docs/registry-deploy.md
 ```
 
