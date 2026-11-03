@@ -327,13 +327,15 @@ class Coordinator:
         until_idle: bool = False,
         max_ticks: int | None = None,
         on_tick: Callable[[WorkResult], None] | None = None,
-        on_idle: Callable[[], None] | None = None,
+        on_idle: Callable[[], bool | None] | None = None,
     ) -> WorkResult:
         """Work on every task, as a worker: until interrupted, or with `until_idle` until there
         is nothing to do and nobody else holds work (paused work is waited for only without it).
         `on_tick` sees the result so far after every tick that moved something (its `events`
         are that tick's); `on_idle` is called after every tick that moved nothing, before the
-        worker waits or stops (others may have changed something meanwhile)."""
+        worker waits or stops (others may have changed something meanwhile). It returns True
+        when it brought work itself (a job from desman-global): the worker looks again at once,
+        and does not stop with it left undone."""
         result = WorkResult()
         while max_ticks is None or result.ticks < max_ticks:
             result.ticks += 1
@@ -348,8 +350,8 @@ class Coordinator:
                 if on_tick is not None:
                     on_tick(result)
                 continue
-            if on_idle is not None:
-                on_idle()
+            if on_idle is not None and on_idle():
+                continue
             if until_idle and self._held_until(None) is None:
                 break
             pause_until = self._earliest(None, "paused", "paused_until")

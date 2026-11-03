@@ -551,6 +551,16 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         expires_at  TEXT NOT NULL
     ) STRICT;
     """,
+    # 29 — a call a job from desman-global is making with a lent model (`net.jobs.Quota`): held
+    # in the transaction that checks the day's quota, so two workers never both take its last
+    # call; dropped once the call is over (it is in model_calls then), or after a worker died
+    """
+    CREATE TABLE quota_holds (
+        id          INTEGER PRIMARY KEY,
+        provider    TEXT NOT NULL,
+        expires_at  TEXT NOT NULL
+    ) STRICT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

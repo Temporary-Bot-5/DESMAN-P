@@ -9,7 +9,8 @@ are kept in the database, `Seen`, so a replay is refused after a restart too) an
   retry budget of its own, its own workspace, with the lease, the record and (for a recheck)
   the result kept in `network_work` in the same transaction. The worker's coordinator runs it
   with the network's crew (`runs.network_crew`): only the models the person lent, each within
-  its day's quota (`Quota`, counted from `model_calls`), the tool policy's `network_*` roles.
+  its day's quota (`Quota`, counted from `model_calls` and the calls being made, each held in
+  the transaction that checks it), the tool policy's `network_*` roles.
   The person's own work goes first and takes over from it (`core.scheduler`).
 - A recheck's execution is the other node's result as it came (`executor`): the work is the
   review. The reviewer judges it without the evidence of tool calls (they stayed on the node
@@ -52,7 +53,11 @@ EXECUTE_RETRY: Final = RetryPolicy(max_attempts=2, max_transient=3)
 RECHECK_RETRY: Final = RetryPolicy(max_attempts=1, max_transient=3)
 """One attempt: the reviewer's rejection of the other node's result is the verdict."""
 RECORD_LIFETIME: Final = timedelta(days=1)
-"""The term of a result or verdict this node signs: long enough to be sent again for a while."""
+"""The least term of a result or verdict this node signs: long enough to be sent again for a
+while. A result lasts as long as its job at least (`record_lifetime`)."""
+HOLD_FOR: Final = timedelta(minutes=30)
+"""A call held of a quota counts this long at most: longer than any call takes, so a hold is
+left behind only by a worker that died during the call."""
 GOAL_CHARS: Final = 120
 MAX_FILES: Final = 16
 RECHECK: Final = "recheck"
@@ -183,6 +188,12 @@ def take(store: Store, registry: str, work: protocol.Work, job: protocol.Job) ->
     )
 
 
+def record_lifetime(held: Held, now: datetime) -> timedelta:
+    """The term of what `held` hands in: a result holds until the job's own term ends, since
+    another node may recheck it as late as that (the registry refuses one that ends sooner)."""
+    return max(RECORD_LIFETIME, held.task.record.expires_at - now)
+
+
 def extended(conn: sqlite3.Connection, lease: str, until: datetime) -> None:
     with db.transaction(conn):
         conn.execute(
@@ -271,13 +282,43 @@ def used_today(conn: sqlite3.Connection, provider: str, now: datetime) -> tuple[
     return int(row[0]), int(row[1])
 
 
+def _held_calls(conn: sqlite3.Connection, provider: str, now: datetime) -> int:
+    row = conn.execute(
+        "SELECT count(*) FROM quota_holds WHERE provider = ? AND expires_at > ?",
+        (provider, db.to_iso(now)),
+    ).fetchone()
+    return int(row[0])
+
+
 def quota_left(conn: sqlite3.Connection, config: Config, provider: str, now: datetime) -> bool:
-    """Whether `provider` is lent and its day's quota is not spent."""
+    """Whether `provider` is lent and its day's quota is not spent (calls being made count)."""
     donation = config.network.donated.get(provider)
     if donation is None:
         return False
     calls, tokens = used_today(conn, provider, now)
+    calls += _held_calls(conn, provider, now)
     return calls < donation.calls_per_day and tokens < donation.tokens_per_day
+
+
+def hold_call(conn: sqlite3.Connection, config: Config, provider: str, now: datetime) -> int | None:
+    """A call of the day's quota taken for one request (its hold's id), checked and held in one
+    transaction: workers on one database never take the same last call. None: none left."""
+    with db.transaction(conn):
+        conn.execute("DELETE FROM quota_holds WHERE expires_at <= ?", (db.to_iso(now),))
+        if not quota_left(conn, config, provider, now):
+            return None
+        cursor = conn.execute(
+            "INSERT INTO quota_holds (provider, expires_at) VALUES (?, ?)",
+            (provider, db.to_iso(now + HOLD_FOR)),
+        )
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
+
+
+def release_call(conn: sqlite3.Connection, hold: int) -> None:
+    """The call is over: what it spent is in model_calls now."""
+    with db.transaction(conn):
+        conn.execute("DELETE FROM quota_holds WHERE id = ?", (hold,))
 
 
 class Quota:
@@ -302,9 +343,13 @@ class Quota:
 
     def complete(self, request: Request) -> Completion:
         now = self._clock()
-        if not quota_left(self.conn, self._config(), self.provider, now):
+        hold = hold_call(self.conn, self._config(), self.provider, now)
+        if hold is None:
             raise QuotaExhausted(self.provider, day_start(now) + timedelta(days=1))
-        return self.llm.complete(request)
+        try:
+            return self.llm.complete(request)
+        finally:
+            release_call(self.conn, hold)
 
     def accept(self, request: Request, reply: Completion) -> None:
         accept = getattr(self.llm, "accept", None)

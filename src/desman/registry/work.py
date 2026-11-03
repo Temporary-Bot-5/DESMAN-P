@@ -377,7 +377,8 @@ def hand_in(
 
     Checked before anything is kept: the lease is the caller's and still runs, the record is
     signed by the caller's key, is the kind its stage hands in, names this job and lease (and,
-    for a verdict, the result that was lent), and was not handed in before."""
+    for a verdict, the result that was lent), was not handed in before, and (a done result)
+    holds for as long as the job does."""
     expire(conn, now)
     moment = db.to_iso(now)
     signed = given.record
@@ -405,6 +406,10 @@ def hand_in(
                     raise refuse(Reason.MALFORMED, "this stage hands in a result")
                 body = protocol.Result.model_validate(record.body)
                 outcome = body.outcome
+                if outcome == "done" and record.expires_at < db.parse_iso(found.expires_at):
+                    # Its recheck may come as late as the job's own term: a result expiring
+                    # first could not be judged by then, and the job would wait for nothing.
+                    raise refuse(Reason.MALFORMED, "the result expires before the job")
             else:
                 if record.kind is not sign.RecordKind.VERDICT:
                     raise refuse(Reason.MALFORMED, "this stage hands in a verdict")

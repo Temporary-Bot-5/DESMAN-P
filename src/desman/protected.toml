@@ -10,7 +10,7 @@
 [package]
 # The tool policy and the code that enforces it.
 "policy.toml" = "d25c734c357376192c528b217989c25bf93c899b182c1ef667bb4fa144098392"
-"core/policy.py" = "ba1d90e6ed80c226cc3abf0e144792d37275ffbab14a265b8923c65c56bc093f"
+"core/policy.py" = "3a52d811d2518fd5dcdc570e17e9eec84aa88329d20934435905077303dc6ecf"
 # The reviewer (and the executor it judges).
 "agents.py" = "6f6a4b511332cb9a2a41b7158ab8f9e0add95b5594e6b4c15b91f3520feea077"
 # Security rules: the sandbox for generated code, the workspace guard for files.

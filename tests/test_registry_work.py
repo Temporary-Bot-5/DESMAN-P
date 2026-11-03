@@ -72,7 +72,7 @@ def record(
         kind = kind or sign.RecordKind.VERDICT
         content = {"job": task, "lease": work_["lease"], "accept": True,
                    "result": work_["result"]["record"]["id"]} | body  # fmt: skip
-    return sign.sign(key or n.key, kind, content, issued_at=n.clock(), lifetime=timedelta(days=1))
+    return sign.sign(key or n.key, kind, content, issued_at=n.clock(), lifetime=timedelta(days=30))
 
 
 def hand_in(
@@ -605,6 +605,31 @@ def test_a_record_past_its_own_term_is_refused(
     )
     answer = hand_in(a, lent, stale)
     assert answer.status_code == 401 and answer.json()["error"] == "expired"
+
+
+def test_a_done_result_must_hold_as_long_as_its_job(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    """Its recheck may come as late as the job's term: a result ending first could not be
+    judged then. A failed one is never rechecked: its term is its own."""
+    add_job(db_path, operator, clock, days=7)
+    a = node(registry, clock)
+    lent = claim(a)
+    assert lent is not None
+    body = {"job": lent["task"]["record"]["id"], "lease": lent["lease"], "outcome": "done"}
+    short = sign.sign(
+        a.key, sign.RecordKind.RESULT, body, issued_at=clock(), lifetime=timedelta(days=1)
+    )
+    answer = hand_in(a, lent, short)
+    assert answer.status_code == 400 and answer.json()["error"] == "malformed"
+    failed = sign.sign(
+        a.key,
+        sign.RecordKind.RESULT,
+        body | {"outcome": "failed"},
+        issued_at=clock(),
+        lifetime=timedelta(days=1),
+    )
+    assert hand_in(a, lent, failed).status_code == 200
 
 
 def test_a_registry_of_the_second_schema_is_upgraded(tmp_path: Path) -> None:

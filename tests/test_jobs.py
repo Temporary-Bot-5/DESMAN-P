@@ -17,8 +17,8 @@ import pytest
 
 from conftest import FakeClock
 from desman import runs
-from desman.config import Config, Donation, Network
-from desman.core import db
+from desman.config import Config, ConfigError, Donation, Network
+from desman.core import calls, db
 from desman.core.coordinator import Coordinator, Crew, Failure, Review, Success, Verdict, Work
 from desman.core.models import Origin, Priority, SubtaskSpec, TaskSpec
 from desman.core.policy import Role
@@ -29,6 +29,7 @@ from desman.core.store import Store
 from desman.core.tools import builtin_registry
 from desman.llm.base import Message, QuotaExhausted, Request
 from desman.llm.fake import FakeLLM
+from desman.llm.openai_compat import CallRecord
 from desman.net import jobs, node, protocol, sign
 from desman.net.node import Change, Node
 from desman.registry import admin, store, work
@@ -132,7 +133,11 @@ class Settings:
             network=Network(enabled=True, registry=REGISTRY, donated={"ollama": donation}),
         )
 
+        self.broken = False
+
     def __call__(self) -> Config:
+        if self.broken:
+            raise ConfigError(Path("config.json"), "does not load")
         return self.config.model_copy(deep=True)
 
 
@@ -729,13 +734,22 @@ def test_a_task_keeps_its_origin_and_only_a_job_holds_network_work(store: Store)
 def test_an_older_database_upgrades_with_every_task_its_own(tmp_path: Path) -> None:
     path = tmp_path / "old.db"
     conn = db.connect(path)
-    db.migrate(conn, db.MIGRATIONS[:-1])
+    db.migrate(conn, db.MIGRATIONS[:27])
     conn.execute(
         "INSERT INTO tasks (id, goal, priority, created_at, max_attempts, max_transient)"
         " VALUES ('t', 'g', 0, '2026-01-01T00:00:00.000Z', 3, 3)"
     )
     db.migrate(conn)
     assert conn.execute("SELECT origin FROM tasks").fetchone()[0] == "local"
+    conn.close()
+
+
+def test_a_database_with_network_work_gets_quota_holds(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "28.db")
+    db.migrate(conn, db.MIGRATIONS[:28])
+    db.migrate(conn)
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
+    assert conn.execute("SELECT count(*) FROM quota_holds").fetchone()[0] == 0
     conn.close()
 
 
@@ -783,3 +797,169 @@ def test_resume_refuses_a_job(tmp_path: Path, store: Store) -> None:
     )
     assert result.exit_code != 0
     assert "desman worker" in result.output
+
+
+# ── Review fixes (Devin, PR #79) ─────────────────────────────────────────────
+
+
+class Slow:
+    """A lent model that takes `minutes` per call, recorded as a real client records one (so
+    `calls.watching` sees it)."""
+
+    def __init__(self, llm: FakeLLM, conn: sqlite3.Connection, clock: FakeClock, minutes: int):
+        self.llm = llm
+        self.name = llm.name
+        self.record = calls.recorder(conn)
+        self.clock = clock
+        self.minutes = minutes
+
+    def complete(self, request: Request) -> Any:
+        self.clock.advance(self.minutes * 60)
+        reply = self.llm.complete(request)
+        self.record(
+            CallRecord(
+                provider="ollama",
+                model="llama3.2",
+                key_id=None,
+                prompt_hash="h",
+                response_hash="r",
+                prompt_tokens=1,
+                completion_tokens=1,
+                latency_ms=1,
+                http_status=200,
+                error_kind=None,
+                error=None,
+            )  # fmt: skip
+        )
+        return reply
+
+
+def tend(m: Machine) -> None:
+    m.poll(idle=False)
+
+
+def test_the_lease_is_extended_between_the_model_calls_of_one_step(
+    tmp_path: Path,
+    world: World,
+    clock: FakeClock,
+    root_pub: Path,
+    add_job: Callable[..., str],
+    registry_db: Path,
+) -> None:
+    """Execution and review take six minutes each, the lease ten: only extended while the
+    models are asked (as `desman worker` does) is the result still taken."""
+    job_id = add_job()
+    a = Machine(tmp_path, "a", world, clock, root_pub, doer())
+    slow = Slow(doer(), a.conn, clock, minutes=6)
+    crew = runs.network_crew(a.store, a.settings(), a.settings, given=runs.Models(slow, None))
+    assert crew is not None
+    a.coordinator.network = crew
+    try:
+        a.poll()
+        with calls.watching(lambda: tend(a)):
+            a.work()
+        handed = a.poll(idle=False)
+        assert handed is not None and handed.change is Change.WORK_HANDED_IN
+        assert job_status(registry_db, job_id) == ("recheck", None)
+        assert world.requests.count(("POST", protocol.EXTEND)) >= 2
+    finally:
+        a.close()
+
+
+def test_two_workers_never_take_the_last_call_of_a_quota(clock: FakeClock, store: Store) -> None:
+    settings = Settings(Donation(calls_per_day=1, tokens_per_day=1000))
+    request = Request(messages=[Message(role="user", content="hi")])
+    second = jobs.Quota(FakeLLM(DONE), store.conn, "ollama", settings, clock)
+    refused: list[BaseException] = []
+
+    class Meanwhile:
+        """The first worker's call: while it is out, the other worker asks."""
+
+        name = "fake"
+
+        def complete(self, _: Request) -> Any:
+            try:
+                second.complete(request)
+            except QuotaExhausted as e:
+                refused.append(e)
+            return FakeLLM(DONE).complete(request)
+
+    first = jobs.Quota(Meanwhile(), store.conn, "ollama", settings, clock)
+    assert first.complete(request).text == DONE
+    assert len(refused) == 1
+    assert store.conn.execute("SELECT count(*) FROM quota_holds").fetchone()[0] == 0
+
+
+def test_a_hold_left_by_a_dead_worker_runs_out(clock: FakeClock, store: Store) -> None:
+    settings = Settings(Donation(calls_per_day=1, tokens_per_day=1000))
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None  # never released
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is None
+    clock.advance(jobs.HOLD_FOR.total_seconds())
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None
+
+
+def test_a_result_holds_as_long_as_its_job_and_a_late_recheck_accepts_it(
+    machine: Callable[[str, FakeLLM], Machine],
+    add_job: Callable[..., str],
+    registry_db: Path,
+    clock: FakeClock,
+) -> None:
+    job_id = add_job()  # seven days
+    a = machine("a", doer())
+    b = machine("b", FakeLLM().on("Review", ACCEPT, repeat_last=True))
+    a.poll()
+    a.work()
+    a.poll(idle=False)
+    record = sign.Signed.model_validate_json(a.held()[0]["record_json"]).record
+    task = sign.Signed.model_validate_json(a.held()[0]["task_json"]).record
+    assert record.expires_at >= task.expires_at
+    clock.advance(3 * 24 * 3600)  # the other node comes days later
+    checking = b.poll()
+    assert checking is not None and checking.change is Change.WORK_TAKEN
+    b.work()
+    b.poll(idle=False)
+    assert job_status(registry_db, job_id) == ("accepted", None)
+
+
+def test_an_until_idle_worker_does_the_job_it_took_before_it_stops(
+    machine: Callable[[str, FakeLLM], Machine],
+    add_job: Callable[..., str],
+) -> None:
+    add_job()
+    a = machine("a", doer())
+
+    def idle() -> bool:
+        event = a.poll()
+        return event is not None and event.change is Change.WORK_TAKEN
+
+    a.coordinator.work(until_idle=True, on_idle=idle)
+    [held] = a.held()
+    assert a.store.task_status(held["task_id"]) is TaskStatus.DONE
+
+
+def test_a_permission_turned_off_holds_for_a_running_worker_s_jobs(
+    machine: Callable[[str, FakeLLM], Machine],
+) -> None:
+    a = machine("a", doer())
+    a.settings.config.permissions.shell_execution = True
+    crew = runs.network_crew(a.store, a.settings(), a.settings, given=runs.Models(FakeLLM(), None))
+    assert crew is not None and crew.access is not None
+    run = builtin_registry().get("run_command")
+    assert run is not None
+    assert crew.access.refusal(run) is None
+    a.settings.config.permissions.shell_execution = False  # while the worker runs
+    refusal = crew.access.refusal(run)
+    assert refusal is not None and "shell_execution" in refusal
+
+
+def test_a_config_that_fails_turns_every_switch_off(
+    machine: Callable[[str, FakeLLM], Machine],
+) -> None:
+    a = machine("a", doer())
+    a.settings.config.permissions.shell_execution = True
+    crew = runs.network_crew(a.store, a.settings(), a.settings, given=runs.Models(FakeLLM(), None))
+    assert crew is not None and crew.access is not None
+    run = builtin_registry().get("run_command")
+    assert run is not None
+    a.settings.broken = True
+    assert crew.access.refusal(run) is not None

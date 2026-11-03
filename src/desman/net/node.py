@@ -11,7 +11,8 @@ quota left today; an empty offer is asked again after `CLAIM_EVERY`. A job lent 
 (the operator's record by `sign.Trust`, never twice; a recheck's result by the signature of the
 node that sent it) and becomes a task of this node; a record that fails is journaled and left
 alone (its lease runs out at the registry). While the job is worked on, its lease is extended
-once less than `EXTEND_WHEN` is left; once it ends, the signed result or verdict is handed in,
+once less than `EXTEND_WHEN` is left (the worker polls after each model call too, so one long
+step does not outlast the lease); once it ends, the signed result or verdict is handed in,
 and sent again until the registry answers. A refusal of the lease (`lease_lost`: it ran out, or
 another node has the job now) drops the job. Turning desman-global off, or another registry,
 drops what is held without a word to anyone (off is off).
@@ -614,7 +615,7 @@ class Node:
                 kind,
                 end.body.model_dump(mode="json"),
                 issued_at=now,
-                lifetime=jobs.RECORD_LIFETIME,
+                lifetime=jobs.record_lifetime(job, now),
             )
             jobs.keep(self.conn, job.lease, record)
             job = jobs.held_by_task(self.conn, job.task_id) or job

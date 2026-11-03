@@ -464,14 +464,21 @@ def worker(
                 progress(result)
             _keep_in_touch(network, as_json)
 
-        def idle() -> None:
+        def called() -> None:
+            _keep_in_touch(network, as_json)
+
+        def idle() -> bool:
             if not as_json:
                 _tell_waiting(watch)
-            _keep_in_touch(network, as_json, idle=True)
+            event = _keep_in_touch(network, as_json, idle=True)
+            return event is not None and event.change is node.Change.WORK_TAKEN
 
         try:
             _keep_in_touch(network, as_json)
-            coordinator.work(until_idle=until_idle, on_tick=ticked, on_idle=idle)
+            # Between a step's model calls too: a job's lease at the registry is extended (and
+            # its heartbeat sent) while one execution asks a slow model several times.
+            with calls.watching(called):
+                coordinator.work(until_idle=until_idle, on_tick=ticked, on_idle=idle)
         except KeyboardInterrupt:
             interrupted = True
         except ScriptExhausted as e:
@@ -518,13 +525,13 @@ def _worker_progress(coordinator: Coordinator, watch: InboxWatch) -> Callable[[o
     return show
 
 
-def _keep_in_touch(network: node.Node, as_json: bool, *, idle: bool = False) -> None:
-    """desman-global between the worker's steps (G.5): a contact when it is due, the jobs
-    held tended, one asked for while the worker is `idle` (G.6b), and what changed told to the
-    person. The network never stops the worker's own work."""
+def _keep_in_touch(network: node.Node, as_json: bool, *, idle: bool = False) -> node.Event | None:
+    """desman-global between the worker's steps (G.5) and model calls: a contact when it is
+    due, the jobs held tended, one asked for while the worker is `idle` (G.6b), and what
+    changed told to the person (and returned). The network never stops the worker's own work."""
     event = network.poll(idle=idle)
     if event is None or as_json:
-        return
+        return event
     if event.change is node.Change.CONNECTED:
         ui.ok(t("In touch with the desman-global registry {url}.", url=event.registry))
     elif event.change is node.Change.UNREACHABLE:
@@ -566,6 +573,7 @@ def _keep_in_touch(network: node.Node, as_json: bool, *, idle: bool = False) -> 
     elif event.change is node.Change.WORK_DROPPED:
         ui.warn(t("A job from desman-global was dropped: {reason}", reason=event.detail))
     sys.stdout.flush()
+    return event
 
 
 def _tell_waiting(watch: InboxWatch) -> None:
