@@ -269,7 +269,8 @@ def claim(
 
     A node lending nothing gets nothing; nor does one already holding `MAX_HELD` leases. A
     node never gets a job it was lent before, in any stage or round (it refuses a record it
-    has seen as a replay, G.6b), and never rechecks the work of its own owner."""
+    has seen as a replay, G.6b), and never rechecks the work of its own owner. Nothing is
+    lent while the registry holds no fresh trust list (G.6c): every node would refuse it."""
     expire(conn, now)
     if not caller.capabilities:
         return None
@@ -281,6 +282,8 @@ def claim(
         if held >= MAX_HELD:
             return None
         believed = store.trust(conn, root, now)
+        if believed.fresh() is not None:  # every node would refuse what is lent
+            return None
         rows = conn.execute(
             "SELECT * FROM jobs WHERE status IN ('execute', 'recheck') AND expires_at > ?"
             " AND NOT EXISTS (SELECT 1 FROM leases WHERE leases.job = jobs.id"

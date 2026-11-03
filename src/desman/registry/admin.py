@@ -1,13 +1,15 @@
 """What the owner does on the registry's server (ADR 0004; ROADMAP G.4, G.6): assign an
-operator, revoke a key, back the database up; as the operator, add jobs and settle those that
-wait for a person, and say whose node is whose. The bodies of `desman-registry assign|revoke|
-backup|job|owner`.
+operator, revoke a key, sign the trust list, back the database up; as the operator, add jobs
+and settle those that wait for a person, and say whose node is whose. The bodies of
+`desman-registry assign|revoke|trust|backup|job|owner`.
 
 Assignments and revocations are signed by the root key, which lives on this server only
 (`root.key` in the registry's directory, readable by its owner only). A key that is not the
 root of `net/root.pub` is refused before anything is signed: nodes would refuse what it signs.
 Every new record is first checked the way a node will check it (`store.trust`), then kept and
-journaled in one transaction.
+journaled in one transaction. An assignment or a revocation also signs a new trust list (G.6c),
+so nodes learn of it at their next poll; the person signs one again before the last expires
+(`desman-registry trust sign`, e.g. from a timer), or nodes take no work.
 """
 
 from __future__ import annotations
@@ -28,6 +30,10 @@ from desman.registry import store, work
 
 ASSIGNMENT_DAYS: Final = 90
 JOB_DAYS: Final = 7
+TRUST_DAYS: Final = 7
+"""How long a trust list lasts unless the person says otherwise."""
+MAX_TRUST_DAYS: Final = 30
+"""The longest a trust list may last: a hidden revocation is hidden at most this long."""
 REVOCATION_LIFETIME: Final = timedelta(days=3650)
 """A revocation is honoured past its term anyway; the term only has to be valid."""
 
@@ -83,7 +89,79 @@ def _keep(conn: sqlite3.Connection, root: sign.NodeKey, signed: sign.Signed, now
                 **{k: v for k, v in record.body.items() if k != "key"},
             },
         )
+        current = store.latest_trust_list(conn, now)
+        left = timedelta(0) if current is None else current.record.expires_at - now
+        _sign_list(conn, root, max(timedelta(days=TRUST_DAYS), left), now)  # never shortened
     return subject
+
+
+def _sign_list(
+    conn: sqlite3.Connection, root: sign.NodeKey, lifetime: timedelta, now: datetime
+) -> sign.Signed:
+    """Inside the caller's transaction: a trust list naming every record in effect, checked
+    the way a node will check it, kept and journaled."""
+    listed = [
+        sign.Listed(
+            id=s.record.id,
+            until=None if s.record.kind is sign.RecordKind.REVOCATION else s.record.expires_at,
+        )
+        for s in store.in_effect(conn, now)
+    ]
+    # Each list later than the last: a node keeps a list only for one issued after its own.
+    last = conn.execute("SELECT max(issued_at) FROM trust_lists").fetchone()[0]
+    issued = now if last is None else max(now, db.parse_iso(last) + timedelta(seconds=1))
+    signed = sign.trust_list(root, listed, issued_at=issued, lifetime=now + lifetime - issued)
+    believed = store.trust(conn, root.public, now)
+    try:
+        believed.receive(signed.model_dump(mode="json"))
+    except sign.Refused as e:
+        raise AdminError(t("A node would refuse it: {error}", error=str(e))) from e
+    why = believed.fresh()
+    if why is not None:  # a record kept here that a node would refuse: never listed as needed
+        raise AdminError(t("A node would refuse it: {error}", error=why))
+    store.add_trust_list(conn, signed)
+    store.log(
+        conn,
+        "trust_list",
+        root.fingerprint,
+        {
+            "record": signed.record.id,
+            "records": len(listed),
+            "expires_at": db.to_iso(signed.record.expires_at),
+        },
+    )
+    return signed
+
+
+@dataclass(frozen=True)
+class TrustListed:
+    id: str
+    records: int
+    issued_at: datetime
+    expires_at: datetime
+
+
+def sign_trust_list(
+    conn: sqlite3.Connection, root: sign.NodeKey, *, days: int, now: datetime
+) -> TrustListed:
+    """`desman-registry trust sign`: a new trust list lasting `days`."""
+    if not 1 <= days <= MAX_TRUST_DAYS:
+        raise AdminError(t("A trust list lasts from 1 to {days} days.", days=MAX_TRUST_DAYS))
+    with db.transaction(conn):
+        signed = _sign_list(conn, root, timedelta(days=days), now)
+    return _listed(signed)
+
+
+def _listed(signed: sign.Signed) -> TrustListed:
+    record = signed.record
+    body = sign.TrustList.model_validate(record.body)
+    return TrustListed(record.id, len(body.records), record.issued_at, record.expires_at)
+
+
+def trust_list(conn: sqlite3.Connection, now: datetime) -> TrustListed | None:
+    """The trust list handed out now: the newest in its term."""
+    found = store.latest_trust_list(conn, now)
+    return None if found is None else _listed(found)
 
 
 @dataclass(frozen=True)

@@ -27,7 +27,7 @@
 # desman-global (ADR 0004): the root of trust and the code that checks signatures by it,
 # records and requests alike.
 "net/root.pub" = "1212bec4b18e53e1025fd017bfe26f2a2416e5180cd262724e3a175594372a2d"
-"net/sign.py" = "da32cb9ab6088ef1cd1eb017507a077441fcbc536f7e8a5f4c6d6956f3498db9"
+"net/sign.py" = "b95d322b5d41db46b36c0370f42f80f250446783df867393e81c17a1f7b543c2"
 "net/request.py" = "c2e14185a19dcdcbe19fc2abf121ac9c85e2ca410f69e600d2e102dbfa7a88b6"
 # The scripted model every test of agents runs on.
 "llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"
@@ -36,5 +36,5 @@
 [checkout]
 # The test harness.
 "tests/conftest.py" = "3efb39eadde50efa779159f822ea99816431b82c6efd36e121e123b5fbfb541b"
-"tests/faults.py" = "a036f2cda805b6ef0ad6048d5c9220878e80880cad04faa704800e451406f9cd"
+"tests/faults.py" = "c14115055995f4510d69dea5e408313305a80f22f668abcf0ea4e06e61abdf87"
 "tests/helpers.py" = "5cf62f2a06f09ae2e5bd630ef9a10d3214fbb5a75d7a6f096c5a5b5a4816fe2b"

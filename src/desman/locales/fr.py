@@ -920,6 +920,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Un travail a été remis à desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Un travail de desman-global a été abandonné : {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Un travail de desman-global ne s'exécute que dans `desman worker`, avec les modèles prêtés.",
+    "A trust list lasts from 1 to {days} days.": "Une liste de confiance dure de 1 à {days} jours.",
+    "How long the list lasts; sign the next one before it ends.": "Durée de la liste ; signez la suivante avant qu'elle ne se termine.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Aucune liste de confiance en vigueur : les nœuds ne prennent aucun travail. Signez-en une avec : desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Signer une nouvelle liste de confiance nommant chaque attribution et révocation en vigueur.",
+    "The trust list handed out now.": "La liste de confiance distribuée maintenant.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "La liste de confiance : signée par la racine ; sans une liste récente, les nœuds ne prennent aucun travail.",
+    "Trust list signed until {date} (records named: {count}).": "Liste de confiance signée jusqu'au {date} (enregistrements nommés : {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Liste de confiance {id} : signée le {issued}, valable jusqu'au {date} ; enregistrements nommés : {count}.",
 }
 
 CLICK: dict[str, Forms] = {

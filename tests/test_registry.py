@@ -420,7 +420,7 @@ def test_assignments_and_revocations_reach_nodes(
     answer = node.call("GET", protocol.TRUST)
     assert answer.status_code == 200
     state = protocol.TrustState.model_validate(answer.json())
-    assert [s.record.kind for s in state.records] == ["assignment", "revocation"]
+    assert [s.record.kind for s in state.records] == ["assignment", "revocation", "trust_list"]
 
     believed = sign.Trust(root.public, clock=clock)
     for record in state.records:
@@ -431,6 +431,8 @@ def test_assignments_and_revocations_reach_nodes(
 
     with store.connection(db_path) as conn:
         entries = store.entries(conn)
+    assert believed.fresh() is None
+    entries = [e for e in entries if e.action != "trust_list"]
     assert [(e.action, e.node) for e in entries[:2]] == [
         ("assignment", operator.fingerprint),
         ("revocation", bad.fingerprint),
@@ -448,7 +450,8 @@ def test_an_expired_assignment_is_not_handed_out(
     clock.advance(timedelta(days=2).total_seconds())
     node = Node(registry, clock)
     node.register()
-    assert node.call("GET", protocol.TRUST).json() == {"records": []}
+    records = node.call("GET", protocol.TRUST).json()["records"]
+    assert [r["record"]["kind"] for r in records] == ["trust_list"]  # signed with it, still on
 
 
 def test_a_revoked_node_is_refused_everything(
@@ -487,7 +490,7 @@ def test_what_a_node_would_refuse_is_never_kept(
         with pytest.raises(admin.AdminError, match="refuse"):
             admin.assign(conn, root, operator.public, set(sign.Scope), days=30, now=clock())
         assert [s.record.kind for s in store.all_records(conn)] == ["revocation"]
-        assert [e.action for e in store.entries(conn)] == ["revocation"]
+        assert [e.action for e in store.entries(conn)] == ["revocation", "trust_list"]
 
 
 def test_records_and_the_journal_are_append_only(
@@ -581,8 +584,11 @@ def test_cli_assign_revoke_nodes_log(
     log = registry_cli("log", "--json")
     assert [e["action"] for e in json.loads(log.output)] == [
         "assignment",
+        "trust_list",
         "assignment",
+        "trust_list",
         "revocation",
+        "trust_list",
     ]
     assert json.loads(registry_cli("nodes", "--json").output) == []
     assert "No node has registered yet." in registry_cli("nodes").output
@@ -660,3 +666,46 @@ def test_the_http_server_answers_signed_requests(served: str, clock: FakeClock) 
         assert client.get("/nothing").status_code == 404
         big = client.post(protocol.REGISTER, content=b"x" * (protocol.MAX_BODY + 1))
         assert big.status_code == 413
+
+
+def test_cli_trust_sign_and_show(registry_dir: Path, root: sign.NodeKey, root_pub: Path) -> None:
+    shown = registry_cli("trust", "show")
+    assert shown.exit_code == 0 and "No trust list" in shown.output
+    assert json.loads(registry_cli("trust", "show", "--json").output) is None
+    _write_key(registry_dir / store.ROOT_KEY, root)
+    assert registry_cli("revoke", sign.NodeKey.generate().fingerprint).exit_code == 0
+    signed = registry_cli("trust", "sign", "--days", "3")
+    assert signed.exit_code == 0, signed.output
+    found = json.loads(registry_cli("trust", "show", "--json").output)
+    assert found["records"] == 1
+    assert "Trust list" in registry_cli("trust", "show").output
+    assert registry_cli("trust", "sign", "--days", "31").exit_code == 2
+    assert registry_cli("trust", "sign", "--days", "0").exit_code == 2
+
+
+def test_trust_lists_are_append_only(db_path: Path, clock: FakeClock, root: sign.NodeKey) -> None:
+    with store.connection(db_path) as conn:
+        admin.sign_trust_list(conn, root, days=7, now=clock())
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute("DELETE FROM trust_lists")
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute("UPDATE trust_lists SET expires_at = 'x'")
+
+
+def test_a_change_signs_a_list_that_is_newer_and_never_shorter(
+    db_path: Path, clock: FakeClock, root: sign.NodeKey
+) -> None:
+    with store.connection(db_path) as conn:
+        long = admin.sign_trust_list(conn, root, days=30, now=clock())
+        admin.revoke(
+            conn, root, sign.NodeKey.generate().fingerprint, "", now=clock()
+        )  # same second
+        found = admin.trust_list(conn, clock())
+        assert found is not None and found.id != long.id
+        assert found.issued_at > long.issued_at
+        assert found.expires_at == long.expires_at  # the person's 30 days, not 7
+        handed = store.handed_out(conn, clock())
+    believed = sign.Trust(root.public, clock=clock)
+    for signed in handed:
+        believed.receive(signed.model_dump(mode="json"))
+    assert believed.fresh() is None

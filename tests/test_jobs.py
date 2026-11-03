@@ -987,3 +987,61 @@ def test_a_call_out_at_midnight_counts_against_the_new_day(clock: FakeClock, sto
     assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is None
     jobs.release_call(store.conn, hold)
     assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None
+
+
+# ── The trust list (G.6c) ────────────────────────────────────────────────────
+
+
+def test_a_registry_hiding_a_revocation_gets_no_work_done(
+    machine: Callable[[str, FakeLLM], Machine],
+    add_job: Callable[..., str],
+    registry_db: Path,
+    root: sign.NodeKey,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_job()
+    with store.connection(registry_db) as conn:
+        admin.revoke(conn, root, "ab" * 32, "spam", now=clock())
+    real = store.handed_out
+
+    def hiding(conn: sqlite3.Connection, now: Any) -> list[sign.Signed]:
+        return [s for s in real(conn, now) if s.record.kind is not sign.RecordKind.REVOCATION]
+
+    a = machine("a", doer())
+    with monkeypatch.context() as m:
+        m.setattr(store, "handed_out", hiding)
+        a.poll()
+        clock.advance(node.CLAIM_EVERY.total_seconds())
+        a.poll()
+    assert a.held() == []
+    stale = [d for action, d in a.log() if action == "trust_stale"]
+    assert len(stale) == 1 and "not received" in stale[0]["why"]
+
+    clock.advance(protocol.HEARTBEAT_SECONDS)  # honest again: the revocation comes
+    taken = a.poll()
+    assert taken is not None and taken.change is Change.WORK_TAKEN
+    assert "trust_fresh" in [action for action, _ in a.log()]
+
+
+def test_without_a_fresh_trust_list_nothing_is_lent_until_the_person_signs_one(
+    machine: Callable[[str, FakeLLM], Machine],
+    add_job: Callable[..., str],
+    registry_db: Path,
+    root: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    clock.advance(timedelta(days=6).total_seconds())  # the operator's list lasts 7 days
+    job_id = add_job()
+    clock.advance(timedelta(days=1, hours=1).total_seconds())
+    a = machine("a", doer())
+    a.poll()
+    assert a.held() == []
+    with store.connection(registry_db) as conn:
+        assert work.claim(conn, store.nodes(conn)[0], root.public, clock()) is None
+        assert admin.trust_list(conn, clock()) is None
+        admin.sign_trust_list(conn, root, days=7, now=clock())
+    clock.advance(protocol.HEARTBEAT_SECONDS)
+    taken = a.poll()
+    assert taken is not None and taken.change is Change.WORK_TAKEN
+    assert a.held()[0]["job"] == job_id

@@ -917,6 +917,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "desman-global को एक काम सौंपा गया ({outcome})।",
     "A job from desman-global was dropped: {reason}": "desman-global का एक काम छोड़ दिया गया: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global का काम केवल `desman worker` में, उधार दिए गए मॉडलों से चलता है।",
+    "A trust list lasts from 1 to {days} days.": "विश्वास सूची 1 से {days} दिन तक मान्य रहती है।",
+    "How long the list lasts; sign the next one before it ends.": "सूची कितने समय तक मान्य है; उसके ख़त्म होने से पहले अगली पर हस्ताक्षर करें।",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "कोई मान्य विश्वास सूची नहीं: नोड काम नहीं लेते। इससे हस्ताक्षर करें: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "सभी लागू नियुक्तियों और रद्दीकरणों वाली नई विश्वास सूची पर हस्ताक्षर करें।",
+    "The trust list handed out now.": "अभी बाँटी जा रही विश्वास सूची।",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "विश्वास सूची: रूट द्वारा हस्ताक्षरित; ताज़ा सूची के बिना नोड काम नहीं लेते।",
+    "Trust list signed until {date} (records named: {count}).": "विश्वास सूची पर {date} तक हस्ताक्षर किए गए (नामित रिकॉर्ड: {count})।",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "विश्वास सूची {id}: {issued} को हस्ताक्षरित, {date} तक मान्य; नामित रिकॉर्ड: {count}।",
 }
 
 CLICK: dict[str, Forms] = {

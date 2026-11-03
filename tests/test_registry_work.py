@@ -643,3 +643,15 @@ def test_a_registry_of_the_second_schema_is_upgraded(tmp_path: Path) -> None:
         assert "owner" in columns
     finally:
         upgraded.close()
+
+
+def test_a_registry_of_the_third_schema_is_upgraded(tmp_path: Path) -> None:
+    path = tmp_path / "v3.db"
+    conn = db.connect(path)
+    db.migrate(conn, store.MIGRATIONS[:3])
+    conn.close()
+    upgraded = store.open_registry(path)
+    try:
+        assert upgraded.execute("SELECT count(*) FROM trust_lists").fetchone()[0] == 0
+    finally:
+        upgraded.close()

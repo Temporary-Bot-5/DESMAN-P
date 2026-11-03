@@ -956,6 +956,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Oddano zadanie do desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Porzucono zadanie z desman-global: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Zadanie z desman-global działa tylko w `desman worker`, na użyczonych modelach.",
+    "A trust list lasts from 1 to {days} days.": "Lista zaufania obowiązuje od 1 do {days} dni.",
+    "How long the list lasts; sign the next one before it ends.": "Jak długo obowiązuje lista; podpisz następną przed jej końcem.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Brak obowiązującej listy zaufania: węzły nie biorą pracy. Podpisz ją: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Podpisz nową listę zaufania ze wszystkimi obowiązującymi przypisaniami i odwołaniami.",
+    "The trust list handed out now.": "Lista zaufania wydawana teraz.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Lista zaufania: podpisana przez korzeń; bez aktualnej węzły nie biorą pracy.",
+    "Trust list signed until {date} (records named: {count}).": "Lista zaufania podpisana do {date} (wymienionych wpisów: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Lista zaufania {id}: podpisana {issued}, ważna do {date}; wymienionych wpisów: {count}.",
 }
 
 CLICK: dict[str, Forms] = {

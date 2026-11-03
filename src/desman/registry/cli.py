@@ -4,7 +4,8 @@
 the database; `nodes` and `log` show what the registry knows and did. The operator's work
 (G.6): `job add` signs a job with the operator's key, `jobs`, `job show` and `inbox` show them,
 `job settle` decides one that waits for a person, `owner` says whose node is whose (a result is
-rechecked by another owner's node). Non-interactive, like every subcommand. It reads no `config.json`: its directory is `--dir` (or
+rechecked by another owner's node). `trust sign` signs the trust list with the root (G.6c):
+without one in its term nodes take no work, so sign it again before it ends (a timer). Non-interactive, like every subcommand. It reads no `config.json`: its directory is `--dir` (or
 $DESMAN_REGISTRY_DIR), its language $DESMAN_REGISTRY_LANGUAGE.
 """
 
@@ -556,3 +557,80 @@ def owner(ctx: click.Context, node_key: str, name: str | None, clear: bool) -> N
         ui.ok(t("Node {key} is its own owner.", key=fingerprint[:16]))
     else:
         ui.ok(t("Node {key} belongs to {owner}.", key=fingerprint[:16], owner=str(name)))
+
+
+@cli.group()
+def trust() -> None:
+    """The trust list: signed by the root, without a fresh one nodes take no work."""
+
+
+@trust.command("sign")
+@click.option(
+    "--days",
+    default=admin.TRUST_DAYS,
+    show_default=True,
+    type=click.IntRange(1, admin.MAX_TRUST_DAYS),
+    help="How long the list lasts; sign the next one before it ends.",
+)
+@_root_option
+@click.pass_context
+def trust_sign(ctx: click.Context, days: int, root_key: Path | None) -> None:
+    """Sign a new trust list naming every assignment and revocation in effect."""
+    try:
+        conn, root = _open(ctx, root_key)
+        try:
+            done = admin.sign_trust_list(conn, root, days=days, now=_now())
+        finally:
+            conn.close()
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(
+        t(
+            "Trust list signed until {date} (records named: {count}).",
+            count=done.records,
+            date=done.expires_at.isoformat(),
+        )
+    )
+
+
+@trust.command("show")
+@_json_option
+@click.pass_context
+def trust_show(ctx: click.Context, as_json: bool) -> None:
+    """The trust list handed out now."""
+    conn = _open_db(ctx)
+    try:
+        found = admin.trust_list(conn, _now())
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(
+            json.dumps(
+                None
+                if found is None
+                else {
+                    "id": found.id,
+                    "records": found.records,
+                    "issued_at": found.issued_at.isoformat(),
+                    "expires_at": found.expires_at.isoformat(),
+                },
+                indent=2,
+            )
+        )
+        return
+    if found is None:
+        ui.warn(
+            t(
+                "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign"
+            )
+        )
+        return
+    ui.ok(
+        t(
+            "Trust list {id}: signed {issued}, until {date}; records named: {count}.",
+            id=found.id[:16],
+            count=found.records,
+            issued=found.issued_at.isoformat(),
+            date=found.expires_at.isoformat(),
+        )
+    )

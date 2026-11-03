@@ -99,8 +99,8 @@ class Left(BaseModel):
 
 
 class TrustState(BaseModel):
-    """Assignments still in their term and every revocation, oldest first: what a node checks
-    on every poll (`sign.Trust.receive`)."""
+    """Assignments still in their term and every revocation, oldest first, then the newest
+    trust list in its term (G.6c): what a node checks on every poll (`sign.Trust.receive`)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
