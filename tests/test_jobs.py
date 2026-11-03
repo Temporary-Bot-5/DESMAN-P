@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from conftest import FakeClock
-from desman import runs
+from desman import providers, runs
 from desman.config import Config, ConfigError, Donation, Network
 from desman.core import calls, db
 from desman.core.coordinator import Coordinator, Crew, Failure, Review, Success, Verdict, Work
@@ -27,6 +27,7 @@ from desman.core.retry import FailureKind
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.core.tools import builtin_registry
+from desman.llm import limiter, router
 from desman.llm.base import Message, QuotaExhausted, Request
 from desman.llm.fake import FakeLLM
 from desman.llm.openai_compat import CallRecord
@@ -896,6 +897,17 @@ def test_a_hold_left_by_a_dead_worker_runs_out(clock: FakeClock, store: Store) -
     assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is None
     clock.advance(jobs.HOLD_FOR.total_seconds())
     assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None
+
+
+def test_a_hold_outlasts_the_longest_call_a_quota_wraps() -> None:
+    # A quota holds the whole backed-off call: every attempt waits for a local slot, then for
+    # the slowest provider's reply, with a pause between attempts. A hold that ran out sooner
+    # would let another call past the limit while this one is still out.
+    slowest = max(p.timeout for p in providers.PROVIDERS)
+    longest = router.ATTEMPTS * (limiter.MAX_WAIT + slowest) + (router.ATTEMPTS - 1) * (
+        router.MAX_DELAY
+    )
+    assert jobs.HOLD_FOR.total_seconds() > 2 * longest
 
 
 def test_a_result_holds_as_long_as_its_job_and_a_late_recheck_accepts_it(
