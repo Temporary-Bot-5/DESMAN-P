@@ -851,6 +851,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "已向 desman-global 提交一项工作（{outcome}）。",
     "A job from desman-global was dropped: {reason}": "一项来自 desman-global 的工作已放弃：{reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "来自 desman-global 的工作只在 `desman worker` 中、用出借的模型运行。",
+    "A trust list lasts from 1 to {days} days.": "信任列表的有效期为 1 到 {days} 天。",
+    "How long the list lasts; sign the next one before it ends.": "列表的有效期；请在到期前签署下一份。",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "没有有效的信任列表：节点不接受工作。请签署一份：desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "签署一份新的信任列表，列出所有有效的任命和撤销。",
+    "The trust list handed out now.": "当前分发的信任列表。",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "信任列表：由根密钥签署；没有新的列表，节点不接受工作。",
+    "Trust list signed until {date} (records named: {count}).": "信任列表已签署，有效期至 {date}（列出的记录：{count}）。",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "信任列表 {id}：签署于 {issued}，有效期至 {date}；列出的记录：{count}。",
 }
 
 CLICK: dict[str, Forms] = {

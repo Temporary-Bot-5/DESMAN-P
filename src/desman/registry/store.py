@@ -9,6 +9,8 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 - `records`: the state the registry hands out (`protocol.TRUST`) — assignments and revocations
   signed by the root. Append-only. Whether a key is revoked is read from them, as a node reads
   them (`sign.Trust`): the latest record about the key counts.
+- `trust_lists` (G.6c): the trust lists the person signed with the root (`desman-registry trust
+  sign`); the newest still in its term is handed out after the records it names. Append-only.
 - `nonces`: what `net.request` saw, until its time window closes.
 - `nodes.owner`: whose node it is, as the operator says (`desman-registry owner`); unset, a
   node is its own owner. A result is rechecked by a node of another owner.
@@ -164,6 +166,20 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     ALTER TABLE results ADD COLUMN owner TEXT;
     """,
+    # 4 — trust lists signed by the root (G.6c)
+    """
+    CREATE TABLE trust_lists (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT NOT NULL UNIQUE,
+        issued_at    TEXT NOT NULL,
+        expires_at   TEXT NOT NULL,
+        signed_json  TEXT NOT NULL CHECK (json_valid(signed_json))
+    ) STRICT;
+    CREATE TRIGGER trust_lists_no_update BEFORE UPDATE ON trust_lists
+        BEGIN SELECT RAISE(ABORT, 'trust lists are append-only'); END;
+    CREATE TRIGGER trust_lists_no_delete BEFORE DELETE ON trust_lists
+        BEGIN SELECT RAISE(ABORT, 'trust lists are append-only'); END;
+    """,
 )
 
 
@@ -271,7 +287,7 @@ def all_records(conn: sqlite3.Connection) -> list[sign.Signed]:
     return [sign.Signed.model_validate_json(r["signed_json"]) for r in rows]
 
 
-def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
+def in_effect(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
     """Assignments still in their term and every revocation (one is honoured past its term)."""
     rows = conn.execute(
         "SELECT signed_json FROM records WHERE kind = 'revocation' OR expires_at > ?"
@@ -281,11 +297,40 @@ def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
     return [sign.Signed.model_validate_json(r["signed_json"]) for r in rows]
 
 
+def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
+    """The records in effect, then the newest trust list still in its term (if any)."""
+    found = latest_trust_list(conn, now)
+    return in_effect(conn, now) + ([] if found is None else [found])
+
+
+def latest_trust_list(conn: sqlite3.Connection, now: datetime) -> sign.Signed | None:
+    row = conn.execute(
+        "SELECT signed_json FROM trust_lists WHERE expires_at > ?"
+        " ORDER BY issued_at DESC, seq DESC LIMIT 1",
+        (db.to_iso(now),),
+    ).fetchone()
+    return None if row is None else sign.Signed.model_validate_json(row["signed_json"])
+
+
+def add_trust_list(conn: sqlite3.Connection, signed: sign.Signed) -> None:
+    record = signed.record
+    conn.execute(
+        "INSERT INTO trust_lists (id, issued_at, expires_at, signed_json) VALUES (?, ?, ?, ?)",
+        (
+            record.id,
+            db.to_iso(record.issued_at),
+            db.to_iso(record.expires_at),
+            json.dumps(signed.model_dump(mode="json"), sort_keys=True),
+        ),
+    )
+
+
 def trust(conn: sqlite3.Connection, root: Ed25519PublicKey, now: datetime) -> sign.Trust:
-    """What a node would believe after receiving every record kept here (an assignment past its
-    term is refused and counts for nothing, as on a node)."""
+    """What a node would believe after receiving every record kept here and the newest trust
+    list (an assignment past its term is refused and counts for nothing, as on a node)."""
     believed = sign.Trust(root, clock=lambda: now)
-    for signed in all_records(conn):
+    found = latest_trust_list(conn, now)
+    for signed in all_records(conn) + ([] if found is None else [found]):
         try:
             believed.receive(signed.model_dump(mode="json"))
         except sign.Refused:

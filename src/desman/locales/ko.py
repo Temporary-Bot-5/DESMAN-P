@@ -859,6 +859,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "desman-global에 작업을 제출했습니다({outcome}).",
     "A job from desman-global was dropped: {reason}": "desman-global의 작업을 포기했습니다: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global의 작업은 `desman worker`에서 빌려준 모델로만 실행됩니다.",
+    "A trust list lasts from 1 to {days} days.": "신뢰 목록의 유효 기간은 1~{days}일입니다.",
+    "How long the list lasts; sign the next one before it ends.": "목록의 유효 기간입니다. 끝나기 전에 다음 목록에 서명하세요.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "유효한 신뢰 목록이 없습니다: 노드가 작업을 받지 않습니다. 서명하려면: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "유효한 모든 지정과 폐기를 담은 새 신뢰 목록에 서명합니다.",
+    "The trust list handed out now.": "지금 배포되는 신뢰 목록.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "신뢰 목록: 루트가 서명하며, 최신 목록이 없으면 노드는 작업을 받지 않습니다.",
+    "Trust list signed until {date} (records named: {count}).": "신뢰 목록에 서명했습니다. {date}까지 유효합니다(기재된 레코드: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "신뢰 목록 {id}: {issued}에 서명, {date}까지 유효; 기재된 레코드: {count}.",
 }
 
 CLICK: dict[str, Forms] = {

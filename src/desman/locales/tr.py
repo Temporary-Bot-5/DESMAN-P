@@ -863,6 +863,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Bir iş desman-global'e teslim edildi ({outcome}).",
     "A job from desman-global was dropped: {reason}": "desman-global'den gelen bir iş bırakıldı: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global'den gelen bir iş yalnızca `desman worker` içinde, ödünç verilen modellerle çalışır.",
+    "A trust list lasts from 1 to {days} days.": "Bir güven listesi 1 ile {days} gün arasında geçerlidir.",
+    "How long the list lasts; sign the next one before it ends.": "Listenin ne kadar geçerli olduğu; bitmeden bir sonrakini imzalayın.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Geçerli güven listesi yok: düğümler iş almıyor. Bir tane imzalayın: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Yürürlükteki her atamayı ve iptali adlandıran yeni bir güven listesi imzala.",
+    "The trust list handed out now.": "Şu anda dağıtılan güven listesi.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Güven listesi: kök tarafından imzalanır; güncel bir liste olmadan düğümler iş almaz.",
+    "Trust list signed until {date} (records named: {count}).": "Güven listesi {date} tarihine kadar imzalandı (adlandırılan kayıtlar: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Güven listesi {id}: {issued} tarihinde imzalandı, {date} tarihine kadar geçerli; adlandırılan kayıtlar: {count}.",
 }
 
 CLICK: dict[str, Forms] = {

@@ -861,6 +861,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "desman-global に作業を提出しました（{outcome}）。",
     "A job from desman-global was dropped: {reason}": "desman-global からの作業を取りやめました: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global からの作業は `desman worker` の中で、貸し出したモデルでのみ実行されます。",
+    "A trust list lasts from 1 to {days} days.": "信頼リストの有効期間は 1〜{days} 日です。",
+    "How long the list lasts; sign the next one before it ends.": "リストの有効期間。終わる前に次のリストに署名してください。",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "有効な信頼リストがありません：ノードは作業を受けません。署名するには：desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "有効なすべての任命と失効を記載した新しい信頼リストに署名します。",
+    "The trust list handed out now.": "現在配布されている信頼リスト。",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "信頼リスト：ルートが署名します。新しいリストがないとノードは作業を受けません。",
+    "Trust list signed until {date} (records named: {count}).": "信頼リストに署名しました。有効期限 {date}（記載レコード：{count}）。",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "信頼リスト {id}：{issued} に署名、{date} まで有効。記載レコード：{count}。",
 }
 
 CLICK: dict[str, Forms] = {

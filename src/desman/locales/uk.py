@@ -956,6 +956,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Роботу здано до desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Роботу з desman-global полишено: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Робота з desman-global виконується лише в `desman worker`, відданими моделями.",
+    "A trust list lasts from 1 to {days} days.": "Список довіри діє від 1 до {days} днів.",
+    "How long the list lasts; sign the next one before it ends.": "Скільки діє список; підпишіть наступний до його закінчення.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Немає чинного списку довіри: вузли не беруть роботу. Підпишіть його: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Підписати новий список довіри з усіма чинними призначеннями та відкликаннями.",
+    "The trust list handed out now.": "Список довіри, який роздається зараз.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Список довіри: підписується коренем, без свіжого вузли не беруть роботу.",
+    "Trust list signed until {date} (records named: {count}).": "Список довіри підписано до {date} (записів у ньому: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Список довіри {id}: підписано {issued}, діє до {date}; записів у ньому: {count}.",
 }
 
 CLICK: dict[str, Forms] = {

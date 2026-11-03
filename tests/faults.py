@@ -46,14 +46,17 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
 from pydantic import BaseModel, ConfigDict
 
 from conftest import FakeClock
+from desman import runs
 from desman.agents import EXECUTE, REVIEW, TOOL_RESULTS, llm_executor, llm_reviewer
+from desman.config import Donation, Network
 from desman.core import db
 from desman.core import store as store_module
 from desman.core.audit import check_history
-from desman.core.coordinator import Coordinator
+from desman.core.coordinator import Coordinator, Review, Success, Verdict
 from desman.core.effects import evidence
 from desman.core.models import Priority, SubtaskSpec, TaskSpec
 from desman.core.policy import Policy, Role, RolePolicy
@@ -67,10 +70,17 @@ from desman.core.tools import (
     Permission,
     Registry,
     Tool,
+    builtin_registry,
 )
 from desman.core.workspace import Workspace
 from desman.llm.base import Completion, Request
-from desman.llm.fake import GARBAGE, FakeLLM, StepLike
+from desman.llm.fake import GARBAGE, FakeLLM, RateLimit, ServerError, StepLike, Timeout
+from desman.net import protocol, sign
+from desman.net.node import Node
+from desman.registry import admin
+from desman.registry import store as registry_store
+from desman.registry.server import Registry as RegistryServer
+from helpers import make_config
 
 ACCESS = Access(
     Policy(
@@ -471,3 +481,345 @@ def simulate(
             sim.observer.conn.close()
             for worker in sim.workers:
                 worker.conn.close()  # a no-op for the dead ones
+
+
+# ── desman-global (ROADMAP G.6c) ─────────────────────────────────────────────
+#
+# A registry and a few nodes, each with its own database, key and owner, work an operator's
+# jobs through the real protocol (`httpx.MockTransport` into `Registry.handle`), the real
+# `Node`, `net.jobs` and a worker's `Coordinator` with its network crew. One seeded generator
+# decides which node moves and what goes wrong:
+#
+# - the registry cannot be reached for a while;
+# - a node dies between two steps and starts again on its database (its held jobs, its key);
+#   what it knew in memory — registration, trust — is gone;
+# - the clock jumps, sometimes past a lease;
+# - the model fails (garbage, timeouts, limits, 5xx) or the reviewer rejects;
+# - the registry hides a revocation for a while (G.6c), and a node starts meanwhile: a node
+#   whose trust list is not fresh must not take work.
+#
+# Then the faults stop and the nodes work until every job is settled. `check()`: every job
+# accepted or waiting for the operator, or still lent only when no node may take it any more; an accepted job's result rechecked and
+# accepted in its round by a node of another owner; everything handed in under the hander's
+# own lease; no node lent one job twice; no lease taken while its node's trust list was not
+# fresh; every node's task history replays, nothing of the network waits for the person, and
+# no node still works on a job at the end.
+
+
+@dataclass(frozen=True)
+class NetFaults:
+    down: float = 0.08
+    """At each step, the registry goes unreachable for a few steps."""
+    crash: float = 0.05
+    """At each step, the node that moves dies first, then starts again."""
+    jump: float = 0.1
+    """At each step, the clock jumps up to 1.5 leases ahead."""
+    provider: float = 0.2
+    """At each model call, it fails."""
+    reject: float = 0.1
+    """At each review of another node's result, the reviewer rejects it."""
+    hide: float = 0.04
+    """At each step, the registry starts hiding revocations for a few steps."""
+
+
+@dataclass(frozen=True)
+class NetShape:
+    jobs: int = 3
+    """At the start; then the operator adds one at `arrive` per step, up to `max_jobs`."""
+    arrive: float = 0.2
+    max_jobs: int = 30
+    nodes: int = 3
+    steps: int = 150
+    calm_steps: int = 400
+    """After the faults: steps to settle every job, the clock moving a few minutes each."""
+
+
+def _net_model(rng: random.Random, faults: NetFaults, report: Report, clock: FakeClock) -> FakeLLM:
+    """Executor and reviewer of every node's crew: seeded failures, then a reply by role."""
+
+    def respond(request: Request) -> StepLike:
+        if rng.random() < faults.provider:
+            kind = rng.choice(["garbage", "timeout", "rate limit", "server error"])
+            report.faults[f"provider: {kind}"] += 1
+            if kind == "garbage":
+                return GARBAGE[rng.choice(sorted(GARBAGE))]
+            if kind == "timeout":
+                return Timeout(after=30)
+            return RateLimit(retry_after=5) if kind == "rate limit" else ServerError()
+        if not request.prompt.startswith(REVIEW):
+            return '{"answer": "5"}'
+        if rng.random() < faults.reject:
+            report.faults["reject"] += 1
+            return '{"verdict": "retry", "feedback": "It says 6"}'
+        return '{"verdict": "accept"}'
+
+    return FakeLLM(respond, repeat_last=True, clock=clock, sleep=clock.sleep)
+
+
+class _NetSettings:
+    def __init__(self, registry: str) -> None:
+        self.config = make_config(
+            language="en",
+            configured=True,
+            settings={"OLLAMA_MODEL": "llama3.2"},
+            network=Network(
+                enabled=True,
+                registry=registry,
+                donated={"ollama": Donation(calls_per_day=10_000, tokens_per_day=10_000_000)},
+            ),
+        )
+
+    def __call__(self) -> Any:
+        return self.config.model_copy(deep=True)
+
+
+class _NetNode:
+    def __init__(self, sim: NetSimulation, name: str, lives: int = 1) -> None:
+        self.name = name
+        self.home = sim.directory / name
+        self.home.mkdir(exist_ok=True)
+        self.lives = lives
+        if not (self.home / "node.key").exists():
+            sign.create_node_key(self.home / "node.key")
+        self.conn = db.open_db(self.home / "desman.db")
+        self.store = Store(self.conn, sim.clock)
+        settings = _NetSettings(sim.address)
+        crew = runs.network_crew(
+            self.store, settings(), settings, given=runs.Models(sim.model, None), cache=False
+        )
+        assert crew is not None
+        self.coordinator = Coordinator(
+            self.store,
+            lambda work: Success(content={}),
+            lambda *_: Review(verdict=Verdict.ACCEPT),
+            owner=f"{name}#{self.lives}",
+            sleep=sim.clock.sleep,
+            tools=builtin_registry(),
+            network=crew,
+        )
+        self.node = Node(
+            self.conn,
+            settings,
+            key_path=self.home / "node.key",
+            transport=sim.transport,
+            clock=sim.clock,
+            root=sim.root_pub,
+            work=True,
+        )
+
+    def close(self) -> None:
+        self.node.close()
+        self.conn.close()
+
+
+class NetSimulation:
+    def __init__(self, directory: Path, seed: int, faults: NetFaults, shape: NetShape) -> None:
+        self.directory = directory
+        self.rng = random.Random(seed)
+        self.faults = faults
+        self.shape = shape
+        self.report = Report(
+            seed, replay=f"DESMAN_FAULT_SEED={seed} pytest tests/test_faults.py -k network"
+        )
+        self.clock = FakeClock()
+        self.address = "https://registry.test"
+        root = sign.NodeKey.generate()
+        self.root_pub = directory / "root.pub"
+        self.root_pub.write_bytes(sign.public_pem(root.public))
+        self.registry_db = directory / "registry.db"
+        registry_store.open_registry(self.registry_db).close()
+        self.operator = sign.NodeKey.generate()
+        with registry_store.connection(self.registry_db) as conn:
+            admin.assign(
+                conn, root, self.operator.public, {sign.Scope.TASKS}, days=30, now=self.clock()
+            )
+            # a revocation in the trust list, for the registry to hide
+            admin.revoke(conn, root, sign.NodeKey.generate().fingerprint, "", now=self.clock())
+        self.jobs = 0
+        for _ in range(shape.jobs):
+            self._add_job()
+        self.registry = RegistryServer(self.registry_db, clock=self.clock, root=self.root_pub)
+        self.down_for = 0
+        self.hide_for = 0
+        self.transport = httpx.MockTransport(self._handle)
+        self.model = _net_model(self.rng, faults, self.report, self.clock)
+        self.nodes = [_NetNode(self, f"n{i}") for i in range(shape.nodes)]
+
+    def _add_job(self) -> None:
+        job = protocol.Job(description=f"Sum 2 and 3 ({self.jobs})", acceptance_criteria="Says 5")
+        with registry_store.connection(self.registry_db) as conn:
+            admin.add_job(
+                conn, self.operator, job, days=7, now=self.clock(), root_pub=self.root_pub
+            )
+        self.jobs += 1
+
+    def _handle(self, req: Any) -> Any:
+        if self.down_for > 0:
+            raise httpx.ConnectError("unreachable", request=req)
+        real = registry_store.handed_out
+
+        def hiding(conn: Any, now: Any) -> list[sign.Signed]:
+            return [s for s in real(conn, now) if s.record.kind is not sign.RecordKind.REVOCATION]
+
+        with mock.patch.object(registry_store, "handed_out", hiding if self.hide_for > 0 else real):
+            reply = self.registry.handle(
+                req.method, req.url.raw_path.decode("ascii"), req.headers.multi_items(), req.content
+            )
+        return httpx.Response(reply.status, json=reply.body)
+
+    def _leases(self, m: _NetNode) -> int:
+        """Leases the registry ever granted to this node (0 before its key exists)."""
+        path = m.home / "node.key"
+        if not path.exists():
+            return 0
+        conn = db.connect(self.registry_db)
+        try:
+            found = conn.execute(
+                "SELECT count(*) FROM leases WHERE node = ?",
+                (sign.load_node_key(path).fingerprint,),
+            ).fetchone()[0]
+            return int(found)
+        finally:
+            conn.close()
+
+    def _step(self, n: int, faulty: bool) -> None:
+        f = self.faults
+        if faulty:
+            if self.jobs < self.shape.max_jobs and self.rng.random() < self.shape.arrive:
+                self._add_job()
+            if self.rng.random() < f.down:
+                self.down_for = self.rng.randint(1, 6)
+                self.report.faults["registry down"] += 1
+            if self.rng.random() < f.hide:
+                self.hide_for = self.rng.randint(4, 12)
+                self.report.faults["revocation hidden"] += 1
+                # a node starting meanwhile knows only what this registry tells it
+                j = self.rng.randrange(len(self.nodes))
+                self._restart(j)
+            if self.rng.random() < f.jump:
+                self.clock.advance(self.rng.uniform(0, 900))
+                self.report.faults["clock jump"] += 1
+        i = self.rng.randrange(len(self.nodes))
+        if faulty and self.rng.random() < f.crash:
+            self.report.faults["node crash"] += 1
+            self._restart(i)
+        m = self.nodes[i]
+        before = self._leases(m)
+        m.node.poll(idle=True)
+        if self._leases(m) > before:
+            trust = m.node._trust
+            why = "no trust" if trust is None else trust.fresh()
+            if why is not None:
+                self.report.problems.append(f"{m.name} took work while not fresh: {why}")
+        m.coordinator.work(until_idle=True, max_ticks=4)
+        m.node.poll(idle=False)
+        self.report.trace.append(f"{n}: {m.name}#{m.lives}")
+        self.down_for = max(0, self.down_for - 1)
+        self.hide_for = max(0, self.hide_for - 1)
+
+    def _restart(self, i: int) -> None:
+        old = self.nodes[i]
+        old.close()
+        self.nodes[i] = _NetNode(self, old.name, old.lives + 1)
+
+    def _settled(self) -> bool:
+        """No lease held, and no job left that some node may still take."""
+        conn = db.connect(self.registry_db)
+        try:
+            if conn.execute("SELECT 1 FROM leases WHERE ended IS NULL").fetchone():
+                return False
+            lent = conn.execute("SELECT * FROM jobs WHERE status IN ('execute', 'recheck')")
+            return not any(_takers(conn, job) for job in lent.fetchall())
+        finally:
+            conn.close()
+
+    def run(self) -> Report:
+        for n in range(self.shape.steps):
+            self._step(n, faulty=True)
+        self.down_for = self.hide_for = 0
+        for n in range(self.shape.calm_steps):
+            if self._settled():
+                break
+            self._step(self.shape.steps + n, faulty=False)
+            self.clock.advance(120)
+        for m in self.nodes:  # hand in whatever is finished
+            m.node.poll(idle=False)
+        self.check()
+        return self.report
+
+    def check(self) -> None:
+        problems = self.report.problems
+        conn = db.connect(self.registry_db)
+        try:
+            for job in conn.execute("SELECT * FROM jobs").fetchall():
+                if job["status"] in ("execute", "recheck"):
+                    if _takers(conn, job):
+                        problems.append(f"job {job['id'][:8]} left {job['status']}")
+                elif job["status"] not in ("accepted", "operator"):
+                    problems.append(f"job {job['id'][:8]} left {job['status']}")
+                if job["status"] != "accepted":
+                    continue
+                result = conn.execute(
+                    "SELECT * FROM results WHERE id = ?", (job["result"],)
+                ).fetchone()
+                verdicts = conn.execute(
+                    "SELECT r.*, coalesce(n.owner, n.fingerprint) AS by_owner FROM results r"
+                    " JOIN nodes n ON n.fingerprint = r.node"
+                    " WHERE r.job = ? AND r.kind = 'verdict' AND r.round = ? AND r.outcome = 'accept'",
+                    (job["id"], job["round"]),
+                ).fetchall()
+                done_by = result["owner"] or result["node"]
+                if not any(v["by_owner"] != done_by for v in verdicts):
+                    problems.append(f"job {job['id'][:8]} accepted without another owner's verdict")
+            for row in conn.execute(
+                "SELECT r.id, r.node, r.kind, l.node AS holder, l.stage FROM results r"
+                " JOIN leases l ON l.token = r.lease"
+            ).fetchall():
+                stage = "execute" if row["kind"] == "result" else "recheck"
+                if row["node"] != row["holder"] or row["stage"] != stage:
+                    problems.append(f"{row['kind']} {row['id'][:8]} handed in under another lease")
+            for row in conn.execute(
+                "SELECT job, node, count(*) AS n FROM leases GROUP BY job, node HAVING n > 1"
+            ).fetchall():
+                problems.append(f"job {row['job'][:8]} lent to one node {row['n']} times")
+        finally:
+            conn.close()
+        for m in self.nodes:
+            for (task_id,) in m.conn.execute("SELECT id FROM tasks").fetchall():
+                for p in check_history(m.conn, task_id):
+                    problems.append(f"{m.name}: {p}")
+                for sub in m.store.list_subtasks(task_id):
+                    if sub.status is SubtaskStatus.NEEDS_HUMAN:
+                        problems.append(f"{m.name}: a network subtask waits for the person")
+            working = m.conn.execute(
+                "SELECT count(*) FROM network_work WHERE state = 'working'"
+            ).fetchone()[0]
+            if working:
+                problems.append(f"{m.name} still works on {working} job(s)")
+
+    def close(self) -> None:
+        for m in self.nodes:
+            m.close()
+
+
+def _takers(conn: Any, job: Any) -> bool:
+    """Some node may still be lent this job: one never lent it, and, for a recheck, not of the
+    owner who did the work. Without one the job waits for its term (`expired`, journaled)."""
+    found = conn.execute(
+        "SELECT 1 FROM nodes n WHERE NOT EXISTS (SELECT 1 FROM leases"
+        " WHERE leases.job = ? AND leases.node = n.fingerprint)"
+        " AND (? = 'execute' OR coalesce(n.owner, n.fingerprint) != (SELECT"
+        " coalesce(r.owner, r.node) FROM results r WHERE r.id = ?))",
+        (job["id"], job["status"], job["result"]),
+    ).fetchone()
+    return found is not None
+
+
+def simulate_network(
+    directory: Path, seed: int, faults: NetFaults | None = None, shape: NetShape | None = None
+) -> Report:
+    sim = NetSimulation(directory, seed, faults or NetFaults(), shape or NetShape())
+    try:
+        return sim.run()
+    finally:
+        sim.close()

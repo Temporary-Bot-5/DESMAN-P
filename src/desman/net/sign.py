@@ -26,6 +26,13 @@ operator's revocation of a key the root assigns afterwards gives way to the assi
 for the network log. Assignments and revocations are the state the registry hands out again on
 every poll, so receiving one twice is harmless; any other record is refused the second time
 (`Seen`). A revocation is honoured even after its own `expires_at`: obeying it only restricts.
+
+**A trust list** (G.6c) is signed by the root only, by the person (`desman-registry trust
+sign`): it names every assignment and revocation in effect when it was signed. The registry
+hands it out with them, and cannot leave one out: a node that holds a list still in its term
+and every record it names is `fresh()`; otherwise it takes no work from any operator. So a
+registry that hides a revocation can do so only until the list it was signed into expires (a
+node keeps the newest list it received).
 """
 
 from __future__ import annotations
@@ -229,9 +236,11 @@ class RecordKind(StrEnum):
     against the key that sent it, never by `Trust` (a node is no authority)."""
     VERDICT = "verdict"
     """A node's review of another node's result, signed like a result."""
+    TRUST_LIST = "trust_list"
+    """The root names every assignment and revocation in effect (`TrustList`)."""
 
 
-STATE: Final = frozenset({RecordKind.ASSIGNMENT, RecordKind.REVOCATION})
+STATE: Final = frozenset({RecordKind.ASSIGNMENT, RecordKind.REVOCATION, RecordKind.TRUST_LIST})
 """Kinds handed out again on every poll: receiving one twice is not a replay."""
 
 
@@ -308,6 +317,30 @@ class Revocation(BaseModel):
     reason: str = Field(default="", max_length=500)
 
 
+class Listed(BaseModel):
+    """A record a trust list names."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: RecordId
+    until: datetime | None
+    """Its `expires_at` (an assignment): required only until then; None for a revocation,
+    which is honoured past its term and so required as long as the list lasts."""
+
+    @field_validator("until")
+    @classmethod
+    def _whole_seconds_utc(cls, moment: datetime | None) -> datetime | None:
+        return None if moment is None else _utc(moment)
+
+
+class TrustList(BaseModel):
+    """The body of a trust list."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    records: list[Listed] = Field(max_length=100_000)
+
+
 def sign(
     key: NodeKey,
     kind: RecordKind,
@@ -353,6 +386,19 @@ def revoke(
     body = Revocation(key=key, reason=reason)
     return sign(
         signer, RecordKind.REVOCATION, body.model_dump(), issued_at=issued_at, lifetime=lifetime
+    )
+
+
+def trust_list(
+    root: NodeKey, listed: list[Listed], *, issued_at: datetime, lifetime: timedelta
+) -> Signed:
+    body = TrustList(records=sorted(listed, key=lambda r: r.id))
+    return sign(
+        root,
+        RecordKind.TRUST_LIST,
+        body.model_dump(mode="json"),
+        issued_at=issued_at,
+        lifetime=lifetime,
     )
 
 
@@ -469,12 +515,30 @@ class Trust:
         """Revoked keys, with the keys that signed their revocations."""
         self._state: dict[str, bytes] = {}
         """Assignments and revocations accepted, by id: the canonical form of the signed record."""
+        self._list: Record | None = None
+        """The newest trust list received."""
 
     def operator(self, key: str) -> Operator | None:
         return self._operators.get(key)
 
     def is_revoked(self, key: str) -> bool:
         return key in self._revoked
+
+    def fresh(self) -> str | None:
+        """None while the newest trust list is in its term and every record it still requires
+        was received; otherwise why not (for the network log)."""
+        found = self._list
+        if found is None:
+            return "no trust list received"
+        now = _utc(self._clock())
+        if now >= found.expires_at:
+            return f"the trust list expired at {found.expires_at.isoformat()}"
+        for listed in TrustList.model_validate(found.body).records:
+            # Allow for skew: the registry stops handing an assignment out at its term.
+            required = listed.until is None or listed.until > now + SKEW
+            if required and listed.id not in self._state:
+                return f"the trust list names a record not received: {listed.id}"
+        return None
 
     def receive(self, data: object) -> Record:
         """A record that passed every check; anything else is `Refused`."""
@@ -520,6 +584,9 @@ class Trust:
         elif isinstance(body, Revocation):
             self._revoked.setdefault(body.key, set()).add(record.signer)
             self._operators.pop(body.key, None)
+        elif isinstance(body, TrustList):
+            if self._list is None or record.issued_at > self._list.issued_at:
+                self._list = record  # an older list handed out again changes nothing
         elif not self._seen.add(record.id, record.expires_at, now):
             raise refuse(Reason.REPLAY, "this record was already received")
 
@@ -556,7 +623,7 @@ class Trust:
         if record.kind is not RecordKind.REVOCATION and now >= term.expires_at:
             raise refuse(Reason.EXPIRED, "the operator's assignment has expired")
 
-    def _check_body(self, record: Record) -> Assignment | Revocation | None:
+    def _check_body(self, record: Record) -> Assignment | Revocation | TrustList | None:
         def refuse(reason: Reason, detail: str) -> Refused:
             return Refused(reason, detail, id=record.id, signer=record.signer)
 
@@ -576,6 +643,8 @@ class Trust:
                 if record.signer != self.root_fingerprint and revocation.key in self._operators:
                     raise refuse(Reason.NOT_ALLOWED, "only the root revokes an operator")
                 return revocation
+            if record.kind is RecordKind.TRUST_LIST:
+                return TrustList.model_validate(record.body)
         except (ValidationError, KeyFileError) as e:
             raise refuse(Reason.MALFORMED, str(e)) from e
         return None

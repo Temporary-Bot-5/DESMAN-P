@@ -461,3 +461,83 @@ def test_an_older_assignment_received_again_changes_nothing(
     trust.receive(old)
     found = trust.operator(op.fingerprint)
     assert found is not None and found.scopes == {Scope.TASKS}
+
+
+# ── The trust list (G.6c) ────────────────────────────────────────────────────
+
+
+def listing(*signed: Signed) -> list[sign.Listed]:
+    return [
+        sign.Listed(
+            id=s.record.id,
+            until=None if s.record.kind is RecordKind.REVOCATION else s.record.expires_at,
+        )
+        for s in signed
+    ]
+
+
+def test_without_a_trust_list_nothing_is_fresh(trust: Trust) -> None:
+    assert trust.fresh() == "no trust list received"
+
+
+def test_a_list_naming_every_record_received_is_fresh_until_it_expires(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    assigned = sign.assign(
+        root, NodeKey.generate().public, {Scope.TASKS}, issued_at=clock(), lifetime=30 * DAY
+    )
+    revoked = sign.revoke(root, "ab" * 32, "lost", issued_at=clock(), lifetime=DAY)
+    listed = sign.trust_list(root, listing(assigned, revoked), issued_at=clock(), lifetime=7 * DAY)
+    for signed in (assigned, revoked, listed):
+        trust.receive(wire(signed))
+    assert trust.fresh() is None
+    trust.receive(wire(listed))  # handed out again on every poll: no replay
+    clock.advance((7 * DAY).total_seconds())
+    assert trust.fresh() is not None and "expired" in (trust.fresh() or "")
+
+
+def test_a_hidden_revocation_leaves_the_list_stale(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    revoked = sign.revoke(root, "ab" * 32, "spam", issued_at=clock(), lifetime=DAY)
+    listed = sign.trust_list(root, listing(revoked), issued_at=clock(), lifetime=7 * DAY)
+    trust.receive(wire(listed))  # the registry kept the revocation to itself
+    assert revoked.record.id in (trust.fresh() or "")
+    clock.advance((2 * DAY).total_seconds())  # a revocation is needed past its own term
+    assert trust.fresh() is not None
+    trust.receive(wire(revoked))  # honoured past its term
+    assert trust.fresh() is None
+
+
+def test_an_assignment_past_its_term_is_no_longer_required(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    assigned = sign.assign(
+        root, NodeKey.generate().public, {Scope.TASKS}, issued_at=clock(), lifetime=DAY
+    )
+    listed = sign.trust_list(root, listing(assigned), issued_at=clock(), lifetime=7 * DAY)
+    trust.receive(wire(listed))
+    assert trust.fresh() is not None
+    clock.advance((DAY - sign.SKEW).total_seconds())  # the registry stops handing it out
+    assert trust.fresh() is None
+
+
+def test_an_older_list_handed_out_again_does_not_replace_the_newest(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    old = sign.trust_list(root, [], issued_at=clock(), lifetime=7 * DAY)
+    clock.advance(HOUR.total_seconds())
+    revoked = sign.revoke(root, "ab" * 32, "spam", issued_at=clock(), lifetime=DAY)
+    new = sign.trust_list(root, listing(revoked), issued_at=clock(), lifetime=7 * DAY)
+    trust.receive(wire(new))
+    trust.receive(wire(old))  # a registry rolling back to before the revocation
+    assert revoked.record.id in (trust.fresh() or "")
+
+
+def test_only_the_root_signs_a_trust_list(trust: Trust, root: NodeKey, clock: FakeClock) -> None:
+    signer = operator(trust, root, clock)
+    forged = sign.trust_list(signer, [], issued_at=clock(), lifetime=7 * DAY)
+    assert refused(trust, wire(forged)) is Reason.NOT_ALLOWED
+    stranger = sign.trust_list(NodeKey.generate(), [], issued_at=clock(), lifetime=7 * DAY)
+    assert refused(trust, wire(stranger)) is Reason.UNKNOWN_SIGNER
+    assert trust.fresh() == "no trust list received"

@@ -1163,6 +1163,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Работа сдана в desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Работа из desman-global оставлена: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Работа из desman-global выполняется только в `desman worker`, отданными моделями.",
+    "A trust list lasts from 1 to {days} days.": "Список доверия действует от 1 до {days} дней.",
+    "How long the list lasts; sign the next one before it ends.": "Сколько действует список; подпишите следующий до его окончания.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Нет действующего списка доверия: узлы не берут работу. Подпишите его: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Подписать новый список доверия со всеми действующими назначениями и отзывами.",
+    "The trust list handed out now.": "Список доверия, который раздаётся сейчас.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Список доверия: подписывается корнем, без свежего узлы не берут работу.",
+    "Trust list signed until {date} (records named: {count}).": "Список доверия подписан до {date} (записей в нём: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Список доверия {id}: подписан {issued}, действует до {date}; записей в нём: {count}.",
 }
 
 CLICK: dict[str, Forms] = {

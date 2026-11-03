@@ -2,7 +2,9 @@
 
 See tests/faults.py for the harness. Each seed is one simulated run of several workers on one
 database, with crashes, hangs, provider failures and rejections where its random generator puts
-them; at the end every invariant must hold. A failing seed is replayed exactly:
+them; at the end every invariant must hold. The network's runs (G.6c) are a registry and
+several nodes with their own databases, with the registry down, nodes restarting, leases lost
+and a revocation hidden. A failing seed is replayed exactly:
 
     DESMAN_FAULT_SEED=17 pytest tests/test_faults.py
 
@@ -18,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from desman.core.states import TaskStatus
-from faults import Faults, Report, Shape, simulate
+from faults import Faults, Report, Shape, simulate, simulate_network
 
 
 def _seeds() -> list[int]:
@@ -104,3 +106,37 @@ def test_the_harness_catches_a_repeated_effect(tmp_path: Path) -> None:
     caught = next(r for r in found if r.problems)
     assert f"seed {caught.seed}: " in caught.explain()
     assert f"replay: {replay}\n" in caught.explain()
+
+
+# ── desman-global (G.6c) ─────────────────────────────────────────────────────
+
+
+def _network_seeds() -> list[int]:
+    """A network run is slower (a registry and three databases): fewer seeds by default."""
+    if os.environ.get("DESMAN_FAULT_SEED") or os.environ.get("DESMAN_FAULT_SEEDS"):
+        return _seeds()
+    return list(range(4))
+
+
+@pytest.mark.parametrize("seed", _network_seeds())
+def test_every_network_invariant_holds_under_random_faults(tmp_path: Path, seed: int) -> None:
+    report = simulate_network(tmp_path, seed)
+    assert not report.problems, report.explain()
+    assert sum(report.faults.values()) > 0
+
+
+def test_the_network_harness_catches_a_node_that_ignores_its_trust_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.net.node import Node
+
+    with monkeypatch.context() as m:
+        m.setattr(Node, "_fresh", lambda self, address: True)
+        for seed in range(6):
+            directory = tmp_path / str(seed)
+            directory.mkdir()
+            report = simulate_network(directory, seed)
+            if any("not fresh" in p for p in report.problems):
+                break
+        else:
+            pytest.fail("no seed caught the node that ignores its trust list")

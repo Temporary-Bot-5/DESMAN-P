@@ -287,7 +287,8 @@ def test_assignments_and_revocations_are_checked_and_journaled_once(
     clock.advance(protocol.HEARTBEAT_SECONDS)
     found.poll()
     received = [d for a, d in log(conn) if a == "record_received"]
-    assert [d["kind"] for d in received] == ["assignment", "revocation"]
+    # each change signs a trust list too (G.6c): only the newest is handed out
+    assert [d["kind"] for d in received] == ["assignment", "revocation", "trust_list"]
     assert all(d["signer"] == root.fingerprint for d in received)
     assert found._trust is not None and found._trust.operator(operator.fingerprint) is not None
 
@@ -304,7 +305,8 @@ def test_records_signed_by_another_root_are_refused_and_journaled_once(
     clock.advance(protocol.HEARTBEAT_SECONDS)
     found.poll()
     refused = [d for a, d in log(conn) if a == "record_refused"]
-    assert len(refused) == 1 and refused[0]["reason"] == sign.Reason.UNKNOWN_SIGNER.value
+    assert [d["kind"] for d in refused] == ["assignment", "trust_list"]
+    assert all(d["reason"] == sign.Reason.UNKNOWN_SIGNER.value for d in refused)
 
 
 # ── When the registry fails ──────────────────────────────────────────────────
@@ -459,7 +461,7 @@ def test_a_record_the_busy_journal_missed_is_journaled_next_time(
     assert "record_received" not in actions(conn)
     clock.advance(node.RETRY_FIRST.total_seconds())
     found.poll()
-    assert actions(conn).count("record_received") == 1
+    assert actions(conn).count("record_received") == 2  # the record and its trust list
 
 
 def test_a_contact_gets_one_timeout_for_both_its_requests(
