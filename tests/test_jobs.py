@@ -963,3 +963,12 @@ def test_a_config_that_fails_turns_every_switch_off(
     assert run is not None
     a.settings.broken = True
     assert crew.access.refusal(run) is not None
+
+
+def test_a_call_held_yesterday_does_not_count_against_today(clock: FakeClock, store: Store) -> None:
+    settings = Settings(Donation(calls_per_day=1, tokens_per_day=1000))
+    clock.advance((jobs.day_start(clock()) + timedelta(days=1) - clock()).total_seconds() - 1)
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None  # 23:59:59
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is None
+    clock.advance(2)  # a new day, the call still out
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None
