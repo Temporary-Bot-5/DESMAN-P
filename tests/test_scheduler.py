@@ -78,19 +78,26 @@ def test_aging_rejects_nonsense_values() -> None:
 @pytest.mark.parametrize(
     "waited", [None, -30.0, 0.0, 44.999, 45.0, 59.999, 60.0, 60.001, 119.999, 600.0, 86_400.0]
 )
+@pytest.mark.parametrize("origin", ["local", "network"])
 def test_sql_and_python_agree(
-    clock: FakeClock, aging: Aging, priority: int, waited: float | None
+    clock: FakeClock, aging: Aging, priority: int, waited: float | None, origin: str
 ) -> None:
     """The claim orders in SQL, the coordinator compares in Python: they must never differ,
-    not even on a step boundary."""
+    not even on a step boundary; nor for a job from the network (G.6b)."""
     now = clock.now + timedelta(days=3)
     queued = None if waited is None else db.to_iso(now - timedelta(seconds=waited))
-    conn = db.connect(":memory:")
+    conn = db.open_db(":memory:")
+    conn.execute(
+        "INSERT INTO tasks (id, goal, priority, created_at, max_attempts, max_transient, origin)"
+        " VALUES ('t', 'g', 0, ?, 3, 3, ?)",
+        (db.to_iso(now), origin),
+    )
     (in_sql,) = conn.execute(
-        f"SELECT {aging.urgency_sql()} FROM (SELECT ? AS priority, ? AS queued_at)",
+        f"SELECT {aging.urgency_sql()} FROM"
+        " (SELECT ? AS priority, ? AS queued_at, 't' AS task_id) AS subtasks",
         (db.to_iso(now), priority, queued),
     ).fetchone()
-    assert in_sql == aging.urgency(priority, queued, now)
+    assert in_sql == aging.urgency(priority, queued, now, network=origin == "network")
 
 
 # ── Claim order across tasks ─────────────────────────────────────────────────

@@ -200,12 +200,14 @@ INBOX_STATUSES = (SubtaskStatus.NEEDS_HUMAN, SubtaskStatus.FAILED)
 
 
 def inbox(store: Store) -> list[InboxItem]:
-    """Everything waiting for the operator, oldest task first."""
+    """Everything waiting for the operator, oldest task first. A job from desman-global never
+    waits for the person (`net.jobs`): it is not listed."""
     items = []
     with db.read_snapshot(store.conn):
         rows = store.conn.execute(
             """SELECT s.task_id, t.goal FROM subtasks s JOIN tasks t ON t.id = s.task_id
-               WHERE s.status IN (?, ?) GROUP BY s.task_id ORDER BY MIN(t.created_at)""",
+               WHERE s.status IN (?, ?) AND t.origin = 'local'
+               GROUP BY s.task_id ORDER BY MIN(t.created_at)""",
             [s.value for s in INBOX_STATUSES],
         ).fetchall()
         for task_id, goal in rows:

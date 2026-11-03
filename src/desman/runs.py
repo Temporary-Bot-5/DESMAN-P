@@ -10,19 +10,19 @@ from __future__ import annotations
 
 import functools
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 import click
 import httpx
 
-from desman import providers, ui
+from desman import net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config, Tuning
 from desman.core import calls, protected
 from desman.core.context import DEFAULT_BUDGET_TOKENS
-from desman.core.coordinator import Coordinator, Labels
+from desman.core.coordinator import Coordinator, Crew, Labels
 from desman.core.effects import evidence
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
@@ -38,6 +38,8 @@ from desman.llm import hub, router
 from desman.llm.base import LLM
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
+from desman.net import jobs
+from desman.net.node import capabilities
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
 
 TUNING_DEFAULTS: Mapping[str, int] = {
@@ -109,11 +111,15 @@ def models(
     client: httpx.Client | None = None,
     clock: Callable[[], datetime] | None = None,
     sleep: Callable[[float], None] | None = None,
+    only: Collection[str] | None = None,
+    wrap: Callable[[LLM, router.Choice], LLM] | None = None,
 ) -> Models:
     """A lineup of models per role (`router.lineup`), each model paced by the rate limiter in
     the database, quick blips retried, calls logged and accepted replies kept there. `provider`
     and `model` narrow the choice like `desman run --provider/--model`; only a pinned `model`
-    leaves no other model for retries. Raises `router.NoProvider`."""
+    leaves no other model for retries. `only`: the models of these providers alone (the ones
+    lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
+    `router.NoProvider`."""
     clients: dict[str, LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
@@ -132,7 +138,9 @@ def models(
             else:
                 keys = max(1, len(api.keys))
                 paced = Limited(api, buckets, choice.label, choice.spec.rpm * keys, sleep=sleep)
-            backed = router.Backoff(paced, sleep=sleep)
+            backed: LLM = router.Backoff(paced, sleep=sleep)
+            if wrap is not None:
+                backed = wrap(backed, choice)
             clients[choice.label] = (
                 Cached(backed, conn, choice.model, server=server) if cache else backed
             )
@@ -141,11 +149,19 @@ def models(
     def chain(choices: list[router.Choice]) -> router.Fallback:
         return router.Fallback([(member(c), c) for c in choices])
 
-    lineups = {role: router.lineup(config, role, provider, model) for role in calls.Role}
+    def lineup(role: calls.Role, kind: Kind | None = None) -> list[router.Choice]:
+        choices = router.lineup(config, role, provider, model, kind=kind)
+        if only is not None:
+            choices = [c for c in choices if c.provider.id in only]
+            if not choices:
+                raise router.NoProvider("none of the providers lent has a model for this")
+        return choices
+
+    lineups = {role: lineup(role) for role in calls.Role}
     roles = {role: chain(choices) for role, choices in lineups.items()}
     kinds: dict[Kind, tuple[LLM, LLM | None]] = {}
     for kind in Kind:
-        own = router.lineup(config, calls.Role.EXECUTOR, provider, model, kind=kind)
+        own = lineup(calls.Role.EXECUTOR, kind)
         others = [] if model is not None else router.other_lineup(own)
         kinds[kind] = (chain(own), chain(others) if others else None)
     executor = lineups[calls.Role.EXECUTOR]
@@ -257,6 +273,7 @@ def coordinator(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     http: httpx.Client | None = None,
     watch: Callable[[], None] | None = None,
+    network: Crew | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
     return _coordinator(
@@ -271,6 +288,61 @@ def coordinator(
         lease_seconds=lease_seconds,
         watch=watch,
         tuning=config.tuning,
+        network=network,
+    )
+
+
+def network_crew(
+    store: Store,
+    config: Config,
+    load: Callable[[], Config],
+    *,
+    given: Models | None = None,
+    cache: bool = True,
+    clock: Callable[[], datetime] | None = None,
+) -> Crew | None:
+    """Who works jobs from desman-global in this worker (ROADMAP G.6b): the models of the
+    providers lent (`net.node.capabilities`), each within its day's quota (`jobs.Quota`, the
+    config read at every call), tools by the `network_*` roles within the person's switches.
+    None while desman-global is off or nothing usable is lent: the worker takes no jobs then
+    (a change later counts from the worker's next start). `given`: these models instead (a
+    fake: its scripts count every call)."""
+    if net.registry(config) is None:
+        return None
+    lent = {c.provider for c in capabilities(config)}
+    if not lent:
+        return None
+    lent_models = given
+    if lent_models is None:
+        now = clock or (lambda: datetime.now(UTC))
+        try:
+            lent_models = models(
+                config,
+                store.conn,
+                cache=cache,
+                clock=clock,
+                only=lent,
+                wrap=lambda llm, choice: jobs.Quota(llm, store.conn, choice.provider.id, load, now),
+            )
+        except router.NoProvider:
+            return None
+    crew_models = lent_models
+    try:
+        policy = default_policy()
+    except PolicyError as e:
+        raise click.ClickException(t("Cannot use the tool policy: {error}", error=e)) from e
+    reviewer = crew_models.for_(calls.Role.REVIEWER)
+    executor = llm_executor(crew_models.llm, crew_models.other, by_kind=crew_models.kinds)
+    return Crew(
+        jobs.executor(store.conn, executor),
+        jobs.reviewer(
+            store.conn,
+            llm_reviewer(reviewer, evidence=functools.partial(evidence, store)),
+            llm_reviewer(reviewer),
+        ),
+        Access(policy, Role.NETWORK_EXECUTOR, switched_on(config.permissions.model_dump())),
+        strategies=functools.partial(strategy_for, other_model=crew_models.other is not None),
+        providers=crew_models.labels,
     )
 
 
@@ -291,6 +363,7 @@ def _coordinator(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     watch: Callable[[], None] | None = None,
     tuning: Tuning | None = None,
+    network: Crew | None = None,
 ) -> Coordinator:
     tuning = tuning or Tuning()
     guard(store)
@@ -314,4 +387,5 @@ def _coordinator(
         tools=tools,
         watch=watch,
         gate=functools.partial(guard, store),  # a running worker stops at a later change too
+        network=network,
     )

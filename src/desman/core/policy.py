@@ -49,6 +49,9 @@ class Role(StrEnum):
     PLANNER = "planner"
     EXECUTOR = "executor"
     REVIEWER = "reviewer"
+    NETWORK_EXECUTOR = "network_executor"
+    """The executor of a job from desman-global (ROADMAP G.6b): someone else's task, so less."""
+    NETWORK_REVIEWER = "network_reviewer"
 
 
 class PolicyError(ValueError):

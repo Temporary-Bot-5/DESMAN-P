@@ -3,7 +3,18 @@
 While `desman worker` runs and desman-global is on, the node keeps in touch with the registry
 between the worker's steps (`Node.poll`): it registers with what it lends, says it is alive
 as often as the registry asks, and fetches the assignments and revocations it then checks
-against the root (`sign.Trust`). Nothing else is sent yet; tasks from the network come with G.6.
+against the root (`sign.Trust`).
+
+Work (G.6b, `net.jobs`): a node whose worker can do it (`work`: models lent, a crew for them)
+asks for a job only while the worker is idle and no job is held, and while some lent module has
+quota left today; an empty offer is asked again after `CLAIM_EVERY`. A job lent is checked first
+(the operator's record by `sign.Trust`, never twice; a recheck's result by the signature of the
+node that sent it) and becomes a task of this node; a record that fails is journaled and left
+alone (its lease runs out at the registry). While the job is worked on, its lease is extended
+once less than `EXTEND_WHEN` is left; once it ends, the signed result or verdict is handed in,
+and sent again until the registry answers. A refusal of the lease (`lease_lost`: it ran out, or
+another node has the job now) drops the job. Turning desman-global off, or another registry,
+drops what is held without a word to anyone (off is off).
 
 - Off is off: the config is read again before every contact, and `net.registry()` has no
   address while desman-global is off, so a `desman global leave` while a worker runs stops it
@@ -45,20 +56,27 @@ from pydantic import BaseModel, ValidationError
 from desman import net, providers
 from desman.config import Config, ConfigError
 from desman.core import netlog
+from desman.core.store import Store
+from desman.core.workspace import workspace_root_for
 from desman.llm.openai_compat import key_id
-from desman.net import protocol, request, sign
+from desman.net import jobs, protocol, request, sign
 
 TIMEOUT: Final = 10.0
 RETRY_FIRST: Final = timedelta(seconds=30)
 RETRY_MAX: Final = timedelta(minutes=30)
 OFF_RECHECK: Final = timedelta(minutes=1)
 """How soon a node that is off (or has no usable key) reads the config again."""
+CLAIM_EVERY: Final = timedelta(minutes=1)
+"""How soon an idle node asks for work again after none was offered (or none could be taken)."""
+EXTEND_WHEN: Final = timedelta(minutes=5)
+"""A held job's lease is extended once less than this is left."""
 HEARTBEAT_MIN: Final = 60
 HEARTBEAT_MAX: Final = 3600
 """The registry's `heartbeat_seconds`, kept within these (a registry cannot make the node
 spin, nor fall silent for a day)."""
 
 NOT_REGISTERED: Final = "not_registered"
+LEASE_LOST: Final = "lease_lost"
 REVOKED: Final = sign.Reason.REVOKED.value
 
 M = TypeVar("M", bound=BaseModel)
@@ -76,6 +94,9 @@ class Change(StrEnum):
     REFUSED = "refused"
     REVOKED = "revoked"
     NO_KEY = "no_key"
+    WORK_TAKEN = "work_taken"
+    WORK_HANDED_IN = "work_handed_in"
+    WORK_DROPPED = "work_dropped"
 
 
 @dataclass(frozen=True)
@@ -83,6 +104,8 @@ class Event:
     change: Change
     registry: str
     detail: str = ""
+    """The error (UNREACHABLE, REFUSED, NO_KEY); the stage (WORK_TAKEN); the outcome
+    (WORK_HANDED_IN); why (WORK_DROPPED)."""
     retry_in: float | None = None
     """Seconds until the next try (UNREACHABLE, REFUSED)."""
 
@@ -241,8 +264,16 @@ class Node:
         transport: httpx.BaseTransport | None = None,
         clock: Callable[[], datetime] = _utc_now,
         root: Path | None = None,
+        work: bool = False,
+        workspaces: Path | None = None,
     ) -> None:
         self.conn = conn
+        self.work = work
+        """This worker can do jobs (a crew for the models lent): it asks for them."""
+        self._store = Store(conn, clock)
+        self._workspaces = workspace_root_for(conn) if workspaces is None else workspaces
+        self.claim_at: datetime | None = None
+        """No asking for work before this."""
         self._config = config
         self._key_path = key_path
         self._transport = transport
@@ -269,13 +300,19 @@ class Node:
 
     # ── The loop ─────────────────────────────────────────────────────────────
 
-    def poll(self) -> Event | None:
-        """Contact the registry if it is time: what changed for the person, if anything."""
+    def poll(self, *, idle: bool = False) -> Event | None:
+        """Contact the registry if it is time, and tend the work held (asking for some when the
+        worker is `idle`): what changed for the person, if anything."""
         now = self._clock()
-        if self.revoked or (self.next_at is not None and now < self.next_at):
+        if self.revoked:
             return None
         try:
-            return self._poll(now)
+            event = None
+            if self.next_at is None or now >= self.next_at:
+                event = self._poll(now)
+            if self.work and not self.revoked:
+                event = self._jobs(now, idle) or event
+            return event
         except sqlite3.OperationalError:
             # The journal is busy (another worker holds the database too long): the worker's
             # own work matters more; look again later.
@@ -406,7 +443,7 @@ class Node:
         """Check each record against the root; True if this node's own key is revoked."""
         if self._trust is None:
             root = sign.load_root() if self._root is None else sign.load_root(self._root)
-            self._trust = sign.Trust(root, clock=self._clock)
+            self._trust = sign.Trust(root, clock=self._clock, seen=jobs.Seen(self.conn))
         for signed in state.records:
             record = signed.record
             try:
@@ -487,6 +524,247 @@ class Node:
             self.conn, "revoked", {"registry": address, "node": key.fingerprint, "why": why}
         )
         return Event(Change.REVOKED, address)
+
+    # ── Work (G.6b) ──────────────────────────────────────────────────────────
+
+    def _jobs(self, now: datetime, idle: bool) -> Event | None:
+        held = jobs.holding(self.conn)
+        if not held and not (idle and (self.claim_at is None or now >= self.claim_at)):
+            return None
+        try:
+            config = self._config()
+        except ConfigError:
+            return None
+        address = net.registry(config)
+        for job in held:
+            if job.registry != address:  # off, or another registry: nothing is sent
+                jobs.close(self._store, job, "abandoned", "desman-global is off or moved")
+                netlog.record(self.conn, "work_dropped", _job_details(job, "off"))
+        held = [job for job in held if job.registry == address]
+        if (
+            address is None
+            or address != self.registry
+            or not self.registered
+            or self._trust is None
+            or self.failures > 0  # the contact's backoff holds for work too
+        ):
+            return None
+        key = self._key(address)
+        if key is None:
+            return None
+        client = self._http()
+        deadline = time.monotonic() + TIMEOUT
+        try:
+            event = None
+            for job in held:
+                event = self._tend(client, key, address, job, now, deadline) or event
+            if (
+                idle
+                and not jobs.holding(self.conn)
+                and (self.claim_at is None or now >= self.claim_at)
+            ):
+                event = self._claim(client, key, config, address, now, deadline) or event
+            return event
+        except _Unreachable as e:
+            return self._failed(address, str(e), now)
+        except _Problem as e:
+            return self._refused(address, key, e.error, now)
+
+    def _tend(
+        self,
+        client: httpx.Client,
+        key: sign.NodeKey,
+        address: str,
+        job: jobs.Held,
+        now: datetime,
+        deadline: float,
+    ) -> Event | None:
+        record = job.record
+        if record is None:
+            end = jobs.ending(self._store, job, self._workspaces, now)
+            if end is None:
+                if job.expires_at - now <= EXTEND_WHEN:
+                    try:
+                        lease = _call(
+                            client,
+                            key,
+                            address,
+                            "POST",
+                            protocol.EXTEND,
+                            protocol.Extend(lease=job.lease),
+                            protocol.Lease,
+                            now,
+                            deadline,
+                        )
+                    except _Problem as e:
+                        if e.error != LEASE_LOST:
+                            raise
+                        return self._drop(job, "lost", LEASE_LOST)
+                    jobs.extended(self.conn, job.lease, lease.expires_at)
+                return None
+            if end.body is None:
+                return self._drop(job, "abandoned", end.why)
+            kind = (
+                sign.RecordKind.VERDICT
+                if isinstance(end.body, protocol.Verdict)
+                else sign.RecordKind.RESULT
+            )
+            record = sign.sign(
+                key,
+                kind,
+                end.body.model_dump(mode="json"),
+                issued_at=now,
+                lifetime=jobs.RECORD_LIFETIME,
+            )
+            jobs.keep(self.conn, job.lease, record)
+            job = jobs.held_by_task(self.conn, job.task_id) or job
+            record = job.record or record
+        try:
+            received = _call(
+                client,
+                key,
+                address,
+                "POST",
+                protocol.HAND_IN,
+                protocol.HandIn(lease=job.lease, record=record),
+                protocol.Received,
+                now,
+                deadline,
+            )
+        except _Problem as e:
+            if e.error in (NOT_REGISTERED, REVOKED):
+                raise
+            # The lease ran out, or the record was refused: either way it is not taken.
+            return self._drop(job, "lost", e.error)
+        outcome = _outcome(record)
+        jobs.close(self._store, job, "handed_in", f"handed in ({outcome})")
+        netlog.record(
+            self.conn,
+            "handed_in",
+            {
+                **_job_details(job),
+                "record": record.record.id,
+                "kind": str(record.record.kind),
+                "outcome": outcome,
+                "status": received.status,
+            },
+        )
+        return Event(Change.WORK_HANDED_IN, address, outcome)
+
+    def _drop(self, job: jobs.Held, state: jobs.State, why: str) -> Event:
+        jobs.close(self._store, job, state, why)
+        netlog.record(self.conn, "work_dropped", _job_details(job, why))
+        return Event(Change.WORK_DROPPED, job.registry, why)
+
+    def _claim(
+        self,
+        client: httpx.Client,
+        key: sign.NodeKey,
+        config: Config,
+        address: str,
+        now: datetime,
+        deadline: float,
+    ) -> Event | None:
+        self.claim_at = now + CLAIM_EVERY
+        lent = capabilities(config)
+        if not any(jobs.quota_left(self.conn, config, c.provider, now) for c in lent):
+            return None  # nothing to do it with today
+        offer = _call(
+            client,
+            key,
+            address,
+            "POST",
+            protocol.CLAIM,
+            protocol.Claim(),
+            protocol.Offer,
+            now,
+            deadline,
+        )
+        work = offer.work
+        if work is None:
+            return None
+        assert self._trust is not None
+        task = work.task.record
+        try:
+            received = self._trust.receive(work.task.model_dump(mode="json"))
+            if received.kind is not sign.RecordKind.TASK:
+                raise sign.Refused(sign.Reason.MALFORMED, "not a task", id=task.id)
+            job = protocol.Job.model_validate(received.body)
+            if work.stage == jobs.RECHECK:
+                _check_result(work, task.id, now)
+        except sign.Refused as e:
+            netlog.record(
+                self.conn,
+                "work_refused",
+                {
+                    "registry": address,
+                    "job": task.id,
+                    "signer": task.signer,
+                    "stage": work.stage,
+                    "reason": e.reason.value,
+                },
+            )
+            return None
+        except (ValidationError, sign.KeyFileError):
+            netlog.record(
+                self.conn,
+                "work_refused",
+                {
+                    "registry": address,
+                    "job": task.id,
+                    "signer": task.signer,
+                    "stage": work.stage,
+                    "reason": sign.Reason.MALFORMED.value,
+                },
+            )
+            return None
+        task_id = jobs.take(self._store, address, work, job)
+        netlog.record(
+            self.conn,
+            "work_taken",
+            {
+                "registry": address,
+                "job": task.id,
+                "signer": task.signer,
+                "stage": work.stage,
+                "task": task_id,
+            },
+        )
+        return Event(Change.WORK_TAKEN, address, work.stage)
+
+
+def _check_result(work: protocol.Work, job_id: str, now: datetime) -> None:
+    """A recheck's result: signed by the key that came with it, about this job, done, in term."""
+    assert work.result is not None and work.result_key is not None
+    signed = work.result
+    sign.check_signature(signed, sign.decode_public(work.result_key))
+    record = signed.record
+    if record.kind is not sign.RecordKind.RESULT:
+        raise sign.Refused(sign.Reason.MALFORMED, "not a result", id=record.id)
+    if now >= record.expires_at:
+        raise sign.Refused(sign.Reason.EXPIRED, "the result has expired", id=record.id)
+    body = protocol.Result.model_validate(record.body)
+    if body.job != job_id or body.outcome != "done":
+        raise sign.Refused(sign.Reason.MALFORMED, "not a done result of this job", id=record.id)
+
+
+def _outcome(record: sign.Signed) -> str:
+    body = record.record.body
+    if record.record.kind is sign.RecordKind.VERDICT:
+        return "accept" if body.get("accept") else "reject"
+    return str(body.get("outcome", ""))
+
+
+def _job_details(job: jobs.Held, why: str | None = None) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "registry": job.registry,
+        "job": job.job,
+        "stage": job.stage,
+        "task": job.task_id,
+    }
+    if why is not None:
+        details["why"] = why
+    return details
 
 
 def _dump(lent: list[protocol.Capability]) -> list[dict[str, Any]]:

@@ -170,9 +170,13 @@ def test_a_rejected_result_goes_to_the_operator(
     with store.connection(db_path) as conn:
         again = admin.settle(conn, job_id[:8], "again", now=clock())
     assert again.status == "execute" and again.result is None
-    redo = claim(a)  # a new round: the node that did it may try again
+    # A new round, but never to a node lent the job before: it would refuse the record as a
+    # replay (G.6b).
+    assert claim(a) is None and claim(b) is None
+    c = node(registry, clock)
+    redo = claim(c)
     assert redo is not None and redo["stage"] == "execute"
-    hand_in(a, redo)
+    hand_in(c, redo)
     with store.connection(db_path) as conn:
         with pytest.raises(admin.AdminError, match="cannot be settled"):
             admin.settle(conn, job_id, "accept", now=clock())  # it waits for a recheck
@@ -194,9 +198,12 @@ def test_failures_and_lost_leases_go_to_the_operator(
     clock.advance(1)
     lost = add_job(db_path, operator, clock)
     for _ in range(work.MAX_LOST):
-        assert claim(a) is not None
+        holder = node(registry, clock)  # each node is lent the job once at most
+        assert claim(holder) is not None
+        assert claim(holder) is None  # one lease at a time
         clock.advance(LEASE + 1)
-    assert claim(b) is None
+        assert claim(holder) is None  # and never the same job again
+    assert claim(node(registry, clock)) is None
     assert status(db_path, lost) == ("operator", "leases_lost")
     with (
         store.connection(db_path) as conn,

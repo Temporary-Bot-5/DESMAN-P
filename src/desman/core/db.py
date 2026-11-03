@@ -516,6 +516,41 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE subtasks ADD COLUMN runs_code INTEGER NOT NULL DEFAULT 0
         CHECK (runs_code IN (0, 1));
     """,
+    # 28 — work from desman-global (ROADMAP G.6b, desman/net/jobs.py). A task's origin, fixed
+    # when it is made: every task before was the person's own. A job the node holds: the
+    # registry's lease and its token, the operator's `task` record, for a recheck the result
+    # reviewed, and the record handed in (signed once, sent again as it is until the registry
+    # answers). Record ids seen (`sign.Trust`): a replay is refused across restarts too
+    f"""
+    ALTER TABLE tasks ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'
+        CHECK (origin IN ('local', 'network'));
+    CREATE TRIGGER tasks_origin_fixed BEFORE UPDATE OF origin ON tasks
+        BEGIN SELECT RAISE(ABORT, 'a task keeps its origin'); END;
+    CREATE TABLE network_work (
+        lease        TEXT PRIMARY KEY,
+        registry     TEXT NOT NULL,
+        job          TEXT NOT NULL,
+        stage        TEXT NOT NULL CHECK (stage IN ('execute', 'recheck')),
+        task_id      TEXT NOT NULL UNIQUE REFERENCES tasks(id),
+        task_json    TEXT NOT NULL CHECK (json_valid(task_json)),
+        result_json  TEXT CHECK ((result_json IS NOT NULL) = (stage = 'recheck')
+                                 AND (result_json IS NULL OR json_valid(result_json))),
+        expires_at   TEXT NOT NULL,
+        state        TEXT NOT NULL DEFAULT 'working'
+                     CHECK (state IN ('working', 'handed_in', 'lost', 'abandoned')),
+        record_json  TEXT CHECK (record_json IS NULL OR json_valid(record_json)),
+        created_at   TEXT NOT NULL DEFAULT {_NOW_SQL},
+        updated_at   TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+    CREATE INDEX network_work_state ON network_work(state);
+    CREATE TRIGGER network_work_origin BEFORE INSERT ON network_work
+        WHEN (SELECT origin FROM tasks WHERE id = NEW.task_id) IS NOT 'network'
+        BEGIN SELECT RAISE(ABORT, 'only a network task holds network work'); END;
+    CREATE TABLE seen_records (
+        id          TEXT PRIMARY KEY,
+        expires_at  TEXT NOT NULL
+    ) STRICT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

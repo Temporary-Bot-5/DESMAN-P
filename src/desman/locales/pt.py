@@ -916,6 +916,10 @@ MESSAGES: dict[str, Forms] = {
     "Material the job works on; repeat for several.": "Material com que a tarefa trabalha; repita para vários.",
     "How long nodes may take it.": "Por quanto tempo os nós podem pegá-la.",
     "The operator's private key (default: operator.key in the registry's directory).": "A chave privada do operador (padrão: operator.key no diretório do registro).",
+    "Took a job from desman-global ({stage}). Your own work still goes first.": "Um trabalho do desman-global foi aceito ({stage}). O seu próprio trabalho continua em primeiro lugar.",
+    "Handed a job in to desman-global ({outcome}).": "Um trabalho foi entregue ao desman-global ({outcome}).",
+    "A job from desman-global was dropped: {reason}": "Um trabalho do desman-global foi abandonado: {reason}",
+    "A job from desman-global runs only in `desman worker`, with the models lent.": "Um trabalho do desman-global só é executado no `desman worker`, com os modelos emprestados.",
 }
 
 CLICK: dict[str, Forms] = {

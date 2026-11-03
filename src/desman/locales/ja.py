@@ -857,6 +857,10 @@ MESSAGES: dict[str, Forms] = {
     "Material the job works on; repeat for several.": "ジョブが扱う資料。複数指定するには繰り返します。",
     "How long nodes may take it.": "ノードが受け取れる期間。",
     "The operator's private key (default: operator.key in the registry's directory).": "オペレーターの秘密鍵 (既定: レジストリのディレクトリにある operator.key)。",
+    "Took a job from desman-global ({stage}). Your own work still goes first.": "desman-global から作業を引き受けました（{stage}）。あなた自身の作業が引き続き優先されます。",
+    "Handed a job in to desman-global ({outcome}).": "desman-global に作業を提出しました（{outcome}）。",
+    "A job from desman-global was dropped: {reason}": "desman-global からの作業を取りやめました: {reason}",
+    "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global からの作業は `desman worker` の中で、貸し出したモデルでのみ実行されます。",
 }
 
 CLICK: dict[str, Forms] = {

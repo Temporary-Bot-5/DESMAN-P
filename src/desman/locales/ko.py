@@ -855,6 +855,10 @@ MESSAGES: dict[str, Forms] = {
     "Material the job works on; repeat for several.": "작업이 다루는 자료. 여러 개는 반복해서 지정합니다.",
     "How long nodes may take it.": "노드가 가져갈 수 있는 기간.",
     "The operator's private key (default: operator.key in the registry's directory).": "운영자의 개인 키 (기본값: 레지스트리 디렉터리의 operator.key).",
+    "Took a job from desman-global ({stage}). Your own work still goes first.": "desman-global에서 작업을 받았습니다({stage}). 내 작업이 여전히 먼저 처리됩니다.",
+    "Handed a job in to desman-global ({outcome}).": "desman-global에 작업을 제출했습니다({outcome}).",
+    "A job from desman-global was dropped: {reason}": "desman-global의 작업을 포기했습니다: {reason}",
+    "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global의 작업은 `desman worker`에서 빌려준 모델로만 실행됩니다.",
 }
 
 CLICK: dict[str, Forms] = {

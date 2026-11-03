@@ -10,6 +10,10 @@ Aging lifts work at most to just below CRITICAL: critical work never queues behi
 merely waited long, and a critical subtask itself does not age (it is first already). Among
 equal urgency the work that has waited longer goes first.
 
+Work lent by desman-global (a task of origin `network`, ROADMAP G.6b) is never more urgent than
+LOW, however long it waits, and every piece of the person's own work goes before it whatever its
+urgency (`NETWORK_SQL` sorts first): the network gets what the machine would not use anyway.
+
 The ordering is computed in SQL (`urgency_sql`, so a claim picks atomically) and in Python
 (`Aging.urgency`, for a subtask already read); a test keeps the two equal.
 """
@@ -21,6 +25,12 @@ from datetime import datetime
 
 from desman.core import db
 from desman.core.models import Priority
+
+NETWORK_SQL = (
+    "EXISTS (SELECT 1 FROM tasks WHERE tasks.id = subtasks.task_id AND tasks.origin = 'network')"
+)
+"""Whether a `subtasks` row belongs to work from the network: sorted on first (own work, 0,
+goes before network work, 1)."""
 
 
 @dataclass(frozen=True)
@@ -39,8 +49,13 @@ class Aging:
         """The highest urgency aging alone can reach."""
         return int(Priority.CRITICAL) - 1
 
-    def urgency(self, priority: int, queued_at: str | None, now: datetime) -> int:
-        """Priority plus the bonus for waiting since `queued_at` (no bonus without one)."""
+    def urgency(
+        self, priority: int, queued_at: str | None, now: datetime, *, network: bool = False
+    ) -> int:
+        """Priority plus the bonus for waiting since `queued_at` (no bonus without one); for
+        `network` work, its priority up to LOW and no bonus."""
+        if network:
+            return min(priority, int(Priority.LOW))
         if priority >= Priority.CRITICAL or queued_at is None:
             return priority
         waited_ms = round((now - db.parse_iso(queued_at)).total_seconds() * 1000)
@@ -52,7 +67,8 @@ class Aging:
         parameter, the current time. Milliseconds are rounded so that floating point never puts
         a step boundary on the other side of where Python puts it."""
         waited_ms = "CAST(ROUND((julianday(?) - julianday(queued_at)) * 86400000) AS INTEGER)"
-        return f"""(CASE WHEN priority >= {int(Priority.CRITICAL)} OR queued_at IS NULL
+        return f"""(CASE WHEN {NETWORK_SQL} THEN MIN(priority, {int(Priority.LOW)})
+                    WHEN priority >= {int(Priority.CRITICAL)} OR queued_at IS NULL
                          THEN priority
                          ELSE MIN(priority + MAX(0, {waited_ms} / {self.every_seconds * 1000})
                                              * {self.step},
