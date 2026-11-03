@@ -1,8 +1,10 @@
-"""`desman-registry`: the registry on the owner's server (ADR 0004; ROADMAP G.4).
+"""`desman-registry`: the registry on the owner's server (ADR 0004; ROADMAP G.4, G.6).
 
 `serve` answers nodes; `assign` and `revoke` sign records with the root key; `backup` copies
-the database; `nodes` and `log` show what the registry knows and did. Non-interactive, like
-every subcommand. It reads no `config.json`: its directory is `--dir` (or
+the database; `nodes` and `log` show what the registry knows and did. The operator's work
+(G.6): `job add` signs a job with the operator's key, `jobs`, `job show` and `inbox` show them,
+`job settle` decides one that waits for a person, `owner` says whose node is whose (a result is
+rechecked by another owner's node). Non-interactive, like every subcommand. It reads no `config.json`: its directory is `--dir` (or
 $DESMAN_REGISTRY_DIR), its language $DESMAN_REGISTRY_LANGUAGE.
 """
 
@@ -16,11 +18,14 @@ from pathlib import Path
 from typing import Any, Final
 
 import click
+from pydantic import ValidationError
+from rich.text import Text
 
 from desman import i18n, ui
+from desman.core.models import Kind
 from desman.i18n import t
-from desman.net import sign
-from desman.registry import admin, server, store
+from desman.net import protocol, sign
+from desman.registry import admin, server, store, work
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
@@ -228,12 +233,12 @@ def nodes(ctx: click.Context, as_json: bool) -> None:
     if not found:
         ui.note(t("No node has registered yet."))
         return
-    table = ui.table(t("Node"), t("Status"), t("Lends"), t("Last seen"))
+    table = ui.table(t("Node"), t("Owner"), t("Status"), t("Lends"), t("Last seen"))
     for n in found:
         lends = ", ".join(
             c.provider if c.model is None else f"{c.provider}/{c.model}" for c in n.capabilities
         )
-        table.add_row(n.fingerprint[:16], _status(n), lends or "—", n.last_seen)
+        table.add_row(n.fingerprint[:16], n.owner or "—", _status(n), lends or "—", n.last_seen)
     ui.out(table)
 
 
@@ -274,3 +279,280 @@ def log_command(ctx: click.Context, limit: int, as_json: bool) -> None:
         details = json.dumps(e.details, ensure_ascii=False, sort_keys=True)
         table.add_row(e.ts, e.action, (e.node or "—")[:16], details)
     ui.out(table)
+
+
+# ── Work (G.6) ───────────────────────────────────────────────────────────────
+
+
+def _job_status(found: work.JobRow) -> str:
+    names = {
+        "execute": t("to do"),
+        "recheck": t("to recheck"),
+        "accepted": t("accepted"),
+        "operator": t("waits for the operator"),
+        "dropped": t("dropped"),
+        "expired": t("expired"),
+    }
+    return names.get(found.status, found.status)
+
+
+def _job_reason(found: work.JobRow) -> str:
+    names = {
+        "disputed": t("the recheck rejected the result"),
+        "failed": t("nodes could not do it"),
+        "leases_lost": t("nodes took it and fell silent"),
+    }
+    return "" if found.reason is None else names.get(found.reason, found.reason)
+
+
+def _open_db(ctx: click.Context) -> Any:
+    return store.open_registry(_dir(ctx) / store.DB_NAME)
+
+
+@cli.group()
+def job() -> None:
+    """The operator's jobs: add, show, settle."""
+
+
+@job.command("add")
+@click.option("--description", required=True, help="What to do (at most 4000 characters).")
+@click.option(
+    "--acceptance",
+    required=True,
+    help="How the result is judged (at most 2000 characters).",
+)
+@click.option(
+    "--kind",
+    type=click.Choice([k.value for k in Kind]),
+    default=Kind.TEXT.value,
+    show_default=True,
+    help="What sort of work it is.",
+)
+@click.option("--runs-code", is_flag=True, help="Done only by running code in the sandbox.")
+@click.option(
+    "--input",
+    "inputs",
+    multiple=True,
+    metavar="NAME=TEXT",
+    help="Material the job works on; repeat for several.",
+)
+@click.option(
+    "--days",
+    default=admin.JOB_DAYS,
+    show_default=True,
+    type=click.IntRange(1, 90),
+    help="How long nodes may take it.",
+)
+@click.option(
+    "--operator-key",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="The operator's private key (default: operator.key in the registry's directory).",
+)
+@click.pass_context
+def job_add(
+    ctx: click.Context,
+    description: str,
+    acceptance: str,
+    kind: str,
+    runs_code: bool,
+    inputs: tuple[str, ...],
+    days: int,
+    operator_key: Path | None,
+) -> None:
+    """Sign a job with the operator's key and offer it to nodes."""
+    given: dict[str, str] = {}
+    for item in inputs:
+        name, sep, text = item.partition("=")
+        if not sep or name in given:
+            raise click.BadParameter(
+                t("Expected NAME=TEXT, each name once: {value}", value=item[:80]),
+                param_hint="--input",
+            )
+        given[name] = text
+    try:
+        spec = protocol.Job(
+            description=description,
+            acceptance_criteria=acceptance,
+            inputs=given,
+            kind=Kind(kind),
+            runs_code=runs_code,
+        )
+    except ValidationError as e:
+        raise click.ClickException(
+            t("The job is not valid: {error}", error=f"{e.error_count()} problem(s)")
+        ) from e
+    directory = _dir(ctx)
+    try:
+        key = admin.load_operator_key(
+            directory / store.OPERATOR_KEY if operator_key is None else operator_key
+        )
+        conn = _open_db(ctx)
+        try:
+            added = admin.add_job(conn, key, spec, days=days, now=_now())
+        finally:
+            conn.close()
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(
+        t(
+            "Job {id} offered to nodes until {date}.",
+            id=added.id,
+            date=added.signed.record.expires_at.date().isoformat(),
+        )
+    )
+
+
+def _jobs_table(found: list[work.JobRow]) -> None:
+    table = ui.table(t("Job"), t("Status"), t("Kind"), t("Description"), t("Added"))
+    for j in found:
+        status = _job_status(j)
+        if j.reason:
+            status += f" ({_job_reason(j)})"
+        spec = j.job
+        table.add_row(j.id[:8], status, spec.kind.value, Text(spec.description[:60]), j.created_at)
+    ui.out(table)
+
+
+@cli.command()
+@click.option(
+    "--status",
+    type=click.Choice(["execute", "recheck", "accepted", "operator", "dropped", "expired"]),
+    default=None,
+    help="Only jobs in this state.",
+)
+@_json_option
+@click.pass_context
+def jobs(ctx: click.Context, status: str | None, as_json: bool) -> None:
+    """The operator's jobs and where each one is."""
+    conn = _open_db(ctx)
+    try:
+        work.expire(conn, _now())  # leases nodes left to lapse, even with no node calling
+        found = work.jobs(conn, status)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps([j.as_json() for j in found], ensure_ascii=False, indent=2))
+        return
+    if not found:
+        ui.note(t("No jobs."))
+        return
+    _jobs_table(found)
+
+
+@cli.command()
+@_json_option
+@click.pass_context
+def inbox(ctx: click.Context, as_json: bool) -> None:
+    """Jobs waiting for the operator's word (`job settle`)."""
+    conn = _open_db(ctx)
+    try:
+        work.expire(conn, _now())  # a job that lost its last lease belongs here already
+        found = work.jobs(conn, "operator")
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps([j.as_json() for j in found], ensure_ascii=False, indent=2))
+        return
+    if not found:
+        ui.note(t("Nothing waits for the operator."))
+        return
+    _jobs_table(found)
+    ui.note(t("Decide each with: desman-registry job settle JOB accept|again|drop"))
+
+
+@job.command("show")
+@click.argument("job_id", metavar="JOB")
+@_json_option
+@click.pass_context
+def job_show(ctx: click.Context, job_id: str, as_json: bool) -> None:
+    """A job, and every result and verdict nodes handed in for it."""
+    conn = _open_db(ctx)
+    try:
+        work.expire(conn, _now())
+        try:
+            found = work.job(conn, admin.find_job(conn, job_id))
+        except admin.AdminError as e:
+            raise _fail(e) from e
+        assert found is not None
+        handed = work.handed_in(conn, found.id)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(
+            json.dumps(
+                found.as_json() | {"handed_in": [h.as_json() for h in handed]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    spec = found.job
+    status = _job_status(found) + (f" ({_job_reason(found)})" if found.reason else "")
+    kind = spec.kind.value + (f", {t('runs code')}" if spec.runs_code else "")
+    # Text, never markup: what nodes (and the operator) wrote is shown as it is.
+    lines = [
+        f"{t('Job')} {found.id}",
+        f"{t('Status')}: {status}",
+        f"{t('Kind')}: {kind}",
+        f"{t('Description')}: {spec.description}",
+        f"{t('Acceptance criteria')}: {spec.acceptance_criteria}",
+        *(f"{t('Input')} {name}: {text[:200]}" for name, text in spec.inputs.items()),
+    ]
+    for line in lines:
+        ui.out(Text(line))
+    if not handed:
+        ui.note(t("Nothing handed in yet."))
+    for h in handed:
+        body = h.signed.record.body
+        ui.out("")
+        ui.out(Text(f"{h.received_at}  {h.kind}  {h.outcome}  {t('node')} {h.node[:16]}"))
+        said = str(body.get("output") or body.get("reason") or "")
+        if said:
+            ui.out(Text(said))
+        for f in body.get("files") or []:
+            size = len(str(f.get("text", "")))
+            ui.out(Text(f"— {f.get('path')} ({t('characters')}: {size})"))
+
+
+@job.command("settle")
+@click.argument("job_id", metavar="JOB")
+@click.argument("decision", type=click.Choice(["accept", "again", "drop"]))
+@click.pass_context
+def job_settle(ctx: click.Context, job_id: str, decision: str) -> None:
+    """Decide a job: accept its result, lend it again from the start, or drop it."""
+    chosen: work.Decision = (
+        "accept" if decision == "accept" else "again" if decision == "again" else "drop"
+    )
+    conn = _open_db(ctx)
+    try:
+        settled = admin.settle(conn, job_id, chosen, now=_now())
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    ui.ok(t("Job {id} is now: {status}", id=settled.id, status=_job_status(settled)))
+
+
+@cli.command()
+@click.argument("node_key", metavar="NODE")
+@click.argument("name", required=False)
+@click.option("--clear", is_flag=True, help="The node is its own owner again.")
+@click.pass_context
+def owner(ctx: click.Context, node_key: str, name: str | None, clear: bool) -> None:
+    """Say whose node NODE is: nodes of one owner never recheck each other's work."""
+    if (name is None) == (not clear):
+        raise click.UsageError(t("Give a NAME or --clear, not both."))
+    if name is not None and not 1 <= len(name) <= 64:
+        raise click.BadParameter(t("At most 64 characters."), param_hint="NAME")
+    conn = _open_db(ctx)
+    try:
+        fingerprint = admin.set_owner(conn, node_key, None if clear else name)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    if clear:
+        ui.ok(t("Node {key} is its own owner.", key=fingerprint[:16]))
+    else:
+        ui.ok(t("Node {key} belongs to {owner}.", key=fingerprint[:16], owner=str(name)))

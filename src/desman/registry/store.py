@@ -10,6 +10,10 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
   signed by the root. Append-only. Whether a key is revoked is read from them, as a node reads
   them (`sign.Trust`): the latest record about the key counts.
 - `nonces`: what `net.request` saw, until its time window closes.
+- `nodes.owner`: whose node it is, as the operator says (`desman-registry owner`); unset, a
+  node is its own owner. A result is rechecked by a node of another owner.
+- `jobs`, `leases`, `results` (G.6): work an operator signed, lent to one node at a time (see
+  `registry/work.py`), and what nodes handed in (append-only).
 - `registry_log`: the registry's journal (ADR 0004, decision 12) — registrations, changes of
   what is lent, departures, assignments, revocations, refused requests. Keys by fingerprint;
   nothing in it is secret. Append-only.
@@ -92,6 +96,73 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         BEGIN SELECT RAISE(ABORT, 'registry_log is append-only'); END;
     CREATE TRIGGER registry_log_no_delete BEFORE DELETE ON registry_log
         BEGIN SELECT RAISE(ABORT, 'registry_log is append-only'); END;
+    """,
+    # 2 — work (G.6): owners of nodes, jobs, their leases, what nodes handed in
+    f"""
+    ALTER TABLE nodes ADD COLUMN owner TEXT
+        CHECK (owner IS NULL OR length(owner) BETWEEN 1 AND 64);
+
+    CREATE TABLE jobs (
+        id           TEXT PRIMARY KEY CHECK (length(id) = 32),
+        signer       TEXT NOT NULL CHECK (length(signer) = 64),
+        signed_json  TEXT NOT NULL CHECK (json_valid(signed_json)),
+        expires_at   TEXT NOT NULL,
+        status       TEXT NOT NULL CHECK (status IN
+                         ('execute', 'recheck', 'accepted', 'operator', 'dropped', 'expired')),
+        result       TEXT,
+        reason       TEXT,
+        round        INTEGER NOT NULL DEFAULT 1 CHECK (round >= 1),
+        created_at   TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+    CREATE INDEX jobs_status ON jobs (status, created_at);
+    CREATE TRIGGER jobs_record_fixed BEFORE UPDATE OF id, signer, signed_json, expires_at ON jobs
+        BEGIN SELECT RAISE(ABORT, 'a job keeps its record'); END;
+    CREATE TRIGGER jobs_no_delete BEFORE DELETE ON jobs
+        BEGIN SELECT RAISE(ABORT, 'jobs are never deleted'); END;
+
+    CREATE TABLE leases (
+        token       TEXT PRIMARY KEY CHECK (length(token) = 32),
+        job         TEXT NOT NULL REFERENCES jobs (id),
+        node        TEXT NOT NULL REFERENCES nodes (fingerprint),
+        stage       TEXT NOT NULL CHECK (stage IN ('execute', 'recheck')),
+        round       INTEGER NOT NULL,
+        granted_at  TEXT NOT NULL,
+        expires_at  TEXT NOT NULL,
+        ended       TEXT CHECK (ended IN ('handed_in', 'expired', 'withdrawn')),
+        ended_at    TEXT
+    ) STRICT;
+    CREATE UNIQUE INDEX leases_one_held ON leases (job) WHERE ended IS NULL;
+    CREATE INDEX leases_held ON leases (expires_at) WHERE ended IS NULL;
+    CREATE TRIGGER leases_fixed BEFORE UPDATE OF token, job, node, stage, round, granted_at
+        ON leases
+        BEGIN SELECT RAISE(ABORT, 'a lease keeps who holds what'); END;
+    CREATE TRIGGER leases_end_once BEFORE UPDATE OF ended ON leases WHEN OLD.ended IS NOT NULL
+        BEGIN SELECT RAISE(ABORT, 'a lease ends once'); END;
+    CREATE TRIGGER leases_no_delete BEFORE DELETE ON leases
+        BEGIN SELECT RAISE(ABORT, 'leases are never deleted'); END;
+
+    CREATE TABLE results (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT NOT NULL UNIQUE CHECK (length(id) = 32),
+        job          TEXT NOT NULL REFERENCES jobs (id),
+        node         TEXT NOT NULL REFERENCES nodes (fingerprint),
+        lease        TEXT NOT NULL UNIQUE REFERENCES leases (token),
+        kind         TEXT NOT NULL CHECK (kind IN ('result', 'verdict')),
+        round        INTEGER NOT NULL,
+        outcome      TEXT NOT NULL CHECK (outcome IN ('done', 'failed', 'accept', 'reject')),
+        signed_json  TEXT NOT NULL CHECK (json_valid(signed_json)),
+        received_at  TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+    CREATE INDEX results_job ON results (job, seq);
+    CREATE TRIGGER results_no_update BEFORE UPDATE ON results
+        BEGIN SELECT RAISE(ABORT, 'results are append-only'); END;
+    CREATE TRIGGER results_no_delete BEFORE DELETE ON results
+        BEGIN SELECT RAISE(ABORT, 'results are append-only'); END;
+    """,
+    # 3 — whose node did the work, as it was when the result came: a later `owner` cannot make
+    # a node of the same owner its reviewer
+    """
+    ALTER TABLE results ADD COLUMN owner TEXT;
     """,
 )
 
@@ -266,6 +337,12 @@ class Node:
     registered_at: str
     last_seen: str
     revoked: bool
+    owner: str | None = None
+
+    @property
+    def owned_by(self) -> str:
+        """Its owner, or itself when the operator named none."""
+        return self.owner or self.fingerprint
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -274,6 +351,7 @@ class Node:
             "capabilities": [c.model_dump(mode="json") for c in self.capabilities],
             "registered_at": self.registered_at,
             "last_seen": self.last_seen,
+            "owner": self.owner,
         }
 
 
@@ -286,6 +364,7 @@ def _node(conn: sqlite3.Connection, row: sqlite3.Row) -> Node:
         registered_at=row["registered_at"],
         last_seen=row["last_seen"],
         revoked=is_revoked(conn, row["fingerprint"]),
+        owner=row["owner"],
     )
 
 

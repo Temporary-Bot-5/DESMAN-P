@@ -11,6 +11,10 @@ is answered with a `protocol.Problem` and written to the journal with the key it
 Only `REGISTER` is open to a key the registry has not seen; everything else needs a node that
 takes part (`active`), and a signed request from one that does not is a refusal like any other.
 
+Work (G.6) is `registry/work.py`'s: `CLAIM` lends a job, `EXTEND` keeps the lease, `HAND_IN`
+takes a signed result or verdict. A token that names no lease the caller holds now is refused
+as `lease_lost` (409), like any refusal journaled; a node that leaves gives its leases back.
+
 What is answered before the signature is read (an unknown path, another method, a body over
 `protocol.MAX_BODY`) is not journaled: nobody could be named, and anyone could fill the journal.
 """
@@ -27,12 +31,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Final, TypeVar
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import BaseModel, ValidationError
 
 from desman.core import db
-from desman.net import protocol, request
+from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import store
+from desman.registry import store, work
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -91,16 +96,31 @@ class Registry:
         *,
         clock: Callable[[], datetime] = _utc_now,
         heartbeat_seconds: int = protocol.HEARTBEAT_SECONDS,
+        root: Path | None = None,
     ) -> None:
         self.path = path
         self._clock = clock
         self._heartbeat = heartbeat_seconds
+        self._root_path = root
+        self._root: Ed25519PublicKey | None = None
         self._routes: dict[str, tuple[str, Handler]] = {
             protocol.REGISTER: ("POST", self._register),
             protocol.HEARTBEAT: ("POST", self._alive),
             protocol.LEAVE: ("POST", self._leave),
             protocol.TRUST: ("GET", self._trust),
+            protocol.CLAIM: ("POST", self._claim),
+            protocol.EXTEND: ("POST", self._extend),
+            protocol.HAND_IN: ("POST", self._hand_in),
         }
+
+    @property
+    def root(self) -> Ed25519PublicKey:
+        """The root nodes check jobs against (`net/root.pub` unless told otherwise)."""
+        if self._root is None:
+            self._root = sign.load_root(
+                sign.ROOT_PUB if self._root_path is None else self._root_path
+            )
+        return self._root
 
     def handle(
         self, method: str, target: str, headers: Iterable[tuple[str, str]], body: bytes
@@ -128,6 +148,9 @@ class Registry:
             except _NotRegistered:
                 self._refused(conn, caller.fingerprint, NOT_REGISTERED, method, target)
                 return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
+            except work.LeaseLost:
+                self._refused(conn, caller.fingerprint, work.LEASE_LOST, method, target)
+                return _problem(HTTPStatus.CONFLICT, work.LEASE_LOST)
 
     def _refused(
         self, conn: sqlite3.Connection, signer: str | None, reason: str, method: str, target: str
@@ -218,6 +241,7 @@ class Registry:
                 (db.to_iso(now), caller.fingerprint),
             )
             store.log(conn, "left", caller.fingerprint)
+            work.withdraw(conn, caller.fingerprint, now)
         return _ok(protocol.Left(node=caller.fingerprint, changed=True))
 
     def _trust(
@@ -228,6 +252,27 @@ class Registry:
             self._active(conn, caller)
             records = store.handed_out(conn, now)
         return _ok(protocol.TrustState(records=records))
+
+    def _claim(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        _body(protocol.Claim, body, caller)
+        found = self._active(conn, caller)
+        return _ok(protocol.Offer(work=work.claim(conn, found, self.root, now)))
+
+    def _extend(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        asked = _body(protocol.Extend, body, caller)
+        found = self._active(conn, caller)
+        return _ok(work.extend(conn, found, asked.lease, now))
+
+    def _hand_in(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        given = _body(protocol.HandIn, body, caller)
+        found = self._active(conn, caller)
+        return _ok(work.hand_in(conn, found, given, now))
 
 
 def _body(model: type[M], body: bytes, caller: request.Caller) -> M:

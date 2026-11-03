@@ -224,6 +224,11 @@ class RecordKind(StrEnum):
     TASK = "task"
     MODERATION = "moderation"
     RELEASE = "release"
+    RESULT = "result"
+    """A node's work on a task, signed by the node's own key: checked with `check_signature`
+    against the key that sent it, never by `Trust` (a node is no authority)."""
+    VERDICT = "verdict"
+    """A node's review of another node's result, signed like a result."""
 
 
 STATE: Final = frozenset({RecordKind.ASSIGNMENT, RecordKind.REVOCATION})
