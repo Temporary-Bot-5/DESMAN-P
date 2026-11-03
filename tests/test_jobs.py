@@ -965,10 +965,13 @@ def test_a_config_that_fails_turns_every_switch_off(
     assert crew.access.refusal(run) is not None
 
 
-def test_a_call_held_yesterday_does_not_count_against_today(clock: FakeClock, store: Store) -> None:
+def test_a_call_out_at_midnight_counts_against_the_new_day(clock: FakeClock, store: Store) -> None:
+    """It is logged when it ends, today: the quota never lets one more through meanwhile."""
     settings = Settings(Donation(calls_per_day=1, tokens_per_day=1000))
     clock.advance((jobs.day_start(clock()) + timedelta(days=1) - clock()).total_seconds() - 1)
-    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None  # 23:59:59
-    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is None
+    hold = jobs.hold_call(store.conn, settings(), "ollama", clock())  # 23:59:59
+    assert hold is not None
     clock.advance(2)  # a new day, the call still out
+    assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is None
+    jobs.release_call(store.conn, hold)
     assert jobs.hold_call(store.conn, settings(), "ollama", clock()) is not None

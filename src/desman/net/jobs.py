@@ -283,13 +283,12 @@ def used_today(conn: sqlite3.Connection, provider: str, now: datetime) -> tuple[
 
 
 def _held_calls(conn: sqlite3.Connection, provider: str, now: datetime) -> int:
-    """Calls being made today: a hold is taken `HOLD_FOR` before it expires, and one taken
-    yesterday counts against yesterday's quota (as its call will, in model_calls)."""
-    taken_today = day_start(now) + HOLD_FOR
+    """Calls being made, all counted against today: one taken before midnight is logged when it
+    ends, maybe today. The quota errs on the side of the person who lent it: right after
+    midnight a call still out may keep a job waiting, never let one through past the limit."""
     row = conn.execute(
-        "SELECT count(*) FROM quota_holds WHERE provider = ? AND expires_at > ?"
-        " AND expires_at >= ?",
-        (provider, db.to_iso(now), db.to_iso(taken_today)),
+        "SELECT count(*) FROM quota_holds WHERE provider = ? AND expires_at > ?",
+        (provider, db.to_iso(now)),
     ).fetchone()
     return int(row[0])
 
