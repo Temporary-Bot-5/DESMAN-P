@@ -9,8 +9,8 @@ lent and switches it off, while the key stays until the person deletes it. A mod
 never leaves the machine, a paid provider is never lent, and a free cloud provider only once
 its terms were checked (`providers.can_donate`).
 
-Only leaving talks to the registry here: once the config is saved off, it says goodbye to the
-registry it was on with (`farewell`, `node.tell_left`); the rest of the contact is the worker's (`net.node`, G.5). Both get the
+Leaving says goodbye to the registry (`farewell`, `node.tell_left`); explicitly confirmed
+proposals and reports also contact it here. The worker handles ongoing contact (`net.node`, G.5). Both get the
 address from `net.registry()`, which has none while desman-global is off. Every change is written to `network_log`. The commands
 are non-interactive; the chat calls the same functions after the person's "yes".
 """
@@ -20,11 +20,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import platform
 import sqlite3
+import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Final
 
@@ -37,6 +40,9 @@ from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog
 from desman.core import proposals as stored_proposals
+from desman.core import report as task_reports
+from desman.core import stats as task_stats
+from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
 from desman.net import node, protocol, sign
 from desman.providers import Provider
@@ -243,7 +249,9 @@ def proposal_upload(
     return signed
 
 
-def _refuse_secrets(config: Config, payload: protocol.ProposalSubmission) -> None:
+def _refuse_secrets(
+    config: Config, payload: protocol.ProposalSubmission | protocol.BugReport | protocol.MemoryShare
+) -> None:
     """Do not let a configured API key leave in a proposal, benchmark, or diff."""
     keys = [key.value for group in config.api_keys.values() for key in group if key.value]
 
@@ -256,8 +264,12 @@ def _refuse_secrets(config: Config, payload: protocol.ProposalSubmission) -> Non
             return any(contains_secret(v) for v in value)
         return False
 
-    if contains_secret(payload.model_dump(mode="json")):
-        raise click.ClickException(t("This proposal contains an API key; nothing was sent."))
+    if contains_secret(payload.model_dump_json()) or contains_secret(
+        payload.model_dump(mode="json")
+    ):
+        if isinstance(payload, protocol.ProposalSubmission):
+            raise click.ClickException(t("This proposal contains an API key; nothing was sent."))
+        raise click.ClickException(t("This report contains an API key; nothing was sent."))
 
 
 def proposal_confirmation(registry: str, body: dict[str, object]) -> str:
@@ -1002,3 +1014,279 @@ def update_command(
         click.echo(json.dumps(result, ensure_ascii=False))
     else:
         print_update(plan, done=action != "show")
+
+
+def _report_ready(config: Config) -> None:
+    if not config.network.enabled:
+        raise click.ClickException(t("desman-global is off: join it first (`desman global join`)."))
+    if net.registry(config) is None:
+        raise click.ClickException(
+            t(
+                "No registry address is known yet: give one with `desman global join --registry URL`."
+            )
+        )
+
+
+def _sign_report(
+    config: Config, report: protocol.BugReport | protocol.MemoryShare, key_path: Path | None
+) -> protocol.SignedReport:
+    _refuse_secrets(config, report)
+    key = usable_node_key(key_path, create=False)
+    if key is None:
+        raise click.ClickException(t("This node has no usable key; nothing was sent."))
+    signed = protocol.SignedReport(
+        report=report,
+        signer=key.fingerprint,
+        signature=base64.b64encode(key.sign(protocol.report_content(report))).decode("ascii"),
+    )
+    if (
+        len(protocol.SubmitReport(signed=signed).model_dump_json().encode())
+        > protocol.MAX_REPORT_BYTES
+    ):
+        raise click.ClickException(t("This report is too large to send."))
+    return signed
+
+
+def _task_snapshot(conn: sqlite3.Connection, task_id: str) -> protocol.TaskSnapshot:
+    with db.read_snapshot(conn):
+        found = task_reports.task_report(Store(conn), task_id)
+        parts = []
+        for sub in found.subtasks[:50]:
+            row = conn.execute(
+                "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+                "AND json_extract(details_json, '$.failure') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+                (sub.id,),
+            ).fetchone()
+            details = json.loads(row[0]) if row else {}
+            cause = details.get("cause") or details.get("reason")
+            parts.append(
+                protocol.SubtaskSnapshot(
+                    kind=sub.kind.value,
+                    status=sub.status.value,
+                    description=sub.description[:300],
+                    attempts=sub.attempts.model_dump(),
+                    failure=details.get("failure"),
+                    cause=str(cause)[:500] if cause is not None else None,
+                )
+            )
+        return protocol.TaskSnapshot(
+            status=found.status.value, goal=found.goal[:500], subtasks=parts
+        )
+
+
+def report_upload(
+    conn: sqlite3.Connection,
+    config: Config,
+    text: str,
+    task_id: str | None,
+    *,
+    key_path: Path | None = None,
+) -> protocol.SignedReport:
+    _report_ready(config)
+    try:
+        snapshot = _task_snapshot(conn, task_id) if task_id is not None else None
+    except (NotFoundError, AmbiguousIdError) as e:
+        raise click.ClickException(t("No task matches {id}.", id=task_id)) from e
+    except ValueError as e:
+        raise click.ClickException(t("This report cannot be sent: invalid contents.")) from e
+    try:
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+        commit = commit_result.stdout.strip() if commit_result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        commit = None
+    try:
+        installed_version = version("desman-p")
+    except PackageNotFoundError:
+        installed_version = "unknown"
+    try:
+        report = protocol.BugReport(
+            text=text,
+            version=installed_version,
+            commit=commit,
+            python=platform.python_version(),
+            system=(platform.system() + " " + platform.release())[:200],
+            language=config.language,
+            task=snapshot,
+        )
+    except ValueError as e:
+        raise click.ClickException(t("This report cannot be sent: invalid contents.")) from e
+    return _sign_report(config, report, key_path)
+
+
+def memory_upload(
+    conn: sqlite3.Connection,
+    config: Config,
+    *,
+    stats: bool,
+    failures: bool,
+    days: int,
+    key_path: Path | None = None,
+) -> protocol.SignedReport:
+    _report_ready(config)
+    if not stats and not failures:
+        raise click.ClickException(t("Choose statistics or failures to share."))
+    if not 1 <= days <= 365:
+        raise click.ClickException(t("This report cannot be sent: invalid contents."))
+    since = (_utc_now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = db.to_iso(since)
+    try:
+        with db.read_snapshot(conn):
+            report = protocol.MemoryShare(
+                since=start,
+                stats=task_stats.collect(conn, since, skip=stored_proposals.PURPOSE).as_json()
+                if stats
+                else None,
+                failures=stored_proposals.failures(conn, start) if failures else None,
+                plan_fallbacks=stored_proposals.plan_fallbacks(conn, start) if failures else None,
+            )
+    except ValueError as e:
+        raise click.ClickException(t("This report cannot be sent: invalid contents.")) from e
+    return _sign_report(config, report, key_path)
+
+
+def send_report(
+    manager: ConfigManager,
+    conn: sqlite3.Connection,
+    signed: protocol.SignedReport,
+    *,
+    registry: str | None = None,
+    key_path: Path | None = None,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> protocol.ReportReceived:
+    with manager.locked():
+        config = manager.load()
+        address = net.registry(config)
+        if registry is not None and address != registry:
+            raise click.ClickException(t("The registry changed after preview; nothing was sent."))
+        if not config.network.enabled or address is None:
+            raise click.ClickException(t("desman-global is off; nothing was sent."))
+        _refuse_secrets(config, signed.report)
+        key = usable_node_key(key_path, create=False)
+        if key is None:
+            raise click.ClickException(t("This node has no usable key; nothing was sent."))
+        if key.fingerprint != signed.signer:
+            raise click.ClickException(t("The node key changed after preview; nothing was sent."))
+        try:
+            received = node.submit_report(address, key, signed, transport=transport, clock=clock)
+        except node.ReportSendError as e:
+            raise click.ClickException(
+                t("The registry did not accept the report: {error}", error=e)
+            ) from e
+    try:
+        netlog.record(
+            conn,
+            "report_sent",
+            {
+                "registry": address,
+                "node": key.fingerprint,
+                "id": received.id,
+                "kind": received.kind,
+            },
+        )
+    except sqlite3.OperationalError:
+        raise click.ClickException(
+            t("The report was sent, but the local journal is busy.")
+        ) from None
+    return received
+
+
+def report_warning(report: protocol.BugReport | protocol.MemoryShare) -> str:
+    if report.kind == "bug":
+        return t("The operator of the registry will read this report.")
+    if report.failures is not None:
+        return t("Failures quote your own tasks' goals and the reviewers' words.")
+    return ""
+
+
+def _report_command(
+    manager: ConfigManager,
+    conn: sqlite3.Connection,
+    config: Config,
+    signed: protocol.SignedReport,
+    confirm: str | None,
+    as_json: bool,
+) -> None:
+    address = net.registry(config)
+    assert address is not None
+    preview = protocol.SubmitReport(signed=signed).model_dump(mode="json", exclude_none=True)
+    digest = proposal_confirmation(address, preview)
+    if confirm is None:
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {
+                        "sent": False,
+                        "registry": address,
+                        "confirmation": digest,
+                        "submission": preview,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            ui.note(
+                t(
+                    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.",
+                    hash=digest,
+                )
+            )
+            ui.out(t("Registry: {address}", address=address))
+            ui.out(Text(json.dumps(preview, ensure_ascii=False, indent=2, sort_keys=True)))
+            ui.note(report_warning(signed.report))
+        return
+    if digest != confirm.strip().casefold():
+        raise click.ClickException(t("The preview changed; nothing was sent. Preview it again."))
+    received = send_report(manager, conn, signed, registry=address)
+    if as_json:
+        click.echo(json.dumps({"sent": True, **received.model_dump()}))
+    else:
+        ui.ok(t("Report sent to the registry as {id}.", id=received.id))
+
+
+@global_group.command("report")
+@click.argument("text")
+@click.option("--task", "task_id", help="Include this task's snapshot.")
+@click.option("--confirm", metavar="SHA256", help="Send only if this matches the preview's hash.")
+@json_option
+def report_command(text: str, task_id: str | None, confirm: str | None, as_json: bool) -> None:
+    """Preview a bug report; --confirm sends the exact payload."""
+    manager = load_config()
+    config = manager.load()
+    with journal(None) as conn:
+        signed = report_upload(conn, config, text, task_id)
+        _report_command(manager, conn, config, signed, confirm, as_json)
+
+
+@global_group.command("share")
+@click.option("--stats/--no-stats", default=True, help="Include aggregate task statistics.")
+@click.option(
+    "--failures/--no-failures", default=False, help="Include failures and plan fallbacks."
+)
+@click.option(
+    "--days",
+    type=click.IntRange(1, 365),
+    default=30,
+    help="Share the last N days, from UTC midnight.",
+)
+@click.option("--confirm", metavar="SHA256", help="Send only if this matches the preview's hash.")
+@json_option
+def share_command(
+    stats: bool, failures: bool, days: int, confirm: str | None, as_json: bool
+) -> None:
+    """Preview shared memory; --confirm sends this one snapshot."""
+    manager = load_config()
+    config = manager.load()
+    with journal(None) as conn:
+        signed = memory_upload(conn, config, stats=stats, failures=failures, days=days)
+        _report_command(manager, conn, config, signed, confirm, as_json)

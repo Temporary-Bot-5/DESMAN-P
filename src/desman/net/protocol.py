@@ -475,3 +475,91 @@ def benchmark_snapshot(result: bench.Result) -> BenchmarkSnapshot:
 
 
 Release = sign.Release
+
+
+# Reports share one endpoint and one signature domain (G.9).
+REPORTS: Final = "/v1/reports"
+MAX_REPORT_BYTES: Final = 64 * 1024
+REPORT_LIMIT: Final = "report_limit"
+MAX_REPORTS_PER_DAY: Final = 5
+
+
+class SubtaskSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: str
+    status: str
+    description: str = Field(max_length=300)
+    attempts: dict[str, int]
+    failure: str | None = None
+    cause: str | None = Field(default=None, max_length=500)
+
+
+class TaskSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    status: str
+    goal: str = Field(max_length=500)
+    subtasks: list[SubtaskSnapshot] = Field(max_length=50)
+
+
+class BugReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["bug"] = "bug"
+    text: str = Field(min_length=1, max_length=4000)
+    version: str = Field(min_length=1, max_length=64)
+    commit: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")] | None = (
+        None
+    )
+    python: str
+    system: str = Field(max_length=200)
+    language: str
+    task: TaskSnapshot | None = None
+
+
+class MemoryShare(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["memory"] = "memory"
+    since: str
+    stats: dict[str, Any] | None = None
+    failures: list[dict[str, Any]] | None = None
+    plan_fallbacks: list[dict[str, Any]] | None = None
+
+    @model_validator(mode="after")
+    def _parts(self) -> MemoryShare:
+        if self.stats is None and self.failures is None:
+            raise ValueError("choose stats or failures")
+        if (self.failures is None) != (self.plan_fallbacks is None):
+            raise ValueError("failures and plan fallbacks go together")
+        start = datetime.fromisoformat(self.since)
+        offset = start.utcoffset()
+        if (
+            offset is None
+            or offset.total_seconds() != 0
+            or any((start.hour, start.minute, start.second, start.microsecond))
+        ):
+            raise ValueError("since must be UTC midnight")
+        return self
+
+
+Report = Annotated[BugReport | MemoryShare, Field(discriminator="kind")]
+
+
+class SignedReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    report: Report
+    signer: Fingerprint
+    signature: SignatureText
+
+
+class SubmitReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    signed: SignedReport
+
+
+class ReportReceived(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str
+    kind: Literal["bug", "memory"]
+
+
+def report_content(report: Report) -> bytes:
+    return canonical({"kind": "report_submission", "report": report.model_dump(mode="json")})

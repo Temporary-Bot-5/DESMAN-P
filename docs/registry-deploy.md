@@ -290,3 +290,5 @@ then preview again; do not assume it was signed or recorded. Back up the registr
 key as described above. Delivery to nodes and installation are separate work in G.8.
 
 The registry serves the newest five root-signed releases at signed GET `/v1/releases` for active nodes.
+
+Inspect incoming bug reports and shared memory with `desman-registry reports [--kind bug|memory]`; read one with `desman-registry report show ID`.

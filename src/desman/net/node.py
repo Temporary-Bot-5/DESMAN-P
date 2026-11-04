@@ -295,6 +295,39 @@ def submit_proposal(
         raise ProposalSendError(str(e)) from e
 
 
+class ReportSendError(Exception):
+    """The registry did not accept a report."""
+
+
+def submit_report(
+    registry: str,
+    key: sign.NodeKey,
+    signed: protocol.SignedReport,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> protocol.ReportReceived:
+    """Send the exact report approved by the person."""
+    body = protocol.SubmitReport(signed=signed)
+    if len(body.model_dump_json(exclude_none=True).encode("utf-8")) > protocol.MAX_REPORT_BYTES:
+        raise ReportSendError("report_too_large")
+    try:
+        with httpx.Client(transport=transport, timeout=TIMEOUT, follow_redirects=False) as client:
+            return _call(
+                client,
+                key,
+                registry,
+                "POST",
+                protocol.REPORTS,
+                body,
+                protocol.ReportReceived,
+                clock(),
+                time.monotonic() + TIMEOUT,
+            )
+    except (_Unreachable, _Problem) as e:
+        raise ReportSendError(str(e)) from e
+
+
 class Node:
     """This machine in desman-global, for one worker's life."""
 
