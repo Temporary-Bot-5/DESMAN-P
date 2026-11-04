@@ -867,6 +867,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "신뢰 목록: 루트가 서명하며, 최신 목록이 없으면 노드는 작업을 받지 않습니다.",
     "Trust list signed until {date} (records named: {count}).": "신뢰 목록에 서명했습니다. {date}까지 유효합니다(기재된 레코드: {count}).",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "신뢰 목록 {id}: {issued}에 서명, {date}까지 유효; 기재된 레코드: {count}.",
+    "Reason": "이유",
+    "Outcome": "결과",
+    "Verdict": "판정",
+    "Matches submission": "제출 내용과 일치",
+    "Handed a proposal check in to desman-global ({outcome}).": "제안 검증 결과를 desman-global에 제출했습니다 ({outcome}).",
 }
 
 CLICK: dict[str, Forms] = {

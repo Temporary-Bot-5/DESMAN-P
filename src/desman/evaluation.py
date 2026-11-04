@@ -7,7 +7,7 @@ made and its settings changed. The proposal must have been made from the files t
 has (`details.base`, their SHA-256), or it answers another text and is not evaluated. Each run
 is a process of its own (`python -m desman.bench`) with the worktree's code first on its path,
 a database of its own in a temporary folder, and the config only in real mode (read, never
-written). The worktrees are removed afterwards.
+written). The worktrees are removed afterwards. G.7b shares validation and runs through `check()`.
 
 The proposed version is made by code, never by applying the diff (a patch can do more than it
 shows): the targets' new texts are checked again and put into the commit's files the way the
@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -73,20 +74,81 @@ def evaluate(
     repo = repository() if repo is None else repo
     commit = _git(repo, "rev-parse", "HEAD").strip()
     candidate_tuning = proposed_tuning(tuning, proposal)
+    checked = check(
+        repo,
+        commit,
+        changes=proposal.details.get("changes", []),
+        base=proposal.details.get("base", {}),
+        diff=proposal.diff or "",
+        mode=mode,
+        base_tuning=tuning,
+        candidate_tuning=candidate_tuning,
+        python=python,
+        on_run=on_run,
+        provider=provider,
+        model=model,
+    )
+    if checked.outcome == "refused":
+        raise EvaluationError(checked.reason)
+    return proposals.record_evaluation(
+        conn,
+        proposal.id,
+        mode=mode,
+        commit=commit,
+        verdict=checked.verdict or "failed",
+        reason=checked.reason,
+        base=None if checked.base is None else checked.base.model_dump(mode="json"),
+        candidate=None if checked.candidate is None else checked.candidate.model_dump(mode="json"),
+    )
+
+
+@dataclass(frozen=True)
+class Checked:
+    """A plain-data evaluation, shared with another node's proposal check (G.7b)."""
+
+    outcome: Literal["refused", "failed", "done"]
+    reason: str | None = None
+    base: bench.Result | None = None
+    candidate: bench.Result | None = None
+    verdict: Literal["better", "worse", "same"] | None = None
+
+
+def check(
+    repo: Path,
+    commit: str,
+    *,
+    changes: list[dict[str, Any]],
+    base: dict[str, str],
+    diff: str,
+    mode: bench.Mode,
+    base_tuning: Tuning,
+    candidate_tuning: Tuning,
+    timeout: float | None = None,
+    python: str = sys.executable,
+    on_run: Callable[[Side], None] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> Checked:
+    """Validate plain proposal data before running either isolated benchmark (G.7b)."""
     folder = Path(tempfile.mkdtemp(prefix="desman-eval-"))
     trees: list[Path] = []
     try:
         base_tree, candidate_tree = folder / "current", folder / "proposed"
         for tree in (base_tree, candidate_tree):
-            _git(repo, "worktree", "add", "--detach", str(tree), commit)
             trees.append(tree)
-        _check_base(base_tree, proposal, commit)
-        if proposal.diff:
-            _build(candidate_tree, proposal)
-            _check_changes(base_tree, candidate_tree, proposal)
+            _git(repo, "worktree", "add", "--detach", str(tree), commit)
+        try:
+            _check_base(base_tree, base, commit)
+            if diff or changes:
+                _build(candidate_tree, changes, diff)
+                _check_changes(base_tree, candidate_tree, changes)
+        except (EvaluationError, OSError, ValueError, SyntaxError) as e:
+            if isinstance(e, EvaluationError) and str(e).startswith("git "):
+                raise
+            return Checked("refused", str(e))
         results: dict[Side, bench.Result] = {}
         sides: tuple[tuple[Side, Path, Tuning], ...] = (
-            ("base", base_tree, tuning),
+            ("base", base_tree, base_tuning),
             ("candidate", candidate_tree, candidate_tuning),
         )
         for side, tree, side_tuning in sides:
@@ -94,27 +156,26 @@ def evaluate(
                 on_run(side)
             try:
                 results[side] = _run(
-                    tree, folder, mode, side_tuning, provider=provider, model=model, python=python
+                    tree,
+                    folder,
+                    mode,
+                    side_tuning,
+                    provider=provider,
+                    model=model,
+                    python=python,
+                    timeout=timeout,
                 )
             except RunFailed as e:
-                done = {k: v.model_dump(mode="json") for k, v in results.items()}
-                return proposals.record_evaluation(
-                    conn,
-                    proposal.id,
-                    mode=mode,
-                    commit=commit,
-                    verdict="failed",
-                    reason=f"the {_side_name(side)} version's run failed: {e}",
-                    base=done.get("base"),
+                return Checked(
+                    "failed",
+                    f"the {_side_name(side)} version's run failed: {e}",
+                    results.get("base"),
                 )
-        return proposals.record_evaluation(
-            conn,
-            proposal.id,
-            mode=mode,
-            commit=commit,
+        return Checked(
+            "done",
+            base=results["base"],
+            candidate=results["candidate"],
             verdict=bench.compare(results["base"], results["candidate"]),
-            base=results["base"].model_dump(mode="json"),
-            candidate=results["candidate"].model_dump(mode="json"),
         )
     finally:
         for tree in trees:
@@ -161,10 +222,13 @@ def proposed_tuning(tuning: Tuning, proposal: Proposal) -> Tuning:
 # ── The worktrees ────────────────────────────────────────────────────────────
 
 
-def _check_base(tree: Path, proposal: Proposal, commit: str) -> None:
+def _check_base(tree: Path, base: dict[str, str], commit: str) -> None:
     """The proposal was made from the files the commit has."""
     differ = []
-    for name, digest in proposal.details.get("base", {}).items():
+    allowed = {improve.SOURCE_PREFIX + target.path for target in improve.TARGETS}
+    for name, digest in base.items():
+        if name not in allowed:
+            raise EvaluationError("the base names a file outside the allowed targets")
         path = tree / name
         text = path.read_text(encoding="utf-8") if path.is_file() else ""
         if hashlib.sha256(text.encode()).hexdigest() != digest:
@@ -176,14 +240,14 @@ def _check_base(tree: Path, proposal: Proposal, commit: str) -> None:
         )
 
 
-def _build(tree: Path, proposal: Proposal) -> None:
+def _build(tree: Path, changes: list[dict[str, Any]], diff: str) -> None:
     """Make the proposed version in `tree` by code, never by applying the diff: each target's
     new text checked (`improve.checked`) and put into the commit's file (`improve.replace`), as
     the diff was built. The diff that makes must be the proposal's, to the byte, so what runs
     is what the person reads; and afterwards git must see only those files changed."""
     texts: dict[str, str] = {}
     package = tree / "src" / "desman"
-    for change in proposal.details.get("changes", []):
+    for change in changes:
         target = improve.BY_ID.get(str(change.get("target")))
         if target is None:
             raise EvaluationError(f"unknown target {change.get('target')!r}")
@@ -198,7 +262,7 @@ def _build(tree: Path, proposal: Proposal) -> None:
         improve.file_diff(path, (package / path).read_text(encoding="utf-8"), text)
         for path, text in texts.items()
     )
-    if built != proposal.diff:
+    if built != diff:
         raise EvaluationError("the diff is not the one the proposal's texts make")
     for path, text in texts.items():
         (package / path).write_text(text, encoding="utf-8")
@@ -208,9 +272,8 @@ def _build(tree: Path, proposal: Proposal) -> None:
         raise EvaluationError("the proposed version differs from the commit in other files")
 
 
-def _check_changes(base: Path, candidate: Path, proposal: Proposal) -> None:
+def _check_changes(base: Path, candidate: Path, changes: list[dict[str, Any]]) -> None:
     """In the proposed version, only the targets' texts differ, and they hold the new values."""
-    changes = proposal.details.get("changes", [])
     by_file: dict[str, dict[str, str]] = {}
     for change in changes:
         target = improve.BY_ID.get(str(change.get("target")))
@@ -286,6 +349,7 @@ def _run(
     provider: str | None,
     model: str | None,
     python: str,
+    timeout: float | None = None,
 ) -> bench.Result:
     """`python -m desman.bench` with the worktree's code; its result, checked to come from it."""
     data = folder / f"{tree.name}-data"
@@ -311,11 +375,13 @@ def _run(
             env=env,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT[mode],
+            timeout=TIMEOUT[mode] if timeout is None else timeout,
             check=False,
         )
     except subprocess.TimeoutExpired as e:
-        raise RunFailed(f"it took longer than {int(TIMEOUT[mode])} s") from e
+        raise RunFailed(
+            f"it took longer than {int(TIMEOUT[mode] if timeout is None else timeout)} s"
+        ) from e
     except OSError as e:
         raise RunFailed(str(e)) from e
     if done.returncode != 0:

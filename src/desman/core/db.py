@@ -1,5 +1,7 @@
 """SQLite connection, schema and migrations.
 
+Migration 30 keeps signed independent proposal checks for durable hand-in (G.7b).
+
 The database is the only place where task state lives (PROJECT_PLAN: "durable state first").
 
 - Connections run in autocommit mode; writes go through `transaction()`, which takes the write
@@ -559,6 +561,19 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         id          INTEGER PRIMARY KEY,
         provider    TEXT NOT NULL,
         expires_at  TEXT NOT NULL
+    ) STRICT;
+    """,
+    # 30 — signed independent proposal checks awaiting hand-in (G.7b).
+    """
+    CREATE TABLE network_checks (
+        lease TEXT PRIMARY KEY,
+        registry TEXT NOT NULL,
+        proposal TEXT NOT NULL,
+        submission_sha256 TEXT NOT NULL,
+        record_json TEXT NOT NULL CHECK (json_valid(record_json)),
+        state TEXT NOT NULL CHECK (state IN ('signed', 'handed_in', 'lost')),
+        created_at TEXT NOT NULL,
+        UNIQUE (registry, proposal)
     ) STRICT;
     """,
 )

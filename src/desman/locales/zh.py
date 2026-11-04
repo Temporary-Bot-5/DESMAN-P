@@ -859,6 +859,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "信任列表：由根密钥签署；没有新的列表，节点不接受工作。",
     "Trust list signed until {date} (records named: {count}).": "信任列表已签署，有效期至 {date}（列出的记录：{count}）。",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "信任列表 {id}：签署于 {issued}，有效期至 {date}；列出的记录：{count}。",
+    "Reason": "原因",
+    "Outcome": "结果",
+    "Verdict": "判定",
+    "Matches submission": "与提交内容一致",
+    "Handed a proposal check in to desman-global ({outcome}).": "已向 desman-global 提交提案检查结果（{outcome}）。",
 }
 
 CLICK: dict[str, Forms] = {

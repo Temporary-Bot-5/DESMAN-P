@@ -1,5 +1,5 @@
 """The interlocutor's manual of DESMAN (ROADMAP C.10): what it may tell the person about how
-DESMAN works, so that it never has to make it up.
+DESMAN works, so that it never has to make it up. G.7b describes independent fake proposal checks.
 
 Short texts for the model, in English like every prompt, one per topic. The interlocutor's
 prompt lists only the topics, a line each (small models have little context); it asks for one
@@ -226,7 +226,7 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "desman-global links DESMANs through the project's registry. Off until the person runs "
+        "desman-global is off until the person runs "
         "`desman global join` (`desman global join --registry URL` while no address is known); it "
         "makes a node key (node.key; only its fingerprint is shown) and lends nothing.\n"
         "Lending a provider with a daily quota: `desman global donate PROVIDER --calls N "
@@ -240,11 +240,13 @@ TOPICS: Final = (
         "web), or reviews another node's result. The person's work goes first and interrupts "
         "a job; a job never waits for the person. An unreachable registry is tried later; a "
         "revoked node falls silent.\n"
+        "When idle, a node may check another owner's proposal: isolated fake benchmark only, "
+        "no personal data sent.\n"
         "`desman global submit-proposal N` sends a proposal that changes texts, with both "
         "benchmark results, signed: never settings, never the analyst's evidence; API keys "
         "found stop it; at most 5 a day. It previews and sends only with `desman global submit-proposal N --confirm "
         "HASH`; the hash confirms both the payload and registry address. "
-        "The chat asks in the window. Every change is journaled.",
+        "The chat asks in the window; changes are journaled.",
     ),
 )
 

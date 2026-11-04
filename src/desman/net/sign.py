@@ -1,5 +1,7 @@
 """Signatures of desman-global (ADR 0004, decision 3; ROADMAP G.2).
 
+G.7b proposal checks are node-signed and never accepted as trust state.
+
 Every key is Ed25519 (`cryptography`). A key is named by its fingerprint: the SHA-256 of its raw
 public bytes, in hex. Only fingerprints and public keys ever leave the machine.
 
@@ -236,6 +238,8 @@ class RecordKind(StrEnum):
     RESULT = "result"
     """A node's work on a task, signed by the node's own key: checked with `check_signature`
     against the key that sent it, never by `Trust` (a node is no authority)."""
+    PROPOSAL_CHECK = "proposal_check"
+    """A node-signed independent proposal benchmark check (G.7b), never trust state."""
     VERDICT = "verdict"
     """A node's review of another node's result, signed like a result."""
     TRUST_LIST = "trust_list"
@@ -567,6 +571,8 @@ class Trust:
 
         if record.signer in self._revoked:
             raise refuse(Reason.REVOKED, "the signer's key is revoked")
+        if record.kind is RecordKind.PROPOSAL_CHECK:
+            raise refuse(Reason.NOT_ALLOWED, "a proposal check is not trust state")
         key = self._signer_key(record)
         check_signature(signed, key)
         self._check_authority(record, now)

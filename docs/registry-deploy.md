@@ -243,3 +243,8 @@ sudo systemctl restart desman-registry
 ```
 
 The registry migrates its database on start. Take a backup first.
+
+Independent proposal checks (G.7b) appear in `desman-registry proposal show ID`: the checking
+node, outcome, verdict, whether the metrics match the submission, reason, and both benchmark
+snapshots. The checker belongs to another owner and runs only the fake benchmark; the
+operator still decides. `--json` includes the checks.

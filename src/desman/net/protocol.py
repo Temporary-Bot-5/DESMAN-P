@@ -1,4 +1,4 @@
-"""What a node and the registry say to each other (ADR 0004; ROADMAP G.4, G.6).
+"""What a node and the registry say to each other (ADR 0004; ROADMAP G.4, G.6, G.7b).
 
 Both sides use these models: the node builds its requests from them (G.5) and the registry
 validates every body with them where it enters, like any contract crossing a boundary. Every
@@ -8,14 +8,18 @@ provider, its model and the fingerprint of the API key (`openai_compat.key_id`),
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
-from typing import Annotated, Any, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from desman.core.models import Kind
-from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed
+from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed, canonical
+
+if TYPE_CHECKING:
+    from desman import bench
 
 REGISTER: Final = "/v1/nodes/register"
 HEARTBEAT: Final = "/v1/nodes/heartbeat"
@@ -24,6 +28,7 @@ TRUST: Final = "/v1/trust"
 CLAIM: Final = "/v1/work/claim"
 EXTEND: Final = "/v1/work/extend"
 HAND_IN: Final = "/v1/work/hand-in"
+CHECK_HAND_IN: Final = "/v1/proposals/check"
 PROPOSALS: Final = "/v1/proposals"
 
 MAX_BODY: Final = 256 * 1024
@@ -263,9 +268,12 @@ class Job(BaseModel):
 
 
 class Claim(BaseModel):
-    """A node asks for work. Empty for now: the registry knows what it lends."""
+    """A node opts into jobs (by default) and fake proposal checks independently (G.7b)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    jobs: bool = True
+    proposals: bool = False
 
 
 class Work(BaseModel):
@@ -290,12 +298,75 @@ class Work(BaseModel):
         return self
 
 
+class ProposalWork(BaseModel):
+    """A submitted proposal lent for one independent fake benchmark check."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    lease: LeaseToken
+    expires_at: datetime
+    proposal: LeaseToken
+    submission: SignedProposalSubmission
+    submitter_key: PublicKeyText
+
+
+class ProposalCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["proposal_check"] = "proposal_check"
+    proposal: LeaseToken
+    lease: LeaseToken
+    submission: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    outcome: Literal["refused", "failed", "unable", "checked"]
+    reason: str = Field(default="", max_length=1000)
+    mode: Literal["fake"] = "fake"
+    commit: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
+    verdict: Literal["better", "worse", "same"] | None = None
+    base: BenchmarkSnapshot | None = None
+    candidate: BenchmarkSnapshot | None = None
+    matches_submission: bool | None = None
+
+    @model_validator(mode="after")
+    def _results(self) -> ProposalCheck:
+        complete = self.verdict is not None and self.base is not None and self.candidate is not None
+        if (self.outcome == "checked") != complete:
+            raise ValueError("only a checked proposal has a verdict and both snapshots")
+        if self.outcome != "checked" and self.verdict is not None:
+            raise ValueError("no verdict without a completed check")
+        if self.outcome in ("refused", "unable") and (
+            self.base is not None or self.candidate is not None
+        ):
+            raise ValueError("a refused or unavailable check has no snapshots")
+        if any(s.mode != "fake" for s in (self.base, self.candidate) if s is not None):
+            raise ValueError("checks run only the fake benchmark")
+        if self.outcome != "checked" and self.matches_submission is not None:
+            raise ValueError("only completed checks can match a submission")
+        return self
+
+
+class HandInCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    lease: LeaseToken
+    record: Signed
+
+
+class CheckReceived(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    proposal: LeaseToken
+    status: str
+
+
 class Offer(BaseModel):
     """The answer to a claim: work, or none for now."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     work: Work | None = None
+    check: ProposalWork | None = None
+
+    @model_validator(mode="after")
+    def _one(self) -> Offer:
+        if self.work is not None and self.check is not None:
+            raise ValueError("an offer lends either a job or a proposal check")
+        return self
 
 
 class Extend(BaseModel):
@@ -368,3 +439,13 @@ class Received(BaseModel):
 
     job: RecordId
     status: str
+
+
+def submission_hash(submission: ProposalSubmission) -> str:
+    """Bind a check to the exact unsigned contents approved by the submitter."""
+    return hashlib.sha256(canonical(submission.model_dump(mode="json"))).hexdigest()
+
+
+def benchmark_snapshot(result: bench.Result) -> BenchmarkSnapshot:
+    """One shared conversion for local uploads and independent checks (G.7b)."""
+    return BenchmarkSnapshot.model_validate(result.model_dump(mode="json"))
