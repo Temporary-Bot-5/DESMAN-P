@@ -26,6 +26,7 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -251,6 +252,22 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER proposals_decision_final BEFORE UPDATE OF status ON proposals
         WHEN OLD.status IN ('accepted', 'rejected') AND NEW.status IS NOT OLD.status
         BEGIN SELECT RAISE(ABORT, 'proposal decisions are final'); END;
+    """,
+    # 8 — reports and one-shot shared memory (G.9).
+    """
+    CREATE TABLE reports (
+        id TEXT PRIMARY KEY,
+        node TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('bug', 'memory')),
+        report_json TEXT NOT NULL CHECK (json_valid(report_json)),
+        created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX reports_kind_created ON reports(kind, created_at);
+    CREATE INDEX reports_node_created ON reports(node, created_at);
+    CREATE TRIGGER reports_no_update BEFORE UPDATE ON reports
+        BEGIN SELECT RAISE(ABORT, 'reports are append-only'); END;
+    CREATE TRIGGER reports_no_delete BEFORE DELETE ON reports
+        BEGIN SELECT RAISE(ABORT, 'reports are append-only'); END;
     """,
 )
 
@@ -596,3 +613,31 @@ def nodes(conn: sqlite3.Connection) -> list[Node]:
 
 def capabilities_json(capabilities: list[Capability]) -> str:
     return json.dumps([c.model_dump(mode="json") for c in capabilities], sort_keys=True)
+
+
+class ReportLimit(Exception):
+    """Five new reports per node and kind in a rolling day."""
+
+
+def submit_report(
+    conn: sqlite3.Connection, node: str, signed: protocol.SignedReport, now: datetime
+) -> tuple[protocol.ReportReceived, bool]:
+    digest = hashlib.sha256(sign.canonical(signed.report.model_dump(mode="json"))).hexdigest()
+    id = hashlib.sha256(f"{node}:{digest}".encode()).hexdigest()
+    kind = signed.report.kind
+    received = protocol.ReportReceived(id=id, kind=kind)
+    with db.transaction(conn):
+        if conn.execute("SELECT 1 FROM reports WHERE id = ?", (id,)).fetchone():
+            return received, False
+        count = conn.execute(
+            "SELECT count(*) FROM reports WHERE node = ? AND kind = ? AND created_at > ?",
+            (node, kind, db.to_iso(now - timedelta(days=1))),
+        ).fetchone()[0]
+        if count >= protocol.MAX_REPORTS_PER_DAY:
+            raise ReportLimit(node)
+        conn.execute(
+            "INSERT INTO reports VALUES (?, ?, ?, ?, ?)",
+            (id, node, kind, signed.model_dump_json(), db.to_iso(now)),
+        )
+        log(conn, "report_received", node, {"id": id, "kind": kind})
+    return received, True

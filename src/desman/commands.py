@@ -290,6 +290,19 @@ class UpdateArgs(Args):
     release: Annotated[int, Field(ge=1)] | None = None
 
 
+class GlobalReportArgs(Args):
+    text: str = Field(
+        min_length=1, max_length=4000, description="the person's description of the problem"
+    )
+    task: str | None = Field(default=None, description="a task id to attach its status, optional")
+
+
+class GlobalShareArgs(Args):
+    stats: bool = Field(default=True, description="include aggregate statistics")
+    failures: bool = Field(default=False, description="include failures quoting the person's tasks")
+    days: int = Field(default=30, ge=1, le=365, description="days back from UTC midnight")
+
+
 class GlobalProposalArgs(Args):
     proposal: Annotated[int, Field(ge=1)] = Field(description="the local proposal number")
 
@@ -574,6 +587,44 @@ def _global_status(ctx: Context, args: NoArgs) -> Outcome:
     found = global_cli.status(ctx.config())
     global_cli.print_status(found)
     return Outcome(found.as_json())
+
+
+def _global_report(ctx: Context, args: GlobalReportArgs) -> Proposal:
+    config = ctx.config()
+    signed = global_cli.report_upload(ctx.store.conn, config, args.text, args.task)
+    return _global_report_window(ctx, config, signed)
+
+
+def _global_share(ctx: Context, args: GlobalShareArgs) -> Proposal:
+    config = ctx.config()
+    signed = global_cli.memory_upload(
+        ctx.store.conn, config, stats=args.stats, failures=args.failures, days=args.days
+    )
+    return _global_report_window(ctx, config, signed)
+
+
+def _global_report_window(ctx: Context, config: Config, signed: protocol.SignedReport) -> Proposal:
+    address = net.registry(config)
+    assert address is not None
+    body = protocol.SubmitReport(signed=signed).model_dump(mode="json", exclude_none=True)
+
+    def apply() -> Outcome:
+        sent = global_cli.send_report(ctx.manager, ctx.store.conn, signed, registry=address)
+        ui.ok(t("Report sent to the registry as {id}.", id=sent.id))
+        return Outcome(sent.model_dump())
+
+    return Proposal(
+        [
+            t("Send this bug report to {address}?", address=address)
+            if signed.report.kind == "bug"
+            else t("Send this memory snapshot to {address}?", address=address),
+            json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True),
+        ],
+        apply,
+        [global_cli.report_warning(signed.report)]
+        if global_cli.report_warning(signed.report)
+        else [],
+    )
 
 
 def _global_submit_proposal(ctx: Context, args: GlobalProposalArgs) -> Proposal:
@@ -1402,6 +1453,22 @@ CATALOG: tuple[Entry, ...] = (
         Kind.READ,
         _global_status,
         aliases=("global",),
+    ),
+    Entry(
+        "global report",
+        "Send a bug report only when the person asks to report a problem. Write the person's "
+        "own description, never add secrets. The person reviews the exact body and confirms.",
+        GlobalReportArgs,
+        Kind.CHANGE,
+        _global_report,
+    ),
+    Entry(
+        "global share",
+        "Share chosen statistics and/or failures with the registry once, only when asked. "
+        "Failures quote private goals and reviewers' words; the person confirms the exact body.",
+        GlobalShareArgs,
+        Kind.CHANGE,
+        _global_share,
     ),
     Entry(
         "global submit-proposal",

@@ -15,6 +15,29 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose statistics or failures to share.": "Выберите статистику или неудачи для отправки.",
+    "Failures quote your own tasks' goals and the reviewers' words.": "Неудачи цитируют цели ваших задач и слова рецензентов.",
+    "Include aggregate task statistics.": "Включить сводную статистику задач.",
+    "Include failures and plan fallbacks.": "Включить неудачи и случаи резервного планирования.",
+    "Include this task's snapshot.": "Включить снимок этой задачи.",
+    "Inspect reports submitted by network nodes.": "Просмотреть отчёты, отправленные узлами сети.",
+    "List bug reports and shared memory.": "Список баг-репортов и переданной памяти.",
+    "No report matches {id}.": "Отчёт {id} не найден.",
+    "No task matches {id}.": "Задача {id} не найдена.",
+    "Only reports of this kind.": "Только отчёты этого вида.",
+    "Preview a bug report; --confirm sends the exact payload.": "Предпросмотр баг-репорта; --confirm отправляет точное содержимое.",
+    "Preview shared memory; --confirm sends this one snapshot.": "Предпросмотр памяти; --confirm отправляет только этот снимок.",
+    "Report sent to the registry as {id}.": "Отчёт отправлен в реестр с номером {id}.",
+    "Send this bug report to {address}?": "Отправить этот отчёт об ошибке по адресу {address}?",
+    "Send this memory snapshot to {address}?": "Отправить этот снимок памяти по адресу {address}?",
+    "The report was sent, but the local journal is busy.": "Отчёт отправлен, но локальный журнал занят.",
+    "Share the last N days, from UTC midnight.": "Передать данные за последние N дней, с полуночи UTC.",
+    "Show the exact submitted report.": "Показать точное содержимое отправленного отчёта.",
+    "The operator of the registry will read this report.": "Оператор реестра прочитает этот отчёт.",
+    "The registry did not accept the report: {error}": "Реестр не принял отчёт: {error}",
+    "This report cannot be sent: invalid contents.": "Этот отчёт нельзя отправить: недопустимое содержимое.",
+    "This report contains an API key; nothing was sent.": "В отчёте есть ключ API; ничего не отправлено.",
+    "This report is too large to send.": "Этот отчёт слишком велик для отправки.",
     # ── Command help ─────────────────────────────────────────────────────────
     "DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)": (
         "DESMAN(P) — децентрализованная самоэволюционирующая модульная сеть агентов (прототип)"

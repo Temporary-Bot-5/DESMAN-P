@@ -121,6 +121,7 @@ class Registry:
             protocol.HAND_IN: ("POST", self._hand_in),
             protocol.CHECK_HAND_IN: ("POST", self._hand_in_check),
             protocol.PROPOSALS: ("POST", self._submit_proposal),
+            protocol.REPORTS: ("POST", self._submit_report),
         }
 
     @property
@@ -343,6 +344,36 @@ class Registry:
                 status="submitted",
             )
         )
+
+    def _submit_report(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        """Store the report body authenticated by this request's node signature."""
+        asked = _body(protocol.SubmitReport, body, caller)
+        self._active(conn, caller)
+        if len(body) > protocol.MAX_REPORT_BYTES:
+            raise Refused(Reason.MALFORMED, "report is too large", signer=caller.fingerprint)
+        if asked.signed.signer != caller.fingerprint:
+            raise Refused(
+                Reason.UNKNOWN_SIGNER,
+                "report signer is not the request node",
+                signer=caller.fingerprint,
+            )
+        try:
+            caller.key.verify(
+                base64.b64decode(asked.signed.signature, validate=True),
+                protocol.report_content(asked.signed.report),
+            )
+        except (InvalidSignature, binascii.Error) as e:
+            raise Refused(Reason.FORGED, "bad report signature", signer=caller.fingerprint) from e
+        try:
+            found, _ = store.submit_report(conn, caller.fingerprint, asked.signed, now)
+        except store.ReportLimit:
+            self._refused(conn, caller.fingerprint, protocol.REPORT_LIMIT, "POST", protocol.REPORTS)
+            return _problem(HTTPStatus.FORBIDDEN, protocol.REPORT_LIMIT)
+        except ValueError as e:
+            raise Refused(Reason.CONFLICT, str(e), signer=caller.fingerprint) from e
+        return _ok(found)
 
 
 def _body(model: type[M], body: bytes, caller: request.Caller) -> M:

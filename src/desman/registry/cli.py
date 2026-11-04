@@ -948,3 +948,52 @@ def release_show(ctx: click.Context, number: int, as_json: bool) -> None:
             )
         )
         ui.out(Text(json.dumps(found, ensure_ascii=False, indent=2)))
+
+
+@cli.command("reports")
+@click.option("--kind", type=click.Choice(["bug", "memory"]), help="Only reports of this kind.")
+@_json_option
+@click.pass_context
+def reports(ctx: click.Context, kind: str | None, as_json: bool) -> None:
+    """List bug reports and shared memory."""
+    conn = _open_db(ctx)
+    try:
+        rows = conn.execute(
+            "SELECT id, node, kind, created_at FROM reports WHERE (? IS NULL OR kind = ?) "
+            "ORDER BY created_at DESC, id",
+            (kind, kind),
+        ).fetchall()
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps([dict(row) for row in rows]))
+    else:
+        for row in rows:
+            ui.out(f"{row['id']}  {row['kind']}  {row['node']}  {row['created_at']}")
+
+
+@cli.group("report")
+def report_group() -> None:
+    """Inspect reports submitted by network nodes."""
+
+
+@report_group.command("show")
+@click.argument("id")
+@_json_option
+@click.pass_context
+def report_show(ctx: click.Context, id: str, as_json: bool) -> None:
+    """Show the exact submitted report."""
+    conn = _open_db(ctx)
+    try:
+        row = conn.execute("SELECT * FROM reports WHERE id = ?", (id,)).fetchone()
+        if row is None:
+            raise click.ClickException(t("No report matches {id}.", id=id))
+        body = dict(row)
+        body["report"] = json.loads(body.pop("report_json"))
+    finally:
+        conn.close()
+    exact = json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True)
+    if as_json:
+        click.echo(exact)
+    else:
+        ui.out(Text(exact))

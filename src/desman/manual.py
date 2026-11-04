@@ -240,11 +240,27 @@ TOPICS: Final = (
         "`desman global submit-proposal N` previews a text proposal and benchmarks (no settings "
         "or private evidence; keys block sending; 5/day); --confirm HASH sends that payload "
         "to that registry. The chat asks in a window.\n"
+        "For bug reports and optional shared memory, see topic globalsend. "
         "Root-signed operator releases arrive with the worker: `desman global update --show N` "
         "inspects (omit N for newest); `desman global update --apply N` installs only by the "
         "person, never automatically; `desman global update --revert` undoes the newest installed release, one at a time, if HEAD/schema "
         "have not advanced. Restart workers/chats; approve protected changes and reinstall "
         "changed dependencies. Chat changes require the confirmation window.",
+    ),
+    Topic(
+        "globalsend",
+        "Sending bug reports and shared memory to the registry",
+        "`desman global report TEXT` previews your problem description and system/version; "
+        "--task ID adds bounded task status, descriptions and failure causes, never workspace files. "
+        "`desman global share` previews aggregate stats; --failures includes failures and plan "
+        "fallbacks quoting your tasks and reviewers. --no-stats omits stats; choose at least one. "
+        "--days N (1–365, default 30) starts at UTC midnight N days ago. "
+        "Both require global join and a registry. Nothing is sent until --confirm HASH matches "
+        "the rebuilt exact body and destination; changed snapshots require another preview. "
+        "The chat shows the exact JSON in its confirmation window. Configured API keys block "
+        "sending. No profile, chat history, configuration or workspace files are included. "
+        "Sharing is one-shot, with no config change. The registry operator reads reports; "
+        "the limit is five new reports per node per kind per day.",
     ),
 )
 
