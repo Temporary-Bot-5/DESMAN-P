@@ -15,11 +15,14 @@ are non-interactive; the chat calls the same functions after the person's "yes".
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -31,8 +34,9 @@ from desman import net, providers, ui
 from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog
+from desman.core import proposals as stored_proposals
 from desman.i18n import t
-from desman.net import node, sign
+from desman.net import node, protocol, sign
 from desman.providers import Provider
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -40,6 +44,10 @@ DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
 
 NO_KEY: Final = "node_key_unusable"
 """`Left.unheard` when the goodbye could not be signed: nothing was sent."""
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -134,6 +142,135 @@ def status(config: Config, key_path: Path | None = None) -> Status:
         node=node_fingerprint(key_path),
         donated=dict(network.donated),
     )
+
+
+def proposal_upload(
+    conn: sqlite3.Connection,
+    config: Config,
+    proposal_id: int,
+    *,
+    key_path: Path | None = None,
+) -> protocol.SignedProposalSubmission:
+    """Build the exact, bounded payload that would leave this node for G.7."""
+    if not config.network.enabled:
+        raise click.ClickException(t("desman-global is off: join it first (`desman global join`)."))
+    if net.registry(config) is None:
+        raise click.ClickException(
+            t(
+                "No registry address is known yet: give one with `desman global join --registry URL`."
+            )
+        )
+    found = stored_proposals.get(conn, proposal_id)
+    if found is None:
+        raise click.ClickException(t("No proposal {id}.", id=proposal_id))
+    if found.status is not stored_proposals.Status.PROPOSED:
+        raise click.ClickException(t("Proposal {id} has nothing to submit.", id=proposal_id))
+    evaluations = stored_proposals.evaluations(conn, proposal_id)
+    evaluation = next(
+        (e for e in evaluations if e.base is not None and e.candidate is not None), None
+    )
+    if evaluation is None or evaluation.verdict == "failed":
+        raise click.ClickException(
+            t("Proposal {id} needs a completed benchmark with both results.", id=proposal_id)
+        )
+    if evaluation.base is None or evaluation.candidate is None:
+        raise click.ClickException(
+            t("Proposal {id} needs a completed benchmark with both results.", id=proposal_id)
+        )
+    try:
+        payload = protocol.ProposalSubmission.model_validate(
+            {
+                "proposal": found.id,
+                "evaluation": evaluation.id,
+                "base_commit": evaluation.commit,
+                "summary": found.summary or t("No summary was recorded."),
+                "details": found.details,
+                "diff": found.diff,
+                "verdict": evaluation.verdict,
+                "mode": evaluation.mode,
+                "base": evaluation.base,
+                "candidate": evaluation.candidate,
+            }
+        )
+    except ValueError as e:
+        # Validation messages can echo submitted text; keep them and any accidental secrets out
+        # of the terminal and logs.
+        raise click.ClickException(
+            t("This proposal cannot be sent: {reason}", reason="invalid contents")
+        ) from e
+    _refuse_secrets(config, payload)
+    key = usable_node_key(key_path, create=False)
+    if key is None:
+        raise click.ClickException(t("This node has no usable key; nothing was sent."))
+    signature = base64.b64encode(key.sign(sign.canonical(payload.model_dump(mode="json")))).decode(
+        "ascii"
+    )
+    signed = protocol.SignedProposalSubmission(
+        submission=payload, signer=key.fingerprint, signature=signature
+    )
+    if (
+        len(protocol.SubmitProposal(signed=signed).model_dump_json().encode("utf-8"))
+        > protocol.MAX_PROPOSAL_BYTES
+    ):
+        raise click.ClickException(t("This proposal is too large to send."))
+    return signed
+
+
+def _refuse_secrets(config: Config, payload: protocol.ProposalSubmission) -> None:
+    """Do not let a configured API key leave in a proposal, benchmark, or diff."""
+    encoded = payload.model_dump_json(exclude_none=True)
+    if any(
+        key.value and key.value in encoded for group in config.api_keys.values() for key in group
+    ):
+        raise click.ClickException(t("This proposal contains an API key; nothing was sent."))
+
+
+def send_proposal(
+    manager: ConfigManager,
+    conn: sqlite3.Connection,
+    signed: protocol.SignedProposalSubmission,
+    *,
+    key_path: Path | None = None,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> protocol.ProposalReceived:
+    """Send a prepared proposal under the config lock; the caller has already shown it."""
+    with manager.locked():
+        config = manager.load()
+        address = net.registry(config)
+        if not config.network.enabled or address is None:
+            raise click.ClickException(t("desman-global is off; nothing was sent."))
+        _refuse_secrets(config, signed.submission)
+        key = usable_node_key(key_path, create=False)
+        if key is None:
+            raise click.ClickException(t("This node has no usable key; nothing was sent."))
+        if key.fingerprint != signed.signer:
+            raise click.ClickException(t("The node key changed after preview; nothing was sent."))
+        try:
+            received = node.submit_proposal(address, key, signed, transport=transport, clock=clock)
+        except node.ProposalSendError as e:
+            raise click.ClickException(
+                t("The registry did not accept the proposal: {error}", error=e)
+            ) from e
+    try:
+        netlog.record(
+            conn,
+            "proposal_submitted",
+            {
+                "registry": address,
+                "node": key.fingerprint,
+                "submission": received.id,
+                "proposal": received.proposal,
+                "evaluation": received.evaluation,
+            },
+        )
+    except sqlite3.OperationalError:
+        # The external write is already durable and retries are idempotent; report the missing
+        # local journal to the caller without exposing the body or any keys.
+        raise click.ClickException(
+            t("The proposal was sent, but the local journal is busy.")
+        ) from None
+    return received
 
 
 # ── Changes ──────────────────────────────────────────────────────────────────
@@ -623,3 +760,58 @@ def quota_command(provider: str, calls: int | None, tokens: int | None, as_json:
         click.echo(_lent_json(changed))
     else:
         print_lent(changed)
+
+
+@global_group.command("submit-proposal")
+@click.argument("proposal", type=click.IntRange(min=1))
+@click.option("--confirm", metavar="SHA256", help="Send only if this matches the preview's hash.")
+@json_option
+def submit_proposal_command(proposal: int, confirm: str | None, as_json: bool) -> None:
+    """Preview a proposal upload; --confirm sends only that exact payload."""
+    manager = load_config()
+    config = manager.load()
+    with journal(None) as conn:
+        payload = proposal_upload(conn, config, proposal)
+        wire = protocol.SubmitProposal(signed=payload)
+        encoded = wire.model_dump_json(exclude_none=True).encode("utf-8")
+        digest = hashlib.sha256(encoded).hexdigest()
+        if confirm is None:
+            preview = wire.model_dump(mode="json", exclude_none=True)
+            if as_json:
+                click.echo(
+                    json.dumps(
+                        {"sent": False, "confirmation": digest, "submission": preview},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                ui.note(
+                    t(
+                        "Nothing was sent. Review this payload, then repeat with --confirm {hash}.",
+                        hash=digest,
+                    )
+                )
+                ui.out(Text(json.dumps(preview, ensure_ascii=False, indent=2, sort_keys=True)))
+            return
+        if not hashlib.sha256(encoded).hexdigest() == confirm.casefold():
+            raise click.ClickException(
+                t("The preview changed; nothing was sent. Preview it again.")
+            )
+        received = send_proposal(manager, conn, payload)
+    result = {
+        "sent": True,
+        "id": received.id,
+        "proposal": received.proposal,
+        "evaluation": received.evaluation,
+    }
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False))
+    else:
+        ui.ok(
+            t(
+                "Proposal {proposal} sent to the registry as {id}.",
+                proposal=received.proposal,
+                id=received.id,
+            )
+        )

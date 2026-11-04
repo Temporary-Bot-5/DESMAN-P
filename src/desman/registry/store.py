@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ from typing import Any, Final, Literal
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
-from desman.net import sign
+from desman.net import protocol, sign
 from desman.net.protocol import Capability
 
 DIR_ENV: Final = "DESMAN_REGISTRY_DIR"
@@ -180,6 +181,26 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER trust_lists_no_delete BEFORE DELETE ON trust_lists
         BEGIN SELECT RAISE(ABORT, 'trust lists are append-only'); END;
     """,
+    # 5 — improvement proposals submitted by a node after its person's confirmation (G.7a)
+    f"""
+    CREATE TABLE proposals (
+        id              TEXT PRIMARY KEY CHECK (length(id) = 32),
+        node            TEXT NOT NULL REFERENCES nodes (fingerprint),
+        proposal        INTEGER NOT NULL CHECK (proposal >= 1),
+        evaluation      INTEGER NOT NULL CHECK (evaluation >= 1),
+        submission_json TEXT NOT NULL CHECK (json_valid(submission_json)),
+        status          TEXT NOT NULL DEFAULT 'submitted'
+                        CHECK (status IN ('submitted', 'reviewing', 'reviewed', 'accepted', 'rejected')),
+        created_at      TEXT NOT NULL DEFAULT {_NOW_SQL},
+        UNIQUE (node, proposal, evaluation)
+    ) STRICT;
+    CREATE INDEX proposals_status ON proposals (status, created_at);
+    CREATE TRIGGER proposals_fixed BEFORE UPDATE OF id, node, proposal, evaluation,
+        submission_json, created_at ON proposals
+        BEGIN SELECT RAISE(ABORT, 'a proposal submission keeps its contents'); END;
+    CREATE TRIGGER proposals_no_delete BEFORE DELETE ON proposals
+        BEGIN SELECT RAISE(ABORT, 'proposals are never deleted'); END;
+    """,
 )
 
 
@@ -322,6 +343,91 @@ def add_trust_list(conn: sqlite3.Connection, signed: sign.Signed) -> None:
             db.to_iso(record.expires_at),
             json.dumps(signed.model_dump(mode="json"), sort_keys=True),
         ),
+    )
+
+
+@dataclass(frozen=True)
+class ProposalSubmission:
+    id: str
+    node: str
+    signed: protocol.SignedProposalSubmission
+    status: str
+    created_at: str
+
+    @property
+    def submission(self) -> protocol.ProposalSubmission:
+        return self.signed.submission
+
+
+def submit_proposal(
+    conn: sqlite3.Connection,
+    node: str,
+    signed: protocol.SignedProposalSubmission,
+) -> tuple[ProposalSubmission, bool]:
+    """Keep a person's confirmed upload once; an identical retry returns the same row."""
+    submission = signed.submission
+    encoded = json.dumps(signed.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    with db.transaction(conn):
+        row = conn.execute(
+            "SELECT * FROM proposals WHERE node = ? AND proposal = ? AND evaluation = ?",
+            (node, submission.proposal, submission.evaluation),
+        ).fetchone()
+        if row is not None:
+            if row["submission_json"] != encoded:
+                raise ValueError(
+                    "this proposal evaluation was already submitted with other contents"
+                )
+            return _proposal_submission(row), False
+        id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO proposals (id, node, proposal, evaluation, submission_json)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (id, node, submission.proposal, submission.evaluation, encoded),
+        )
+        log(
+            conn,
+            "proposal_submitted",
+            node,
+            {"id": id, "proposal": submission.proposal, "evaluation": submission.evaluation},
+        )
+        row = conn.execute("SELECT * FROM proposals WHERE id = ?", (id,)).fetchone()
+    assert row is not None
+    return _proposal_submission(row), True
+
+
+def proposals(conn: sqlite3.Connection, status: str | None = None) -> list[ProposalSubmission]:
+    """Submissions, oldest first; optionally by their operator-facing status."""
+    if status is None:
+        rows = conn.execute("SELECT * FROM proposals ORDER BY created_at, id").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM proposals WHERE status = ? ORDER BY created_at, id", (status,)
+        ).fetchall()
+    return [_proposal_submission(row) for row in rows]
+
+
+def proposal(conn: sqlite3.Connection, id: str) -> ProposalSubmission | None:
+    row = conn.execute("SELECT * FROM proposals WHERE id = ?", (id,)).fetchone()
+    return None if row is None else _proposal_submission(row)
+
+
+def find_proposal(conn: sqlite3.Connection, prefix: str) -> list[str]:
+    if not prefix or any(c not in "0123456789abcdef" for c in prefix):
+        return []
+    rows = conn.execute(
+        "SELECT id FROM proposals WHERE substr(id, 1, ?) = ? ORDER BY id LIMIT 2",
+        (len(prefix), prefix),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def _proposal_submission(row: sqlite3.Row) -> ProposalSubmission:
+    return ProposalSubmission(
+        id=row["id"],
+        node=row["node"],
+        signed=protocol.SignedProposalSubmission.model_validate_json(row["submission_json"]),
+        status=row["status"],
+        created_at=row["created_at"],
     )
 
 

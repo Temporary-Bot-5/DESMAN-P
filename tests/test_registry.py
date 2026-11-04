@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 import subprocess
@@ -709,3 +710,88 @@ def test_a_change_signs_a_list_that_is_newer_and_never_shorter(
     for signed in handed:
         believed.receive(signed.model_dump(mode="json"))
     assert believed.fresh() is None
+
+
+def proposal_upload() -> protocol.ProposalSubmission:
+    run = protocol.BenchmarkSnapshot(
+        version=1,
+        mode="fake",
+        source="/checkout/src/desman",
+        cases=[protocol.BenchmarkCase(id="case", status="done", plan="llm", subtasks=1)],
+        stats={"tasks": {"done": 1}},
+    )
+    return protocol.ProposalSubmission(
+        proposal=7,
+        evaluation=3,
+        base_commit="a" * 40,
+        summary="Tighten a planning prompt.",
+        details={"changes": [{"target": "planner.rules", "new": "new text"}]},
+        diff="--- a/src/desman/planner.py\n+++ b/src/desman/planner.py\n",
+        verdict="better",
+        mode="fake",
+        base=run,
+        candidate=run,
+    )
+
+
+def signed_proposal(node: Node, submission: protocol.ProposalSubmission) -> dict[str, Any]:
+    signed = protocol.SignedProposalSubmission(
+        submission=submission,
+        signer=node.fingerprint,
+        signature=base64.b64encode(
+            node.key.sign(sign.canonical(submission.model_dump(mode="json")))
+        ).decode("ascii"),
+    )
+    return {"signed": signed.model_dump(mode="json")}
+
+
+def test_a_registered_node_can_submit_a_proposal_once(
+    registry: Registry, db_path: Path, clock: FakeClock
+) -> None:
+    node = Node(registry, clock)
+    assert node.register().status_code == 200
+    submission = proposal_upload()
+    body = signed_proposal(node, submission)
+
+    first = node.call("POST", protocol.PROPOSALS, body)
+    again = node.call("POST", protocol.PROPOSALS, body)
+    assert first.status_code == again.status_code == 200
+    received = protocol.ProposalReceived.model_validate(first.json())
+    assert protocol.ProposalReceived.model_validate(again.json()).id == received.id
+    with store.connection(db_path) as conn:
+        found = store.proposal(conn, received.id)
+        assert found is not None
+        assert found.node == node.fingerprint
+        assert found.submission == submission
+        assert found.status == "submitted"
+        assert len(store.proposals(conn)) == 1
+        assert store.entries(conn)[-1].action == "proposal_submitted"
+
+
+def test_a_proposal_upload_cannot_be_replaced_or_submitted_by_an_unregistered_node(
+    registry: Registry, db_path: Path, clock: FakeClock
+) -> None:
+    node = Node(registry, clock)
+    submission = proposal_upload()
+    body = signed_proposal(node, submission)
+    assert node.call("POST", protocol.PROPOSALS, body).status_code == 403
+    assert node.register().status_code == 200
+    assert node.call("POST", protocol.PROPOSALS, body).status_code == 200
+    changed = submission.model_copy(update={"summary": "different"})
+    response = node.call("POST", protocol.PROPOSALS, signed_proposal(node, changed))
+    assert response.status_code == 409
+    with store.connection(db_path) as conn:
+        assert len(store.proposals(conn)) == 1
+        assert store.proposals(conn)[0].submission.summary == submission.summary
+
+
+def test_a_proposal_body_must_match_its_node_signature(
+    registry: Registry, clock: FakeClock
+) -> None:
+    node = Node(registry, clock)
+    assert node.register().status_code == 200
+    body = signed_proposal(node, proposal_upload())
+    body["signed"]["submission"]["summary"] = "tampered after signing"
+    response = node.call("POST", protocol.PROPOSALS, body)
+    assert response.status_code == 401
+    assert response.json()["error"] == Reason.FORGED

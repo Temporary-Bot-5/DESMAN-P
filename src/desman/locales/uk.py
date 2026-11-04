@@ -1063,4 +1063,38 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Підтвердити дію без запитання.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES = {
+    'Another node will check the proposal before the operator can accept it.': 'Інший вузол перевірить пропозицію, перш ніж оператор зможе її прийняти.',
+    'Base commit': 'Базовий коміт',
+    'Benchmark': 'Бенчмарк',
+    'ID': 'ID',
+    'Inspect one with: desman-registry proposal show ID': 'Переглянути: desman-registry proposal show ID',
+    'List proposal submissions for operator review.': 'Список пропозицій, надісланих оператору на розгляд.',
+    'No proposals have been submitted.': 'Пропозицій не надіслано.',
+    'No summary was recorded.': 'Підсумок не записано.',
+    'No unique proposal matches {id}.': 'Немає єдиної пропозиції, що відповідає {id}.',
+    'Nothing was sent. Review this payload, then repeat with --confirm {hash}.': 'Нічого не надіслано. Перевірте дані й повторіть із --confirm {hash}.',
+    'Only proposals in this state.': 'Лише пропозиції з таким статусом.',
+    'Preview a proposal upload; --confirm sends only that exact payload.': 'Попередній перегляд; --confirm надсилає саме ці дані.',
+    'Proposal': 'Пропозиція',
+    'Proposal submission': 'Надсилання пропозиції',
+    'Proposal {id} has nothing to submit.': 'У пропозиції {id} немає чого надсилати.',
+    'Proposal {id} needs a completed benchmark with both results.': 'Для пропозиції {id} потрібен завершений бенчмарк з обома результатами.',
+    'Proposal {proposal} sent to the registry as {id}.': 'Пропозицію {proposal} надіслано до реєстру як {id}.',
+    "Send only if this matches the preview's hash.": 'Надсилати, лише якщо хеш збігається з попереднім переглядом.',
+    'Send proposal {id} and its benchmark results to the desman-global registry?': 'Надіслати пропозицію {id} та результати бенчмарку до реєстру desman-global?',
+    'Show a submitted proposal, its diff and both local benchmark results.': 'Показати надіслану пропозицію, diff і обидва результати локального бенчмарку.',
+    "The Improvement Analyst's proposals submitted by network nodes.": 'Пропозиції Аналітика покращень, надіслані вузлами мережі.',
+    'The node key changed after preview; nothing was sent.': 'Ключ вузла змінився після попереднього перегляду; нічого не надіслано.',
+    'The preview changed; nothing was sent. Preview it again.': 'Попередній перегляд змінився; нічого не надіслано. Створіть його знову.',
+    'The proposal was sent, but the local journal is busy.': 'Пропозицію надіслано, але локальний журнал зайнятий.',
+    'The registry did not accept the proposal: {error}': 'Реєстр не прийняв пропозицію: {error}',
+    'This node has no usable key; nothing was sent.': 'У вузла немає придатного ключа; нічого не надіслано.',
+    'This proposal cannot be sent: {reason}': 'Цю пропозицію неможливо надіслати: {reason}',
+    'This proposal contains an API key; nothing was sent.': 'У пропозиції є API-ключ; нічого не надіслано.',
+    'This proposal is too large to send.': 'Пропозиція завелика для надсилання.',
+    'desman-global is off; nothing was sent.': 'desman-global вимкнено; нічого не надіслано.',
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)

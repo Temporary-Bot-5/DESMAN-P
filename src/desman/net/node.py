@@ -125,6 +125,10 @@ class _Problem(Exception):
         self.error = error
 
 
+class ProposalSendError(Exception):
+    """A proposal could not be sent; the message contains no request or key material."""
+
+
 def capabilities(config: Config) -> list[protocol.Capability]:
     """What this node lends, as the registry is told: provider, model, the fingerprint of the
     provider's first key (`key_id`, never the key; none for a local server), quotas. A
@@ -253,6 +257,35 @@ def tell_left(
             # Never registered, or gone already: the registry does not list it either way.
             return None if e.error == NOT_REGISTERED else e.error
     return None
+
+
+def submit_proposal(
+    registry: str,
+    key: sign.NodeKey,
+    signed: protocol.SignedProposalSubmission,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> protocol.ProposalReceived:
+    """Send the exact proposal body the person approved, signed as a registry request."""
+    body = protocol.SubmitProposal(signed=signed)
+    if len(body.model_dump_json(exclude_none=True).encode("utf-8")) > protocol.MAX_PROPOSAL_BYTES:
+        raise _Problem("proposal_too_large")
+    try:
+        with httpx.Client(transport=transport, timeout=TIMEOUT, follow_redirects=False) as client:
+            return _call(
+                client,
+                key,
+                registry,
+                "POST",
+                protocol.PROPOSALS,
+                body,
+                protocol.ProposalReceived,
+                clock(),
+                time.monotonic() + TIMEOUT,
+            )
+    except (_Unreachable, _Problem) as e:
+        raise ProposalSendError(str(e)) from e
 
 
 class Node:

@@ -226,26 +226,26 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "desman-global is a network of DESMANs on people's machines, coordinated by the "
-        "project's registry. Off unless the person joins: the wizard's last step, or `desman "
-        "global join` (`desman global join --registry URL` while no address is known). It makes a node key "
-        "(node.key next to the database; only its fingerprint is shown) and lends nothing.\n"
+        "desman-global links DESMANs through the project's registry. Off until the person runs "
+        "`desman global join`; use `desman global join --registry URL` to set its address. It "
+        "makes a node key (node.key beside the database; only its fingerprint is shown) and "
+        "lends nothing.\n"
         "The person lends each provider with a daily quota: `desman global donate PROVIDER "
-        "--calls N --tokens N`, changed with `desman global quota PROVIDER`, taken back with "
+        "--calls N --tokens N`, changed with `desman global quota PROVIDER`, undone with "
         "`desman global undonate PROVIDER`. A key never leaves the machine. A local server can be lent; a free cloud provider only once its terms allow it "
-        "(none yet); a paid one never. `desman global leave` takes back everything and "
-        "switches it off; the key stays. `desman global status` shows it all; every change is "
-        "journaled.\n"
+        "(none yet); a paid one never. `desman global leave` turns it off; the key stays. "
+        "`desman global status` shows the state; changes are journaled.\n"
         "While `desman worker` runs, the node registers, says it is alive and fetches the "
-        "revocations; without a fresh trust list (signed by the project's owner) it takes no "
-        "jobs. When the worker is idle and a lent provider has quota left today, it "
-        "takes a job: one at a time, signed by an operator, done with the lent providers only "
-        "(files in its own folder, commands in the sandbox, no web), or another node's result "
-        "to review. The person's own work always goes first and interrupts a job; a job never "
-        "waits for the person. Results go back signed by the node key. A worker started "
-        "before joining or lending takes jobs from its next start. An unreachable registry is "
-        "tried again later; a revoked node falls silent. In the chat each change needs the "
-        "person's yes in the window.",
+        "revocations; without a fresh trust list signed by the owner it takes no jobs. An idle "
+        "worker may take one operator-signed job using lent providers only (sandboxed commands, "
+        "no web), or review another node's result. The person's work takes priority. Results "
+        "are signed by the node. Send a proposal with both benchmark results using `desman "
+        "global submit-proposal N`: chat shows the signed payload and asks first; CLI previews "
+        "it and sends only with `desman global submit-proposal N --confirm HASH`. API keys are "
+        "checked before sending. The "
+        "registry lists uploads with desman-registry proposal list and shows one with proposal "
+        "show ID. A worker started before joining or lending takes jobs on its next start. "
+        "Revoked nodes fall silent. Chat changes need the person's yes.",
     ),
 )
 
