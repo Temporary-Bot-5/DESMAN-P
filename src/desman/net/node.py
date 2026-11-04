@@ -65,7 +65,7 @@ from desman.core import netlog
 from desman.core.store import Store
 from desman.core.workspace import workspace_root_for
 from desman.llm.openai_compat import key_id
-from desman.net import checks, jobs, protocol, request, sign
+from desman.net import checks, jobs, protocol, request, sign, updates
 
 TIMEOUT: Final = 10.0
 RETRY_FIRST: Final = timedelta(seconds=30)
@@ -95,6 +95,7 @@ def _utc_now() -> datetime:
 class Change(StrEnum):
     """What a poll changed, for the worker to tell the person."""
 
+    RELEASE = "release"
     CONNECTED = "connected"
     UNREACHABLE = "unreachable"
     REFUSED = "refused"
@@ -222,6 +223,8 @@ def _call(
     body_bytes = bytes(received)
     if reply.status_code == 429 or reply.status_code >= 500:
         raise _Unreachable(f"HTTP {reply.status_code}")
+    if reply.status_code == 404 and path == protocol.RELEASES:
+        raise _Problem("not_found")
     if reply.status_code != 200:
         try:
             problem = protocol.Problem.model_validate_json(body_bytes)
@@ -334,6 +337,7 @@ class Node:
         """Why the trust list was not fresh when last asked (G.6c); None: it was."""
         self._journaled: set[tuple[str, str]] = set()
         self._no_key: str | None = None
+        self._pending_release: Event | None = None
 
     def close(self) -> None:
         if self._client is not None:
@@ -352,8 +356,14 @@ class Node:
             event = None
             if self.next_at is None or now >= self.next_at:
                 event = self._poll(now)
+            if event is not None and event.change is Change.RELEASE:
+                self._pending_release = event
+                event = None
             if not self.revoked:
                 event = self._jobs(now, idle) or event
+            if event is None and not self.revoked:
+                event = self._pending_release
+                self._pending_release = None
             return event
         except sqlite3.OperationalError:
             # The journal is busy (another worker holds the database too long): the worker's
@@ -394,6 +404,7 @@ class Node:
         self._sent = None
         self._trust = None
         self._stale = None
+        self._pending_release = None
         self.close()
 
     def _key(self, address: str) -> sign.NodeKey | None:
@@ -474,13 +485,51 @@ class Node:
         revoked = self._receive(address, key, trust)
         if revoked:
             return self._stop(address, key, "the trust list revokes this node")
+        release_event = self._releases(client, key, address, now, deadline)
         recovered = self.failures > 0
         self.failures = 0
         seconds = min(max(state.heartbeat_seconds, HEARTBEAT_MIN), HEARTBEAT_MAX)
         self.next_at = now + timedelta(seconds=seconds)
         if recovered:
             netlog.record(self.conn, "reachable", {"registry": address})
-        return Event(Change.CONNECTED, address) if first or recovered else None
+        return release_event or (Event(Change.CONNECTED, address) if first or recovered else None)
+
+    def _releases(
+        self, client: httpx.Client, key: sign.NodeKey, address: str, now: datetime, deadline: float
+    ) -> Event | None:
+        assert self._trust is not None
+        newest = self.conn.execute("SELECT MAX(number) FROM releases").fetchone()[0] or 0
+        event = None
+        try:
+            received = _call(
+                client,
+                key,
+                address,
+                "GET",
+                protocol.RELEASES,
+                None,
+                protocol.Releases,
+                now,
+                deadline,
+            )
+        except _Problem as e:
+            self._release_unavailable(address, e.error)
+            return None
+        for signed in received.records:
+            try:
+                if updates.keep(self.conn, self._trust, signed):
+                    number = sign.Release.model_validate(signed.record.body).number
+                    if number > newest:
+                        newest = number
+                        event = Event(Change.RELEASE, address, str(number))
+            except sign.Refused as e:
+                self._release_unavailable(address, str(e))
+        return event
+
+    def _release_unavailable(self, address: str, why: str) -> None:
+        self._once(
+            ("releases_unavailable", why), "releases_unavailable", {"registry": address, "why": why}
+        )
 
     def _receive(self, address: str, key: sign.NodeKey, state: protocol.TrustState) -> bool:
         """Check each record against the root; True if this node's own key is revoked."""

@@ -177,7 +177,7 @@ def test_joining_while_the_worker_runs_starts_at_the_next_look(
     clock.advance(node.OFF_RECHECK.total_seconds())
     event = found.poll()
     assert event is not None and event.change is Change.CONNECTED
-    assert [p for _, p in world.requests] == [protocol.REGISTER, protocol.TRUST]
+    assert [p for _, p in world.requests] == [protocol.REGISTER, protocol.TRUST, protocol.RELEASES]
 
 
 def test_leaving_while_the_worker_runs_stops_it_before_anything_is_sent(
@@ -233,11 +233,15 @@ def test_a_node_registers_with_what_it_lends_then_says_it_is_alive(
     # Not due yet: nothing sent.
     clock.advance(protocol.HEARTBEAT_SECONDS - 1)
     assert found.poll() is None
-    assert len(world.requests) == 2
+    assert len(world.requests) == 3
     # Due: a heartbeat that changes nothing is not journaled, and the person hears nothing.
     clock.advance(1)
     assert found.poll() is None
-    assert [p for _, p in world.requests[2:]] == [protocol.HEARTBEAT, protocol.TRUST]
+    assert [p for _, p in world.requests[3:]] == [
+        protocol.HEARTBEAT,
+        protocol.TRUST,
+        protocol.RELEASES,
+    ]
     assert actions(conn) == ["registered"]
 
     # A quota changed: the next heartbeat carries it.
@@ -481,10 +485,10 @@ def test_a_contact_gets_one_timeout_for_both_its_requests(
 
     monkeypatch.setattr(time, "monotonic", lambda: now[0])
     found = make_node(transport=Slow())
-    spent[:] = [6.0, 0.0]
+    spent[:] = [6.0, 0.0, 0.0]
     event = found.poll()
     assert event is not None and event.change is Change.CONNECTED
-    assert given == [node.TIMEOUT, node.TIMEOUT - 6.0]
+    assert given == [node.TIMEOUT, node.TIMEOUT - 6.0, node.TIMEOUT - 6.0]
     # The heartbeat spends it all: the trust list is not asked for.
     found.next_at = None
     given.clear()
@@ -751,3 +755,119 @@ def test_leave_from_the_command_line_warns_when_the_registry_did_not_hear() -> N
         "withdrawn": [],
         "registry_told": False,
     }
+
+
+@pytest.mark.parametrize("mode", ["good", "forged", "operator", "old", "down"])
+def test_release_poll(
+    mode: str,
+    make_node: Callable[..., Node],
+    world: World,
+    root: sign.NodeKey,
+    clock: FakeClock,
+    conn: sqlite3.Connection,
+) -> None:
+    from test_updates import envelope
+
+    signed = envelope(root, "a" * 40, "b" * 40)
+    assigned = None
+    if mode == "forged":
+        signed = signed.model_copy(update={"signature": "A" * 86 + "=="})
+    if mode == "operator":
+        op = sign.NodeKey.generate()
+        assigned = sign.assign(
+            root, op.public, set(sign.Scope), issued_at=clock(), lifetime=timedelta(days=7)
+        )
+        signed = envelope(op, "a" * 40, "b" * 40)
+    # Fixtures use a deterministic clock; sign within that term.
+    signed = sign.sign(
+        root if mode != "operator" else op,
+        sign.RecordKind.RELEASE,
+        signed.record.body,
+        issued_at=clock(),
+        lifetime=timedelta(days=7),
+    )
+    if mode == "forged":
+        signed = signed.model_copy(update={"signature": "A" * 86 + "=="})
+    normal = world.handle
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == protocol.RELEASES:
+            world.requests.append((req.method, req.url.path))
+            if mode == "old":
+                return httpx.Response(404, text="not found")
+            if mode == "down":
+                raise httpx.ConnectError("down", request=req)
+            return httpx.Response(200, json={"records": [signed.model_dump(mode="json")]})
+        if req.url.path == protocol.TRUST and assigned is not None:
+            return httpx.Response(200, json={"records": [assigned.model_dump(mode="json")]})
+        return normal(req)
+
+    found = make_node(transport=httpx.MockTransport(handle))
+    event = found.poll()
+    assert event is not None
+    assert event.change is (
+        Change.RELEASE
+        if mode == "good"
+        else Change.UNREACHABLE
+        if mode == "down"
+        else Change.CONNECTED
+    )
+    for _ in range(2):
+        clock.advance(protocol.HEARTBEAT_SECONDS)
+        found.poll()
+    if mode == "good":
+        assert conn.execute("SELECT COUNT(*) FROM releases").fetchone()[0] == 1
+        assert actions(conn).count("release_received") == 1
+    elif mode != "down":
+        assert actions(conn).count("releases_unavailable") == 1
+        assert found.failures == 0 and not found.revoked
+        assert conn.execute("SELECT COUNT(*) FROM releases").fetchone()[0] == 0
+
+
+def test_release_notice_survives_job_claim(
+    make_node: Callable[..., Node],
+    world: World,
+    root: sign.NodeKey,
+    root_pub: Path,
+    registry_db: Path,
+    clock: FakeClock,
+    conn: sqlite3.Connection,
+) -> None:
+    from test_updates import envelope
+
+    operator = sign.NodeKey.generate()
+    with store.connection(registry_db) as registry_conn:
+        admin.assign(registry_conn, root, operator.public, {sign.Scope.TASKS}, days=7, now=clock())
+        job = admin.add_job(
+            registry_conn,
+            operator,
+            protocol.Job(description="Sum 2 and 3", acceptance_criteria="Says 5"),
+            days=7,
+            now=clock(),
+            root_pub=root_pub,
+        )
+        admin.sign_trust_list(registry_conn, root, days=7, now=clock())
+    world.registry = Registry(registry_db, clock=clock, root=root_pub)
+    signed = envelope(root, "a" * 40, "b" * 40)
+    signed = sign.sign(
+        root,
+        sign.RecordKind.RELEASE,
+        signed.record.body,
+        issued_at=clock(),
+        lifetime=timedelta(days=7),
+    )
+    normal = world.handle
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == protocol.RELEASES:
+            return httpx.Response(200, json={"records": [signed.model_dump(mode="json")]})
+        return normal(req)
+
+    found = make_node(transport=httpx.MockTransport(handle), work=True)
+    taken = found.poll(idle=True)
+    assert taken == node.Event(Change.WORK_TAKEN, REGISTRY, "execute")
+    assert conn.execute("SELECT job FROM network_work").fetchone()[0] == job.id
+    assert found.poll() == node.Event(Change.RELEASE, REGISTRY, "1")
+    assert found.poll() is None
+    clock.advance(protocol.HEARTBEAT_SECONDS)
+    assert found.poll() is None

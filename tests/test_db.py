@@ -759,3 +759,43 @@ def test_v23_database_with_sessions_upgrades_to_temporary_chats(tmp_path: Path) 
     sessions.erase(temporary)
     assert sessions.messages(temporary) == [] and [s.id for s in sessions.recent()] == [kept]
     conn.close()
+
+
+def test_g8_upgrade_preserves_applications(tmp_path: Path) -> None:
+    from desman.core import proposals
+
+    conn = db.connect(tmp_path / "before-updates.db")
+    try:
+        db.migrate(conn, db.MIGRATIONS[:30])
+        task = add_task(conn)
+        conn.execute(
+            "INSERT INTO proposals (task_id, status, settled_at, diff) VALUES (?, 'proposed', 'now', '')",
+            (task,),
+        )
+        proposal = conn.execute("SELECT id FROM proposals").fetchone()[0]
+        conn.execute(
+            "INSERT INTO applications (proposal_id, action, details_json) VALUES (?, 'applied', '{}')",
+            (proposal,),
+        )
+        before = proposals.applications(conn, proposal)
+        db.migrate(conn, db.MIGRATIONS)
+        assert proposals.applications(conn, proposal) == before
+        assert proposals.updates(conn) == []
+        with pytest.raises(sqlite3.IntegrityError, match="in turn"):
+            conn.execute(
+                "INSERT INTO applications (proposal_id, action) VALUES (?, 'applied')", (proposal,)
+            )
+        conn.execute(
+            "INSERT INTO applications (proposal_id, action) VALUES (?, 'reverted')", (proposal,)
+        )
+        for sql in ("UPDATE applications SET branch = 'evil'", "DELETE FROM applications"):
+            with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+                conn.execute(sql)
+        other = add_task(conn)
+        conn.execute("INSERT INTO proposals (task_id) VALUES (?)", (other,))
+        with pytest.raises(sqlite3.IntegrityError, match="proposed"):
+            conn.execute("INSERT INTO applications (proposal_id, action) VALUES (2, 'applied')")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO applications (action) VALUES ('applied')")
+    finally:
+        conn.close()

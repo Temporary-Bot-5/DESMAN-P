@@ -1,7 +1,7 @@
 """Signatures of desman-global (ADR 0004, decision 3; ROADMAP G.2).
 
 G.7b proposal checks are node-signed and never accepted as trust state.
-Release bodies are validated on receipt and never accepted as trust state.
+Root-signed release bodies are validated on receipt and can be handed out again (G.8).
 
 Every key is Ed25519 (`cryptography`). A key is named by its fingerprint: the SHA-256 of its raw
 public bytes, in hex. Only fingerprints and public keys ever leave the machine.
@@ -26,8 +26,8 @@ operator's revocation of a key the root assigns afterwards gives way to the assi
 
 `Trust.receive()` is where a record enters: schema, signer, signature, authority, time, replay
 — and only a record that passed all of it is returned. Any failure is `Refused`, with a `Reason`
-for the network log. Assignments and revocations are the state the registry hands out again on
-every poll, so receiving one twice is harmless; any other record is refused the second time
+for the network log. Assignments, revocations, trust lists and releases are state the registry
+hands out again on every poll, so receiving one twice is harmless; other records are refused the second time
 (`Seen`). A revocation is honoured even after its own `expires_at`: obeying it only restricts.
 
 **A trust list** (G.6c) is signed by the root only, by the person (`desman-registry trust
@@ -247,7 +247,9 @@ class RecordKind(StrEnum):
     """The root names every assignment and revocation in effect (`TrustList`)."""
 
 
-STATE: Final = frozenset({RecordKind.ASSIGNMENT, RecordKind.REVOCATION, RecordKind.TRUST_LIST})
+STATE: Final = frozenset(
+    {RecordKind.ASSIGNMENT, RecordKind.REVOCATION, RecordKind.TRUST_LIST, RecordKind.RELEASE}
+)
 """Kinds handed out again on every poll: receiving one twice is not a replay."""
 
 
@@ -619,7 +621,7 @@ class Trust:
         elif isinstance(body, TrustList):
             if self._list is None or record.issued_at > self._list.issued_at:
                 self._list = record  # an older list handed out again changes nothing
-        elif not self._seen.add(record.id, record.expires_at, now):
+        elif record.kind not in STATE and not self._seen.add(record.id, record.expires_at, now):
             raise refuse(Reason.REPLAY, "this record was already received")
 
         if record.kind in STATE:

@@ -535,7 +535,14 @@ def _keep_in_touch(network: node.Node, as_json: bool, *, idle: bool = False) -> 
     event = network.poll(idle=idle)
     if event is None or as_json:
         return event
-    if event.change is node.Change.CONNECTED:
+    if event.change is node.Change.RELEASE:
+        ui.note(
+            t(
+                "Release {number} is available; inspect it with `desman global update --show`.",
+                number=event.detail,
+            )
+        )
+    elif event.change is node.Change.CONNECTED:
         ui.ok(t("In touch with the desman-global registry {url}.", url=event.registry))
     elif event.change is node.Change.UNREACHABLE:
         ui.warn(

@@ -27,6 +27,7 @@ REGISTER: Final = "/v1/nodes/register"
 HEARTBEAT: Final = "/v1/nodes/heartbeat"
 LEAVE: Final = "/v1/nodes/leave"
 TRUST: Final = "/v1/trust"
+RELEASES: Final = "/v1/releases"
 CLAIM: Final = "/v1/work/claim"
 EXTEND: Final = "/v1/work/extend"
 HAND_IN: Final = "/v1/work/hand-in"
@@ -114,6 +115,12 @@ class TrustState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     records: list[Signed]
+
+
+class Releases(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    records: list[Signed] = Field(max_length=5)
 
 
 class Problem(BaseModel):

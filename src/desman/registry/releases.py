@@ -265,3 +265,11 @@ def show(conn: sqlite3.Connection, number: int) -> dict[str, Any]:
         signer=signed.record.signer,
         signed=signed.model_dump(mode="json"),
     )
+
+
+def handed_out(conn: sqlite3.Connection, limit: int = 5) -> list[sign.Signed]:
+    """Newest releases, oldest first; caller holds a read snapshot."""
+    rows = conn.execute(
+        "SELECT signed_json FROM releases ORDER BY number DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [sign.Signed.model_validate_json(r["signed_json"]) for r in reversed(rows)]
