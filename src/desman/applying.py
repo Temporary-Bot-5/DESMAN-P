@@ -1,6 +1,7 @@
 """Applying a proposal of the Improvement Analyst, and reverting it (ROADMAP 5.6, D8). Only the
 person does either: `desman proposals apply N` and `desman proposals revert N`, or the same
 in the chat after the person's "yes" in the window. Nothing applies a proposal on its own.
+G.7b shares plain-data validation with isolated proposal checks.
 
 Applying makes the proposal's diff a git commit of the checkout DESMAN runs from, on the
 branch it is on. The commit is made in a git worktree of HEAD, its files built by code exactly
@@ -262,9 +263,9 @@ def _commit_apply(plan: Plan, base: Path, tree: Path) -> str:
     makes the proposed version; `base` is HEAD as it is, to compare with."""
     p = plan.proposal
     try:
-        evaluation._check_base(tree, p, plan.head or "")
-        evaluation._build(tree, p)
-        evaluation._check_changes(base, tree, p)
+        evaluation._check_base(tree, p.details.get("base", {}), plan.head or "")
+        evaluation._build(tree, p.details.get("changes", []), p.diff or "")
+        evaluation._check_changes(base, tree, p.details.get("changes", []))
     except evaluation.EvaluationError as e:
         raise ApplyError(str(e)) from e
     _git(tree, "add", "--", *plan.files)

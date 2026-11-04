@@ -168,6 +168,10 @@ def test_the_fake_does_not_plan_without_the_format() -> None:
 
 def test_the_benchmark_follows_the_tuning() -> None:
     result = bench.run(store(), "fake", Tuning(max_subtasks=1))
+    assert result.limits is not None and result.limits["max_subtasks"] == 1
+    assert "models" not in result.limits
+    legacy = result.model_dump(exclude={"limits"})
+    assert bench.Result.model_validate(legacy).limits is None
     # The fake plans within the limit its prompt states, as a model asked for it would.
     assert all(c.plan == "llm" and c.subtasks == 1 for c in result.cases)
     assert bench.metrics(result)["plan_fallbacks"] == 0
@@ -527,3 +531,35 @@ def test_the_analyst_sees_the_values_an_earlier_proposal_gave(
     assert spec is not None
     [earlier] = spec.subtasks[0].inputs["earlier_proposals"]
     assert earlier["settings"] == [{"setting": "tuning.max_subtasks", "old": None, "new": 3}]
+
+
+def test_fake_child_environment_has_no_inherited_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "parent-secret")
+    monkeypatch.setenv("HF_TOKEN", "parent-secret")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+
+    def child(*args: Any, **kwargs: Any) -> Any:
+        env = kwargs["env"]
+        assert set(env) <= {
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "HOME",
+            "PYTHONPATH",
+            "DESMAN_DATA_DIR",
+            "DESMAN_CONFIG_DIR",
+            "PYTHONDONTWRITEBYTECODE",
+        }
+        assert Path(env["HOME"]).is_relative_to(tmp_path)
+        assert Path(env["HOME"]).is_dir()
+        assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+        raise OSError("checked environment")
+
+    monkeypatch.setattr(subprocess, "run", child)
+    with pytest.raises(evaluation.RunFailed, match="checked environment"):
+        evaluation._run(
+            tree, tmp_path, "fake", Tuning(), provider=None, model=None, python="python"
+        )

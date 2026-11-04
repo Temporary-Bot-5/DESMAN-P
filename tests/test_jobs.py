@@ -431,7 +431,7 @@ def test_work_is_asked_for_only_when_idle_and_not_too_often(
     assert world.requests.count(("POST", protocol.CLAIM)) == 2  # one job at a time
 
 
-def test_a_worker_without_a_crew_asks_for_nothing(
+def test_a_worker_without_a_crew_never_takes_jobs(
     tmp_path: Path, world: World, clock: FakeClock, root_pub: Path, add_job: Callable[..., str]
 ) -> None:
     add_job()
@@ -446,12 +446,13 @@ def test_a_worker_without_a_crew_asks_for_nothing(
         root=root_pub,
     )
     n.poll(idle=True)
-    assert ("POST", protocol.CLAIM) not in world.requests
+    assert ("POST", protocol.CLAIM) in world.requests  # proposal checks remain available
+    assert jobs.holding(conn) == []
     n.close()
     conn.close()
 
 
-def test_no_work_is_asked_for_once_the_day_s_quota_is_spent(
+def test_no_job_is_taken_once_the_day_s_quota_is_spent(
     machine: Callable[[str, FakeLLM], Machine],
     add_job: Callable[..., str],
     world: World,
@@ -467,10 +468,11 @@ def test_no_work_is_asked_for_once_the_day_s_quota_is_spent(
         (db.to_iso(clock()), spent),
     )
     a.poll()
-    assert ("POST", protocol.CLAIM) not in world.requests
+    assert ("POST", protocol.CLAIM) in world.requests  # proposal checks remain available
+    assert jobs.holding(a.conn) == []
     clock.advance(24 * 3600)  # a new day
     a.poll()
-    assert ("POST", protocol.CLAIM) in world.requests
+    assert len(jobs.holding(a.conn)) == 1
 
 
 def network_task(s: Store) -> str:

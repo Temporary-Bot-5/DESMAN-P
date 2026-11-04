@@ -964,6 +964,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "Список довіри: підписується коренем, без свіжого вузли не беруть роботу.",
     "Trust list signed until {date} (records named: {count}).": "Список довіри підписано до {date} (записів у ньому: {count}).",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Список довіри {id}: підписано {issued}, діє до {date}; записів у ньому: {count}.",
+    "Reason": "Причина",
+    "Outcome": "Результат",
+    "Verdict": "Вердикт",
+    "Matches submission": "Збігається з поданням",
+    "Handed a proposal check in to desman-global ({outcome}).": "Перевірку пропозиції передано в desman-global ({outcome}).",
 }
 
 CLICK: dict[str, Forms] = {

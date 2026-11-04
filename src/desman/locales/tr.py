@@ -871,6 +871,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "Güven listesi: kök tarafından imzalanır; güncel bir liste olmadan düğümler iş almaz.",
     "Trust list signed until {date} (records named: {count}).": "Güven listesi {date} tarihine kadar imzalandı (adlandırılan kayıtlar: {count}).",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Güven listesi {id}: {issued} tarihinde imzalandı, {date} tarihine kadar geçerli; adlandırılan kayıtlar: {count}.",
+    "Reason": "Neden",
+    "Outcome": "Sonuç",
+    "Verdict": "Karar",
+    "Matches submission": "Gönderimle eşleşiyor",
+    "Handed a proposal check in to desman-global ({outcome}).": "Öneri kontrolü desman-global ağına teslim edildi ({outcome}).",
 }
 
 CLICK: dict[str, Forms] = {

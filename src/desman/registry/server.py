@@ -1,5 +1,7 @@
 """The registry's HTTP side (ADR 0004; ROADMAP G.4): `ThreadingHTTPServer`, plain HTTP.
 
+G.7b lends proposals and accepts independent signed benchmark checks.
+
 TLS is the reverse proxy's (docs/registry-deploy.md); the server listens on 127.0.0.1 unless
 told otherwise. `Registry.handle()` is the whole of it and knows nothing of sockets: tests call
 it through `httpx.MockTransport`, the HTTP handler below only reads a request and writes the
@@ -40,7 +42,7 @@ from pydantic import BaseModel, ValidationError
 from desman.core import db
 from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import store, work
+from desman.registry import checks, store, work
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -116,6 +118,7 @@ class Registry:
             protocol.CLAIM: ("POST", self._claim),
             protocol.EXTEND: ("POST", self._extend),
             protocol.HAND_IN: ("POST", self._hand_in),
+            protocol.CHECK_HAND_IN: ("POST", self._hand_in_check),
             protocol.PROPOSALS: ("POST", self._submit_proposal),
         }
 
@@ -262,9 +265,16 @@ class Registry:
     def _claim(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
     ) -> Reply:
-        _body(protocol.Claim, body, caller)
+        asked = _body(protocol.Claim, body, caller)
         found = self._active(conn, caller)
-        return _ok(protocol.Offer(work=work.claim(conn, found, self.root, now)))
+        offered = work.claim(
+            conn, found, self.root, now, jobs=asked.jobs, proposals=asked.proposals
+        )
+        return _ok(
+            protocol.Offer(check=offered)
+            if isinstance(offered, protocol.ProposalWork)
+            else protocol.Offer(work=offered)
+        )
 
     def _extend(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
@@ -279,6 +289,13 @@ class Registry:
         given = _body(protocol.HandIn, body, caller)
         found = self._active(conn, caller)
         return _ok(work.hand_in(conn, found, given, now))
+
+    def _hand_in_check(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        """Keep an independent proposal benchmark check (G.7b)."""
+        given = _body(protocol.HandInCheck, body, caller)
+        return _ok(checks.hand_in(conn, self._active(conn, caller), given, now))
 
     def _submit_proposal(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime

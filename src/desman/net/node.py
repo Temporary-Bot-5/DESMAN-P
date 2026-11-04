@@ -37,6 +37,9 @@ already held is still finished.
   record and reason in a worker's life). A heartbeat that changes nothing is not: one every few
   minutes would bury the rest.
 
+G.7b checks proposals synchronously while idle, using only the fake benchmark; signed
+checks are retried durably before claiming more work.
+
 `tell_left` is `desman global leave`'s goodbye: sent once, after the config was saved off.
 """
 
@@ -56,13 +59,13 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from desman import net, providers
+from desman import evaluation, net, providers
 from desman.config import Config, ConfigError
 from desman.core import netlog
 from desman.core.store import Store
 from desman.core.workspace import workspace_root_for
 from desman.llm.openai_compat import key_id
-from desman.net import jobs, protocol, request, sign
+from desman.net import checks, jobs, protocol, request, sign
 
 TIMEOUT: Final = 10.0
 RETRY_FIRST: Final = timedelta(seconds=30)
@@ -100,6 +103,7 @@ class Change(StrEnum):
     WORK_TAKEN = "work_taken"
     WORK_HANDED_IN = "work_handed_in"
     WORK_DROPPED = "work_dropped"
+    CHECK_HANDED_IN = "check_handed_in"
 
 
 @dataclass(frozen=True)
@@ -348,7 +352,7 @@ class Node:
             event = None
             if self.next_at is None or now >= self.next_at:
                 event = self._poll(now)
-            if self.work and not self.revoked:
+            if not self.revoked:
                 event = self._jobs(now, idle) or event
             return event
         except sqlite3.OperationalError:
@@ -559,6 +563,18 @@ class Node:
         self.revoked = True
         self.registered = False
         self.close()
+        for check in checks.pending(self.conn):
+            if check.registry == address:
+                checks.close(self.conn, check.lease, "lost")
+                netlog.record(
+                    self.conn,
+                    "check_lost",
+                    {
+                        "registry": address,
+                        "proposal": check.proposal,
+                        "reason": REVOKED,
+                    },
+                )
         netlog.record(
             self.conn, "revoked", {"registry": address, "node": key.fingerprint, "why": why}
         )
@@ -568,7 +584,12 @@ class Node:
 
     def _jobs(self, now: datetime, idle: bool) -> Event | None:
         held = jobs.holding(self.conn)
-        if not held and not (idle and (self.claim_at is None or now >= self.claim_at)):
+        waiting = checks.pending(self.conn)
+        if (
+            not held
+            and not waiting
+            and not (idle and (self.claim_at is None or now >= self.claim_at))
+        ):
             return None
         try:
             config = self._config()
@@ -580,6 +601,10 @@ class Node:
                 jobs.close(self._store, job, "abandoned", "desman-global is off or moved")
                 netlog.record(self.conn, "work_dropped", _job_details(job, "off"))
         held = [job for job in held if job.registry == address]
+        for check in waiting:
+            if check.registry != address:
+                checks.close(self.conn, check.lease, "lost")
+        waiting = [check for check in waiting if check.registry == address]
         if (
             address is None
             or address != self.registry
@@ -595,8 +620,12 @@ class Node:
         deadline = time.monotonic() + TIMEOUT
         try:
             event = None
+            for check in waiting:
+                event = self._hand_check(client, key, address, check, now, deadline) or event
             for job in held:
                 event = self._tend(client, key, address, job, now, deadline) or event
+            if checks.pending(self.conn):
+                return event
             if (
                 idle
                 and not jobs.holding(self.conn)
@@ -720,22 +749,30 @@ class Node:
     ) -> Event | None:
         self.claim_at = now + CLAIM_EVERY
         lent = capabilities(config)
-        if not any(jobs.quota_left(self.conn, config, c.provider, now) for c in lent):
-            return None  # nothing to do it with today
+        job_work = bool(self.work) and any(
+            jobs.quota_left(self.conn, config, c.provider, now) for c in lent
+        )
+        proposal_checks = checks.can_check()
+        if not job_work and not proposal_checks:
+            return None
         offer = _call(
             client,
             key,
             address,
             "POST",
             protocol.CLAIM,
-            protocol.Claim(),
+            protocol.Claim(jobs=job_work, proposals=proposal_checks),
             protocol.Offer,
             now,
             deadline,
         )
+        if offer.check is not None:
+            return self._check_proposal(client, key, address, offer.check, now)
         work = offer.work
         if work is None:
             return None
+        if not self.work:  # claimed with jobs=False: a registry that lends one anyway is wrong
+            raise _Unreachable("bad_reply")
         assert self._trust is not None
         task = work.task.record
         try:
@@ -784,6 +821,115 @@ class Node:
             },
         )
         return Event(Change.WORK_TAKEN, address, work.stage)
+
+    def _check_proposal(
+        self,
+        client: httpx.Client,
+        key: sign.NodeKey,
+        address: str,
+        work: protocol.ProposalWork,
+        now: datetime,
+    ) -> Event | None:
+        assert self._trust is not None
+        try:
+            checks.verify(work, self._trust, now, conn=self.conn, registry=address)
+        except sign.Refused as e:
+            netlog.record(
+                self.conn,
+                "check_refused",
+                {
+                    "registry": address,
+                    "proposal": work.proposal,
+                    "reason": e.reason.value,
+                },
+            )
+            return None
+        try:
+            repo = evaluation.repository()
+        except evaluation.EvaluationError:
+            # The checkout may disappear after capability discovery.
+            body = protocol.ProposalCheck(
+                proposal=work.proposal,
+                lease=work.lease,
+                submission=protocol.submission_hash(work.submission.submission),
+                commit=work.submission.submission.base_commit,
+                outcome="unable",
+                reason="DESMAN no longer runs from a git checkout.",
+            )
+        else:
+            body = checks.run(work, repo, now)
+        signed = sign.sign(
+            key,
+            sign.RecordKind.PROPOSAL_CHECK,
+            body.model_dump(mode="json"),
+            issued_at=self._clock(),
+            lifetime=jobs.RECORD_LIFETIME,
+        )
+        checks.keep(self.conn, address, work, signed, self._clock())
+        netlog.record(
+            self.conn,
+            "proposal_checked",
+            {
+                "registry": address,
+                "proposal": work.proposal,
+                "outcome": body.outcome,
+                "verdict": body.verdict,
+            },
+        )
+        pending = next((c for c in checks.pending(self.conn) if c.lease == work.lease), None)
+        if pending is None:  # another worker already handed it in
+            return None
+        return self._hand_check(
+            client, key, address, pending, self._clock(), time.monotonic() + TIMEOUT
+        )
+
+    def _hand_check(
+        self,
+        client: httpx.Client,
+        key: sign.NodeKey,
+        address: str,
+        check: checks.Pending,
+        now: datetime,
+        deadline: float,
+    ) -> Event | None:
+        # A check takes seconds: consent can change while it runs.
+        try:
+            current = net.registry(self._config())
+        except ConfigError:
+            return None
+        if current != address:
+            checks.close(self.conn, check.lease, "lost")
+            return None
+        try:
+            received = _call(
+                client,
+                key,
+                address,
+                "POST",
+                protocol.CHECK_HAND_IN,
+                protocol.HandInCheck(lease=check.lease, record=check.record),
+                protocol.CheckReceived,
+                now,
+                deadline,
+            )
+            if received.proposal != check.proposal:
+                raise _Unreachable("bad_reply")
+        except _Problem as e:
+            if e.error in (NOT_REGISTERED, REVOKED):
+                raise
+            checks.close(self.conn, check.lease, "lost")
+            netlog.record(
+                self.conn,
+                "check_lost",
+                {
+                    "registry": address,
+                    "proposal": check.proposal,
+                    "reason": e.error,
+                },
+            )
+            return Event(Change.WORK_DROPPED, address, e.error)
+        checks.close(self.conn, check.lease, "handed_in")
+        return Event(Change.CHECK_HANDED_IN, address, str(check.record.record.body["outcome"]))
 
 
 def _check_result(work: protocol.Work, job_id: str, now: datetime) -> None:

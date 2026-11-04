@@ -18,6 +18,8 @@ lend it again from the start (a new *round*), or drop it.
 Only a job a node would accept is lent: its record still passes `sign.Trust` (the operator
 assigned, not revoked, in its term). A job past its record's term is `expired`.
 
+G.7b shares the lease limit and expiry sweep with independent proposal checks.
+
 Every step is journaled in `registry_log` in the transaction that makes it; the lease token is
 not (whoever reads the journal could not use it, but it is nobody's business either).
 """
@@ -37,7 +39,7 @@ from pydantic import ValidationError
 from desman.core import db
 from desman.net import protocol, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import store
+from desman.registry import checks, store
 
 LEASE: Final = timedelta(minutes=10)
 """How long a lease runs without being extended."""
@@ -204,6 +206,7 @@ def expire(conn: sqlite3.Connection, now: datetime) -> None:
     that lends or hands in, and before the operator reads or decides (nothing else sweeps)."""
     moment = db.to_iso(now)
     with db.transaction(conn):
+        checks.expire(conn, now, MAX_LOST)
         lapsed = conn.execute(
             "SELECT token, job, node, stage FROM leases WHERE ended IS NULL AND expires_at <= ?",
             (moment,),
@@ -264,34 +267,57 @@ def claim(
     caller: store.Node,
     root: Ed25519PublicKey,
     now: datetime,
-) -> protocol.Work | None:
+    *,
+    jobs: bool = True,
+    proposals: bool = False,
+) -> protocol.Work | protocol.ProposalWork | None:
     """Lend `caller` the job waiting longest (rechecks first: they finish work), or nothing.
 
-    A node lending nothing gets nothing; nor does one already holding `MAX_HELD` leases. A
+    Jobs need opt-in and lent models; proposal checks need opt-in and only a checkout. `MAX_HELD` counts both. A
     node never gets a job it was lent before, in any stage or round (it refuses a record it
     has seen as a replay, G.6b), and never rechecks the work of its own owner. Nothing is
     lent while the registry holds no fresh trust list (G.6c): every node would refuse it."""
     expire(conn, now)
-    if not caller.capabilities:
+    if not (jobs and caller.capabilities) and not proposals:
         return None
     moment = db.to_iso(now)
     with db.transaction(conn):
         held = conn.execute(
             "SELECT count(*) FROM leases WHERE node = ? AND ended IS NULL", (caller.fingerprint,)
         ).fetchone()[0]
+        held += conn.execute(
+            "SELECT count(*) FROM proposal_leases WHERE node = ? AND ended IS NULL",
+            (caller.fingerprint,),
+        ).fetchone()[0]
         if held >= MAX_HELD:
             return None
         believed = store.trust(conn, root, now)
         if believed.fresh() is not None:  # every node would refuse what is lent
             return None
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE status IN ('execute', 'recheck') AND expires_at > ?"
-            " AND NOT EXISTS (SELECT 1 FROM leases WHERE leases.job = jobs.id"
-            " AND ended IS NULL)"
-            " ORDER BY status = 'recheck' DESC, created_at, id",
-            (moment,),
-        ).fetchall()
+        rows = (
+            conn.execute(
+                "SELECT * FROM jobs WHERE status IN ('execute', 'recheck') AND expires_at > ?"
+                " AND NOT EXISTS (SELECT 1 FROM leases WHERE leases.job = jobs.id"
+                " AND ended IS NULL)"
+                " ORDER BY status = 'recheck' DESC, created_at, id",
+                (moment,),
+            ).fetchall()
+            if jobs
+            else []
+        )
+        if proposals:
+            # Rechecks finish jobs already done; then proposals; then fresh executions.
+            rechecks = [row for row in rows if row["status"] == "recheck"]
+            executions = [row for row in rows if row["status"] == "execute"]
+            rows = [*rechecks, None, *executions]
         for row in rows:
+            if row is None:
+                offered = checks.lend(conn, caller, now)
+                if offered is not None:
+                    return offered
+                continue
+            if not caller.capabilities:
+                continue
             found = _job(row)
             lent_before = conn.execute(
                 "SELECT 1 FROM leases WHERE job = ? AND node = ?", (found.id, caller.fingerprint)
@@ -485,7 +511,7 @@ def withdraw(conn: sqlite3.Connection, fingerprint: str, now: datetime) -> int:
     for row in rows:
         _end_lease(conn, row["token"], "withdrawn", db.to_iso(now))
         store.log(conn, "lease_withdrawn", fingerprint, {"job": row["job"]})
-    return len(rows)
+    return len(rows) + checks.withdraw(conn, fingerprint, now)
 
 
 # ── The operator's side ──────────────────────────────────────────────────────

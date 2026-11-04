@@ -1,4 +1,7 @@
-"""CLI for DESMAN(P)."""
+"""CLI for DESMAN(P).
+
+G.7b reports independent proposal check hand-ins alongside job events.
+"""
 
 from __future__ import annotations
 
@@ -568,6 +571,8 @@ def _keep_in_touch(network: node.Node, as_json: bool, *, idle: bool = False) -> 
                 stage=event.detail,
             )
         )
+    elif event.change is node.Change.CHECK_HANDED_IN:
+        ui.note(t("Handed a proposal check in to desman-global ({outcome}).", outcome=event.detail))
     elif event.change is node.Change.WORK_HANDED_IN:
         ui.note(t("Handed a job in to desman-global ({outcome}).", outcome=event.detail))
     elif event.change is node.Change.WORK_DROPPED:

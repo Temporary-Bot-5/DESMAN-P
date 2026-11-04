@@ -925,6 +925,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "विश्वास सूची: रूट द्वारा हस्ताक्षरित; ताज़ा सूची के बिना नोड काम नहीं लेते।",
     "Trust list signed until {date} (records named: {count}).": "विश्वास सूची पर {date} तक हस्ताक्षर किए गए (नामित रिकॉर्ड: {count})।",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "विश्वास सूची {id}: {issued} को हस्ताक्षरित, {date} तक मान्य; नामित रिकॉर्ड: {count}।",
+    "Reason": "कारण",
+    "Outcome": "परिणाम",
+    "Verdict": "निर्णय",
+    "Matches submission": "प्रस्तुति से मेल खाता है",
+    "Handed a proposal check in to desman-global ({outcome}).": "प्रस्ताव की जाँच desman-global को सौंपी गई ({outcome})।",
 }
 
 CLICK: dict[str, Forms] = {

@@ -928,6 +928,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "La liste de confiance : signée par la racine ; sans une liste récente, les nœuds ne prennent aucun travail.",
     "Trust list signed until {date} (records named: {count}).": "Liste de confiance signée jusqu'au {date} (enregistrements nommés : {count}).",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Liste de confiance {id} : signée le {issued}, valable jusqu'au {date} ; enregistrements nommés : {count}.",
+    "Reason": "Motif",
+    "Outcome": "Résultat",
+    "Verdict": "Verdict",
+    "Matches submission": "Correspond à la soumission",
+    "Handed a proposal check in to desman-global ({outcome}).": "Une vérification de proposition a été remise à desman-global ({outcome}).",
 }
 
 CLICK: dict[str, Forms] = {

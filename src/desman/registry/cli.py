@@ -1,4 +1,4 @@
-"""`desman-registry`: the registry on the owner's server (ADR 0004; ROADMAP G.4, G.6).
+"""`desman-registry`: the registry on the owner's server (ADR 0004; ROADMAP G.4, G.6, G.7b).
 
 `serve` answers nodes; `assign` and `revoke` sign records with the root key; `backup` copies
 the database; `nodes` and `log` show what the registry knows and did. The operator's work
@@ -26,7 +26,7 @@ from desman import i18n, ui
 from desman.core.models import Kind
 from desman.i18n import t
 from desman.net import protocol, sign
-from desman.registry import admin, server, store, work
+from desman.registry import admin, checks, server, store, work
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
@@ -459,6 +459,7 @@ def proposal_list(ctx: click.Context, status: str | None, as_json: bool) -> None
     """List proposal submissions for operator review."""
     conn = _open_db(ctx)
     try:
+        work.expire(conn, _now())
         found = store.proposals(conn, status)
     finally:
         conn.close()
@@ -510,7 +511,9 @@ def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
         matches = store.find_proposal(conn, proposal_id)
         if len(matches) != 1:
             raise click.ClickException(t("No unique proposal matches {id}.", id=proposal_id))
+        work.expire(conn, _now())
         found = store.proposal(conn, matches[0])
+        checked = checks.results(conn, matches[0])
     finally:
         conn.close()
     assert found is not None
@@ -520,6 +523,8 @@ def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
         "status": found.status,
         "created_at": found.created_at,
         "submission": found.submission.model_dump(mode="json"),
+        "reason": found.reason,
+        "checks": checked,
     }
     if as_json:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
@@ -533,36 +538,24 @@ def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
         f"{t('Benchmark')}: {item.mode} ({item.verdict})",
     ):
         ui.out(Text(line))
-    for label, snapshot in (
-        (t("Current version"), item.base),
-        (t("Proposed version"), item.candidate),
-    ):
-        ui.out(Text(label))
-        for case in snapshot.cases:
-            ui.out(
-                Text(
-                    t(
-                        "{id}: {status} (subtasks {n})",
-                        id=case.id,
-                        status=case.status,
-                        n=case.subtasks,
-                    )
-                )
-            )
-        roles = snapshot.stats.get("roles")
-        if isinstance(roles, list):
-            for key, label in (
-                ("calls", t("Calls")),
-                ("prompt_tokens", t("Prompt tokens")),
-                ("completion_tokens", t("Completion tokens")),
-            ):
-                values = [
-                    row[key]
-                    for row in roles
-                    if isinstance(row, dict) and isinstance(row.get(key), int)
-                ]
-                if values:
-                    ui.out(Text(f"{label}: {sum(values)}"))
+    _show_snapshots(item.base, item.candidate)
+    if found.reason:
+        ui.out(Text(f"{t('Reason')}: {found.reason}"))
+    for check in checked:
+        ui.out(Text(f"{t('Node')}: {check['node']}"))
+        ui.out(Text(f"{t('Outcome')}: {check['outcome']}"))
+        ui.out(Text(f"{t('Verdict')}: {check['verdict']}"))
+        ui.out(Text(f"{t('Matches submission')}: {check['matches_submission']}"))
+        if check["reason"]:
+            ui.out(Text(f"{t('Reason')}: {check['reason']}"))
+        _show_snapshots(
+            None
+            if check["base"] is None
+            else protocol.BenchmarkSnapshot.model_validate(check["base"]),
+            None
+            if check["candidate"] is None
+            else protocol.BenchmarkSnapshot.model_validate(check["candidate"]),
+        )
     ui.out(Text(item.summary))
     if item.diff:
         ui.out(Text(item.diff))
@@ -763,3 +756,41 @@ def trust_show(ctx: click.Context, as_json: bool) -> None:
             date=found.expires_at.isoformat(),
         )
     )
+
+
+def _show_snapshots(
+    base: protocol.BenchmarkSnapshot | None, candidate: protocol.BenchmarkSnapshot | None
+) -> None:
+    """Both local and independent benchmark snapshots (G.7b)."""
+    for label, snapshot in (
+        (t("Current version"), base),
+        (t("Proposed version"), candidate),
+    ):
+        if snapshot is None:
+            continue
+        ui.out(Text(label))
+        for case in snapshot.cases:
+            ui.out(
+                Text(
+                    t(
+                        "{id}: {status} (subtasks {n})",
+                        id=case.id,
+                        status=case.status,
+                        n=case.subtasks,
+                    )
+                )
+            )
+        roles = snapshot.stats.get("roles")
+        if isinstance(roles, list):
+            for key, label in (
+                ("calls", t("Calls")),
+                ("prompt_tokens", t("Prompt tokens")),
+                ("completion_tokens", t("Completion tokens")),
+            ):
+                values = [
+                    row[key]
+                    for row in roles
+                    if isinstance(row, dict) and isinstance(row.get(key), int)
+                ]
+                if values:
+                    ui.out(Text(f"{label}: {sum(values)}"))

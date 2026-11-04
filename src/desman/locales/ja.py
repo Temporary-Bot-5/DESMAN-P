@@ -869,6 +869,11 @@ MESSAGES: dict[str, Forms] = {
     "The trust list: signed by the root, without a fresh one nodes take no work.": "信頼リスト：ルートが署名します。新しいリストがないとノードは作業を受けません。",
     "Trust list signed until {date} (records named: {count}).": "信頼リストに署名しました。有効期限 {date}（記載レコード：{count}）。",
     "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "信頼リスト {id}：{issued} に署名、{date} まで有効。記載レコード：{count}。",
+    "Reason": "理由",
+    "Outcome": "結果",
+    "Verdict": "判定",
+    "Matches submission": "提出内容と一致",
+    "Handed a proposal check in to desman-global ({outcome}).": "提案の検証結果を desman-global に提出しました（{outcome}）。",
 }
 
 CLICK: dict[str, Forms] = {

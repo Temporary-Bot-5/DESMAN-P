@@ -1,5 +1,7 @@
 """`desman global`: whether this machine takes part in desman-global, and what it lends (G.3).
 
+G.7b shares benchmark snapshots with independent checkers.
+
 Off unless the person joins (ADR 0004, decision 4). Joining creates the node's key (`node.key`,
 shown by its fingerprint only) and switches desman-global on; leaving takes back everything
 lent and switches it off, while the key stays until the person deletes it. A module lent
@@ -30,7 +32,7 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import net, providers, ui
+from desman import bench, net, providers, ui
 from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog
@@ -211,8 +213,10 @@ def proposal_upload(
                 "diff": found.diff,
                 "verdict": evaluation.verdict,
                 "mode": evaluation.mode,
-                "base": evaluation.base,
-                "candidate": evaluation.candidate,
+                "base": protocol.benchmark_snapshot(bench.Result.model_validate(evaluation.base)),
+                "candidate": protocol.benchmark_snapshot(
+                    bench.Result.model_validate(evaluation.candidate)
+                ),
             }
         )
     except ValueError as e:

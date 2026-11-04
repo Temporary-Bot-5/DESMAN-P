@@ -1,5 +1,7 @@
 """The registry's database (ADR 0004; ROADMAP G.4): its own SQLite with its own migrations.
 
+G.7b adds independent proposal checks and leases (migration 6).
+
 The same rules as the node's database (`core/db.py`, whose helpers it uses): append-only
 migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 
@@ -201,6 +203,34 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER proposals_no_delete BEFORE DELETE ON proposals
         BEGIN SELECT RAISE(ABORT, 'proposals are never deleted'); END;
     """,
+    # 6 — independent proposal checks and their leases (G.7b).
+    """
+    ALTER TABLE proposals ADD COLUMN reason TEXT;
+    CREATE TABLE proposal_leases (
+        token TEXT PRIMARY KEY CHECK (length(token) = 32 AND token NOT GLOB '*[^0-9a-f]*'),
+        proposal TEXT NOT NULL REFERENCES proposals(id),
+        node TEXT NOT NULL REFERENCES nodes(fingerprint),
+        granted_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        ended TEXT CHECK (ended IN ('handed_in', 'expired', 'withdrawn')),
+        ended_at TEXT
+    ) STRICT;
+    CREATE INDEX proposal_leases_active ON proposal_leases(node, ended);
+    CREATE TABLE proposal_checks (
+        id TEXT PRIMARY KEY,
+        proposal TEXT NOT NULL REFERENCES proposals(id),
+        node TEXT NOT NULL REFERENCES nodes(fingerprint),
+        owner TEXT NOT NULL,
+        lease TEXT NOT NULL UNIQUE REFERENCES proposal_leases(token),
+        outcome TEXT NOT NULL CHECK (outcome IN ('refused', 'failed', 'unable', 'checked')),
+        signed_json TEXT NOT NULL CHECK (json_valid(signed_json)),
+        received_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TRIGGER proposal_checks_no_update BEFORE UPDATE ON proposal_checks
+        BEGIN SELECT RAISE(ABORT, 'proposal checks are append-only'); END;
+    CREATE TRIGGER proposal_checks_no_delete BEFORE DELETE ON proposal_checks
+        BEGIN SELECT RAISE(ABORT, 'proposal checks are append-only'); END;
+    """,
 )
 
 
@@ -353,6 +383,7 @@ class ProposalSubmission:
     signed: protocol.SignedProposalSubmission
     status: str
     created_at: str
+    reason: str | None = None
 
     @property
     def submission(self) -> protocol.ProposalSubmission:
@@ -438,6 +469,7 @@ def _proposal_submission(row: sqlite3.Row) -> ProposalSubmission:
         id=row["id"],
         node=row["node"],
         signed=protocol.SignedProposalSubmission.model_validate_json(row["submission_json"]),
+        reason=row["reason"],
         status=row["status"],
         created_at=row["created_at"],
     )
