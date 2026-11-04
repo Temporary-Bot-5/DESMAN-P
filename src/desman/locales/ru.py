@@ -1163,6 +1163,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Работа сдана в desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Работа из desman-global оставлена: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Работа из desman-global выполняется только в `desman worker`, отданными моделями.",
+    "A trust list lasts from 1 to {days} days.": "Список доверия действует от 1 до {days} дней.",
+    "How long the list lasts; sign the next one before it ends.": "Сколько действует список; подпишите следующий до его окончания.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Нет действующего списка доверия: узлы не берут работу. Подпишите его: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Подписать новый список доверия со всеми действующими назначениями и отзывами.",
+    "The trust list handed out now.": "Список доверия, который раздаётся сейчас.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Список доверия: подписывается корнем, без свежего узлы не берут работу.",
+    "Trust list signed until {date} (records named: {count}).": "Список доверия подписан до {date} (записей в нём: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Список доверия {id}: подписан {issued}, действует до {date}; записей в нём: {count}.",
 }
 
 CLICK: dict[str, Forms] = {
@@ -1298,4 +1306,57 @@ CLICK: dict[str, Forms] = {
     "Unknown standard stream '{name}'": "Неизвестный стандартный поток '{name}'",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "Предложение {id} меняет настройки; отправить можно только предложения, меняющие тексты.",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "Краткое описание и ожидаемый эффект — слова аналитика о ваших собственных неудачных задачах: прочитайте их перед отправкой, в них могут быть цитаты из этих задач.",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "Реестр принимает от одного узла не больше {n} предложения в день; ничего не отправлено.",
+        "Реестр принимает от одного узла не больше {n} предложений в день; ничего не отправлено.",
+        "Реестр принимает от одного узла не больше {n} предложений в день; ничего не отправлено.",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "Другой узел проверит предложение, прежде чем оператор сможет его принять.",
+    "Base commit": "Базовый коммит",
+    "Benchmark": "Бенчмарк",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "Посмотреть: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "Список предложений на рассмотрение оператору.",
+    "No proposals have been submitted.": "Предложений пока нет.",
+    "No unique proposal matches {id}.": "Нет единственного предложения с ID {id}.",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "Ничего не отправлено. Проверьте данные и повторите с --confirm {hash}.",
+    "Only proposals in this state.": "Только предложения с этим статусом.",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "Предпросмотр отправки; --confirm отправит только эти данные.",
+    "Proposal": "Предложение",
+    "Proposal submission": "Отправка предложения",
+    "Proposal {id} has nothing to submit.": "В предложении {id} нечего отправлять.",
+    "Proposal {id} needs a completed benchmark with both results.": "Для предложения {id} нужен завершённый бенчмарк с обоими результатами.",
+    "Proposal {proposal} sent to the registry as {id}.": "Предложение {proposal} отправлено в реестр под номером {id}.",
+    "Send only if this matches the preview's hash.": "Отправить, только если хэш совпадает с предпросмотром.",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "Отправить предложение {id} и результаты бенчмарка в реестр desman-global?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "Показать отправленное предложение, его diff и оба результата локального бенчмарка.",
+    "The Improvement Analyst's proposals submitted by network nodes.": "Предложения аналитика улучшений, отправленные сетевыми узлами.",
+    "The node key changed after preview; nothing was sent.": "Ключ узла изменился после предпросмотра; ничего не отправлено.",
+    "The preview changed; nothing was sent. Preview it again.": "Предпросмотр изменился; ничего не отправлено. Создайте его заново.",
+    "The proposal was sent, but the local journal is busy.": "Предложение отправлено, но локальный журнал занят.",
+    "The registry did not accept the proposal: {error}": "Реестр не принял предложение: {error}",
+    "This node has no usable key; nothing was sent.": "У узла нет рабочего ключа; ничего не отправлено.",
+    "This proposal cannot be sent: {reason}": "Это предложение нельзя отправить: {reason}",
+    "This proposal contains an API key; nothing was sent.": "В предложении найден API-ключ; ничего не отправлено.",
+    "This proposal is too large to send.": "Предложение слишком велико для отправки.",
+    "desman-global is off; nothing was sent.": "desman-global выключен; ничего не отправлено.",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "Реестр изменился после просмотра; ничего не отправлено.",
+        "Registry: {address}": "Реестр: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "Списку доверия больше 2 дней: узлы не берут работу. Подпишите новый список.",
+        "Current version": "Текущая версия",
+        "Proposed version": "Предлагаемая версия",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (подзадач {n})",
+        "Calls": "Вызовы",
+        "Prompt tokens": "Токены запроса",
+        "Completion tokens": "Токены ответа",
+    }
+)
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)

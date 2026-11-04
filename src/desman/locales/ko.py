@@ -859,6 +859,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "desman-global에 작업을 제출했습니다({outcome}).",
     "A job from desman-global was dropped: {reason}": "desman-global의 작업을 포기했습니다: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global의 작업은 `desman worker`에서 빌려준 모델로만 실행됩니다.",
+    "A trust list lasts from 1 to {days} days.": "신뢰 목록의 유효 기간은 1~{days}일입니다.",
+    "How long the list lasts; sign the next one before it ends.": "목록의 유효 기간입니다. 끝나기 전에 다음 목록에 서명하세요.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "유효한 신뢰 목록이 없습니다: 노드가 작업을 받지 않습니다. 서명하려면: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "유효한 모든 지정과 폐기를 담은 새 신뢰 목록에 서명합니다.",
+    "The trust list handed out now.": "지금 배포되는 신뢰 목록.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "신뢰 목록: 루트가 서명하며, 최신 목록이 없으면 노드는 작업을 받지 않습니다.",
+    "Trust list signed until {date} (records named: {count}).": "신뢰 목록에 서명했습니다. {date}까지 유효합니다(기재된 레코드: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "신뢰 목록 {id}: {issued}에 서명, {date}까지 유효; 기재된 레코드: {count}.",
 }
 
 CLICK: dict[str, Forms] = {
@@ -934,4 +942,55 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "묻지 않고 작업을 확인합니다.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "제안 {id}은(는) 설정을 바꿉니다. 텍스트를 바꾸는 제안만 보낼 수 있습니다.",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "요약과 기대 효과는 당신이 실패한 작업에 대한 분석가의 말입니다. 보내기 전에 읽어 보세요. 그 작업을 인용할 수 있습니다.",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "레지스트리는 한 노드에서 하루에 최대 {n}개의 제안만 받습니다. 아무것도 보내지 않았습니다.",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "운영자가 수락하기 전에 다른 노드가 제안을 확인합니다.",
+    "Base commit": "기준 커밋",
+    "Benchmark": "벤치마크",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "확인: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "운영자 검토를 위해 제출된 제안을 나열합니다.",
+    "No proposals have been submitted.": "제출된 제안이 없습니다.",
+    "No unique proposal matches {id}.": "{id}와 일치하는 고유한 제안이 없습니다.",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "보내지 않았습니다. 내용을 확인한 뒤 --confirm {hash}로 다시 실행하세요.",
+    "Only proposals in this state.": "이 상태의 제안만.",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "제출 내용을 미리 봅니다. --confirm은 이 내용만 전송합니다.",
+    "Proposal": "제안",
+    "Proposal submission": "제안 제출",
+    "Proposal {id} has nothing to submit.": "제안 {id}에는 보낼 내용이 없습니다.",
+    "Proposal {id} needs a completed benchmark with both results.": "제안 {id}에는 두 결과가 모두 있는 완료된 벤치마크가 필요합니다.",
+    "Proposal {proposal} sent to the registry as {id}.": "제안 {proposal}을(를) 레지스트리에 {id}(으)로 보냈습니다.",
+    "Send only if this matches the preview's hash.": "미리보기 해시와 일치할 때만 보냅니다.",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "제안 {id}와 벤치마크 결과를 desman-global 레지스트리에 보낼까요?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "제출된 제안, diff, 로컬 벤치마크 결과 두 개를 표시합니다.",
+    "The Improvement Analyst's proposals submitted by network nodes.": "네트워크 노드가 제출한 개선 분석가의 제안입니다.",
+    "The node key changed after preview; nothing was sent.": "미리보기 후 노드 키가 변경되어 보내지 않았습니다.",
+    "The preview changed; nothing was sent. Preview it again.": "미리보기가 변경되어 보내지 않았습니다. 다시 미리 보세요.",
+    "The proposal was sent, but the local journal is busy.": "제안은 보냈지만 로컬 기록이 사용 중입니다.",
+    "The registry did not accept the proposal: {error}": "레지스트리가 제안을 수락하지 않았습니다: {error}",
+    "This node has no usable key; nothing was sent.": "이 노드에는 사용할 수 있는 키가 없습니다. 보내지 않았습니다.",
+    "This proposal cannot be sent: {reason}": "이 제안을 보낼 수 없습니다: {reason}",
+    "This proposal contains an API key; nothing was sent.": "제안에 API 키가 포함되어 있습니다. 보내지 않았습니다.",
+    "This proposal is too large to send.": "제안이 너무 커서 보낼 수 없습니다.",
+    "desman-global is off; nothing was sent.": "desman-global이 꺼져 있어 보내지 않았습니다.",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "미리보기 후 레지스트리가 변경되었습니다. 아무것도 전송하지 않았습니다.",
+        "Registry: {address}": "레지스트리: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "신뢰 목록이 2일보다 오래되었습니다. 노드는 작업을 받지 않습니다. 새 목록에 서명하세요.",
+        "Current version": "현재 버전",
+        "Proposed version": "제안 버전",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (하위 작업 {n})",
+        "Calls": "호출 수",
+        "Prompt tokens": "입력 토큰",
+        "Completion tokens": "출력 토큰",
+    }
+)
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Annotated, Final, Literal
+from typing import Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from desman.core.models import Kind
-from desman.net.sign import Fingerprint, PublicKeyText, RecordId, Signed
+from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed
 
 REGISTER: Final = "/v1/nodes/register"
 HEARTBEAT: Final = "/v1/nodes/heartbeat"
@@ -24,6 +24,7 @@ TRUST: Final = "/v1/trust"
 CLAIM: Final = "/v1/work/claim"
 EXTEND: Final = "/v1/work/extend"
 HAND_IN: Final = "/v1/work/hand-in"
+PROPOSALS: Final = "/v1/proposals"
 
 MAX_BODY: Final = 256 * 1024
 MAX_RESULT_BYTES: Final = 160 * 1024
@@ -31,6 +32,7 @@ MAX_RESULT_BYTES: Final = 160 * 1024
 (`\\uXXXX`, the longest any serializer writes them): what fits a request (`MAX_BODY`) with
 room to spare, however the node encodes it."""
 MAX_INPUT_BYTES: Final = 32 * 1024
+MAX_PROPOSAL_BYTES: Final = 96 * 1024
 MAX_CAPABILITIES: Final = 32
 HEARTBEAT_SECONDS: Final = 300
 """How often the registry asks a node to say it is alive."""
@@ -99,8 +101,8 @@ class Left(BaseModel):
 
 
 class TrustState(BaseModel):
-    """Assignments still in their term and every revocation, oldest first: what a node checks
-    on every poll (`sign.Trust.receive`)."""
+    """Assignments still in their term and every revocation, oldest first, then the newest
+    trust list in its term (G.6c): what a node checks on every poll (`sign.Trust.receive`)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -114,6 +116,108 @@ class Problem(BaseModel):
 
     error: str
     detail: str = ""
+
+
+class BenchmarkCase(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1, max_length=64)
+    status: str = Field(min_length=1, max_length=32)
+    plan: str = Field(min_length=1, max_length=32)
+    plan_error: str | None = Field(default=None, max_length=1000)
+    subtasks: int = Field(ge=0, le=1000)
+
+
+class BenchmarkSnapshot(BaseModel):
+    """The bounded result of one local proposal benchmark run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: int = Field(ge=1)
+    mode: Literal["fake", "real"]
+    source: str = Field(min_length=1, max_length=500)
+    cases: list[BenchmarkCase] = Field(max_length=100)
+    stats: dict[str, Any]
+
+
+class ProposalChange(BaseModel):
+    """One target text the proposal changes (as `improve.render` records it)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target: str = Field(min_length=1, max_length=200)
+    file: str = Field(min_length=1, max_length=200)
+    old: str = Field(max_length=MAX_PROPOSAL_BYTES)
+    new: str = Field(max_length=MAX_PROPOSAL_BYTES)
+
+
+class ProposalDetails(BaseModel):
+    """What another node needs to check the diff: the targets it may touch, each file's
+    SHA-256 when it was made, the expected effect. Never the analyst's `evidence` (it quotes
+    the person's own tasks) nor `settings` (`Config.tuning` is this machine's)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    changes: list[ProposalChange] = Field(min_length=1, max_length=32)
+    base: dict[str, str]
+    expected_effect: str = Field(default="", max_length=2000)
+
+
+PROPOSAL_KIND: Final = "proposal_submission"
+"""Inside every signed submission, so its signature can never pass for another node-signed
+body (a record, a request)."""
+MAX_PROPOSALS_PER_DAY: Final = 5
+"""Submissions the registry keeps from one node in 24 hours."""
+PROPOSAL_LIMIT: Final = "proposal_limit"
+"""The registry's word (`Problem.error`) when a node is over `MAX_PROPOSALS_PER_DAY`."""
+
+
+class ProposalSubmission(BaseModel):
+    """What a person approved for sending to the registry (ROADMAP G.7). Only target texts:
+    a proposal of settings stays on its machine."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["proposal_submission"] = PROPOSAL_KIND
+    proposal: int = Field(ge=1)
+    evaluation: int = Field(ge=1)
+    base_commit: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
+    summary: str = Field(min_length=1, max_length=2000)
+    details: ProposalDetails
+    diff: str = Field(min_length=1, max_length=MAX_PROPOSAL_BYTES)
+    verdict: Literal["better", "worse", "same"]
+    mode: Literal["fake", "real"]
+    base: BenchmarkSnapshot
+    candidate: BenchmarkSnapshot
+
+    @model_validator(mode="after")
+    def _same_mode(self) -> ProposalSubmission:
+        if self.base.mode != self.mode or self.candidate.mode != self.mode:
+            raise ValueError("benchmark modes do not match the evaluation")
+        return self
+
+
+class SignedProposalSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    submission: ProposalSubmission
+    signer: Fingerprint
+    signature: SignatureText
+
+
+class SubmitProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    signed: SignedProposalSubmission
+
+
+class ProposalReceived(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str
+    proposal: int
+    evaluation: int
+    status: Literal["submitted"]
 
 
 # ── Work (G.6) ───────────────────────────────────────────────────────────────

@@ -4,7 +4,8 @@
 the database; `nodes` and `log` show what the registry knows and did. The operator's work
 (G.6): `job add` signs a job with the operator's key, `jobs`, `job show` and `inbox` show them,
 `job settle` decides one that waits for a person, `owner` says whose node is whose (a result is
-rechecked by another owner's node). Non-interactive, like every subcommand. It reads no `config.json`: its directory is `--dir` (or
+rechecked by another owner's node). `trust sign` signs the trust list with the root (G.6c):
+without one in its term nodes take no work, so sign it again before it ends (a timer). Non-interactive, like every subcommand. It reads no `config.json`: its directory is `--dir` (or
 $DESMAN_REGISTRY_DIR), its language $DESMAN_REGISTRY_LANGUAGE.
 """
 
@@ -440,6 +441,133 @@ def jobs(ctx: click.Context, status: str | None, as_json: bool) -> None:
     _jobs_table(found)
 
 
+@cli.group()
+def proposal() -> None:
+    """The Improvement Analyst's proposals submitted by network nodes."""
+
+
+@proposal.command("list")
+@click.option(
+    "--status",
+    type=click.Choice(["submitted", "reviewing", "reviewed", "accepted", "rejected"]),
+    default=None,
+    help="Only proposals in this state.",
+)
+@_json_option
+@click.pass_context
+def proposal_list(ctx: click.Context, status: str | None, as_json: bool) -> None:
+    """List proposal submissions for operator review."""
+    conn = _open_db(ctx)
+    try:
+        found = store.proposals(conn, status)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "id": item.id,
+                        "node": item.node,
+                        "proposal": item.submission.proposal,
+                        "evaluation": item.submission.evaluation,
+                        "status": item.status,
+                        "created_at": item.created_at,
+                        "summary": item.submission.summary,
+                        "verdict": item.submission.verdict,
+                    }
+                    for item in found
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not found:
+        ui.note(t("No proposals have been submitted."))
+        return
+    table = ui.table(t("ID"), t("Proposal"), t("Node"), t("Status"), t("Benchmark"))
+    for item in found:
+        table.add_row(
+            item.id[:12],
+            str(item.submission.proposal),
+            item.node[:16],
+            item.status,
+            f"{item.submission.mode}: {item.submission.verdict}",
+        )
+    ui.out(table)
+    ui.note(t("Inspect one with: desman-registry proposal show ID"))
+
+
+@proposal.command("show")
+@click.argument("proposal_id", metavar="ID")
+@_json_option
+@click.pass_context
+def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
+    """Show a submitted proposal, its diff and both local benchmark results."""
+    conn = _open_db(ctx)
+    try:
+        matches = store.find_proposal(conn, proposal_id)
+        if len(matches) != 1:
+            raise click.ClickException(t("No unique proposal matches {id}.", id=proposal_id))
+        found = store.proposal(conn, matches[0])
+    finally:
+        conn.close()
+    assert found is not None
+    data = {
+        "id": found.id,
+        "node": found.node,
+        "status": found.status,
+        "created_at": found.created_at,
+        "submission": found.submission.model_dump(mode="json"),
+    }
+    if as_json:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    item = found.submission
+    for line in (
+        f"{t('Proposal submission')} {found.id}",
+        f"{t('Node')}: {found.node}",
+        f"{t('Status')}: {found.status}",
+        f"{t('Base commit')}: {item.base_commit}",
+        f"{t('Benchmark')}: {item.mode} ({item.verdict})",
+    ):
+        ui.out(Text(line))
+    for label, snapshot in (
+        (t("Current version"), item.base),
+        (t("Proposed version"), item.candidate),
+    ):
+        ui.out(Text(label))
+        for case in snapshot.cases:
+            ui.out(
+                Text(
+                    t(
+                        "{id}: {status} (subtasks {n})",
+                        id=case.id,
+                        status=case.status,
+                        n=case.subtasks,
+                    )
+                )
+            )
+        roles = snapshot.stats.get("roles")
+        if isinstance(roles, list):
+            for key, label in (
+                ("calls", t("Calls")),
+                ("prompt_tokens", t("Prompt tokens")),
+                ("completion_tokens", t("Completion tokens")),
+            ):
+                values = [
+                    row[key]
+                    for row in roles
+                    if isinstance(row, dict) and isinstance(row.get(key), int)
+                ]
+                if values:
+                    ui.out(Text(f"{label}: {sum(values)}"))
+    ui.out(Text(item.summary))
+    if item.diff:
+        ui.out(Text(item.diff))
+
+
 @cli.command()
 @_json_option
 @click.pass_context
@@ -556,3 +684,82 @@ def owner(ctx: click.Context, node_key: str, name: str | None, clear: bool) -> N
         ui.ok(t("Node {key} is its own owner.", key=fingerprint[:16]))
     else:
         ui.ok(t("Node {key} belongs to {owner}.", key=fingerprint[:16], owner=str(name)))
+
+
+@cli.group()
+def trust() -> None:
+    """The trust list: signed by the root, without a fresh one nodes take no work."""
+
+
+@trust.command("sign")
+@click.option(
+    "--days",
+    default=admin.TRUST_DAYS,
+    show_default=True,
+    type=click.IntRange(1, admin.MAX_TRUST_DAYS),
+    help="How long the list lasts; sign the next one before it ends.",
+)
+@_root_option
+@click.pass_context
+def trust_sign(ctx: click.Context, days: int, root_key: Path | None) -> None:
+    """Sign a new trust list naming every assignment and revocation in effect."""
+    try:
+        conn, root = _open(ctx, root_key)
+        try:
+            done = admin.sign_trust_list(conn, root, days=days, now=_now())
+        finally:
+            conn.close()
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(
+        t(
+            "Trust list signed until {date} (records named: {count}).",
+            count=done.records,
+            date=done.expires_at.isoformat(),
+        )
+    )
+
+
+@trust.command("show")
+@_json_option
+@click.pass_context
+def trust_show(ctx: click.Context, as_json: bool) -> None:
+    """The trust list handed out now."""
+    conn = _open_db(ctx)
+    try:
+        found = admin.trust_list(conn, _now())
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(
+            json.dumps(
+                None
+                if found is None
+                else {
+                    "id": found.id,
+                    "records": found.records,
+                    "issued_at": found.issued_at.isoformat(),
+                    "expires_at": found.expires_at.isoformat(),
+                },
+                indent=2,
+            )
+        )
+        return
+    if found is None:
+        ui.warn(
+            t(
+                "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign"
+            )
+        )
+        return
+    if _now() >= found.issued_at + sign.TRUST_LIST_MAX_AGE:
+        ui.warn(t("The trust list is more than 2 days old: nodes take no work. Sign a new list."))
+    ui.ok(
+        t(
+            "Trust list {id}: signed {issued}, until {date}; records named: {count}.",
+            id=found.id[:16],
+            count=found.records,
+            issued=found.issued_at.isoformat(),
+            date=found.expires_at.isoformat(),
+        )
+    )

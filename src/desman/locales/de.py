@@ -920,6 +920,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Eine Aufgabe an desman-global abgegeben ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Eine Aufgabe von desman-global wurde aufgegeben: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Eine Aufgabe von desman-global läuft nur in `desman worker`, mit den verliehenen Modellen.",
+    "A trust list lasts from 1 to {days} days.": "Eine Vertrauensliste gilt 1 bis {days} Tage.",
+    "How long the list lasts; sign the next one before it ends.": "Wie lange die Liste gilt; signieren Sie die nächste, bevor sie endet.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Keine gültige Vertrauensliste: Knoten nehmen keine Arbeit an. Signieren Sie eine mit: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Eine neue Vertrauensliste signieren, die jede gültige Zuweisung und jeden Widerruf nennt.",
+    "The trust list handed out now.": "Die Vertrauensliste, die jetzt ausgegeben wird.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Die Vertrauensliste: von der Wurzel signiert, ohne eine aktuelle nehmen Knoten keine Arbeit an.",
+    "Trust list signed until {date} (records named: {count}).": "Vertrauensliste signiert bis {date} (genannte Einträge: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Vertrauensliste {id}: signiert {issued}, gültig bis {date}; genannte Einträge: {count}.",
 }
 
 CLICK: dict[str, Forms] = {
@@ -1012,4 +1020,56 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Die Aktion ohne Rückfrage bestätigen.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "Vorschlag {id} ändert Einstellungen; senden lassen sich nur Vorschläge, die Texte ändern.",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "Zusammenfassung und erwartete Wirkung sind Worte des Analysten über deine eigenen fehlgeschlagenen Aufgaben: Lies sie vor dem Senden, sie können diese Aufgaben zitieren.",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "Die Registry nimmt höchstens {n} Vorschlag pro Tag von einem Knoten an; nichts wurde gesendet.",
+        "Die Registry nimmt höchstens {n} Vorschläge pro Tag von einem Knoten an; nichts wurde gesendet.",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "Ein anderer Knoten prüft den Vorschlag, bevor der Betreiber ihn annehmen kann.",
+    "Base commit": "Basis-Commit",
+    "Benchmark": "Benchmark",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "Ansehen mit: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "Listet zur Prüfung eingereichte Vorschläge auf.",
+    "No proposals have been submitted.": "Es wurden keine Vorschläge eingereicht.",
+    "No unique proposal matches {id}.": "Kein eindeutiger Vorschlag für {id} gefunden.",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "Nichts wurde gesendet. Prüfe die Daten und wiederhole mit --confirm {hash}.",
+    "Only proposals in this state.": "Nur Vorschläge in diesem Status.",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "Vorschau des Uploads; --confirm sendet genau diese Daten.",
+    "Proposal": "Vorschlag",
+    "Proposal submission": "Vorschlagseinreichung",
+    "Proposal {id} has nothing to submit.": "Vorschlag {id} enthält nichts zum Senden.",
+    "Proposal {id} needs a completed benchmark with both results.": "Vorschlag {id} benötigt einen abgeschlossenen Benchmark mit beiden Ergebnissen.",
+    "Proposal {proposal} sent to the registry as {id}.": "Vorschlag {proposal} wurde als {id} an das Register gesendet.",
+    "Send only if this matches the preview's hash.": "Nur senden, wenn der Hash mit der Vorschau übereinstimmt.",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "Vorschlag {id} und seine Benchmark-Ergebnisse an das desman-global-Register senden?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "Einen eingereichten Vorschlag, sein Diff und beide lokalen Benchmark-Ergebnisse anzeigen.",
+    "The Improvement Analyst's proposals submitted by network nodes.": "Vom Netzwerk eingereichte Vorschläge des Improvement Analyst.",
+    "The node key changed after preview; nothing was sent.": "Der Knotenschlüssel hat sich seit der Vorschau geändert; nichts gesendet.",
+    "The preview changed; nothing was sent. Preview it again.": "Die Vorschau hat sich geändert; nichts gesendet. Erstelle sie erneut.",
+    "The proposal was sent, but the local journal is busy.": "Der Vorschlag wurde gesendet, aber das lokale Journal ist beschäftigt.",
+    "The registry did not accept the proposal: {error}": "Das Register hat den Vorschlag nicht angenommen: {error}",
+    "This node has no usable key; nothing was sent.": "Dieser Knoten hat keinen verwendbaren Schlüssel; nichts gesendet.",
+    "This proposal cannot be sent: {reason}": "Dieser Vorschlag kann nicht gesendet werden: {reason}",
+    "This proposal contains an API key; nothing was sent.": "Dieser Vorschlag enthält einen API-Schlüssel; nichts gesendet.",
+    "This proposal is too large to send.": "Der Vorschlag ist zu groß zum Senden.",
+    "desman-global is off; nothing was sent.": "desman-global ist ausgeschaltet; nichts gesendet.",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "Die Registry hat sich nach der Vorschau geändert; nichts gesendet.",
+        "Registry: {address}": "Registry: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "Die Vertrauensliste ist über 2 Tage alt: Knoten nehmen keine Arbeit an. Signieren Sie eine neue Liste.",
+        "Current version": "Aktuelle Version",
+        "Proposed version": "Vorgeschlagene Version",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (Teilaufgaben {n})",
+        "Calls": "Aufrufe",
+        "Prompt tokens": "Eingabetokens",
+        "Completion tokens": "Ausgabetokens",
+    }
+)
 CATALOG = Catalog("Deutsch", plural, MESSAGES, CLICK, forms=2)

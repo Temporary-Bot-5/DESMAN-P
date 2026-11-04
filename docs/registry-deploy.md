@@ -56,6 +56,21 @@ person has to approve that change on their machine (`desman protected approve`).
 `assign PUBLIC_KEY.pem --scope tasks --days 30` assigns someone else's key instead. Renew the
 assignment before it ends: run the same command again.
 
+### The trust list
+
+Nodes take no work unless they hold a fresh **trust list**: a record signed with the root key
+that names every assignment and revocation in effect. If the registry hid a revocation (if it
+was broken into, say), nodes would notice something missing from the list and stop taking work.
+Each `assign` and `revoke` signs a new list lasting 7 days. Nodes accept a list only for
+2 days after it is signed, so the daily timer matters. Sign one again every day from a timer (`crontab -e` as `desman`):
+
+```cron
+0 4 * * * /srv/desman/DESMAN-P/.venv/bin/desman-registry trust sign --days 7
+```
+
+`desman-registry trust show` says which list is handed out and until when. A list lasts 30
+days at most (`--days`), but concealment is bounded by the 2-day age limit.
+
 ## 4. Run it as a service
 
 `/etc/systemd/system/desman-registry.service`:
@@ -214,7 +229,9 @@ sudo systemctl start desman-registry
 The copy does not know the nonces seen after it was taken. A request is good for 5 minutes, so
 start the restored registry at least 5 minutes after stopping the old one: by then no request
 it saw can be replayed. Records signed after the backup are lost with it. Sign them again: a
-revocation, for one, must be redone at once.
+revocation, for one, must be redone at once. Then sign a trust list (`trust sign`): nodes keep
+the newest one they saw, which may name records the copy has lost, and they take no work until
+the restored registry hands out every record a list still names.
 
 ## 8. Updating
 

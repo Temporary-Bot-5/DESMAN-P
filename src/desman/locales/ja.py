@@ -861,6 +861,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "desman-global に作業を提出しました（{outcome}）。",
     "A job from desman-global was dropped: {reason}": "desman-global からの作業を取りやめました: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global からの作業は `desman worker` の中で、貸し出したモデルでのみ実行されます。",
+    "A trust list lasts from 1 to {days} days.": "信頼リストの有効期間は 1〜{days} 日です。",
+    "How long the list lasts; sign the next one before it ends.": "リストの有効期間。終わる前に次のリストに署名してください。",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "有効な信頼リストがありません：ノードは作業を受けません。署名するには：desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "有効なすべての任命と失効を記載した新しい信頼リストに署名します。",
+    "The trust list handed out now.": "現在配布されている信頼リスト。",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "信頼リスト：ルートが署名します。新しいリストがないとノードは作業を受けません。",
+    "Trust list signed until {date} (records named: {count}).": "信頼リストに署名しました。有効期限 {date}（記載レコード：{count}）。",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "信頼リスト {id}：{issued} に署名、{date} まで有効。記載レコード：{count}。",
 }
 
 CLICK: dict[str, Forms] = {
@@ -940,4 +948,55 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "確認なしで操作を実行します。",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "提案 {id} は設定を変更します。送信できるのはテキストを変更する提案だけです。",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "要約と期待される効果は、あなた自身の失敗したタスクについてのアナリストの言葉です。送信前に読んでください。それらのタスクを引用している場合があります。",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "レジストリは 1 つのノードから 1 日に最大 {n} 件の提案しか受け付けません。何も送信されていません。",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "運営者が承認する前に、別のノードが提案を確認します。",
+    "Base commit": "ベースコミット",
+    "Benchmark": "ベンチマーク",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "確認: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "運営者の確認用に送信された提案を一覧表示します。",
+    "No proposals have been submitted.": "提案はまだ送信されていません。",
+    "No unique proposal matches {id}.": "{id} に一致する一意の提案がありません。",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "送信していません。内容を確認し、--confirm {hash} を付けて再実行してください。",
+    "Only proposals in this state.": "この状態の提案のみ。",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "送信内容をプレビューします。--confirm で同じ内容だけを送信します。",
+    "Proposal": "提案",
+    "Proposal submission": "提案の送信",
+    "Proposal {id} has nothing to submit.": "提案 {id} に送信する内容がありません。",
+    "Proposal {id} needs a completed benchmark with both results.": "提案 {id} には両方の結果を含む完了済みベンチマークが必要です。",
+    "Proposal {proposal} sent to the registry as {id}.": "提案 {proposal} を登録番号 {id} で送信しました。",
+    "Send only if this matches the preview's hash.": "プレビューのハッシュと一致する場合のみ送信します。",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "提案 {id} とベンチマーク結果を desman-global レジストリに送信しますか？",
+    "Show a submitted proposal, its diff and both local benchmark results.": "送信済み提案、diff、ローカルベンチマークの両方の結果を表示します。",
+    "The Improvement Analyst's proposals submitted by network nodes.": "ネットワークノードから送信された改善アナリストの提案。",
+    "The node key changed after preview; nothing was sent.": "プレビュー後にノードキーが変わりました。送信していません。",
+    "The preview changed; nothing was sent. Preview it again.": "プレビューが変わりました。送信していません。もう一度プレビューしてください。",
+    "The proposal was sent, but the local journal is busy.": "提案は送信されましたが、ローカル履歴が使用中です。",
+    "The registry did not accept the proposal: {error}": "レジストリは提案を受け付けませんでした: {error}",
+    "This node has no usable key; nothing was sent.": "このノードに使用可能なキーがありません。送信していません。",
+    "This proposal cannot be sent: {reason}": "この提案は送信できません: {reason}",
+    "This proposal contains an API key; nothing was sent.": "提案に API キーが含まれています。送信していません。",
+    "This proposal is too large to send.": "提案が大きすぎて送信できません。",
+    "desman-global is off; nothing was sent.": "desman-global はオフです。送信していません。",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "プレビュー後にレジストリが変更されました。何も送信していません。",
+        "Registry: {address}": "レジストリ: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "信頼リストは署名から2日を超えています。ノードは作業を受け付けません。新しいリストに署名してください。",
+        "Current version": "現在のバージョン",
+        "Proposed version": "提案バージョン",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (サブタスク {n})",
+        "Calls": "呼び出し数",
+        "Prompt tokens": "入力トークン",
+        "Completion tokens": "出力トークン",
+    }
+)
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

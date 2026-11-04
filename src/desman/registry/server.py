@@ -21,6 +21,8 @@ What is answered before the signature is read (an unknown path, another method, 
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import sqlite3
 from collections.abc import Callable, Iterable
@@ -31,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Final, TypeVar
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import BaseModel, ValidationError
 
@@ -48,6 +51,7 @@ NOT_REGISTERED: Final = "not_registered"
 NOT_FOUND: Final = "not_found"
 NOT_ALLOWED_METHOD: Final = "method_not_allowed"
 TOO_LARGE: Final = "too_large"
+PROPOSAL_LIMIT: Final = protocol.PROPOSAL_LIMIT
 INTERNAL: Final = "internal"
 
 M = TypeVar("M", bound=BaseModel)
@@ -55,6 +59,7 @@ M = TypeVar("M", bound=BaseModel)
 _STATUS: Final = {
     Reason.MALFORMED: HTTPStatus.BAD_REQUEST,
     Reason.REVOKED: HTTPStatus.FORBIDDEN,
+    Reason.CONFLICT: HTTPStatus.CONFLICT,
 }
 """Refusals that are not 401 (who sent it could not be told, or must not be served)."""
 
@@ -111,6 +116,7 @@ class Registry:
             protocol.CLAIM: ("POST", self._claim),
             protocol.EXTEND: ("POST", self._extend),
             protocol.HAND_IN: ("POST", self._hand_in),
+            protocol.PROPOSALS: ("POST", self._submit_proposal),
         }
 
     @property
@@ -273,6 +279,43 @@ class Registry:
         given = _body(protocol.HandIn, body, caller)
         found = self._active(conn, caller)
         return _ok(work.hand_in(conn, found, given, now))
+
+    def _submit_proposal(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        """Store the proposal body authenticated by this request's node signature."""
+        asked = _body(protocol.SubmitProposal, body, caller)
+        self._active(conn, caller)
+        if len(body) > protocol.MAX_PROPOSAL_BYTES:
+            raise Refused(Reason.MALFORMED, "proposal is too large", signer=caller.fingerprint)
+        if asked.signed.signer != caller.fingerprint:
+            raise Refused(
+                Reason.UNKNOWN_SIGNER,
+                "proposal signer is not the request node",
+                signer=caller.fingerprint,
+            )
+        try:
+            caller.key.verify(
+                base64.b64decode(asked.signed.signature, validate=True),
+                sign.canonical(asked.signed.submission.model_dump(mode="json")),
+            )
+        except (InvalidSignature, binascii.Error) as e:
+            raise Refused(Reason.FORGED, "bad proposal signature", signer=caller.fingerprint) from e
+        try:
+            found, _ = store.submit_proposal(conn, caller.fingerprint, asked.signed, now)
+        except store.ProposalLimit:
+            self._refused(conn, caller.fingerprint, PROPOSAL_LIMIT, "POST", protocol.PROPOSALS)
+            return _problem(HTTPStatus.FORBIDDEN, PROPOSAL_LIMIT)
+        except ValueError as e:
+            raise Refused(Reason.CONFLICT, str(e), signer=caller.fingerprint) from e
+        return _ok(
+            protocol.ProposalReceived(
+                id=found.id,
+                proposal=found.submission.proposal,
+                evaluation=found.submission.evaluation,
+                status="submitted",
+            )
+        )
 
 
 def _body(model: type[M], body: bytes, caller: request.Caller) -> M:

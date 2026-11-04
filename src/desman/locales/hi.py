@@ -917,6 +917,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "desman-global को एक काम सौंपा गया ({outcome})।",
     "A job from desman-global was dropped: {reason}": "desman-global का एक काम छोड़ दिया गया: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global का काम केवल `desman worker` में, उधार दिए गए मॉडलों से चलता है।",
+    "A trust list lasts from 1 to {days} days.": "विश्वास सूची 1 से {days} दिन तक मान्य रहती है।",
+    "How long the list lasts; sign the next one before it ends.": "सूची कितने समय तक मान्य है; उसके ख़त्म होने से पहले अगली पर हस्ताक्षर करें।",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "कोई मान्य विश्वास सूची नहीं: नोड काम नहीं लेते। इससे हस्ताक्षर करें: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "सभी लागू नियुक्तियों और रद्दीकरणों वाली नई विश्वास सूची पर हस्ताक्षर करें।",
+    "The trust list handed out now.": "अभी बाँटी जा रही विश्वास सूची।",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "विश्वास सूची: रूट द्वारा हस्ताक्षरित; ताज़ा सूची के बिना नोड काम नहीं लेते।",
+    "Trust list signed until {date} (records named: {count}).": "विश्वास सूची पर {date} तक हस्ताक्षर किए गए (नामित रिकॉर्ड: {count})।",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "विश्वास सूची {id}: {issued} को हस्ताक्षरित, {date} तक मान्य; नामित रिकॉर्ड: {count}।",
 }
 
 CLICK: dict[str, Forms] = {
@@ -1009,4 +1017,56 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "बिना पूछे कार्रवाई की पुष्टि करें।",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "प्रस्ताव {id} सेटिंग्स बदलता है; केवल वे प्रस्ताव भेजे जा सकते हैं जो पाठ बदलते हैं।",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "सारांश और अपेक्षित प्रभाव आपके अपने विफल कार्यों के बारे में विश्लेषक के शब्द हैं: भेजने से पहले इन्हें पढ़ें, इनमें उन कार्यों के उद्धरण हो सकते हैं।",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "रजिस्ट्री एक नोड से दिन में अधिकतम {n} प्रस्ताव लेती है; कुछ नहीं भेजा गया।",
+        "रजिस्ट्री एक नोड से दिन में अधिकतम {n} प्रस्ताव लेती है; कुछ नहीं भेजा गया।",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "ऑपरेटर के स्वीकार करने से पहले दूसरा नोड प्रस्ताव की जाँच करेगा।",
+    "Base commit": "आधार कमिट",
+    "Benchmark": "बेंचमार्क",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "देखें: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "ऑपरेटर की समीक्षा के लिए भेजे गए प्रस्तावों की सूची।",
+    "No proposals have been submitted.": "कोई प्रस्ताव नहीं भेजा गया।",
+    "No unique proposal matches {id}.": "{id} से मेल खाता एकल प्रस्ताव नहीं मिला।",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "कुछ नहीं भेजा गया। सामग्री जाँचें और --confirm {hash} के साथ दोहराएँ।",
+    "Only proposals in this state.": "केवल इस स्थिति वाले प्रस्ताव।",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "भेजने से पहले पूर्वावलोकन; --confirm केवल यही सामग्री भेजता है।",
+    "Proposal": "प्रस्ताव",
+    "Proposal submission": "प्रस्ताव भेजना",
+    "Proposal {id} has nothing to submit.": "प्रस्ताव {id} में भेजने के लिए कुछ नहीं है।",
+    "Proposal {id} needs a completed benchmark with both results.": "प्रस्ताव {id} के लिए दोनों परिणामों वाला पूरा बेंचमार्क चाहिए।",
+    "Proposal {proposal} sent to the registry as {id}.": "प्रस्ताव {proposal} रजिस्ट्री में {id} के रूप में भेजा गया।",
+    "Send only if this matches the preview's hash.": "केवल तभी भेजें जब हैश पूर्वावलोकन से मेल खाए।",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "प्रस्ताव {id} और उसके बेंचमार्क परिणाम desman-global रजिस्ट्री में भेजें?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "भेजा गया प्रस्ताव, उसका diff और दोनों स्थानीय बेंचमार्क परिणाम दिखाएँ।",
+    "The Improvement Analyst's proposals submitted by network nodes.": "नेटवर्क नोड्स द्वारा भेजे गए सुधार विश्लेषक के प्रस्ताव।",
+    "The node key changed after preview; nothing was sent.": "पूर्वावलोकन के बाद नोड कुंजी बदल गई; कुछ नहीं भेजा गया।",
+    "The preview changed; nothing was sent. Preview it again.": "पूर्वावलोकन बदल गया; कुछ नहीं भेजा गया। फिर से पूर्वावलोकन करें।",
+    "The proposal was sent, but the local journal is busy.": "प्रस्ताव भेजा गया, लेकिन स्थानीय जर्नल व्यस्त है।",
+    "The registry did not accept the proposal: {error}": "रजिस्ट्री ने प्रस्ताव स्वीकार नहीं किया: {error}",
+    "This node has no usable key; nothing was sent.": "इस नोड के पास उपयोगी कुंजी नहीं है; कुछ नहीं भेजा गया।",
+    "This proposal cannot be sent: {reason}": "यह प्रस्ताव नहीं भेजा जा सकता: {reason}",
+    "This proposal contains an API key; nothing was sent.": "इस प्रस्ताव में API कुंजी है; कुछ नहीं भेजा गया।",
+    "This proposal is too large to send.": "प्रस्ताव भेजने के लिए बहुत बड़ा है।",
+    "desman-global is off; nothing was sent.": "desman-global बंद है; कुछ नहीं भेजा गया।",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "पूर्वावलोकन के बाद रजिस्ट्री बदल गई; कुछ नहीं भेजा गया।",
+        "Registry: {address}": "रजिस्ट्री: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "विश्वास सूची 2 दिन से पुरानी है: नोड काम नहीं लेते। नई सूची पर हस्ताक्षर करें।",
+        "Current version": "वर्तमान संस्करण",
+        "Proposed version": "प्रस्तावित संस्करण",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (उपकार्य {n})",
+        "Calls": "कॉल",
+        "Prompt tokens": "इनपुट टोकन",
+        "Completion tokens": "आउटपुट टोकन",
+    }
+)
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

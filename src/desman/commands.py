@@ -42,6 +42,7 @@ from desman import (
     improve,
     local_models,
     models_cli,
+    net,
     proposals_cli,
     protected_cli,
     providers,
@@ -67,6 +68,7 @@ from desman.core.store import Store
 from desman.i18n import t, tn
 from desman.llm import hub
 from desman.llm.openai_compat import key_id
+from desman.net import protocol
 
 
 class Kind(StrEnum):
@@ -281,6 +283,10 @@ Tokens = Annotated[int, Field(ge=1_000, le=100_000_000)]
 
 class JoinArgs(Args):
     registry: RegistryUrl | None = Field(None, description="the registry's https address")
+
+
+class GlobalProposalArgs(Args):
+    proposal: Annotated[int, Field(ge=1)] = Field(description="the local proposal number")
 
 
 class DonateArgs(Args):
@@ -563,6 +569,42 @@ def _global_status(ctx: Context, args: NoArgs) -> Outcome:
     found = global_cli.status(ctx.config())
     global_cli.print_status(found)
     return Outcome(found.as_json())
+
+
+def _global_submit_proposal(ctx: Context, args: GlobalProposalArgs) -> Proposal:
+    config = ctx.config()
+    payload = global_cli.proposal_upload(ctx.store.conn, config, args.proposal)
+    body = protocol.SubmitProposal(signed=payload).model_dump(mode="json", exclude_none=True)
+    address = net.registry(config)
+    assert address is not None
+    exact = json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True)
+
+    def apply() -> Outcome:
+        sent = global_cli.send_proposal(ctx.manager, ctx.store.conn, payload, registry=address)
+        ui.ok(
+            t(
+                "Proposal {proposal} sent to the registry as {id}.",
+                proposal=sent.proposal,
+                id=sent.id,
+            )
+        )
+        return Outcome({"id": sent.id, "proposal": sent.proposal, "evaluation": sent.evaluation})
+
+    return Proposal(
+        [
+            t(
+                "Send proposal {id} and its benchmark results to the desman-global registry?",
+                id=args.proposal,
+            ),
+            exact,
+            t("Registry: {address}", address=address),
+        ],
+        apply,
+        [
+            t("Another node will check the proposal before the operator can accept it."),
+            global_cli.summary_warning(),
+        ],
+    )
 
 
 def _global_join(ctx: Context, args: JoinArgs) -> Outcome | Proposal:
@@ -1324,6 +1366,15 @@ CATALOG: tuple[Entry, ...] = (
         Kind.READ,
         _global_status,
         aliases=("global",),
+    ),
+    Entry(
+        "global submit-proposal",
+        "Send a locally evaluated improvement proposal and the exact benchmark results to the "
+        "desman-global registry. The person sees the complete payload and confirms before it "
+        "leaves this machine.",
+        GlobalProposalArgs,
+        Kind.CHANGE,
+        _global_submit_proposal,
     ),
     Entry(
         "global join",

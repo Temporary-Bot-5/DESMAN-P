@@ -920,6 +920,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Um trabalho foi entregue ao desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Um trabalho do desman-global foi abandonado: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Um trabalho do desman-global só é executado no `desman worker`, com os modelos emprestados.",
+    "A trust list lasts from 1 to {days} days.": "Uma lista de confiança dura de 1 a {days} dias.",
+    "How long the list lasts; sign the next one before it ends.": "Quanto tempo a lista dura; assine a próxima antes de ela terminar.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Nenhuma lista de confiança em vigor: os nós não aceitam trabalho. Assine uma com: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Assinar uma nova lista de confiança com cada atribuição e revogação em vigor.",
+    "The trust list handed out now.": "A lista de confiança entregue agora.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "A lista de confiança: assinada pela raiz; sem uma recente, os nós não aceitam trabalho.",
+    "Trust list signed until {date} (records named: {count}).": "Lista de confiança assinada até {date} (registros nomeados: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Lista de confiança {id}: assinada {issued}, válida até {date}; registros nomeados: {count}.",
 }
 
 CLICK: dict[str, Forms] = {
@@ -1012,4 +1020,56 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Confirma a ação sem perguntar.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "A proposta {id} altera configurações; só podem ser enviadas propostas que alteram textos.",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "O resumo e o efeito esperado são palavras do analista sobre suas próprias tarefas que falharam: leia-os antes de enviar, eles podem citar essas tarefas.",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "O registro aceita no máximo {n} proposta por dia de um nó; nada foi enviado.",
+        "O registro aceita no máximo {n} propostas por dia de um nó; nada foi enviado.",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "Outro nó verificará a proposta antes que o operador possa aceitá-la.",
+    "Base commit": "Commit base",
+    "Benchmark": "Benchmark",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "Veja: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "Lista propostas enviadas para análise do operador.",
+    "No proposals have been submitted.": "Nenhuma proposta foi enviada.",
+    "No unique proposal matches {id}.": "Não há uma proposta única correspondente a {id}.",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "Nada foi enviado. Revise o conteúdo e repita com --confirm {hash}.",
+    "Only proposals in this state.": "Somente propostas neste estado.",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "Prévia do envio; --confirm envia somente este conteúdo.",
+    "Proposal": "Proposta",
+    "Proposal submission": "Envio da proposta",
+    "Proposal {id} has nothing to submit.": "A proposta {id} não tem nada para enviar.",
+    "Proposal {id} needs a completed benchmark with both results.": "A proposta {id} precisa de um benchmark concluído com os dois resultados.",
+    "Proposal {proposal} sent to the registry as {id}.": "Proposta {proposal} enviada ao registro como {id}.",
+    "Send only if this matches the preview's hash.": "Envie somente se corresponder ao hash da prévia.",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "Enviar a proposta {id} e os resultados do benchmark ao registro desman-global?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "Mostra uma proposta enviada, seu diff e os dois resultados do benchmark local.",
+    "The Improvement Analyst's proposals submitted by network nodes.": "Propostas do Analista de Melhorias enviadas por nós da rede.",
+    "The node key changed after preview; nothing was sent.": "A chave do nó mudou após a prévia; nada foi enviado.",
+    "The preview changed; nothing was sent. Preview it again.": "A prévia mudou; nada foi enviado. Gere uma nova.",
+    "The proposal was sent, but the local journal is busy.": "A proposta foi enviada, mas o registro local está ocupado.",
+    "The registry did not accept the proposal: {error}": "O registro não aceitou a proposta: {error}",
+    "This node has no usable key; nothing was sent.": "Este nó não tem uma chave utilizável; nada foi enviado.",
+    "This proposal cannot be sent: {reason}": "Esta proposta não pode ser enviada: {reason}",
+    "This proposal contains an API key; nothing was sent.": "Esta proposta contém uma chave de API; nada foi enviado.",
+    "This proposal is too large to send.": "A proposta é grande demais para enviar.",
+    "desman-global is off; nothing was sent.": "desman-global está desligado; nada foi enviado.",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "O registro mudou após a prévia; nada foi enviado.",
+        "Registry: {address}": "Registro: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "A lista de confiança tem mais de 2 dias: os nós não aceitam trabalho. Assine uma nova lista.",
+        "Current version": "Versão atual",
+        "Proposed version": "Versão proposta",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (subtarefas {n})",
+        "Calls": "Chamadas",
+        "Prompt tokens": "Tokens de entrada",
+        "Completion tokens": "Tokens de saída",
+    }
+)
 CATALOG = Catalog("Português (Brasil)", plural, MESSAGES, CLICK, forms=2)

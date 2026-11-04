@@ -851,6 +851,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "已向 desman-global 提交一项工作（{outcome}）。",
     "A job from desman-global was dropped: {reason}": "一项来自 desman-global 的工作已放弃：{reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "来自 desman-global 的工作只在 `desman worker` 中、用出借的模型运行。",
+    "A trust list lasts from 1 to {days} days.": "信任列表的有效期为 1 到 {days} 天。",
+    "How long the list lasts; sign the next one before it ends.": "列表的有效期；请在到期前签署下一份。",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "没有有效的信任列表：节点不接受工作。请签署一份：desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "签署一份新的信任列表，列出所有有效的任命和撤销。",
+    "The trust list handed out now.": "当前分发的信任列表。",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "信任列表：由根密钥签署；没有新的列表，节点不接受工作。",
+    "Trust list signed until {date} (records named: {count}).": "信任列表已签署，有效期至 {date}（列出的记录：{count}）。",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "信任列表 {id}：签署于 {issued}，有效期至 {date}；列出的记录：{count}。",
 }
 
 CLICK: dict[str, Forms] = {
@@ -924,4 +932,55 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "无需提示，直接确认操作。",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "提案 {id} 更改设置；只能发送更改文本的提案。",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "摘要和预期效果是分析器对你自己失败任务的描述：发送前请阅读，其中可能引用这些任务。",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "注册中心每天最多接受一个节点的 {n} 个提案；未发送任何内容。",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "其他节点会先检查提案，之后运营者才能接受。",
+    "Base commit": "基准提交",
+    "Benchmark": "基准测试",
+    "ID": "编号",
+    "Inspect one with: desman-registry proposal show ID": "查看：desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "列出提交给运营者审核的提案。",
+    "No proposals have been submitted.": "尚未提交提案。",
+    "No unique proposal matches {id}.": "没有唯一匹配 {id} 的提案。",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "尚未发送。请检查内容，然后使用 --confirm {hash} 重试。",
+    "Only proposals in this state.": "仅显示此状态的提案。",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "预览提案上传；--confirm 仅发送此预览内容。",
+    "Proposal": "提案",
+    "Proposal submission": "提案提交",
+    "Proposal {id} has nothing to submit.": "提案 {id} 没有可提交的内容。",
+    "Proposal {id} needs a completed benchmark with both results.": "提案 {id} 需要完成的基准测试及两份结果。",
+    "Proposal {proposal} sent to the registry as {id}.": "提案 {proposal} 已以编号 {id} 发送到注册表。",
+    "Send only if this matches the preview's hash.": "仅当哈希与预览一致时发送。",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "将提案 {id} 及其基准测试结果发送到 desman-global 注册表？",
+    "Show a submitted proposal, its diff and both local benchmark results.": "显示已提交的提案、差异和两份本地基准测试结果。",
+    "The Improvement Analyst's proposals submitted by network nodes.": "网络节点提交的改进分析器提案。",
+    "The node key changed after preview; nothing was sent.": "预览后节点密钥发生变化；未发送。",
+    "The preview changed; nothing was sent. Preview it again.": "预览内容已变化；未发送。请重新预览。",
+    "The proposal was sent, but the local journal is busy.": "提案已发送，但本地日志正忙。",
+    "The registry did not accept the proposal: {error}": "注册表未接受提案：{error}",
+    "This node has no usable key; nothing was sent.": "此节点没有可用密钥；未发送。",
+    "This proposal cannot be sent: {reason}": "无法发送此提案：{reason}",
+    "This proposal contains an API key; nothing was sent.": "此提案包含 API 密钥；未发送。",
+    "This proposal is too large to send.": "提案过大，无法发送。",
+    "desman-global is off; nothing was sent.": "desman-global 已关闭；未发送。",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "预览后注册服务器已更改；未发送任何内容。",
+        "Registry: {address}": "注册服务器：{address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "信任列表已超过2天：节点不接受工作。请签署新列表。",
+        "Current version": "当前版本",
+        "Proposed version": "提议版本",
+        "{id}: {status} (subtasks {n})": "{id}: {status}（子任务 {n}）",
+        "Calls": "调用次数",
+        "Prompt tokens": "输入令牌",
+        "Completion tokens": "输出令牌",
+    }
+)
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

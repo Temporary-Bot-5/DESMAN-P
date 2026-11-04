@@ -9,6 +9,8 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 - `records`: the state the registry hands out (`protocol.TRUST`) — assignments and revocations
   signed by the root. Append-only. Whether a key is revoked is read from them, as a node reads
   them (`sign.Trust`): the latest record about the key counts.
+- `trust_lists` (G.6c): the trust lists the person signed with the root (`desman-registry trust
+  sign`); the newest still in its term is handed out after the records it names. Append-only.
 - `nonces`: what `net.request` saw, until its time window closes.
 - `nodes.owner`: whose node it is, as the operator says (`desman-registry owner`); unset, a
   node is its own owner. A result is rechecked by a node of another owner.
@@ -24,17 +26,18 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
-from desman.net import sign
+from desman.net import protocol, sign
 from desman.net.protocol import Capability
 
 DIR_ENV: Final = "DESMAN_REGISTRY_DIR"
@@ -164,6 +167,40 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     ALTER TABLE results ADD COLUMN owner TEXT;
     """,
+    # 4 — trust lists signed by the root (G.6c)
+    """
+    CREATE TABLE trust_lists (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT NOT NULL UNIQUE,
+        issued_at    TEXT NOT NULL,
+        expires_at   TEXT NOT NULL,
+        signed_json  TEXT NOT NULL CHECK (json_valid(signed_json))
+    ) STRICT;
+    CREATE TRIGGER trust_lists_no_update BEFORE UPDATE ON trust_lists
+        BEGIN SELECT RAISE(ABORT, 'trust lists are append-only'); END;
+    CREATE TRIGGER trust_lists_no_delete BEFORE DELETE ON trust_lists
+        BEGIN SELECT RAISE(ABORT, 'trust lists are append-only'); END;
+    """,
+    # 5 — improvement proposals submitted by a node after its person's confirmation (G.7a)
+    f"""
+    CREATE TABLE proposals (
+        id              TEXT PRIMARY KEY CHECK (length(id) = 32),
+        node            TEXT NOT NULL REFERENCES nodes (fingerprint),
+        proposal        INTEGER NOT NULL CHECK (proposal >= 1),
+        evaluation      INTEGER NOT NULL CHECK (evaluation >= 1),
+        submission_json TEXT NOT NULL CHECK (json_valid(submission_json)),
+        status          TEXT NOT NULL DEFAULT 'submitted'
+                        CHECK (status IN ('submitted', 'reviewing', 'reviewed', 'accepted', 'rejected')),
+        created_at      TEXT NOT NULL DEFAULT {_NOW_SQL},
+        UNIQUE (node, proposal, evaluation)
+    ) STRICT;
+    CREATE INDEX proposals_status ON proposals (status, created_at);
+    CREATE TRIGGER proposals_fixed BEFORE UPDATE OF id, node, proposal, evaluation,
+        submission_json, created_at ON proposals
+        BEGIN SELECT RAISE(ABORT, 'a proposal submission keeps its contents'); END;
+    CREATE TRIGGER proposals_no_delete BEFORE DELETE ON proposals
+        BEGIN SELECT RAISE(ABORT, 'proposals are never deleted'); END;
+    """,
 )
 
 
@@ -271,7 +308,7 @@ def all_records(conn: sqlite3.Connection) -> list[sign.Signed]:
     return [sign.Signed.model_validate_json(r["signed_json"]) for r in rows]
 
 
-def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
+def in_effect(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
     """Assignments still in their term and every revocation (one is honoured past its term)."""
     rows = conn.execute(
         "SELECT signed_json FROM records WHERE kind = 'revocation' OR expires_at > ?"
@@ -281,11 +318,137 @@ def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
     return [sign.Signed.model_validate_json(r["signed_json"]) for r in rows]
 
 
+def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
+    """The records in effect, then the newest trust list still in its term (if any)."""
+    found = latest_trust_list(conn, now)
+    return in_effect(conn, now) + ([] if found is None else [found])
+
+
+def latest_trust_list(conn: sqlite3.Connection, now: datetime) -> sign.Signed | None:
+    row = conn.execute(
+        "SELECT signed_json FROM trust_lists WHERE expires_at > ?"
+        " ORDER BY issued_at DESC, seq DESC LIMIT 1",
+        (db.to_iso(now),),
+    ).fetchone()
+    return None if row is None else sign.Signed.model_validate_json(row["signed_json"])
+
+
+def add_trust_list(conn: sqlite3.Connection, signed: sign.Signed) -> None:
+    record = signed.record
+    conn.execute(
+        "INSERT INTO trust_lists (id, issued_at, expires_at, signed_json) VALUES (?, ?, ?, ?)",
+        (
+            record.id,
+            db.to_iso(record.issued_at),
+            db.to_iso(record.expires_at),
+            json.dumps(signed.model_dump(mode="json"), sort_keys=True),
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class ProposalSubmission:
+    id: str
+    node: str
+    signed: protocol.SignedProposalSubmission
+    status: str
+    created_at: str
+
+    @property
+    def submission(self) -> protocol.ProposalSubmission:
+        return self.signed.submission
+
+
+class ProposalLimit(Exception):
+    """The node already submitted `protocol.MAX_PROPOSALS_PER_DAY` in the last 24 hours."""
+
+
+def submit_proposal(
+    conn: sqlite3.Connection,
+    node: str,
+    signed: protocol.SignedProposalSubmission,
+    now: datetime,
+) -> tuple[ProposalSubmission, bool]:
+    """Keep a person's confirmed upload once; an identical retry returns the same row (even
+    past the limit). A node keeps at most `MAX_PROPOSALS_PER_DAY` new ones a day."""
+    submission = signed.submission
+    encoded = json.dumps(signed.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    with db.transaction(conn):
+        row = conn.execute(
+            "SELECT * FROM proposals WHERE node = ? AND proposal = ? AND evaluation = ?",
+            (node, submission.proposal, submission.evaluation),
+        ).fetchone()
+        if row is not None:
+            if row["submission_json"] != encoded:
+                raise ValueError(
+                    "this proposal evaluation was already submitted with other contents"
+                )
+            return _proposal_submission(row), False
+        (recent,) = conn.execute(
+            "SELECT count(*) FROM proposals WHERE node = ? AND created_at > ?",
+            (node, db.to_iso(now - timedelta(days=1))),
+        ).fetchone()
+        if recent >= protocol.MAX_PROPOSALS_PER_DAY:
+            raise ProposalLimit(node)
+        id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO proposals (id, node, proposal, evaluation, submission_json, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (id, node, submission.proposal, submission.evaluation, encoded, db.to_iso(now)),
+        )
+        log(
+            conn,
+            "proposal_submitted",
+            node,
+            {"id": id, "proposal": submission.proposal, "evaluation": submission.evaluation},
+        )
+        row = conn.execute("SELECT * FROM proposals WHERE id = ?", (id,)).fetchone()
+    assert row is not None
+    return _proposal_submission(row), True
+
+
+def proposals(conn: sqlite3.Connection, status: str | None = None) -> list[ProposalSubmission]:
+    """Submissions, oldest first; optionally by their operator-facing status."""
+    if status is None:
+        rows = conn.execute("SELECT * FROM proposals ORDER BY created_at, id").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM proposals WHERE status = ? ORDER BY created_at, id", (status,)
+        ).fetchall()
+    return [_proposal_submission(row) for row in rows]
+
+
+def proposal(conn: sqlite3.Connection, id: str) -> ProposalSubmission | None:
+    row = conn.execute("SELECT * FROM proposals WHERE id = ?", (id,)).fetchone()
+    return None if row is None else _proposal_submission(row)
+
+
+def find_proposal(conn: sqlite3.Connection, prefix: str) -> list[str]:
+    if not prefix or any(c not in "0123456789abcdef" for c in prefix):
+        return []
+    rows = conn.execute(
+        "SELECT id FROM proposals WHERE substr(id, 1, ?) = ? ORDER BY id LIMIT 2",
+        (len(prefix), prefix),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def _proposal_submission(row: sqlite3.Row) -> ProposalSubmission:
+    return ProposalSubmission(
+        id=row["id"],
+        node=row["node"],
+        signed=protocol.SignedProposalSubmission.model_validate_json(row["submission_json"]),
+        status=row["status"],
+        created_at=row["created_at"],
+    )
+
+
 def trust(conn: sqlite3.Connection, root: Ed25519PublicKey, now: datetime) -> sign.Trust:
-    """What a node would believe after receiving every record kept here (an assignment past its
-    term is refused and counts for nothing, as on a node)."""
+    """What a node would believe after receiving every record kept here and the newest trust
+    list (an assignment past its term is refused and counts for nothing, as on a node)."""
     believed = sign.Trust(root, clock=lambda: now)
-    for signed in all_records(conn):
+    found = latest_trust_list(conn, now)
+    for signed in all_records(conn) + ([] if found is None else [found]):
         try:
             believed.receive(signed.model_dump(mode="json"))
         except sign.Refused:

@@ -863,6 +863,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Bir iş desman-global'e teslim edildi ({outcome}).",
     "A job from desman-global was dropped: {reason}": "desman-global'den gelen bir iş bırakıldı: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global'den gelen bir iş yalnızca `desman worker` içinde, ödünç verilen modellerle çalışır.",
+    "A trust list lasts from 1 to {days} days.": "Bir güven listesi 1 ile {days} gün arasında geçerlidir.",
+    "How long the list lasts; sign the next one before it ends.": "Listenin ne kadar geçerli olduğu; bitmeden bir sonrakini imzalayın.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Geçerli güven listesi yok: düğümler iş almıyor. Bir tane imzalayın: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Yürürlükteki her atamayı ve iptali adlandıran yeni bir güven listesi imzala.",
+    "The trust list handed out now.": "Şu anda dağıtılan güven listesi.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Güven listesi: kök tarafından imzalanır; güncel bir liste olmadan düğümler iş almaz.",
+    "Trust list signed until {date} (records named: {count}).": "Güven listesi {date} tarihine kadar imzalandı (adlandırılan kayıtlar: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Güven listesi {id}: {issued} tarihinde imzalandı, {date} tarihine kadar geçerli; adlandırılan kayıtlar: {count}.",
 }
 
 CLICK: dict[str, Forms] = {
@@ -938,4 +946,55 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Eylemi sormadan onaylar.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "Öneri {id} ayarları değiştiriyor; yalnızca metinleri değiştiren öneriler gönderilebilir.",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "Özet ve beklenen etki, analistin kendi başarısız görevleriniz hakkındaki sözleridir: göndermeden önce okuyun, bu görevlerden alıntı içerebilirler.",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "Kayıt sunucusu bir düğümden günde en fazla {n} öneri kabul eder; hiçbir şey gönderilmedi.",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "Operatör kabul etmeden önce başka bir düğüm öneriyi denetler.",
+    "Base commit": "Temel commit",
+    "Benchmark": "Karşılaştırma",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "Görüntüle: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "Operatör incelemesine gönderilen önerileri listeler.",
+    "No proposals have been submitted.": "Henüz öneri gönderilmedi.",
+    "No unique proposal matches {id}.": "{id} ile eşleşen tekil bir öneri yok.",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "Hiçbir şey gönderilmedi. İçeriği inceleyip --confirm {hash} ile yineleyin.",
+    "Only proposals in this state.": "Yalnızca bu durumdaki öneriler.",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "Gönderim önizlemesi; --confirm yalnızca bu içeriği gönderir.",
+    "Proposal": "Öneri",
+    "Proposal submission": "Öneri gönderimi",
+    "Proposal {id} has nothing to submit.": "{id} numaralı öneride gönderilecek bir şey yok.",
+    "Proposal {id} needs a completed benchmark with both results.": "{id} önerisi, iki sonucu da içeren tamamlanmış bir karşılaştırma gerektirir.",
+    "Proposal {proposal} sent to the registry as {id}.": "{proposal} önerisi kayıt defterine {id} olarak gönderildi.",
+    "Send only if this matches the preview's hash.": "Yalnızca önizleme özetiyle eşleşirse gönderin.",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "{id} önerisi ve karşılaştırma sonuçları desman-global kayıt defterine gönderilsin mi?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "Gönderilen öneriyi, diff'i ve iki yerel karşılaştırma sonucunu gösterir.",
+    "The Improvement Analyst's proposals submitted by network nodes.": "Ağ düğümlerinin gönderdiği İyileştirme Analisti önerileri.",
+    "The node key changed after preview; nothing was sent.": "Önizlemeden sonra düğüm anahtarı değişti; hiçbir şey gönderilmedi.",
+    "The preview changed; nothing was sent. Preview it again.": "Önizleme değişti; hiçbir şey gönderilmedi. Yeniden önizleyin.",
+    "The proposal was sent, but the local journal is busy.": "Öneri gönderildi, ancak yerel günlük meşgul.",
+    "The registry did not accept the proposal: {error}": "Kayıt defteri öneriyi kabul etmedi: {error}",
+    "This node has no usable key; nothing was sent.": "Bu düğümde kullanılabilir anahtar yok; gönderilmedi.",
+    "This proposal cannot be sent: {reason}": "Bu öneri gönderilemiyor: {reason}",
+    "This proposal contains an API key; nothing was sent.": "Bu öneri bir API anahtarı içeriyor; gönderilmedi.",
+    "This proposal is too large to send.": "Öneri gönderilemeyecek kadar büyük.",
+    "desman-global is off; nothing was sent.": "desman-global kapalı; hiçbir şey gönderilmedi.",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "Önizlemeden sonra kayıt sunucusu değişti; hiçbir şey gönderilmedi.",
+        "Registry: {address}": "Kayıt sunucusu: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "Güven listesi 2 günden eski: düğümler iş almıyor. Yeni bir liste imzalayın.",
+        "Current version": "Geçerli sürüm",
+        "Proposed version": "Önerilen sürüm",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (alt görevler {n})",
+        "Calls": "Çağrılar",
+        "Prompt tokens": "İstem tokenleri",
+        "Completion tokens": "Yanıt tokenleri",
+    }
+)
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

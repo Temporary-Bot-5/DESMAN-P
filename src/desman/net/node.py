@@ -15,7 +15,9 @@ once less than `EXTEND_WHEN` is left (the worker polls after each model call too
 step does not outlast the lease); once it ends, the signed result or verdict is handed in,
 and sent again until the registry answers. A refusal of the lease (`lease_lost`: it ran out, or
 another node has the job now) drops the job. Turning desman-global off, or another registry,
-drops what is held without a word to anyone (off is off).
+drops what is held without a word to anyone (off is off). No job is asked for while the trust
+list is not fresh (G.6c, `sign.Trust.fresh`): a registry could be hiding a revocation; a job
+already held is still finished.
 
 - Off is off: the config is read again before every contact, and `net.registry()` has no
   address while desman-global is off, so a `desman global leave` while a worker runs stops it
@@ -121,6 +123,10 @@ class _Problem(Exception):
     def __init__(self, error: str) -> None:
         super().__init__(error)
         self.error = error
+
+
+class ProposalSendError(Exception):
+    """A proposal could not be sent; the message contains no request or key material."""
 
 
 def capabilities(config: Config) -> list[protocol.Capability]:
@@ -253,6 +259,35 @@ def tell_left(
     return None
 
 
+def submit_proposal(
+    registry: str,
+    key: sign.NodeKey,
+    signed: protocol.SignedProposalSubmission,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> protocol.ProposalReceived:
+    """Send the exact proposal body the person approved, signed as a registry request."""
+    body = protocol.SubmitProposal(signed=signed)
+    if len(body.model_dump_json(exclude_none=True).encode("utf-8")) > protocol.MAX_PROPOSAL_BYTES:
+        raise _Problem("proposal_too_large")
+    try:
+        with httpx.Client(transport=transport, timeout=TIMEOUT, follow_redirects=False) as client:
+            return _call(
+                client,
+                key,
+                registry,
+                "POST",
+                protocol.PROPOSALS,
+                body,
+                protocol.ProposalReceived,
+                clock(),
+                time.monotonic() + TIMEOUT,
+            )
+    except (_Unreachable, _Problem) as e:
+        raise ProposalSendError(str(e)) from e
+
+
 class Node:
     """This machine in desman-global, for one worker's life."""
 
@@ -291,6 +326,8 @@ class Node:
         self.failures = 0
         self._sent: list[protocol.Capability] | None = None
         self._trust: sign.Trust | None = None
+        self._stale: str | None = None
+        """Why the trust list was not fresh when last asked (G.6c); None: it was."""
         self._journaled: set[tuple[str, str]] = set()
         self._no_key: str | None = None
 
@@ -352,6 +389,7 @@ class Node:
         self.failures = 0
         self._sent = None
         self._trust = None
+        self._stale = None
         self.close()
 
     def _key(self, address: str) -> sign.NodeKey | None:
@@ -563,6 +601,7 @@ class Node:
                 idle
                 and not jobs.holding(self.conn)
                 and (self.claim_at is None or now >= self.claim_at)
+                and self._fresh(address)
             ):
                 event = self._claim(client, key, config, address, now, deadline) or event
             return event
@@ -570,6 +609,19 @@ class Node:
             return self._failed(address, str(e), now)
         except _Problem as e:
             return self._refused(address, key, e.error, now)
+
+    def _fresh(self, address: str) -> bool:
+        """The trust list is fresh (G.6c): without it no work is taken from any operator, as
+        the registry may be hiding a revocation. Each change is journaled once."""
+        assert self._trust is not None
+        why = self._trust.fresh()
+        if why != self._stale:
+            if why is None:
+                netlog.record(self.conn, "trust_fresh", {"registry": address})
+            else:
+                netlog.record(self.conn, "trust_stale", {"registry": address, "why": why})
+            self._stale = why
+        return why is None
 
     def _tend(
         self,

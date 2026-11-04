@@ -956,6 +956,14 @@ MESSAGES: dict[str, Forms] = {
     "Handed a job in to desman-global ({outcome}).": "Роботу здано до desman-global ({outcome}).",
     "A job from desman-global was dropped: {reason}": "Роботу з desman-global полишено: {reason}",
     "A job from desman-global runs only in `desman worker`, with the models lent.": "Робота з desman-global виконується лише в `desman worker`, відданими моделями.",
+    "A trust list lasts from 1 to {days} days.": "Список довіри діє від 1 до {days} днів.",
+    "How long the list lasts; sign the next one before it ends.": "Скільки діє список; підпишіть наступний до його закінчення.",
+    "No trust list in its term: nodes take no work. Sign one with: desman-registry trust sign": "Немає чинного списку довіри: вузли не беруть роботу. Підпишіть його: desman-registry trust sign",
+    "Sign a new trust list naming every assignment and revocation in effect.": "Підписати новий список довіри з усіма чинними призначеннями та відкликаннями.",
+    "The trust list handed out now.": "Список довіри, який роздається зараз.",
+    "The trust list: signed by the root, without a fresh one nodes take no work.": "Список довіри: підписується коренем, без свіжого вузли не беруть роботу.",
+    "Trust list signed until {date} (records named: {count}).": "Список довіри підписано до {date} (записів у ньому: {count}).",
+    "Trust list {id}: signed {issued}, until {date}; records named: {count}.": "Список довіри {id}: підписано {issued}, діє до {date}; записів у ньому: {count}.",
 }
 
 CLICK: dict[str, Forms] = {
@@ -1055,4 +1063,57 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Підтвердити дію без запитання.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
+    "Proposal {id} changes settings; only proposals that change texts can be sent.": "Пропозиція {id} змінює налаштування; надіслати можна лише пропозиції, що змінюють тексти.",
+    "The summary and the expected effect are the analyst's words about your own failed tasks: read them before sending, they may quote those tasks.": "Короткий опис і очікуваний ефект — слова аналітика про ваші власні невдалі задачі: прочитайте їх перед надсиланням, у них можуть бути цитати з цих задач.",
+    "The registry takes at most {n} proposal a day from one node; nothing was sent.": (
+        "Реєстр приймає від одного вузла не більше {n} пропозиції на день; нічого не надіслано.",
+        "Реєстр приймає від одного вузла не більше {n} пропозицій на день; нічого не надіслано.",
+        "Реєстр приймає від одного вузла не більше {n} пропозицій на день; нічого не надіслано.",
+    ),
+    "Another node will check the proposal before the operator can accept it.": "Інший вузол перевірить пропозицію, перш ніж оператор зможе її прийняти.",
+    "Base commit": "Базовий коміт",
+    "Benchmark": "Бенчмарк",
+    "ID": "ID",
+    "Inspect one with: desman-registry proposal show ID": "Переглянути: desman-registry proposal show ID",
+    "List proposal submissions for operator review.": "Список пропозицій, надісланих оператору на розгляд.",
+    "No proposals have been submitted.": "Пропозицій не надіслано.",
+    "No unique proposal matches {id}.": "Немає єдиної пропозиції, що відповідає {id}.",
+    "Nothing was sent. Review this payload, then repeat with --confirm {hash}.": "Нічого не надіслано. Перевірте дані й повторіть із --confirm {hash}.",
+    "Only proposals in this state.": "Лише пропозиції з таким статусом.",
+    "Preview a proposal upload; --confirm sends only that exact payload.": "Попередній перегляд; --confirm надсилає саме ці дані.",
+    "Proposal": "Пропозиція",
+    "Proposal submission": "Надсилання пропозиції",
+    "Proposal {id} has nothing to submit.": "У пропозиції {id} немає чого надсилати.",
+    "Proposal {id} needs a completed benchmark with both results.": "Для пропозиції {id} потрібен завершений бенчмарк з обома результатами.",
+    "Proposal {proposal} sent to the registry as {id}.": "Пропозицію {proposal} надіслано до реєстру як {id}.",
+    "Send only if this matches the preview's hash.": "Надсилати, лише якщо хеш збігається з попереднім переглядом.",
+    "Send proposal {id} and its benchmark results to the desman-global registry?": "Надіслати пропозицію {id} та результати бенчмарку до реєстру desman-global?",
+    "Show a submitted proposal, its diff and both local benchmark results.": "Показати надіслану пропозицію, diff і обидва результати локального бенчмарку.",
+    "The Improvement Analyst's proposals submitted by network nodes.": "Пропозиції Аналітика покращень, надіслані вузлами мережі.",
+    "The node key changed after preview; nothing was sent.": "Ключ вузла змінився після попереднього перегляду; нічого не надіслано.",
+    "The preview changed; nothing was sent. Preview it again.": "Попередній перегляд змінився; нічого не надіслано. Створіть його знову.",
+    "The proposal was sent, but the local journal is busy.": "Пропозицію надіслано, але локальний журнал зайнятий.",
+    "The registry did not accept the proposal: {error}": "Реєстр не прийняв пропозицію: {error}",
+    "This node has no usable key; nothing was sent.": "У вузла немає придатного ключа; нічого не надіслано.",
+    "This proposal cannot be sent: {reason}": "Цю пропозицію неможливо надіслати: {reason}",
+    "This proposal contains an API key; nothing was sent.": "У пропозиції є API-ключ; нічого не надіслано.",
+    "This proposal is too large to send.": "Пропозиція завелика для надсилання.",
+    "desman-global is off; nothing was sent.": "desman-global вимкнено; нічого не надіслано.",
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "Реєстр змінився після перегляду; нічого не надіслано.",
+        "Registry: {address}": "Реєстр: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "Списку довіри понад 2 дні: вузли не беруть роботу. Підпишіть новий список.",
+        "Current version": "Поточна версія",
+        "Proposed version": "Запропонована версія",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (підзавдань {n})",
+        "Calls": "Виклики",
+        "Prompt tokens": "Токени запиту",
+        "Completion tokens": "Токени відповіді",
+    }
+)
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)
