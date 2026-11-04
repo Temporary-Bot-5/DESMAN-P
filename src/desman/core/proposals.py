@@ -415,3 +415,66 @@ def applications(conn: sqlite3.Connection, proposal_id: int) -> list[Application
 def last_application(conn: sqlite3.Connection, proposal_id: int) -> Application | None:
     found = applications(conn, proposal_id)
     return found[0] if found else None
+
+
+class Update(BaseModel):
+    """A release installed or reverted by the person."""
+
+    id: int
+    release: int
+    created_at: str
+    action: str
+    commit: str
+    base: str
+    branch: str
+    details: dict[str, Any]
+
+
+def updates(conn: sqlite3.Connection) -> list[Update]:
+    return [
+        Update(
+            id=r["id"],
+            release=r["release"],
+            created_at=r["created_at"],
+            action=r["action"],
+            commit=r["git_commit"],
+            base=r["base_commit"],
+            branch=r["branch"],
+            details=json.loads(r["details_json"]),
+        )
+        for r in conn.execute(
+            "SELECT * FROM applications WHERE release IS NOT NULL ORDER BY id DESC"
+        )
+    ]
+
+
+def last_update(conn: sqlite3.Connection) -> Update | None:
+    found = updates(conn)
+    return found[0] if found else None
+
+
+def record_update(
+    conn: sqlite3.Connection,
+    release: int,
+    action: str,
+    *,
+    commit: str,
+    base: str,
+    branch: str,
+    details: dict[str, Any],
+    session_id: str | None = None,
+) -> Update:
+    from desman.core import netlog
+
+    with db.transaction(conn):
+        cursor = conn.execute(
+            "INSERT INTO applications (release, action, git_commit, base_commit, branch, details_json)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (release, action, commit, base, branch, json.dumps(details, ensure_ascii=False)),
+        )
+        entry = {"release": release, "commit": commit}
+        operator.write(conn, f"operator_update_{action}", entry, session_id=session_id)
+        netlog.write(conn, f"update_{action}", entry)
+    found = last_update(conn)
+    assert found is not None and found.id == cursor.lastrowid
+    return found

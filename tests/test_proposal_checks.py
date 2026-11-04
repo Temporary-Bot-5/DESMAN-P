@@ -345,7 +345,7 @@ def test_node_upgrade(tmp_path: Path, version: int) -> None:
     conn.execute("INSERT INTO tasks (id, goal) VALUES ('kept', 'old task')")
     conn.close()
     conn = db.open_db(path)
-    assert db.schema_version(conn) == 30
+    assert db.schema_version(conn) == db.SCHEMA_VERSION
     assert conn.execute("SELECT goal FROM tasks WHERE id = 'kept'").fetchone()[0] == "old task"
     assert checks.pending(conn) == []
     conn.close()

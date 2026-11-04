@@ -32,7 +32,7 @@ import click
 import httpx
 from rich.text import Text
 
-from desman import bench, net, providers, ui
+from desman import applying, bench, net, providers, ui
 from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog
@@ -879,3 +879,126 @@ def submit_proposal_command(proposal: int, confirm: str | None, as_json: bool) -
                 id=received.id,
             )
         )
+
+
+def update_plan(
+    conn: sqlite3.Connection,
+    action: str,
+    release: int | None = None,
+) -> applying.UpdatePlan:
+    try:
+        return (
+            applying.plan_update_revert(conn)
+            if action == "revert"
+            else applying.plan_update(conn, release)
+        )
+    except applying.ApplyError as e:
+        raise click.ClickException(str(e)) from e
+
+
+def update_lines(plan: applying.UpdatePlan) -> list[str]:
+    lines = [
+        t("Release {number}: {summary}", number=plan.release.number, summary=plan.release.summary),
+        t(
+            "Branch: {branch}; commit: {commit}; proposal: {proposal}",
+            branch=plan.release.branch,
+            commit=plan.release.commit,
+            proposal=plan.release.proposal,
+        ),
+        t(
+            "Checkout: {branch}; {head} → {target}",
+            branch=plan.branch,
+            head=plan.head,
+            target=plan.target,
+        ),
+        t("Commits: {count}", count=plan.commit_count),
+        *plan.commits,
+        t("Files: {files}", files=", ".join(plan.files)),
+    ]
+    if plan.commit_count > len(plan.commits) and plan.action == "applied":
+        lines.append(t("More commits: {count}", count=plan.commit_count - len(plan.commits)))
+    if plan.protected:
+        lines.append(
+            t(
+                "Protected files: {files}. Run `desman protected approve` after the update; tasks are blocked until then.",
+                files=", ".join(plan.protected),
+            )
+        )
+    if plan.dependencies:
+        lines.append(t("pyproject.toml changes: reinstall dependencies after the update."))
+    lines.append(t("Restart running workers and chats after moving the checkout."))
+    return lines
+
+
+def update_data(plan: applying.UpdatePlan) -> dict[str, Any]:
+    return {
+        "release": plan.release.model_dump(mode="json"),
+        "action": plan.action,
+        "head": plan.head,
+        "branch": plan.branch,
+        "target": plan.target,
+        "commits": plan.commits,
+        "commit_count": plan.commit_count,
+        "files": plan.files,
+        "protected": plan.protected,
+        "dependencies": plan.dependencies,
+        "schema": plan.schema,
+    }
+
+
+def install_update(
+    conn: sqlite3.Connection,
+    plan: applying.UpdatePlan,
+    *,
+    session_id: str | None = None,
+) -> stored_proposals.Update:
+    try:
+        return applying.carry_out_update(conn, plan, session_id=session_id)
+    except applying.ApplyError as e:
+        raise click.ClickException(str(e)) from e
+
+
+def print_update(plan: applying.UpdatePlan, *, done: bool = False) -> None:
+    for line in update_lines(plan):
+        ui.out(Text(line))
+    if done:
+        ui.ok(t("The checkout moved to commit {commit}.", commit=plan.target))
+
+
+@global_group.command("update")
+@click.option(
+    "--show",
+    type=int,
+    is_flag=False,
+    flag_value=-1,
+    default=None,
+    help="Show release N, or the newest received release when N is omitted.",
+)
+@click.option(
+    "--apply",
+    "apply_release",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Install exactly release N, after inspecting it with --show.",
+)
+@click.option("--revert", is_flag=True, help="Go back to the checkout before the last update.")
+@json_option
+def update_command(
+    show: int | None, apply_release: int | None, revert: bool, as_json: bool
+) -> None:
+    """Inspect, install or revert a root-signed release; nothing installs automatically."""
+    if sum((show is not None, apply_release is not None, revert)) > 1:
+        raise click.UsageError(t("Choose only one of --show, --apply and --revert."))
+    if show is not None and show != -1 and show < 1:
+        raise click.UsageError(t("The release number must be positive."))
+    action = "revert" if revert else "apply" if apply_release is not None else "show"
+    number = apply_release if apply_release is not None else None if show in (None, -1) else show
+    with journal(None) as conn:
+        plan = update_plan(conn, action, number)
+        result = update_data(plan)
+        if action != "show":
+            result["application"] = install_update(conn, plan).model_dump(mode="json")
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False))
+    else:
+        print_update(plan, done=action != "show")

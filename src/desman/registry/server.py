@@ -42,7 +42,7 @@ from pydantic import BaseModel, ValidationError
 from desman.core import db
 from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import checks, store, work
+from desman.registry import checks, releases, store, work
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -115,6 +115,7 @@ class Registry:
             protocol.HEARTBEAT: ("POST", self._alive),
             protocol.LEAVE: ("POST", self._leave),
             protocol.TRUST: ("GET", self._trust),
+            protocol.RELEASES: ("GET", self._releases),
             protocol.CLAIM: ("POST", self._claim),
             protocol.EXTEND: ("POST", self._extend),
             protocol.HAND_IN: ("POST", self._hand_in),
@@ -261,6 +262,15 @@ class Registry:
             self._active(conn, caller)
             records = store.handed_out(conn, now)
         return _ok(protocol.TrustState(records=records))
+
+    def _releases(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        _no_body(body, caller)
+        with db.read_snapshot(conn):
+            self._active(conn, caller)
+            records = releases.handed_out(conn)
+        return _ok(protocol.Releases(records=records))
 
     def _claim(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime

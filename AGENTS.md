@@ -108,7 +108,8 @@ src/desman/
 ├── applying.py    # `proposals apply|revert` (5.6): only the person's command; the diff becomes a
 │                  #   git commit built by code in a worktree (as evaluation builds it), then the
 │                  #   checkout fast-forwarded; settings into `tuning`; revert = `git revert` the
-│                  #   same way. Recorded in `applications` (in turn). Protected
+│                  #   same way. Also installs/reverts root-signed releases (`global update`).
+│                  #   Recorded in `applications` (in turn). Protected
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation
@@ -265,6 +266,7 @@ src/desman/
     │              #   config re-read before each contact; backoff; revoked → silent;
     │              #   `tell_left` for `global leave`; all in `network_log`. G.6b: asks for a
     │              #   job only while idle, checks it, extends its lease, hands in the record
+    ├── updates.py # Receives root-signed releases; rechecks signatures before manual installation
     ├── jobs.py    # A job lent (G.6b) as a task of origin `network` (`network_work`): LOW,
     │              #   after and preempted by the person's own work; worked by the crew
     │              #   (`runs.network_crew`: lent models within `Quota`, `network_*` roles);

@@ -226,27 +226,25 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "desman-global is off until the person runs "
-        "`desman global join` (`desman global join --registry URL` while no address is known); it "
-        "makes a node key (node.key; only its fingerprint is shown) and lends nothing.\n"
-        "Lending a provider with a daily quota: `desman global donate PROVIDER --calls N "
-        "--tokens N`, `desman global quota PROVIDER`, `desman global undonate PROVIDER`. A key "
-        "never leaves the machine. A local server can be lent; a free cloud provider once its "
-        "terms allow it (none yet); a paid one never. `desman global leave` takes back "
-        "everything and switches it off; the key stays. `desman global status` shows it all.\n"
-        "While `desman worker` runs, the node registers and fetches revocations; without a "
-        "fresh trust list signed by the owner less than 2 days ago it takes no jobs. An idle worker takes one job "
-        "at a time, signed by an operator, with lent providers only (own folder, sandbox, no "
-        "web), or reviews another node's result. The person's work goes first and interrupts "
-        "a job; a job never waits for the person. An unreachable registry is tried later; a "
-        "revoked node falls silent.\n"
-        "An idle node may check another owner's proposal: isolated fake benchmark only, "
-        "base in HEAD history; no inherited secrets.\n"
-        "`desman global submit-proposal N` sends a proposal that changes texts, with both "
-        "benchmark results, signed: never settings, never the analyst's evidence; API keys "
-        "found stop it; at most 5 a day. It previews and sends only with `desman global submit-proposal N --confirm "
-        "HASH`; the hash confirms both the payload and registry address. "
-        "The chat asks in the window; changes are journaled.",
+        "desman-global is off until `desman global join` (use --registry URL if unknown). "
+        "Joining makes node.key, shows only its fingerprint, and lends nothing. "
+        "`desman global donate PROVIDER --calls N --tokens N` lends a local model or an "
+        "allowed free provider, never paid; keys stay here. `desman global quota PROVIDER` "
+        "shows/changes quotas; `desman global undonate PROVIDER` takes it back. "
+        "`desman global leave` withdraws everything and switches off; `desman global status` "
+        "shows state.\n"
+        "While `desman worker` runs, it registers and fetches revocations. Jobs need a fresh "
+        "root-signed trust list. An idle node works on one operator-signed job with lent "
+        "models (own folder, sandbox, no web), reviews a result or checks a proposal with an "
+        "isolated fake benchmark. Own tasks go first. Unreachable: retry later; revoked: stop.\n"
+        "`desman global submit-proposal N` previews a text proposal and benchmarks (no settings "
+        "or private evidence; keys block sending; 5/day); --confirm HASH sends that payload "
+        "to that registry. The chat asks in a window.\n"
+        "Root-signed operator releases arrive with the worker: `desman global update --show N` "
+        "inspects (omit N for newest); `desman global update --apply N` installs only by the "
+        "person, never automatically; `desman global update --revert` goes back if HEAD/schema "
+        "have not advanced. Restart workers/chats; approve protected changes and reinstall "
+        "changed dependencies. Chat changes require the confirmation window.",
     ),
 )
 

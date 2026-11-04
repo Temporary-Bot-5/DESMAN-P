@@ -609,3 +609,38 @@ def test_release_number_change_invalidates_confirmation(
         assert git(checkout, "count-objects", "-v") == objects
         assert len(releases.listing(conn)) == 1
         assert store.proposal(conn, ready).status == "reviewed"  # type: ignore[union-attr]
+
+
+def test_releases_endpoint(
+    ready: str,
+    db_path: Path,
+    registry: Registry,
+    clock: FakeClock,
+    root: sign.NodeKey,
+) -> None:
+    from test_registry import Node
+    from test_updates import envelope
+
+    caller = Node(registry, clock)
+    assert caller.call("GET", protocol.RELEASES).status_code != 200
+    caller.register()
+    with store.connection(db_path) as conn:
+        for number in range(1, 8):
+            signed = envelope(root, "a" * 40, "b" * 40, number=number)
+            pid = f"{number:032x}"
+            conn.execute(
+                "INSERT INTO proposals (id, node, proposal, evaluation, submission_json, status) "
+                "SELECT ?, node, proposal + ?, evaluation, submission_json, status FROM proposals WHERE id = ?",
+                (pid, number, ready),
+            )
+            conn.execute(
+                "INSERT INTO releases VALUES (?, ?, ?, ?, ?, 'main', ?, 'now')",
+                (number, signed.record.id, pid, "b" * 40, "a" * 40, signed.model_dump_json()),
+            )
+    reply = caller.call("GET", protocol.RELEASES)
+    assert reply.status_code == 200
+    result = protocol.Releases.model_validate(reply.json())
+    assert [r.record.body["number"] for r in result.records] == [3, 4, 5, 6, 7]
+    assert caller.call("GET", protocol.RELEASES, content=b"{}").status_code != 200
+    caller.call("POST", protocol.LEAVE)
+    assert caller.call("GET", protocol.RELEASES).status_code != 200

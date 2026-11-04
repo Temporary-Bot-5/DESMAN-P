@@ -576,6 +576,75 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         UNIQUE (registry, proposal)
     ) STRICT;
     """,
+    # 31 — root-signed releases received by this node (G.8).
+    f"""
+    CREATE TABLE releases (
+        number INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        commit_sha TEXT NOT NULL,
+        parent TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        signed_json TEXT NOT NULL CHECK (json_valid(signed_json)),
+        received_at TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+    CREATE TRIGGER releases_no_update BEFORE UPDATE ON releases
+        BEGIN SELECT RAISE(ABORT, 'releases are append-only'); END;
+    CREATE TRIGGER releases_no_delete BEFORE DELETE ON releases
+        BEGIN SELECT RAISE(ABORT, 'releases are append-only'); END;
+    """,
+    # 32 — applications belong to either a proposal or a release; preserve existing history.
+    f"""
+    DROP TRIGGER applications_in_turn;
+    DROP TRIGGER applications_proposed_only;
+    DROP TRIGGER applications_no_update;
+    DROP TRIGGER applications_no_delete;
+    DROP INDEX applications_proposal;
+    ALTER TABLE applications RENAME TO old_applications;
+    CREATE TABLE applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proposal_id INTEGER REFERENCES proposals(id),
+        release INTEGER REFERENCES releases(number),
+        created_at TEXT NOT NULL DEFAULT {_NOW_SQL},
+        action TEXT NOT NULL CHECK (action IN ('applied', 'reverted')),
+        git_commit TEXT,
+        base_commit TEXT CHECK ((base_commit IS NULL) = (git_commit IS NULL)),
+        branch TEXT CHECK (branch IS NULL OR git_commit IS NOT NULL),
+        details_json TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details_json)),
+        CHECK ((proposal_id IS NULL) <> (release IS NULL)),
+        CHECK (release IS NULL OR
+            (git_commit IS NOT NULL AND base_commit IS NOT NULL AND branch IS NOT NULL))
+    ) STRICT;
+    INSERT INTO applications
+        (id, proposal_id, created_at, action, git_commit, base_commit, branch, details_json)
+        SELECT id, proposal_id, created_at, action, git_commit, base_commit, branch, details_json
+        FROM old_applications;
+    DROP TABLE old_applications;
+    CREATE INDEX applications_proposal ON applications(proposal_id);
+    CREATE INDEX applications_release ON applications(release);
+    CREATE TRIGGER applications_in_turn BEFORE INSERT ON applications
+        WHEN NEW.proposal_id IS NOT NULL AND NEW.action = COALESCE(
+            (SELECT action FROM applications WHERE proposal_id = NEW.proposal_id
+             ORDER BY id DESC LIMIT 1), 'reverted')
+        BEGIN SELECT RAISE(ABORT, 'a proposal is applied and reverted in turn'); END;
+    CREATE TRIGGER applications_proposed_only BEFORE INSERT ON applications
+        WHEN NEW.proposal_id IS NOT NULL AND
+            (SELECT status FROM proposals WHERE id = NEW.proposal_id) IS NOT 'proposed'
+        BEGIN SELECT RAISE(ABORT, 'only a proposed change is applied'); END;
+    CREATE TRIGGER updates_in_turn BEFORE INSERT ON applications
+        WHEN NEW.release IS NOT NULL AND NEW.action = COALESCE(
+            (SELECT action FROM applications WHERE release = NEW.release
+             ORDER BY id DESC LIMIT 1), 'reverted')
+        BEGIN SELECT RAISE(ABORT, 'a release is applied and reverted in turn'); END;
+    CREATE TRIGGER updates_one_active BEFORE INSERT ON applications
+        WHEN NEW.release IS NOT NULL AND NEW.action = 'applied' AND EXISTS (
+            SELECT 1 FROM applications a WHERE a.release IS NOT NULL AND a.action = 'applied'
+            AND a.id = (SELECT MAX(b.id) FROM applications b WHERE b.release = a.release))
+        BEGIN SELECT RAISE(ABORT, 'revert the installed release first'); END;
+    CREATE TRIGGER applications_no_update BEFORE UPDATE ON applications
+        BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
+    CREATE TRIGGER applications_no_delete BEFORE DELETE ON applications
+        BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

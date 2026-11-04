@@ -285,6 +285,11 @@ class JoinArgs(Args):
     registry: RegistryUrl | None = Field(None, description="the registry's https address")
 
 
+class UpdateArgs(Args):
+    action: Literal["show", "apply", "revert"] = "show"
+    release: Annotated[int, Field(ge=1)] | None = None
+
+
 class GlobalProposalArgs(Args):
     proposal: Annotated[int, Field(ge=1)] = Field(description="the local proposal number")
 
@@ -696,6 +701,28 @@ def _global_undonate(ctx: Context, args: UndonateArgs) -> Proposal:
 
     name = global_cli.provider_name(lent)
     return Proposal([t("Take {name} back from desman-global.", name=name)], apply)
+
+
+def _update_kind(args: UpdateArgs) -> Kind:
+    return Kind.READ if args.action == "show" else Kind.CHANGE
+
+
+def _global_update(ctx: Context, args: UpdateArgs) -> Outcome | Proposal:
+    if args.action == "apply" and args.release is None:
+        raise click.ClickException(t("Choose a release number to install after inspecting it."))
+    if args.action == "revert" and args.release is not None:
+        raise click.ClickException(t("Revert takes no release number."))
+    plan = global_cli.update_plan(ctx.store.conn, args.action, args.release)
+    if args.action == "show":
+        global_cli.print_update(plan)
+        return Outcome(global_cli.update_data(plan))
+
+    def apply() -> Outcome:
+        done = global_cli.install_update(ctx.store.conn, plan, session_id=ctx.session_id())
+        global_cli.print_update(plan, done=True)
+        return Outcome(done.model_dump(mode="json"))
+
+    return Proposal(global_cli.update_lines(plan), apply)
 
 
 def _quota_kind(args: QuotaArgs) -> Kind:
@@ -1356,6 +1383,15 @@ CATALOG: tuple[Entry, ...] = (
         ProposalShowArgs,
         Kind.CHANGE,
         _proposals_revert,
+    ),
+    Entry(
+        "global update",
+        "Inspect a root-signed release received by the worker (show); install exactly the "
+        "release number the person inspected (apply), or go back (revert). Changes require "
+        "the person's confirmation in the window. Nothing installs automatically.",
+        UpdateArgs,
+        _update_kind,
+        _global_update,
     ),
     Entry(
         "global status",

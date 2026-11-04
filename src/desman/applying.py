@@ -32,6 +32,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import tomllib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,9 +42,10 @@ from pydantic import ValidationError
 
 from desman import evaluation, improve
 from desman.config import ConfigError, ConfigManager, Tuning
-from desman.core import proposals
+from desman.core import db, proposals
 from desman.core.proposals import Application, Proposal, Status
 from desman.i18n import t
+from desman.net import sign
 
 Action = Literal["applied", "reverted"]
 
@@ -448,3 +450,210 @@ def _set(manager: ConfigManager, settings: list[dict[str, Any]]) -> list[dict[st
     except ConfigError as e:
         raise ApplyError(str(e)) from e
     return [{"setting": i["setting"], "old": i["old"], "new": i["new"]} for i in settings]
+
+
+@dataclass(frozen=True)
+class UpdatePlan:
+    """A verified release and the exact checkout move shown to the person."""
+
+    release: sign.Release
+    action: Action
+    repo: Path
+    head: str
+    branch: str
+    target: str
+    last: proposals.Update | None
+    files: list[str]
+    commits: list[str]
+    commit_count: int
+    protected: list[str]
+    dependencies: bool
+    schema: int
+    root: Path | None = None
+
+
+def _ancestor(repo: Path, older: str, newer: str) -> bool:
+    try:
+        _git(repo, "merge-base", "--is-ancestor", older, newer)
+    except ApplyError:
+        return False
+    return True
+
+
+def plan_update(
+    conn: sqlite3.Connection,
+    number: int | None = None,
+    *,
+    repo: Path | None = None,
+    root: Path | None = None,
+) -> UpdatePlan:
+    from desman.net import updates
+
+    try:
+        release = updates.verified(conn, number, root=root)
+    except (ValueError, OSError) as e:
+        raise ApplyError(t("The release cannot be verified: {error}", error=e)) from e
+    if release is None:
+        if number is not None:
+            raise ApplyError(t("No release {number}.", number=number))
+        raise ApplyError(
+            t(
+                "No release received yet; releases arrive while `desman worker` runs with desman-global on."
+            )
+        )
+    last = proposals.last_update(conn)
+    if last is not None and last.action == "applied":
+        raise ApplyError(t("A release is already installed; revert it first."))
+    repo, head, branch = checkout(repo)
+    if branch is None:
+        raise ApplyError(t("The checkout must be on a branch."))
+    _git(repo, "fetch", "--quiet")
+    commit = release.commit
+    try:
+        matches = (
+            _git(repo, "cat-file", "-t", commit).strip() == "commit"
+            and _git(repo, "rev-parse", f"{commit}^").strip() == release.parent
+            and sorted(
+                _git(
+                    repo, "diff-tree", "--no-commit-id", "--name-only", "-r", release.parent, commit
+                ).splitlines()
+            )
+            == sorted(release.files)
+        )
+    except ApplyError:
+        matches = False
+    if not matches:
+        raise ApplyError(t("The fetched commit is not the one the root signed."))
+    if _ancestor(repo, commit, head):
+        raise ApplyError(t("This release is already installed."))
+    if not _ancestor(repo, head, commit):
+        raise ApplyError(
+            t(
+                "The checkout has commits of its own or is on another line; update it with git by hand."
+            )
+        )
+    files = _git(repo, "diff", "--name-only", head, commit).splitlines()
+    clean(repo, files)
+    commits = _git(repo, "log", "--format=%H%x09%s", f"{head}..{commit}").splitlines()
+
+    manifest = repo / "src/desman/protected.toml"
+    protected_files: set[str] = set()
+    if manifest.exists():
+        protected_files = {
+            "src/desman/" + name for name in tomllib.loads(manifest.read_text()).get("package", {})
+        }
+    protected_files.add("src/desman/protected.toml")
+    return UpdatePlan(
+        release,
+        "applied",
+        repo,
+        head,
+        branch,
+        commit,
+        last,
+        files,
+        commits[:50],
+        len(commits),
+        sorted(set(files) & protected_files),
+        "pyproject.toml" in files,
+        db.SCHEMA_VERSION,
+        root,
+    )
+
+
+def plan_update_revert(conn: sqlite3.Connection, *, repo: Path | None = None) -> UpdatePlan:
+
+    last = proposals.last_update(conn)
+    if last is None or last.action != "applied":
+        raise ApplyError(t("No release is installed to revert."))
+    repo, head, branch = checkout(repo)
+    if (head, branch) != (last.commit, last.branch):
+        raise ApplyError(t("Commits were made since; go back with git by hand."))
+    schema = int(last.details["schema"])
+    if conn.execute("PRAGMA user_version").fetchone()[0] > schema:
+        raise ApplyError(
+            t("The database schema grew since this update; the older version could not open it.")
+        )
+    files = _git(repo, "diff", "--name-only", last.base, last.commit).splitlines()
+    clean(repo, files)
+    # The applied record supplies the original signed body for the window, not installation.
+
+    row = conn.execute(
+        "SELECT signed_json FROM releases WHERE number = ?", (last.release,)
+    ).fetchone()
+    release = sign.Release.model_validate(sign.Signed.model_validate_json(row[0]).record.body)
+    return UpdatePlan(
+        release,
+        "reverted",
+        repo,
+        head,
+        last.branch,
+        last.base,
+        last,
+        files,
+        [],
+        int(last.details.get("commit_count", 0)),
+        last.details.get("protected", []),
+        "pyproject.toml" in files,
+        db.SCHEMA_VERSION,
+    )
+
+
+def forward_update(repo: Path, head: str, commit: str) -> None:
+    """Fast-forward through any number of signed history's commits, without hooks."""
+    if not _ancestor(repo, head, commit):
+        raise ApplyError(
+            t(
+                "The checkout has commits of its own or is on another line; update it with git by hand."
+            )
+        )
+    _git(repo, "merge", "--ff-only", "--quiet", commit)
+
+
+def carry_out_update(
+    conn: sqlite3.Connection,
+    plan: UpdatePlan,
+    *,
+    session_id: str | None = None,
+) -> proposals.Update:
+    """Move then record. A crash between them requires the person to restore the old HEAD
+    with git before trying again. Revert uses reset --keep: release commits remain in the
+    remote and no release history is lost. Running workers/chats must be restarted."""
+    from desman.net import updates
+
+    if proposals.last_update(conn) != plan.last:
+        raise ApplyError(t("The installed release changed since: look again."))
+    if checkout(plan.repo)[1:] != (plan.head, plan.branch):
+        raise ApplyError(t("the checkout's branch or HEAD changed since: look again"))
+    clean(plan.repo, plan.files)
+    if plan.action == "applied":
+        try:
+            if updates.verified(conn, plan.release.number, root=plan.root) != plan.release:
+                raise ValueError("release changed")
+        except (ValueError, OSError) as e:
+            raise ApplyError(t("The release cannot be verified: {error}", error=e)) from e
+        forward_update(plan.repo, plan.head, plan.target)
+    else:
+        assert plan.last is not None
+        if conn.execute("PRAGMA user_version").fetchone()[0] > int(plan.last.details["schema"]):
+            raise ApplyError(
+                t(
+                    "The database schema grew since this update; the older version could not open it."
+                )
+            )
+        _git(plan.repo, "reset", "--keep", plan.target)
+    return proposals.record_update(
+        conn,
+        plan.release.number,
+        plan.action,
+        commit=plan.release.commit,
+        base=plan.head if plan.action == "applied" else plan.target,
+        branch=plan.branch,
+        details={
+            "files": plan.files,
+            "commit_count": plan.commit_count,
+            "protected": plan.protected,
+            "schema": plan.schema,
+        },
+        session_id=session_id,
+    )

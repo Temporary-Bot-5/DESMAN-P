@@ -288,3 +288,5 @@ checkout advances can leave an **unrecorded commit** (an error names it when pos
 `git log` and `desman-registry release list` before retrying. Revert that commit with git,
 then preview again; do not assume it was signed or recorded. Back up the registry and root
 key as described above. Delivery to nodes and installation are separate work in G.8.
+
+The registry serves the newest five root-signed releases at signed GET `/v1/releases` for active nodes.
