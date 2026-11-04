@@ -503,7 +503,7 @@ def test_a_hidden_revocation_leaves_the_list_stale(
     listed = sign.trust_list(root, listing(revoked), issued_at=clock(), lifetime=7 * DAY)
     trust.receive(wire(listed))  # the registry kept the revocation to itself
     assert revoked.record.id in (trust.fresh() or "")
-    clock.advance((2 * DAY).total_seconds())  # a revocation is needed past its own term
+    clock.advance((DAY + HOUR).total_seconds())  # a revocation is needed past its own term
     assert trust.fresh() is not None
     trust.receive(wire(revoked))  # honoured past its term
     assert trust.fresh() is None
@@ -541,3 +541,15 @@ def test_only_the_root_signs_a_trust_list(trust: Trust, root: NodeKey, clock: Fa
     stranger = sign.trust_list(NodeKey.generate(), [], issued_at=clock(), lifetime=7 * DAY)
     assert refused(trust, wire(stranger)) is Reason.UNKNOWN_SIGNER
     assert trust.fresh() == "no trust list received"
+
+
+def test_a_list_in_term_must_be_younger_than_two_days(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    trust.receive(sign.trust_list(root, [], issued_at=clock(), lifetime=7 * DAY))
+    clock.advance(sign.TRUST_LIST_MAX_AGE.total_seconds() - 1)
+    assert trust.fresh() is None
+    clock.advance(1)
+    assert "more than 2 days ago" in (trust.fresh() or "")
+    trust.receive(sign.trust_list(root, [], issued_at=clock(), lifetime=7 * DAY))
+    assert trust.fresh() is None

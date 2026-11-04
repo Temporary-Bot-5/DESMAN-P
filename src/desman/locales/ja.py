@@ -986,4 +986,17 @@ _NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
     "desman-global is off; nothing was sent.": "desman-global はオフです。送信していません。",
 }
 MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "プレビュー後にレジストリが変更されました。何も送信していません。",
+        "Registry: {address}": "レジストリ: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "信頼リストは署名から2日を超えています。ノードは作業を受け付けません。新しいリストに署名してください。",
+        "Current version": "現在のバージョン",
+        "Proposed version": "提案バージョン",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (サブタスク {n})",
+        "Calls": "呼び出し数",
+        "Prompt tokens": "入力トークン",
+        "Completion tokens": "出力トークン",
+    }
+)
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

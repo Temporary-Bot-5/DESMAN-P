@@ -655,3 +655,19 @@ def test_a_registry_of_the_third_schema_is_upgraded(tmp_path: Path) -> None:
         assert upgraded.execute("SELECT count(*) FROM trust_lists").fetchone()[0] == 0
     finally:
         upgraded.close()
+
+
+def test_an_old_trust_list_stops_lending_until_renewed(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    root: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    add_job(db_path, operator, clock)
+    clock.advance(sign.TRUST_LIST_MAX_AGE.total_seconds())
+    borrower = node(registry, clock)
+    assert claim(borrower) is None
+    with store.connection(db_path) as conn:
+        admin.sign_trust_list(conn, root, days=7, now=clock())
+    assert claim(borrower) is not None

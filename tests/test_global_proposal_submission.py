@@ -159,6 +159,7 @@ def test_send_uses_the_previewed_signed_payload_and_records_the_receipt(
         manager,
         conn,
         preview,
+        registry="https://registry.test",
         key_path=key_path,
         transport=httpx.MockTransport(respond),
     )
@@ -225,7 +226,12 @@ def test_the_registry_limit_is_told_in_words(conn: sqlite3.Connection, tmp_path:
 
     with pytest.raises(ClickException, match="at most 5 proposals a day"):
         global_cli.send_proposal(
-            manager, conn, preview, key_path=key_path, transport=httpx.MockTransport(respond)
+            manager,
+            conn,
+            preview,
+            registry="https://registry.test",
+            key_path=key_path,
+            transport=httpx.MockTransport(respond),
         )
     assert conn.execute("SELECT count(*) FROM network_log").fetchone()[0] == 0
 
@@ -277,6 +283,7 @@ def test_the_command_sends_only_the_previewed_hash(
     assert preview["sent"] is False and sent == []
     text = runner.invoke(cli, ["global", "submit-proposal", str(proposal_id)])
     assert "may quote those tasks" in text.output.replace("\n", " ")
+    assert "https://registry.test" in text.output
 
     wrong = runner.invoke(
         cli, ["global", "submit-proposal", str(proposal_id), "--confirm", "0" * 64]
@@ -317,6 +324,7 @@ def test_the_chat_sends_only_after_the_window(
         window = entry.handler(ctx, args)
         assert isinstance(window, commands.Proposal)
         assert '"signature"' in window.lines[1]
+        assert any("https://registry.test" in line for line in window.lines)
         assert any("may quote those tasks" in w for w in window.warnings)
         assert sent == []  # nothing until the "yes"
         outcome = window.apply()
@@ -324,3 +332,93 @@ def test_the_chat_sends_only_after_the_window(
         opened.close()
     assert outcome.data["id"] == "d" * 32
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize("field", ["summary", "diff"])
+def test_escaped_secrets_are_refused_before_preview_and_send(
+    conn: sqlite3.Connection, tmp_path: Path, field: str
+) -> None:
+    secret = 'sk-test\\"secret'
+    contents: dict[str, Any] = {field: f"copied {secret}"}
+    proposal_id = proposed(conn, **contents)
+    key_path = tmp_path / "node.key"
+    sign.node_key(key_path)
+    config = Config(network=Network(enabled=True, registry="https://registry.test"))
+    preview = global_cli.proposal_upload(conn, config, proposal_id, key_path=key_path)
+    config.api_keys = {"GROQ_API_KEY": [ApiKey(value=secret)]}
+    manager = make_manager(tmp_path, config)
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(500)
+
+    with pytest.raises(ClickException, match="contains an API key"):
+        global_cli.proposal_upload(conn, config, proposal_id, key_path=key_path)
+    with pytest.raises(ClickException, match="contains an API key"):
+        global_cli.send_proposal(
+            manager,
+            conn,
+            preview,
+            registry="https://registry.test",
+            key_path=key_path,
+            transport=httpx.MockTransport(respond),
+        )
+    assert seen == []
+
+
+def test_a_newer_failed_evaluation_blocks_upload(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    proposal_id = proposed(conn)
+    proposals.record_evaluation(
+        conn, proposal_id, mode="fake", commit="a" * 40, verdict="failed", reason="benchmark failed"
+    )
+    config = Config(network=Network(enabled=True, registry="https://registry.test"))
+    with pytest.raises(ClickException, match="needs a completed benchmark"):
+        global_cli.proposal_upload(conn, config, proposal_id, key_path=tmp_path / "node.key")
+
+
+def test_send_refuses_a_changed_registry(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    proposal_id = proposed(conn)
+    key_path = tmp_path / "node.key"
+    sign.node_key(key_path)
+    config = Config(network=Network(enabled=True, registry="https://registry.test"))
+    preview = global_cli.proposal_upload(conn, config, proposal_id, key_path=key_path)
+    config.network.registry = "https://other.test"
+    manager = make_manager(tmp_path, config)
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(500)
+
+    with pytest.raises(ClickException, match="registry changed after preview"):
+        global_cli.send_proposal(
+            manager,
+            conn,
+            preview,
+            registry="https://registry.test",
+            key_path=key_path,
+            transport=httpx.MockTransport(respond),
+        )
+    assert seen == []
+
+
+def test_body_only_hash_cannot_confirm(
+    on_disk: tuple[int, list[protocol.SignedProposalSubmission]],
+) -> None:
+    import hashlib
+
+    proposal_id, sent = on_disk
+    runner = CliRunner()
+    preview = json.loads(
+        runner.invoke(cli, ["global", "submit-proposal", str(proposal_id), "--json"]).output
+    )
+    assert preview["registry"] == "https://registry.test"
+    old_hash = hashlib.sha256(
+        json.dumps(preview["submission"], ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    result = runner.invoke(
+        cli, ["global", "submit-proposal", str(proposal_id), "--confirm", old_hash]
+    )
+    assert result.exit_code == 1
+    assert sent == []

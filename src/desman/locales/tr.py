@@ -984,4 +984,17 @@ _NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
     "desman-global is off; nothing was sent.": "desman-global kapalı; hiçbir şey gönderilmedi.",
 }
 MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "Önizlemeden sonra kayıt sunucusu değişti; hiçbir şey gönderilmedi.",
+        "Registry: {address}": "Kayıt sunucusu: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "Güven listesi 2 günden eski: düğümler iş almıyor. Yeni bir liste imzalayın.",
+        "Current version": "Geçerli sürüm",
+        "Proposed version": "Önerilen sürüm",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (alt görevler {n})",
+        "Calls": "Çağrılar",
+        "Prompt tokens": "İstem tokenleri",
+        "Completion tokens": "Yanıt tokenleri",
+    }
+)
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

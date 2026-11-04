@@ -914,6 +914,7 @@ def test_a_result_holds_as_long_as_its_job_and_a_late_recheck_accepts_it(
     machine: Callable[[str, FakeLLM], Machine],
     add_job: Callable[..., str],
     registry_db: Path,
+    root: sign.NodeKey,
     clock: FakeClock,
 ) -> None:
     job_id = add_job()  # seven days
@@ -926,6 +927,8 @@ def test_a_result_holds_as_long_as_its_job_and_a_late_recheck_accepts_it(
     task = sign.Signed.model_validate_json(a.held()[0]["task_json"]).record
     assert record.expires_at >= task.expires_at
     clock.advance(3 * 24 * 3600)  # the other node comes days later
+    with store.connection(registry_db) as conn:
+        admin.sign_trust_list(conn, root, days=7, now=clock())
     checking = b.poll()
     assert checking is not None and checking.change is Change.WORK_TAKEN
     b.work()

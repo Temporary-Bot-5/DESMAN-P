@@ -970,4 +970,17 @@ _NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
     "desman-global is off; nothing was sent.": "desman-global 已关闭；未发送。",
 }
 MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "预览后注册服务器已更改；未发送任何内容。",
+        "Registry: {address}": "注册服务器：{address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "信任列表已超过2天：节点不接受工作。请签署新列表。",
+        "Current version": "当前版本",
+        "Proposed version": "提议版本",
+        "{id}: {status} (subtasks {n})": "{id}: {status}（子任务 {n}）",
+        "Calls": "调用次数",
+        "Prompt tokens": "输入令牌",
+        "Completion tokens": "输出令牌",
+    }
+)
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

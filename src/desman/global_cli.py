@@ -176,14 +176,13 @@ def proposal_upload(
     if found.status is not stored_proposals.Status.PROPOSED:
         raise click.ClickException(t("Proposal {id} has nothing to submit.", id=proposal_id))
     evaluations = stored_proposals.evaluations(conn, proposal_id)
-    evaluation = next(
-        (e for e in evaluations if e.base is not None and e.candidate is not None), None
-    )
-    if evaluation is None or evaluation.verdict == "failed":
-        raise click.ClickException(
-            t("Proposal {id} needs a completed benchmark with both results.", id=proposal_id)
-        )
-    if evaluation.base is None or evaluation.candidate is None:
+    evaluation = evaluations[0] if evaluations else None
+    if (
+        evaluation is None
+        or evaluation.verdict == "failed"
+        or evaluation.base is None
+        or evaluation.candidate is None
+    ):
         raise click.ClickException(
             t("Proposal {id} needs a completed benchmark with both results.", id=proposal_id)
         )
@@ -242,11 +241,27 @@ def proposal_upload(
 
 def _refuse_secrets(config: Config, payload: protocol.ProposalSubmission) -> None:
     """Do not let a configured API key leave in a proposal, benchmark, or diff."""
-    encoded = payload.model_dump_json(exclude_none=True)
-    if any(
-        key.value and key.value in encoded for group in config.api_keys.values() for key in group
-    ):
+    keys = [key.value for group in config.api_keys.values() for key in group if key.value]
+
+    def contains_secret(value: object) -> bool:
+        if isinstance(value, str):
+            return any(key in value for key in keys)
+        if isinstance(value, dict):
+            return any(contains_secret(k) or contains_secret(v) for k, v in value.items())
+        if isinstance(value, list):
+            return any(contains_secret(v) for v in value)
+        return False
+
+    if contains_secret(payload.model_dump(mode="json")):
         raise click.ClickException(t("This proposal contains an API key; nothing was sent."))
+
+
+def proposal_confirmation(registry: str, body: dict[str, object]) -> str:
+    """Hash the destination together with the exact wire body."""
+    encoded = json.dumps(
+        {"registry": registry, "submission": body}, sort_keys=True, ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def send_proposal(
@@ -254,6 +269,7 @@ def send_proposal(
     conn: sqlite3.Connection,
     signed: protocol.SignedProposalSubmission,
     *,
+    registry: str,
     key_path: Path | None = None,
     transport: httpx.BaseTransport | None = None,
     clock: Callable[[], datetime] = _utc_now,
@@ -262,6 +278,8 @@ def send_proposal(
     with manager.locked():
         config = manager.load()
         address = net.registry(config)
+        if address != registry:
+            raise click.ClickException(t("The registry changed after preview; nothing was sent."))
         if not config.network.enabled or address is None:
             raise click.ClickException(t("desman-global is off; nothing was sent."))
         _refuse_secrets(config, signed.submission)
@@ -807,14 +825,20 @@ def submit_proposal_command(proposal: int, confirm: str | None, as_json: bool) -
     with journal(None) as conn:
         payload = proposal_upload(conn, config, proposal)
         wire = protocol.SubmitProposal(signed=payload)
-        encoded = wire.model_dump_json(exclude_none=True).encode("utf-8")
-        digest = hashlib.sha256(encoded).hexdigest()
+        address = net.registry(config)
+        assert address is not None
+        preview = wire.model_dump(mode="json", exclude_none=True)
+        digest = proposal_confirmation(address, preview)
         if confirm is None:
-            preview = wire.model_dump(mode="json", exclude_none=True)
             if as_json:
                 click.echo(
                     json.dumps(
-                        {"sent": False, "confirmation": digest, "submission": preview},
+                        {
+                            "sent": False,
+                            "registry": address,
+                            "confirmation": digest,
+                            "submission": preview,
+                        },
                         ensure_ascii=False,
                         indent=2,
                     )
@@ -826,6 +850,7 @@ def submit_proposal_command(proposal: int, confirm: str | None, as_json: bool) -
                         hash=digest,
                     )
                 )
+                ui.out(t("Registry: {address}", address=address))
                 ui.out(Text(json.dumps(preview, ensure_ascii=False, indent=2, sort_keys=True)))
                 ui.note(summary_warning())
             return
@@ -833,7 +858,7 @@ def submit_proposal_command(proposal: int, confirm: str | None, as_json: bool) -
             raise click.ClickException(
                 t("The preview changed; nothing was sent. Preview it again.")
             )
-        received = send_proposal(manager, conn, payload)
+        received = send_proposal(manager, conn, payload, registry=address)
     result = {
         "sent": True,
         "id": received.id,

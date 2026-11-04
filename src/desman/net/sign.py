@@ -29,10 +29,11 @@ every poll, so receiving one twice is harmless; any other record is refused the 
 
 **A trust list** (G.6c) is signed by the root only, by the person (`desman-registry trust
 sign`): it names every assignment and revocation in effect when it was signed. The registry
-hands it out with them, and cannot leave one out: a node that holds a list still in its term
-and every record it names is `fresh()`; otherwise it takes no work from any operator. So a
-registry that hides a revocation can do so only until the list it was signed into expires (a
-node keeps the newest list it received).
+hands it out with them, and cannot leave one out: a node that holds a list still in its term,
+younger than TRUST_LIST_MAX_AGE, and every record it names is `fresh()`; otherwise it takes no
+work from any operator. So a
+registry that hides a revocation can do so only while the list is young, at most
+TRUST_LIST_MAX_AGE (a node keeps the newest list it received).
 """
 
 from __future__ import annotations
@@ -67,6 +68,7 @@ from desman.core import db
 
 ROOT_PUB: Final = Path(__file__).resolve().parent / "root.pub"
 NODE_KEY: Final = "node.key"
+TRUST_LIST_MAX_AGE: Final = timedelta(days=2)
 SKEW: Final = timedelta(minutes=5)
 """How far ahead of our clock a record's `issued_at` may be."""
 
@@ -525,7 +527,7 @@ class Trust:
         return key in self._revoked
 
     def fresh(self) -> str | None:
-        """None while the newest trust list is in its term and every record it still requires
+        """None while the newest trust list is young, in term, and every required record
         was received; otherwise why not (for the network log)."""
         found = self._list
         if found is None:
@@ -533,6 +535,10 @@ class Trust:
         now = _utc(self._clock())
         if now >= found.expires_at:
             return f"the trust list expired at {found.expires_at.isoformat()}"
+        if now >= found.issued_at + TRUST_LIST_MAX_AGE:
+            return (
+                f"the trust list was signed at {found.issued_at.isoformat()}, more than 2 days ago"
+            )
         for listed in TrustList.model_validate(found.body).records:
             # Allow for skew: the registry stops handing an assignment out at its term.
             required = listed.until is None or listed.until > now + SKEW

@@ -718,7 +718,10 @@ def proposal_upload(number: int = 7) -> protocol.ProposalSubmission:
         mode="fake",
         source="/checkout/src/desman",
         cases=[protocol.BenchmarkCase(id="case", status="done", plan="llm", subtasks=1)],
-        stats={"tasks": {"done": 1}},
+        stats={
+            "tasks": {"done": 1},
+            "roles": [{"calls": 2, "prompt_tokens": 10, "completion_tokens": 5}],
+        },
     )
     return protocol.ProposalSubmission(
         proposal=number,
@@ -866,6 +869,12 @@ def test_the_operator_lists_and_shows_submissions(
 
     shown = registry_cli("proposal", "show", received.id[:8])
     assert shown.exit_code == 0, shown.output
+    assert "Current version" in shown.output
+    assert "Proposed version" in shown.output
+    assert shown.output.count("case: done (subtasks 1)") == 2
+    assert shown.output.count("Calls: 2") == 2
+    assert "Prompt tokens: 10" in shown.output
+    assert "Completion tokens: 5" in shown.output
     assert "Tighten a planning prompt." in shown.output
     assert "+++ b/src/desman/planner.py" in shown.output
     data = json.loads(registry_cli("proposal", "show", received.id, "--json").output)
@@ -873,3 +882,19 @@ def test_the_operator_lists_and_shows_submissions(
 
     missing = registry_cli("proposal", "show", "ffff")
     assert missing.exit_code != 0
+
+
+def test_trust_show_warns_when_the_list_is_too_old(
+    db_path: Path, root: sign.NodeKey, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.registry import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "_now", clock)
+    with store.connection(db_path) as conn:
+        admin.sign_trust_list(conn, root, days=7, now=clock())
+    assert "more than 2 days old" not in registry_cli("trust", "show").output
+    clock.advance(sign.TRUST_LIST_MAX_AGE.total_seconds())
+    shown = registry_cli("trust", "show")
+    assert shown.exit_code == 0, shown.output
+    assert "more than 2 days old" in shown.output
+    assert "nodes take no work" in shown.output

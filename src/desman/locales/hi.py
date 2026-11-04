@@ -1056,4 +1056,17 @@ _NETWORK_PROPOSAL_MESSAGES: dict[str, str | tuple[str, ...]] = {
     "desman-global is off; nothing was sent.": "desman-global बंद है; कुछ नहीं भेजा गया।",
 }
 MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
+MESSAGES.update(
+    {
+        "The registry changed after preview; nothing was sent.": "पूर्वावलोकन के बाद रजिस्ट्री बदल गई; कुछ नहीं भेजा गया।",
+        "Registry: {address}": "रजिस्ट्री: {address}",
+        "The trust list is more than 2 days old: nodes take no work. Sign a new list.": "विश्वास सूची 2 दिन से पुरानी है: नोड काम नहीं लेते। नई सूची पर हस्ताक्षर करें।",
+        "Current version": "वर्तमान संस्करण",
+        "Proposed version": "प्रस्तावित संस्करण",
+        "{id}: {status} (subtasks {n})": "{id}: {status} (उपकार्य {n})",
+        "Calls": "कॉल",
+        "Prompt tokens": "इनपुट टोकन",
+        "Completion tokens": "आउटपुट टोकन",
+    }
+)
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

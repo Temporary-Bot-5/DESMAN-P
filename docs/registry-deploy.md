@@ -61,15 +61,15 @@ assignment before it ends: run the same command again.
 Nodes take no work unless they hold a fresh **trust list**: a record signed with the root key
 that names every assignment and revocation in effect. If the registry hid a revocation (if it
 was broken into, say), nodes would notice something missing from the list and stop taking work.
-Each `assign` and `revoke` signs a new list lasting 7 days. Sign one again before it ends,
-every day from a timer (`crontab -e` as `desman`):
+Each `assign` and `revoke` signs a new list lasting 7 days. Nodes accept a list only for
+2 days after it is signed, so the daily timer matters. Sign one again every day from a timer (`crontab -e` as `desman`):
 
 ```cron
 0 4 * * * /srv/desman/DESMAN-P/.venv/bin/desman-registry trust sign --days 7
 ```
 
 `desman-registry trust show` says which list is handed out and until when. A list lasts 30
-days at most (`--days`): the longer it lasts, the longer a hidden revocation would go unnoticed.
+days at most (`--days`), but concealment is bounded by the 2-day age limit.
 
 ## 4. Run it as a service
 

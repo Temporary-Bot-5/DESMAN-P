@@ -235,7 +235,7 @@ TOPICS: Final = (
         "terms allow it (none yet); a paid one never. `desman global leave` takes back "
         "everything and switches it off; the key stays. `desman global status` shows it all.\n"
         "While `desman worker` runs, the node registers and fetches revocations; without a "
-        "fresh trust list signed by the owner it takes no jobs. An idle worker takes one job "
+        "fresh trust list signed by the owner less than 2 days ago it takes no jobs. An idle worker takes one job "
         "at a time, signed by an operator, with lent providers only (own folder, sandbox, no "
         "web), or reviews another node's result. The person's work goes first and interrupts "
         "a job; a job never waits for the person. An unreachable registry is tried later; a "
@@ -243,8 +243,8 @@ TOPICS: Final = (
         "`desman global submit-proposal N` sends a proposal that changes texts, with both "
         "benchmark results, signed: never settings, never the analyst's evidence; API keys "
         "found stop it; at most 5 a day. It previews and sends only with `desman global submit-proposal N --confirm "
-        "HASH`; "
-        "the chat asks in the window. Every change is journaled.",
+        "HASH`; the hash confirms both the payload and registry address. "
+        "The chat asks in the window. Every change is journaled.",
     ),
 )
 

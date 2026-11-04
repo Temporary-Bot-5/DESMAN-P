@@ -42,6 +42,7 @@ from desman import (
     improve,
     local_models,
     models_cli,
+    net,
     proposals_cli,
     protected_cli,
     providers,
@@ -574,10 +575,12 @@ def _global_submit_proposal(ctx: Context, args: GlobalProposalArgs) -> Proposal:
     config = ctx.config()
     payload = global_cli.proposal_upload(ctx.store.conn, config, args.proposal)
     body = protocol.SubmitProposal(signed=payload).model_dump(mode="json", exclude_none=True)
+    address = net.registry(config)
+    assert address is not None
     exact = json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True)
 
     def apply() -> Outcome:
-        sent = global_cli.send_proposal(ctx.manager, ctx.store.conn, payload)
+        sent = global_cli.send_proposal(ctx.manager, ctx.store.conn, payload, registry=address)
         ui.ok(
             t(
                 "Proposal {proposal} sent to the registry as {id}.",
@@ -594,6 +597,7 @@ def _global_submit_proposal(ctx: Context, args: GlobalProposalArgs) -> Proposal:
                 id=args.proposal,
             ),
             exact,
+            t("Registry: {address}", address=address),
         ],
         apply,
         [
