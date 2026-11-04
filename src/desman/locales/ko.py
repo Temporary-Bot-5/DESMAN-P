@@ -873,7 +873,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "제출 내용과 일치",
     "Handed a proposal check in to desman-global ({outcome}).": "제안 검증 결과를 desman-global에 제출했습니다 ({outcome}).",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "이미 설치된 릴리스가 있습니다. 먼저 되돌리세요.",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "브랜치: {branch}; 커밋: {commit}; 제안: {proposal}",
     "Checkout: {branch}; {head} → {target}": "작업 사본: {branch}; {head} → {target}",
     "Choose a release number to install after inspecting it.": "검토 후 설치할 릴리스 번호를 선택하세요.",

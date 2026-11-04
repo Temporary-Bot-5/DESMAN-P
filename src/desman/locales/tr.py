@@ -877,7 +877,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "Gönderimle eşleşiyor",
     "Handed a proposal check in to desman-global ({outcome}).": "Öneri kontrolü desman-global ağına teslim edildi ({outcome}).",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "Bir sürüm zaten kurulu; önce geri alın.",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "Dal: {branch}; commit: {commit}; öneri: {proposal}",
     "Checkout: {branch}; {head} → {target}": "Çalışma kopyası: {branch}; {head} → {target}",
     "Choose a release number to install after inspecting it.": "İnceledikten sonra kurulacak sürüm numarasını seçin.",

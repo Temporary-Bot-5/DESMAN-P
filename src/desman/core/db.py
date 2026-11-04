@@ -635,11 +635,6 @@ MIGRATIONS: Final[tuple[str, ...]] = (
             (SELECT action FROM applications WHERE release = NEW.release
              ORDER BY id DESC LIMIT 1), 'reverted')
         BEGIN SELECT RAISE(ABORT, 'a release is applied and reverted in turn'); END;
-    CREATE TRIGGER updates_one_active BEFORE INSERT ON applications
-        WHEN NEW.release IS NOT NULL AND NEW.action = 'applied' AND EXISTS (
-            SELECT 1 FROM applications a WHERE a.release IS NOT NULL AND a.action = 'applied'
-            AND a.id = (SELECT MAX(b.id) FROM applications b WHERE b.release = a.release))
-        BEGIN SELECT RAISE(ABORT, 'revert the installed release first'); END;
     CREATE TRIGGER applications_no_update BEFORE UPDATE ON applications
         BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
     CREATE TRIGGER applications_no_delete BEFORE DELETE ON applications

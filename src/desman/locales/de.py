@@ -934,7 +934,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "Stimmt mit Einreichung überein",
     "Handed a proposal check in to desman-global ({outcome}).": "Eine Vorschlagsprüfung wurde an desman-global übergeben ({outcome}).",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "Ein Release ist bereits installiert; zuerst zurücksetzen.",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "Branch: {branch}; Commit: {commit}; Vorschlag: {proposal}",
     "Checkout: {branch}; {head} → {target}": "Arbeitskopie: {branch}; {head} → {target}",
     "Choose a release number to install after inspecting it.": "Nach der Prüfung eine Release-Nummer zur Installation wählen.",

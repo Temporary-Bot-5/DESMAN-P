@@ -242,7 +242,7 @@ TOPICS: Final = (
         "to that registry. The chat asks in a window.\n"
         "Root-signed operator releases arrive with the worker: `desman global update --show N` "
         "inspects (omit N for newest); `desman global update --apply N` installs only by the "
-        "person, never automatically; `desman global update --revert` goes back if HEAD/schema "
+        "person, never automatically; `desman global update --revert` undoes the newest installed release, one at a time, if HEAD/schema "
         "have not advanced. Restart workers/chats; approve protected changes and reinstall "
         "changed dependencies. Chat changes require the confirmation window.",
     ),

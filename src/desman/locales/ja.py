@@ -875,7 +875,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "提出内容と一致",
     "Handed a proposal check in to desman-global ({outcome}).": "提案の検証結果を desman-global に提出しました（{outcome}）。",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "リリースは既にインストール済みです。先に元に戻してください。",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "ブランチ: {branch}、コミット: {commit}、提案: {proposal}",
     "Checkout: {branch}; {head} → {target}": "作業コピー: {branch}、{head} → {target}",
     "Choose a release number to install after inspecting it.": "確認後、インストールするリリース番号を選んでください。",

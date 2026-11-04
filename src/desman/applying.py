@@ -501,9 +501,7 @@ def plan_update(
                 "No release received yet; releases arrive while `desman worker` runs with desman-global on."
             )
         )
-    last = proposals.last_update(conn)
-    if last is not None and last.action == "applied":
-        raise ApplyError(t("A release is already installed; revert it first."))
+    last = proposals.installed_update(conn)
     repo, head, branch = checkout(repo)
     if branch is None:
         raise ApplyError(t("The checkout must be on a branch."))
@@ -536,12 +534,18 @@ def plan_update(
     clean(repo, files)
     commits = _git(repo, "log", "--format=%H%x09%s", f"{head}..{commit}").splitlines()
 
-    manifest = repo / "src/desman/protected.toml"
     protected_files: set[str] = set()
-    if manifest.exists():
-        protected_files = {
-            "src/desman/" + name for name in tomllib.loads(manifest.read_text()).get("package", {})
-        }
+    for revision in (head, commit):
+        manifest_path = "src/desman/protected.toml"
+        if (
+            manifest_path
+            not in _git(repo, "ls-tree", "--name-only", revision, manifest_path).splitlines()
+        ):
+            continue
+        manifest = _git(repo, "show", f"{revision}:{manifest_path}")
+        protected_files.update(
+            "src/desman/" + name for name in tomllib.loads(manifest).get("package", {})
+        )
     protected_files.add("src/desman/protected.toml")
     return UpdatePlan(
         release,
@@ -563,7 +567,7 @@ def plan_update(
 
 def plan_update_revert(conn: sqlite3.Connection, *, repo: Path | None = None) -> UpdatePlan:
 
-    last = proposals.last_update(conn)
+    last = proposals.installed_update(conn)
     if last is None or last.action != "applied":
         raise ApplyError(t("No release is installed to revert."))
     repo, head, branch = checkout(repo)
@@ -581,6 +585,8 @@ def plan_update_revert(conn: sqlite3.Connection, *, repo: Path | None = None) ->
     row = conn.execute(
         "SELECT signed_json FROM releases WHERE number = ?", (last.release,)
     ).fetchone()
+    if row is None:
+        raise ApplyError(t("No release {number}.", number=last.release))
     release = sign.Release.model_validate(sign.Signed.model_validate_json(row[0]).record.body)
     return UpdatePlan(
         release,
@@ -621,7 +627,7 @@ def carry_out_update(
     remote and no release history is lost. Running workers/chats must be restarted."""
     from desman.net import updates
 
-    if proposals.last_update(conn) != plan.last:
+    if proposals.installed_update(conn) != plan.last:
         raise ApplyError(t("The installed release changed since: look again."))
     if checkout(plan.repo)[1:] != (plan.head, plan.branch):
         raise ApplyError(t("the checkout's branch or HEAD changed since: look again"))

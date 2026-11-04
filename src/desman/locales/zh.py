@@ -865,7 +865,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "与提交内容一致",
     "Handed a proposal check in to desman-global ({outcome}).": "已向 desman-global 提交提案检查结果（{outcome}）。",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "已有版本安装；请先回退。",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "分支：{branch}；提交：{commit}；提案：{proposal}",
     "Checkout: {branch}; {head} → {target}": "工作副本：{branch}；{head} → {target}",
     "Choose a release number to install after inspecting it.": "查看后请选择要安装的版本号。",

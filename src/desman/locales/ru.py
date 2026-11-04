@@ -1177,7 +1177,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "Совпадает с отправкой",
     "Handed a proposal check in to desman-global ({outcome}).": "Проверка предложения передана в desman-global ({outcome}).",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "Релиз уже установлен; сначала откатите его.",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "Ветка: {branch}; коммит: {commit}; предложение: {proposal}",
     "Checkout: {branch}; {head} → {target}": "Рабочая копия: {branch}; {head} → {target}",
     "Choose a release number to install after inspecting it.": "После просмотра выберите номер релиза для установки.",

@@ -119,9 +119,9 @@ def test_apply_revert_reapply(
     assert len(operator.entries(conn)) == 3
     signed = envelope(root, parent, commit, number=2)
     assert updates.keep(conn, sign.Trust(root.public), signed)
-    with pytest.raises(sqlite3.IntegrityError, match="revert"):
+    with pytest.raises(sqlite3.IntegrityError, match="in turn"):
         proposals.record_update(
-            conn, 2, "applied", commit=commit, base=base, branch="main", details={}
+            conn, 1, "applied", commit=commit, base=base, branch="main", details={}
         )
 
 
@@ -336,3 +336,68 @@ def test_release_state_does_not_use_replay_journal() -> None:
         trust = sign.Trust(root.public, seen=NoSeen())
         trust.receive(signed.model_dump(mode="json"))
         trust.receive(signed.model_dump(mode="json"))
+
+
+def test_stacked_updates(
+    conn: sqlite3.Connection, tmp_path: Path, release_repo: tuple[Path, Path, str, str]
+) -> None:
+    repo, source, parent, first = release_repo
+    base = git(repo, "rev-parse", "HEAD").strip()
+    pub, root = receive(conn, tmp_path, parent, first)
+    applying.carry_out_update(conn, applying.plan_update(conn, repo=repo, root=pub))
+    (source / "src/desman/protected.toml").write_text('[package]\n"new.py" = "hash"\n')
+    (source / "src/desman/new.py").write_text("new\n")
+    (source / "src/desman/agents.py").write_text("newer\n")
+    git(source, "add", ".")
+    git(source, "commit", "-m", "second release")
+    second = git(source, "rev-parse", "HEAD").strip()
+    git(source, "push", "origin", "main")
+    updates.keep(
+        conn,
+        sign.Trust(root.public),
+        envelope(
+            root,
+            first,
+            second,
+            number=2,
+            files=["src/desman/agents.py", "src/desman/new.py", "src/desman/protected.toml"],
+        ),
+    )
+    plan = applying.plan_update(conn, repo=repo, root=pub)
+    assert plan.protected == [
+        "src/desman/agents.py",
+        "src/desman/new.py",
+        "src/desman/protected.toml",
+    ]
+    applying.carry_out_update(conn, plan)
+    for target, release in ((first, 2), (base, 1)):
+        revert = applying.plan_update_revert(conn, repo=repo)
+        assert revert.release.number == release
+        conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
+        with pytest.raises(applying.ApplyError, match="schema grew"):
+            applying.carry_out_update(conn, revert)
+        conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION}")
+        applying.carry_out_update(conn, revert)
+        assert git(repo, "rev-parse", "HEAD").strip() == target
+    applying.carry_out_update(conn, applying.plan_update(conn, 2, repo=repo, root=pub))
+    assert git(repo, "rev-parse", "HEAD").strip() == second
+    assert [(u.release, u.action) for u in reversed(proposals.updates(conn))] == [
+        (1, "applied"),
+        (2, "applied"),
+        (2, "reverted"),
+        (1, "reverted"),
+        (2, "applied"),
+    ]
+
+
+def test_revert_missing_release(
+    conn: sqlite3.Connection, tmp_path: Path, release_repo: tuple[Path, Path, str, str]
+) -> None:
+    repo, _, parent, commit = release_repo
+    pub, _ = receive(conn, tmp_path, parent, commit)
+    applying.carry_out_update(conn, applying.plan_update(conn, repo=repo, root=pub))
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("DROP TRIGGER releases_no_delete")
+    conn.execute("DELETE FROM releases")
+    with pytest.raises(applying.ApplyError, match="No release 1"):
+        applying.plan_update_revert(conn, repo=repo)

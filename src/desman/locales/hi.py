@@ -931,7 +931,6 @@ MESSAGES: dict[str, Forms] = {
     "Matches submission": "प्रस्तुति से मेल खाता है",
     "Handed a proposal check in to desman-global ({outcome}).": "प्रस्ताव की जाँच desman-global को सौंपी गई ({outcome})।",
     # G.8 — manual release updates.
-    "A release is already installed; revert it first.": "एक रिलीज़ पहले से स्थापित है; पहले उसे वापस लें।",
     "Branch: {branch}; commit: {commit}; proposal: {proposal}": "शाखा: {branch}; कमिट: {commit}; प्रस्ताव: {proposal}",
     "Checkout: {branch}; {head} → {target}": "कार्य प्रति: {branch}; {head} → {target}",
     "Choose a release number to install after inspecting it.": "देखने के बाद स्थापित करने के लिए रिलीज़ नंबर चुनें।",
