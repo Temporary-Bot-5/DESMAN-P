@@ -913,6 +913,10 @@ MESSAGES: dict[str, Forms] = {
     "Material the job works on; repeat for several.": "वह सामग्री जिस पर काम होता है; कई के लिए दोहराएँ।",
     "How long nodes may take it.": "नोड इसे कितने समय तक ले सकते हैं।",
     "The operator's private key (default: operator.key in the registry's directory).": "ऑपरेटर की निजी कुंजी (डिफ़ॉल्ट: रजिस्ट्री निर्देशिका में operator.key)।",
+    "Took a job from desman-global ({stage}). Your own work still goes first.": "desman-global से एक काम लिया गया ({stage})। आपका अपना काम अब भी पहले होता है।",
+    "Handed a job in to desman-global ({outcome}).": "desman-global को एक काम सौंपा गया ({outcome})।",
+    "A job from desman-global was dropped: {reason}": "desman-global का एक काम छोड़ दिया गया: {reason}",
+    "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global का काम केवल `desman worker` में, उधार दिए गए मॉडलों से चलता है।",
 }
 
 CLICK: dict[str, Forms] = {

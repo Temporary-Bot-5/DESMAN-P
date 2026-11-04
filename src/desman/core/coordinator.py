@@ -20,6 +20,11 @@ operator). Termination is guaranteed: every quality or transient failure spends 
 and ends in NEEDS_HUMAN, and blocked dependents are settled immediately. The one open-ended wait
 is a provider pause; by default the coordinator returns instead of sleeping through it.
 
+Jobs lent by desman-global (tasks of origin `network`, ROADMAP G.6b) are worked by a crew of
+their own (`Crew`: the models lent, the `network_*` roles of the tool policy, no splitting); a
+coordinator without one never takes them. The person's own work goes first and takes over from
+a job at the executor's next step, as critical work does from the rest.
+
 Executor and reviewer are plain callables, so the loop is tested with scripted fakes and later
 driven by real LLM-backed agents. An executor acts on nothing itself: it asks for tool calls
 through `Work.tools` (core/tools.py), which checks, guards, audits and journals each one, so
@@ -32,6 +37,7 @@ import functools
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -42,7 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from desman.core import calls, db
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
 from desman.core.effects import Effects
-from desman.core.models import Priority, Subtask, SubtaskSpec, Tools
+from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -169,6 +175,20 @@ errors propagate like the executor's."""
 Reviewer = Callable[[Subtask, dict[str, Any] | None], Review | Failure]
 
 
+@dataclass(frozen=True)
+class Crew:
+    """Who works the subtasks of jobs from desman-global (ROADMAP G.6b): only the models the
+    person lent, within their quotas; tools by the `network_*` roles of the tool policy (and
+    the person's switches); never split (a job is one self-contained subtask)."""
+
+    executor: Executor
+    reviewer: Reviewer
+    access: Access | None
+    """None: the workspace tools only, as for the coordinator's own `access`."""
+    strategies: Strategies = ONE_MODEL
+    providers: Labels | Callable[[Subtask], Labels] | None = None
+
+
 class RunResult(BaseModel):
     task_id: str
     status: TaskStatus
@@ -215,6 +235,7 @@ class Coordinator:
         poll_seconds: float = DEFAULT_POLL_SECONDS,
         watch: Callable[[], None] | None = None,
         gate: Callable[[], None] | None = None,
+        network: Crew | None = None,
     ) -> None:
         self.store = store
         self.executor = executor
@@ -262,6 +283,8 @@ class Coordinator:
         """Called before every tick, before anything is swept, reserved or claimed: whatever it
         raises stops `run()` and `work()` with nothing held (protected files that changed
         since the start, ROADMAP 5.3)."""
+        self.network = network
+        """Who works jobs from desman-global; None: they are never taken here."""
 
     def run(
         self, task_id: str, *, wait_for_pauses: bool = False, max_ticks: int = 10_000
@@ -304,13 +327,15 @@ class Coordinator:
         until_idle: bool = False,
         max_ticks: int | None = None,
         on_tick: Callable[[WorkResult], None] | None = None,
-        on_idle: Callable[[], None] | None = None,
+        on_idle: Callable[[], bool | None] | None = None,
     ) -> WorkResult:
         """Work on every task, as a worker: until interrupted, or with `until_idle` until there
         is nothing to do and nobody else holds work (paused work is waited for only without it).
         `on_tick` sees the result so far after every tick that moved something (its `events`
         are that tick's); `on_idle` is called after every tick that moved nothing, before the
-        worker waits or stops (others may have changed something meanwhile)."""
+        worker waits or stops (others may have changed something meanwhile). It returns True
+        when it brought work itself (a job from desman-global): the worker looks again at once,
+        and does not stop with it left undone."""
         result = WorkResult()
         while max_ticks is None or result.ticks < max_ticks:
             result.ticks += 1
@@ -325,8 +350,8 @@ class Coordinator:
                 if on_tick is not None:
                     on_tick(result)
                 continue
-            if on_idle is not None:
-                on_idle()
+            if on_idle is not None and on_idle():
+                continue
             if until_idle and self._held_until(None) is None:
                 break
             pause_until = self._earliest(None, "paused", "paused_until")
@@ -351,9 +376,10 @@ class Coordinator:
         # unless work more urgent than they are is ready to run; that runs first, they wait for
         # the next tick. Equal urgency favours the review: its execution is paid for already.
         # Ready work is looked at again before each review: a verdict may have unlocked some.
-        for subtask in self.store.pending_reviews(task_id=task_id):
-            ready = self.store.next_ready(task_id=task_id)
-            if ready is not None and self.store.urgency(subtask) < self.store.urgency(ready):
+        network = self.network is not None
+        for subtask in self.store.pending_reviews(task_id=task_id, network=network):
+            ready = self.store.next_ready(task_id=task_id, network=network)
+            if ready is not None and self.store.rank(subtask) < self.store.rank(ready):
                 break
             token = self.store.reserve_review(
                 subtask.id, self.owner, seconds=self.review_seconds, abandoned=self.abandoned
@@ -366,7 +392,9 @@ class Coordinator:
                 self.store.release_review(subtask.id, token)  # a no-op after a verdict
             self._changed()
 
-        claimed = self.store.claim(self.owner, task_id=task_id, lease_seconds=self.lease_seconds)
+        claimed = self.store.claim(
+            self.owner, task_id=task_id, lease_seconds=self.lease_seconds, network=network
+        )
         while claimed is not None:
             self._changed()
             self.executed += 1
@@ -380,6 +408,12 @@ class Coordinator:
     def _changed(self) -> None:
         if self.watch is not None:
             self.watch()
+
+    def _crew(self, subtask: Subtask) -> Crew:
+        """Who works `subtask`: the network's crew for a job from desman-global, else ours."""
+        if self.network is not None and self.store.origin(subtask.task_id) is Origin.NETWORK:
+            return self.network
+        return Crew(self.executor, self.reviewer, self.access, self.strategies, self.providers)
 
     def _for(self, role: calls.Role, subtask: Subtask) -> calls.Purpose:
         return calls.Purpose(role, task_id=subtask.task_id, subtask_id=subtask.id)
@@ -412,21 +446,24 @@ class Coordinator:
                 raise PreemptedError(subtask.id, critical.id)
 
         outcome: Outcome
+        crew = self._crew(subtask)
+        own = crew is not self.network  # a job from the network is never split
         try:
             attempt = subtask.attempts.quality + 1
             unfit = frozenset(self.store.unfit_providers(subtask.task_id))
-            avoid = self._avoid(subtask, unfit)
+            avoid = self._avoid(crew, subtask, unfit)
             if self.store.parts(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
                 # A split would let parts hand in what only running the code can tell.
                 can_split = (
-                    self.decomposer is not None
+                    own
+                    and self.decomposer is not None
                     and subtask.parent_id is None
                     and not subtask.runs_code
                 )
-                strategy = self.strategies(attempt, split=can_split, **avoid)
-            tools = self._toolbox(subtask, journal, heartbeat)
+                strategy = crew.strategies(attempt, split=can_split, **avoid)
+            tools = self._toolbox(subtask, journal, heartbeat, crew.access)
             if subtask.runs_code and strategy is not Strategy.COMBINE:
                 missing = tools.refusal(RUN_TOOL)
                 if missing is not None:
@@ -453,7 +490,7 @@ class Coordinator:
                     return
                 # No usable split: try once more the way the attempt before did.
                 context = context.model_copy(
-                    update={"strategy": self.strategies(attempt, split=False, **avoid)}
+                    update={"strategy": crew.strategies(attempt, split=False, **avoid)}
                 )
                 work = work.model_copy(update={"context": context})
                 self._started(subtask, context)
@@ -464,7 +501,7 @@ class Coordinator:
                 )
 
             with calls.for_(self._for(calls.Role.EXECUTOR, subtask)), noticing_unfit(unfit_heard):
-                returned = self.executor(work)
+                returned = crew.executor(work)
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
             outcome = returned
@@ -525,6 +562,7 @@ class Coordinator:
         subtask: Subtask,
         journal: Effects,
         heartbeat: Callable[[dict[str, Any] | None], None],
+        access: Access | None,
     ) -> Toolbox:
         def record(action: str, details: dict[str, Any]) -> None:
             self.store.note(subtask.id, Actor.EXECUTOR, action, details)
@@ -533,7 +571,7 @@ class Coordinator:
         return Toolbox(
             Workspace(self.workspaces, subtask.task_id),
             self.tools if granted else Registry(),
-            access=self.access if granted else None,
+            access=access if granted else None,
             record=record,
             guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
             journal=journal,
@@ -601,8 +639,9 @@ class Coordinator:
         review: Review | Failure
         artifact = self.store.latest_artifact(subtask.id)
         try:
+            reviewer = self._crew(subtask).reviewer
             with calls.for_(self._for(calls.Role.REVIEWER, subtask)):
-                returned = self.reviewer(subtask, artifact)
+                returned = reviewer(subtask, artifact)
             # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
         except ProviderError as e:
@@ -704,13 +743,13 @@ class Coordinator:
             unfit_provider=error.label if error.unfit_model else None,
         )
 
-    def _avoid(self, subtask: Subtask, unfit: frozenset[str]) -> dict[str, bool]:
+    def _avoid(self, crew: Crew, subtask: Subtask, unfit: frozenset[str]) -> dict[str, bool]:
         """Which of the models the executor asks for `subtask` an execution of the task found
         unfit (C.9): the other one is then not switched to; the main one is not asked while the
         other is fit."""
-        if self.providers is None:
+        if crew.providers is None:
             return {}
-        main, other = self.providers(subtask) if callable(self.providers) else self.providers
+        main, other = crew.providers(subtask) if callable(crew.providers) else crew.providers
         avoid_other = other is not None and among(other, unfit)
         return {"avoid_main": among(main, unfit) and not avoid_other, "avoid_other": avoid_other}
 

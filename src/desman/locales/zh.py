@@ -847,6 +847,10 @@ MESSAGES: dict[str, Forms] = {
     "Material the job works on; repeat for several.": "任务处理的材料；可重复多次。",
     "How long nodes may take it.": "节点可以领取它的时长。",
     "The operator's private key (default: operator.key in the registry's directory).": "运营者的私钥（默认：注册中心目录中的 operator.key）。",
+    "Took a job from desman-global ({stage}). Your own work still goes first.": "已从 desman-global 领取一项工作（{stage}）。您自己的工作仍然优先。",
+    "Handed a job in to desman-global ({outcome}).": "已向 desman-global 提交一项工作（{outcome}）。",
+    "A job from desman-global was dropped: {reason}": "一项来自 desman-global 的工作已放弃：{reason}",
+    "A job from desman-global runs only in `desman worker`, with the models lent.": "来自 desman-global 的工作只在 `desman worker` 中、用出借的模型运行。",
 }
 
 CLICK: dict[str, Forms] = {

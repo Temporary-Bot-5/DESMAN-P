@@ -859,6 +859,10 @@ MESSAGES: dict[str, Forms] = {
     "Material the job works on; repeat for several.": "İşin üzerinde çalıştığı malzeme; birden fazlası için tekrarlayın.",
     "How long nodes may take it.": "Düğümlerin onu ne kadar süre alabileceği.",
     "The operator's private key (default: operator.key in the registry's directory).": "Operatörün özel anahtarı (varsayılan: kayıt dizinindeki operator.key).",
+    "Took a job from desman-global ({stage}). Your own work still goes first.": "desman-global'den bir iş alındı ({stage}). Kendi işiniz yine önce gelir.",
+    "Handed a job in to desman-global ({outcome}).": "Bir iş desman-global'e teslim edildi ({outcome}).",
+    "A job from desman-global was dropped: {reason}": "desman-global'den gelen bir iş bırakıldı: {reason}",
+    "A job from desman-global runs only in `desman worker`, with the models lent.": "desman-global'den gelen bir iş yalnızca `desman worker` içinde, ödünç verilen modellerle çalışır.",
 }
 
 CLICK: dict[str, Forms] = {

@@ -15,7 +15,7 @@ from typing import Annotated, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from desman.core.models import Kind
-from desman.net.sign import Fingerprint, RecordId, Signed
+from desman.net.sign import Fingerprint, PublicKeyText, RecordId, Signed
 
 REGISTER: Final = "/v1/nodes/register"
 HEARTBEAT: Final = "/v1/nodes/heartbeat"
@@ -176,6 +176,14 @@ class Work(BaseModel):
     """The operator's `task` record, as the node checks it (`sign.Trust`)."""
     result: Signed | None = None
     """For `recheck`: the result to review, signed by the node that did the work."""
+    result_key: PublicKeyText | None = None
+    """For `recheck`: that node's public key, so the reviewer checks the signature itself."""
+
+    @model_validator(mode="after")
+    def _recheck_has_result(self) -> Work:
+        if (self.stage == "recheck") != (self.result is not None and self.result_key is not None):
+            raise ValueError("a recheck, and only a recheck, comes with a result and its key")
+        return self
 
 
 class Offer(BaseModel):

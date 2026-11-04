@@ -9,8 +9,8 @@
 # Relative to the package (src/desman).
 [package]
 # The tool policy and the code that enforces it.
-"policy.toml" = "5dc7ab410d2323db5df0dc2f2516179d5d9490af83c25e88e086089bd8f01c90"
-"core/policy.py" = "1caf70d8c136b9f93c484cdef80bf6359f17ece55ae7926318ed90630bc1be50"
+"policy.toml" = "d25c734c357376192c528b217989c25bf93c899b182c1ef667bb4fa144098392"
+"core/policy.py" = "3a52d811d2518fd5dcdc570e17e9eec84aa88329d20934435905077303dc6ecf"
 # The reviewer (and the executor it judges).
 "agents.py" = "6f6a4b511332cb9a2a41b7158ab8f9e0add95b5594e6b4c15b91f3520feea077"
 # Security rules: the sandbox for generated code, the workspace guard for files.

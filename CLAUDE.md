@@ -238,7 +238,13 @@ src/desman/
     ├── node.py    # The node in the network (G.5): `Node.poll()` between a worker's steps —
     │              #   register with what is lent, heartbeat, trust list checked by `Trust`;
     │              #   config re-read before each contact; backoff; revoked → silent;
-    │              #   `tell_left` for `global leave`; all in `network_log`
+    │              #   `tell_left` for `global leave`; all in `network_log`. G.6b: asks for a
+    │              #   job only while idle, checks it, extends its lease, hands in the record
+    ├── jobs.py    # A job lent (G.6b) as a task of origin `network` (`network_work`): LOW,
+    │              #   after and preempted by the person's own work; worked by the crew
+    │              #   (`runs.network_crew`: lent models within `Quota`, `network_*` roles);
+    │              #   a recheck replays the other node's result for review; `ending()` → a
+    │              #   signed result/verdict; seen record ids kept (`Seen`); never in the inbox
     └── root.pub   # The root's public key (its private half: the owner's server). Protected
 └── registry/      # desman-registry (G.4), the owner's server; reads no config.json, keeps no key
     ├── store.py   # Its own SQLite and migrations (core.db helpers): nodes, root-signed records

@@ -32,7 +32,7 @@ from desman.config_cli import (
 )
 from desman.core import calls, db
 from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult, WorkResult
-from desman.core.models import Kind, Priority, TaskSpec
+from desman.core.models import Kind, Origin, Priority, TaskSpec
 from desman.core.policy import Access
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report, task_summaries
 from desman.core.sessions import Sessions
@@ -384,8 +384,13 @@ def resume(
     store = open_existing(db_path)
     try:
         runs.guard(store)  # before any model is asked
-        models = _attach(source, store, cache=not no_cache, as_json=as_json)
         task_id = find_task(store, task)
+        if store.origin(task_id) is Origin.NETWORK:
+            # Its models are the ones lent, within their quotas: only a worker has them.
+            raise click.ClickException(
+                t("A job from desman-global runs only in `desman worker`, with the models lent.")
+            )
+        models = _attach(source, store, cache=not no_cache, as_json=as_json)
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
@@ -434,12 +439,20 @@ def worker(
         runs.guard(store)  # before any model is asked
         models = _attach(source, store, cache=not no_cache, as_json=as_json)
         manager = load_config()
+        config = manager.load()
+        crew = runs.network_crew(
+            store,
+            config,
+            manager.load,
+            given=models if source.fake is not None else None,
+            cache=not no_cache,
+        )
         coordinator = runs.coordinator(
-            store, models, access, manager.load(), lease_seconds=lease_seconds
+            store, models, access, config, lease_seconds=lease_seconds, network=crew
         )
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)
-        network = node.Node(store.conn, manager.load)
+        network = node.Node(store.conn, manager.load, work=crew is not None)
         if not as_json:
             ui.note(t("Worker {owner} started. Ctrl+C stops it.", owner=coordinator.owner))
             _tell_waiting(watch)  # what already waits, then what comes to
@@ -451,14 +464,21 @@ def worker(
                 progress(result)
             _keep_in_touch(network, as_json)
 
-        def idle() -> None:
+        def called() -> None:
+            _keep_in_touch(network, as_json)
+
+        def idle() -> bool:
             if not as_json:
                 _tell_waiting(watch)
-            _keep_in_touch(network, as_json)
+            event = _keep_in_touch(network, as_json, idle=True)
+            return event is not None and event.change is node.Change.WORK_TAKEN
 
         try:
             _keep_in_touch(network, as_json)
-            coordinator.work(until_idle=until_idle, on_tick=ticked, on_idle=idle)
+            # Between a step's model calls too: a job's lease at the registry is extended (and
+            # its heartbeat sent) while one execution asks a slow model several times.
+            with calls.watching(called):
+                coordinator.work(until_idle=until_idle, on_tick=ticked, on_idle=idle)
         except KeyboardInterrupt:
             interrupted = True
         except ScriptExhausted as e:
@@ -505,12 +525,13 @@ def _worker_progress(coordinator: Coordinator, watch: InboxWatch) -> Callable[[o
     return show
 
 
-def _keep_in_touch(network: node.Node, as_json: bool) -> None:
-    """desman-global between the worker's steps (G.5): a contact when it is due, and what
-    changed told to the person. The network never stops the worker's own work."""
-    event = network.poll()
+def _keep_in_touch(network: node.Node, as_json: bool, *, idle: bool = False) -> node.Event | None:
+    """desman-global between the worker's steps (G.5) and model calls: a contact when it is
+    due, the jobs held tended, one asked for while the worker is `idle` (G.6b), and what
+    changed told to the person (and returned). The network never stops the worker's own work."""
+    event = network.poll(idle=idle)
     if event is None or as_json:
-        return
+        return event
     if event.change is node.Change.CONNECTED:
         ui.ok(t("In touch with the desman-global registry {url}.", url=event.registry))
     elif event.change is node.Change.UNREACHABLE:
@@ -540,7 +561,19 @@ def _keep_in_touch(network: node.Node, as_json: bool) -> None:
         )
     elif event.change is node.Change.NO_KEY:
         ui.warn(t("The node's key cannot be used: {error}", error=event.detail))
+    elif event.change is node.Change.WORK_TAKEN:
+        ui.note(
+            t(
+                "Took a job from desman-global ({stage}). Your own work still goes first.",
+                stage=event.detail,
+            )
+        )
+    elif event.change is node.Change.WORK_HANDED_IN:
+        ui.note(t("Handed a job in to desman-global ({outcome}).", outcome=event.detail))
+    elif event.change is node.Change.WORK_DROPPED:
+        ui.warn(t("A job from desman-global was dropped: {reason}", reason=event.detail))
     sys.stdout.flush()
+    return event
 
 
 def _tell_waiting(watch: InboxWatch) -> None:

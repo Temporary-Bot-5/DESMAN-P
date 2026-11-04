@@ -268,8 +268,8 @@ def claim(
     """Lend `caller` the job waiting longest (rechecks first: they finish work), or nothing.
 
     A node lending nothing gets nothing; nor does one already holding `MAX_HELD` leases. A
-    node never redoes a job it handed a result for in this round, and never rechecks the work
-    of its own owner."""
+    node never gets a job it was lent before, in any stage or round (it refuses a record it
+    has seen as a replay, G.6b), and never rechecks the work of its own owner."""
     expire(conn, now)
     if not caller.capabilities:
         return None
@@ -290,15 +290,12 @@ def claim(
         ).fetchall()
         for row in rows:
             found = _job(row)
-            if found.status == "execute":
-                tried = conn.execute(
-                    "SELECT 1 FROM results WHERE job = ? AND node = ? AND kind = 'result'"
-                    " AND round = ?",
-                    (found.id, caller.fingerprint, found.round),
-                ).fetchone()
-                if tried is not None:
-                    continue
-            else:
+            lent_before = conn.execute(
+                "SELECT 1 FROM leases WHERE job = ? AND node = ?", (found.id, caller.fingerprint)
+            ).fetchone()
+            if lent_before is not None:
+                continue
+            if found.status == "recheck":
                 owners = _owners_of_result(conn, found.result)
                 if owners is None or caller.owned_by in owners:
                     continue
@@ -327,15 +324,24 @@ def _lend(
         ),
     )
     result: sign.Signed | None = None
+    result_key: str | None = None
     if found.status == "recheck":
         row = conn.execute(
-            "SELECT signed_json FROM results WHERE id = ?", (found.result,)
+            "SELECT r.signed_json, n.public_key FROM results r JOIN nodes n ON n.fingerprint = r.node"
+            " WHERE r.id = ?",
+            (found.result,),
         ).fetchone()
         result = sign.Signed.model_validate_json(row["signed_json"])
+        result_key = row["public_key"]
     store.log(conn, "lent", caller.fingerprint, {"job": found.id, "stage": found.status})
     stage: protocol.Stage = "execute" if found.status == "execute" else "recheck"
     return protocol.Work(
-        lease=token, expires_at=until, stage=stage, task=found.signed, result=result
+        lease=token,
+        expires_at=until,
+        stage=stage,
+        task=found.signed,
+        result=result,
+        result_key=result_key,
     )
 
 
@@ -371,7 +377,8 @@ def hand_in(
 
     Checked before anything is kept: the lease is the caller's and still runs, the record is
     signed by the caller's key, is the kind its stage hands in, names this job and lease (and,
-    for a verdict, the result that was lent), and was not handed in before."""
+    for a verdict, the result that was lent), was not handed in before, and (a done result)
+    holds for as long as the job does."""
     expire(conn, now)
     moment = db.to_iso(now)
     signed = given.record
@@ -399,6 +406,10 @@ def hand_in(
                     raise refuse(Reason.MALFORMED, "this stage hands in a result")
                 body = protocol.Result.model_validate(record.body)
                 outcome = body.outcome
+                if outcome == "done" and record.expires_at < db.parse_iso(found.expires_at):
+                    # Its recheck may come as late as the job's own term: a result expiring
+                    # first could not be judged by then, and the job would wait for nothing.
+                    raise refuse(Reason.MALFORMED, "the result expires before the job")
             else:
                 if record.kind is not sign.RecordKind.VERDICT:
                     raise refuse(Reason.MALFORMED, "this stage hands in a verdict")

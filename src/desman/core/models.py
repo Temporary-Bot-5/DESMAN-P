@@ -32,6 +32,16 @@ class Tools(StrEnum):
     (a chat summary), so nothing written in it can make the work act."""
 
 
+class Origin(StrEnum):
+    """Where a task came from (ROADMAP G.6b)."""
+
+    LOCAL = "local"
+    """The person's own: asked here, by a command or in the chat."""
+    NETWORK = "network"
+    """A job lent by desman-global (`net.jobs`): never more urgent than LOW, and any of the
+    person's own work goes first and takes over from it (`core.scheduler`)."""
+
+
 class Kind(StrEnum):
     """What sort of work a subtask is (ROADMAP 4.5): its executor's model is picked by it."""
 

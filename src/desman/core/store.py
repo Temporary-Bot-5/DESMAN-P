@@ -23,9 +23,9 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
-from desman.core.models import Priority, Subtask, SubtaskSpec, TaskSpec, Tools
+from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
-from desman.core.scheduler import DEFAULT_AGING, Aging
+from desman.core.scheduler import DEFAULT_AGING, NETWORK_SQL, Aging
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.states import transition as check_transition
 
@@ -101,19 +101,21 @@ class Store:
         details: dict[str, Any] | None = None,
         session_id: str | None = None,
         also: Callable[[sqlite3.Connection, str], None] | None = None,
+        origin: Origin = Origin.LOCAL,
     ) -> str:
         """Store a task and its subtask graph; returns the task id. `details` go into the
         `task_created` audit entry (e.g. how the plan was made); `session_id` is the chat
         session that asked for it. `also(conn, task_id)` runs in the same transaction (a
-        record that belongs with the task); what it raises leaves nothing created."""
+        record that belongs with the task); what it raises leaves nothing created. `origin`:
+        a job from desman-global is `Origin.NETWORK` (`net.jobs`), fixed for good."""
         task_id = _new_id()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
             now = self._now()  # after the lock: creation order matches commit order
             self.conn.execute(
                 """INSERT INTO tasks (id, goal, priority, created_at, session_id, max_attempts,
-                                      max_transient, tools)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                      max_transient, tools, origin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task_id,
                     spec.goal,
@@ -123,6 +125,7 @@ class Store:
                     spec.retry.max_attempts,
                     spec.retry.max_transient,
                     spec.tools.value,
+                    origin.value,
                 ),
             )
             for seq, (subtask_id, sub) in enumerate(zip(ids, spec.subtasks, strict=True)):
@@ -161,6 +164,7 @@ class Store:
                     "priority": spec.priority,
                     "retry": spec.retry.model_dump(),
                     "tools": spec.tools.value,
+                    **({"origin": origin.value} if origin is not Origin.LOCAL else {}),
                     "subtasks": ids,
                 },
             )
@@ -239,6 +243,12 @@ class Store:
             raise NotFoundError(f"task {task_id} not found")
         return Tools(row["tools"])
 
+    def origin(self, task_id: str) -> Origin:
+        row = self.conn.execute("SELECT origin FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if row is None:
+            raise NotFoundError(f"task {task_id} not found")
+        return Origin(row[0])
+
     def task_status(self, task_id: str) -> TaskStatus:
         rows = self.conn.execute(
             "SELECT status FROM subtasks WHERE task_id = ?", (task_id,)
@@ -311,17 +321,19 @@ class Store:
         *,
         task_id: str | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        network: bool = True,
     ) -> Subtask | None:
         """Atomically take the most urgent READY subtask of any task (or of `task_id`); None if
-        nothing is ready.
+        nothing is ready. Without `network`, never one of a job from desman-global (a run that
+        has no models lent to the network for it).
 
-        Order: urgency (priority aged by the wait, core/scheduler.py), then the longest wait,
-        then position in the task. The returned subtask carries a fresh `lease_token`; the
-        executor must present it to leave RUNNING.
+        Order: the person's own work first, then urgency (priority aged by the wait,
+        core/scheduler.py), then the longest wait, then position in the task. The returned
+        subtask carries a fresh `lease_token`; the executor must present it to leave RUNNING.
         """
         check_transition(S.READY, S.RUNNING, Actor.EXECUTOR)
         with db.transaction(self.conn):
-            return self._claim(owner, task_id, lease_seconds)
+            return self._claim(owner, task_id, lease_seconds, network=network)
 
     def _claim(
         self,
@@ -331,8 +343,10 @@ class Store:
         *,
         min_priority: int | None = None,
         details: dict[str, Any] | None = None,
+        network: bool = True,
     ) -> Subtask | None:
-        """The body of `claim`, only among work of at least `min_priority`. Needs a transaction."""
+        """The body of `claim`, only among work of at least `min_priority` (and without
+        `network`, only the person's own). Needs a transaction."""
         lease_token = _new_id()
         # Times are taken after the write lock is held: waiting for it must not eat the lease.
         lease_until = db.to_iso(self.clock() + timedelta(seconds=lease_seconds))
@@ -343,10 +357,12 @@ class Store:
         if min_priority is not None:
             scope += " AND priority >= ?"
             params.append(min_priority)
+        if not network:
+            scope += f" AND NOT {NETWORK_SQL}"
         chosen = self.conn.execute(
             f"""SELECT id, {self.aging.urgency_sql()} AS urgency FROM subtasks
                 WHERE status = 'ready' {scope}
-                ORDER BY urgency DESC, queued_at, seq LIMIT 1""",
+                ORDER BY {NETWORK_SQL}, urgency DESC, queued_at, seq LIMIT 1""",
             (now, *params),
         ).fetchone()
         if chosen is None:
@@ -386,20 +402,31 @@ class Store:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> Subtask | None:
         """Cooperative preemption (ROADMAP 4.4, D5): critical work is ready (of any task, or of
-        `task_id`) while the executor holding `lease` runs work below CRITICAL. In one
-        transaction `owner` claims the most urgent critical subtask and gives its own back to
+        `task_id`) while the executor holding `lease` runs work below CRITICAL; or, while it
+        runs a job from desman-global, any of the person's own work is ready (G.6b). In one
+        transaction `owner` claims the most urgent such subtask and gives its own back to
         READY (`preempted`: no attempt spent, the checkpoint kept). Returns the claimed subtask,
         or None when there is nothing to yield to; with one, the caller drops its work and runs
         the claimed subtask instead.
 
-        One executor yields per critical subtask: the claim is atomic, so the others find
-        nothing left. Critical work itself is never preempted. Raises StaleStateError if `lease`
-        no longer holds the subtask.
+        One executor yields per subtask waiting: the claim is atomic, so the others find
+        nothing left. Critical work itself is never preempted, and the network's never takes
+        over. Raises StaleStateError if `lease` no longer holds the subtask.
         """
-        scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
+        held = self.get_subtask(subtask_id)
+        network = self.origin(held.task_id) is Origin.NETWORK
+        # A job from the network yields to whatever the person asked; their own work to
+        # critical work only.
+        least = None if network else int(Priority.CRITICAL)
+        params: list[Any] = [task_id] if task_id else []
+        scope = "AND task_id = ?" if task_id else ""
+        if least is None:
+            scope += f" AND NOT {NETWORK_SQL}"
+        else:
+            scope += " AND priority >= ?"
+            params.append(least)
         waiting = self.conn.execute(  # without the write lock: almost always nothing waits
-            f"SELECT 1 FROM subtasks WHERE status = 'ready' AND priority >= ? {scope} LIMIT 1",
-            (int(Priority.CRITICAL), *params),
+            f"SELECT 1 FROM subtasks WHERE status = 'ready' {scope} LIMIT 1", params
         ).fetchone()
         if waiting is None:
             return None
@@ -411,8 +438,9 @@ class Store:
                 owner,
                 task_id,
                 lease_seconds,
-                min_priority=int(Priority.CRITICAL),
+                min_priority=least,
                 details={"preempting": subtask_id},
+                network=False,
             )
             if claimed is None:
                 return None  # another executor took it meanwhile
@@ -422,7 +450,11 @@ class Store:
                 S.READY,
                 Actor.EXECUTOR,
                 lease=lease,
-                reason=f"critical work {claimed.id} is waiting",
+                reason=(
+                    f"the person's own work {claimed.id} is waiting"
+                    if network
+                    else f"critical work {claimed.id} is waiting"
+                ),
                 details={"by": claimed.id, "by_task": claimed.task_id},
                 action="preempted",
             )
@@ -901,7 +933,9 @@ class Store:
                 )
         return resumed
 
-    def pending_reviews(self, limit: int = 10, *, task_id: str | None = None) -> list[Subtask]:
+    def pending_reviews(
+        self, limit: int = 10, *, task_id: str | None = None, network: bool = True
+    ) -> list[Subtask]:
         """Subtasks waiting for a verdict, most urgent first.
 
         Review needs no lease: it only reads the submitted result, and the verdict is a
@@ -909,22 +943,33 @@ class Store:
         reviewed again without re-running the work. A reviewer reserves one first
         (`reserve_review`), so another worker does not spend a model call on the same verdict.
         """
-        return self._queue("review", limit, task_id)
+        return self._queue("review", limit, task_id, network)
 
-    def next_ready(self, *, task_id: str | None = None) -> Subtask | None:
+    def next_ready(self, *, task_id: str | None = None, network: bool = True) -> Subtask | None:
         """The READY subtask `claim` would take now, without taking it (another worker may)."""
-        ready = self._queue("ready", 1, task_id)
+        ready = self._queue("ready", 1, task_id, network)
         return ready[0] if ready else None
 
     def urgency(self, subtask: Subtask) -> int:
-        """How urgent waiting `subtask` is now: the order `claim` and `pending_reviews` use."""
-        return self.aging.urgency(subtask.priority, subtask.queued_at, db.parse_iso(self._now()))
+        """How urgent waiting `subtask` is now (`core.scheduler`)."""
+        network = self.origin(subtask.task_id) is Origin.NETWORK
+        return self.aging.urgency(
+            subtask.priority, subtask.queued_at, db.parse_iso(self._now()), network=network
+        )
 
-    def _queue(self, status: str, limit: int, task_id: str | None) -> list[Subtask]:
+    def rank(self, subtask: Subtask) -> tuple[int, int]:
+        """Where waiting `subtask` stands in the order `claim` and `pending_reviews` use: the
+        person's own work above the network's, then by urgency. Higher goes first."""
+        own = self.origin(subtask.task_id) is not Origin.NETWORK
+        return int(own), self.urgency(subtask)
+
+    def _queue(self, status: str, limit: int, task_id: str | None, network: bool) -> list[Subtask]:
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
+        if not network:
+            scope += f" AND NOT {NETWORK_SQL}"
         rows = self.conn.execute(
             f"""SELECT * FROM subtasks WHERE status = ? {scope}
-                ORDER BY {self.aging.urgency_sql()} DESC, queued_at, seq LIMIT ?""",
+                ORDER BY {NETWORK_SQL}, {self.aging.urgency_sql()} DESC, queued_at, seq LIMIT ?""",
             (status, *params, self._now(), limit),
         ).fetchall()
         return [Subtask.from_row(r) for r in rows]

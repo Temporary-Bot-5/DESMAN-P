@@ -19,7 +19,7 @@ on, every run warns about it and every call of a tool that needs it is audited a
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
@@ -49,6 +49,9 @@ class Role(StrEnum):
     PLANNER = "planner"
     EXECUTOR = "executor"
     REVIEWER = "reviewer"
+    NETWORK_EXECUTOR = "network_executor"
+    """The executor of a job from desman-global (ROADMAP G.6b): someone else's task, so less."""
+    NETWORK_REVIEWER = "network_reviewer"
 
 
 class PolicyError(ValueError):
@@ -107,12 +110,35 @@ def switched_on(permissions: Mapping[str, Any]) -> frozenset[Permission]:
 
 
 class Access:
-    """What one role may use: the policy's list, bounded by the human's switches."""
+    """What one role may use: the policy's list, bounded by the human's switches.
 
-    def __init__(self, policy: Policy, role: Role, switches: Iterable[Permission] = ()) -> None:
+    `switches` may be a callable, asked at every check: the switches as the human has them now
+    (a long-running worker sees a permission turned off at its next tool call). Whatever it
+    raises counts as every switch off."""
+
+    def __init__(
+        self,
+        policy: Policy,
+        role: Role,
+        switches: Iterable[Permission] | Callable[[], Iterable[Permission]] = (),
+    ) -> None:
         self.policy = policy
         self.role = role
-        self.switches = frozenset(switches)
+        self._current: Callable[[], Iterable[Permission]] | None = None
+        self._fixed: frozenset[Permission] = frozenset()
+        if callable(switches):
+            self._current = switches
+        else:
+            self._fixed = frozenset(switches)
+
+    @property
+    def switches(self) -> frozenset[Permission]:
+        if self._current is None:
+            return self._fixed
+        try:
+            return frozenset(self._current())
+        except Exception:
+            return frozenset()  # cannot tell what the human allows: nothing beyond the workspace
 
     def refusal(self, tool: Tool[Any]) -> str | None:
         """Why `tool` may not be used, or None if it may."""
