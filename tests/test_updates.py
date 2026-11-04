@@ -123,6 +123,9 @@ def test_apply_revert_reapply(
         proposals.record_update(
             conn, 1, "applied", commit=commit, base=base, branch="main", details={}
         )
+    applying.carry_out_update(conn, applying.plan_update_revert(conn, repo=repo))
+    assert git(repo, "rev-parse", "HEAD").strip() == base
+    assert proposals.installed_update(conn) is None
 
 
 @pytest.mark.parametrize(

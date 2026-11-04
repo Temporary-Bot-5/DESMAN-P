@@ -455,11 +455,12 @@ def last_update(conn: sqlite3.Connection) -> Update | None:
 
 def installed_update(conn: sqlite3.Connection) -> Update | None:
     """Newest application not followed by a revert of that release."""
-    reverted: set[int] = set()
+    seen: set[int] = set()
     for entry in updates(conn):
-        if entry.action == "reverted":
-            reverted.add(entry.release)
-        elif entry.release not in reverted:
+        if entry.release in seen:
+            continue
+        seen.add(entry.release)
+        if entry.action == "applied":
             return entry
     return None
 

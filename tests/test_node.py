@@ -822,3 +822,52 @@ def test_release_poll(
         assert actions(conn).count("releases_unavailable") == 1
         assert found.failures == 0 and not found.revoked
         assert conn.execute("SELECT COUNT(*) FROM releases").fetchone()[0] == 0
+
+
+def test_release_notice_survives_job_claim(
+    make_node: Callable[..., Node],
+    world: World,
+    root: sign.NodeKey,
+    root_pub: Path,
+    registry_db: Path,
+    clock: FakeClock,
+    conn: sqlite3.Connection,
+) -> None:
+    from test_updates import envelope
+
+    operator = sign.NodeKey.generate()
+    with store.connection(registry_db) as registry_conn:
+        admin.assign(registry_conn, root, operator.public, {sign.Scope.TASKS}, days=7, now=clock())
+        job = admin.add_job(
+            registry_conn,
+            operator,
+            protocol.Job(description="Sum 2 and 3", acceptance_criteria="Says 5"),
+            days=7,
+            now=clock(),
+            root_pub=root_pub,
+        )
+        admin.sign_trust_list(registry_conn, root, days=7, now=clock())
+    world.registry = Registry(registry_db, clock=clock, root=root_pub)
+    signed = envelope(root, "a" * 40, "b" * 40)
+    signed = sign.sign(
+        root,
+        sign.RecordKind.RELEASE,
+        signed.record.body,
+        issued_at=clock(),
+        lifetime=timedelta(days=7),
+    )
+    normal = world.handle
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == protocol.RELEASES:
+            return httpx.Response(200, json={"records": [signed.model_dump(mode="json")]})
+        return normal(req)
+
+    found = make_node(transport=httpx.MockTransport(handle), work=True)
+    taken = found.poll(idle=True)
+    assert taken == node.Event(Change.WORK_TAKEN, REGISTRY, "execute")
+    assert conn.execute("SELECT job FROM network_work").fetchone()[0] == job.id
+    assert found.poll() == node.Event(Change.RELEASE, REGISTRY, "1")
+    assert found.poll() is None
+    clock.advance(protocol.HEARTBEAT_SECONDS)
+    assert found.poll() is None

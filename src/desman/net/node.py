@@ -337,6 +337,7 @@ class Node:
         """Why the trust list was not fresh when last asked (G.6c); None: it was."""
         self._journaled: set[tuple[str, str]] = set()
         self._no_key: str | None = None
+        self._pending_release: Event | None = None
 
     def close(self) -> None:
         if self._client is not None:
@@ -355,8 +356,14 @@ class Node:
             event = None
             if self.next_at is None or now >= self.next_at:
                 event = self._poll(now)
+            if event is not None and event.change is Change.RELEASE:
+                self._pending_release = event
+                event = None
             if not self.revoked:
                 event = self._jobs(now, idle) or event
+            if event is None and not self.revoked:
+                event = self._pending_release
+                self._pending_release = None
             return event
         except sqlite3.OperationalError:
             # The journal is busy (another worker holds the database too long): the worker's
@@ -397,6 +404,7 @@ class Node:
         self._sent = None
         self._trust = None
         self._stale = None
+        self._pending_release = None
         self.close()
 
     def _key(self, address: str) -> sign.NodeKey | None:
