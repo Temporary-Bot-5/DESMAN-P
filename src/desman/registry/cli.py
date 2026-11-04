@@ -441,6 +441,103 @@ def jobs(ctx: click.Context, status: str | None, as_json: bool) -> None:
     _jobs_table(found)
 
 
+@cli.group()
+def proposal() -> None:
+    """The Improvement Analyst's proposals submitted by network nodes."""
+
+
+@proposal.command("list")
+@click.option(
+    "--status",
+    type=click.Choice(["submitted", "reviewing", "reviewed", "accepted", "rejected"]),
+    default=None,
+    help="Only proposals in this state.",
+)
+@_json_option
+@click.pass_context
+def proposal_list(ctx: click.Context, status: str | None, as_json: bool) -> None:
+    """List proposal submissions for operator review."""
+    conn = _open_db(ctx)
+    try:
+        found = store.proposals(conn, status)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "id": item.id,
+                        "node": item.node,
+                        "proposal": item.submission.proposal,
+                        "evaluation": item.submission.evaluation,
+                        "status": item.status,
+                        "created_at": item.created_at,
+                        "summary": item.submission.summary,
+                        "verdict": item.submission.verdict,
+                    }
+                    for item in found
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if not found:
+        ui.note(t("No proposals have been submitted."))
+        return
+    table = ui.table(t("ID"), t("Proposal"), t("Node"), t("Status"), t("Benchmark"))
+    for item in found:
+        table.add_row(
+            item.id[:12],
+            str(item.submission.proposal),
+            item.node[:16],
+            item.status,
+            f"{item.submission.mode}: {item.submission.verdict}",
+        )
+    ui.out(table)
+    ui.note(t("Inspect one with: desman-registry proposal show ID"))
+
+
+@proposal.command("show")
+@click.argument("proposal_id", metavar="ID")
+@_json_option
+@click.pass_context
+def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
+    """Show a submitted proposal, its diff and both local benchmark results."""
+    conn = _open_db(ctx)
+    try:
+        matches = store.find_proposal(conn, proposal_id)
+        if len(matches) != 1:
+            raise click.ClickException(t("No unique proposal matches {id}.", id=proposal_id))
+        found = store.proposal(conn, matches[0])
+    finally:
+        conn.close()
+    assert found is not None
+    data = {
+        "id": found.id,
+        "node": found.node,
+        "status": found.status,
+        "created_at": found.created_at,
+        "submission": found.submission.model_dump(mode="json"),
+    }
+    if as_json:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    item = found.submission
+    for line in (
+        f"{t('Proposal submission')} {found.id}",
+        f"{t('Node')}: {found.node}",
+        f"{t('Status')}: {found.status}",
+        f"{t('Base commit')}: {item.base_commit}",
+        f"{t('Benchmark')}: {item.mode} ({item.verdict})",
+        item.summary,
+    ):
+        ui.out(Text(line))
+    if item.diff:
+        ui.out(Text(item.diff))
+
+
 @cli.command()
 @_json_option
 @click.pass_context

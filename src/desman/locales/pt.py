@@ -1020,4 +1020,38 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Confirma a ação sem perguntar.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES = {
+    'Another node will check the proposal before the operator can accept it.': 'Outro nó verificará a proposta antes que o operador possa aceitá-la.',
+    'Base commit': 'Commit base',
+    'Benchmark': 'Benchmark',
+    'ID': 'ID',
+    'Inspect one with: desman-registry proposal show ID': 'Veja: desman-registry proposal show ID',
+    'List proposal submissions for operator review.': 'Lista propostas enviadas para análise do operador.',
+    'No proposals have been submitted.': 'Nenhuma proposta foi enviada.',
+    'No summary was recorded.': 'Nenhum resumo foi registrado.',
+    'No unique proposal matches {id}.': 'Não há uma proposta única correspondente a {id}.',
+    'Nothing was sent. Review this payload, then repeat with --confirm {hash}.': 'Nada foi enviado. Revise o conteúdo e repita com --confirm {hash}.',
+    'Only proposals in this state.': 'Somente propostas neste estado.',
+    'Preview a proposal upload; --confirm sends only that exact payload.': 'Prévia do envio; --confirm envia somente este conteúdo.',
+    'Proposal': 'Proposta',
+    'Proposal submission': 'Envio da proposta',
+    'Proposal {id} has nothing to submit.': 'A proposta {id} não tem nada para enviar.',
+    'Proposal {id} needs a completed benchmark with both results.': 'A proposta {id} precisa de um benchmark concluído com os dois resultados.',
+    'Proposal {proposal} sent to the registry as {id}.': 'Proposta {proposal} enviada ao registro como {id}.',
+    "Send only if this matches the preview's hash.": 'Envie somente se corresponder ao hash da prévia.',
+    'Send proposal {id} and its benchmark results to the desman-global registry?': 'Enviar a proposta {id} e os resultados do benchmark ao registro desman-global?',
+    'Show a submitted proposal, its diff and both local benchmark results.': 'Mostra uma proposta enviada, seu diff e os dois resultados do benchmark local.',
+    "The Improvement Analyst's proposals submitted by network nodes.": 'Propostas do Analista de Melhorias enviadas por nós da rede.',
+    'The node key changed after preview; nothing was sent.': 'A chave do nó mudou após a prévia; nada foi enviado.',
+    'The preview changed; nothing was sent. Preview it again.': 'A prévia mudou; nada foi enviado. Gere uma nova.',
+    'The proposal was sent, but the local journal is busy.': 'A proposta foi enviada, mas o registro local está ocupado.',
+    'The registry did not accept the proposal: {error}': 'O registro não aceitou a proposta: {error}',
+    'This node has no usable key; nothing was sent.': 'Este nó não tem uma chave utilizável; nada foi enviado.',
+    'This proposal cannot be sent: {reason}': 'Esta proposta não pode ser enviada: {reason}',
+    'This proposal contains an API key; nothing was sent.': 'Esta proposta contém uma chave de API; nada foi enviado.',
+    'This proposal is too large to send.': 'A proposta é grande demais para enviar.',
+    'desman-global is off; nothing was sent.': 'desman-global está desligado; nada foi enviado.',
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
 CATALOG = Catalog("Português (Brasil)", plural, MESSAGES, CLICK, forms=2)

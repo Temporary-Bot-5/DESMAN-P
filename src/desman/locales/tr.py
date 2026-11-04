@@ -946,4 +946,38 @@ CLICK: dict[str, Forms] = {
     "Confirm the action without prompting.": "Eylemi sormadan onaylar.",
 }
 
+
+_NETWORK_PROPOSAL_MESSAGES = {
+    'Another node will check the proposal before the operator can accept it.': 'Operatör kabul etmeden önce başka bir düğüm öneriyi denetler.',
+    'Base commit': 'Temel commit',
+    'Benchmark': 'Karşılaştırma',
+    'ID': 'ID',
+    'Inspect one with: desman-registry proposal show ID': 'Görüntüle: desman-registry proposal show ID',
+    'List proposal submissions for operator review.': 'Operatör incelemesine gönderilen önerileri listeler.',
+    'No proposals have been submitted.': 'Henüz öneri gönderilmedi.',
+    'No summary was recorded.': 'Özet kaydedilmedi.',
+    'No unique proposal matches {id}.': '{id} ile eşleşen tekil bir öneri yok.',
+    'Nothing was sent. Review this payload, then repeat with --confirm {hash}.': 'Hiçbir şey gönderilmedi. İçeriği inceleyip --confirm {hash} ile yineleyin.',
+    'Only proposals in this state.': 'Yalnızca bu durumdaki öneriler.',
+    'Preview a proposal upload; --confirm sends only that exact payload.': 'Gönderim önizlemesi; --confirm yalnızca bu içeriği gönderir.',
+    'Proposal': 'Öneri',
+    'Proposal submission': 'Öneri gönderimi',
+    'Proposal {id} has nothing to submit.': '{id} numaralı öneride gönderilecek bir şey yok.',
+    'Proposal {id} needs a completed benchmark with both results.': '{id} önerisi, iki sonucu da içeren tamamlanmış bir karşılaştırma gerektirir.',
+    'Proposal {proposal} sent to the registry as {id}.': '{proposal} önerisi kayıt defterine {id} olarak gönderildi.',
+    "Send only if this matches the preview's hash.": 'Yalnızca önizleme özetiyle eşleşirse gönderin.',
+    'Send proposal {id} and its benchmark results to the desman-global registry?': '{id} önerisi ve karşılaştırma sonuçları desman-global kayıt defterine gönderilsin mi?',
+    'Show a submitted proposal, its diff and both local benchmark results.': "Gönderilen öneriyi, diff'i ve iki yerel karşılaştırma sonucunu gösterir.",
+    "The Improvement Analyst's proposals submitted by network nodes.": 'Ağ düğümlerinin gönderdiği İyileştirme Analisti önerileri.',
+    'The node key changed after preview; nothing was sent.': 'Önizlemeden sonra düğüm anahtarı değişti; hiçbir şey gönderilmedi.',
+    'The preview changed; nothing was sent. Preview it again.': 'Önizleme değişti; hiçbir şey gönderilmedi. Yeniden önizleyin.',
+    'The proposal was sent, but the local journal is busy.': 'Öneri gönderildi, ancak yerel günlük meşgul.',
+    'The registry did not accept the proposal: {error}': 'Kayıt defteri öneriyi kabul etmedi: {error}',
+    'This node has no usable key; nothing was sent.': 'Bu düğümde kullanılabilir anahtar yok; gönderilmedi.',
+    'This proposal cannot be sent: {reason}': 'Bu öneri gönderilemiyor: {reason}',
+    'This proposal contains an API key; nothing was sent.': 'Bu öneri bir API anahtarı içeriyor; gönderilmedi.',
+    'This proposal is too large to send.': 'Öneri gönderilemeyecek kadar büyük.',
+    'desman-global is off; nothing was sent.': 'desman-global kapalı; hiçbir şey gönderilmedi.',
+}
+MESSAGES.update(_NETWORK_PROPOSAL_MESSAGES)
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)
