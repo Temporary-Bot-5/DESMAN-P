@@ -4,17 +4,19 @@
 
 ## Two agents, one repository
 
-**Each agent works in its own branch; only the combined final result of both reaches `master`.**
+**Claude Code plans and reviews; Codex writes the code; Devin reviews the PR.**
 
-- Claude Code: branch `Claude-Edition`. Codex: branch `task/GPT-Edition` (its worktree
-  `/tmp/DESMAN-P-GPT-Edition`). Commit only to your own branch; never commit, push, rebase or
-  reset the other agent's branch, and never commit to `master` directly.
-- Work in your own checkout (git worktree) so that neither switches the other's branch.
-- To use the other's work, merge or cherry-pick from its branch into yours, and say so in
-  `HANDOFF.md`.
-- `master` gets a change only once both agents' work on it is brought together (one edition
-  merged into the other, conflicts resolved, checks green), through a PR the owner merges at
-  their explicit word.
+- One flow: a branch per ROADMAP task (`task/<id>-<name>`), one PR into `master`. Never
+  commit to `master` directly.
+- Claude Code reads the task, decides the design (ADR when needed) and writes Codex a brief:
+  files, contracts, tests, the rules of this file that matter. It runs Codex itself
+  (`codex exec -C <checkout>`), reads the diff, runs the checks below and sends fixes back.
+  Codex works only on the branch it was given and does not push, open or merge PRs.
+- After a push: wait for Devin Review and CI, read every finding, fix the real ones (through
+  Codex), re-check. Claude Code then merges the PR itself (the owner allowed it, 2026-11-04):
+  only with CI green and Devin's review present and handled, never before Devin has posted.
+  It tells the owner what was merged and what they must do after (e.g.
+  `desman protected approve`).
 
 Claude Code and Codex do not remember each other's sessions. They talk
 through `HANDOFF.md` in the project root (not in git, so it survives branch switches; from a
