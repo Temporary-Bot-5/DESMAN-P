@@ -30,7 +30,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
 
@@ -359,12 +359,18 @@ class ProposalSubmission:
         return self.signed.submission
 
 
+class ProposalLimit(Exception):
+    """The node already submitted `protocol.MAX_PROPOSALS_PER_DAY` in the last 24 hours."""
+
+
 def submit_proposal(
     conn: sqlite3.Connection,
     node: str,
     signed: protocol.SignedProposalSubmission,
+    now: datetime,
 ) -> tuple[ProposalSubmission, bool]:
-    """Keep a person's confirmed upload once; an identical retry returns the same row."""
+    """Keep a person's confirmed upload once; an identical retry returns the same row (even
+    past the limit). A node keeps at most `MAX_PROPOSALS_PER_DAY` new ones a day."""
     submission = signed.submission
     encoded = json.dumps(signed.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     with db.transaction(conn):
@@ -378,11 +384,17 @@ def submit_proposal(
                     "this proposal evaluation was already submitted with other contents"
                 )
             return _proposal_submission(row), False
+        (recent,) = conn.execute(
+            "SELECT count(*) FROM proposals WHERE node = ? AND created_at > ?",
+            (node, db.to_iso(now - timedelta(days=1))),
+        ).fetchone()
+        if recent >= protocol.MAX_PROPOSALS_PER_DAY:
+            raise ProposalLimit(node)
         id = uuid.uuid4().hex
         conn.execute(
-            "INSERT INTO proposals (id, node, proposal, evaluation, submission_json)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (id, node, submission.proposal, submission.evaluation, encoded),
+            "INSERT INTO proposals (id, node, proposal, evaluation, submission_json, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (id, node, submission.proposal, submission.evaluation, encoded, db.to_iso(now)),
         )
         log(
             conn,

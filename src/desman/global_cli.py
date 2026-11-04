@@ -35,7 +35,7 @@ from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog
 from desman.core import proposals as stored_proposals
-from desman.i18n import t
+from desman.i18n import t, tn
 from desman.net import node, protocol, sign
 from desman.providers import Provider
 
@@ -44,6 +44,16 @@ DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
 
 NO_KEY: Final = "node_key_unusable"
 """`Left.unheard` when the goodbye could not be signed: nothing was sent."""
+NO_SUMMARY: Final = "No summary was recorded."
+"""A submission's summary when the analyst wrote none."""
+
+
+def summary_warning() -> str:
+    """Shown with every preview: the analyst's texts are written from the person's tasks."""
+    return t(
+        "The summary and the expected effect are the analyst's words about your own failed "
+        "tasks: read them before sending, they may quote those tasks."
+    )
 
 
 def _utc_now() -> datetime:
@@ -177,14 +187,28 @@ def proposal_upload(
         raise click.ClickException(
             t("Proposal {id} needs a completed benchmark with both results.", id=proposal_id)
         )
+    if found.details.get("settings") or not found.diff:
+        # Settings (`Config.tuning`) name this machine's models and limits: they stay here.
+        raise click.ClickException(
+            t(
+                "Proposal {id} changes settings; only proposals that change texts can be sent.",
+                id=proposal_id,
+            )
+        )
     try:
         payload = protocol.ProposalSubmission.model_validate(
             {
                 "proposal": found.id,
                 "evaluation": evaluation.id,
                 "base_commit": evaluation.commit,
-                "summary": found.summary or t("No summary was recorded."),
-                "details": found.details,
+                # Signed: the same in every language, so never translated.
+                "summary": found.summary or NO_SUMMARY,
+                # Not the analyst's `evidence`: it quotes the person's own tasks.
+                "details": {
+                    "changes": found.details.get("changes", []),
+                    "base": found.details.get("base", {}),
+                    "expected_effect": found.details.get("expected_effect", ""),
+                },
                 "diff": found.diff,
                 "verdict": evaluation.verdict,
                 "mode": evaluation.mode,
@@ -249,6 +273,16 @@ def send_proposal(
         try:
             received = node.submit_proposal(address, key, signed, transport=transport, clock=clock)
         except node.ProposalSendError as e:
+            if str(e) == protocol.PROPOSAL_LIMIT:
+                raise click.ClickException(
+                    tn(
+                        protocol.MAX_PROPOSALS_PER_DAY,
+                        "The registry takes at most {n} proposal a day from one node; "
+                        "nothing was sent.",
+                        "The registry takes at most {n} proposals a day from one node; "
+                        "nothing was sent.",
+                    )
+                ) from e
             raise click.ClickException(
                 t("The registry did not accept the proposal: {error}", error=e)
             ) from e
@@ -793,8 +827,9 @@ def submit_proposal_command(proposal: int, confirm: str | None, as_json: bool) -
                     )
                 )
                 ui.out(Text(json.dumps(preview, ensure_ascii=False, indent=2, sort_keys=True)))
+                ui.note(summary_warning())
             return
-        if not hashlib.sha256(encoded).hexdigest() == confirm.casefold():
+        if digest != confirm.strip().casefold():
             raise click.ClickException(
                 t("The preview changed; nothing was sent. Preview it again.")
             )

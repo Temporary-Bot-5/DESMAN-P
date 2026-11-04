@@ -712,7 +712,7 @@ def test_a_change_signs_a_list_that_is_newer_and_never_shorter(
     assert believed.fresh() is None
 
 
-def proposal_upload() -> protocol.ProposalSubmission:
+def proposal_upload(number: int = 7) -> protocol.ProposalSubmission:
     run = protocol.BenchmarkSnapshot(
         version=1,
         mode="fake",
@@ -721,11 +721,21 @@ def proposal_upload() -> protocol.ProposalSubmission:
         stats={"tasks": {"done": 1}},
     )
     return protocol.ProposalSubmission(
-        proposal=7,
+        proposal=number,
         evaluation=3,
         base_commit="a" * 40,
         summary="Tighten a planning prompt.",
-        details={"changes": [{"target": "planner.rules", "new": "new text"}]},
+        details=protocol.ProposalDetails(
+            changes=[
+                protocol.ProposalChange(
+                    target="planner.rules",
+                    file="src/desman/planner.py",
+                    old="old text",
+                    new="new text",
+                )
+            ],
+            base={"src/desman/planner.py": "b" * 64},
+        ),
         diff="--- a/src/desman/planner.py\n+++ b/src/desman/planner.py\n",
         verdict="better",
         mode="fake",
@@ -795,3 +805,71 @@ def test_a_proposal_body_must_match_its_node_signature(
     response = node.call("POST", protocol.PROPOSALS, body)
     assert response.status_code == 401
     assert response.json()["error"] == Reason.FORGED
+
+
+def test_a_node_submits_at_most_five_proposals_a_day(
+    registry: Registry, db_path: Path, clock: FakeClock
+) -> None:
+    node = Node(registry, clock)
+    assert node.register().status_code == 200
+    bodies = [signed_proposal(node, proposal_upload(n)) for n in range(1, 8)]
+    for body in bodies[: protocol.MAX_PROPOSALS_PER_DAY]:
+        assert node.call("POST", protocol.PROPOSALS, body).status_code == 200
+    over = node.call("POST", protocol.PROPOSALS, bodies[5])
+    assert over.status_code == 403
+    assert over.json()["error"] == protocol.PROPOSAL_LIMIT
+    # A retry of one already kept is still answered: the person's command may have lost it.
+    assert node.call("POST", protocol.PROPOSALS, bodies[0]).status_code == 200
+    clock.advance(24 * 3600 + 1)
+    assert node.call("POST", protocol.PROPOSALS, bodies[5]).status_code == 200
+    with store.connection(db_path) as conn:
+        assert len(store.proposals(conn)) == protocol.MAX_PROPOSALS_PER_DAY + 1
+    assert ("refused", node.fingerprint) in log_actions(db_path)
+
+
+def test_a_submission_signature_is_marked_as_one() -> None:
+    signed = sign.canonical(proposal_upload().model_dump(mode="json"))
+    assert json.loads(signed)["kind"] == protocol.PROPOSAL_KIND
+    with pytest.raises(ValueError):
+        protocol.ProposalSubmission.model_validate(
+            proposal_upload().model_dump(mode="json") | {"kind": "result"}
+        )
+
+
+def test_a_submission_carries_texts_never_settings_or_evidence() -> None:
+    data = proposal_upload().model_dump(mode="json")
+    for change in (
+        {"diff": None},
+        {"details": data["details"] | {"settings": [{"setting": "x"}]}},
+        {"details": data["details"] | {"evidence": ["a failed task said ..."]}},
+    ):
+        with pytest.raises(ValueError):
+            protocol.ProposalSubmission.model_validate(data | change)
+
+
+def test_the_operator_lists_and_shows_submissions(
+    registry: Registry, db_path: Path, clock: FakeClock
+) -> None:
+    node = Node(registry, clock)
+    assert node.register().status_code == 200
+    reply = node.call("POST", protocol.PROPOSALS, signed_proposal(node, proposal_upload()))
+    received = protocol.ProposalReceived.model_validate(reply.json())
+
+    listed = registry_cli("proposal", "list", "--json")
+    assert listed.exit_code == 0, listed.output
+    [item] = json.loads(listed.output)
+    assert item["id"] == received.id and item["node"] == node.fingerprint
+    assert item["proposal"] == 7 and item["status"] == "submitted"
+    assert (
+        json.loads(registry_cli("proposal", "list", "--status", "accepted", "--json").output) == []
+    )
+
+    shown = registry_cli("proposal", "show", received.id[:8])
+    assert shown.exit_code == 0, shown.output
+    assert "Tighten a planning prompt." in shown.output
+    assert "+++ b/src/desman/planner.py" in shown.output
+    data = json.loads(registry_cli("proposal", "show", received.id, "--json").output)
+    assert data["submission"]["details"]["changes"][0]["target"] == "planner.rules"
+
+    missing = registry_cli("proposal", "show", "ffff")
+    assert missing.exit_code != 0

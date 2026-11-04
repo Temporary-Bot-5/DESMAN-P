@@ -140,17 +140,51 @@ class BenchmarkSnapshot(BaseModel):
     stats: dict[str, Any]
 
 
-class ProposalSubmission(BaseModel):
-    """What a person approved for sending to the registry (ROADMAP G.7)."""
+class ProposalChange(BaseModel):
+    """One target text the proposal changes (as `improve.render` records it)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    target: str = Field(min_length=1, max_length=200)
+    file: str = Field(min_length=1, max_length=200)
+    old: str = Field(max_length=MAX_PROPOSAL_BYTES)
+    new: str = Field(max_length=MAX_PROPOSAL_BYTES)
+
+
+class ProposalDetails(BaseModel):
+    """What another node needs to check the diff: the targets it may touch, each file's
+    SHA-256 when it was made, the expected effect. Never the analyst's `evidence` (it quotes
+    the person's own tasks) nor `settings` (`Config.tuning` is this machine's)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    changes: list[ProposalChange] = Field(min_length=1, max_length=32)
+    base: dict[str, str]
+    expected_effect: str = Field(default="", max_length=2000)
+
+
+PROPOSAL_KIND: Final = "proposal_submission"
+"""Inside every signed submission, so its signature can never pass for another node-signed
+body (a record, a request)."""
+MAX_PROPOSALS_PER_DAY: Final = 5
+"""Submissions the registry keeps from one node in 24 hours."""
+PROPOSAL_LIMIT: Final = "proposal_limit"
+"""The registry's word (`Problem.error`) when a node is over `MAX_PROPOSALS_PER_DAY`."""
+
+
+class ProposalSubmission(BaseModel):
+    """What a person approved for sending to the registry (ROADMAP G.7). Only target texts:
+    a proposal of settings stays on its machine."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["proposal_submission"] = PROPOSAL_KIND
     proposal: int = Field(ge=1)
     evaluation: int = Field(ge=1)
     base_commit: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
     summary: str = Field(min_length=1, max_length=2000)
-    details: dict[str, Any]
-    diff: str | None = Field(default=None, max_length=MAX_PROPOSAL_BYTES)
+    details: ProposalDetails
+    diff: str = Field(min_length=1, max_length=MAX_PROPOSAL_BYTES)
     verdict: Literal["better", "worse", "same"]
     mode: Literal["fake", "real"]
     base: BenchmarkSnapshot

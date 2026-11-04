@@ -596,7 +596,10 @@ def _global_submit_proposal(ctx: Context, args: GlobalProposalArgs) -> Proposal:
             exact,
         ],
         apply,
-        [t("Another node will check the proposal before the operator can accept it.")],
+        [
+            t("Another node will check the proposal before the operator can accept it."),
+            global_cli.summary_warning(),
+        ],
     )
 
 

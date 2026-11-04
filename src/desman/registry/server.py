@@ -51,6 +51,7 @@ NOT_REGISTERED: Final = "not_registered"
 NOT_FOUND: Final = "not_found"
 NOT_ALLOWED_METHOD: Final = "method_not_allowed"
 TOO_LARGE: Final = "too_large"
+PROPOSAL_LIMIT: Final = protocol.PROPOSAL_LIMIT
 INTERNAL: Final = "internal"
 
 M = TypeVar("M", bound=BaseModel)
@@ -301,7 +302,10 @@ class Registry:
         except (InvalidSignature, binascii.Error) as e:
             raise Refused(Reason.FORGED, "bad proposal signature", signer=caller.fingerprint) from e
         try:
-            found, _ = store.submit_proposal(conn, caller.fingerprint, asked.signed)
+            found, _ = store.submit_proposal(conn, caller.fingerprint, asked.signed, now)
+        except store.ProposalLimit:
+            self._refused(conn, caller.fingerprint, PROPOSAL_LIMIT, "POST", protocol.PROPOSALS)
+            return _problem(HTTPStatus.FORBIDDEN, PROPOSAL_LIMIT)
         except ValueError as e:
             raise Refused(Reason.CONFLICT, str(e), signer=caller.fingerprint) from e
         return _ok(
