@@ -85,7 +85,9 @@ def plan(conn: sqlite3.Connection, prefix: str, repo: Path) -> dict[str, Any]:
     ids = [c["record"]["record"]["id"] for c in checked]
     if not 1 <= len(ids) <= 16:
         raise admin.AdminError(t("Proposal {id} is not eligible for release.", id=found.id))
+    number = int(conn.execute("SELECT coalesce(max(number), 0) + 1 FROM releases").fetchone()[0])
     bound = dict(
+        number=number,
         proposal=found.id,
         submission=protocol.submission_hash(item),
         repo=str(repo),
@@ -133,9 +135,7 @@ def accept(
             if confirmation != preview["confirmation"]:
                 raise admin.AdminError(t("The release confirmation changed: preview it again."))
             found = _eligible(conn, prefix)
-            number = int(
-                conn.execute("SELECT coalesce(max(number), 0) + 1 FROM releases").fetchone()[0]
-            )
+            number = preview["number"]
             item = found.submission
             targets = ", ".join(c.target for c in item.details.changes)
             message = (

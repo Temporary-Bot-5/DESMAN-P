@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from desman.core.models import Kind
+from desman.net import sign
 from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed, canonical
 from desman.tuning_limits import TUNING_BOUNDS
 
@@ -466,20 +467,4 @@ def benchmark_snapshot(result: bench.Result) -> BenchmarkSnapshot:
     return BenchmarkSnapshot.model_validate(result.model_dump(mode="json"))
 
 
-class Release(BaseModel):
-    """The root's statement of the commit the operator accepted (G.7c)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    kind: Literal["release"] = "release"
-    number: int = Field(ge=1)
-    commit: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
-    parent: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
-    branch: Annotated[
-        str, StringConstraints(min_length=1, max_length=200, pattern=r"^[^\s\x00-\x1f\x7f-\x9f]+$")
-    ]
-    proposal: LeaseToken
-    submission: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-    checks: list[LeaseToken] = Field(min_length=1, max_length=16)
-    summary: str = Field(max_length=2000)
-    files: list[str] = Field(min_length=1, max_length=32)
+Release = sign.Release

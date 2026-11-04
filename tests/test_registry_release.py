@@ -80,6 +80,7 @@ def test_preview_accept_and_second_release(
         old = improve.current(improve.BY_ID["planner.rules"], package(checkout))
         snapshot = list(conn.iterdump())
         preview = releases.plan(conn, ready, checkout)
+        assert preview["number"] == 1
         assert len(preview["confirmation"]) == 64
         assert list(conn.iterdump()) == snapshot
         assert git(checkout, "rev-parse", "HEAD").strip() == before
@@ -312,11 +313,13 @@ def test_cli(
     preview = runner.invoke(cli, [*args, "--json"])
     assert preview.exit_code == 0, preview.output
     planned = json.loads(preview.output)
+    assert planned["number"] == 1
     assert planned["base_commit"] == base
     assert planned["head"] == head
     confirmation = planned["confirmation"]
     plain = runner.invoke(cli, args)
     assert plain.exit_code == 0 and confirmation in plain.output
+    assert "Release: 1" in plain.output
     assert f"Base commit: {base}" in plain.output
     assert f"HEAD: {head}" in plain.output
     done = runner.invoke(cli, [*args, "--confirm", confirmation, "--json"])
@@ -566,3 +569,43 @@ def test_registry_writes_during_release_build(
             assert conn.execute(
                 "SELECT 1 FROM registry_log WHERE action = 'concurrent_write'"
             ).fetchone()
+
+
+def test_release_number_change_invalidates_confirmation(
+    ready: str,
+    checkout: Path,
+    tmp_path: Path,
+    db_path: Path,
+    registry_dir: Path,
+    key_path: Path,
+    root_pub: Path,
+    registry: Registry,
+    clock: FakeClock,
+) -> None:
+    other = tmp_path / "other-checkout"
+    git(checkout, "clone", str(checkout), str(other))
+    git(other, "config", "user.email", "test@example.com")
+    git(other, "config", "user.name", "Test")
+    a, b = checker(registry, clock), checker(registry, clock)
+    second = submit(a, submission(a.key, other))
+    lent = ask(b)
+    assert lent is not None
+    assert give(b, lent, record(b, lent, "checked")).status_code == 200
+    with store.connection(db_path) as conn:
+        preview = releases.plan(conn, ready, checkout)
+        assert preview["number"] == 1
+        assert run_accept(conn, second, other, registry_dir, clock)["number"] == 1
+        head = git(checkout, "rev-parse", "HEAD").strip()
+        objects = git(checkout, "count-objects", "-v")
+        snapshot = list(conn.iterdump())
+        updated = releases.plan(conn, ready, checkout)
+        assert updated["number"] == 2
+        assert updated["head"] == preview["head"]
+        assert updated["checks"] == preview["checks"]
+        with pytest.raises(admin.AdminError, match="confirmation changed"):
+            run_accept(conn, ready, checkout, registry_dir, clock, preview["confirmation"])
+        assert list(conn.iterdump()) == snapshot
+        assert git(checkout, "rev-parse", "HEAD").strip() == head
+        assert git(checkout, "count-objects", "-v") == objects
+        assert len(releases.listing(conn)) == 1
+        assert store.proposal(conn, ready).status == "reviewed"  # type: ignore[union-attr]

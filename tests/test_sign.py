@@ -153,6 +153,39 @@ def test_an_assigned_operator_signs_within_its_scopes(
     assert refused(trust, revocation) is Reason.NOT_ALLOWED
 
 
+def release_body() -> dict[str, Any]:
+    return sign.Release(
+        number=1,
+        commit="a" * 40,
+        parent="b" * 40,
+        branch="master",
+        proposal="c" * 32,
+        submission="d" * 64,
+        checks=["e" * 32],
+        summary="Release",
+        files=["src/desman/planner.py"],
+    ).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("case", ["missing_commit", "extra", "zero", "proposal", "checks"])
+def test_malformed_release_is_refused(
+    trust: Trust, root: NodeKey, clock: FakeClock, case: str
+) -> None:
+    body = release_body()
+    if case == "missing_commit":
+        del body["commit"]
+    elif case == "extra":
+        body["extra"] = True
+    elif case == "zero":
+        body["number"] = 0
+    elif case == "proposal":
+        body["proposal"] = "bad"
+    else:
+        body["checks"] = ["bad"]
+    signed = sign.sign(root, RecordKind.RELEASE, body, issued_at=clock(), lifetime=DAY)
+    assert refused(trust, signed) is Reason.MALFORMED
+
+
 @pytest.mark.parametrize("kind", [RecordKind.RELEASE, RecordKind.ASSIGNMENT])
 def test_releases_and_assignments_are_the_roots_only(
     trust: Trust, root: NodeKey, clock: FakeClock, kind: RecordKind
@@ -160,12 +193,12 @@ def test_releases_and_assignments_are_the_roots_only(
     op = operator(trust, root, clock)
     other = NodeKey.generate()
     body = {"key": sign.encode_public(other.public), "scopes": ["tasks"]}
+    if kind is RecordKind.RELEASE:
+        body = release_body()
     record = sign.sign(op, kind, body, issued_at=clock(), lifetime=HOUR)
     assert refused(trust, record) is Reason.NOT_ALLOWED
     assert trust.operator(other.fingerprint) is None
-    release = sign.sign(
-        root, RecordKind.RELEASE, {"commit": "abc"}, issued_at=clock(), lifetime=DAY
-    )
+    release = sign.sign(root, RecordKind.RELEASE, release_body(), issued_at=clock(), lifetime=DAY)
     assert trust.receive(release).kind is RecordKind.RELEASE
 
 

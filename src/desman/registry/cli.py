@@ -841,6 +841,7 @@ def proposal_accept(
         return
     if confirm is None:
         for label, value in (
+            (t("Release"), result["number"]),
             (t("Proposal submission"), result["proposal"]),
             (t("Node"), result["node"]),
             (t("Summary"), result["summary"]),
