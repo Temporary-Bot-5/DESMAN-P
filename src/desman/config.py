@@ -30,6 +30,8 @@ from pydantic import (
     ValidationError,
 )
 
+from desman.tuning_limits import TUNING_BOUNDS as TUNING_BOUNDS
+
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
 
@@ -162,14 +164,6 @@ class ModelChoices(BaseModel):
     analysis: ModelLabel | None = None
 
 
-TUNING_BOUNDS: dict[str, tuple[int, int]] = {
-    "max_subtasks": (1, 12),
-    "max_parts": (2, 6),
-    "context_tokens": (1000, 16000),
-    "max_attempts": (2, 8),
-    "max_transient": (2, 10),
-}
-"""The least and the most each number of `Tuning` may be."""
 TUNING_LIMITS = tuple(TUNING_BOUNDS)
 """The numbers of `Tuning`, in the order they are shown."""
 

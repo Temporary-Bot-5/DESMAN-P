@@ -1,6 +1,6 @@
 """Independent fake proposal benchmarks (G.7b), checked before running and durably signed.
 
-No models, config or fetch: the base commit must already be in this checkout. Signed results
+No models, config or fetch: the base commit must be in this checkout's HEAD history. Signed results
 survive interrupted hand-ins and are never recomputed for the same registry and proposal.
 """
 
@@ -84,7 +84,22 @@ def run(work: protocol.ProposalWork, repo: Path, now: datetime) -> protocol.Prop
         commit=item.base_commit,
     )
     try:
-        evaluation._git(repo, "cat-file", "-e", item.base_commit + "^{commit}")
+        evaluation._git(repo, "merge-base", "--is-ancestor", item.base_commit, "HEAD")
+    except evaluation.EvaluationError:
+        return protocol.ProposalCheck(
+            **common,
+            outcome="unable",
+            reason="The base commit is not in this checkout's history.",
+        )
+    try:
+        base_snapshot = protocol.BenchmarkSnapshot.model_validate(item.base.model_dump())
+        candidate_snapshot = protocol.BenchmarkSnapshot.model_validate(item.candidate.model_dump())
+    except ValidationError:
+        return protocol.ProposalCheck(
+            **common, outcome="refused", reason="The submission has invalid workflow limits."
+        )
+    comparable = base_snapshot.limits is not None and candidate_snapshot.limits is not None
+    try:
         result = evaluation.check(
             repo,
             item.base_commit,
@@ -92,8 +107,10 @@ def run(work: protocol.ProposalWork, repo: Path, now: datetime) -> protocol.Prop
             base=item.details.base,
             diff=item.diff,
             mode="fake",
-            base_tuning=Tuning(),
-            candidate_tuning=Tuning(),
+            base_tuning=Tuning.model_validate(base_snapshot.limits) if comparable else Tuning(),
+            candidate_tuning=Tuning.model_validate(candidate_snapshot.limits)
+            if comparable
+            else Tuning(),
             timeout=RUN_TIMEOUT,
         )
     except evaluation.EvaluationError:
@@ -117,7 +134,7 @@ def run(work: protocol.ProposalWork, repo: Path, now: datetime) -> protocol.Prop
         )
     assert result.base is not None and result.candidate is not None
     matches = None
-    if item.mode == "fake":
+    if item.mode == "fake" and comparable:
         try:
             matches = bench.metrics(result.base) == bench.metrics(
                 bench.Result.model_validate(item.base.model_dump())

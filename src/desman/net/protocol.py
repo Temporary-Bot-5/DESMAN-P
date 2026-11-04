@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from desman.core.models import Kind
 from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed, canonical
+from desman.tuning_limits import TUNING_BOUNDS
 
 if TYPE_CHECKING:
     from desman import bench
@@ -143,6 +144,20 @@ class BenchmarkSnapshot(BaseModel):
     source: str = Field(min_length=1, max_length=500)
     cases: list[BenchmarkCase] = Field(max_length=100)
     stats: dict[str, Any]
+    limits: dict[str, int] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_limits(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("limits") is not None:
+            limits = data["limits"]
+            if not isinstance(limits, dict) or any(name not in TUNING_BOUNDS for name in limits):
+                raise ValueError("unknown workflow limits")
+            for name, value in limits.items():
+                low, high = TUNING_BOUNDS[name]
+                if type(value) is not int or not low <= value <= high:
+                    raise ValueError("workflow limit outside its integer bounds")
+        return data
 
 
 class ProposalChange(BaseModel):

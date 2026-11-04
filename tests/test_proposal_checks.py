@@ -41,7 +41,12 @@ REGISTRY = "https://registry.test"
 
 def snapshot() -> protocol.BenchmarkSnapshot:
     return protocol.BenchmarkSnapshot(
-        version=bench.VERSION, mode="fake", source="/checkout/src/desman", cases=[], stats={}
+        version=bench.VERSION,
+        mode="fake",
+        source="/checkout/src/desman",
+        cases=[],
+        stats={},
+        limits={"max_subtasks": 8},
     )
 
 
@@ -387,7 +392,18 @@ def test_plain_check_failed_and_done(checkout: Path, tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "scenario",
-    ["honest", "extra_diff", "missing", "forged", "retry", "dishonest", "real", "failed"],
+    [
+        "honest",
+        "extra_diff",
+        "missing",
+        "forged",
+        "retry",
+        "reregister",
+        "dishonest",
+        "real",
+        "failed",
+        "legacy",
+    ],
 )
 def test_node_end_to_end(
     checkout: Path,
@@ -402,7 +418,7 @@ def test_node_end_to_end(
 ) -> None:
     a = checker(registry, clock)
     signed = submission(a.key, checkout)
-    if scenario in ("honest", "retry"):
+    if scenario in ("honest", "retry", "reregister"):
         item = signed.submission
         honest = evaluation.check(
             checkout,
@@ -411,8 +427,8 @@ def test_node_end_to_end(
             base=item.details.base,
             diff=item.diff,
             mode="fake",
-            base_tuning=Tuning(),
-            candidate_tuning=Tuning(),
+            base_tuning=Tuning(max_subtasks=1),
+            candidate_tuning=Tuning(max_subtasks=3),
         )
         assert honest.base is not None and honest.candidate is not None
         signed = signed_submission(
@@ -439,6 +455,17 @@ def test_node_end_to_end(
     elif scenario == "missing":
         signed = signed_submission(
             a.key, signed.submission.model_copy(update={"base_commit": "0" * 40})
+        )
+    if scenario == "legacy":
+        item = signed.submission
+        signed = signed_submission(
+            a.key,
+            item.model_copy(
+                update={
+                    "base": item.base.model_copy(update={"limits": None}),
+                    "candidate": item.candidate.model_copy(update={"limits": None}),
+                }
+            ),
         )
     if scenario == "real":
         item = signed.submission
@@ -481,8 +508,12 @@ def test_node_end_to_end(
     blocked = scenario == "retry"
 
     def transport(req: httpx.Request) -> httpx.Response:
+        nonlocal blocked
         requests.append(req.url.path)
-        if blocked and req.url.path == protocol.CHECK_HAND_IN:
+        if scenario == "reregister" and req.url.path == protocol.CHECK_HAND_IN and not blocked:
+            blocked = True
+            return httpx.Response(403, json={"error": "not_registered"})
+        if scenario == "retry" and blocked and req.url.path == protocol.CHECK_HAND_IN:
             raise httpx.ConnectError("down", request=req)
         reply = registry.handle(
             req.method, req.url.raw_path.decode(), req.headers.multi_items(), req.content
@@ -498,21 +529,22 @@ def test_node_end_to_end(
         clock=clock,
     )
     machine.poll(idle=True)
-    if scenario == "retry":
+    if scenario in ("retry", "reregister"):
         pending = checks.pending(conn)
         assert len(pending) == 1
         record_id = pending[0].record.record.id
-        machine.close()
-        blocked = False
         clock.advance(node.RETRY_FIRST.total_seconds())
-        machine = node.Node(
-            conn,
-            lambda: config,
-            key_path=key_path,
-            root=root_pub,
-            transport=httpx.MockTransport(transport),
-            clock=clock,
-        )
+        if scenario == "retry":
+            machine.close()
+            blocked = False
+            machine = node.Node(
+                conn,
+                lambda: config,
+                key_path=key_path,
+                root=root_pub,
+                transport=httpx.MockTransport(transport),
+                clock=clock,
+            )
         machine.poll(idle=True)
         assert checks.pending(conn) == []
         with store.connection(db_path) as rconn:
@@ -534,6 +566,8 @@ def test_node_end_to_end(
             == {
                 "honest": "checked",
                 "retry": "checked",
+                "reregister": "checked",
+                "legacy": "checked",
                 "extra_diff": "refused",
                 "missing": "unable",
                 "dishonest": "checked",
@@ -541,11 +575,11 @@ def test_node_end_to_end(
                 "failed": "failed",
             }[scenario]
         )
-        if scenario in ("honest", "retry"):
+        if scenario in ("honest", "retry", "reregister"):
             assert result["matches_submission"] is True
         elif scenario == "dishonest":
             assert result["matches_submission"] is False
-        elif scenario == "real":
+        elif scenario in ("real", "legacy"):
             assert result["matches_submission"] is None
             assert result["mode"] == "fake"
         elif scenario == "failed":
@@ -762,3 +796,37 @@ def test_claim_job_default_and_strictness() -> None:
     assert protocol.Claim().jobs is True
     with pytest.raises(ValueError):
         protocol.Claim.model_validate({"jobs": 1})
+
+
+def test_base_on_another_branch_never_runs(
+    checkout: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = git(checkout, "rev-parse", "HEAD").strip()
+    other = git(checkout, "commit-tree", "HEAD^{tree}", "-p", parent, "-m", "other").strip()
+    git(checkout, "branch", "untrusted", other)
+    key = sign.NodeKey.generate()
+    lent = local_work(key, clock).model_copy(
+        update={
+            "submission": signed_submission(
+                key, submission(key, checkout).submission.model_copy(update={"base_commit": other})
+            )
+        }
+    )
+    monkeypatch.setattr(evaluation, "_run", lambda *a, **kw: pytest.fail("benchmark ran"))
+    result = checks.run(lent, checkout, clock())
+    assert result.outcome == "unable"
+    assert result.reason == "The base commit is not in this checkout's history."
+
+
+@pytest.mark.parametrize("limits", [{"max_subtasks": 0}, {"models": 1}, {"max_parts": True}])
+def test_invalid_limits_refused_before_running(
+    checkout: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch, limits: dict[str, Any]
+) -> None:
+    key = sign.NodeKey.generate()
+    item = submission(key, checkout).submission
+    with pytest.raises(ValueError):
+        protocol.BenchmarkSnapshot.model_validate(item.base.model_dump() | {"limits": limits})
+    item = item.model_copy(update={"base": item.base.model_copy(update={"limits": limits})})
+    lent = local_work(key, clock).model_copy(update={"submission": signed_submission(key, item)})
+    monkeypatch.setattr(evaluation, "_run", lambda *a, **kw: pytest.fail("benchmark ran"))
+    assert checks.run(lent, checkout, clock()).outcome == "refused"

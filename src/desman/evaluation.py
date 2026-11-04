@@ -354,12 +354,20 @@ def _run(
     """`python -m desman.bench` with the worktree's code; its result, checked to come from it."""
     data = folder / f"{tree.name}-data"
     data.mkdir(mode=0o700)
-    env = dict(os.environ)
+    env = (
+        dict(os.environ)
+        if mode == "real"
+        else {name: os.environ[name] for name in ("PATH", "LANG", "LC_ALL") if name in os.environ}
+    )
     env["PYTHONPATH"] = str(tree / "src")
     env["DESMAN_DATA_DIR"] = str(data)
     if mode == "real":
         env["DESMAN_CONFIG_DIR"] = str(default_config_path().parent)
     else:  # the fake needs no config: an empty one, never the person's
+        home = folder / f"{tree.name}-home"
+        home.mkdir(mode=0o700)
+        env["HOME"] = str(home)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         empty = folder / f"{tree.name}-config"
         empty.mkdir(mode=0o700)
         env["DESMAN_CONFIG_DIR"] = str(empty)

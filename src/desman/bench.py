@@ -104,6 +104,8 @@ class Result(BaseModel):
     source: str
     """Where the package that ran is: the worktree's, checked by the caller."""
     cases: list[CaseResult]
+    limits: dict[str, int] | None = None
+    """Effective workflow limits without model choices; absent in older results."""
     stats: dict[str, Any]
     """`desman stats` of the run's database (`core.stats.Stats.as_json`)."""
 
@@ -155,6 +157,7 @@ def run(
         mode=mode,
         source=str(Path(desman.__file__).resolve().parent),
         cases=cases,
+        limits={name: runs.tuned(tuning, name) for name in runs.TUNING_DEFAULTS},
         stats=collect(store.conn).as_json(),
     )
 

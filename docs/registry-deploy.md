@@ -247,4 +247,8 @@ The registry migrates its database on start. Take a backup first.
 Independent proposal checks (G.7b) appear in `desman-registry proposal show ID`: the checking
 node, outcome, verdict, whether the metrics match the submission, reason, and both benchmark
 snapshots. The checker belongs to another owner and runs only the fake benchmark; the
-operator still decides. `--json` includes the checks.
+operator still decides. The base must be HEAD or an ancestor in the checker's checkout.
+Fake children receive a minimal environment and an empty home and config. When both
+snapshots include workflow limits, the checker uses those limits to compare metrics; older
+snapshots run with defaults and leave the match unknown. Signed checks survive a registry
+re-registration and are handed in on a later poll. `--json` includes the checks.

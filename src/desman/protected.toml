@@ -20,8 +20,8 @@
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
 # How a proposal of the Improvement Analyst is judged: the benchmark and its comparison.
-"bench.py" = "1c1976c7ce35f303b0e5e0d7462106e8cf50cecae3f366291307c39bf20eb322"
-"evaluation.py" = "3454756188f1c698b153e8334a934869ad01a6fde6ac2ab0cbb54454e2e05403"
+"bench.py" = "60a50afd4e76034bd2a071169fda3d642071a690eed510f02208d6f90e5ca036"
+"evaluation.py" = "945932293b66db029dbe24c6afee6d3d63cf9dc64ac55d713f5392ea0c3d0753"
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
 "applying.py" = "123b3c2dbc31bc085f05cfe5a6fa85f50c3a674085d6b6e4d8b52cef37809e07"
 # desman-global (ADR 0004): the root of trust and the code that checks signatures by it,

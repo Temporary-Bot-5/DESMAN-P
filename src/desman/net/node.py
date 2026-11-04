@@ -915,6 +915,8 @@ class Node:
             if received.proposal != check.proposal:
                 raise _Unreachable("bad_reply")
         except _Problem as e:
+            if e.error in (NOT_REGISTERED, REVOKED):
+                raise
             checks.close(self.conn, check.lease, "lost")
             netlog.record(
                 self.conn,
@@ -925,8 +927,6 @@ class Node:
                     "reason": e.error,
                 },
             )
-            if e.error in (NOT_REGISTERED, REVOKED):
-                raise
             return Event(Change.WORK_DROPPED, address, e.error)
         checks.close(self.conn, check.lease, "handed_in")
         return Event(Change.CHECK_HANDED_IN, address, str(check.record.record.body["outcome"]))
