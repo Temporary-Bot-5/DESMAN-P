@@ -330,7 +330,7 @@ def test_registry_upgrade(tmp_path: Path, version: int) -> None:
     )
     conn.close()
     conn = store.open_registry(path)
-    assert db.schema_version(conn) == 6
+    assert db.schema_version(conn) == len(store.MIGRATIONS)
     assert conn.execute("SELECT count(*) FROM proposal_checks").fetchone()[0] == 0
     found = store.proposal(conn, "f" * 32)
     assert found is not None and found.signed == signed and found.reason is None

@@ -1121,4 +1121,38 @@ MESSAGES.update(
         "Completion tokens": "Токени відповіді",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "Пропозицію {id} відхилено.",
+        "Nothing was done. Repeat with --confirm {hash}.": "Нічого не зроблено. Повторіть з --confirm {hash}.",
+        "Release {number}: {commit} on {branch}.": "Реліз {number}: {commit} у гілці {branch}.",
+        "Push it yourself: {command}": "Надішліть самостійно: {command}",
+        "Summary": "Стислий опис",
+        "Repository": "Репозиторій",
+        "Branch": "Гілка",
+        "Files": "Файли",
+        "Release": "Реліз",
+        "Proposal {id} is not eligible for release.": "Пропозицію {id} не можна випустити.",
+        "A rejection reason must contain 1 to 1000 characters.": "Причина відхилення має містити від 1 до 1000 символів.",
+        "No release {number}.": "Немає релізу {number}.",
+        "The release checkout must be on a branch.": "Робоча копія для релізу має бути на гілці.",
+        "The submission base must name exactly the target files.": "База надсилання має перелічувати рівно цільові файли.",
+        "A node is checking it, try later.": "Вузол перевіряє пропозицію, спробуйте пізніше.",
+        "Proposal {id} is already decided.": "Щодо пропозиції {id} вже ухвалено рішення.",
+        "The submission base differs from HEAD: {file}.": "База надсилання відрізняється від HEAD: {file}.",
+        "Another release is being made.": "Уже створюється інший реліз.",
+        "The release confirmation changed: preview it again.": "Підтвердження релізу змінилося: перегляньте знову.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "Коміт {commit} не записано: скасуйте його через git перед повтором. {error}",
+        "Root-signed releases accepted by the operator.": "Релізи, прийняті оператором і підписані кореневим ключем.",
+        "Show a release and its root-signed record.": "Показати реліз та його запис із кореневим підписом.",
+        "List the registry's releases.": "Перелічити релізи реєстру.",
+        "Reject a submission with a recorded reason.": "Відхилити надсилання зі збереженням причини.",
+        "Why the submission is rejected (1 to 1000 characters).": "Причина відхилення надсилання (від 1 до 1000 символів).",
+        "Preview or confirm a root-signed release of a checked submission.": "Переглянути або підтвердити підписаний кореневим ключем реліз перевіреного надсилання.",
+        "The owner's checkout to release into.": "Робоча копія власника для створення релізу.",
+        "Confirm the exact release preview hash.": "Підтвердити точний хеш перегляду релізу.",
+    }
+)
+
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)

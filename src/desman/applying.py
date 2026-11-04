@@ -110,9 +110,9 @@ def plan_apply(
     ]
     if not proposal.diff:
         return Plan(proposal, "applied", last, settings=settings)
-    repo, head, branch = _checkout(repo)
+    repo, head, branch = checkout(repo)
     files = sorted({improve.SOURCE_PREFIX + improve.BY_ID[t].path for t in _targets(proposal)})
-    _clean(repo, files)
+    clean(repo, files)
     differ = [
         name
         for name, digest in proposal.details.get("base", {}).items()
@@ -145,7 +145,7 @@ def plan_revert(
             left.append(str(item["setting"]))
     if last.commit is None:
         return Plan(proposal, "reverted", last, settings=settings, left=left)
-    repo, head, branch = _checkout(repo)
+    repo, head, branch = checkout(repo)
     try:
         _git(repo, "merge-base", "--is-ancestor", last.commit, head)
     except ApplyError:
@@ -160,7 +160,7 @@ def plan_revert(
     files = sorted(
         _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", last.commit).split()
     )
-    _clean(repo, files)
+    clean(repo, files)
     return Plan(proposal, "reverted", last, repo, head, branch, files, settings, left)
 
 
@@ -171,7 +171,7 @@ def _targets(proposal: Proposal) -> list[str]:
     return found
 
 
-def _checkout(repo: Path | None) -> tuple[Path, str, str | None]:
+def checkout(repo: Path | None) -> tuple[Path, str, str | None]:
     """The checkout, its HEAD and the branch it is on (None: detached)."""
     try:
         repo = evaluation.repository() if repo is None else repo
@@ -185,7 +185,7 @@ def _checkout(repo: Path | None) -> tuple[Path, str, str | None]:
     return repo, head, branch
 
 
-def _clean(repo: Path, files: list[str]) -> None:
+def clean(repo: Path, files: list[str]) -> None:
     """The person has nothing uncommitted (staged or not) in `files`: a commit over them
     would be refused by git, or would mix their work into DESMAN's."""
     status = _git(repo, "status", "--porcelain", "--untracked-files=all", "--", *files)
@@ -216,20 +216,19 @@ def carry_out(
         raise ApplyError(t("proposal {id} was applied or reverted meanwhile", id=plan.proposal.id))
     if plan.repo is not None:
         _unmoved(plan)
-        _clean(plan.repo, plan.files)
+        clean(plan.repo, plan.files)
     settings = _set(manager, plan.settings)
     commit = None
     try:
         if plan.repo is not None:
             assert plan.head is not None
-            count = 2 if plan.action == "applied" else 1
-            with _worktrees(plan.repo, plan.head, count) as trees:
-                if plan.action == "applied":
-                    commit = _commit_apply(plan, trees[0], trees[1])
-                else:
+            if plan.action == "applied":
+                commit = _commit_apply(plan)
+            else:
+                with _worktrees(plan.repo, plan.head, 1) as trees:
                     commit = _commit_revert(plan, trees[0])
-                _unmoved(plan)
-                _forward(plan.repo, plan.head, commit)
+            _unmoved(plan)
+            forward(plan.repo, plan.head, commit)
     except BaseException:
         back = [{"setting": i["setting"], "old": i["new"], "new": i["old"]} for i in settings]
         with contextlib.suppress(ApplyError, ConfigError):
@@ -253,29 +252,53 @@ def carry_out(
 def _unmoved(plan: Plan) -> None:
     """The checkout is on the HEAD and the branch the plan showed."""
     assert plan.repo is not None
-    _, head, branch = _checkout(plan.repo)
+    _, head, branch = checkout(plan.repo)
     if (head, branch) != (plan.head, plan.branch):
         raise ApplyError(t("the checkout's branch or HEAD changed since: look again"))
 
 
-def _commit_apply(plan: Plan, base: Path, tree: Path) -> str:
-    """The proposal's commit, made in `tree` (a worktree of HEAD) by code, as the evaluation
-    makes the proposed version; `base` is HEAD as it is, to compare with."""
+def _commit_apply(plan: Plan) -> str:
+    """Build the proposal's commit using the shared text-only builder."""
     p = plan.proposal
-    try:
-        evaluation._check_base(tree, p.details.get("base", {}), plan.head or "")
-        evaluation._build(tree, p.details.get("changes", []), p.diff or "")
-        evaluation._check_changes(base, tree, p.details.get("changes", []))
-    except evaluation.EvaluationError as e:
-        raise ApplyError(str(e)) from e
-    _git(tree, "add", "--", *plan.files)
     message = (
         f"DESMAN proposal {p.id}: {', '.join(_targets(p))}\n\n"
         f"Applied by the person: desman proposals apply {p.id}\n"
         f"Why: desman proposals show {p.id}\n\n"
         f"{TRAILER}: {p.id}\n"
     )
-    return _commit(tree, message, plan.files)
+    assert plan.repo is not None and plan.head is not None
+    return commit_texts(
+        plan.repo,
+        plan.head,
+        changes=p.details.get("changes", []),
+        base=p.details.get("base", {}),
+        diff=p.diff or "",
+        files=plan.files,
+        message=message,
+    )
+
+
+def commit_texts(
+    repo: Path,
+    head: str,
+    *,
+    changes: list[dict[str, Any]],
+    base: dict[str, str],
+    diff: str,
+    files: list[str],
+    message: str,
+) -> str:
+    """Build and verify a text-only commit in two detached worktrees; leave HEAD alone."""
+    with _worktrees(repo, head, 2) as trees:
+        original, tree = trees
+        try:
+            evaluation._check_base(tree, base, head)
+            evaluation._build(tree, changes, diff)
+            evaluation._check_changes(original, tree, changes)
+        except evaluation.EvaluationError as e:
+            raise ApplyError(str(e)) from e
+        _git(tree, "add", "--", *files)
+        return _commit(tree, message, files)
 
 
 def _commit_revert(plan: Plan, tree: Path) -> str:
@@ -332,7 +355,7 @@ def _identity(tree: Path) -> tuple[str, ...]:
     return ()
 
 
-def _forward(repo: Path, head: str, commit: str) -> None:
+def forward(repo: Path, head: str, commit: str) -> None:
     """Move the checkout from `head` to `commit`, its child, without merging anything."""
     if _git(repo, "rev-parse", f"{commit}^").strip() != head:
         raise ApplyError(t("the commit was not made on the checkout's HEAD"))

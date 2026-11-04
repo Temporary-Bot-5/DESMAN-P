@@ -21,6 +21,9 @@ MAX_UNABLE: Final = 3
 
 
 def _after(conn: sqlite3.Connection, proposal: str, reason: str | None = None) -> str:
+    found = store.proposal(conn, proposal)
+    if found is not None and found.status in ("accepted", "rejected"):
+        return found.status
     status = "reviewed" if reason else "submitted"
     conn.execute(
         "UPDATE proposals SET status = ?, reason = ? WHERE id = ?", (status, reason, proposal)
@@ -142,6 +145,8 @@ def hand_in(
             raise refuse(sign.Reason.MALFORMED, "invalid proposal check") from e
         found = store.proposal(conn, lease["proposal"])
         assert found is not None
+        if found.status != "reviewing":
+            raise work.LeaseLost
         if (
             body.proposal != found.id
             or body.lease != given.lease

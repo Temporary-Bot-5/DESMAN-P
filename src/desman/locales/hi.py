@@ -1074,4 +1074,38 @@ MESSAGES.update(
         "Completion tokens": "आउटपुट टोकन",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "प्रस्ताव {id} अस्वीकृत।",
+        "Nothing was done. Repeat with --confirm {hash}.": "कुछ नहीं किया गया। --confirm {hash} के साथ दोहराएँ।",
+        "Release {number}: {commit} on {branch}.": "रिलीज़ {number}: {branch} पर {commit}।",
+        "Push it yourself: {command}": "स्वयं पुश करें: {command}",
+        "Summary": "सारांश",
+        "Repository": "रिपॉज़िटरी",
+        "Branch": "शाखा",
+        "Files": "फ़ाइलें",
+        "Release": "रिलीज़",
+        "Proposal {id} is not eligible for release.": "प्रस्ताव {id} रिलीज़ के योग्य नहीं है।",
+        "A rejection reason must contain 1 to 1000 characters.": "अस्वीकृति का कारण 1 से 1000 वर्णों का होना चाहिए।",
+        "No release {number}.": "रिलीज़ {number} नहीं है।",
+        "The release checkout must be on a branch.": "रिलीज़ की कार्य प्रति किसी शाखा पर होनी चाहिए।",
+        "The submission base must name exactly the target files.": "प्रस्तुति के आधार में ठीक लक्ष्य फ़ाइलों के नाम होने चाहिए।",
+        "A node is checking it, try later.": "एक नोड जाँच कर रहा है, बाद में प्रयास करें।",
+        "Proposal {id} is already decided.": "प्रस्ताव {id} पर निर्णय हो चुका है।",
+        "The submission base differs from HEAD: {file}.": "प्रस्तुति का आधार HEAD से अलग है: {file}।",
+        "Another release is being made.": "दूसरी रिलीज़ बनाई जा रही है।",
+        "The release confirmation changed: preview it again.": "रिलीज़ की पुष्टि बदल गई: पूर्वावलोकन फिर देखें।",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "कमिट {commit} दर्ज नहीं है: फिर प्रयास करने से पहले git से उसे वापस करें। {error}",
+        "Root-signed releases accepted by the operator.": "संचालक द्वारा स्वीकृत और मूल कुंजी से हस्ताक्षरित रिलीज़।",
+        "Show a release and its root-signed record.": "रिलीज़ और उसका मूल कुंजी से हस्ताक्षरित रिकॉर्ड दिखाएँ।",
+        "List the registry's releases.": "रजिस्ट्री की रिलीज़ सूची दिखाएँ।",
+        "Reject a submission with a recorded reason.": "कारण दर्ज करके प्रस्तुति अस्वीकार करें।",
+        "Why the submission is rejected (1 to 1000 characters).": "प्रस्तुति अस्वीकार करने का कारण (1 से 1000 वर्ण)।",
+        "Preview or confirm a root-signed release of a checked submission.": "जाँची गई प्रस्तुति की मूल हस्ताक्षरित रिलीज़ का पूर्वावलोकन या पुष्टि करें।",
+        "The owner's checkout to release into.": "रिलीज़ बनाने के लिए मालिक की कार्य प्रति।",
+        "Confirm the exact release preview hash.": "रिलीज़ पूर्वावलोकन के सटीक हैश की पुष्टि करें।",
+    }
+)
+
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

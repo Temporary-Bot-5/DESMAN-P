@@ -1121,4 +1121,38 @@ MESSAGES.update(
         "Completion tokens": "Tokeny wyjściowe",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "Propozycja {id} odrzucona.",
+        "Nothing was done. Repeat with --confirm {hash}.": "Nic nie zrobiono. Powtórz z --confirm {hash}.",
+        "Release {number}: {commit} on {branch}.": "Wydanie {number}: {commit} na {branch}.",
+        "Push it yourself: {command}": "Wyślij samodzielnie: {command}",
+        "Summary": "Podsumowanie",
+        "Repository": "Repozytorium",
+        "Branch": "Gałąź",
+        "Files": "Pliki",
+        "Release": "Wydanie",
+        "Proposal {id} is not eligible for release.": "Propozycja {id} nie kwalifikuje się do wydania.",
+        "A rejection reason must contain 1 to 1000 characters.": "Powód odrzucenia musi zawierać od 1 do 1000 znaków.",
+        "No release {number}.": "Brak wydania {number}.",
+        "The release checkout must be on a branch.": "Kopia robocza wydania musi być na gałęzi.",
+        "The submission base must name exactly the target files.": "Baza zgłoszenia musi wskazywać dokładnie pliki docelowe.",
+        "A node is checking it, try later.": "Węzeł to sprawdza, spróbuj później.",
+        "Proposal {id} is already decided.": "Propozycja {id} została już rozstrzygnięta.",
+        "The submission base differs from HEAD: {file}.": "Baza zgłoszenia różni się od HEAD: {file}.",
+        "Another release is being made.": "Trwa tworzenie innego wydania.",
+        "The release confirmation changed: preview it again.": "Potwierdzenie wydania zmieniło się: obejrzyj podgląd ponownie.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "Commit {commit} nie jest zapisany: cofnij go przez git przed kolejną próbą. {error}",
+        "Root-signed releases accepted by the operator.": "Wydania zaakceptowane przez operatora i podpisane kluczem głównym.",
+        "Show a release and its root-signed record.": "Pokaż wydanie i jego rekord podpisany kluczem głównym.",
+        "List the registry's releases.": "Wyświetl wydania rejestru.",
+        "Reject a submission with a recorded reason.": "Odrzuć zgłoszenie, zapisując powód.",
+        "Why the submission is rejected (1 to 1000 characters).": "Powód odrzucenia zgłoszenia (od 1 do 1000 znaków).",
+        "Preview or confirm a root-signed release of a checked submission.": "Podejrzyj lub potwierdź wydanie sprawdzonego zgłoszenia podpisane kluczem głównym.",
+        "The owner's checkout to release into.": "Kopia robocza właściciela, w której powstanie wydanie.",
+        "Confirm the exact release preview hash.": "Potwierdź dokładny skrót podglądu wydania.",
+    }
+)
+
 CATALOG = Catalog("Polski", plural, MESSAGES, CLICK, forms=3)

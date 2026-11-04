@@ -475,7 +475,7 @@ def test_the_settings_are_put_back_when_the_commit_fails(
         assert open_config().load().tuning.max_subtasks == 3  # set before the commit
         raise applying.ApplyError("no")
 
-    monkeypatch.setattr(applying, "_forward", fail)
+    monkeypatch.setattr(applying, "forward", fail)
     with pytest.raises(applying.ApplyError, match="no"):
         applying.carry_out(s.conn, plan, open_config())
     assert open_config().load().tuning.max_subtasks is None
