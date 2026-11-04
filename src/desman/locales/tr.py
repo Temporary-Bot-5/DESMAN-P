@@ -1002,4 +1002,38 @@ MESSAGES.update(
         "Completion tokens": "Yanıt tokenleri",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "Öneri {id} reddedildi.",
+        "Nothing was done. Repeat with --confirm {hash}.": "Hiçbir işlem yapılmadı. --confirm {hash} ile tekrarlayın.",
+        "Release {number}: {commit} on {branch}.": "Sürüm {number}: {branch} üzerinde {commit}.",
+        "Push it yourself: {command}": "Kendiniz gönderin: {command}",
+        "Summary": "Özet",
+        "Repository": "Depo",
+        "Branch": "Dal",
+        "Files": "Dosyalar",
+        "Release": "Sürüm",
+        "Proposal {id} is not eligible for release.": "Öneri {id} yayımlanmaya uygun değil.",
+        "A rejection reason must contain 1 to 1000 characters.": "Ret nedeni 1 ile 1000 karakter arasında olmalıdır.",
+        "No release {number}.": "{number} sürümü yok.",
+        "The release checkout must be on a branch.": "Sürümün çalışma kopyası bir dal üzerinde olmalıdır.",
+        "The submission base must name exactly the target files.": "Gönderimin tabanı tam olarak hedef dosyaları belirtmelidir.",
+        "A node is checking it, try later.": "Bir düğüm kontrol ediyor, daha sonra deneyin.",
+        "Proposal {id} is already decided.": "Öneri {id} için zaten karar verilmiş.",
+        "The submission base differs from HEAD: {file}.": "Gönderimin tabanı HEAD ile farklı: {file}.",
+        "Another release is being made.": "Başka bir sürüm oluşturuluyor.",
+        "The release confirmation changed: preview it again.": "Sürüm onayı değişti: önizlemeyi yeniden inceleyin.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "{commit} işlemesi kaydedilmedi: tekrar denemeden önce git ile geri alın. {error}",
+        "Root-signed releases accepted by the operator.": "İşletmecinin kabul ettiği, kök anahtarla imzalanmış sürümler.",
+        "Show a release and its root-signed record.": "Bir sürümü ve kök anahtarla imzalı kaydını göster.",
+        "List the registry's releases.": "Sicilin sürümlerini listele.",
+        "Reject a submission with a recorded reason.": "Nedenini kaydederek gönderimi reddet.",
+        "Why the submission is rejected (1 to 1000 characters).": "Gönderimin ret nedeni (1 ile 1000 karakter).",
+        "Preview or confirm a root-signed release of a checked submission.": "Kontrol edilmiş gönderimin kök imzalı sürümünü önizle veya onayla.",
+        "The owner's checkout to release into.": "Sürümün oluşturulacağı sahibin çalışma kopyası.",
+        "Confirm the exact release preview hash.": "Sürüm önizlemesinin tam özetini onayla.",
+    }
+)
+
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

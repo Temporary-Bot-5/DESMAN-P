@@ -252,3 +252,39 @@ Fake children receive a minimal environment and an empty home and config. When b
 snapshots include workflow limits, the checker uses those limits to compare metrics; older
 snapshots run with defaults and leave the match unknown. Signed checks survive a registry
 re-registration and are handed in on a later poll. `--json` includes the checks.
+
+
+## Accepting a proposal and releasing
+
+Inspect the submission and its independent checks, then preview acceptance into the owner's
+explicit checkout (it must be on a branch, with clean target files):
+
+```bash
+desman-registry proposal show ID
+desman-registry proposal accept ID --repo /path/to/DESMAN-P
+# Inspect the diff, checks, branch and HEAD, then repeat with the displayed hash:
+desman-registry proposal accept ID --repo /path/to/DESMAN-P --confirm SHA256
+# Or reject it, recording why (only when no node is checking it):
+desman-registry proposal reject ID --reason "Reason for declining"
+desman-registry release list
+desman-registry release show 1 --json
+```
+
+Confirmation needs `root.key` in the registry directory (or `--root-key PATH`). It builds a
+commit containing only the proposed target texts, fast-forwards the supplied checkout and
+records a release signed by the root, numbered consecutively. Repeating acceptance is refused.
+The preview is read-only and needs no root key; `--json` is available for preview, acceptance,
+and release list/show. A changed HEAD, branch, submission or set of checks requires a fresh
+preview. Rejections and acceptances are final.
+
+DESMAN never pushes. Push the resulting branch yourself, as the command's output explains:
+
+```bash
+git -C /path/to/DESMAN-P push origin BRANCH
+```
+
+Git and the registry database cannot commit atomically. A crash or database failure after the
+checkout advances can leave an **unrecorded commit** (an error names it when possible). Inspect
+`git log` and `desman-registry release list` before retrying. Revert that commit with git,
+then preview again; do not assume it was signed or recorded. Back up the registry and root
+key as described above. Delivery to nodes and installation are separate work in G.8.

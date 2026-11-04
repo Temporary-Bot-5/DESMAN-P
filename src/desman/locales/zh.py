@@ -988,4 +988,38 @@ MESSAGES.update(
         "Completion tokens": "输出令牌",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "提案 {id} 已拒绝。",
+        "Nothing was done. Repeat with --confirm {hash}.": "未执行任何操作。请加上 --confirm {hash} 重试。",
+        "Release {number}: {commit} on {branch}.": "版本 {number}：{branch} 上的 {commit}。",
+        "Push it yourself: {command}": "请自行推送：{command}",
+        "Summary": "摘要",
+        "Repository": "仓库",
+        "Branch": "分支",
+        "Files": "文件",
+        "Release": "版本",
+        "Proposal {id} is not eligible for release.": "提案 {id} 不符合发布条件。",
+        "A rejection reason must contain 1 to 1000 characters.": "拒绝理由必须包含 1 到 1000 个字符。",
+        "No release {number}.": "没有版本 {number}。",
+        "The release checkout must be on a branch.": "发布工作副本必须位于分支上。",
+        "The submission base must name exactly the target files.": "提交基准必须恰好列出目标文件。",
+        "A node is checking it, try later.": "节点正在检查，请稍后重试。",
+        "Proposal {id} is already decided.": "提案 {id} 已有决定。",
+        "The submission base differs from HEAD: {file}.": "提交基准与 HEAD 不同：{file}。",
+        "Another release is being made.": "正在创建另一个版本。",
+        "The release confirmation changed: preview it again.": "发布确认已改变：请重新预览。",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "提交 {commit} 未记录：请先用 git 撤销，再重试。{error}",
+        "Root-signed releases accepted by the operator.": "操作员接受并由根密钥签名的版本。",
+        "Show a release and its root-signed record.": "显示版本及其根密钥签名记录。",
+        "List the registry's releases.": "列出注册中心的版本。",
+        "Reject a submission with a recorded reason.": "拒绝提交并记录理由。",
+        "Why the submission is rejected (1 to 1000 characters).": "拒绝提交的理由（1 到 1000 个字符）。",
+        "Preview or confirm a root-signed release of a checked submission.": "预览或确认已检查提交的根密钥签名版本。",
+        "The owner's checkout to release into.": "用于发布的所有者工作副本。",
+        "Confirm the exact release preview hash.": "确认发布预览的精确哈希。",
+    }
+)
+
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

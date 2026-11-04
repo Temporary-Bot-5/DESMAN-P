@@ -1004,4 +1004,38 @@ MESSAGES.update(
         "Completion tokens": "出力トークン",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "提案 {id} を却下しました。",
+        "Nothing was done. Repeat with --confirm {hash}.": "何も実行していません。--confirm {hash} を付けて再実行してください。",
+        "Release {number}: {commit} on {branch}.": "リリース {number}：{branch} の {commit}。",
+        "Push it yourself: {command}": "ご自身でプッシュしてください：{command}",
+        "Summary": "概要",
+        "Repository": "リポジトリ",
+        "Branch": "ブランチ",
+        "Files": "ファイル",
+        "Release": "リリース",
+        "Proposal {id} is not eligible for release.": "提案 {id} はリリースできません。",
+        "A rejection reason must contain 1 to 1000 characters.": "却下理由は1〜1000文字にしてください。",
+        "No release {number}.": "リリース {number} はありません。",
+        "The release checkout must be on a branch.": "リリース用の作業コピーはブランチ上である必要があります。",
+        "The submission base must name exactly the target files.": "提出の基準には対象ファイルを過不足なく指定してください。",
+        "A node is checking it, try later.": "ノードが確認中です。後で再試行してください。",
+        "Proposal {id} is already decided.": "提案 {id} はすでに決定済みです。",
+        "The submission base differs from HEAD: {file}.": "提出の基準が HEAD と異なります：{file}。",
+        "Another release is being made.": "別のリリースを作成中です。",
+        "The release confirmation changed: preview it again.": "リリースの確認情報が変わりました。再度プレビューしてください。",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "コミット {commit} は未記録です。再試行前に git で取り消してください。{error}",
+        "Root-signed releases accepted by the operator.": "運用者が承認しルート鍵で署名したリリース。",
+        "Show a release and its root-signed record.": "リリースとルート鍵で署名した記録を表示します。",
+        "List the registry's releases.": "レジストリのリリースを一覧表示します。",
+        "Reject a submission with a recorded reason.": "理由を記録して提出を却下します。",
+        "Why the submission is rejected (1 to 1000 characters).": "提出の却下理由（1〜1000文字）。",
+        "Preview or confirm a root-signed release of a checked submission.": "確認済み提出のルート署名付きリリースをプレビューまたは確定します。",
+        "The owner's checkout to release into.": "リリース先となる所有者の作業コピー。",
+        "Confirm the exact release preview hash.": "リリースプレビューの正確なハッシュを確認します。",
+    }
+)
+
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

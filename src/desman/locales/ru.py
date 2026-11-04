@@ -1364,4 +1364,38 @@ MESSAGES.update(
         "Completion tokens": "Токены ответа",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "Предложение {id} отклонено.",
+        "Nothing was done. Repeat with --confirm {hash}.": "Ничего не сделано. Повторите с --confirm {hash}.",
+        "Release {number}: {commit} on {branch}.": "Релиз {number}: {commit} в ветке {branch}.",
+        "Push it yourself: {command}": "Отправьте сами: {command}",
+        "Summary": "Краткое описание",
+        "Repository": "Репозиторий",
+        "Branch": "Ветка",
+        "Files": "Файлы",
+        "Release": "Релиз",
+        "Proposal {id} is not eligible for release.": "Предложение {id} нельзя выпустить.",
+        "A rejection reason must contain 1 to 1000 characters.": "Причина отказа должна содержать от 1 до 1000 символов.",
+        "No release {number}.": "Нет релиза {number}.",
+        "The release checkout must be on a branch.": "Рабочая копия для релиза должна быть на ветке.",
+        "The submission base must name exactly the target files.": "База отправки должна перечислять только и все целевые файлы.",
+        "A node is checking it, try later.": "Узел проверяет предложение, попробуйте позже.",
+        "Proposal {id} is already decided.": "По предложению {id} уже принято решение.",
+        "The submission base differs from HEAD: {file}.": "База отправки отличается от HEAD: {file}.",
+        "Another release is being made.": "Уже создаётся другой релиз.",
+        "The release confirmation changed: preview it again.": "Подтверждение релиза изменилось: просмотрите заново.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "Коммит {commit} не записан: отмените его через git перед повтором. {error}",
+        "Root-signed releases accepted by the operator.": "Релизы, принятые оператором и подписанные корнем.",
+        "Show a release and its root-signed record.": "Показать релиз и его запись с подписью корня.",
+        "List the registry's releases.": "Перечислить релизы реестра.",
+        "Reject a submission with a recorded reason.": "Отклонить отправку с сохранением причины.",
+        "Why the submission is rejected (1 to 1000 characters).": "Причина отклонения отправки (от 1 до 1000 символов).",
+        "Preview or confirm a root-signed release of a checked submission.": "Просмотреть или подтвердить подписанный корнем релиз проверенной отправки.",
+        "The owner's checkout to release into.": "Рабочая копия владельца для создания релиза.",
+        "Confirm the exact release preview hash.": "Подтвердить точный хеш просмотра релиза.",
+    }
+)
+
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)

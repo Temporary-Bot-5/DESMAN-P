@@ -998,4 +998,38 @@ MESSAGES.update(
         "Completion tokens": "출력 토큰",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "제안 {id}을(를) 거부했습니다.",
+        "Nothing was done. Repeat with --confirm {hash}.": "아무 작업도 하지 않았습니다. --confirm {hash}로 다시 실행하세요.",
+        "Release {number}: {commit} on {branch}.": "릴리스 {number}: {branch}의 {commit}.",
+        "Push it yourself: {command}": "직접 푸시하세요: {command}",
+        "Summary": "요약",
+        "Repository": "저장소",
+        "Branch": "브랜치",
+        "Files": "파일",
+        "Release": "릴리스",
+        "Proposal {id} is not eligible for release.": "제안 {id}은(는) 릴리스할 수 없습니다.",
+        "A rejection reason must contain 1 to 1000 characters.": "거부 사유는 1~1000자여야 합니다.",
+        "No release {number}.": "릴리스 {number}이(가) 없습니다.",
+        "The release checkout must be on a branch.": "릴리스 작업 사본은 브랜치에 있어야 합니다.",
+        "The submission base must name exactly the target files.": "제출 기준에는 대상 파일만 빠짐없이 지정해야 합니다.",
+        "A node is checking it, try later.": "노드가 확인 중입니다. 나중에 다시 시도하세요.",
+        "Proposal {id} is already decided.": "제안 {id}은(는) 이미 결정되었습니다.",
+        "The submission base differs from HEAD: {file}.": "제출 기준이 HEAD와 다릅니다: {file}.",
+        "Another release is being made.": "다른 릴리스를 만드는 중입니다.",
+        "The release confirmation changed: preview it again.": "릴리스 확인 정보가 변경되었습니다. 다시 미리 보세요.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "커밋 {commit}이(가) 기록되지 않았습니다. 다시 시도하기 전에 git으로 되돌리세요. {error}",
+        "Root-signed releases accepted by the operator.": "운영자가 수락하고 루트 키로 서명한 릴리스.",
+        "Show a release and its root-signed record.": "릴리스와 루트 서명 기록을 표시합니다.",
+        "List the registry's releases.": "레지스트리의 릴리스 목록을 표시합니다.",
+        "Reject a submission with a recorded reason.": "사유를 기록하고 제출을 거부합니다.",
+        "Why the submission is rejected (1 to 1000 characters).": "제출 거부 사유(1~1000자).",
+        "Preview or confirm a root-signed release of a checked submission.": "확인된 제출의 루트 서명 릴리스를 미리 보거나 확정합니다.",
+        "The owner's checkout to release into.": "릴리스를 만들 소유자의 작업 사본.",
+        "Confirm the exact release preview hash.": "릴리스 미리 보기의 정확한 해시를 확인합니다.",
+    }
+)
+
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

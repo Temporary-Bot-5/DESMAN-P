@@ -1,6 +1,7 @@
 """Signatures of desman-global (ADR 0004, decision 3; ROADMAP G.2).
 
 G.7b proposal checks are node-signed and never accepted as trust state.
+Release bodies are validated on receipt and never accepted as trust state.
 
 Every key is Ed25519 (`cryptography`). A key is named by its fingerprint: the SHA-256 of its raw
 public bytes, in hex. Only fingerprints and public keys ever leave the machine.
@@ -51,7 +52,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Final, Protocol
+from typing import Annotated, Any, Final, Literal, Protocol
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -312,6 +313,25 @@ class Assignment(BaseModel):
     @property
     def fingerprint(self) -> str:
         return fingerprint(decode_public(self.key))
+
+
+class Release(BaseModel):
+    """The root's statement of the commit the operator accepted (G.7c)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["release"] = "release"
+    number: int = Field(ge=1)
+    commit: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
+    parent: Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
+    branch: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, pattern=r"^[^\s\x00-\x1f\x7f-\x9f]+$")
+    ]
+    proposal: RecordId
+    submission: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    checks: list[RecordId] = Field(min_length=1, max_length=16)
+    summary: str = Field(max_length=2000)
+    files: list[str] = Field(min_length=1, max_length=32)
 
 
 class Revocation(BaseModel):
@@ -635,7 +655,7 @@ class Trust:
         if record.kind is not RecordKind.REVOCATION and now >= term.expires_at:
             raise refuse(Reason.EXPIRED, "the operator's assignment has expired")
 
-    def _check_body(self, record: Record) -> Assignment | Revocation | TrustList | None:
+    def _check_body(self, record: Record) -> Assignment | Revocation | TrustList | Release | None:
         def refuse(reason: Reason, detail: str) -> Refused:
             return Refused(reason, detail, id=record.id, signer=record.signer)
 
@@ -657,6 +677,8 @@ class Trust:
                 return revocation
             if record.kind is RecordKind.TRUST_LIST:
                 return TrustList.model_validate(record.body)
+            if record.kind is RecordKind.RELEASE:
+                return Release.model_validate(record.body)
         except (ValidationError, KeyFileError) as e:
             raise refuse(Reason.MALFORMED, str(e)) from e
         return None

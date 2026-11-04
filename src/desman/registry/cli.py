@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -26,7 +27,7 @@ from desman import i18n, ui
 from desman.core.models import Kind
 from desman.i18n import t
 from desman.net import protocol, sign
-from desman.registry import admin, checks, server, store, work
+from desman.registry import admin, checks, releases, server, store, work
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
@@ -514,6 +515,9 @@ def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
         work.expire(conn, _now())
         found = store.proposal(conn, matches[0])
         checked = checks.results(conn, matches[0])
+        released = conn.execute(
+            "SELECT number FROM releases WHERE proposal = ?", (matches[0],)
+        ).fetchone()
     finally:
         conn.close()
     assert found is not None
@@ -525,6 +529,7 @@ def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
         "submission": found.submission.model_dump(mode="json"),
         "reason": found.reason,
         "checks": checked,
+        "release": None if released is None else released["number"],
     }
     if as_json:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
@@ -538,6 +543,8 @@ def proposal_show(ctx: click.Context, proposal_id: str, as_json: bool) -> None:
         f"{t('Benchmark')}: {item.mode} ({item.verdict})",
     ):
         ui.out(Text(line))
+    if released is not None:
+        ui.out(Text(f"{t('Release')}: {released['number']}"))
     _show_snapshots(item.base, item.candidate)
     if found.reason:
         ui.out(Text(f"{t('Reason')}: {found.reason}"))
@@ -794,3 +801,150 @@ def _show_snapshots(
                 ]
                 if values:
                     ui.out(Text(f"{label}: {sum(values)}"))
+
+
+@proposal.command("accept")
+@click.argument("proposal_id", metavar="ID")
+@click.option(
+    "--repo",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="The owner's checkout to release into.",
+)
+@click.option("--confirm", help="Confirm the exact release preview hash.")
+@_root_option
+@_json_option
+@click.pass_context
+def proposal_accept(
+    ctx: click.Context,
+    proposal_id: str,
+    repo: Path,
+    confirm: str | None,
+    root_key: Path | None,
+    as_json: bool,
+) -> None:
+    """Preview or confirm a root-signed release of a checked submission."""
+    conn = _open_db(ctx)
+    try:
+        if confirm is None:
+            result = releases.plan(conn, proposal_id, repo)
+        else:
+            result = releases.accept(
+                conn, proposal_id, repo, confirm, directory=_dir(ctx), root_key=root_key, now=_now()
+            )
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    if confirm is None:
+        for label, value in (
+            (t("Release"), result["number"]),
+            (t("Proposal submission"), result["proposal"]),
+            (t("Node"), result["node"]),
+            (t("Summary"), result["summary"]),
+            (t("Repository"), result["repo"]),
+            (t("Branch"), result["branch"]),
+            (t("Base commit"), result["base_commit"]),
+            ("HEAD", result["head"]),
+            (t("Files"), ", ".join(result["files"])),
+        ):
+            ui.out(Text(f"{label}: {value}"))
+        for check in result["check_results"]:
+            ui.out(
+                Text(
+                    f"{t('Node')}: {check['node']}  {t('Verdict')}: {check['verdict']}  {t('Matches submission')}: {check['matches_submission']}"
+                )
+            )
+        ui.out(Text(result["diff"]))
+        ui.note(t("Nothing was done. Repeat with --confirm {hash}.", hash=result["confirmation"]))
+    else:
+        ui.ok(
+            t(
+                "Release {number}: {commit} on {branch}.",
+                number=result["number"],
+                commit=result["commit"],
+                branch=result["branch"],
+            )
+        )
+        ui.note(
+            t(
+                "Push it yourself: {command}",
+                command=f"git -C {shlex.quote(str(repo.resolve()))} push origin {shlex.quote(result['branch'])}",
+            )
+        )
+
+
+@proposal.command("reject")
+@click.argument("proposal_id", metavar="ID")
+@click.option(
+    "--reason", required=True, help="Why the submission is rejected (1 to 1000 characters)."
+)
+@click.pass_context
+def proposal_reject(ctx: click.Context, proposal_id: str, reason: str) -> None:
+    """Reject a submission with a recorded reason."""
+    conn = _open_db(ctx)
+    try:
+        pid = releases.reject(conn, proposal_id, reason)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    ui.ok(t("Proposal {id} rejected.", id=pid))
+
+
+@cli.group()
+def release() -> None:
+    """Root-signed releases accepted by the operator."""
+
+
+@release.command("list")
+@_json_option
+@click.pass_context
+def release_list(ctx: click.Context, as_json: bool) -> None:
+    """List the registry's releases."""
+    conn = _open_db(ctx)
+    try:
+        found = releases.listing(conn)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps(found, ensure_ascii=False, indent=2))
+        return
+    for row in found:
+        ui.out(
+            Text(
+                f"{row['number']}  {row['commit'][:12]}  {row['branch']}  {row['proposal'][:12]}  {row['created_at']}"
+            )
+        )
+
+
+@release.command("show")
+@click.argument("number", type=click.IntRange(min=1))
+@_json_option
+@click.pass_context
+def release_show(ctx: click.Context, number: int, as_json: bool) -> None:
+    """Show a release and its root-signed record."""
+    conn = _open_db(ctx)
+    try:
+        found = releases.show(conn, number)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps(found, ensure_ascii=False, indent=2))
+    else:
+        ui.out(
+            Text(
+                t(
+                    "Release {number}: {commit} on {branch}.",
+                    number=number,
+                    commit=found["commit"],
+                    branch=found["branch"],
+                )
+            )
+        )
+        ui.out(Text(json.dumps(found, ensure_ascii=False, indent=2)))

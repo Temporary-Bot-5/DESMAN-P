@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from desman.core.models import Kind
+from desman.net import sign
 from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed, canonical
 from desman.tuning_limits import TUNING_BOUNDS
 
@@ -464,3 +465,6 @@ def submission_hash(submission: ProposalSubmission) -> str:
 def benchmark_snapshot(result: bench.Result) -> BenchmarkSnapshot:
     """One shared conversion for local uploads and independent checks (G.7b)."""
     return BenchmarkSnapshot.model_validate(result.model_dump(mode="json"))
+
+
+Release = sign.Release

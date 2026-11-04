@@ -1,6 +1,7 @@
 """The registry's database (ADR 0004; ROADMAP G.4): its own SQLite with its own migrations.
 
-G.7b adds independent proposal checks and leases (migration 6).
+G.7b adds independent proposal checks and leases (migration 6). G.7c adds final operator
+decisions and append-only root-signed releases (migration 7); rejection reasons use `reason`.
 
 The same rules as the node's database (`core/db.py`, whose helpers it uses): append-only
 migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
@@ -230,6 +231,26 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         BEGIN SELECT RAISE(ABORT, 'proposal checks are append-only'); END;
     CREATE TRIGGER proposal_checks_no_delete BEFORE DELETE ON proposal_checks
         BEGIN SELECT RAISE(ABORT, 'proposal checks are append-only'); END;
+    """,
+    # 7 — operator decisions and root-signed releases (G.7c).
+    """
+    CREATE TABLE releases (
+        number INTEGER PRIMARY KEY CHECK (number >= 1),
+        id TEXT NOT NULL UNIQUE,
+        proposal TEXT NOT NULL UNIQUE REFERENCES proposals(id),
+        commit_sha TEXT NOT NULL,
+        parent TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        signed_json TEXT NOT NULL CHECK (json_valid(signed_json)),
+        created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TRIGGER releases_no_update BEFORE UPDATE ON releases
+        BEGIN SELECT RAISE(ABORT, 'releases are append-only'); END;
+    CREATE TRIGGER releases_no_delete BEFORE DELETE ON releases
+        BEGIN SELECT RAISE(ABORT, 'releases are append-only'); END;
+    CREATE TRIGGER proposals_decision_final BEFORE UPDATE OF status ON proposals
+        WHEN OLD.status IN ('accepted', 'rejected') AND NEW.status IS NOT OLD.status
+        BEGIN SELECT RAISE(ABORT, 'proposal decisions are final'); END;
     """,
 )
 

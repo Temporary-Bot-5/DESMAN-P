@@ -1077,4 +1077,38 @@ MESSAGES.update(
         "Completion tokens": "Ausgabetokens",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "Vorschlag {id} abgelehnt.",
+        "Nothing was done. Repeat with --confirm {hash}.": "Nichts wurde geändert. Mit --confirm {hash} wiederholen.",
+        "Release {number}: {commit} on {branch}.": "Release {number}: {commit} auf {branch}.",
+        "Push it yourself: {command}": "Selbst hochladen: {command}",
+        "Summary": "Zusammenfassung",
+        "Repository": "Repository",
+        "Branch": "Branch",
+        "Files": "Dateien",
+        "Release": "Release",
+        "Proposal {id} is not eligible for release.": "Vorschlag {id} kann nicht veröffentlicht werden.",
+        "A rejection reason must contain 1 to 1000 characters.": "Ein Ablehnungsgrund muss 1 bis 1000 Zeichen enthalten.",
+        "No release {number}.": "Kein Release {number}.",
+        "The release checkout must be on a branch.": "Die Arbeitskopie für das Release muss auf einem Branch sein.",
+        "The submission base must name exactly the target files.": "Die Einreichungsbasis muss genau die Zieldateien nennen.",
+        "A node is checking it, try later.": "Ein Knoten prüft es, später erneut versuchen.",
+        "Proposal {id} is already decided.": "Über Vorschlag {id} wurde bereits entschieden.",
+        "The submission base differs from HEAD: {file}.": "Die Einreichungsbasis weicht von HEAD ab: {file}.",
+        "Another release is being made.": "Ein anderes Release wird gerade erstellt.",
+        "The release confirmation changed: preview it again.": "Die Release-Bestätigung hat sich geändert: Vorschau erneut ansehen.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "Commit {commit} ist nicht erfasst: vor einem neuen Versuch mit git rückgängig machen. {error}",
+        "Root-signed releases accepted by the operator.": "Vom Betreiber akzeptierte, vom Stammschlüssel signierte Releases.",
+        "Show a release and its root-signed record.": "Ein Release und seinen vom Stammschlüssel signierten Datensatz anzeigen.",
+        "List the registry's releases.": "Releases der Registry auflisten.",
+        "Reject a submission with a recorded reason.": "Eine Einreichung mit gespeichertem Grund ablehnen.",
+        "Why the submission is rejected (1 to 1000 characters).": "Grund der Ablehnung (1 bis 1000 Zeichen).",
+        "Preview or confirm a root-signed release of a checked submission.": "Vorschau oder Bestätigung eines vom Stammschlüssel signierten Releases einer geprüften Einreichung.",
+        "The owner's checkout to release into.": "Die Arbeitskopie des Eigentümers für das Release.",
+        "Confirm the exact release preview hash.": "Den genauen Hash der Release-Vorschau bestätigen.",
+    }
+)
+
 CATALOG = Catalog("Deutsch", plural, MESSAGES, CLICK, forms=2)

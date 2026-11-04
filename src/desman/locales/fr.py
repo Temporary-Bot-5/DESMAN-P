@@ -1077,4 +1077,38 @@ MESSAGES.update(
         "Completion tokens": "Jetons de réponse",
     }
 )
+# G.7c — operator decisions and releases.
+MESSAGES.update(
+    {
+        "Proposal {id} rejected.": "Proposition {id} rejetée.",
+        "Nothing was done. Repeat with --confirm {hash}.": "Rien n’a été fait. Répétez avec --confirm {hash}.",
+        "Release {number}: {commit} on {branch}.": "Version {number} : {commit} sur {branch}.",
+        "Push it yourself: {command}": "Envoyez-la vous-même : {command}",
+        "Summary": "Résumé",
+        "Repository": "Dépôt",
+        "Branch": "Branche",
+        "Files": "Fichiers",
+        "Release": "Version",
+        "Proposal {id} is not eligible for release.": "La proposition {id} ne peut pas être publiée.",
+        "A rejection reason must contain 1 to 1000 characters.": "Le motif du rejet doit contenir de 1 à 1000 caractères.",
+        "No release {number}.": "Aucune version {number}.",
+        "The release checkout must be on a branch.": "La copie de travail de publication doit être sur une branche.",
+        "The submission base must name exactly the target files.": "La base de la soumission doit nommer exactement les fichiers cibles.",
+        "A node is checking it, try later.": "Un nœud la vérifie, réessayez plus tard.",
+        "Proposal {id} is already decided.": "La proposition {id} a déjà été tranchée.",
+        "The submission base differs from HEAD: {file}.": "La base de la soumission diffère de HEAD : {file}.",
+        "Another release is being made.": "Une autre version est en cours de création.",
+        "The release confirmation changed: preview it again.": "La confirmation de publication a changé : revoyez l’aperçu.",
+        "Commit {commit} is unrecorded: revert it with git before trying again. {error}": "Le commit {commit} n’est pas enregistré : annulez-le avec git avant de réessayer. {error}",
+        "Root-signed releases accepted by the operator.": "Versions acceptées par l’opérateur et signées par la racine.",
+        "Show a release and its root-signed record.": "Afficher une version et son enregistrement signé par la racine.",
+        "List the registry's releases.": "Lister les versions du registre.",
+        "Reject a submission with a recorded reason.": "Rejeter une soumission en enregistrant le motif.",
+        "Why the submission is rejected (1 to 1000 characters).": "Motif du rejet de la soumission (1 à 1000 caractères).",
+        "Preview or confirm a root-signed release of a checked submission.": "Prévisualiser ou confirmer une version signée par la racine d’une soumission vérifiée.",
+        "The owner's checkout to release into.": "La copie de travail du propriétaire où créer la version.",
+        "Confirm the exact release preview hash.": "Confirmer le hash exact de l’aperçu de publication.",
+    }
+)
+
 CATALOG = Catalog("Français", plural, MESSAGES, CLICK, forms=2)
