@@ -42,7 +42,7 @@ from pydantic import BaseModel, ValidationError
 from desman.core import db
 from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import checks, releases, store, work
+from desman.registry import checks, messenger, releases, store, work
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -122,6 +122,26 @@ class Registry:
             protocol.CHECK_HAND_IN: ("POST", self._hand_in_check),
             protocol.PROPOSALS: ("POST", self._submit_proposal),
             protocol.REPORTS: ("POST", self._submit_report),
+            protocol.MESSENGER_NAME: (
+                "POST",
+                self._messenger_route(protocol.SetName, messenger.set_name),
+            ),
+            protocol.MESSENGER_CONTACT: (
+                "POST",
+                self._messenger_route(protocol.ContactAction, messenger.contact),
+            ),
+            protocol.MESSENGER_SEND: (
+                "POST",
+                self._messenger_route(protocol.SendMessage, messenger.send),
+            ),
+            protocol.MESSENGER_INBOX: (
+                "POST",
+                self._messenger_route(protocol.InboxQuery, messenger.inbox),
+            ),
+            protocol.MESSENGER_COMPLAIN: (
+                "POST",
+                self._messenger_route(protocol.Complain, messenger.complain),
+            ),
         }
 
     @property
@@ -159,9 +179,25 @@ class Registry:
             except _NotRegistered:
                 self._refused(conn, caller.fingerprint, NOT_REGISTERED, method, target)
                 return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
+            except messenger.Refusal as e:
+                self._refused(conn, caller.fingerprint, str(e), method, target)
+                return _problem(HTTPStatus.FORBIDDEN, str(e))
             except work.LeaseLost:
                 self._refused(conn, caller.fingerprint, work.LEASE_LOST, method, target)
                 return _problem(HTTPStatus.CONFLICT, work.LEASE_LOST)
+
+    def _messenger_route(
+        self, model: type[M], perform: Callable[[sqlite3.Connection, str, M, datetime], BaseModel]
+    ) -> Handler:
+        def route(
+            conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+        ) -> Reply:
+            asked = _body(model, body, caller)
+            with db.transaction(conn):
+                self._active(conn, caller)
+                return _ok(perform(conn, caller.fingerprint, asked, now))
+
+        return route
 
     def _refused(
         self, conn: sqlite3.Connection, signer: str | None, reason: str, method: str, target: str

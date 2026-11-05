@@ -395,11 +395,17 @@ class Chat:
         self, entry: commands.Entry, args: commands.Args, done: bool, before: Config | None
     ) -> None:
         """The operator's journal: the command, confirmed or declined, and what it changed in
-        the config (a key by its fingerprint, a permission by its name). A temporary chat's
+        the config (a key by its fingerprint, a permission by its name). Private fields
+        are recorded only by name. A temporary chat's
         command is kept without its arguments' values: a goal or a note is the chat's text."""
         conn = self.store.conn
         given = args.model_dump(mode="json", exclude_defaults=True)
-        details: dict[str, Any] = {"command": entry.name, "args": args.model_dump(mode="json")}
+        details: dict[str, Any] = {
+            "command": entry.name,
+            "args": args.model_dump(mode="json", exclude=set(entry.private)),
+        }
+        if entry.private:
+            details["args_private"] = list(entry.private)
         if self.temporary:  # the decision is the person's, kept; what the chat said is not
             details = {"command": entry.name, "args_given": sorted(given), "temporary": True}
         action = "operator_command" if done else "operator_declined"

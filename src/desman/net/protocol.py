@@ -10,10 +10,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from desman.core.models import Kind
 from desman.net import sign
@@ -563,3 +571,94 @@ class ReportReceived(BaseModel):
 
 def report_content(report: Report) -> bytes:
     return canonical({"kind": "report_submission", "report": report.model_dump(mode="json")})
+
+
+# ── Messenger (G.10) ─────────────────────────────────────────────────────────
+
+Handle = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{2,31}$")]
+MESSENGER_NAME: Final = "/v1/messenger/name"
+MESSENGER_CONTACT: Final = "/v1/messenger/contact"
+MESSENGER_SEND: Final = "/v1/messenger/send"
+MESSENGER_INBOX: Final = "/v1/messenger/inbox"
+MESSENGER_COMPLAIN: Final = "/v1/messenger/complain"
+MAX_MESSAGES_PER_DAY: Final = 200
+MAX_CONTACT_REQUESTS_PER_DAY: Final = 20
+MAX_COMPLAINTS_PER_DAY: Final = 5
+MESSAGE_DAYS: Final = 30
+AWAY: Final = "away"
+
+
+def message_text(text: str) -> str:
+    """Human correspondence cannot carry terminal controls or bidi overrides."""
+    if any(
+        (unicodedata.category(c) == "Cc" and c not in "\n\t")
+        or "\u202a" <= c <= "\u202e"
+        or "\u2066" <= c <= "\u2069"
+        for c in text
+    ):
+        raise ValueError("control character in message")
+    return text
+
+
+class MessengerBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class SetName(MessengerBody):
+    name: Handle
+
+
+class MessengerName(MessengerBody):
+    name: Handle
+
+
+class ContactAction(MessengerBody):
+    name: Handle
+    action: Literal["add", "remove", "block", "unblock"]
+
+
+class ContactState(MessengerBody):
+    name: Handle
+    state: Literal["contact", "asked", "none", "blocked"]
+
+
+class SendMessage(MessengerBody):
+    to: Handle
+    text: Annotated[str, Field(min_length=1, max_length=2000), AfterValidator(message_text)]
+
+
+class MessageSent(MessengerBody):
+    id: int
+    sent_at: datetime
+
+
+class InboxQuery(MessengerBody):
+    after: int | None = Field(default=None, ge=0)
+    with_name: Handle | None = None
+
+
+class Message(MessengerBody):
+    id: int
+    sender: Handle
+    recipient: Handle
+    text: Annotated[str, Field(min_length=1, max_length=2000), AfterValidator(message_text)]
+    sent_at: datetime
+
+
+class Inbox(MessengerBody):
+    name: Handle | None
+    contacts: list[Handle]
+    asked: list[Handle]
+    asking: list[Handle]
+    blocked: list[Handle]
+    messages: list[Message] = Field(max_length=100)
+
+
+class Complain(MessengerBody):
+    name: Handle
+    text: Annotated[str, Field(min_length=1, max_length=2000), AfterValidator(message_text)]
+    message: int | None = Field(default=None, ge=1)
+
+
+class ComplaintReceived(MessengerBody):
+    id: str
