@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "Die in dieser Beschwerde zitierte Nachricht ist nicht mehr in Ihrem Posteingang; es wurde nichts gesendet.",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Nachrichten sind Ende-zu-Ende-verschlüsselt: Der Registerbetreiber sieht, wer wem wann schreibt, aber keinen Text. Eine Beschwerde zeigt ihm die zitierte Nachricht. Nachrichten werden 30 Tage aufbewahrt. Sie sind mit dem Schlüssel dieses Knotens (node.key) verschlüsselt: Geht er verloren, gehen auch die Nachrichten verloren.",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "Der Schlüssel von {name} hat sich geändert. Führen Sie `desman global contact remove {name}` und dann `desman global contact add {name}` aus, um den neuen Schlüssel zu akzeptieren.",
     "The message could not be decrypted or verified.": "Die Nachricht konnte nicht entschlüsselt oder verifiziert werden.",

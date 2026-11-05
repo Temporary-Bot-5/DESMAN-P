@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "この苦情で引用したメッセージは受信トレイにもうありません。何も送信されませんでした。",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "メッセージはエンドツーエンドで暗号化されます。レジストリ運営者に見えるのは誰が誰にいつ送ったかで、本文は見えません。苦情を送ると、引用したメッセージが運営者に公開されます。保存期間は30日です。このノードの鍵（node.key）で暗号化されるため、鍵を失うとメッセージも失われます。",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} の鍵が変わりました。新しい鍵を受け入れるには `desman global contact remove {name}`、次に `desman global contact add {name}` を実行してください。",
     "The message could not be decrypted or verified.": "メッセージを復号または検証できませんでした。",

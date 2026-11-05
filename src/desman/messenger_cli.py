@@ -108,7 +108,13 @@ def perform(
                         clock=clock,
                     )
                     cited = next((m for m in found.messages if m.id == body.message), None)
-                    if cited is not None and cited.sealed is not None:
+                    if cited is None:
+                        raise click.ClickException(
+                            t(
+                                "The message this complaint cites is no longer in your inbox; nothing was sent."
+                            )
+                        )
+                    if cited.sealed is not None:
                         body = body.model_copy(
                             update={"content_key": seal.encode(seal.content_key(key, cited.sealed))}
                         )

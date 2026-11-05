@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "此投诉引用的消息已不在您的收件箱中；未发送任何内容。",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "消息采用端到端加密：注册中心运营者能看到谁在何时给谁发消息，但看不到正文。投诉会向运营者公开所引用的消息。消息保留30天。消息使用此节点的密钥（node.key）加密：密钥丢失，消息也将丢失。",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} 的密钥已更改。运行 `desman global contact remove {name}`，然后运行 `desman global contact add {name}` 以接受新密钥。",
     "The message could not be decrypted or verified.": "无法解密或验证此消息。",

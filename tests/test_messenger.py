@@ -291,6 +291,48 @@ def test_client_registration_and_network_journal(
     assert len([r for r in logs if r[2] == "registered"]) == 1
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_complaint_requires_cited_message_in_inbox(
+    registry: Registry, clock: FakeClock, conn: sqlite3.Connection, joined: Config, legacy: bool
+) -> None:
+    key = sign.node_key(sign.default_node_key_path())
+    a = Node(registry, clock, key=key)
+    paths: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return a._handle(request)
+
+    transport = httpx.MockTransport(respond)
+    manager = open_config()
+    messenger_cli.perform(manager, conn, p.SetName(name="alice"), transport=transport, clock=clock)
+    b = named(registry, clock, "bobby")
+    if legacy:
+        with store.connection(registry.path) as registry_conn:
+            registry_conn.execute(
+                "INSERT INTO messages(sender,recipient,text,sent_at) VALUES (?,?,?,?)",
+                (b.fingerprint, a.fingerprint, "legacy plaintext", db.to_iso(clock())),
+            )
+    paths.clear()
+    body = p.Complain(name="bobby", text="please review", message=1)
+    if legacy:
+        result = messenger_cli.perform(manager, conn, body, transport=transport, clock=clock)
+        assert isinstance(result, p.ComplaintReceived)
+        with store.connection(registry.path) as registry_conn:
+            assert registry_conn.execute("SELECT message_text FROM complaints").fetchone()[0] == (
+                "legacy plaintext"
+            )
+    else:
+        with pytest.raises(
+            ClickException,
+            match="The message this complaint cites is no longer in your inbox; nothing was sent.",
+        ):
+            messenger_cli.perform(manager, conn, body, transport=transport, clock=clock)
+        assert p.MESSENGER_COMPLAIN not in paths
+        with store.connection(registry.path) as registry_conn:
+            assert registry_conn.execute("SELECT count(*) FROM complaints").fetchone()[0] == 0
+
+
 def test_registration_retry_once(
     conn: sqlite3.Connection, joined: Config, clock: FakeClock
 ) -> None:
@@ -351,7 +393,8 @@ def test_secret_before_request(
 
     monkeypatch.setattr(httpx.Client, "send", forbidden)
     result = CliRunner().invoke(cli, ["global", command, "bobby", f"text {secret}"])
-    assert result.exit_code == 1 and "contains an API key" in result.output
+    assert result.exit_code == 1
+    assert "This message contains an API key; nothing was sent." in result.output
     assert secret not in result.output
 
 
