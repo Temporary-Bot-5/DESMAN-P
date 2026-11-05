@@ -399,18 +399,16 @@ def _git(where: Path, *args: str, stdin: str | None = None) -> str:
     try:
         done = subprocess.run(
             ["git", "-c", "core.autocrlf=false", "-C", str(where), *HOOKS_OFF, *args],
-            input=stdin,
+            input=None if stdin is None else stdin.encode("utf-8"),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
             timeout=evaluation.GIT_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         raise ApplyError(f"git {args[0]}: {e}") from e
     if done.returncode != 0:
-        raise ApplyError(f"git {args[0]}: {done.stderr.strip() or done.returncode}")
-    return done.stdout
+        raise ApplyError(f"git {args[0]}: {done.stderr.decode('utf-8').strip() or done.returncode}")
+    return done.stdout.decode("utf-8")
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────

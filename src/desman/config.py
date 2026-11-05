@@ -26,6 +26,7 @@ from pydantic import (
 )
 
 from desman.core import filelock
+from desman.core.atomic import replace_file
 from desman.tuning_limits import TUNING_BOUNDS as TUNING_BOUNDS
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
@@ -405,13 +406,13 @@ class ConfigManager:
         tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
                 f.flush()
                 os.fsync(f.fileno())
             if target.exists():
                 os.chmod(target, 0o600)  # the old inode, shared by any other hard link
-            os.replace(tmp, target)
+            replace_file(tmp, target)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise

@@ -48,6 +48,7 @@ from pydantic import BaseModel, Field, StrictInt, StrictStr, StringConstraints, 
 from desman import bench, runs
 from desman.config import TUNING_BOUNDS, TUNING_LIMITS, Config, ModelChoices
 from desman.core import db, proposals
+from desman.core.atomic import replace_file
 from desman.core.models import Kind, SubtaskSpec, TaskSpec, Tools
 from desman.core.proposals import Proposal, Status
 from desman.core.states import TaskStatus
@@ -711,9 +712,9 @@ def write_file(conn: sqlite3.Connection, proposal: Proposal) -> Path | None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(content)
-        os.replace(tmp, path)
+        replace_file(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
