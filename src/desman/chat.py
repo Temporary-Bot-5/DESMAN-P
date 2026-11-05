@@ -42,6 +42,7 @@ from typing import Any
 
 import click
 import httpx
+from pydantic import ValidationError
 from rich.text import Text
 
 from desman import (
@@ -49,6 +50,7 @@ from desman import (
     commands,
     compaction,
     config_cli,
+    messenger_cli,
     providers,
     runs,
     task_files,
@@ -84,6 +86,7 @@ from desman.live import Progress
 from desman.llm import hub, router
 from desman.llm.base import ProviderError
 from desman.llm.structured import StructuredOutputError
+from desman.net import protocol
 from desman.planner import must_run, plan
 
 SHOWN_ON_RETURN = 6
@@ -112,6 +115,7 @@ def _commands(temporary: bool = False) -> dict[str, str]:
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
         "/compact": t("summarise this session's older messages now"),
+        "/messages": t("read messages privately: /messages [NAME]"),
         "/profile": t("how the interlocutor talks to you and what it notes about you"),
         "/delete": t("delete this session from the list (after your yes)"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
@@ -891,6 +895,17 @@ class Chat:
             self._delete()
         elif name == "/compact":
             self._compact_now()
+        elif name == "/messages":
+            try:
+                body = protocol.InboxQuery(with_name=line.strip()[len(name) :].strip() or None)
+                result = messenger_cli.perform(open_config(), self.store.conn, body)
+                messenger_cli.print_result(result, view="messages")
+            except ConfigError as e:
+                ui.error(str(e))
+            except ValidationError:
+                ui.error(t("Invalid messenger request; nothing was sent."))
+            except click.ClickException as e:
+                ui.error(e.format_message())
         elif name == "/profile":
             self._profile()
         else:

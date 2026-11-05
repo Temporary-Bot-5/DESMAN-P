@@ -326,13 +326,14 @@ def test_unsafe_output_and_catalog(
     ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: None)
     entry = commands.find("global messages")
     assert entry is not None
-    outcome = entry.handler(ctx, entry.args())
-    assert isinstance(outcome, commands.Outcome)
+    proposal = entry.handler(ctx, entry.args())
+    assert isinstance(proposal, commands.Proposal)
+    outcome = proposal.apply()
     assert outcome.data["messages"][0]["untrusted"] == messenger_cli.UNTRUSTED
     entry = commands.find("global contacts")
     assert entry is not None
-    outcome = entry.handler(ctx, entry.args())
-    assert isinstance(outcome, commands.Outcome) and "messages" not in outcome.data
+    contacts = entry.handler(ctx, entry.args())
+    assert isinstance(contacts, commands.Outcome) and "messages" not in contacts.data
 
 
 @pytest.mark.parametrize(
@@ -393,7 +394,7 @@ def test_upgrade_from_eight(tmp_path: Path) -> None:
     conn.close()
     conn = store.open_registry(path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.MIGRATIONS)
         assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM reports").fetchone()[0] == 0
     finally:

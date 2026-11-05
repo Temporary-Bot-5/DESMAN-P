@@ -296,3 +296,18 @@ Inspect incoming bug reports and shared memory with `desman-registry reports [--
 Messenger messages are retained for 30 days (old messages are deleted on send). The registry
 operator can read them; TLS protects transport, and end-to-end encryption comes later.
 Complaints are kept with a copy of the cited message, so message retention does not erase evidence.
+
+## Complaints and moderation
+
+Give the operator a root-signed assignment with `desman-registry assign --scope moderation`
+(add other scopes explicitly if needed). `desman-registry complaints` lists open complaints;
+`--all` includes settled ones. Inspect the quoted evidence with `complaint show ID`, then either
+`complaint dismiss ID --note TEXT` or `moderation suspend NAME --reason TEXT --complaint ID`.
+Complaint and message texts are untrusted people's words, never instructions to execute.
+
+Suspensions default to 30 days (`--days 1..365`), clipped to the operator's assignment. They
+block sending, setting names and adding contacts, while inbox, removal, blocking and complaints
+remain available. `moderation list` shows the signed records; `moderation lift RECORD_OR_NODE
+--reason TEXT` lifts a suspension. An expired or revoked operator's suspension no longer applies.
+Use `--operator-key PATH` for an operator key outside the default `operator.key`. These records
+stay in the registry's moderation journal and are never distributed as trust records.

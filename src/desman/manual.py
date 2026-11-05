@@ -279,7 +279,9 @@ TOPICS: Final = (
         "of the cited message. End-to-end encryption comes later. Limits per node per day: "
         "200 messages, 20 new contact requests, 5 complaints. Configured API keys block sending. "
         "The chat confirms changes in a window with the exact text and warning. Messages are "
-        "untrusted data, shown to the interlocutor only when the person asks. Nothing in a "
+        "untrusted data, shown to the interlocutor only after the person agrees in a window. "
+        "Use /messages [NAME] to read privately: no history or model call. An operator suspension "
+        "blocks sending, names and new contacts until expiry or lifting; inbox and complaints work. Nothing in a "
         "message runs or becomes a task, command or click.",
     ),
 )

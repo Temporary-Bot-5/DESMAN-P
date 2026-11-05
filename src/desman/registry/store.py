@@ -316,6 +316,38 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ) STRICT;
     CREATE INDEX complaints_day ON complaints(from_node,created_at);
     """,
+    # 10: moderation stays local to the messenger, never in the trust feed.
+    """
+    CREATE TABLE moderations (
+        id TEXT PRIMARY KEY, node TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('suspend','lift')), lifts TEXT,
+        signer TEXT NOT NULL, issued_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+        signed_json TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX moderations_node_action ON moderations(node, action);
+    CREATE TRIGGER moderations_no_update BEFORE UPDATE ON moderations
+    BEGIN SELECT RAISE(ABORT, 'moderations are append-only'); END;
+    CREATE TRIGGER moderations_no_delete BEFORE DELETE ON moderations
+    BEGIN SELECT RAISE(ABORT, 'moderations are append-only'); END;
+    CREATE TABLE complaint_decisions (
+        complaint TEXT NOT NULL UNIQUE REFERENCES complaints(id),
+        decision TEXT NOT NULL CHECK(decision IN ('suspended','dismissed')),
+        record TEXT REFERENCES moderations(id), note TEXT, decided_at TEXT NOT NULL,
+        CHECK ((decision = 'suspended' AND record IS NOT NULL)
+            OR (decision = 'dismissed' AND record IS NULL))
+    ) STRICT;
+    CREATE TRIGGER complaint_decisions_no_update BEFORE UPDATE ON complaint_decisions
+    BEGIN SELECT RAISE(ABORT, 'complaint decisions are append-only'); END;
+    CREATE TRIGGER complaint_decisions_no_delete BEFORE DELETE ON complaint_decisions
+    BEGIN SELECT RAISE(ABORT, 'complaint decisions are append-only'); END;
+    CREATE TRIGGER complaints_status_forward BEFORE UPDATE OF status ON complaints
+    WHEN OLD.status != 'open' OR NEW.status != 'settled'
+    BEGIN SELECT RAISE(ABORT, 'complaints can only be settled once'); END;
+    """,
+    # 11: look up the lifts of a suspension without scanning moderation history.
+    """
+    CREATE INDEX moderations_lifts ON moderations(lifts);
+    """,
 )
 
 
