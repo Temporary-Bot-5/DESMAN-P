@@ -33,6 +33,7 @@ from desman.core import calls, db, netlog
 from desman.i18n import t, tn
 from desman.llm import check
 from desman.llm.openai_compat import key_id
+from desman.stdio import utf8_stream
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -956,6 +957,8 @@ def keys_add(provider: str, label: str, from_stdin: bool) -> None:
     p = keyed_provider(provider)
     manager = load_config()
     # Asked before the lock is taken: nobody waits while the user types.
+    if from_stdin:
+        utf8_stream(sys.stdin)
     value = sys.stdin.readline().strip() if from_stdin else ask_key(p)
     if not value:
         raise click.UsageError(t("no key given"))

@@ -316,6 +316,9 @@ def main(argv: list[str] | None = None) -> int:
     Not a command for people: `desman.evaluation` runs it in a worktree. What it says on
     stderr when it cannot run becomes the reason an evaluation failed, which the database
     keeps as it is, like every stored reason (untranslated)."""
+    from desman.stdio import configure_output
+
+    configure_output()
     parser = argparse.ArgumentParser(prog="desman.bench")
     parser.add_argument("--mode", choices=["fake", "real"], required=True)
     parser.add_argument("--tuning", default="{}", help="The tuning to run with (JSON).")

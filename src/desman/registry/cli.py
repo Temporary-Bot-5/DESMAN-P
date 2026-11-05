@@ -28,6 +28,7 @@ from desman.core.models import Kind
 from desman.i18n import t
 from desman.net import protocol, sign
 from desman.registry import admin, checks, moderation, releases, server, store, work
+from desman.stdio import configure_output
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
@@ -37,6 +38,7 @@ class RegistryGroup(click.Group):
     """Switches to $DESMAN_REGISTRY_LANGUAGE before Click reads the arguments."""
 
     def main(self, *args: Any, **kwargs: Any) -> Any:
+        configure_output()
         code = os.environ.get(LANGUAGE_ENV, "en")
         i18n.set_language(code if code in i18n.CATALOGS else "en")
         i18n.translate_commands(self)

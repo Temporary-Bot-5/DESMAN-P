@@ -16,11 +16,12 @@
 # Security rules: the sandbox for generated code, the workspace guard for files.
 "core/sandbox.py" = "542dd5febdfa0a3745ad0752b6678580362a872d7fdec8eabe9c3066beca5abc"
 "core/workspace.py" = "36f3ae20366db16c4e99ded0ac81d70f9a93856b9c75dcca0c5f984987951001"
+"core/atomic.py" = "08a1ada8de45275dbbbda0bb7d938f56f2003719efbc9d3c1bb6b918f04ab032"
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
 # How a proposal of the Improvement Analyst is judged: the benchmark and its comparison.
-"bench.py" = "60a50afd4e76034bd2a071169fda3d642071a690eed510f02208d6f90e5ca036"
+"bench.py" = "23feb97c39e501659a15f27d2a3db10f6c43d87fe20bef75e669cb1bfff5abbf"
 "evaluation.py" = "a931fe78c83dda1117b4dcf2ec1937126987ad8fb0c82746cdc3a3ffb67b7d96"
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
 "applying.py" = "655a1ac6db3304e4d031a4fcdd627ae046f67c322b9e339cbf5d403bfb21f368"
