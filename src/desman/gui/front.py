@@ -5,7 +5,7 @@ from __future__ import annotations
 import _thread
 import io
 from collections import deque
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from threading import Condition
 from typing import Any
@@ -15,7 +15,8 @@ from rich.console import Console, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
-from desman import ui
+from desman import providers, ui
+from desman.config import ConfigError, open_config
 
 
 class Answer(BaseModel):
@@ -30,7 +31,7 @@ class Answer(BaseModel):
 class WebFront(ui.Front):
     """Adapt synchronous UI calls to browser state without moving authority to the page."""
 
-    def __init__(self, limit: int = 5000) -> None:
+    def __init__(self, limit: int = 5000, redact: Callable[[str], str] | None = None) -> None:
         self.condition = Condition()
         self.events: deque[dict[str, Any]] = deque(maxlen=limit)
         self.seq = 0
@@ -40,6 +41,9 @@ class WebFront(ui.Front):
         self._answer: dict[str, Any] | None = None
         self._prompt_id = 0
         self.busy = False
+        self.redact: Callable[[str], str] = redact or redact_keys
+        """What typed text is shown as: the event log is replayed to every reload, so a key
+        pasted into a line never stays in it (the chat itself cuts it before keeping it)."""
         self.ended = False
 
     def emit(self, event_type: str, **data: Any) -> None:
@@ -189,6 +193,8 @@ class WebFront(ui.Front):
             echo: Any = None if cancelled else value
             if kind == "secret":
                 echo = "••••"
+            elif isinstance(echo, str):  # a key pasted into the chat: cut as the chat cuts it
+                echo = self.redact(echo)
             elif not cancelled and kind in {"select", "checkbox"}:
                 choices = [i["label"] for i in prompt["items"] if "heading" not in i]
                 echo = choices[value] if kind == "select" else [choices[i] for i in value]
@@ -286,6 +292,15 @@ class WebFront(ui.Front):
         stream = Output(self)
         with redirect_stdout(stream), redirect_stderr(stream):
             yield
+
+
+def redact_keys(text: str) -> str:
+    """`text` with the configured keys and anything shaped like a key cut out."""
+    try:
+        config = open_config().load()
+    except (ConfigError, OSError):
+        config = None  # the shapes of keys are still cut
+    return providers.redact_keys(text, config)[0]
 
 
 class Output(io.TextIOBase):

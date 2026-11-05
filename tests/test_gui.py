@@ -507,3 +507,48 @@ def test_bold_theme_styles_keep_their_colour() -> None:
         assert style.bold and style.color is not None
         assert style.color.triplet is not None and style.color.triplet.hex == colour.lower()
     assert ui.ACCENT.lower() in WebFront.render(Text("A", style="bold accent"))
+
+
+def test_a_key_typed_into_a_line_is_not_echoed() -> None:
+    """The event log is replayed on every reload: a pasted key must not stay in it."""
+    front = WebFront()
+    key = "gsk_" + "A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S7t8"
+    said = f"my key is {key} ok"
+    assert roundtrip(front, front.line, said)[0] == said  # the chat itself cuts it, and warns
+    echoed = json.dumps(front.poll(0, 0))
+    assert key not in echoed and "my key is" in echoed
+    custom = WebFront(redact=lambda text: text.replace("secret-word", "[cut]"))
+    roundtrip(custom, lambda: custom.text("Name"), "a secret-word here")
+    assert "secret-word" not in json.dumps(custom.poll(0, 0))
+
+
+def test_a_startup_error_is_shown_on_the_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman.gui import app as gui_app
+
+    apps: list[Server] = []
+
+    class HTTP:
+        def serve_forever(self) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            pass
+
+        def server_close(self) -> None:
+            pass
+
+    def http(app: Server) -> HTTP:
+        apps.append(app)
+        return HTTP()
+
+    def broken() -> None:
+        raise click.ClickException("config.json does not load: fix it or run desman config reset")
+
+    monkeypatch.setattr(gui_app, "http_server", http)
+    monkeypatch.setattr(gui_app, "load_config", broken)
+    with pytest.raises(click.ClickException):  # the CLI still exits with an error
+        gui_app.run(False, False, 0, False, sleep=lambda _: None)
+    [app] = apps
+    events = list(app.front.events)
+    assert [e["type"] for e in events][-2:] == ["out", "end"]
+    assert "config.json does not load" in events[-2]["html"]

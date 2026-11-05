@@ -53,6 +53,9 @@ def run(
                     conn.close()
             except (KeyboardInterrupt, ui.Cancelled):
                 pass
+            except click.ClickException as e:  # a broken config or database: say so on the page
+                ui.error(e.format_message())
+                raise
             finally:
                 front.end()
                 sleep(0.5)
