@@ -900,6 +900,8 @@ class Chat:
                 body = protocol.InboxQuery(with_name=line.strip()[len(name) :].strip() or None)
                 result = messenger_cli.perform(open_config(), self.store.conn, body)
                 messenger_cli.print_result(result, view="messages")
+            except ConfigError as e:
+                ui.error(str(e))
             except ValidationError:
                 ui.error(t("Invalid messenger request; nothing was sent."))
             except click.ClickException as e:

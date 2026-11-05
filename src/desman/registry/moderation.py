@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -142,7 +142,7 @@ def _valid(
         body = p.Moderation.model_validate(signed.record.body)
     except (sign.Refused, ValidationError):
         return None
-    if body.action != "suspend" or body.node != row["node"]:
+    if body.action != row["action"] or body.node != row["node"] or body.lifts != row["lifts"]:
         return None
     return p.Suspension(
         until=signed.record.expires_at,
@@ -157,7 +157,6 @@ def suspension(
 ) -> p.Suspension | None:
     rows = conn.execute(
         "SELECT s.* FROM moderations s WHERE s.node=? AND s.action='suspend' AND s.expires_at>? "
-        "AND NOT EXISTS (SELECT 1 FROM moderations l WHERE l.action='lift' AND l.lifts=s.id) "
         "ORDER BY s.issued_at DESC,s.rowid DESC",
         (node, db.to_iso(now)),
     ).fetchall()
@@ -166,18 +165,28 @@ def suspension(
     root = sign.load_root(sign.ROOT_PUB) if root is None else root
     for row in rows:
         found = _valid(conn, row, root, now)
-        if found is not None:
+        if found is not None and not _lifted(conn, row["id"], root, now):
             return found
     return None
 
 
-def moderations(conn: sqlite3.Connection) -> list[ModerationRow]:
+def _lifted(conn: sqlite3.Connection, id: str, root: Ed25519PublicKey, now: datetime) -> bool:
+    return any(
+        _valid(conn, row, root, now) is not None
+        for row in conn.execute("SELECT * FROM moderations WHERE action='lift' AND lifts=?", (id,))
+    )
+
+
+def moderations(
+    conn: sqlite3.Connection, *, now: datetime | None = None, root: Ed25519PublicKey | None = None
+) -> list[ModerationRow]:
+    now = datetime.now(UTC) if now is None else now
+    root = sign.load_root(sign.ROOT_PUB) if root is None else root
     return [
-        ModerationRow.model_validate(dict(row))
+        ModerationRow.model_validate({**dict(row), "lifted": _lifted(conn, row["id"], root, now)})
         for row in conn.execute(
-            "SELECT s.id,s.node,s.action,s.lifts,s.signer,s.issued_at,s.expires_at,"
-            "EXISTS(SELECT 1 FROM moderations l WHERE l.action='lift' AND l.lifts=s.id) AS lifted "
-            "FROM moderations s ORDER BY s.issued_at DESC,s.rowid DESC"
+            "SELECT id,node,action,lifts,signer,issued_at,expires_at "
+            "FROM moderations ORDER BY issued_at DESC,rowid DESC"
         )
     ]
 
@@ -186,7 +195,7 @@ def _keep(
     conn: sqlite3.Connection,
     operator: sign.NodeKey,
     fields: dict[str, Any],
-    days: int,
+    lifetime: timedelta,
     now: datetime,
     root_pub: Path | None,
 ) -> ModerationRow:
@@ -197,7 +206,6 @@ def _keep(
     root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
     believed = store.trust(conn, root, now)
     assigned = believed.operator(operator.fingerprint)
-    lifetime = timedelta(days=days)
     if assigned is not None:
         lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
     if lifetime <= timedelta(0):
@@ -240,7 +248,7 @@ def _keep(
             "complaints": body.complaints,
         },
     )
-    return next(row for row in moderations(conn) if row.id == record.id)
+    return next(row for row in moderations(conn, now=now, root=root) if row.id == record.id)
 
 
 def suspend(
@@ -273,7 +281,7 @@ def suspend(
             conn,
             operator,
             {"node": node, "action": "suspend", "reason": reason, "complaints": ids},
-            days,
+            timedelta(days=days),
             now,
             root_pub,
         )
@@ -300,9 +308,7 @@ def lift(
         if rows:
             row = rows[0]
             found = _valid(conn, row, root, now)
-            if conn.execute(
-                "SELECT 1 FROM moderations WHERE action='lift' AND lifts=?", (row["id"],)
-            ).fetchone():
+            if _lifted(conn, row["id"], root, now):
                 found = None
         else:
             found = suspension(conn, _node(conn, ref), now, root=root)
@@ -317,7 +323,7 @@ def lift(
                 "reason": reason,
                 "lifts": found.record,
             },
-            1,
+            max(timedelta(seconds=1), found.until - now),
             now,
             root_pub,
         )

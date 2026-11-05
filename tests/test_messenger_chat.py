@@ -162,3 +162,15 @@ def test_suspended_refusal(conn: sqlite3.Connection, joined: Config, clock: Fake
         messenger_cli.perform(
             open_config(), conn, p.SetName(name="alice"), transport=transport, clock=clock
         )
+
+
+def test_slash_malformed_config_continues(
+    conn: sqlite3.Connection, wire: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    chat = Chat(Sessions(conn))
+    open_config().config_path.write_text("{malformed", encoding="utf-8")
+    assert chat._slash("/messages")
+    assert "not valid JSON" in capsys.readouterr().err
+    assert chat._slash("/help")
+    assert "/messages" in capsys.readouterr().out
+    assert wire == []

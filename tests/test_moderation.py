@@ -118,7 +118,7 @@ def test_suspend_enforcement_and_lift(
         assert moderation.suspension(conn, b.fingerprint, clock()) is None
         with pytest.raises(admin.AdminError, match="No suspension"):
             moderation.lift(conn, operator, "bobby", "again", now=clock())
-        assert next(r for r in moderation.moderations(conn) if r.id == added.id).lifted
+        assert next(r for r in moderation.moderations(conn, now=clock()) if r.id == added.id).lifted
     assert call(b, p.MESSENGER_INBOX)["suspended"] is None
     assert call(b, p.MESSENGER_NAME, name="new_name")["name"] == "new_name"
 
@@ -342,3 +342,51 @@ def test_citations_are_one_atomic_decision(
         assert moderation.complaint(conn, id).status == "open"
         assert moderation.complaint(conn, id).decisions == []
         assert moderation.moderations(conn) == []
+
+
+def test_revoked_lift_restores_suspension(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, root: sign.NodeKey, clock: FakeClock
+) -> None:
+    b = named(registry, clock, "bobby")
+    other = sign.NodeKey.generate()
+    with store.open_registry(db_path) as conn:
+        admin.assign(conn, root, other.public, {sign.Scope.MODERATION}, days=30, now=clock())
+        added = moderation.suspend(
+            conn, operator, "bobby", "reason", days=5, complaints=[], now=clock()
+        )
+        moderation.lift(conn, other, added.id, "resolved", now=clock())
+        assert moderation.suspension(conn, b.fingerprint, clock()) is None
+        assert next(r for r in moderation.moderations(conn, now=clock()) if r.id == added.id).lifted
+        admin.revoke(conn, root, other.fingerprint, "revoked", now=clock())
+        assert moderation.suspension(conn, b.fingerprint, clock()).record == added.id  # type: ignore[union-attr]
+        assert not next(
+            r for r in moderation.moderations(conn, now=clock()) if r.id == added.id
+        ).lifted
+        # A revoked lift must not prevent a currently authorized operator lifting it again.
+        moderation.lift(conn, operator, added.id, "resolved again", now=clock())
+        assert moderation.suspension(conn, b.fingerprint, clock()) is None
+
+
+def test_lift_lasts_until_original_suspension_end(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    b = named(registry, clock, "bobby")
+    with store.open_registry(db_path) as conn:
+        added = moderation.suspend(
+            conn, operator, "bobby", "reason", days=5, complaints=[], now=clock()
+        )
+        clock.advance(3600)
+        lifted = moderation.lift(conn, operator, added.id, "resolved", now=clock())
+        assert lifted.expires_at == added.expires_at
+        clock.advance(2 * 86400)
+        assert moderation.suspension(conn, b.fingerprint, clock()) is None
+        assert next(r for r in moderation.moderations(conn, now=clock()) if r.id == added.id).lifted
+        with pytest.raises(admin.AdminError, match="No suspension"):
+            moderation.lift(conn, operator, added.id, "again", now=clock())
+        clock.advance(3 * 86400 - 3601)
+        assert moderation.suspension(conn, b.fingerprint, clock()) is None
+        clock.advance(1)
+        assert moderation.suspension(conn, b.fingerprint, clock()) is None
+        assert not next(
+            r for r in moderation.moderations(conn, now=clock()) if r.id == added.id
+        ).lifted

@@ -1157,7 +1157,7 @@ def moderation_list(ctx: click.Context, as_json: bool) -> None:
     """List signed moderation records."""
     conn = _open_db(ctx)
     try:
-        rows = moderation.moderations(conn)
+        rows = moderation.moderations(conn, now=_now())
     finally:
         conn.close()
     if as_json:
