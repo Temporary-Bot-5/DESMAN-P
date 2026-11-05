@@ -37,10 +37,20 @@ DESMAN(P) is meant to be simple and approachable for most people, not only for d
 The long-term goal: what DESMAN does on one machine, done by a network of DESMAN instances on machines anywhere in the world. It comes after the prototype (ROADMAP phase G) and is opt-in.
 
 - **Donated modules.** With desman-global turned on (a separate option, the last step of configuration, with its own commands), the person chooses which modules (API keys, local models) and which accumulated memory to donate to **DESMAN-EVOLUTION**. Without it, the instance takes no part in evolution, gets no updates from it, and cannot contact other instances.
-- **Registry and clusters.** Each instance registers in a shared registry and advertises what it can do. When enough free modules are available, they are assembled into a cluster run by an operator (one of the nodes, like the coordinator on one machine); the cluster receives its task from a global operator.
-- **Hierarchy of authority.** For now the only global operator is the owner's instance on the owner's server, directing the owner's test machines. Later DESMAN may appoint operators itself. Authority is a signed chain from a root key: a node acts only on signed assignments and tasks.
+- **The end state: a self-sustaining network.** In the end DESMAN runs and maintains itself on the computers of the people who joined desman-global. Work, stored information and requests are spread over the whole network, so it does not depend on any one machine. It has three levels:
+  - **Nodes** are people's instances. They do the work with the modules their people donated.
+  - **Cluster operators** are a separate kind of operator, and DESMAN itself appoints them from among the nodes. When enough free modules are available, a cluster operator assembles them into agents (planner, executors, reviewers, as the coordinator does on one machine) and supervises them. It also keeps the information that matters to its own cluster, plus copies of what matters to other clusters.
+  - **Global operators** are people. They direct the clusters and give them their tasks. Each keeps a copy of all the important information the cluster operators hold, so there is always a backup.
+- **Where it starts.** Each instance registers in a shared registry and advertises what it can do. For now the only global operator is the owner, on the owner's server, directing the owner's test machines. Until there are cluster operators, the registry hands work to the nodes itself. Authority is a signed chain from a root key: a node acts only on signed assignments and tasks, and that includes the appointment of a cluster operator.
 - **Bug reports.** A person reports a bug in the chat; the agent sends it to global memory after the person sees and confirms what will be sent.
 - **People, too.** DESMAN evolves together with people, so global users can message each other (a simple messenger, contacts by mutual consent). This is between people; agents still communicate only through structured records.
+
+Open questions for the ADR that starts the cluster operators (not decided yet):
+
+- **Trust in an appointed operator.** People write the rules by which DESMAN appoints a cluster operator (how long the node has worked, how its results held up when rechecked). An appointment is signed, short-lived and revocable. Its scope is only the work of its cluster: never releases, moderation, or appointing others.
+- **Reachability.** Home machines sit behind NAT and go offline. Either the nodes keep reaching their cluster operator through the registry, or the owner revisits the rule against peer-to-peer networking.
+- **What is stored where.** Only network records (jobs, results, signed records) go to other machines, never a person's own tasks, chat, profile or keys. A copy is signed, so whoever holds it cannot alter it. Disk space is donated by the person with a quota, like modules. Each piece is kept on several nodes, because nodes come and go.
+- **An operator that disappears.** The operator role is held under a lease, like a subtask. Another node takes over from the copies.
 
 Safety rules specific to the network:
 
