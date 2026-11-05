@@ -441,3 +441,27 @@ def test_lift_lasts_until_original_suspension_end(
         assert not next(
             r for r in moderation.moderations(conn, now=clock()) if r.id == added.id
         ).lifted
+
+
+def test_root_signed_suspension_counts(
+    registry: Registry, db_path: Path, root: sign.NodeKey, root_pub: Path, clock: FakeClock
+) -> None:
+    named(registry, clock, "bobby")
+    with store.open_registry(db_path) as conn:
+        added = moderation.suspend(conn, root, "bobby", "by the root", complaints=[], now=clock())
+        found = moderation.suspension(conn, added.node, clock(), root=root.public)
+        assert found is not None and found.record == added.id
+        moderation.lift(conn, root, added.id, "done", now=clock())
+        assert moderation.suspension(conn, added.node, clock(), root=root.public) is None
+
+
+def test_future_dated_suspension_waits_for_its_time(
+    registry: Registry, db_path: Path, operator: sign.NodeKey, clock: FakeClock
+) -> None:
+    named(registry, clock, "bobby")
+    with store.open_registry(db_path) as conn:
+        ahead = clock() + timedelta(hours=1)
+        added = moderation.suspend(conn, operator, "bobby", "later", complaints=[], now=ahead)
+        root_key = sign.load_root(sign.ROOT_PUB)
+        assert moderation.suspension(conn, added.node, clock(), root=root_key) is None
+        assert moderation.suspension(conn, added.node, ahead, root=root_key) is not None

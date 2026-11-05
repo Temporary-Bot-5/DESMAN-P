@@ -134,22 +134,29 @@ def _node(conn: sqlite3.Connection, ref: str) -> str:
 
 
 def _valid(row: sqlite3.Row, believed: sign.Trust, now: datetime) -> p.Suspension | None:
-    """The record as a node would take it now: signed by an operator with scope `moderation`,
-    not revoked, issued within its assignment, both still in term. Uses `Trust`'s public view
-    only (receiving a moderation record would mark its id as seen)."""
+    """The record as a node would take it now (as `Trust.receive` checks it): signed by the
+    root, or by an operator with scope `moderation`, not revoked, issued within its assignment
+    and not ahead of the clock, both still in term. Uses `Trust`'s public view only (receiving
+    a moderation record would mark its id as seen)."""
     try:
         signed = sign.Signed.model_validate_json(row["signed_json"])
         record = signed.record
         if record.kind is not sign.RecordKind.MODERATION or believed.is_revoked(record.signer):
             return None
-        found = believed.operator(record.signer)
-        if found is None or sign.Scope.MODERATION not in found.scopes:
+        if record.issued_at > now + sign.SKEW or now >= record.expires_at:
             return None
-        if not found.issued_at <= record.issued_at < found.expires_at:
-            return None
-        if now >= found.expires_at or now >= record.expires_at:
-            return None
-        sign.check_signature(signed, found.key)
+        if record.signer == believed.root_fingerprint:
+            key = believed.root
+        else:
+            found = believed.operator(record.signer)
+            if found is None or sign.Scope.MODERATION not in found.scopes:
+                return None
+            if not found.issued_at <= record.issued_at < found.expires_at:
+                return None
+            if now >= found.expires_at:
+                return None
+            key = found.key
+        sign.check_signature(signed, key)
         body = p.Moderation.model_validate(record.body)
     except (sign.Refused, ValidationError):
         return None
