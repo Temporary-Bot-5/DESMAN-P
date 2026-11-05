@@ -223,6 +223,8 @@ def _find_prlimit() -> str | None:
 
 
 def _set_limits(limits: Limits) -> Callable[[], None]:
+    if sys.platform == "win32":
+        raise RuntimeError("the sandbox needs Linux (bubblewrap)")
     import resource  # POSIX only: importing this module must still work elsewhere
 
     def apply() -> None:  # in the child, between fork and exec
@@ -309,7 +311,10 @@ def _collect(
 
 def _kill(process: subprocess.Popen[bytes]) -> None:
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
+        if sys.platform != "win32":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
 
 
 def _exit_code(code: int) -> int:

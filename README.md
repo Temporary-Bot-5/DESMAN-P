@@ -23,6 +23,8 @@ gradually improve its own components under human supervision.
 
 ## Quick Start
 
+On Windows agents cannot run code: the sandbox needs Linux (bubblewrap).
+
 ```bash
 uv venv -p python3.12 .venv
 uv pip install -e ".[dev]"

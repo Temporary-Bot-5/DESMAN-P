@@ -160,6 +160,7 @@ def test_concurrent_key_adds_both_survive(tmp_path: Path) -> None:
             [sys.executable, "-m", "desman", "keys", "add", "groq", "--stdin"],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             env=env,
         )
         for _ in range(8)
@@ -168,7 +169,9 @@ def test_concurrent_key_adds_both_survive(tmp_path: Path) -> None:
         assert proc.stdin is not None
         proc.stdin.write(f"gsk_concurrent_{i}\n".encode())
         proc.stdin.close()
-    assert [proc.wait(timeout=60) for proc in procs] == [0] * 8
+    codes = [proc.wait(timeout=60) for proc in procs]
+    errors = [proc.stderr.read().decode("utf-8", errors="replace") for proc in procs if proc.stderr]
+    assert codes == [0] * 8, errors
     values = sorted(k.value for k in saved().load().keys("GROQ_API_KEY"))
     assert values == sorted(f"gsk_concurrent_{i}" for i in range(8))
 

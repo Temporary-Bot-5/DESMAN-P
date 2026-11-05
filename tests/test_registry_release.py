@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import sqlite3
 from datetime import timedelta
@@ -14,7 +13,7 @@ from click.testing import CliRunner
 
 from conftest import FakeClock
 from desman import applying, improve
-from desman.core import db
+from desman.core import db, filelock
 from desman.net import protocol, sign
 from desman.registry import admin, checks, releases, store
 from desman.registry.cli import cli
@@ -182,7 +181,7 @@ def test_refusals_change_nothing(
         lock = (registry_dir / "releases.lock").open("a")
         try:
             if case == "lock":
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                filelock.lock(lock.fileno(), blocking=False)
             before = git(checkout, "rev-parse", "HEAD")
             snapshot = list(conn.iterdump())
             with pytest.raises(admin.AdminError):

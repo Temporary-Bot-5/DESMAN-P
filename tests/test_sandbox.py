@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -186,6 +187,11 @@ def missing() -> Sandbox:
 
 
 def test_without_a_working_bwrap_nothing_runs(ws: Workspace, tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        with pytest.raises(SandboxUnavailable, match="the sandbox needs Linux"):
+            missing().run(["touch", "x"], ws.root)
+        assert ws.files() == []
+        return
     with pytest.raises(SandboxUnavailable, match="cannot be started"):
         missing().run(["touch", "x"], ws.root)
     refusing = tmp_path / "bwrap"
@@ -214,7 +220,12 @@ def test_a_timeout_asked_for_is_never_longer_than_the_limit(ws: Workspace) -> No
 
 def test_without_bwrap_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("desman.core.sandbox.shutil.which", lambda name: None)
-    assert Sandbox().unavailable() == "bubblewrap (bwrap) is not installed"
+    expected = (
+        "the sandbox needs Linux (bubblewrap)"
+        if sys.platform == "win32"
+        else "bubblewrap (bwrap) is not installed"
+    )
+    assert Sandbox().unavailable() == expected
 
 
 # ── The run_command tool ────────────────────────────────────────────────────
@@ -273,7 +284,11 @@ def test_run_command_needs_a_working_sandbox(ws: Workspace) -> None:
     result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
     assert not result.ok and "cannot run here" in (result.error or "")
     [(action, details)] = entries
-    assert action == "tool_refused" and "cannot be started" in details["reason"]
+    assert (
+        action == "tool_refused"
+        and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
+        in details["reason"]
+    )
 
 
 def test_the_result_the_model_gets_and_the_audit(ws: Workspace) -> None:
@@ -372,4 +387,8 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
     config.permissions.shell_execution = True
     ConfigManager(default_config_path()).save(config)
     output = desman_run()
-    assert warning in output and "cannot be started" in output
+    assert (
+        warning in output
+        and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
+        in output
+    )

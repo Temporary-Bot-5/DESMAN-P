@@ -265,7 +265,7 @@ def _build(tree: Path, changes: list[dict[str, Any]], diff: str) -> None:
     if built != diff:
         raise EvaluationError("the diff is not the one the proposal's texts make")
     for path, text in texts.items():
-        (package / path).write_text(text, encoding="utf-8")
+        (package / path).write_text(text, encoding="utf-8", newline="")
     status = _git(tree, "status", "--porcelain", "--untracked-files=all", "--ignored")
     expected = {f" M {improve.SOURCE_PREFIX}{path}" for path in texts}
     if set(status.splitlines()) != expected:
@@ -317,20 +317,22 @@ def _assigned(node: ast.stmt) -> str | None:
     return None
 
 
-def _git(where: Path, *args: str) -> str:
+def _git(where: Path, *args: str, stdin: str | None = None) -> str:
     try:
         done = subprocess.run(
-            ["git", "-C", str(where), *args],
+            ["git", "-c", "core.autocrlf=false", "-C", str(where), *args],
+            input=None if stdin is None else stdin.encode("utf-8"),
             capture_output=True,
-            text=True,
             timeout=GIT_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         raise EvaluationError(f"git {args[0]}: {e}") from e
     if done.returncode != 0:
-        raise EvaluationError(f"git {args[0]}: {done.stderr.strip() or done.returncode}")
-    return done.stdout
+        raise EvaluationError(
+            f"git {args[0]}: {done.stderr.decode('utf-8').strip() or done.returncode}"
+        )
+    return done.stdout.decode("utf-8")
 
 
 # ── A run ────────────────────────────────────────────────────────────────────
@@ -383,6 +385,7 @@ def _run(
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=TIMEOUT[mode] if timeout is None else timeout,
             check=False,
         )

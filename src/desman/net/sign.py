@@ -46,6 +46,7 @@ import binascii
 import hashlib
 import json
 import os
+import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -153,7 +154,7 @@ def create_node_key(path: Path) -> NodeKey:
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         try:
-            if os.name != "nt":
+            if sys.platform != "win32":
                 os.fchmod(fd, 0o600)
             os.write(fd, pem)
             os.fsync(fd)

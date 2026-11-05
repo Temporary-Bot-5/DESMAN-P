@@ -54,6 +54,7 @@ from desman.net import node
 from desman.planner import Planned, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
+from desman.stdio import configure_output
 from desman.tuning_cli import tuning
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -81,6 +82,7 @@ class DesmanGroup(click.Group):
     arguments, so help and Click's own errors are translated too."""
 
     def main(self, *args: Any, **kwargs: Any) -> Any:
+        configure_output()
         i18n.set_language(_configured_language())
         i18n.translate_commands(self)
         return super().main(*args, **kwargs)

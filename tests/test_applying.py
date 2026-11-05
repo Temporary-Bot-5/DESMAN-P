@@ -6,9 +6,11 @@ reverted the same way. The checkout is a copy of this one, a git repository of i
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -93,6 +95,30 @@ def test_a_proposal_is_applied_as_a_commit_on_the_branch(checkout: Path) -> None
     [entry] = operator.entries(s.conn)
     assert entry.action == "operator_proposal_applied"
     assert entry.details == {"proposal": p.id, "commit": done.commit, "settings": []}
+
+
+@pytest.mark.parametrize("helper", [applying._git, evaluation._git])
+def test_git_blob_bytes_are_preserved(checkout: Path, helper: Callable[..., str]) -> None:
+    blob = helper(checkout, "hash-object", "-w", "--stdin", stdin="a\nb\n").strip()
+    assert blob == hashlib.sha1(b"blob 4\0a\nb\n").hexdigest()
+    assert helper(checkout, "cat-file", "-p", blob) == "a\nb\n"
+    blob = helper(checkout, "hash-object", "-w", "--stdin", stdin="привет\r\n").strip()
+    assert helper(checkout, "cat-file", "-p", blob) == "привет\r\n"
+
+
+@pytest.mark.parametrize("autocrlf", ["true", "false"])
+def test_apply_and_revert_ignore_checkout_autocrlf(checkout: Path, autocrlf: str) -> None:
+    git(checkout, "config", "core.autocrlf", autocrlf)
+    planner = package(checkout) / "planner.py"
+    original = planner.read_text(encoding="utf-8")
+    s = store()
+    p = a_proposal(s, checkout)
+    apply(s, p, checkout)
+    assert planner_rules(checkout).endswith(" Prefer one subtask.")
+    assert b"\r\n" not in planner.read_bytes()
+    revert(s, p, checkout)
+    assert planner.read_text(encoding="utf-8") == original
+    assert git(checkout, "status", "--porcelain") == ""
 
 
 def test_the_checkouts_own_identity_commits(checkout: Path) -> None:

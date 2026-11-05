@@ -5,7 +5,6 @@ in process, behind `httpx.MockTransport` (ADR 0004, decision 14)."""
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import sqlite3
@@ -23,7 +22,7 @@ from conftest import FakeClock
 from desman import global_cli
 from desman.cli import cli
 from desman.config import Config, ConfigManager, Donation, Network, default_config_path
-from desman.core import db, netlog
+from desman.core import db, filelock, netlog
 from desman.core.store import Store
 from desman.net import node, protocol, sign
 from desman.net.node import Change, Node
@@ -677,7 +676,7 @@ def _lock_is_held(manager: ConfigManager) -> bool:
     lock = manager.config_path.parent / f".{manager.config_path.name}.lock"
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        filelock.lock(fd, blocking=False)
     except BlockingIOError:
         return True
     finally:

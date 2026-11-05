@@ -9,14 +9,9 @@ import json
 import os
 import secrets
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Any, Literal
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows
-    fcntl = None  # type: ignore[assignment]
 
 import click
 from pydantic import (
@@ -30,6 +25,8 @@ from pydantic import (
     ValidationError,
 )
 
+from desman.core import filelock
+from desman.core.atomic import replace_file
 from desman.tuning_limits import TUNING_BOUNDS as TUNING_BOUNDS
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
@@ -409,13 +406,13 @@ class ConfigManager:
         tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
                 f.flush()
                 os.fsync(f.fileno())
             if target.exists():
                 os.chmod(target, 0o600)  # the old inode, shared by any other hard link
-            os.replace(tmp, target)
+            replace_file(tmp, target)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
@@ -435,15 +432,18 @@ class ConfigManager:
     @contextmanager
     def locked(self) -> Iterator[None]:
         """Hold the config's lock: other DESMAN processes that change it wait meanwhile.
-        Advisory (flock on a lock file next to it); a no-op where flock does not exist."""
+        Advisory, on a lock file next to the config, shared by all processes."""
         lock_path = self.config_path.parent / f".{self.config_path.name}.lock"
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            if fcntl is not None:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
+            filelock.lock(fd)
+            try:
+                yield
+            finally:
+                with suppress(OSError):
+                    filelock.unlock(fd)
         finally:
-            os.close(fd)  # releases the lock
+            os.close(fd)
 
     @contextmanager
     def edit(self) -> Iterator[Config]:

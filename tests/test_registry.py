@@ -519,6 +519,12 @@ def test_only_the_root_of_root_pub_signs(
         admin.load_root_key(other)
     _write_key(good, root)
     assert admin.load_root_key(good).fingerprint == root.fingerprint
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX key modes; registry runs on Linux")
+def test_root_key_must_be_private(tmp_path: Path, root: sign.NodeKey, root_pub: Path) -> None:
+    good = tmp_path / "root.key"
+    _write_key(good, root)
     good.chmod(0o644)
     with pytest.raises(admin.AdminError, match="cannot be used"):
         admin.load_root_key(good)
@@ -544,7 +550,8 @@ def test_backup_is_a_consistent_private_copy(
     Node(registry, clock).register([GROQ])
     dest = tmp_path / "copy.db"
     admin.backup(db_path, dest)
-    assert dest.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":  # POSIX modes; still check backup contents on Windows
+        assert dest.stat().st_mode & 0o777 == 0o600
     copy = store.open_registry(dest)
     try:
         assert len(store.nodes(copy)) == 1

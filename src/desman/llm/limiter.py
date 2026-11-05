@@ -22,6 +22,7 @@ import getpass
 import hashlib
 import os
 import sqlite3
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -29,7 +30,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from desman.core import db
+from desman.core import db, filelock
 from desman.llm.base import (
     LLM,
     Completion,
@@ -39,11 +40,6 @@ from desman.llm.base import (
     Request,
 )
 from desman.llm.openai_compat import OpenAICompatible
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - not POSIX
-    fcntl = None  # type: ignore[assignment]
 
 MAX_WAIT = 10.0
 """Seconds a call may wait for its turn here (as long as `router.Backoff` waits out a limit)."""
@@ -220,6 +216,8 @@ def lock_dir() -> Path:
 
 def machine_load() -> float | None:
     """The load average of the last minute per CPU; None where the system does not tell."""
+    if sys.platform == "win32":
+        return None
     try:
         load = os.getloadavg()[0]
     except (AttributeError, OSError):
@@ -277,27 +275,26 @@ class Local:
 
     @contextmanager
     def _slot(self) -> Iterator[None]:
-        if fcntl is None:  # no file locks here: calls are not shared out between processes
-            yield
-            return
         folder = self.locks or lock_dir()
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if folder.stat().st_uid != os.getuid():  # someone else's: their files are not our slots
+        if (
+            sys.platform != "win32" and folder.stat().st_uid != os.getuid()
+        ):  # someone else's: their files are not our slots
             yield
             return
         name = hashlib.sha256(self.server.encode()).hexdigest()[:16]
         waited = 0.0
         while True:
             for n in range(SLOTS):
-                with open(folder / f"{name}.{n}.lock", "a") as handle:
+                with open(folder / f"{name}.{n}.lock", "a+b") as handle:
                     try:
-                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        filelock.lock(handle.fileno(), blocking=False)
                     except BlockingIOError:
                         continue
                     try:
                         yield
                     finally:
-                        fcntl.flock(handle, fcntl.LOCK_UN)
+                        filelock.unlock(handle.fileno())
                     return
             if waited + 1.0 > MAX_WAIT:
                 raise Busy(self.name, BUSY_PAUSE, "the server is answering another request")

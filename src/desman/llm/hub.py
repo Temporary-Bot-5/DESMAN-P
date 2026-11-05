@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -256,8 +257,10 @@ def memory() -> Memory:
 
 
 def _ram() -> int | None:
+    if sys.platform == "win32":
+        return _windows_ram()
     try:
-        text = Path("/proc/meminfo").read_text()
+        text = Path("/proc/meminfo").read_text(encoding="utf-8")
     except OSError:
         text = ""
     found = re.search(r"^MemAvailable:\s+(\d+) kB", text, re.M)
@@ -288,8 +291,8 @@ def _video() -> int | None:
     free = 0
     for card in Path("/sys/class/drm").glob("card*/device"):
         try:
-            total = int((card / "mem_info_vram_total").read_text())
-            used = int((card / "mem_info_vram_used").read_text())
+            total = int((card / "mem_info_vram_total").read_text(encoding="utf-8"))
+            used = int((card / "mem_info_vram_used").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         free += max(0, total - used)
@@ -385,3 +388,36 @@ def size_text(size: int) -> str:
     if size >= 1_000_000_000:
         return f"{size / 1_000_000_000:.1f} GB"
     return f"{max(1, round(size / 1_000_000))} MB"
+
+
+def _windows_ram() -> int | None:
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [
+                ("length", wintypes.DWORD),
+                ("load", wintypes.DWORD),
+                *[
+                    (name, ctypes.c_ulonglong)
+                    for name in (
+                        "total_phys",
+                        "avail_phys",
+                        "total_page",
+                        "avail_page",
+                        "total_virtual",
+                        "avail_virtual",
+                        "avail_extended",
+                    )
+                ],
+            ]
+
+        status = Status()
+        status.length = ctypes.sizeof(status)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(Status)]
+        kernel.GlobalMemoryStatusEx.restype = wintypes.BOOL
+        return int(status.avail_phys) if kernel.GlobalMemoryStatusEx(ctypes.byref(status)) else None
+    else:
+        return None

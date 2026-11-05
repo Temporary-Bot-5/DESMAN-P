@@ -125,7 +125,7 @@ def copy_package(tmp_path: Path) -> Path:
 
 def apply(tmp_path: Path, diff: str) -> None:
     patch = tmp_path / "p.diff"
-    patch.write_text("# a comment line, as in the file DESMAN writes\n\n" + diff)
+    patch.write_bytes(("# a comment line, as in the file DESMAN writes\n\n" + diff).encode("utf-8"))
     subprocess.run(["git", "apply", str(patch)], cwd=tmp_path, check=True)
 
 
@@ -312,7 +312,8 @@ def test_analyze_proposes_a_diff_and_applies_nothing(tmp_path: Path) -> None:
     assert p.status is Status.PROPOSED and p.diff is not None
     assert p.details["evidence"] == ["the criteria ask for a live seat map"]
     path = db.default_db_path().parent / "proposals" / "1.diff"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
+    assert path.read_bytes() == text.encode("utf-8")
     assert text.startswith("# DESMAN proposal 1") and text.endswith(p.diff)
     assert p.summary is not None and p.summary not in text  # the model's words stay in the DB
 

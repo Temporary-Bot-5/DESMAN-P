@@ -247,3 +247,31 @@ def test_checkout_config_wins_over_the_home_one(
     assert old.exists()  # left for the user, never merged or overwritten
     config.adopt_config(old, new)  # even if the new file appears after the check
     assert flat_keys(ConfigManager(new).load()) == {"GROQ_API_KEY": "gsk_new"} and old.exists()
+
+
+def test_windows_streams_write_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import sys
+
+    from desman.stdio import configure_output, utf8_stream
+
+    output = io.BytesIO()
+    errors = io.BytesIO()
+    with (
+        monkeypatch.context() as patch,
+        io.TextIOWrapper(output, encoding="cp1252") as stdout,
+        io.TextIOWrapper(errors, encoding="ascii") as stderr,
+        io.TextIOWrapper(io.BytesIO("ключ\n".encode()), encoding="cp1252") as stdin,
+    ):
+        patch.setattr(sys, "platform", "win32")
+        patch.setattr(sys, "stdout", stdout)
+        patch.setattr(sys, "stderr", stderr)
+        configure_output()
+        stdout.write("✓")
+        stderr.write("✓")
+        stdout.flush()
+        stderr.flush()
+        assert output.getvalue() == "✓".encode()
+        assert errors.getvalue() == "✓".encode()
+        utf8_stream(stdin)
+        assert stdin.readline() == "ключ\n"

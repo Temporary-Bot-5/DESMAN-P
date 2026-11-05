@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Final
 
 from desman.core import db
+from desman.core.atomic import replace_file
 
 WORKSPACES_DIR: Final = "workspaces"
 _TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -245,7 +246,7 @@ class Workspace:
                 f.write(payload)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, target)
+            replace_file(tmp, target)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
