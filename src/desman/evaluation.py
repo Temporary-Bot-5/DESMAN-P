@@ -320,9 +320,10 @@ def _assigned(node: ast.stmt) -> str | None:
 def _git(where: Path, *args: str) -> str:
     try:
         done = subprocess.run(
-            ["git", "-C", str(where), *args],
+            ["git", "-c", "core.autocrlf=false", "-C", str(where), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=GIT_TIMEOUT,
             check=False,
         )
@@ -383,6 +384,7 @@ def _run(
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=TIMEOUT[mode] if timeout is None else timeout,
             check=False,
         )

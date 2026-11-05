@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -107,7 +108,7 @@ def outside(tmp_path: Path) -> Path:
 
 def test_write_read_roundtrip(ws: Workspace) -> None:
     assert ws.write("dir/sub/a.txt", "привет") == "dir/sub/a.txt"
-    assert (ws.root / "dir" / "sub" / "a.txt").read_text() == "привет"
+    assert (ws.root / "dir" / "sub" / "a.txt").read_text(encoding="utf-8") == "привет"
     assert ws.read_text("dir/sub/a.txt") == "привет"
     ws.write("dir/sub/a.txt", b"\x00\x01")
     assert ws.read("dir/sub/a.txt") == b"\x00\x01"
@@ -167,7 +168,7 @@ def test_symlinked_directory_pointing_outside_is_not_followed(ws: Workspace, out
         ws.read("link/secret")
     assert not ws.exists("link/secret")
     assert sorted(os.listdir(outside)) == ["secret"]
-    assert (outside / "secret").read_text() == "keep me"
+    assert (outside / "secret").read_text(encoding="utf-8") == "keep me"
     assert ws.files() == []
 
 
@@ -205,19 +206,20 @@ def test_writing_over_a_symlinked_file_replaces_the_link_not_the_target(
     else:
         with pytest.raises(PathEscapeError, match="symlink"):
             ws.write("evil", "mine")
-    assert (outside / "secret").read_text() == "keep me"
+    assert (outside / "secret").read_text(encoding="utf-8") == "keep me"
 
 
 def test_writing_over_a_hard_link_does_not_write_through(ws: Workspace, outside: Path) -> None:
     os.link(outside / "secret", ws.root / "hard")
     ws.write("hard", "mine")
     assert ws.read_text("hard") == "mine"
-    assert (outside / "secret").read_text() == "keep me"
+    assert (outside / "secret").read_text(encoding="utf-8") == "keep me"
 
 
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+@pytest.mark.skipif(sys.platform == "win32", reason="no FIFOs here")
 def test_reading_a_fifo_does_not_hang(ws: Workspace, secure: bool) -> None:
-    os.mkfifo(ws.root / "pipe")
+    if sys.platform != "win32":
+        os.mkfifo(ws.root / "pipe")
     with pytest.raises((PathEscapeError, FileNotFoundError)):
         ws.read("pipe")
     assert ws.files() == []
@@ -230,7 +232,9 @@ def test_ordinary_os_errors_are_not_disguised(ws: Workspace) -> None:
         ws.read("missing.txt")
     with pytest.raises(NotADirectoryError):
         ws.write("file.txt/below", "x")
-    with pytest.raises(IsADirectoryError):
+    # Windows replace() reports access denied when the destination is a directory.
+    directory_error = PermissionError if sys.platform == "win32" else IsADirectoryError
+    with pytest.raises(directory_error):
         ws.write("dir", "x")
     with pytest.raises((IsADirectoryError, FileNotFoundError, PathEscapeError)):
         ws.read("dir")
@@ -278,7 +282,7 @@ def test_executor_writes_into_its_task_directory(
     root = tmp_path / "ws"
     result = Coordinator(store, executor, accept, workspaces=root, sleep=clock.sleep).run(task_id)
     assert result.status is TaskStatus.DONE
-    assert (root / task_id / "out" / "report.md").read_text() == "# done"
+    assert (root / task_id / "out" / "report.md").read_text(encoding="utf-8") == "# done"
     assert not (root / other_id).exists()
     [sub] = store.list_subtasks(task_id)
     assert store.latest_artifact(sub.id) == {"files": ["out/report.md"]}
@@ -341,7 +345,7 @@ def test_task_directory_replaced_by_a_symlink_later_is_not_followed(
     assert not ws.exists("secret")
     assert ws.files() == []
     assert sorted(os.listdir(outside)) == ["secret"]
-    assert (outside / "secret").read_text() == "keep me"
+    assert (outside / "secret").read_text(encoding="utf-8") == "keep me"
 
 
 @pytest.mark.parametrize("path", ["bad\ud800.txt", "dir/\udcff", "\udfff" * 300])

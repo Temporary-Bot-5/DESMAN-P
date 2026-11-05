@@ -47,6 +47,7 @@ def git(where: Path, *args: str) -> str:
         ["git", "-C", str(where), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
         env={**os.environ, **GIT_ENV},
     ).stdout
@@ -60,6 +61,7 @@ def origin(tmp_path_factory: pytest.TempPathFactory) -> Path:
         ROOT / "src", repo / "src", ignore=shutil.ignore_patterns("__pycache__", "*.egg-info")
     )
     shutil.copy(ROOT / "pyproject.toml", repo)
+    shutil.copy(ROOT / ".gitattributes", repo)
     (repo / "tests").mkdir()
     for name in ("conftest.py", "faults.py", "helpers.py"):  # protected: checked in a checkout
         shutil.copy(ROOT / "tests" / name, repo / "tests")

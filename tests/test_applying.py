@@ -95,6 +95,27 @@ def test_a_proposal_is_applied_as_a_commit_on_the_branch(checkout: Path) -> None
     assert entry.details == {"proposal": p.id, "commit": done.commit, "settings": []}
 
 
+def test_git_blob_text_is_utf8_with_normalized_line_endings(checkout: Path) -> None:
+    blob = applying._git(checkout, "hash-object", "-w", "--stdin", stdin="привет\r\n").strip()
+    assert applying._git(checkout, "show", blob) == "привет\n"
+    assert evaluation._git(checkout, "show", blob) == "привет\n"
+
+
+@pytest.mark.parametrize("autocrlf", ["true", "false"])
+def test_apply_and_revert_ignore_checkout_autocrlf(checkout: Path, autocrlf: str) -> None:
+    git(checkout, "config", "core.autocrlf", autocrlf)
+    planner = package(checkout) / "planner.py"
+    original = planner.read_text(encoding="utf-8")
+    s = store()
+    p = a_proposal(s, checkout)
+    apply(s, p, checkout)
+    assert planner_rules(checkout).endswith(" Prefer one subtask.")
+    assert b"\r\n" not in planner.read_bytes()
+    revert(s, p, checkout)
+    assert planner.read_text(encoding="utf-8") == original
+    assert git(checkout, "status", "--porcelain") == ""
+
+
 def test_the_checkouts_own_identity_commits(checkout: Path) -> None:
     git(checkout, "config", "user.name", "Person")
     git(checkout, "config", "user.email", "person@example.invalid")

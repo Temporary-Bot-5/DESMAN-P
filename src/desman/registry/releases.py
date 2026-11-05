@@ -14,14 +14,14 @@ here only: distributing or installing them belongs to G.8.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import sqlite3
+from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
-from desman.core import db
+from desman.core import db, filelock
 from desman.i18n import t
 from desman.net import protocol, sign
 from desman.registry import admin, checks, store
@@ -123,9 +123,9 @@ def accept(
     root = admin.load_root_key(
         directory / store.ROOT_KEY if root_key is None else root_key, root_pub
     )
-    with (directory / "releases.lock").open("a") as lock:
+    with (directory / "releases.lock").open("a+b") as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            filelock.lock(lock.fileno(), blocking=False)
         except BlockingIOError as e:
             raise admin.AdminError(t("Another release is being made.")) from e
         commit: str | None = None
@@ -223,6 +223,9 @@ def accept(
             if isinstance(e, applying.ApplyError):
                 raise admin.AdminError(str(e)) from e
             raise
+        finally:
+            with suppress(OSError):
+                filelock.unlock(lock.fileno())
     return show(conn, number)
 
 

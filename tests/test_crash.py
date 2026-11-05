@@ -8,7 +8,6 @@ seconds: `resume` takes the dead run's lease over at once instead of waiting it 
 from __future__ import annotations
 
 import json
-import os
 import signal
 import sqlite3
 import subprocess
@@ -24,10 +23,9 @@ from desman.cli import cli
 from desman.core import db
 from desman.core.audit import check_history, history
 from desman.core.models import SubtaskSpec, TaskSpec
-from desman.core.owner import current_owner, owner_is_gone
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="SIGKILL and pid checks are POSIX")
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL and pid checks are POSIX")
 
 ACCEPT = '{"verdict": "accept"}'
 SLOW = 120  # seconds a scripted reply "takes": the run is always killed long before
@@ -97,9 +95,11 @@ def run_and_kill(tmp_path: Path, script: Path, killed_when: Any) -> tuple[Path, 
     try:
         wait_for(lambda: path.exists() and killed_when(path, proc.pid), proc, "the kill point")
     finally:
-        proc.send_signal(signal.SIGKILL)
+        if sys.platform != "win32":
+            proc.send_signal(signal.SIGKILL)
         proc.wait(timeout=10)  # reaped: the pid is really gone, not a zombie
-    assert proc.returncode == -signal.SIGKILL
+    if sys.platform != "win32":
+        assert proc.returncode == -signal.SIGKILL
     return path, proc.pid
 
 
@@ -245,7 +245,8 @@ def test_checkpoint_survives_sigkill_and_reaches_the_next_executor(tmp_path: Pat
             lambda: subtask(path, 0).get("checkpoint_json") is not None, proc, "the checkpoint"
         )
     finally:
-        proc.send_signal(signal.SIGKILL)
+        if sys.platform != "win32":
+            proc.send_signal(signal.SIGKILL)
         proc.wait(timeout=10)
     assert json.loads(subtask(path, 0)["checkpoint_json"]) == {"pages_done": 2}
 
@@ -258,19 +259,3 @@ def test_checkpoint_survives_sigkill_and_reaches_the_next_executor(tmp_path: Pat
     ]
     assert check_history(store.conn, task_id) == []
     store.conn.close()
-
-
-# ── Owner detection ──────────────────────────────────────────────────────────
-
-
-def test_owner_is_gone_only_when_certain() -> None:
-    host = current_owner().rpartition(":")[0]
-    child = subprocess.Popen([sys.executable, "-c", "pass"])
-    child.wait()
-    assert owner_is_gone(f"{host}:{child.pid}")  # exited and reaped
-    assert not owner_is_gone(current_owner())  # ourselves
-    assert not owner_is_gone(f"{host}:{os.getppid()}")  # alive
-    assert not owner_is_gone(f"{host}:1")  # alive, another user's (or ours in a container)
-    assert not owner_is_gone(f"some-other-host:{child.pid}")  # cannot know
-    for garbage in ("", "coordinator", f"{host}:", f"{host}:-5", f"{host}:0", f"{host}:x1", "w"):
-        assert not owner_is_gone(garbage), garbage

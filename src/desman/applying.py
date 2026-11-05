@@ -398,10 +398,11 @@ checked."""
 def _git(where: Path, *args: str, stdin: str | None = None) -> str:
     try:
         done = subprocess.run(
-            ["git", "-C", str(where), *HOOKS_OFF, *args],
+            ["git", "-c", "core.autocrlf=false", "-C", str(where), *HOOKS_OFF, *args],
             input=stdin,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=evaluation.GIT_TIMEOUT,
             check=False,
         )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -16,6 +15,7 @@ from conftest import FakeClock
 from desman import providers, runs
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
+from desman.core import filelock
 from desman.core.calls import Role
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.states import TaskStatus
@@ -219,7 +219,7 @@ def held(tmp_path: Path) -> Iterator[Callable[[str], None]]:
         folder.mkdir(parents=True, exist_ok=True)
         name = hashlib.sha256(server.encode()).hexdigest()[:16]
         handle = open(folder / f"{name}.0.lock", "a")  # noqa: SIM115
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        filelock.lock(handle.fileno(), blocking=False)
         handles.append(handle)
 
     yield take

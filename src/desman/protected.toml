@@ -14,20 +14,20 @@
 # The reviewer (and the executor it judges).
 "agents.py" = "6f6a4b511332cb9a2a41b7158ab8f9e0add95b5594e6b4c15b91f3520feea077"
 # Security rules: the sandbox for generated code, the workspace guard for files.
-"core/sandbox.py" = "94296cd60523f6e886146c901ba37e72c5c0ca53431afa02948908988da17252"
+"core/sandbox.py" = "542dd5febdfa0a3745ad0752b6678580362a872d7fdec8eabe9c3066beca5abc"
 "core/workspace.py" = "2a8775f29cbb12cee517649cc3651e82ba449d3340c40622ce9d78f62f009d43"
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
 # How a proposal of the Improvement Analyst is judged: the benchmark and its comparison.
 "bench.py" = "60a50afd4e76034bd2a071169fda3d642071a690eed510f02208d6f90e5ca036"
-"evaluation.py" = "945932293b66db029dbe24c6afee6d3d63cf9dc64ac55d713f5392ea0c3d0753"
+"evaluation.py" = "3b724aa668a882d0073d4a1814df162ece81fea699667a8b9862609418227f15"
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
-"applying.py" = "0309d7ccf143f431b101171c8b2a2307fcc15766226a19665f13052698ef878e"
+"applying.py" = "32f147bf9053fd106511fc9d96fa20a536087dc820e3a22021d3d7b3dd3693e9"
 # desman-global (ADR 0004): the root of trust and the code that checks signatures by it,
 # records and requests alike.
 "net/root.pub" = "1212bec4b18e53e1025fd017bfe26f2a2416e5180cd262724e3a175594372a2d"
-"net/sign.py" = "3369da272f34cdf0000e0327e79b82aa9ccb3f7bb4e35763860b1c816f4ee644"
+"net/sign.py" = "35128aa0aede44bd910b8d1ce07d1fbf0e7cc53feacdf4021aa7b390da7ef128"
 "net/request.py" = "c2e14185a19dcdcbe19fc2abf121ac9c85e2ca410f69e600d2e102dbfa7a88b6"
 # The scripted model every test of agents runs on.
 "llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"

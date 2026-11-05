@@ -15,7 +15,6 @@ Either way the subtask is done once, with the second worker's result, and the hi
 from __future__ import annotations
 
 import json
-import os
 import signal
 import subprocess
 import sys
@@ -31,7 +30,7 @@ from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.states import TaskStatus
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="SIGKILL, SIGSTOP and pid checks")
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL, SIGSTOP and pid checks")
 
 ACCEPT = '{"verdict": "accept"}'
 SLOW = 120  # seconds a scripted reply "takes": the first worker is always stopped long before
@@ -98,7 +97,8 @@ def finish(proc: subprocess.Popen[bytes]) -> dict[str, Any]:
 
 
 def kill(proc: subprocess.Popen[bytes]) -> None:
-    proc.send_signal(signal.SIGKILL)
+    if sys.platform != "win32":
+        proc.send_signal(signal.SIGKILL)
     proc.wait(timeout=10)  # reaped: the pid is really gone, not a zombie
 
 
@@ -166,13 +166,15 @@ def test_a_hung_workers_subtask_is_done_by_another_after_its_lease(tmp_path: Pat
     )
     try:
         wait_until_holding(path, first, "lease_owner")
-        first.send_signal(signal.SIGSTOP)  # alive, but renews nothing
+        if sys.platform != "win32":
+            first.send_signal(signal.SIGSTOP)  # alive, but renews nothing
         started = time.monotonic()
         second = finish(worker(path, script(tmp_path, "second", reply("second"), ACCEPT)))
         assert time.monotonic() - started >= lease / 2  # a live owner's lease is waited out
         assert (second["executed"], second["reviewed"]) == (1, 1)
     finally:
-        first.send_signal(signal.SIGCONT)
+        if sys.platform != "win32":
+            first.send_signal(signal.SIGCONT)
     late = finish(first)  # wakes up, its reply arrives, the result is refused
     assert (late["executed"], late["reviewed"]) == (1, 0)
 
