@@ -10,6 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "Die in dieser Beschwerde zitierte Nachricht ist nicht mehr in Ihrem Posteingang; es wurde nichts gesendet.",
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Nachrichten sind Ende-zu-Ende-verschlüsselt: Der Registerbetreiber sieht, wer wem wann schreibt, aber keinen Text. Eine Beschwerde zeigt ihm die zitierte Nachricht. Nachrichten werden 30 Tage aufbewahrt. Sie sind mit dem Schlüssel dieses Knotens (node.key) verschlüsselt: Geht er verloren, gehen auch die Nachrichten verloren.",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "Der Schlüssel von {name} hat sich geändert. Führen Sie `desman global contact remove {name}` und dann `desman global contact add {name}` aus, um den neuen Schlüssel zu akzeptieren.",
+    "The message could not be decrypted or verified.": "Die Nachricht konnte nicht entschlüsselt oder verifiziert werden.",
+    "Key changed, not shown.": "Schlüssel geändert, nicht angezeigt.",
+    "(sent unencrypted)": "(unverschlüsselt gesendet)",
+    "The operator will read the cited message.": "Der Betreiber wird die zitierte Nachricht lesen.",
     "A suspension lasts from 1 to {days} days.": "Eine Sperre dauert 1 bis {days} Tage.",
     "About": "Über",
     "Cite each complaint only once.": "Jede Beschwerde nur einmal angeben.",
@@ -76,7 +83,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Messenger-Unterhaltungen anzeigen.",
     "Show or set your messenger name.": "Messenger-Namen anzeigen oder festlegen.",
     "The registry refused the messenger request: {error}": "Die Registry hat die Messenger-Anfrage abgelehnt: {error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "Der Betreiber der Registry kann diese Nachrichten lesen; sie werden 30 Tage gespeichert. Ende-zu-Ende-Verschlüsselung folgt später.",
     "The request succeeded, but the local journal is busy.": "Die Anfrage war erfolgreich, aber das lokale Journal ist belegt.",
     "This message contains an API key; nothing was sent.": "Diese Nachricht enthält einen API-Schlüssel; nichts wurde gesendet.",
     "Unblock a messenger name.": "Einen Messenger-Namen entsperren.",

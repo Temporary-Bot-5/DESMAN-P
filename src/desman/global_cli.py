@@ -268,7 +268,7 @@ def _refuse_secrets(config: Config, payload: BaseModel) -> None:
     ):
         if isinstance(payload, protocol.ProposalSubmission):
             raise click.ClickException(t("This proposal contains an API key; nothing was sent."))
-        if isinstance(payload, (protocol.SendMessage, protocol.Complain)):
+        if isinstance(payload, protocol.MessengerBody):
             raise click.ClickException(t("This message contains an API key; nothing was sent."))
         raise click.ClickException(t("This report contains an API key; nothing was sent."))
 

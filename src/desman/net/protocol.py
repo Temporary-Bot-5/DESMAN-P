@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import unicodedata
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
@@ -24,7 +23,8 @@ from pydantic import (
 )
 
 from desman.core.models import Kind
-from desman.net import sign
+from desman.net import seal, sign
+from desman.net.seal import message_text
 from desman.net.sign import Fingerprint, PublicKeyText, RecordId, SignatureText, Signed, canonical
 from desman.tuning_limits import TUNING_BOUNDS
 
@@ -576,6 +576,8 @@ def report_content(report: Report) -> bytes:
 # ── Messenger (G.10) ─────────────────────────────────────────────────────────
 
 Handle = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{2,31}$")]
+MESSENGER_KEY: Final = "/v1/messenger/key"
+MESSENGER_PEER: Final = "/v1/messenger/peer"
 MESSENGER_NAME: Final = "/v1/messenger/name"
 MESSENGER_CONTACT: Final = "/v1/messenger/contact"
 MESSENGER_SEND: Final = "/v1/messenger/send"
@@ -589,18 +591,6 @@ AWAY: Final = "away"
 SUSPENDED: Final = "suspended"
 MODERATION_DAYS: Final = 30
 MAX_MODERATION_DAYS: Final = 365
-
-
-def message_text(text: str) -> str:
-    """Human correspondence cannot carry terminal controls or bidi overrides."""
-    if any(
-        (unicodedata.category(c) == "Cc" and c not in "\n\t")
-        or "\u202a" <= c <= "\u202e"
-        or "\u2066" <= c <= "\u2069"
-        for c in text
-    ):
-        raise ValueError("control character in message")
-    return text
 
 
 class MessengerBody(BaseModel):
@@ -646,9 +636,27 @@ class ContactState(MessengerBody):
     state: Literal["contact", "asked", "none", "blocked"]
 
 
+class PublishKey(MessengerBody):
+    key: seal.MessengerKey
+
+
+class KeyPublished(MessengerBody):
+    pass
+
+
+class PeerQuery(MessengerBody):
+    name: Handle
+
+
+class Peer(MessengerBody):
+    name: Handle
+    node_public: PublicKeyText
+    key: seal.MessengerKey
+
+
 class SendMessage(MessengerBody):
     to: Handle
-    text: Annotated[str, Field(min_length=1, max_length=2000), AfterValidator(message_text)]
+    sealed: seal.Sealed
 
 
 class MessageSent(MessengerBody):
@@ -665,8 +673,15 @@ class Message(MessengerBody):
     id: int
     sender: Handle
     recipient: Handle
-    text: Annotated[str, Field(min_length=1, max_length=2000), AfterValidator(message_text)]
+    text: seal.Text | None = None
+    sealed: seal.Sealed | None = None
     sent_at: datetime
+
+    @model_validator(mode="after")
+    def _payload(self) -> Message:
+        if (self.text is None) == (self.sealed is None):
+            raise ValueError("exactly one message payload required")
+        return self
 
 
 class Inbox(MessengerBody):
@@ -677,9 +692,11 @@ class Inbox(MessengerBody):
     asking: list[Handle]
     blocked: list[Handle]
     messages: list[Message] = Field(max_length=100)
+    peers: list[Peer] = Field(default_factory=list, max_length=200)
 
 
 class Complain(MessengerBody):
+    content_key: seal.Raw32 | None = None
     name: Handle
     text: Annotated[str, Field(min_length=1, max_length=2000), AfterValidator(message_text)]
     message: int | None = Field(default=None, ge=1)

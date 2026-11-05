@@ -10,6 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "이 신고에서 인용한 메시지가 더 이상 받은 편지함에 없습니다. 아무것도 전송되지 않았습니다.",
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "메시지는 종단 간 암호화됩니다. 레지스트리 운영자는 누가 누구에게 언제 보냈는지만 볼 수 있고 내용은 볼 수 없습니다. 신고하면 인용한 메시지가 운영자에게 공개됩니다. 메시지는 30일간 보관됩니다. 이 노드의 키(node.key)로 암호화되므로 키를 잃으면 메시지도 잃게 됩니다.",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name}의 키가 변경되었습니다. 새 키를 수락하려면 `desman global contact remove {name}` 다음에 `desman global contact add {name}`를 실행하세요.",
+    "The message could not be decrypted or verified.": "메시지를 복호화하거나 검증할 수 없습니다.",
+    "Key changed, not shown.": "키가 변경되어 표시하지 않습니다.",
+    "(sent unencrypted)": "(암호화하지 않고 전송됨)",
+    "The operator will read the cited message.": "운영자가 인용된 메시지를 읽게 됩니다.",
     "A suspension lasts from 1 to {days} days.": "정지 기간은 1일부터 {days}일까지입니다.",
     "About": "대상",
     "Cite each complaint only once.": "각 신고는 한 번만 인용하세요.",
@@ -76,7 +83,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "메신저 대화를 표시합니다.",
     "Show or set your messenger name.": "메신저 이름을 표시하거나 설정합니다.",
     "The registry refused the messenger request: {error}": "레지스트리가 메신저 요청을 거부했습니다: {error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "레지스트리 운영자는 이 메시지를 읽을 수 있으며, 메시지는 30일 동안 보관됩니다. 종단 간 암호화는 나중에 제공됩니다.",
     "The request succeeded, but the local journal is busy.": "요청은 성공했지만 로컬 로그가 사용 중입니다.",
     "This message contains an API key; nothing was sent.": "이 메시지에 API 키가 포함되어 있습니다. 아무것도 전송하지 않았습니다.",
     "Unblock a messenger name.": "메신저 이름의 차단을 해제합니다.",

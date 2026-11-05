@@ -10,6 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "この苦情で引用したメッセージは受信トレイにもうありません。何も送信されませんでした。",
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "メッセージはエンドツーエンドで暗号化されます。レジストリ運営者に見えるのは誰が誰にいつ送ったかで、本文は見えません。苦情を送ると、引用したメッセージが運営者に公開されます。保存期間は30日です。このノードの鍵（node.key）で暗号化されるため、鍵を失うとメッセージも失われます。",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} の鍵が変わりました。新しい鍵を受け入れるには `desman global contact remove {name}`、次に `desman global contact add {name}` を実行してください。",
+    "The message could not be decrypted or verified.": "メッセージを復号または検証できませんでした。",
+    "Key changed, not shown.": "鍵が変わったため非表示です。",
+    "(sent unencrypted)": "（暗号化せずに送信）",
+    "The operator will read the cited message.": "運営者が引用されたメッセージを読みます。",
     "A suspension lasts from 1 to {days} days.": "停止期間は1日から{days}日です。",
     "About": "対象",
     "Cite each complaint only once.": "各苦情は一度だけ引用してください。",
@@ -76,7 +83,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "メッセンジャーのやり取りを表示します。",
     "Show or set your messenger name.": "メッセンジャーの名前を表示または設定します。",
     "The registry refused the messenger request: {error}": "レジストリがメッセンジャー要求を拒否しました：{error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "レジストリの運営者はこれらのメッセージを読むことができます。保存期間は30日です。エンドツーエンド暗号化は後日導入されます。",
     "The request succeeded, but the local journal is busy.": "要求は成功しましたが、ローカルログが使用中です。",
     "This message contains an API key; nothing was sent.": "このメッセージにはAPIキーが含まれています。何も送信されませんでした。",
     "Unblock a messenger name.": "メッセンジャーの名前のブロックを解除します。",

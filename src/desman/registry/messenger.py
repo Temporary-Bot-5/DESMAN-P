@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import suppress
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
 from desman.net import protocol as p
+from desman.net import seal, sign
 from desman.registry import moderation, store
 
 
@@ -67,6 +69,71 @@ def _limit(
     ).fetchone()[0]
     if count >= maximum:
         raise Refusal("messenger_limit")
+
+
+def _public(conn: sqlite3.Connection, node: str) -> Ed25519PublicKey:
+    return sign.decode_public(
+        conn.execute("SELECT public_key FROM nodes WHERE fingerprint = ?", (node,)).fetchone()[0]
+    )
+
+
+def publish_key(
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.PublishKey,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
+) -> p.KeyPublished:
+    try:
+        if asked.key.node != who:
+            raise seal.SealError("wrong node")
+        seal.verify(asked.key, _public(conn, who))
+    except seal.SealError:
+        raise Refusal("bad_key") from None
+    row = conn.execute("SELECT x25519 FROM messenger_keys WHERE node = ?", (who,)).fetchone()
+    if row is not None:
+        if row[0] != asked.key.x25519:
+            raise Refusal("key_mismatch")
+        return p.KeyPublished()
+    conn.execute(
+        "INSERT INTO messenger_keys VALUES (?, ?, ?, ?)",
+        (who, asked.key.x25519, asked.key.model_dump_json(), db.to_iso(now)),
+    )
+    store.log(conn, "messenger_key", who, {})
+    return p.KeyPublished()
+
+
+def _peer(conn: sqlite3.Connection, name: str) -> p.Peer:
+    node = _other(conn, name)
+    row = conn.execute("SELECT signed_json FROM messenger_keys WHERE node = ?", (node,)).fetchone()
+    if row is None:
+        raise Refusal("no_key")
+    return p.Peer(
+        name=name,
+        node_public=sign.encode_public(_public(conn, node)),
+        key=seal.MessengerKey.model_validate_json(row[0]),
+    )
+
+
+def peer(
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.PeerQuery,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
+) -> p.Peer:
+    _name(conn, who)
+    other = _other(conn, asked.name)
+    pair = _pair(who, other)
+    if not (
+        _has(conn, "contacts", "a = ? AND b = ?", pair)
+        or _has(conn, "contact_requests", "from_node = ? AND to_node = ?", (who, other))
+        or _has(conn, "contact_requests", "from_node = ? AND to_node = ?", (other, who))
+    ):
+        raise Refusal("not_contact")
+    return _peer(conn, asked.name)
 
 
 def set_name(
@@ -169,13 +236,16 @@ def send(
     if not _has(conn, "contacts", "a = ? AND b = ?", _pair(who, other)):
         raise Refusal("not_contact")
     _active(conn, other)
+    for node, error in ((who, "own_key_missing"), (other, "no_key")):
+        if conn.execute("SELECT 1 FROM messenger_keys WHERE node = ?", (node,)).fetchone() is None:
+            raise Refusal(error)
     _limit(conn, "messages", who, "sender", "sent_at", now, p.MAX_MESSAGES_PER_DAY)
     conn.execute(
         "DELETE FROM messages WHERE sent_at < ?", (db.to_iso(now - timedelta(days=p.MESSAGE_DAYS)),)
     )
     cursor = conn.execute(
-        "INSERT INTO messages(sender,recipient,text,sent_at) VALUES (?, ?, ?, ?)",
-        (who, other, asked.text, db.to_iso(now)),
+        "INSERT INTO messages(sender,recipient,text,sent_at,sealed) VALUES (?, ?, ?, ?, ?)",
+        (who, other, "", db.to_iso(now), asked.sealed.model_dump_json()),
     )
     assert cursor.lastrowid is not None
     store.log(
@@ -221,12 +291,28 @@ def inbox(
         params.append(asked.after)
     order = "ASC" if asked.after is not None else "DESC"
     rows = conn.execute(
-        "SELECT m.id, s.name AS sender, r.name AS recipient, m.text, m.sent_at FROM messages m "
+        "SELECT m.id, s.name AS sender, r.name AS recipient, m.text, m.sent_at, m.sealed FROM messages m "
         "JOIN messenger_names s ON s.node = m.sender JOIN messenger_names r ON r.node = m.recipient "
         f"WHERE {where} ORDER BY m.id {order} LIMIT 100",
         params,
     ).fetchall()
-    messages = [p.Message.model_validate(dict(r)) for r in rows]
+    messages = [
+        p.Message(
+            id=r["id"],
+            sender=r["sender"],
+            recipient=r["recipient"],
+            sent_at=r["sent_at"],
+            text=r["text"] if r["sealed"] is None else None,
+            sealed=seal.Sealed.model_validate_json(r["sealed"])
+            if r["sealed"] is not None
+            else None,
+        )
+        for r in rows
+    ]
+    peers = []
+    for name in sorted({n for m in messages for n in (m.sender, m.recipient)}):
+        with suppress(Refusal):
+            peers.append(_peer(conn, name))
     messages.sort(key=lambda m: m.id)
     return p.Inbox(
         suspended=moderation.suspension(conn, who, now, root=root),
@@ -236,6 +322,7 @@ def inbox(
         asking=incoming,
         blocked=blocked,
         messages=messages,
+        peers=peers,
     )
 
 
@@ -251,13 +338,25 @@ def complain(
     other = _other(conn, asked.name)
     pair = _pair(who, other)
     evidence = None
+    message_text = None
     if asked.message is not None:
         evidence = conn.execute(
-            "SELECT text FROM messages WHERE id = ? AND sender = ? AND recipient = ?",
+            "SELECT text, sealed FROM messages WHERE id = ? AND sender = ? AND recipient = ?",
             (asked.message, other, who),
         ).fetchone()
         if evidence is None:
             raise Refusal("unknown_name")
+        message_text = evidence[0]
+        if evidence[1] is not None:
+            try:
+                if asked.content_key is None:
+                    raise seal.SealError("missing evidence key")
+                signed = seal.open_with(
+                    seal.decode(asked.content_key, 32), seal.Sealed.model_validate_json(evidence[1])
+                )
+                message_text = seal.check(signed, _public(conn, other), other, who).text
+            except seal.SealError:
+                raise Refusal("bad_evidence") from None
     known = (
         evidence is not None
         or _has(conn, "contact_history", "a = ? AND b = ?", pair)
@@ -275,7 +374,7 @@ def complain(
             who,
             other,
             asked.message,
-            evidence[0] if evidence else None,
+            message_text,
             asked.text,
             db.to_iso(now),
         ),

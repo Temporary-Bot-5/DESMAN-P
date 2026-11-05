@@ -348,6 +348,17 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     CREATE INDEX moderations_lifts ON moderations(lifts);
     """,
+    # 12: authenticated public messenger keys and opaque encrypted envelopes.
+    """
+    CREATE TABLE messenger_keys (
+        node TEXT PRIMARY KEY REFERENCES nodes(fingerprint), x25519 TEXT NOT NULL,
+        signed_json TEXT NOT NULL CHECK(json_valid(signed_json)), published_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TRIGGER messenger_key_fixed BEFORE UPDATE OF x25519 ON messenger_keys
+    WHEN NEW.x25519 IS NOT OLD.x25519
+    BEGIN SELECT RAISE(ABORT, 'messenger key is fixed'); END;
+    ALTER TABLE messages ADD COLUMN sealed TEXT CHECK(sealed IS NULL OR json_valid(sealed));
+    """,
 )
 
 

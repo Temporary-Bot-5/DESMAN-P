@@ -640,6 +640,16 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER applications_no_delete BEFORE DELETE ON applications
         BEGIN SELECT RAISE(ABORT, 'applications are append-only'); END;
     """,
+    # 33: per-registry messenger TOFU pins and publication receipts.
+    """
+    CREATE TABLE messenger_peers (
+        registry TEXT NOT NULL, name TEXT NOT NULL, node TEXT NOT NULL,
+        x25519 TEXT NOT NULL, first_seen TEXT NOT NULL, PRIMARY KEY(registry, name)
+    ) STRICT;
+    CREATE TABLE messenger_published (
+        registry TEXT PRIMARY KEY, node TEXT NOT NULL, published_at TEXT NOT NULL
+    ) STRICT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

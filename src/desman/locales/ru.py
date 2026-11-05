@@ -15,6 +15,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The message this complaint cites is no longer in your inbox; nothing was sent.": "Сообщения, на которое ссылается эта жалоба, больше нет в вашем почтовом ящике; ничего не отправлено.",
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Сообщения защищены сквозным шифрованием: оператор реестра видит, кто, кому и когда пишет, но не текст. Жалоба раскрывает оператору цитируемое сообщение. Сообщения хранятся 30 дней. Они зашифрованы ключом этого узла (node.key): при потере ключа сообщения тоже теряются.",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "Ключ {name} изменился. Выполните `desman global contact remove {name}`, затем `desman global contact add {name}`, чтобы принять новый ключ.",
+    "The message could not be decrypted or verified.": "Не удалось расшифровать или проверить сообщение.",
+    "Key changed, not shown.": "Ключ изменился, сообщение скрыто.",
+    "(sent unencrypted)": "(отправлено без шифрования)",
+    "The operator will read the cited message.": "Оператор прочтёт цитируемое сообщение.",
     "A suspension lasts from 1 to {days} days.": "Приостановка действует от 1 до {days} дней.",
     "About": "О ком",
     "Cite each complaint only once.": "Укажите каждую жалобу только один раз.",
@@ -81,7 +88,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Показать переписку мессенджера.",
     "Show or set your messenger name.": "Показать или задать имя в мессенджере.",
     "The registry refused the messenger request: {error}": "Реестр отклонил запрос мессенджера: {error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "Оператор реестра может читать эти сообщения; они хранятся 30 дней. Сквозное шифрование появится позже.",
     "The request succeeded, but the local journal is busy.": "Запрос выполнен, но локальный журнал занят.",
     "This message contains an API key; nothing was sent.": "Сообщение содержит API-ключ; ничего не отправлено.",
     "Unblock a messenger name.": "Разблокировать имя в мессенджере.",
