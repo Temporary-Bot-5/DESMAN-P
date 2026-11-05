@@ -29,6 +29,16 @@ def _other(conn: sqlite3.Connection, name: str) -> str:
     return str(row[0])
 
 
+def _active(conn: sqlite3.Connection, node: str) -> None:
+    if (
+        conn.execute(
+            "SELECT 1 FROM nodes WHERE fingerprint = ? AND status = 'active'", (node,)
+        ).fetchone()
+        is None
+    ):
+        raise Refusal(p.AWAY)
+
+
 def _pair(a: str, b: str) -> tuple[str, str]:
     if a == b:
         raise Refusal("unknown_name")
@@ -86,6 +96,7 @@ def contact(
     moment = db.to_iso(now)
     state: p.ContactState = p.ContactState(name=asked.name, state="none")
     if asked.action == "add":
+        _active(conn, other)
         if _has(conn, "blocks", "node = ? AND blocked = ?", (who, other)):
             raise Refusal("blocked")
         if _has(conn, "contacts", "a = ? AND b = ?", pair):
@@ -134,6 +145,7 @@ def send(conn: sqlite3.Connection, who: str, asked: p.SendMessage, now: datetime
     other = _other(conn, asked.to)
     if not _has(conn, "contacts", "a = ? AND b = ?", _pair(who, other)):
         raise Refusal("not_contact")
+    _active(conn, other)
     _limit(conn, "messages", who, "sender", "sent_at", now, p.MAX_MESSAGES_PER_DAY)
     conn.execute(
         "DELETE FROM messages WHERE sent_at < ?", (db.to_iso(now - timedelta(days=p.MESSAGE_DAYS)),)

@@ -585,6 +585,7 @@ MAX_MESSAGES_PER_DAY: Final = 200
 MAX_CONTACT_REQUESTS_PER_DAY: Final = 20
 MAX_COMPLAINTS_PER_DAY: Final = 5
 MESSAGE_DAYS: Final = 30
+AWAY: Final = "away"
 
 
 def message_text(text: str) -> str:

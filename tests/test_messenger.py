@@ -376,7 +376,9 @@ def test_proposals_send_only_after_yes(
     if "message" in fields:
         assert proposal.lines[2] == "Cited message: 42"
     assert proposal.warnings == [messenger_cli.warning()]
-    proposal.apply()
+    outcome = proposal.apply()
+    if "text" in fields:
+        assert fields["text"] not in json.dumps(outcome.data)
     assert len(sent) == 1
     payload = sent[0].model_dump(mode="json")
     assert (payload.get("to") or payload.get("name")) == fields["name"]
@@ -553,3 +555,81 @@ def test_name_contracts_are_independent() -> None:
         p.Complain(name="alice", text="reason"),
     ]:
         assert not isinstance(body, p.SetName)
+
+
+def test_departed_contact_and_return(registry: Registry, clock: FakeClock) -> None:
+    a, b = named(registry, clock, "alice"), named(registry, clock, "bobby")
+    connect(a, b)
+    assert b.call("POST", p.LEAVE).status_code == 200
+    assert call(a, p.MESSENGER_SEND, to="bobby", text="lost")["error"] == p.AWAY
+    assert call(a, p.MESSENGER_CONTACT, action="add", name="bobby")["error"] == p.AWAY
+    with store.connection(registry.path) as opened:
+        assert opened.execute("SELECT count(*) FROM messages").fetchone()[0] == 0
+        assert opened.execute("SELECT count(*) FROM contacts").fetchone()[0] == 1
+    assert b.register().status_code == 200
+    assert "id" in call(a, p.MESSENGER_SEND, to="bobby", text="welcome back")
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_contact_add_requires_active_other(
+    registry: Registry, clock: FakeClock, accept: bool
+) -> None:
+    a, b = named(registry, clock, "alice"), named(registry, clock, "bobby")
+    if accept:
+        call(b, p.MESSENGER_CONTACT, action="add", name="alice")
+    assert b.call("POST", p.LEAVE).status_code == 200
+    assert call(a, p.MESSENGER_CONTACT, action="add", name="bobby")["error"] == p.AWAY
+    with store.connection(registry.path) as opened:
+        assert opened.execute("SELECT count(*) FROM contacts").fetchone()[0] == 0
+        assert opened.execute("SELECT count(*) FROM contact_events").fetchone()[0] == int(accept)
+
+
+@pytest.mark.parametrize("command", ["global send", "global complain", "global report"])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_private_chat_command_journal_and_event(
+    conn: sqlite3.Connection,
+    joined: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    confirmed: bool,
+) -> None:
+    from desman import global_cli, runs
+    from desman.chat import Chat
+    from desman.core.sessions import Kind, Role, Sessions
+    from desman.interlocutor import Command, Interlocutor
+    from desman.llm.fake import FakeLLM
+
+    private = "private correspondence marker"
+    fields: dict[str, Any] = {"text": private}
+    if command != "global report":
+        fields["name"] = "bobby"
+
+    def perform(*args: Any, **kwargs: Any) -> p.MessageSent | p.ComplaintReceived:
+        if command == "global complain":
+            return p.ComplaintReceived(id="complaint")
+        return p.MessageSent(id=1, sent_at=messenger._utc_now())
+
+    monkeypatch.setattr(messenger_cli, "perform", perform)
+    monkeypatch.setattr(
+        global_cli, "send_report", lambda *a, **kw: p.ReportReceived(id="report", kind="bug")
+    )
+    monkeypatch.setattr(Chat, "_confirmed", lambda self, proposal: confirmed)
+    sessions = Sessions(conn)
+    chat = Chat(sessions)
+    chat.session_id = sessions.add(None, Role.USER, "send it").session_id
+    llm = FakeLLM()
+    chat._command(
+        Command(type="command", name=command, args=fields),
+        joined,
+        runs.Models(llm, None),
+        Interlocutor(llm, "en"),
+    )
+    rows = conn.execute("SELECT action, details_json FROM operator_log").fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == ("operator_command" if confirmed else "operator_declined")
+    assert private not in str([tuple(row) for row in rows])
+    details = json.loads(rows[0][1])
+    assert details["args_private"] == ["text"]
+    assert "text" not in details["args"]
+    events = [m for m in sessions.messages(chat.session_id) if m.kind is Kind.EVENT]
+    assert events and all(private not in m.text for m in events)

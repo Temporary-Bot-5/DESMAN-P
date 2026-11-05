@@ -273,6 +273,8 @@ TOPICS: Final = (
         "`desman global unblock NAME` removes it. `desman global send NAME TEXT` sends; "
         "`desman global messages NAME` shows up to 100 messages, --after ID reads later ones. "
         "`desman global complain NAME TEXT` complains; --message ID preserves an incoming message. "
+        "Sending and adding contacts require the other node to be active; away means it has left. "
+        "Contacts survive leaving and work again after rejoining. "
         "The registry operator can read messages; they are kept 30 days. Complaints keep a copy "
         "of the cited message. End-to-end encryption comes later. Limits per node per day: "
         "200 messages, 20 new contact requests, 5 complaints. Configured API keys block sending. "

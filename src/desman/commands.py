@@ -142,6 +142,9 @@ class Entry:
     aliases: tuple[str, ...] = ()
     """Other CLI names of the same command (`keys` lists keys like `keys list`)."""
 
+    private: tuple[str, ...] = ()
+    """Argument fields whose values must never enter the operator journal."""
+
     def kind_of(self, args: Args) -> Kind:
         return self.kind if isinstance(self.kind, Kind) else self.kind(args)
 
@@ -1619,6 +1622,7 @@ CATALOG: tuple[Entry, ...] = (
         MessengerSendArgs,
         Kind.CHANGE,
         _messenger_send,
+        private=("text",),
     ),
     Entry(
         "global complain",
@@ -1626,6 +1630,7 @@ CATALOG: tuple[Entry, ...] = (
         MessengerComplainArgs,
         Kind.CHANGE,
         _messenger_complain,
+        private=("text",),
     ),
     Entry(
         "global report",
@@ -1634,6 +1639,7 @@ CATALOG: tuple[Entry, ...] = (
         GlobalReportArgs,
         Kind.CHANGE,
         _global_report,
+        private=("text",),
     ),
     Entry(
         "global share",
@@ -1818,8 +1824,8 @@ def parse(entry: Entry, raw: dict[str, JsonValue], config: Config | None) -> Arg
 
 
 def shown(entry: Entry, args: Args) -> str:
-    """The command as the person and the interlocutor see it: name and the arguments given."""
-    given = args.model_dump(exclude_defaults=True)
+    """The command label for results: name and non-private arguments given."""
+    given = args.model_dump(exclude_defaults=True, exclude=set(entry.private))
     return entry.name + (" " + json.dumps(given, ensure_ascii=False) if given else "")
 
 
