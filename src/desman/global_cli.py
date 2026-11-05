@@ -33,6 +33,7 @@ from typing import Any, Final
 
 import click
 import httpx
+from pydantic import BaseModel
 from rich.text import Text
 
 from desman import applying, bench, net, providers, ui
@@ -249,10 +250,8 @@ def proposal_upload(
     return signed
 
 
-def _refuse_secrets(
-    config: Config, payload: protocol.ProposalSubmission | protocol.BugReport | protocol.MemoryShare
-) -> None:
-    """Do not let a configured API key leave in a proposal, benchmark, or diff."""
+def _refuse_secrets(config: Config, payload: BaseModel) -> None:
+    """Do not let a configured API key leave in a proposal, report, or message."""
     keys = [key.value for group in config.api_keys.values() for key in group if key.value]
 
     def contains_secret(value: object) -> bool:
@@ -269,6 +268,8 @@ def _refuse_secrets(
     ):
         if isinstance(payload, protocol.ProposalSubmission):
             raise click.ClickException(t("This proposal contains an API key; nothing was sent."))
+        if isinstance(payload, (protocol.SendMessage, protocol.Complain)):
+            raise click.ClickException(t("This message contains an API key; nothing was sent."))
         raise click.ClickException(t("This report contains an API key; nothing was sent."))
 
 

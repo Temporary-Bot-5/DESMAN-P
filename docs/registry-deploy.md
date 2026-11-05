@@ -292,3 +292,7 @@ key as described above. Delivery to nodes and installation are separate work in 
 The registry serves the newest five root-signed releases at signed GET `/v1/releases` for active nodes.
 
 Inspect incoming bug reports and shared memory with `desman-registry reports [--kind bug|memory]`; read one with `desman-registry report show ID`.
+
+Messenger messages are retained for 30 days (old messages are deleted on send). The registry
+operator can read them; TLS protects transport, and end-to-end encryption comes later.
+Complaints are kept with a copy of the cited message, so message retention does not erase evidence.

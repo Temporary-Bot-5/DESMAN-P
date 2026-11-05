@@ -269,6 +269,53 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER reports_no_delete BEFORE DELETE ON reports
         BEGIN SELECT RAISE(ABORT, 'reports are append-only'); END;
     """,
+    # 9 — human correspondence (G.10a). Events survive withdrawn requests.
+    """
+    CREATE TABLE messenger_names (
+        node TEXT PRIMARY KEY REFERENCES nodes(fingerprint),
+        name TEXT NOT NULL UNIQUE, set_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE contact_requests (
+        from_node TEXT NOT NULL REFERENCES nodes(fingerprint),
+        to_node TEXT NOT NULL REFERENCES nodes(fingerprint), created_at TEXT NOT NULL,
+        PRIMARY KEY(from_node, to_node)
+    ) STRICT;
+    CREATE TABLE contact_events (
+        from_node TEXT NOT NULL REFERENCES nodes(fingerprint),
+        to_node TEXT NOT NULL REFERENCES nodes(fingerprint), created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX contact_events_day ON contact_events(from_node, created_at);
+    CREATE TABLE contacts (
+        a TEXT NOT NULL REFERENCES nodes(fingerprint),
+        b TEXT NOT NULL REFERENCES nodes(fingerprint), since TEXT NOT NULL,
+        PRIMARY KEY(a,b), CHECK(a < b)
+    ) STRICT;
+    CREATE TABLE contact_history (
+        a TEXT NOT NULL REFERENCES nodes(fingerprint),
+        b TEXT NOT NULL REFERENCES nodes(fingerprint), PRIMARY KEY(a,b), CHECK(a < b)
+    ) STRICT;
+    CREATE TABLE blocks (
+        node TEXT NOT NULL REFERENCES nodes(fingerprint),
+        blocked TEXT NOT NULL REFERENCES nodes(fingerprint), created_at TEXT NOT NULL,
+        PRIMARY KEY(node,blocked)
+    ) STRICT;
+    CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender TEXT NOT NULL REFERENCES nodes(fingerprint),
+        recipient TEXT NOT NULL REFERENCES nodes(fingerprint),
+        text TEXT NOT NULL, sent_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX messages_inbox ON messages(recipient,id);
+    CREATE INDEX messages_sender ON messages(sender,id);
+    CREATE INDEX messages_day ON messages(sender,sent_at);
+    CREATE TABLE complaints (
+        id TEXT PRIMARY KEY, from_node TEXT NOT NULL REFERENCES nodes(fingerprint),
+        about_node TEXT NOT NULL REFERENCES nodes(fingerprint), message_id INTEGER,
+        message_text TEXT, text TEXT NOT NULL, created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','settled'))
+    ) STRICT;
+    CREATE INDEX complaints_day ON complaints(from_node,created_at);
+    """,
 )
 
 

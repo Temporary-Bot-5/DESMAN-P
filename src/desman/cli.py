@@ -48,6 +48,7 @@ from desman.info import print_project_info
 from desman.llm import router
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
+from desman.messenger_cli import register_commands
 from desman.models_cli import models
 from desman.net import node
 from desman.planner import Planned, must_run, plan, template_plan
@@ -166,6 +167,7 @@ cli.add_command(tuning)
 cli.add_command(models)
 cli.add_command(protected_group, name="protected")
 cli.add_command(proposals_group, name="proposals")
+register_commands(global_group)
 cli.add_command(global_group, name="global")
 
 
