@@ -10,6 +10,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Send": "发送",
+    "Cancel": "取消",
+    "OK": "确定",
+    "Stop": "停止",
+    "DESMAN finished, you can close this tab": "DESMAN 已结束，可以关闭此标签页",
+    "DESMAN is not running": "DESMAN 未运行",
+    "Open the page with desman gui in a terminal.": "在终端中运行 desman gui 打开页面。",
+    "Please check your answer and try again.": "请检查回答并重试。",
+    "Local web page port (default: automatic).": "本地网页端口（默认：自动）。",
+    "Print the page address without opening a browser.": "显示页面地址而不打开浏览器。",
+    "Open the chat as a local web page.": "以本地网页形式打开聊天。",
     "The message this complaint cites is no longer in your inbox; nothing was sent.": "此投诉引用的消息已不在您的收件箱中；未发送任何内容。",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "消息采用端到端加密：注册中心运营者能看到谁在何时给谁发消息，但看不到正文。投诉会向运营者公开所引用的消息。消息保留30天。消息使用此节点的密钥（node.key）加密：密钥丢失，消息也将丢失。",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} 的密钥已更改。运行 `desman global contact remove {name}`，然后运行 `desman global contact add {name}` 以接受新密钥。",

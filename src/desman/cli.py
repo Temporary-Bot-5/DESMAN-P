@@ -151,6 +151,38 @@ def cli(ctx: click.Context, resume: bool, temporary: bool) -> None:
 
 
 @cli.command()
+@click.option(
+    "--port",
+    type=click.IntRange(0, 65535),
+    default=0,
+    help="Local web page port (default: automatic).",
+)
+@click.option(
+    "--no-browser", is_flag=True, help="Print the page address without opening a browser."
+)
+@click.option(
+    "-c",
+    "--continue",
+    "resume",
+    is_flag=True,
+    help="Continue the last chat session instead of starting a new one.",
+)
+@click.option(
+    "-t",
+    "--temporary",
+    is_flag=True,
+    help="A temporary chat: nothing said is kept, it is erased when you leave.",
+)
+def gui(port: int, no_browser: bool, resume: bool, temporary: bool) -> None:
+    """Open the chat as a local web page."""
+    if resume and temporary:
+        raise click.UsageError(t("A temporary chat starts afresh: -c and -t do not go together."))
+    from desman.gui.app import run
+
+    run(resume, temporary, port, not no_browser)
+
+
+@cli.command()
 @click.pass_context
 def help(ctx: click.Context) -> None:
     """Show help for commands."""

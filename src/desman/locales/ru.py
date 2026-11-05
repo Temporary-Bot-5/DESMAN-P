@@ -15,6 +15,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Send": "Отправить",
+    "Cancel": "Отмена",
+    "OK": "ОК",
+    "Stop": "Остановить",
+    "DESMAN finished, you can close this tab": "DESMAN завершён, можно закрыть эту вкладку",
+    "DESMAN is not running": "DESMAN не запущен",
+    "Open the page with desman gui in a terminal.": "Откройте страницу командой desman gui в терминале.",
+    "Please check your answer and try again.": "Проверьте ответ и попробуйте снова.",
+    "Local web page port (default: automatic).": "Порт локальной страницы (по умолчанию: автоматически).",
+    "Print the page address without opening a browser.": "Показать адрес страницы, не открывая браузер.",
+    "Open the chat as a local web page.": "Открыть чат как локальную веб-страницу.",
     "The message this complaint cites is no longer in your inbox; nothing was sent.": "Сообщения, на которое ссылается эта жалоба, больше нет в вашем почтовом ящике; ничего не отправлено.",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Сообщения защищены сквозным шифрованием: оператор реестра видит, кто, кому и когда пишет, но не текст. Жалоба раскрывает оператору цитируемое сообщение. Сообщения хранятся 30 дней. Они зашифрованы ключом этого узла (node.key): при потере ключа сообщения тоже теряются.",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "Ключ {name} изменился. Выполните `desman global contact remove {name}`, затем `desman global contact add {name}`, чтобы принять новый ключ.",

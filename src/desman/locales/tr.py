@@ -10,6 +10,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Send": "Gönder",
+    "Cancel": "İptal",
+    "OK": "Tamam",
+    "Stop": "Durdur",
+    "DESMAN finished, you can close this tab": "DESMAN sona erdi, bu sekmeyi kapatabilirsiniz",
+    "DESMAN is not running": "DESMAN çalışmıyor",
+    "Open the page with desman gui in a terminal.": "Sayfayı terminalde desman gui ile açın.",
+    "Please check your answer and try again.": "Yanıtınızı kontrol edip yeniden deneyin.",
+    "Local web page port (default: automatic).": "Yerel web sayfası bağlantı noktası (varsayılan: otomatik).",
+    "Print the page address without opening a browser.": "Tarayıcı açmadan sayfa adresini göster.",
+    "Open the chat as a local web page.": "Sohbeti yerel web sayfası olarak aç.",
     "The message this complaint cites is no longer in your inbox; nothing was sent.": "Bu şikâyette atıfta bulunulan mesaj artık gelen kutunuzda değil; hiçbir şey gönderilmedi.",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Mesajlar uçtan uca şifrelenir: kayıt sunucusunun işletmecisi kimin kime ne zaman yazdığını görür, metni göremez. Şikâyet, alıntılanan mesajı işletmeciye gösterir. Mesajlar 30 gün saklanır. Bu düğümün anahtarıyla (node.key) şifrelenir: anahtar kaybolursa mesajlar da kaybolur.",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} anahtarı değişti. Yeni anahtarı kabul etmek için `desman global contact remove {name}` ardından `desman global contact add {name}` çalıştırın.",

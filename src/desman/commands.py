@@ -397,6 +397,12 @@ class PermissionArgs(Args):
 # ── Read ─────────────────────────────────────────────────────────────────────
 
 
+def _gui(ctx: Context, args: NoArgs) -> Outcome:
+    message = t("Open the page with desman gui in a terminal.")
+    ui.note(message)
+    return Outcome({"message": message})
+
+
 def _help(ctx: Context, args: NoArgs) -> Outcome:
     table = ui.table("", "")
     table.show_header = False
@@ -1365,6 +1371,7 @@ def _config_reset(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 _KEYED = [p.id for p in providers.CLOUD + providers.SERVICES if p.key_env is not None]
 
 CATALOG: tuple[Entry, ...] = (
+    Entry("gui", "Explain how to open the browser chat from a terminal.", NoArgs, Kind.READ, _gui),
     Entry("help", "List DESMAN's commands for the person.", NoArgs, Kind.READ, _help),
     Entry("status", "Show a task and its subtasks.", TaskArgs, Kind.READ, _status),
     Entry("list", "List tasks, newest first.", ListArgs, Kind.READ, _list),

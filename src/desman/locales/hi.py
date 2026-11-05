@@ -10,6 +10,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Send": "भेजें",
+    "Cancel": "रद्द करें",
+    "OK": "ठीक है",
+    "Stop": "रोकें",
+    "DESMAN finished, you can close this tab": "DESMAN समाप्त हो गया है, आप यह टैब बंद कर सकते हैं",
+    "DESMAN is not running": "DESMAN चल नहीं रहा है",
+    "Open the page with desman gui in a terminal.": "टर्मिनल में desman gui से पेज खोलें।",
+    "Please check your answer and try again.": "अपना उत्तर जाँचें और फिर कोशिश करें।",
+    "Local web page port (default: automatic).": "स्थानीय वेब पेज का पोर्ट (डिफ़ॉल्ट: स्वचालित)।",
+    "Print the page address without opening a browser.": "ब्राउज़र खोले बिना पेज का पता दिखाएँ।",
+    "Open the chat as a local web page.": "चैट को स्थानीय वेब पेज के रूप में खोलें।",
     "The message this complaint cites is no longer in your inbox; nothing was sent.": "इस शिकायत में उद्धृत संदेश अब आपके इनबॉक्स में नहीं है; कुछ भी नहीं भेजा गया।",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "संदेश एंड-टू-एंड एन्क्रिप्ट किए जाते हैं: रजिस्ट्री संचालक देखता है कि कौन किसे और कब लिखता है, पर पाठ नहीं। शिकायत में उद्धृत संदेश संचालक को दिखाया जाता है। संदेश 30 दिन रखे जाते हैं। वे इस नोड की कुंजी (node.key) से एन्क्रिप्ट होते हैं: कुंजी खोने पर संदेश भी खो जाते हैं।",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} की कुंजी बदल गई है। नई कुंजी स्वीकार करने के लिए `desman global contact remove {name}` और फिर `desman global contact add {name}` चलाएँ।",

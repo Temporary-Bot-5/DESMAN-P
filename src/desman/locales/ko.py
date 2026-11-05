@@ -10,6 +10,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Send": "보내기",
+    "Cancel": "취소",
+    "OK": "확인",
+    "Stop": "중지",
+    "DESMAN finished, you can close this tab": "DESMAN이 종료되었습니다. 이 탭을 닫아도 됩니다",
+    "DESMAN is not running": "DESMAN이 실행 중이 아닙니다",
+    "Open the page with desman gui in a terminal.": "터미널에서 desman gui로 페이지를 여세요.",
+    "Please check your answer and try again.": "답변을 확인하고 다시 시도하세요.",
+    "Local web page port (default: automatic).": "로컬 웹 페이지 포트 (기본값: 자동).",
+    "Print the page address without opening a browser.": "브라우저를 열지 않고 페이지 주소를 표시합니다.",
+    "Open the chat as a local web page.": "채팅을 로컬 웹 페이지로 엽니다.",
     "The message this complaint cites is no longer in your inbox; nothing was sent.": "이 신고에서 인용한 메시지가 더 이상 받은 편지함에 없습니다. 아무것도 전송되지 않았습니다.",
     "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "메시지는 종단 간 암호화됩니다. 레지스트리 운영자는 누가 누구에게 언제 보냈는지만 볼 수 있고 내용은 볼 수 없습니다. 신고하면 인용한 메시지가 운영자에게 공개됩니다. 메시지는 30일간 보관됩니다. 이 노드의 키(node.key)로 암호화되므로 키를 잃으면 메시지도 잃게 됩니다.",
     "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name}의 키가 변경되었습니다. 새 키를 수락하려면 `desman global contact remove {name}` 다음에 `desman global contact add {name}`를 실행하세요.",
