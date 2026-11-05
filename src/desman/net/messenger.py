@@ -12,8 +12,8 @@ import httpx
 from pydantic import BaseModel
 
 from desman.config import Config
-from desman.core import netlog
-from desman.net import node, sign
+from desman.core import db, netlog
+from desman.net import node, seal, sign
 from desman.net import protocol as p
 
 M = TypeVar("M", bound=BaseModel)
@@ -63,6 +63,19 @@ def call(
             try:
                 return invoke(path, body, answer)
             except node._Problem as e:
+                if e.error == "own_key_missing":
+                    node._call(
+                        client,
+                        key,
+                        registry,
+                        "POST",
+                        p.MESSENGER_KEY,
+                        p.PublishKey(key=seal.publish(key)),
+                        p.KeyPublished,
+                        clock(),
+                        time.monotonic() + node.TIMEOUT,
+                    )
+                    return invoke(path, body, answer)
                 if e.error != node.NOT_REGISTERED:
                     raise
             lent = node.capabilities(config)
@@ -101,6 +114,7 @@ def set_name(
     transport: httpx.BaseTransport | None = None,
     clock: Callable[[], datetime] = _utc_now,
 ) -> p.MessengerName:
+    publish_key(registry, key, config, conn, transport=transport, clock=clock)
     return call(
         registry,
         key,
@@ -124,7 +138,9 @@ def contact(
     transport: httpx.BaseTransport | None = None,
     clock: Callable[[], datetime] = _utc_now,
 ) -> p.ContactState:
-    return call(
+    if body.action == "add":
+        publish_key(registry, key, config, conn, transport=transport, clock=clock)
+    result = call(
         registry,
         key,
         config,
@@ -135,6 +151,29 @@ def contact(
         transport=transport,
         clock=clock,
     )
+
+    if body.action == "add":
+        try:
+            peer(
+                registry,
+                key,
+                config,
+                conn,
+                p.PeerQuery(name=body.name),
+                transport=transport,
+                clock=clock,
+            )
+        except MessengerError as e:
+            # A legacy peer may not have published yet. A hidden block deliberately
+            # looks like a request, without granting access to the other person's key.
+            if e.error not in {"no_key", "not_contact"}:
+                raise
+    if body.action in {"remove", "block"}:
+        with db.transaction(conn):
+            conn.execute(
+                "DELETE FROM messenger_peers WHERE registry = ? AND name = ?", (registry, body.name)
+            )
+    return result
 
 
 def send(
@@ -147,6 +186,7 @@ def send(
     transport: httpx.BaseTransport | None = None,
     clock: Callable[[], datetime] = _utc_now,
 ) -> p.MessageSent:
+    publish_key(registry, key, config, conn, transport=transport, clock=clock)
     return call(
         registry,
         key,
@@ -204,3 +244,91 @@ def complain(
         transport=transport,
         clock=clock,
     )
+
+
+def publish_key(
+    registry: str,
+    key: sign.NodeKey,
+    config: Config,
+    conn: sqlite3.Connection,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+    force: bool = False,
+) -> None:
+    if (
+        not force
+        and conn.execute(
+            "SELECT 1 FROM messenger_published WHERE registry = ? AND node = ?",
+            (registry, key.fingerprint),
+        ).fetchone()
+        is not None
+    ):
+        return
+    call(
+        registry,
+        key,
+        config,
+        conn,
+        p.MESSENGER_KEY,
+        p.PublishKey(key=seal.publish(key)),
+        p.KeyPublished,
+        transport=transport,
+        clock=clock,
+    )
+    with db.transaction(conn):
+        conn.execute(
+            "INSERT INTO messenger_published VALUES (?, ?, ?) ON CONFLICT(registry) DO UPDATE SET node=excluded.node,published_at=excluded.published_at",
+            (registry, key.fingerprint, db.to_iso(clock())),
+        )
+
+
+def peer(
+    registry: str,
+    key: sign.NodeKey,
+    config: Config,
+    conn: sqlite3.Connection,
+    body: p.PeerQuery,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> p.Peer:
+    found = call(
+        registry,
+        key,
+        config,
+        conn,
+        p.MESSENGER_PEER,
+        body,
+        p.Peer,
+        transport=transport,
+        clock=clock,
+    )
+    if found.name != body.name:
+        raise MessengerError("bad_reply")
+    pin(conn, registry, found, clock())
+    return found
+
+
+def pin(conn: sqlite3.Connection, registry: str, peer: p.Peer, now: datetime) -> None:
+    try:
+        seal.verify(peer.key, sign.decode_public(peer.node_public))
+    except (seal.SealError, sign.KeyFileError):
+        raise MessengerError("bad_peer") from None
+    with db.transaction(conn):
+        row = conn.execute(
+            "SELECT node,x25519 FROM messenger_peers WHERE registry = ? AND name = ?",
+            (registry, peer.name),
+        ).fetchone()
+        if row is not None and tuple(row) != (peer.key.node, peer.key.x25519):
+            raise KeyChanged(peer.name)
+        conn.execute(
+            "INSERT OR IGNORE INTO messenger_peers VALUES (?, ?, ?, ?, ?)",
+            (registry, peer.name, peer.key.node, peer.key.x25519, db.to_iso(now)),
+        )
+
+
+class KeyChanged(MessengerError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__("key_changed")

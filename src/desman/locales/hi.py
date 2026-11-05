@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "संदेश एंड-टू-एंड एन्क्रिप्ट किए जाते हैं: रजिस्ट्री संचालक देखता है कि कौन किसे और कब लिखता है, पर पाठ नहीं। शिकायत में उद्धृत संदेश संचालक को दिखाया जाता है। संदेश 30 दिन रखे जाते हैं। वे इस नोड की कुंजी (node.key) से एन्क्रिप्ट होते हैं: कुंजी खोने पर संदेश भी खो जाते हैं।",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} की कुंजी बदल गई है। नई कुंजी स्वीकार करने के लिए `desman global contact remove {name}` और फिर `desman global contact add {name}` चलाएँ।",
+    "The message could not be decrypted or verified.": "संदेश को डिक्रिप्ट या सत्यापित नहीं किया जा सका।",
+    "Key changed, not shown.": "कुंजी बदल गई है, संदेश छिपाया गया।",
+    "(sent unencrypted)": "(बिना एन्क्रिप्शन भेजा गया)",
+    "The operator will read the cited message.": "संचालक उद्धृत संदेश पढ़ेगा।",
     "A suspension lasts from 1 to {days} days.": "निलंबन 1 से {days} दिनों तक रहता है।",
     "About": "किसके बारे में",
     "Cite each complaint only once.": "हर शिकायत का उल्लेख केवल एक बार करें।",
@@ -76,7 +82,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "मैसेंजर की बातचीत दिखाएँ।",
     "Show or set your messenger name.": "अपना मैसेंजर नाम दिखाएँ या सेट करें।",
     "The registry refused the messenger request: {error}": "रजिस्ट्री ने मैसेंजर अनुरोध अस्वीकार किया: {error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "रजिस्ट्री का संचालक इन संदेशों को पढ़ सकता है; ये 30 दिनों तक रखे जाते हैं। एंड-टू-एंड एन्क्रिप्शन बाद में आएगा।",
     "The request succeeded, but the local journal is busy.": "अनुरोध सफल हुआ, लेकिन स्थानीय जर्नल व्यस्त है।",
     "This message contains an API key; nothing was sent.": "इस संदेश में API कुंजी है; कुछ नहीं भेजा गया।",
     "Unblock a messenger name.": "मैसेंजर नाम को अनब्लॉक करें।",

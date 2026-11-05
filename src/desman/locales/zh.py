@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "消息采用端到端加密：注册中心运营者能看到谁在何时给谁发消息，但看不到正文。投诉会向运营者公开所引用的消息。消息保留30天。消息使用此节点的密钥（node.key）加密：密钥丢失，消息也将丢失。",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} 的密钥已更改。运行 `desman global contact remove {name}`，然后运行 `desman global contact add {name}` 以接受新密钥。",
+    "The message could not be decrypted or verified.": "无法解密或验证此消息。",
+    "Key changed, not shown.": "密钥已更改，消息已隐藏。",
+    "(sent unencrypted)": "（发送时未加密）",
+    "The operator will read the cited message.": "运营者将阅读所引用的消息。",
     "A suspension lasts from 1 to {days} days.": "暂停期限为1至{days}天。",
     "About": "针对",
     "Cite each complaint only once.": "每条投诉只能引用一次。",
@@ -76,7 +82,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "显示通信记录。",
     "Show or set your messenger name.": "显示或设置您的通信名称。",
     "The registry refused the messenger request: {error}": "注册中心拒绝了通信请求：{error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "注册中心的运营者可以读取这些消息；消息保存30天。端到端加密将在以后提供。",
     "The request succeeded, but the local journal is busy.": "请求已成功，但本地日志正忙。",
     "This message contains an API key; nothing was sent.": "此消息包含API密钥；未发送任何内容。",
     "Unblock a messenger name.": "解除屏蔽通信名称。",

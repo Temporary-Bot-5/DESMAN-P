@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import httpx
 import pytest
 from click import ClickException
 from click.testing import CliRunner
+from pydantic import ValidationError
 
 from conftest import FakeClock
 from desman import commands, messenger_cli
@@ -19,7 +21,7 @@ from desman.cli import cli
 from desman.config import ApiKey, Config, ConfigManager, Network, default_config_path, open_config
 from desman.core import db
 from desman.core.store import Store
-from desman.net import messenger, sign
+from desman.net import messenger, seal, sign
 from desman.net import protocol as p
 from desman.registry import store
 from desman.registry.server import Registry
@@ -41,7 +43,65 @@ def conn() -> Iterator[sqlite3.Connection]:
 
 
 def call(node: Node, path: str, **body: Any) -> dict[str, Any]:
-    return dict(node.call("POST", path, body).json())
+    # Existing behavioral tests use clear drafts; the wire always carries sealed envelopes.
+    if path == p.MESSENGER_NAME:
+        with store.connection(node.registry.path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM nodes WHERE fingerprint=? AND status='active' AND fingerprint NOT IN (SELECT node FROM messenger_keys)",
+                (node.fingerprint,),
+            ).fetchone()
+        if row:
+            node.call(
+                "POST", p.MESSENGER_KEY, {"key": seal.publish(node.key).model_dump(mode="json")}
+            )
+    if path == p.MESSENGER_SEND and "text" in body:
+        try:
+            draft = messenger_cli.MessageDraft.model_validate(body)
+        except ValidationError:
+            return dict(node.call("POST", path, body).json())
+        with store.connection(node.registry.path) as conn:
+            row = conn.execute(
+                "SELECT node FROM messenger_names WHERE name=?", (draft.to,)
+            ).fetchone()
+            public = (
+                conn.execute(
+                    "SELECT public_key FROM nodes WHERE fingerprint=?", (row[0],)
+                ).fetchone()[0]
+                if row
+                else sign.encode_public(node.key.public)
+            )
+        recipient = sign.decode_public(public)
+        # Only test fixtures hold both private keys; obtain the already published X25519 key.
+        with store.connection(node.registry.path) as conn:
+            row = conn.execute(
+                "SELECT x25519 FROM messenger_keys WHERE node=?", (sign.fingerprint(recipient),)
+            ).fetchone()
+        x25519 = row[0] if row else seal.publish(node.key).x25519
+        body = {
+            "to": draft.to,
+            "sealed": seal.seal(
+                node.key, sign.fingerprint(recipient), x25519, draft.text, node.clock()
+            ).model_dump(mode="json"),
+        }
+    if path == p.MESSENGER_COMPLAIN and body.get("message") is not None:
+        with store.connection(node.registry.path) as conn:
+            row = conn.execute(
+                "SELECT sealed FROM messages WHERE id=?", (body["message"],)
+            ).fetchone()
+        if row and row[0]:
+            with suppress(seal.SealError):
+                body["content_key"] = seal.encode(
+                    seal.content_key(node.key, seal.Sealed.model_validate_json(row[0]))
+                )
+    result = dict(node.call("POST", path, body).json())
+    if path == p.MESSENGER_INBOX and "messages" in result:
+        for message in result["messages"]:
+            if message.get("sealed") is not None:
+                message["text"] = seal.open_with(
+                    seal.content_key(node.key, seal.Sealed.model_validate(message["sealed"])),
+                    seal.Sealed.model_validate(message["sealed"]),
+                ).letter.text
+    return result
 
 
 def named(registry: Registry, clock: FakeClock, name: str) -> Node:
@@ -218,7 +278,7 @@ def test_client_registration_and_network_journal(
     b = named(registry, clock, "bobby")
     perform(p.ContactAction(action="add", name="bobby"))
     call(b, p.MESSENGER_CONTACT, action="add", name="alice")
-    perform(p.SendMessage(to="bobby", text="private outbound marker"))
+    perform(messenger_cli.MessageDraft(to="bobby", text="private outbound marker"))
     call(b, p.MESSENGER_SEND, to="alice", text="incoming")
     perform(p.Complain(name="bobby", text="private complaint marker"))
     before = conn.execute("SELECT count(*) FROM network_log").fetchone()[0]
@@ -376,6 +436,7 @@ def test_proposals_send_only_after_yes(
         assert proposal.lines[-1] == fields["text"]
     if "message" in fields:
         assert proposal.lines[2] == "Cited message: 42"
+        assert "The operator will read the cited message." in proposal.lines
     assert proposal.warnings == [messenger_cli.warning()]
     outcome = proposal.apply()
     if "text" in fields:
@@ -432,13 +493,22 @@ def test_refusals_are_journaled_and_inactive_nodes_refused(
     a = named(registry, clock, "alice")
     call(a, p.MESSENGER_NAME, name="root")
     a.call("POST", p.LEAVE)
-    for path, body in [
+    requests: list[tuple[str, dict[str, Any]]] = [
         (p.MESSENGER_NAME, {"name": "alice"}),
         (p.MESSENGER_CONTACT, {"action": "add", "name": "bobby"}),
-        (p.MESSENGER_SEND, {"to": "bobby", "text": "hello"}),
+        (
+            p.MESSENGER_SEND,
+            {
+                "to": "bobby",
+                "sealed": seal.seal(
+                    a.key, a.fingerprint, seal.publish(a.key).x25519, "hello", clock()
+                ).model_dump(mode="json"),
+            },
+        ),
         (p.MESSENGER_INBOX, {}),
         (p.MESSENGER_COMPLAIN, {"name": "bobby", "text": "hello"}),
-    ]:
+    ]
+    for path, body in requests:
         assert a.call("POST", path, body).json()["error"] == "not_registered"
     with store.connection(registry.path) as conn:
         reasons = [
@@ -468,6 +538,18 @@ def test_cli_success_json_and_safe_messages(
     joined: Config, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
 ) -> None:
     def respond(req: httpx.Request) -> httpx.Response:
+        if req.url.path == p.MESSENGER_KEY:
+            return httpx.Response(200, json={})
+        if req.url.path == p.MESSENGER_PEER:
+            peer_key = sign.NodeKey.generate()
+            return httpx.Response(
+                200,
+                json=p.Peer(
+                    name="bobby",
+                    node_public=sign.encode_public(peer_key.public),
+                    key=seal.publish(peer_key),
+                ).model_dump(mode="json"),
+            )
         if req.url.path == p.MESSENGER_NAME:
             return httpx.Response(200, json={"name": "alice"})
         if req.url.path == p.MESSENGER_SEND:

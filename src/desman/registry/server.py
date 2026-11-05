@@ -136,6 +136,14 @@ class Registry:
             protocol.CHECK_HAND_IN: ("POST", self._hand_in_check),
             protocol.PROPOSALS: ("POST", self._submit_proposal),
             protocol.REPORTS: ("POST", self._submit_report),
+            protocol.MESSENGER_KEY: (
+                "POST",
+                self._messenger_route(protocol.PublishKey, messenger.publish_key),
+            ),
+            protocol.MESSENGER_PEER: (
+                "POST",
+                self._messenger_route(protocol.PeerQuery, messenger.peer),
+            ),
             protocol.MESSENGER_NAME: (
                 "POST",
                 self._messenger_route(protocol.SetName, messenger.set_name),

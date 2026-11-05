@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Mesajlar uçtan uca şifrelenir: kayıt sunucusunun işletmecisi kimin kime ne zaman yazdığını görür, metni göremez. Şikâyet, alıntılanan mesajı işletmeciye gösterir. Mesajlar 30 gün saklanır. Bu düğümün anahtarıyla (node.key) şifrelenir: anahtar kaybolursa mesajlar da kaybolur.",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "{name} anahtarı değişti. Yeni anahtarı kabul etmek için `desman global contact remove {name}` ardından `desman global contact add {name}` çalıştırın.",
+    "The message could not be decrypted or verified.": "Mesajın şifresi çözülemedi veya doğrulanamadı.",
+    "Key changed, not shown.": "Anahtar değişti, mesaj gösterilmiyor.",
+    "(sent unencrypted)": "(şifrelenmeden gönderildi)",
+    "The operator will read the cited message.": "İşletmeci alıntılanan mesajı okuyacak.",
     "A suspension lasts from 1 to {days} days.": "Askıya alma 1 ile {days} gün sürer.",
     "About": "Hakkında",
     "Cite each complaint only once.": "Her şikayeti yalnızca bir kez belirtin.",
@@ -76,7 +82,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Mesajlaşma yazışmalarını göster.",
     "Show or set your messenger name.": "Mesajlaşma adınızı göster veya ayarla.",
     "The registry refused the messenger request: {error}": "Kayıt sunucusu mesajlaşma isteğini reddetti: {error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "Kayıt sunucusunun işletmecisi bu mesajları okuyabilir; mesajlar 30 gün saklanır. Uçtan uca şifreleme daha sonra gelecek.",
     "The request succeeded, but the local journal is busy.": "İstek başarılı oldu, ancak yerel günlük meşgul.",
     "This message contains an API key; nothing was sent.": "Bu mesaj bir API anahtarı içeriyor; hiçbir şey gönderilmedi.",
     "Unblock a messenger name.": "Mesajlaşma adının engelini kaldır.",

@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Messages are end-to-end encrypted: the registry's operator sees who writes to whom and when, not the text. A complaint shows the operator the message it cites. Messages are kept for 30 days. They are encrypted with this node's key (node.key): if that key is lost, the messages are lost too.": "Los mensajes tienen cifrado de extremo a extremo: el operador del registro ve quién escribe a quién y cuándo, pero no el texto. Una denuncia revela al operador el mensaje citado. Los mensajes se conservan 30 días. Se cifran con la clave de este nodo (node.key): si se pierde, también se pierden los mensajes.",
+    "The key of {name} changed. Run `desman global contact remove {name}` then `desman global contact add {name}` to accept the new key.": "La clave de {name} ha cambiado. Ejecuta `desman global contact remove {name}` y después `desman global contact add {name}` para aceptar la nueva clave.",
+    "The message could not be decrypted or verified.": "No se pudo descifrar o verificar el mensaje.",
+    "Key changed, not shown.": "La clave cambió; mensaje oculto.",
+    "(sent unencrypted)": "(enviado sin cifrar)",
+    "The operator will read the cited message.": "El operador leerá el mensaje citado.",
     "A suspension lasts from 1 to {days} days.": "Una suspensión dura de 1 a {days} días.",
     "About": "Acerca de",
     "Cite each complaint only once.": "Cite cada denuncia solo una vez.",
@@ -76,7 +82,6 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Mostrar conversaciones de mensajería.",
     "Show or set your messenger name.": "Mostrar o establecer su nombre de mensajería.",
     "The registry refused the messenger request: {error}": "El registro rechazó la solicitud de mensajería: {error}",
-    "The registry's operator can read these messages; they are kept for 30 days. End-to-end encryption comes later.": "El operador del registro puede leer estos mensajes; se conservan durante 30 días. El cifrado de extremo a extremo llegará más adelante.",
     "The request succeeded, but the local journal is busy.": "La solicitud se completó, pero el registro local está ocupado.",
     "This message contains an API key; nothing was sent.": "Este mensaje contiene una clave API; no se envió nada.",
     "Unblock a messenger name.": "Desbloquear un nombre de mensajería.",

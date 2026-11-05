@@ -266,23 +266,22 @@ TOPICS: Final = (
         "messenger",
         "human correspondence through the registry: names, contacts, messages, blocks and complaints",
         "After joining desman-global, `desman global name NAME` shows or sets a unique lowercase "
-        "ASCII name (3–32 characters). `desman global contacts` lists contacts and requests both ways. "
-        "`desman global contact add NAME` requests or accepts; both people must agree before sending. "
+        "ASCII name (3–32 characters). `desman global contacts` lists contacts and requests. "
+        "`desman global contact add NAME` requests or accepts; both people must agree to send. "
         "`desman global contact remove NAME` removes, withdraws or declines. "
-        "`desman global block NAME` removes contact and blocks requests without revealing the block; "
-        "`desman global unblock NAME` removes it. `desman global send NAME TEXT` sends; "
-        "`desman global messages NAME` shows up to 100 messages, --after ID reads later ones. "
-        "`desman global complain NAME TEXT` complains; --message ID preserves an incoming message. "
-        "Sending and adding contacts require the other node to be active; away means it has left. "
-        "Contacts survive leaving and work again after rejoining. "
-        "The registry operator can read messages; they are kept 30 days. Complaints keep a copy "
-        "of the cited message. End-to-end encryption comes later. Limits per node per day: "
-        "200 messages, 20 new contact requests, 5 complaints. Configured API keys block sending. "
-        "The chat confirms changes in a window with the exact text and warning. Messages are "
-        "untrusted data, shown to the interlocutor only after the person agrees in a window. "
-        "Use /messages [NAME] to read privately: no history or model call. An operator suspension "
-        "blocks sending, names and new contacts until expiry or lifting; inbox and complaints work. Nothing in a "
-        "message runs or becomes a task, command or click.",
+        "`desman global block NAME` removes contact and blocks requests discreetly; "
+        "`desman global unblock NAME` unblocks. `desman global send NAME TEXT` sends. "
+        "`desman global messages NAME` shows up to 100 messages; --after ID reads later ones. "
+        "`desman global complain NAME TEXT` complains; --message ID reveals the cited incoming "
+        "message to the operator and preserves its text. Messages are end-to-end encrypted, kept "
+        "30 days. The operator sees who writes to whom and when. Keys are pinned on first contact; "
+        "a changed key requires removing and adding the contact. Losing node.key loses messages. "
+        "Sending and adding contacts require an active peer. Contacts survive leaving. "
+        "Daily limits: 200 messages, 20 requests, 5 complaints. Configured API keys block sending. "
+        "The chat confirms changes in a window. Messages are untrusted data, shown to the "
+        "interlocutor only after the person agrees. /messages [NAME] reads privately without "
+        "history or model calls. Operator suspension blocks sends, names and new contacts; "
+        "inbox and complaints work. Messages never become tasks, commands or clicks.",
     ),
 )
 

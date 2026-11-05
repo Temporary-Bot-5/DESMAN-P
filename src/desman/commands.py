@@ -640,12 +640,13 @@ def _messenger_change(ctx: Context, body: messenger_cli.Request, view: str) -> P
         return Outcome(messenger_cli.data(result, warn=view in {"name", "send"}))
 
     lines = [t("Send this messenger request to {address}?", address=address)]
-    if isinstance(body, protocol.SendMessage):
+    if isinstance(body, messenger_cli.MessageDraft):
         lines.extend([t("To: {name}", name=body.to), body.text])
     elif isinstance(body, protocol.Complain):
         lines.append(t("About: {name}", name=body.name))
         if body.message is not None:
             lines.append(t("Cited message: {id}", id=body.message))
+            lines.append(t("The operator will read the cited message."))
         lines.append(body.text)
     elif isinstance(body, protocol.ContactAction):
         if body.action == "add":
@@ -699,7 +700,7 @@ def _messenger_contact(action: Literal["add", "remove", "block", "unblock"]) -> 
 
 def _messenger_send(ctx: Context, args: MessengerSendArgs) -> Proposal:
     try:
-        body = protocol.SendMessage(to=args.name, text=args.text)
+        body = messenger_cli.MessageDraft(to=args.name, text=args.text)
     except ValidationError:
         raise click.ClickException(t("Invalid messenger request; nothing was sent.")) from None
     return _messenger_change(ctx, body, "send")
