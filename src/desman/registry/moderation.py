@@ -133,13 +133,24 @@ def _node(conn: sqlite3.Connection, ref: str) -> str:
     return str(row[0]) if row is not None else admin.find_node(conn, ref)
 
 
-def _valid(
-    conn: sqlite3.Connection, row: sqlite3.Row, root: Ed25519PublicKey, now: datetime
-) -> p.Suspension | None:
+def _valid(row: sqlite3.Row, believed: sign.Trust, now: datetime) -> p.Suspension | None:
+    """The record as a node would take it now: signed by an operator with scope `moderation`,
+    not revoked, issued within its assignment, both still in term. Uses `Trust`'s public view
+    only (receiving a moderation record would mark its id as seen)."""
     try:
         signed = sign.Signed.model_validate_json(row["signed_json"])
-        store.trust(conn, root, now).receive(signed.model_dump(mode="json"))
-        body = p.Moderation.model_validate(signed.record.body)
+        record = signed.record
+        if record.kind is not sign.RecordKind.MODERATION or believed.is_revoked(record.signer):
+            return None
+        found = believed.operator(record.signer)
+        if found is None or sign.Scope.MODERATION not in found.scopes:
+            return None
+        if not found.issued_at <= record.issued_at < found.expires_at:
+            return None
+        if now >= found.expires_at or now >= record.expires_at:
+            return None
+        sign.check_signature(signed, found.key)
+        body = p.Moderation.model_validate(record.body)
     except (sign.Refused, ValidationError):
         return None
     if body.action != row["action"] or body.node != row["node"] or body.lifts != row["lifts"]:
@@ -163,16 +174,17 @@ def suspension(
     if not rows:
         return None
     root = sign.load_root(sign.ROOT_PUB) if root is None else root
+    believed = store.trust(conn, root, now)
     for row in rows:
-        found = _valid(conn, row, root, now)
-        if found is not None and not _lifted(conn, row["id"], root, now):
+        found = _valid(row, believed, now)
+        if found is not None and not _lifted(conn, row["id"], believed, now):
             return found
     return None
 
 
-def _lifted(conn: sqlite3.Connection, id: str, root: Ed25519PublicKey, now: datetime) -> bool:
+def _lifted(conn: sqlite3.Connection, id: str, believed: sign.Trust, now: datetime) -> bool:
     return any(
-        _valid(conn, row, root, now) is not None
+        _valid(row, believed, now) is not None
         for row in conn.execute("SELECT * FROM moderations WHERE action='lift' AND lifts=?", (id,))
     )
 
@@ -182,8 +194,16 @@ def moderations(
 ) -> list[ModerationRow]:
     now = datetime.now(UTC) if now is None else now
     root = sign.load_root(sign.ROOT_PUB) if root is None else root
+    believed = store.trust(conn, root, now)
+    lifted = {
+        row["lifts"]
+        for row in conn.execute("SELECT * FROM moderations WHERE action='lift'")
+        if _valid(row, believed, now) is not None
+    }
     return [
-        ModerationRow.model_validate({**dict(row), "lifted": _lifted(conn, row["id"], root, now)})
+        ModerationRow.model_validate(
+            {**dict(row), "lifted": row["action"] == "suspend" and row["id"] in lifted}
+        )
         for row in conn.execute(
             "SELECT id,node,action,lifts,signer,issued_at,expires_at "
             "FROM moderations ORDER BY issued_at DESC,rowid DESC"
@@ -248,7 +268,16 @@ def _keep(
             "complaints": body.complaints,
         },
     )
-    return next(row for row in moderations(conn, now=now, root=root) if row.id == record.id)
+    return ModerationRow(
+        id=record.id,
+        node=body.node,
+        action=body.action,
+        lifts=body.lifts,
+        signer=record.signer,
+        issued_at=db.to_iso(record.issued_at),
+        expires_at=db.to_iso(record.expires_at),
+        lifted=False,
+    )
 
 
 def suspend(
@@ -307,8 +336,9 @@ def lift(
             )
         if rows:
             row = rows[0]
-            found = _valid(conn, row, root, now)
-            if _lifted(conn, row["id"], root, now):
+            believed = store.trust(conn, root, now)
+            found = _valid(row, believed, now)
+            if _lifted(conn, row["id"], believed, now):
                 found = None
         else:
             found = suspension(conn, _node(conn, ref), now, root=root)

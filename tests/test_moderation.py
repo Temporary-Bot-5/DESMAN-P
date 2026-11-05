@@ -228,6 +228,57 @@ def test_upgrade_nine_with_complaint(tmp_path: Path, clock: FakeClock) -> None:
         conn.close()
 
 
+def test_upgrade_ten_preserves_moderations(tmp_path: Path, clock: FakeClock) -> None:
+    path = tmp_path / "ten.db"
+    conn = db.connect(path)
+    db.migrate(conn, store.MIGRATIONS[:10])
+    values = ("s", "node", "suspend", None, "signer", db.to_iso(clock()), db.to_iso(clock()), "{}")
+    conn.execute("INSERT INTO moderations VALUES (?,?,?,?,?,?,?,?)", values)
+    conn.close()
+    with store.open_registry(path) as conn:
+        assert tuple(conn.execute("SELECT * FROM moderations").fetchone()) == values
+        assert [row[2] for row in conn.execute("PRAGMA index_info(moderations_lifts)")] == ["lifts"]
+
+
+def test_listing_builds_trust_once_and_writes_skip_listing(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    named(registry, clock, "bobby")
+    with store.open_registry(db_path) as conn:
+        original_list = moderation.moderations
+
+        def unexpected_list(*args: Any, **kwargs: Any) -> list[moderation.ModerationRow]:
+            pytest.fail("writing a moderation must not list history")
+
+        monkeypatch.setattr(moderation, "moderations", unexpected_list)
+        first = moderation.suspend(conn, operator, "bobby", "reason", complaints=[], now=clock())
+        second = moderation.suspend(conn, operator, "bobby", "reason", complaints=[], now=clock())
+        lifted = moderation.lift(conn, operator, first.id, "reason", now=clock())
+        assert not first.lifted and not second.lifted and not lifted.lifted
+        original_trust = store.trust
+        calls = 0
+
+        def counted_trust(*args: Any, **kwargs: Any) -> sign.Trust:
+            nonlocal calls
+            calls += 1
+            return original_trust(*args, **kwargs)
+
+        monkeypatch.setattr(store, "trust", counted_trust)
+        rows = {row.id: row for row in original_list(conn, now=clock())}
+        assert calls == 1
+        assert rows[first.id].lifted
+        assert not rows[second.id].lifted and not rows[lifted.id].lifted
+        # Checking the same signed record twice must not consume its replay id.
+        believed = original_trust(conn, sign.load_root(sign.ROOT_PUB), clock())
+        row = conn.execute("SELECT * FROM moderations WHERE id=?", (lifted.id,)).fetchone()
+        assert moderation._valid(row, believed, clock()) is not None
+        assert moderation._valid(row, believed, clock()) is not None
+
+
 def test_protocol() -> None:
     bodies: list[dict[str, Any]] = [
         {"action": "lift"},

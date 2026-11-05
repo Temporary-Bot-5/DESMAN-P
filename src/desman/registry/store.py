@@ -344,6 +344,10 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     WHEN OLD.status != 'open' OR NEW.status != 'settled'
     BEGIN SELECT RAISE(ABORT, 'complaints can only be settled once'); END;
     """,
+    # 11: look up the lifts of a suspension without scanning moderation history.
+    """
+    CREATE INDEX moderations_lifts ON moderations(lifts);
+    """,
 )
 
 
