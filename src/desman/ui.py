@@ -1,4 +1,4 @@
-"""Terminal look and prompts, shared by every command.
+"""Output and prompts shared by every command, with a swappable Front.
 
 Output goes through rich. Prompts use arrow-key menus (questionary) in a real terminal and
 fall back to numbered prompts otherwise, so scripts, pipes and tests can still drive them by
@@ -12,12 +12,14 @@ import re
 import sys
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import click
 from rich.cells import cell_len
 from rich.console import Console, RenderableType
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -41,6 +43,11 @@ THEME = Theme(
         "warn": WARN,
         "muted": MUTED,
         "key": "bold " + ACCENT,
+        # Rich cannot parse a theme name inside a style string ("bold accent" would be lost,
+        # silently), so the bold forms used across the code are names of their own.
+        "bold accent": "bold " + ACCENT,
+        "bold warn": "bold " + WARN,
+        "bold bad": "bold " + BAD,
     }
 )
 
@@ -64,40 +71,40 @@ def console(stderr: bool = False) -> Console:
     )
 
 
-def interactive() -> bool:
+def _terminal_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def out(*items: RenderableType | str) -> None:
+def _terminal_out(*items: RenderableType | str) -> None:
     console().print(*items)
 
 
-def header(title: str, subtitle: str = "") -> None:
+def _terminal_header(title: str, subtitle: str = "") -> None:
     body = Text(title, style="bold accent")
     if subtitle:
         body.append("\n" + subtitle, style="muted")
     out(Panel(body, border_style="accent", padding=(0, 2), expand=False))
 
 
-def section(title: str) -> None:
+def _terminal_section(title: str) -> None:
     out("")
     out(Text(f"── {title} ", style="bold accent") + Text("─" * max(0, 50 - len(title)), "muted"))
 
 
-def note(text: str) -> None:
+def _terminal_note(text: str) -> None:
     out(Text(text, style="muted"))
 
 
-def ok(text: str) -> None:
+def _terminal_ok(text: str) -> None:
     out(Text("✓ ", style="good") + Text(text))
 
 
-def warn(text: str, *, stderr: bool = False) -> None:
+def _terminal_warn(text: str, *, stderr: bool = False) -> None:
     """`stderr` keeps stdout clean for machine output (`--json`)."""
     console(stderr).print(Text("! ", style="bold warn") + Text(text, style="warn"))
 
 
-def error(text: str) -> None:
+def _terminal_error(text: str) -> None:
     console(stderr=True).print(Text("✗ ", style="bold bad") + Text(text, style="bad"))
 
 
@@ -133,7 +140,7 @@ class Heading:
     title: str
 
 
-def select(question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
+def _terminal_select(question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
     """One of the choices among `items` by value."""
     choices = [c for c in items if isinstance(c, Choice)]
     if not choices:
@@ -195,7 +202,7 @@ def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - cell_len(text))
 
 
-def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:
+def _terminal_checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:
     """The values the user ticks. Without a terminal: a yes/no question per choice."""
     if interactive():
         import questionary
@@ -218,7 +225,7 @@ def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set
     return {c.value for c in choices if confirm(f"  {c.label}", default=c.value in checked)}
 
 
-def confirm(question: str, default: bool = False) -> bool:
+def _terminal_confirm(question: str, default: bool = False) -> bool:
     if interactive():
         import questionary
 
@@ -251,7 +258,7 @@ def _fold(text: str) -> str:
     return text.casefold().replace("i\u0307", "i").replace("ı", "i")
 
 
-def text(question: str, default: str = "") -> str:
+def _terminal_text(question: str, default: str = "") -> str:
     if interactive():
         import questionary
 
@@ -262,7 +269,7 @@ def text(question: str, default: str = "") -> str:
     return str(click.prompt(question, default=default, show_default=bool(default))).strip()
 
 
-def line(commands: Mapping[str, str] | None = None) -> str | None:
+def _terminal_line(commands: Mapping[str, str] | None = None) -> str | None:
     """A line typed in the chat; None when the person leaves (Ctrl+D, Ctrl+C, end of input).
 
     In a terminal the line is edited with prompt_toolkit (questionary's own base): ↑ for earlier
@@ -328,7 +335,7 @@ def _completer(commands: Mapping[str, str]) -> Any:
     return Slash()
 
 
-def secret(question: str) -> str:
+def _terminal_secret(question: str) -> str:
     """Hidden input; never echoed."""
     if interactive():
         import questionary
@@ -369,3 +376,174 @@ def clean(text: str) -> str:
         else c
         for c in text
     )
+
+
+class Front(Protocol):
+    """Define shared UI operations so chat and commands can use either front."""
+
+    def interactive(self) -> bool: ...
+    def out(self, *items: RenderableType | str) -> None: ...
+    def header(self, title: str, subtitle: str = "") -> None: ...
+    def section(self, title: str) -> None: ...
+    def note(self, text: str) -> None: ...
+    def ok(self, text: str) -> None: ...
+    def warn(self, text: str, *, stderr: bool = False) -> None: ...
+    def error(self, text: str) -> None: ...
+    def select(
+        self, question: str, items: Sequence[Choice | Heading], default: Any = None
+    ) -> Any: ...
+    def checkbox(self, question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]: ...
+    def confirm(self, question: str, default: bool = False) -> bool: ...
+    def text(self, question: str, default: str = "") -> str: ...
+    def line(self, commands: Mapping[str, str] | None = None) -> str | None: ...
+    def secret(self, question: str) -> str: ...
+    def live_start(self, terminal: bool | None = None) -> bool: ...
+    def live_update(self, renderable: RenderableType) -> None: ...
+    def live_stop(self) -> None: ...
+
+
+class TerminalFront:
+    """Keep terminal rendering and prompts behind the shared front contract."""
+
+    def __init__(self) -> None:
+        self._live: Live | None = None
+
+    def interactive(self) -> bool:
+        return _terminal_interactive()
+
+    def out(self, *items: RenderableType | str) -> None:
+        return _terminal_out(*items)
+
+    def header(self, title: str, subtitle: str = "") -> None:
+        return _terminal_header(title, subtitle)
+
+    def section(self, title: str) -> None:
+        return _terminal_section(title)
+
+    def note(self, text: str) -> None:
+        return _terminal_note(text)
+
+    def ok(self, text: str) -> None:
+        return _terminal_ok(text)
+
+    def warn(self, text: str, *, stderr: bool = False) -> None:
+        return _terminal_warn(text, stderr=stderr)
+
+    def error(self, text: str) -> None:
+        return _terminal_error(text)
+
+    def select(self, question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
+        return _terminal_select(question, items, default)
+
+    def checkbox(self, question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:
+        return _terminal_checkbox(question, choices, checked)
+
+    def confirm(self, question: str, default: bool = False) -> bool:
+        return _terminal_confirm(question, default)
+
+    def text(self, question: str, default: str = "") -> str:
+        return _terminal_text(question, default)
+
+    def line(self, commands: Mapping[str, str] | None = None) -> str | None:
+        return _terminal_line(commands)
+
+    def secret(self, question: str) -> str:
+        return _terminal_secret(question)
+
+    def live_start(self, terminal: bool | None = None) -> bool:
+        enabled = console().is_terminal if terminal is None else terminal
+        if enabled:
+            self._live = Live(console=console(), auto_refresh=False, transient=True)
+            self._live.start()
+        return enabled
+
+    def live_update(self, renderable: RenderableType) -> None:
+        if self._live is not None:
+            self._live.update(renderable, refresh=True)
+
+    def live_stop(self) -> None:
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+
+
+_front: Front = TerminalFront()
+
+
+@contextmanager
+def use(front: Front) -> Iterator[None]:
+    """Select a front for synchronous UI calls and restore it even after cancellation."""
+    global _front
+    previous, _front = _front, front
+    try:
+        yield
+    finally:
+        _front = previous
+
+
+def live_start(terminal: bool | None = None) -> bool:
+    return _front.live_start(terminal)
+
+
+def live_update(renderable: RenderableType) -> None:
+    _front.live_update(renderable)
+
+
+def live_stop() -> None:
+    _front.live_stop()
+
+
+def interactive() -> bool:
+    return _front.interactive()
+
+
+def out(*items: RenderableType | str) -> None:
+    return _front.out(*items)
+
+
+def header(title: str, subtitle: str = "") -> None:
+    return _front.header(title, subtitle)
+
+
+def section(title: str) -> None:
+    return _front.section(title)
+
+
+def note(text: str) -> None:
+    return _front.note(text)
+
+
+def ok(text: str) -> None:
+    return _front.ok(text)
+
+
+def warn(text: str, *, stderr: bool = False) -> None:
+    return _front.warn(text, stderr=stderr)
+
+
+def error(text: str) -> None:
+    return _front.error(text)
+
+
+def select(question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
+    return _front.select(question, items, default)
+
+
+def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:
+    return _front.checkbox(question, choices, checked)
+
+
+def confirm(question: str, default: bool = False) -> bool:
+    return _front.confirm(question, default)
+
+
+def text(question: str, default: str = "") -> str:
+    return _front.text(question, default)
+
+
+def line(commands: Mapping[str, str] | None = None) -> str | None:
+    return _front.line(commands)
+
+
+def secret(question: str) -> str:
+    return _front.secret(question)

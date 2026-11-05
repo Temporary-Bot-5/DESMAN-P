@@ -18,7 +18,6 @@ from __future__ import annotations
 from types import TracebackType
 
 from rich.console import Group, RenderableType
-from rich.live import Live
 from rich.progress_bar import ProgressBar
 from rich.table import Table
 from rich.text import Text
@@ -58,14 +57,12 @@ class Progress:
         self.store = store
         self.task_id = task_id
         self.labels = key_labels(config)
-        self.terminal = ui.console().is_terminal if terminal is None else terminal
-        self._live: Live | None = None
+        self.terminal = terminal
+        self._live = False
         self._said: dict[str, str] = {}  # without a terminal: what each line said last
 
     def __enter__(self) -> Progress:
-        if self.terminal:
-            self._live = Live(console=ui.console(), auto_refresh=False, transient=True)
-            self._live.start()
+        self._live = ui.live_start(self.terminal)
         self.refresh()
         return self
 
@@ -75,15 +72,14 @@ class Progress:
         error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
-        if self._live is not None:
-            self._live.stop()
-            self._live = None
+        ui.live_stop()
+        self._live = False
 
     def refresh(self) -> None:
         report = task_report(self.store, self.task_id)
         modules = calls.modules(self.store.conn, self.task_id)
-        if self._live is not None:
-            self._live.update(self.render(report, modules), refresh=True)
+        if self._live:
+            ui.live_update(self.render(report, modules))
             return
         for name, line in self.lines(report, modules):
             if self._said.get(name) != line:

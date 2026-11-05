@@ -37,7 +37,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-desman = ["policy.toml", "protected.toml", "net/root.pub"]
+desman = ["policy.toml", "protected.toml", "net/root.pub", "gui/static/*"]
 
 [tool.ruff]
 target-version = "py311"

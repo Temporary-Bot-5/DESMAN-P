@@ -1,0 +1,133 @@
+/* Shared page theme and form controls. */
+:root {
+  color-scheme: dark;
+  font: 18px/1.5 system-ui, sans-serif;
+  background: #101418;
+  color: #eee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 1000px;
+  margin: auto;
+  padding: 1rem;
+}
+
+h1 {
+  color: #00eeff;
+  font-size: 1.5rem;
+}
+
+h1 span {
+  color: #888;
+}
+
+a {
+  color: #00eeff;
+  overflow-wrap: anywhere;
+}
+
+button, input, textarea {
+  font: inherit;
+}
+
+button {
+  background: #23343d;
+  color: #eee;
+  border: 1px solid #507080;
+  border-radius: .5rem;
+  padding: .65rem 1rem;
+  cursor: pointer;
+  margin: .3rem;
+}
+
+button:hover, button:focus-visible {
+  border-color: #00eeff;
+}
+
+input, textarea {
+  background: #161e24;
+  color: #fff;
+  border: 1px solid #888;
+  border-radius: .4rem;
+  padding: .7rem;
+  max-width: 100%;
+}
+
+textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+}
+
+/* Prompt windows stay available below the transcript. */
+#prompt {
+  position: sticky;
+  bottom: 0;
+  background: #101418;
+  padding: 1rem 0;
+  border-top: 1px solid #33434b;
+}
+
+#prompt > label, #prompt > button.choice {
+  display: block;
+}
+
+#prompt label input {
+  margin-right: .7rem;
+}
+
+/* Rich output needs fixed-width glyphs to preserve table alignment. */
+.out, #live {
+  font-family: ui-monospace, monospace;
+}
+
+#messages > div {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: .5rem 0;
+}
+
+#messages .user {
+  background: #20343e;
+  border-radius: .7rem;
+  padding: .7rem 1rem;
+  margin: .5rem 0 .5rem auto;
+  max-width: 90%;
+  width: fit-content;
+}
+
+#live {
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: #888;
+}
+
+#status {
+  color: #ffb000;
+}
+
+small {
+  color: #aaa;
+  display: block;
+}
+
+/* Stop is visible only while work is busy. */
+#stop {
+  border-color: #ffb000;
+}
+
+#suggestions button {
+  font-size: .9rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+}
