@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Final, TypeVar
+from typing import Any, Final, Protocol, TypeVar
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -57,6 +57,20 @@ PROPOSAL_LIMIT: Final = protocol.PROPOSAL_LIMIT
 INTERNAL: Final = "internal"
 
 M = TypeVar("M", bound=BaseModel)
+_M_contra = TypeVar("_M_contra", bound=BaseModel, contravariant=True)
+
+
+class MessengerHandler(Protocol[_M_contra]):
+    def __call__(
+        self,
+        conn: sqlite3.Connection,
+        who: str,
+        asked: _M_contra,
+        now: datetime,
+        *,
+        root: Ed25519PublicKey | None = None,
+    ) -> BaseModel: ...
+
 
 _STATUS: Final = {
     Reason.MALFORMED: HTTPStatus.BAD_REQUEST,
@@ -186,16 +200,14 @@ class Registry:
                 self._refused(conn, caller.fingerprint, work.LEASE_LOST, method, target)
                 return _problem(HTTPStatus.CONFLICT, work.LEASE_LOST)
 
-    def _messenger_route(
-        self, model: type[M], perform: Callable[[sqlite3.Connection, str, M, datetime], BaseModel]
-    ) -> Handler:
+    def _messenger_route(self, model: type[M], perform: MessengerHandler[M]) -> Handler:
         def route(
             conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
         ) -> Reply:
             asked = _body(model, body, caller)
             with db.transaction(conn):
                 self._active(conn, caller)
-                return _ok(perform(conn, caller.fingerprint, asked, now))
+                return _ok(perform(conn, caller.fingerprint, asked, now, root=self.root))
 
         return route
 

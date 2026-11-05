@@ -586,6 +586,9 @@ MAX_CONTACT_REQUESTS_PER_DAY: Final = 20
 MAX_COMPLAINTS_PER_DAY: Final = 5
 MESSAGE_DAYS: Final = 30
 AWAY: Final = "away"
+SUSPENDED: Final = "suspended"
+MODERATION_DAYS: Final = 30
+MAX_MODERATION_DAYS: Final = 365
 
 
 def message_text(text: str) -> str:
@@ -602,6 +605,27 @@ def message_text(text: str) -> str:
 
 class MessengerBody(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class Moderation(MessengerBody):
+    node: Fingerprint
+    action: Literal["suspend", "lift"]
+    reason: Annotated[str, Field(min_length=1, max_length=500), AfterValidator(message_text)]
+    complaints: list[str] = Field(default_factory=list, max_length=20)
+    lifts: RecordId | None = None
+
+    @model_validator(mode="after")
+    def _target(self) -> Moderation:
+        if (self.action == "lift") != (self.lifts is not None):
+            raise ValueError("only a lift must name a suspension")
+        return self
+
+
+class Suspension(MessengerBody):
+    until: datetime
+    reason: str
+    record: str
+    operator: Fingerprint
 
 
 class SetName(MessengerBody):
@@ -646,6 +670,7 @@ class Message(MessengerBody):
 
 
 class Inbox(MessengerBody):
+    suspended: Suspension | None = None
     name: Handle | None
     contacts: list[Handle]
     asked: list[Handle]

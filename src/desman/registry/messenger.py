@@ -6,9 +6,11 @@ import sqlite3
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from desman.core import db
 from desman.net import protocol as p
-from desman.registry import store
+from desman.registry import moderation, store
 
 
 class Refusal(Exception):
@@ -68,8 +70,14 @@ def _limit(
 
 
 def set_name(
-    conn: sqlite3.Connection, who: str, asked: p.SetName, now: datetime
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.SetName,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
 ) -> p.MessengerName:
+    _permitted(conn, who, now, root)
     name = asked.name
     if name in {"admin", "operator", "registry", "root", "system", "support"} or name.startswith(
         "desman"
@@ -88,8 +96,15 @@ def set_name(
 
 
 def contact(
-    conn: sqlite3.Connection, who: str, asked: p.ContactAction, now: datetime
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.ContactAction,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
 ) -> p.ContactState:
+    if asked.action == "add":
+        _permitted(conn, who, now, root)
     _name(conn, who)
     other = _other(conn, asked.name)
     pair = _pair(who, other)
@@ -140,7 +155,15 @@ def contact(
     return state
 
 
-def send(conn: sqlite3.Connection, who: str, asked: p.SendMessage, now: datetime) -> p.MessageSent:
+def send(
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.SendMessage,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
+) -> p.MessageSent:
+    _permitted(conn, who, now, root)
     _name(conn, who)
     other = _other(conn, asked.to)
     if not _has(conn, "contacts", "a = ? AND b = ?", _pair(who, other)):
@@ -161,7 +184,14 @@ def send(conn: sqlite3.Connection, who: str, asked: p.SendMessage, now: datetime
     return p.MessageSent(id=cursor.lastrowid, sent_at=now)
 
 
-def inbox(conn: sqlite3.Connection, who: str, asked: p.InboxQuery, now: datetime) -> p.Inbox:
+def inbox(
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.InboxQuery,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
+) -> p.Inbox:
     own = conn.execute("SELECT name FROM messenger_names WHERE node = ?", (who,)).fetchone()
 
     def names(sql: str, *, twice: bool = False) -> list[str]:
@@ -199,6 +229,7 @@ def inbox(conn: sqlite3.Connection, who: str, asked: p.InboxQuery, now: datetime
     messages = [p.Message.model_validate(dict(r)) for r in rows]
     messages.sort(key=lambda m: m.id)
     return p.Inbox(
+        suspended=moderation.suspension(conn, who, now, root=root),
         name=own[0] if own else None,
         contacts=contacts,
         asked=outgoing,
@@ -209,7 +240,12 @@ def inbox(conn: sqlite3.Connection, who: str, asked: p.InboxQuery, now: datetime
 
 
 def complain(
-    conn: sqlite3.Connection, who: str, asked: p.Complain, now: datetime
+    conn: sqlite3.Connection,
+    who: str,
+    asked: p.Complain,
+    now: datetime,
+    *,
+    root: Ed25519PublicKey | None = None,
 ) -> p.ComplaintReceived:
     _name(conn, who)
     other = _other(conn, asked.name)
@@ -246,3 +282,10 @@ def complain(
     )
     store.log(conn, "complaint", who, {"id": id, "from_node": who, "about_node": other})
     return p.ComplaintReceived(id=id)
+
+
+def _permitted(
+    conn: sqlite3.Connection, who: str, now: datetime, root: Ed25519PublicKey | None
+) -> None:
+    if moderation.suspension(conn, who, now, root=root) is not None:
+        raise Refusal(p.SUSPENDED)

@@ -27,7 +27,7 @@ from desman import i18n, ui
 from desman.core.models import Kind
 from desman.i18n import t
 from desman.net import protocol, sign
-from desman.registry import admin, checks, releases, server, store, work
+from desman.registry import admin, checks, moderation, releases, server, store, work
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
@@ -997,3 +997,179 @@ def report_show(ctx: click.Context, id: str, as_json: bool) -> None:
         click.echo(exact)
     else:
         ui.out(Text(exact))
+
+
+@cli.command("complaints")
+@click.option("--all", "include_settled", is_flag=True, help="Include settled complaints.")
+@_json_option
+@click.pass_context
+def complaints_command(ctx: click.Context, include_settled: bool, as_json: bool) -> None:
+    """List messenger complaints."""
+    conn = _open_db(ctx)
+    try:
+        rows = moderation.complaints(conn, all=include_settled)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps([row.model_dump() for row in rows], ensure_ascii=False))
+    else:
+        table = ui.table(t("ID"), t("Created"), t("From"), t("About"), t("Count"), t("Status"))
+        for row in rows:
+            table.add_row(
+                Text(row.id[:12]),
+                Text(row.created_at),
+                Text(row.from_name or row.from_node[:12]),
+                Text(f"{row.about_name or ''} ({row.about_node[:12]})"),
+                str(row.count),
+                Text(row.status),
+            )
+        ui.out(table)
+
+
+@cli.group("complaint")
+def complaint_group() -> None:
+    """Inspect and settle messenger complaints."""
+
+
+@complaint_group.command("show")
+@click.argument("id")
+@_json_option
+@click.pass_context
+def complaint_show(ctx: click.Context, id: str, as_json: bool) -> None:
+    """Show a complaint and its quoted message."""
+    conn = _open_db(ctx)
+    try:
+        found = moderation.complaint(conn, id)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(found.model_dump_json(indent=2))
+    else:
+        ui.out(
+            Text(
+                json.dumps(
+                    found.model_dump(exclude={"text", "message_text"}), ensure_ascii=False, indent=2
+                )
+            )
+        )
+        ui.out(Text(t("Quoted complaint:") + "\n" + ui.clean(found.text)))
+        if found.message_text is not None:
+            ui.out(Text(t("Quoted message:") + "\n" + ui.clean(found.message_text)))
+
+
+@complaint_group.command("dismiss")
+@click.argument("id")
+@click.option("--note", default=None)
+@click.pass_context
+def complaint_dismiss(ctx: click.Context, id: str, note: str | None) -> None:
+    """Dismiss an open complaint."""
+    conn = _open_db(ctx)
+    try:
+        moderation.dismiss(conn, id, note, _now())
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    ui.ok(t("Complaint dismissed."))
+
+
+@cli.group("moderation")
+def moderation_group() -> None:
+    """Suspend messaging or lift a suspension."""
+
+
+def _operator_option(command: Any) -> Any:
+    return click.option(
+        "--operator-key",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=None,
+        help="The operator's private key (default: operator.key in the registry's directory).",
+    )(command)
+
+
+@moderation_group.command("suspend")
+@click.argument("node")
+@click.option("--reason", required=True)
+@click.option(
+    "--days",
+    default=protocol.MODERATION_DAYS,
+    show_default=True,
+    type=click.IntRange(1, protocol.MAX_MODERATION_DAYS),
+)
+@click.option("--complaint", "complaints", multiple=True)
+@_operator_option
+@click.pass_context
+def moderation_suspend(
+    ctx: click.Context,
+    node: str,
+    reason: str,
+    days: int,
+    complaints: tuple[str, ...],
+    operator_key: Path | None,
+) -> None:
+    """Sign a suspension of a node's messaging."""
+    _moderate(ctx, "suspend", node, reason, operator_key, days, list(complaints))
+
+
+@moderation_group.command("lift")
+@click.argument("ref")
+@click.option("--reason", required=True)
+@_operator_option
+@click.pass_context
+def moderation_lift(ctx: click.Context, ref: str, reason: str, operator_key: Path | None) -> None:
+    """Sign the lifting of a messaging suspension."""
+    _moderate(ctx, "lift", ref, reason, operator_key)
+
+
+def _moderate(
+    ctx: click.Context,
+    action: str,
+    ref: str,
+    reason: str,
+    path: Path | None,
+    days: int = protocol.MODERATION_DAYS,
+    complaints: list[str] | None = None,
+) -> None:
+    directory = _dir(ctx)
+    try:
+        key = admin.load_operator_key(directory / store.OPERATOR_KEY if path is None else path)
+        conn = _open_db(ctx)
+        try:
+            if action == "suspend":
+                row = moderation.suspend(
+                    conn, key, ref, reason, days=days, complaints=complaints or [], now=_now()
+                )
+            else:
+                row = moderation.lift(conn, key, ref, reason, now=_now())
+        finally:
+            conn.close()
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(t("Moderation recorded as {id}.", id=row.id))
+
+
+@moderation_group.command("list")
+@_json_option
+@click.pass_context
+def moderation_list(ctx: click.Context, as_json: bool) -> None:
+    """List signed moderation records."""
+    conn = _open_db(ctx)
+    try:
+        rows = moderation.moderations(conn)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps([row.model_dump() for row in rows]))
+    else:
+        table = ui.table(t("ID"), t("Action"), t("Node"), t("Until"), t("Lifted"))
+        for row in rows:
+            table.add_row(
+                Text(row.id[:12]),
+                Text(row.action),
+                Text(row.node[:12]),
+                Text(row.expires_at),
+                Text(t("yes") if row.lifted else t("no")),
+            )
+        ui.out(table)

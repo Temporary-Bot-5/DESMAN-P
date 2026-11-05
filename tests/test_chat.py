@@ -255,7 +255,17 @@ def test_the_chat_offers_its_own_commands(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(ui, "line", line)
     Chat(stored()).run()
     assert offered == [
-        ["/help", "/new", "/sessions", "/rename", "/compact", "/profile", "/delete", "/exit"]
+        [
+            "/help",
+            "/new",
+            "/sessions",
+            "/rename",
+            "/compact",
+            "/messages",
+            "/profile",
+            "/delete",
+            "/exit",
+        ]
     ]
 
 

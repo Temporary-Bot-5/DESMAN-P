@@ -8,7 +8,9 @@ typing numbers. A cancelled prompt (Ctrl+C, Esc) raises `Cancelled`.
 from __future__ import annotations
 
 import os
+import re
 import sys
+import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -352,4 +354,18 @@ def _style() -> Any:
             ("instruction", f"fg:{MUTED}"),
             ("hint", f"fg:{MUTED}"),
         ]
+    )
+
+
+def clean(text: str) -> str:
+    """Treat even a compromised registry's output as plain terminal text."""
+    text = re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-_])", "", text)
+    return "".join(
+        "�"
+        if (unicodedata.category(c) == "Cc" and c not in "\n\t")
+        or "\u202a" <= c <= "\u202e"
+        or "\u2066" <= c <= "\u2069"
+        or c in "\u200e\u200f\u061c"
+        else c
+        for c in text
     )
