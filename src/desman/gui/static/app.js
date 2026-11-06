@@ -156,7 +156,7 @@ function showPrompt(p) {
       input.addEventListener("input", () => {
         suggestions.replaceChildren();
         const value = input.value.toLowerCase();
-        if (value.startsWith("/") && !/\s/.test(value)) {
+        if (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) {
           for (const [name, hint] of Object.entries(p.commands || {})) {
             if (name.startsWith(value)) {
               button(suggestions, `${name} — ${hint}`, () => {

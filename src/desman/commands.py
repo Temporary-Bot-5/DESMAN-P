@@ -20,9 +20,10 @@ data in the first place.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -142,8 +143,13 @@ class Entry:
     aliases: tuple[str, ...] = ()
     """Other CLI names of the same command (`keys` lists keys like `keys list`)."""
 
+    cli_names: tuple[tuple[str, str], ...] = ()
+    chat_only: tuple[tuple[str, str], ...] = ()
     private: tuple[str, ...] = ()
     """Argument fields whose values must never enter the operator journal."""
+
+    typed_confirm: bool = False
+    """Keep the CLI confirmation or payload preview for an explicit command line."""
 
     def kind_of(self, args: Args) -> Kind:
         return self.kind if isinstance(self.kind, Kind) else self.kind(args)
@@ -195,7 +201,12 @@ class TaskArgs(Args):
     task: Ref = Field(description="task id or a unique prefix of it")
 
 
+class InboxArgs(Args):
+    list: bool = False
+
+
 class ListArgs(Args):
+    subtasks: bool = False
     status: Literal["active", "done", "needs_human", "failed", "cancelled"] | None = None
     limit: Annotated[int, Field(ge=1, le=100)] = 20
 
@@ -429,11 +440,18 @@ def _status(ctx: Context, args: TaskArgs) -> Outcome:
 
 def _list(ctx: Context, args: ListArgs) -> Outcome:
     wanted = TaskStatus(args.status) if args.status else None
-    summaries = task_summaries(ctx.store, status=wanted, limit=args.limit)
-    actions.print_summaries(summaries)
+    summaries = actions.list_tasks(
+        ctx.store, status=wanted, limit=args.limit, subtasks=args.subtasks
+    )
+    actions.print_summaries(summaries, subtasks=args.subtasks)
     if not summaries:
         ui.note(t("No tasks."))
-    return Outcome([s.model_dump(mode="json", exclude={"subtasks"}) for s in summaries])
+    return Outcome(
+        [
+            s.model_dump(mode="json", exclude=set() if args.subtasks else {"subtasks"})
+            for s in summaries
+        ]
+    )
 
 
 def _audit(ctx: Context, args: TaskArgs) -> Outcome:
@@ -442,7 +460,9 @@ def _audit(ctx: Context, args: TaskArgs) -> Outcome:
     return Outcome(found.as_json())
 
 
-def _inbox(ctx: Context, args: NoArgs) -> Outcome:
+def _inbox(ctx: Context, args: InboxArgs) -> Outcome:
+    if not args.list and ui.interactive():
+        return Outcome(actions.choose_inbox(ctx.store, ctx.session_id()))
     items = inbox(ctx.store)
     actions.print_inbox(items)
     return Outcome([i.model_dump(mode="json") for i in items])
@@ -1379,8 +1399,8 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "inbox",
         "Subtasks waiting for the person's decision (retry, accept or fail), with the reason.",
-        NoArgs,
-        Kind.READ,
+        InboxArgs,
+        lambda args: Kind.READ if args.list or not ui.interactive() else Kind.INPUT,
         _inbox,
     ),
     Entry(
@@ -1659,6 +1679,7 @@ CATALOG: tuple[Entry, ...] = (
         Kind.CHANGE,
         _global_report,
         private=("text",),
+        typed_confirm=True,
     ),
     Entry(
         "global share",
@@ -1667,6 +1688,7 @@ CATALOG: tuple[Entry, ...] = (
         GlobalShareArgs,
         Kind.CHANGE,
         _global_share,
+        typed_confirm=True,
     ),
     Entry(
         "global submit-proposal",
@@ -1676,6 +1698,7 @@ CATALOG: tuple[Entry, ...] = (
         GlobalProposalArgs,
         Kind.CHANGE,
         _global_submit_proposal,
+        typed_confirm=True,
     ),
     Entry(
         "global join",
@@ -1793,6 +1816,7 @@ CATALOG: tuple[Entry, ...] = (
         NoArgs,
         Kind.CHANGE,
         _config_reset,
+        typed_confirm=True,
     ),
     Entry(
         "init-db",
@@ -1808,6 +1832,28 @@ def _folded(name: str) -> str:
     """`keys_add`, `/keys-add`, `desman keys add` are all `keys add`; `init db` is `init-db`."""
     name = re.sub(r"[\s_\-/]+", " ", name.casefold()).strip()
     return name.removeprefix("desman ").strip()
+
+
+# Click spelling differs from the model contract in these few entries.
+_CLI_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
+    "list": (("status_filter", "status"),),
+    "inbox": (("list_only", "list"),),
+    "language": (("name", "code"),),
+    "personalize": (("state", "on"),),
+    "protected show": (("with_diff", "diff"),),
+    "global report": (("task_id", "task"),),
+    "keys remove": (("remove_all", "all"),),
+    "global update": (("show", "action"), ("apply_release", "release"), ("revert", "release")),
+}
+_CHAT_ONLY: dict[str, tuple[tuple[str, str], ...]] = {
+    "run": (("title", "Chat tasks may have a separate short title."),),
+    "config": (("section", "The chat can open one wizard section."),),
+}
+
+CATALOG = tuple(
+    replace(e, cli_names=_CLI_NAMES.get(e.name, ()), chat_only=_CHAT_ONLY.get(e.name, ()))
+    for e in CATALOG
+)
 
 
 _BY_NAME = {_folded(n): e for e in CATALOG for n in (e.name, *e.aliases)}
@@ -1953,3 +1999,108 @@ def for_interlocutor(data: Any, configs: list[Config | None], budget_chars: int)
     for config in configs:
         text = providers.redact_keys(text, config)[0]
     return text if len(text) <= budget_chars else text[:budget_chars] + " …(cut)"
+
+
+def completions() -> dict[str, str]:
+    """Explicit command lines share the CLI's translated short help."""
+    from desman.cli import cli
+
+    i18n.translate_commands(cli)
+    return {"!" + entry.name: _short_help(entry) for entry in CATALOG}
+
+
+def _windows_words(line: str) -> list[str]:
+    """Split double-quoted arguments; apostrophes and backslashes stay literal."""
+    words: list[str] = []
+    token: list[str] = []
+    quote: str | None = None
+    started = False
+    for char in line:
+        if quote is not None:
+            if char == quote:
+                quote = None
+            else:
+                token.append(char)
+        elif char == '"':
+            quote = char
+            started = True
+        elif char.isspace():
+            if started:
+                words.append("".join(token))
+                token = []
+                started = False
+        else:
+            token.append(char)
+            started = True
+    if quote is not None:
+        raise ValueError("Unclosed quote")
+    if started:
+        words.append("".join(token))
+    return words
+
+
+def parse_line(
+    line: str, config: Config | None, *, windows: bool | None = None
+) -> tuple[Entry, Args] | None:
+    """Parse without invoking Click: all execution still goes through the catalog."""
+    import shlex
+
+    from click.core import ParameterSource
+
+    from desman.cli import cli
+
+    i18n.translate_commands(cli)
+    try:
+        use_windows = os.name == "nt" if windows is None else windows
+        words = _windows_words(line) if use_windows else shlex.split(line)
+    except ValueError:
+        raise BadArgs(t("Invalid quoting in the command.")) from None
+    if words and words[0] == "desman":
+        words.pop(0)
+    command: click.Command = cli
+    path: list[str] = []
+    while words and isinstance(command, click.Group) and words[0] in command.commands:
+        path.append(words.pop(0))
+        command = command.commands[path[-1]]
+    entry = find(" ".join(path))
+    if entry is None:
+        raise BadArgs(t("DESMAN has no command {name}.", name=" ".join(path) or "!"))
+    if "--help" in words:
+        with command.make_context(entry.name, [], resilient_parsing=True) as ctx:
+            ui.out(Text(command.get_help(ctx)))
+        return None
+    with command.make_context(entry.name, words) as ctx:
+        if isinstance(command, click.Group) and words and not words[0].startswith("-"):
+            raise click.UsageError(t("DESMAN has no command {name}.", name=" ".join(path + words)))
+        raw: dict[str, JsonValue] = {}
+        mapping = dict(entry.cli_names)
+        for name, value in ctx.params.items():
+            field_name = mapping.get(name, name)
+            supplied = ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+            if entry.name == "config reset" and name == "yes":
+                if value:
+                    entry = replace(entry, typed_confirm=False)
+                continue
+            if field_name in entry.args.model_fields:
+                raw[field_name] = str(value) if isinstance(value, Path) else value
+            elif supplied and not (
+                entry.name == "global update" and name in ("show", "apply_release", "revert")
+            ):
+                param = next(p for p in command.params if p.name == name)
+                option = next((o for o in param.opts if o.startswith("--")), name)
+                raise BadArgs(t("{option} is not available in the chat", option=option))
+        if entry.name == "global update":
+            show, apply, revert = (ctx.params[n] for n in ("show", "apply_release", "revert"))
+            if sum((show is not None, apply is not None, bool(revert))) > 1:
+                raise BadArgs(t("Choose only one of --show, --apply and --revert."))
+            raw = {
+                "action": "revert" if revert else "apply" if apply is not None else "show",
+                "release": apply if apply is not None else None if show in (None, -1) else show,
+            }
+        if entry.name == "tuning":
+            raw["models"] = {
+                k: v for k, v in tuning_cli.parse_models(ctx.params["models"]).items()
+            } or None
+        if entry.name == "personalize" and raw.get("on") is not None:
+            raw["on"] = raw["on"] == "on"
+        return entry, parse(entry, raw, config)

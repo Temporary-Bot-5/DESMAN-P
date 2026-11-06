@@ -129,7 +129,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "Geçici sohbet: söylenenler saklanmaz, çıkınca silinir.",
     "-c and -t are for the chat: give them without a command.": "-c ve -t sohbet içindir: bir komut olmadan verin.",
     "A temporary chat starts afresh: -c and -t do not go together.": "Geçici sohbet sıfırdan başlar: -c ve -t birlikte kullanılmaz.",
-    "start a new temporary chat (this one is erased)": "yeni bir geçici sohbet başlat (bu silinir)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "Geçici sohbet: burada söylenenler saklanmaz ve çıkınca silinir; istediğiniz görevler her görev gibi kalır. /help sohbetin komutlarını listeler.",
     "{name} is not available in a temporary chat": "{name} geçici sohbette kullanılamaz",
     "{prog}, version {version}": "{prog}, sürüm {version}",
@@ -1174,6 +1173,45 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "Kontrol edilmiş gönderimin kök imzalı sürümünü önizle veya onayla.",
         "The owner's checkout to release into.": "Sürümün oluşturulacağı sahibin çalışma kopyası.",
         "Confirm the exact release preview hash.": "Sürüm önizlemesinin tam özetini onayla.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND bir DESMAN komutu çalıştırır; !help komutları listeler.",
+        "Accept": "Kabul et",
+        "Choose a decision": "Bir karar seçin",
+        "Choose a subtask": "Bir alt görev seçin",
+        "DESMAN needs configuring before this command can use models.": "Bu komutun modelleri kullanabilmesi için DESMAN yapılandırılmalıdır.",
+        "Delete them?": "Silinsin mi?",
+        "Fail": "Başarısız olarak işaretle",
+        "Include each task’s subtasks.": "Her görevin alt görevlerini dahil et.",
+        "Leave it for now": "Şimdilik bırak",
+        "List waiting subtasks without choosing a decision.": "Karar seçmeden bekleyen alt görevleri listele.",
+        "Optional guidance for the next attempt": "Sonraki deneme için isteğe bağlı yönlendirme",
+        "Retry": "Yeniden dene",
+        "Session pinned.": "Oturum sabitlendi.",
+        "Session unpinned.": "Oturumun sabitlemesi kaldırıldı.",
+        "The person ran {command}.": "Kişi {command} komutunu çalıştırdı.",
+        "Why did it fail?": "Neden başarısız oldu?",
+        "delete all unpinned sessions after confirmation": "onaydan sonra sabitlenmemiş tüm oturumları sil",
+        "pin or unpin this session": "bu oturumu sabitle veya sabitlemesini kaldır",
+        "pinned": "sabitlenmiş",
+        "start a normal session (this temporary chat is erased)": "normal oturum başlat (bu geçici sohbet silinir)",
+        "start a temporary chat": "geçici sohbet başlat",
+        "{option} is not available in the chat": "{option} sohbette kullanılamaz",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "Komuttaki tırnak işaretleri geçersiz."})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "Sabitlenmemiş {count} oturum silinsin mi? Sabitlenmiş oturumlar kalır; mesajlar veritabanında kalır.",
+        ),
+        "Deleted {count} session.": ("{count} oturum silindi.",),
+        "No unpinned sessions to delete.": "Silinecek sabitlenmemiş oturum yok.",
     }
 )
 

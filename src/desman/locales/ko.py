@@ -129,7 +129,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "임시 채팅: 말한 내용은 보관되지 않으며 나갈 때 지워집니다.",
     "-c and -t are for the chat: give them without a command.": "-c와 -t는 채팅용입니다: 명령 없이 지정하세요.",
     "A temporary chat starts afresh: -c and -t do not go together.": "임시 채팅은 새로 시작합니다: -c와 -t는 함께 쓸 수 없습니다.",
-    "start a new temporary chat (this one is erased)": "새 임시 채팅 시작 (지금 채팅은 지워짐)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "임시 채팅: 여기서 한 말은 보관되지 않고 나갈 때 지워집니다. 요청한 작업은 다른 작업처럼 남습니다. /help 로 채팅 명령을 볼 수 있습니다.",
     "{name} is not available in a temporary chat": "{name}은(는) 임시 채팅에서 사용할 수 없습니다",
     "{prog}, version {version}": "{prog}, 버전 {version}",
@@ -1170,6 +1169,45 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "확인된 제출의 루트 서명 릴리스를 미리 보거나 확정합니다.",
         "The owner's checkout to release into.": "릴리스를 만들 소유자의 작업 사본.",
         "Confirm the exact release preview hash.": "릴리스 미리 보기의 정확한 해시를 확인합니다.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND는 DESMAN 명령을 실행합니다. !help는 명령 목록을 표시합니다.",
+        "Accept": "수락",
+        "Choose a decision": "결정 선택",
+        "Choose a subtask": "하위 작업 선택",
+        "DESMAN needs configuring before this command can use models.": "이 명령이 모델을 사용하려면 DESMAN을 설정해야 합니다.",
+        "Delete them?": "삭제할까요?",
+        "Fail": "실패로 표시",
+        "Include each task’s subtasks.": "각 작업의 하위 작업을 포함합니다.",
+        "Leave it for now": "일단 그대로 두기",
+        "List waiting subtasks without choosing a decision.": "결정을 선택하지 않고 대기 중인 하위 작업을 나열합니다.",
+        "Optional guidance for the next attempt": "다음 시도를 위한 안내 (선택 사항)",
+        "Retry": "재시도",
+        "Session pinned.": "세션을 고정했습니다.",
+        "Session unpinned.": "세션 고정을 해제했습니다.",
+        "The person ran {command}.": "사용자가 {command} 명령을 실행했습니다.",
+        "Why did it fail?": "실패한 이유는 무엇인가요?",
+        "delete all unpinned sessions after confirmation": "확인 후 고정하지 않은 모든 세션 삭제",
+        "pin or unpin this session": "현재 세션 고정 전환",
+        "pinned": "고정됨",
+        "start a normal session (this temporary chat is erased)": "일반 세션 시작 (현재 임시 채팅은 지워집니다)",
+        "start a temporary chat": "임시 채팅 시작",
+        "{option} is not available in the chat": "채팅에서는 {option} 옵션을 사용할 수 없습니다",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "명령의 따옴표가 올바르지 않습니다."})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "고정되지 않은 세션 {count}개를 삭제할까요? 고정된 세션과 데이터베이스의 메시지는 유지됩니다.",
+        ),
+        "Deleted {count} session.": ("세션 {count}개를 삭제했습니다.",),
+        "No unpinned sessions to delete.": "삭제할 고정되지 않은 세션이 없습니다.",
     }
 )
 

@@ -134,7 +134,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "Тимчасовий чат: нічого не зберігається, усе стирається під час виходу.",
     "-c and -t are for the chat: give them without a command.": "-c і -t стосуються чату: вкажіть їх без команди.",
     "A temporary chat starts afresh: -c and -t do not go together.": "Тимчасовий чат починається з чистого аркуша: -c і -t разом не використовуються.",
-    "start a new temporary chat (this one is erased)": "почати новий тимчасовий чат (цей буде стерто)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "Тимчасовий чат: сказане тут не зберігається і стирається під час виходу; задачі, які ви попросите, залишаються, як будь-які задачі. /help — команди чату.",
     "{name} is not available in a temporary chat": "{name} недоступна в тимчасовому чаті",
     "{prog}, version {version}": "{prog}, версія {version}",
@@ -1293,6 +1292,51 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "Переглянути або підтвердити підписаний кореневим ключем реліз перевіреного надсилання.",
         "The owner's checkout to release into.": "Робоча копія власника для створення релізу.",
         "Confirm the exact release preview hash.": "Підтвердити точний хеш перегляду релізу.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND виконує команду DESMAN; !help показує список.",
+        "Accept": "Прийняти",
+        "Choose a decision": "Оберіть рішення",
+        "Choose a subtask": "Оберіть підзадачу",
+        "DESMAN needs configuring before this command can use models.": "Налаштуйте DESMAN, щоб ця команда могла використовувати моделі.",
+        "Delete them?": "Видалити їх?",
+        "Fail": "Позначити невдачу",
+        "Include each task’s subtasks.": "Додати підзадачі кожної задачі.",
+        "Leave it for now": "Поки залишити",
+        "List waiting subtasks without choosing a decision.": "Показати підзадачі, що очікують, без вибору рішення.",
+        "Optional guidance for the next attempt": "Необов’язкова вказівка для наступної спроби",
+        "Retry": "Повторити",
+        "Session pinned.": "Сесію закріплено.",
+        "Session unpinned.": "Сесію відкріплено.",
+        "The person ran {command}.": "Користувач виконав {command}.",
+        "Why did it fail?": "Чому сталася невдача?",
+        "delete all unpinned sessions after confirmation": "видалити всі незакріплені сесії після підтвердження",
+        "pin or unpin this session": "закріпити або відкріпити цю сесію",
+        "pinned": "закріплена",
+        "start a normal session (this temporary chat is erased)": "почати звичайну сесію (цей тимчасовий чат буде стерто)",
+        "start a temporary chat": "почати тимчасовий чат",
+        "{option} is not available in the chat": "{option} недоступний у чаті",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "Неправильні лапки в команді."})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "Видалити {count} незакріплену сесію? Закріплені залишаться; повідомлення збережуться в базі даних.",
+            "Видалити {count} незакріплені сесії? Закріплені залишаться; повідомлення збережуться в базі даних.",
+            "Видалити {count} незакріплених сесій? Закріплені залишаться; повідомлення збережуться в базі даних.",
+        ),
+        "Deleted {count} session.": (
+            "Видалено {count} сесію.",
+            "Видалено {count} сесії.",
+            "Видалено {count} сесій.",
+        ),
+        "No unpinned sessions to delete.": "Немає незакріплених сесій для видалення.",
     }
 )
 

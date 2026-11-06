@@ -81,6 +81,7 @@ class SessionInfo(BaseModel):
     messages: int
     opening: str
     """The first thing the person wrote: how they recognise the session in a list."""
+    pinned: bool = False
     title: str | None = None
     """The name the person gave it (`/rename`), shown instead of the opening."""
 
@@ -222,6 +223,24 @@ class Sessions:
                 (now, session_id),
             )
 
+    def pin(self, session_id: str, pinned: bool) -> None:
+        """Pin a kept session; the database refuses pinning a temporary one."""
+        with db.transaction(self.conn):
+            self.conn.execute(
+                "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+                (db.to_iso(self.clock()) if pinned else None, session_id),
+            )
+
+    def delete_all(self) -> int:
+        """Soft-delete listed, unpinned sessions, retaining their messages."""
+        with db.transaction(self.conn):
+            return self.conn.execute(
+                "UPDATE sessions SET deleted_at = ? WHERE deleted_at IS NULL "
+                "AND temporary = 0 AND pinned_at IS NULL "
+                "AND EXISTS (SELECT 1 FROM messages WHERE session_id = sessions.id)",
+                (db.to_iso(self.clock()),),
+            ).rowcount
+
     def erase(self, session_id: str) -> None:
         """Erase the messages of a temporary session (the database refuses any other)."""
         with db.transaction(self.conn):
@@ -253,14 +272,14 @@ class Sessions:
     ) -> list[SessionInfo]:
         rows = self.conn.execute(
             f"""
-            SELECT s.id, s.created_at, s.title, MAX(m.at) AS last_at, COUNT(m.seq) AS messages,
+            SELECT s.id, s.created_at, s.title, s.pinned_at IS NOT NULL AS pinned, MAX(m.at) AS last_at, COUNT(m.seq) AS messages,
                    COALESCE((SELECT u.text FROM messages u
                              WHERE u.session_id = s.id AND u.role = 'user'
                              ORDER BY u.seq LIMIT 1), '') AS opening
             FROM sessions s JOIN messages m ON m.session_id = s.id
             WHERE s.deleted_at IS NULL AND s.temporary = 0 {where}
             GROUP BY s.id
-            ORDER BY MAX(m.seq) DESC
+            ORDER BY (s.pinned_at IS NOT NULL) DESC, MAX(m.seq) DESC
             LIMIT ? OFFSET ?
             """,
             (*params, limit, offset),
@@ -269,5 +288,9 @@ class Sessions:
 
     def latest(self) -> SessionInfo | None:
         """The session the chat continues: the one written to last."""
-        recent = self.recent(limit=1)
-        return recent[0] if recent else None
+        row = self.conn.execute(
+            "SELECT s.id FROM sessions s JOIN messages m ON m.session_id = s.id "
+            "WHERE s.deleted_at IS NULL AND s.temporary = 0 "
+            "GROUP BY s.id ORDER BY MAX(m.seq) DESC LIMIT 1"
+        ).fetchone()
+        return None if row is None else self.get(row["id"])

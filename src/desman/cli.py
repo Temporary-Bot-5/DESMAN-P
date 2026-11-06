@@ -37,7 +37,7 @@ from desman.core import calls, db
 from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult, WorkResult
 from desman.core.models import Kind, Origin, Priority, TaskSpec
 from desman.core.policy import Access
-from desman.core.report import InboxWatch, TaskReport, inbox, task_report, task_summaries
+from desman.core.report import InboxWatch, TaskReport, inbox, task_report
 from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
@@ -650,6 +650,7 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
 
 
 @cli.command("list")
+@click.option("--subtasks", is_flag=True, help="Include each task’s subtasks.")
 @click.option(
     "--status",
     "status_filter",
@@ -660,19 +661,24 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
 @click.option("--limit", type=click.IntRange(min=1), default=20, show_default=True)
 @db_option
 @json_option
-def list_tasks(status_filter: str | None, limit: int, db_path: Path | None, as_json: bool) -> None:
+def list_tasks(
+    status_filter: str | None, limit: int, db_path: Path | None, as_json: bool, subtasks: bool
+) -> None:
     """List tasks, newest first."""
     store = open_existing(db_path)
     try:
         wanted = TaskStatus(status_filter) if status_filter else None
-        summaries = task_summaries(store, status=wanted, limit=limit)
+        summaries = actions.list_tasks(store, status=wanted, limit=limit, subtasks=subtasks)
     finally:
         store.conn.close()
     if as_json:
-        rows = [s.model_dump(mode="json", exclude={"subtasks"}) for s in summaries]
+        rows = [
+            s.model_dump(mode="json", exclude=set() if subtasks else {"subtasks"})
+            for s in summaries
+        ]
         click.echo(json.dumps(rows, ensure_ascii=False, indent=2))
         return
-    actions.print_summaries(summaries)
+    actions.print_summaries(summaries, subtasks=subtasks)
 
 
 def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json: bool) -> Planned:
@@ -1005,12 +1011,24 @@ def stats_command(since: str, db_path: Path | None, as_json: bool) -> None:
 
 
 @cli.command("inbox")
+@click.option(
+    "--list", "list_only", is_flag=True, help="List waiting subtasks without choosing a decision."
+)
 @db_option
 @json_option
-def inbox_command(db_path: Path | None, as_json: bool) -> None:
+def inbox_command(db_path: Path | None, as_json: bool, list_only: bool) -> None:
     """List subtasks waiting for the operator (needs_human, failed), with the reason."""
     store = open_existing(db_path)
     try:
+        if (
+            not as_json
+            and not list_only
+            and ui.interactive()
+            and sys.stdin.isatty()
+            and sys.stdout.isatty()
+        ):
+            actions.choose_inbox(store)
+            return
         items = inbox(store)
     finally:
         store.conn.close()

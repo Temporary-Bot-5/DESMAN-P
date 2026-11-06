@@ -129,7 +129,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "临时聊天：所说的内容都不会保留，退出时即被清除。",
     "-c and -t are for the chat: give them without a command.": "-c 和 -t 只用于聊天：请不带命令使用。",
     "A temporary chat starts afresh: -c and -t do not go together.": "临时聊天总是从头开始：-c 和 -t 不能同时使用。",
-    "start a new temporary chat (this one is erased)": "开始新的临时聊天（当前这个会被清除）",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "临时聊天：这里说的内容不会保留，退出时即被清除；你要求的任务会像其他任务一样保留。/help 列出聊天命令。",
     "{name} is not available in a temporary chat": "{name} 在临时聊天中不可用",
     "{prog}, version {version}": "{prog}，版本 {version}",
@@ -1160,6 +1159,45 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "预览或确认已检查提交的根密钥签名版本。",
         "The owner's checkout to release into.": "用于发布的所有者工作副本。",
         "Confirm the exact release preview hash.": "确认发布预览的精确哈希。",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND 运行 DESMAN 命令；!help 列出命令。",
+        "Accept": "接受",
+        "Choose a decision": "选择操作",
+        "Choose a subtask": "选择子任务",
+        "DESMAN needs configuring before this command can use models.": "请先配置 DESMAN，此命令才能使用模型。",
+        "Delete them?": "删除这些会话？",
+        "Fail": "标记失败",
+        "Include each task’s subtasks.": "包括每个任务的子任务。",
+        "Leave it for now": "暂时保留",
+        "List waiting subtasks without choosing a decision.": "仅列出待处理子任务，不选择操作。",
+        "Optional guidance for the next attempt": "下次尝试的可选指导",
+        "Retry": "重试",
+        "Session pinned.": "会话已置顶。",
+        "Session unpinned.": "会话已取消置顶。",
+        "The person ran {command}.": "用户运行了 {command}。",
+        "Why did it fail?": "为什么失败？",
+        "delete all unpinned sessions after confirmation": "确认后删除所有未置顶会话",
+        "pin or unpin this session": "置顶或取消置顶当前会话",
+        "pinned": "已置顶",
+        "start a normal session (this temporary chat is erased)": "开始普通会话（此临时聊天将被擦除）",
+        "start a temporary chat": "开始临时聊天",
+        "{option} is not available in the chat": "聊天中无法使用 {option}",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "命令中的引号无效。"})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "删除 {count} 个未置顶的会话？ 置顶会话保留；消息仍保存在数据库中。",
+        ),
+        "Deleted {count} session.": ("已删除 {count} 个会话。",),
+        "No unpinned sessions to delete.": "没有可删除的未置顶会话。",
     }
 )
 
