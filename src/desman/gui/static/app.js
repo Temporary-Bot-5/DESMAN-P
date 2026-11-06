@@ -8,6 +8,7 @@ let promptId = null;
 let ended = false;
 let sending = false;
 let lineOpen = false;
+let terminalOpen = false;
 const expanded = new Set();
 
 function text(tag, value, parent) {
@@ -144,7 +145,10 @@ function showPrompt(p) {
     }
     input.maxLength = 20000;
     input.setAttribute("aria-label", p.question || "DESMAN");
-    if (p.kind === "line") input.rows = 1;
+    if (p.kind === "line") {
+      input.rows = 1;
+      input.placeholder = terminalOpen ? words.terminal_input : words.answer;
+    }
     form.append(input);
     const submit = () => {
       const value = input.value;
@@ -333,6 +337,8 @@ function setupPanels() {
   $("session-tools").replaceChildren();
   actionButton($("session-tools"), words.new_chat, {type: "new_session", temporary: false});
   actionButton($("session-tools"), words.temporary_chat, {type: "new_session", temporary: true});
+  const terminal = actionButton($("session-tools"), "General_Terminal", {type: "terminal"});
+  terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
   actionButton($("sidebar-bottom"), `⚙ ${words.settings}`, {type: "settings"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
@@ -367,6 +373,20 @@ function iconAction(parent, icon, label, value) {
 }
 
 function showSessions(data) {
+  terminalOpen = !!data.terminal && !!data.terminal.id && data.current === data.terminal.id;
+  $("session-title").textContent = terminalOpen ? "General_Terminal" : "";
+  const terminal = $("terminal-button");
+  if (terminal) {
+    terminal.textContent = "General_Terminal";
+    if (data.terminal && data.terminal.unread) {
+      text("span", String(data.terminal.unread), terminal).className = "unread";
+    }
+    terminal.classList.toggle("current", terminalOpen);
+    if (terminalOpen) terminal.setAttribute("aria-current", "true");
+    else terminal.removeAttribute("aria-current");
+  }
+  const input = $("prompt").querySelector("textarea");
+  if (input && lineOpen) input.placeholder = terminalOpen ? words.terminal_input : words.answer;
   const root = $("sessions");
   root.replaceChildren();
   for (const pinned of [true, false]) {

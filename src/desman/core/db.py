@@ -655,6 +655,12 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE sessions ADD COLUMN pinned_at TEXT
         CHECK (pinned_at IS NULL OR temporary = 0);
     """,
+    # 35: a single permanent command console, never temporary.
+    """
+    ALTER TABLE sessions ADD COLUMN terminal INTEGER NOT NULL DEFAULT 0
+        CHECK (terminal IN (0, 1) AND (terminal = 0 OR temporary = 0));
+    CREATE UNIQUE INDEX sessions_terminal ON sessions (terminal) WHERE terminal = 1;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

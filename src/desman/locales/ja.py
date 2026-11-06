@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "「{word}」はコマンドではありません。General_Terminal は DESMAN のコマンドのみ受け付けます（`help` で一覧表示）。会話するには /back でチャットに戻ってください。",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "`protected show` で変更を確認し、`protected approve` で承認してください。",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "`inbox` または `retry`、`accept`、`fail` REF で判断してください。",
+    "open General_Terminal": "General_Terminal を開く",
+    "return from General_Terminal to the previous chat": "General_Terminal から前のチャットに戻る",
+    "{name} is not available in General_Terminal": "{name} は General_Terminal では利用できません",
+    "{n} new in General_Terminal (/terminal)": "General_Terminal に {n} 件の新着 (/terminal)",
+    "Type a command here": "ここにコマンドを入力",
     "Pinned": "固定済み",
     "Modules": "モジュール",
     "Tokens": "トークン",
@@ -247,7 +255,6 @@ MESSAGES: dict[str, Forms] = {
     "strategy": "戦略",
     "{n} task: {statuses}.": ("{n} 件のタスク: {statuses}。",),
     "{n} subtask waits for your decision:": ("{n} 件のサブタスクがあなたの判断を待っています:",),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "ここで再試行・承認・失敗を頼むか、ターミナルで判断してください: desman inbox。",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "判断: desman retry|accept|fail <ref> [--note テキスト]",
     "say why it failed": "失敗した理由を書いてください",
     "it changed meanwhile, try again: {error}": "その間に変更がありました。もう一度試してください: {error}",
@@ -686,7 +693,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} 用の {model}、{size}: {reason}",
     "To use it: {command}": "使うには: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "変更の表示や承認は、ここで頼めます。",
     "Approve the protected files as they are now, so tasks run again:": "保護されたファイルを今の状態で承認し、タスクを再び実行できるようにします:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "これらのファイルは、エージェントに何ができるか、その仕事がどう評価されるかを決めます。確認した変更だけを承認してください (desman protected show --diff)。",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

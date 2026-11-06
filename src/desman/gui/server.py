@@ -36,6 +36,7 @@ SECURITY = {
 def strings() -> dict[str, str]:
     return {
         "lang": language(),
+        "terminal_input": t("Type a command here"),
         "pinned": t("Pinned"),
         "modules": t("Modules"),
         "calls": t("Calls"),

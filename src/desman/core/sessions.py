@@ -103,6 +103,23 @@ class Sessions:
         self.conn = conn
         self.clock = clock
 
+    def terminal(self) -> str:
+        """Return the one permanent console, creating it atomically on first use."""
+        with db.transaction(self.conn):
+            self.conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, created_at, terminal, title) "
+                "VALUES (?, ?, 1, 'General_Terminal')",
+                (uuid.uuid4().hex, db.to_iso(self.clock())),
+            )
+            row = self.conn.execute("SELECT id FROM sessions WHERE terminal = 1").fetchone()
+        return str(row["id"])
+
+    def is_terminal(self, session_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT terminal FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return row is not None and bool(row["terminal"])
+
     def add(
         self,
         session_id: str | None,
@@ -117,6 +134,8 @@ class Sessions:
         asked (this process holds it). A summary says which messages it `covers`."""
         if (covers is not None) != (kind is Kind.SUMMARY):
             raise ValueError("a summary, and only a summary, covers earlier messages")
+        if kind is Kind.SUMMARY and session_id is not None and self.is_terminal(session_id):
+            raise ValueError("the terminal cannot have summaries")
         now = db.to_iso(self.clock())
         with db.transaction(self.conn):
             if session_id is None:
@@ -169,6 +188,8 @@ class Sessions:
     def history(self, session_id: str, last: int | None = None) -> History:
         """The latest summary of the session and the messages after those it covers (only the
         `last` few of them if given), summaries left out."""
+        if self.is_terminal(session_id):
+            return History(summary=None, messages=[])
         row = self.conn.execute(
             "SELECT * FROM messages WHERE session_id = ? AND kind = 'summary' "
             "ORDER BY seq DESC LIMIT 1",
@@ -212,14 +233,16 @@ class Sessions:
         """Name a session; None (or blank) gives it back its opening as the name."""
         title = " ".join((title or "").split())[:TITLE_CHARS] or None
         with db.transaction(self.conn):
-            self.conn.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+            self.conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ? AND terminal = 0", (title, session_id)
+            )
 
     def delete(self, session_id: str) -> None:
         """Take a session out of the lists and the chat. Its messages are kept."""
         now = db.to_iso(self.clock())
         with db.transaction(self.conn):
             self.conn.execute(
-                "UPDATE sessions SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+                "UPDATE sessions SET deleted_at = ? WHERE id = ? AND terminal = 0 AND deleted_at IS NULL",
                 (now, session_id),
             )
 
@@ -227,7 +250,7 @@ class Sessions:
         """Pin a kept session; the database refuses pinning a temporary one."""
         with db.transaction(self.conn):
             self.conn.execute(
-                "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+                "UPDATE sessions SET pinned_at = ? WHERE id = ? AND terminal = 0",
                 (db.to_iso(self.clock()) if pinned else None, session_id),
             )
 
@@ -236,7 +259,7 @@ class Sessions:
         with db.transaction(self.conn):
             return self.conn.execute(
                 "UPDATE sessions SET deleted_at = ? WHERE deleted_at IS NULL "
-                "AND temporary = 0 AND pinned_at IS NULL "
+                "AND temporary = 0 AND terminal = 0 AND pinned_at IS NULL "
                 "AND EXISTS (SELECT 1 FROM messages WHERE session_id = sessions.id)",
                 (db.to_iso(self.clock()),),
             ).rowcount
@@ -277,7 +300,7 @@ class Sessions:
                              WHERE u.session_id = s.id AND u.role = 'user'
                              ORDER BY u.seq LIMIT 1), '') AS opening
             FROM sessions s JOIN messages m ON m.session_id = s.id
-            WHERE s.deleted_at IS NULL AND s.temporary = 0 {where}
+            WHERE s.deleted_at IS NULL AND s.temporary = 0 AND s.terminal = 0 {where}
             GROUP BY s.id
             ORDER BY (s.pinned_at IS NOT NULL) DESC, MAX(m.seq) DESC
             LIMIT ? OFFSET ?
@@ -290,7 +313,7 @@ class Sessions:
         """The session the chat continues: the one written to last."""
         row = self.conn.execute(
             "SELECT s.id FROM sessions s JOIN messages m ON m.session_id = s.id "
-            "WHERE s.deleted_at IS NULL AND s.temporary = 0 "
+            "WHERE s.deleted_at IS NULL AND s.temporary = 0 AND s.terminal = 0 "
             "GROUP BY s.id ORDER BY MAX(m.seq) DESC LIMIT 1"
         ).fetchone()
         return None if row is None else self.get(row["id"])

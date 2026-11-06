@@ -179,7 +179,7 @@ main { height: 100%; display: flex; flex-direction: column; padding: 1rem 1.4rem
 aside { height: 100%; position: static; }
 #sidebar h1 { font-size: 1.1rem; margin: .3rem .4rem 1rem; }
 #session-tools button, #sidebar-bottom button { display: block; width: 100%; margin: .3rem 0; text-align: left; }
-#session-tools > button:first-child { background: #00eeff; color: #101418; border-color: #00eeff; }
+#session-tools > button.current { background: #23343d; border-color: transparent; }
 #sessions h2 { color: #aaa; font-size: .72rem; font-weight: 500; margin: 1rem .4rem .4rem; }
 .session { display: flex; align-items: center; gap: .25rem; border-radius: .4rem; padding: .2rem .3rem; min-height: 2.2rem; }
 .session.current { background: #23343d; border: 0; }
@@ -211,3 +211,6 @@ aside { height: 100%; position: static; }
   #topbar { flex: none; position: static; }
   aside { position: fixed; height: auto; }
 }
+
+#session-title:not(:empty) { padding: .5rem 1rem; font-weight: bold; }
+.unread { margin-left: .5rem; border-radius: 1rem; padding: .1rem .5rem; background: #25434a; }

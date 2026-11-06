@@ -49,6 +49,7 @@ class WebFront(ui.Front):
         self.ended = False
         self.current: str | None = None
         self.temporary = False
+        self.terminal_seq = 0
         self._greeting = False
 
     def emit(self, event_type: str, **data: Any) -> None:
@@ -84,6 +85,10 @@ class WebFront(ui.Front):
     def session(self, id: str | None, temporary: bool) -> None:
         with self.condition:
             self.current, self.temporary = id, temporary
+
+    def terminal_seen(self, seq: int) -> None:
+        with self.condition:
+            self.terminal_seq = seq
 
     def banner(self, value: str) -> str:
         return value.replace("░", " ")

@@ -15,6 +15,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "«{word}» — не команда. General_Terminal принимает только команды DESMAN (`help` покажет список); для разговора вернитесь в чат через /back.",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "Введите `protected show`, чтобы увидеть изменение, и `protected approve`, чтобы одобрить его.",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "Примите решение через `inbox` или `retry`, `accept`, `fail` REF.",
+    "open General_Terminal": "открыть General_Terminal",
+    "return from General_Terminal to the previous chat": "вернуться из General_Terminal в предыдущий чат",
+    "{name} is not available in General_Terminal": "{name} недоступна в General_Terminal",
+    "{n} new in General_Terminal (/terminal)": "Новых в General_Terminal: {n} (/terminal)",
+    "Type a command here": "Введите команду здесь",
     "Pinned": "Закреплённые",
     "Modules": "Модули",
     "Tokens": "Токены",
@@ -373,7 +381,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} подзадачи ждут вашего решения:",
         "{n} подзадач ждут вашего решения:",
     ),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Попросите здесь повторить, принять или провалить её либо решите в терминале: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": (
         "Решение: desman retry|accept|fail <ref> [--note ТЕКСТ]"
     ),
@@ -970,7 +977,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {model} для {server}, {size}: {reason}",
     "To use it: {command}": "Чтобы использовать: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "Попросите здесь показать изменение или одобрить его.",
     "Approve the protected files as they are now, so tasks run again:": "Одобрить защищённые файлы в их нынешнем виде, чтобы задачи снова запускались:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "Эти файлы решают, что могут агенты и как оценивается их работа: одобряйте только изменение, которое вы посмотрели (desman protected show --diff).",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

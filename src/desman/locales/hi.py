@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}” कोई कमांड नहीं है। General_Terminal केवल DESMAN की कमांड स्वीकार करता है (`help` सूची दिखाता है); बात करने के लिए /back से चैट में लौटें।",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "बदलाव देखने के लिए `protected show` और मंज़ूरी देने के लिए `protected approve` टाइप करें।",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "`inbox` या `retry`, `accept`, `fail` REF से निर्णय लें।",
+    "open General_Terminal": "General_Terminal खोलें",
+    "return from General_Terminal to the previous chat": "General_Terminal से पिछली चैट पर लौटें",
+    "{name} is not available in General_Terminal": "General_Terminal में {name} उपलब्ध नहीं है",
+    "{n} new in General_Terminal (/terminal)": "General_Terminal में {n} नए (/terminal)",
+    "Type a command here": "यहाँ कमांड लिखें",
     "Pinned": "पिन किए गए",
     "Modules": "मॉड्यूल",
     "Tokens": "टोकन",
@@ -260,7 +268,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} उप-कार्य आपके निर्णय की प्रतीक्षा में है:",
         "{n} उप-कार्य आपके निर्णय की प्रतीक्षा में हैं:",
     ),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "यहीं किसी को दोबारा चलाने, स्वीकारने या विफल करने को कहें, या टर्मिनल में तय करें: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "निर्णय लें: desman retry|accept|fail <ref> [--note पाठ]",
     "say why it failed": "बताएँ कि यह क्यों विफल हुआ",
     "it changed meanwhile, try again: {error}": "इस बीच कुछ बदल गया, फिर से कोशिश करें: {error}",
@@ -730,7 +737,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} के लिए {model}, {size}: {reason}",
     "To use it: {command}": "इस्तेमाल करने के लिए: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "यहाँ बदलाव दिखाने या उसे मंज़ूर करने के लिए कहें।",
     "Approve the protected files as they are now, so tasks run again:": "सुरक्षित फ़ाइलों को उनकी अभी की स्थिति में मंज़ूर करें, ताकि कार्य फिर से चलें:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "ये फ़ाइलें तय करती हैं कि एजेंट क्या कर सकते हैं और उनके काम को कैसे परखा जाता है: केवल वही बदलाव मंज़ूर करें जिसे आपने देखा है (desman protected show --diff)।",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

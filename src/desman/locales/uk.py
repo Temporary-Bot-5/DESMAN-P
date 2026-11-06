@@ -15,6 +15,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "«{word}» — не команда. General_Terminal приймає лише команди DESMAN (`help` покаже список); для розмови поверніться до чату через /back.",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "Введіть `protected show`, щоб побачити зміну, і `protected approve`, щоб схвалити її.",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "Прийміть рішення через `inbox` або `retry`, `accept`, `fail` REF.",
+    "open General_Terminal": "відкрити General_Terminal",
+    "return from General_Terminal to the previous chat": "повернутися з General_Terminal до попереднього чату",
+    "{name} is not available in General_Terminal": "{name} недоступна в General_Terminal",
+    "{n} new in General_Terminal (/terminal)": "Нових у General_Terminal: {n} (/terminal)",
+    "Type a command here": "Введіть команду тут",
     "Pinned": "Закріплені",
     "Modules": "Модулі",
     "Tokens": "Токени",
@@ -270,7 +278,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} підзадачі чекають на ваше рішення:",
         "{n} підзадач чекають на ваше рішення:",
     ),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Попросіть тут повторити, прийняти чи провалити її або вирішіть у терміналі: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Рішення: desman retry|accept|fail <ref> [--note ТЕКСТ]",
     "say why it failed": "напишіть, чому не вдалося",
     "it changed meanwhile, try again: {error}": "за цей час щось змінилося, повторіть: {error}",
@@ -763,7 +770,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {model} для {server}, {size}: {reason}",
     "To use it: {command}": "Щоб використати: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "Попросіть тут показати зміну або схвалити її.",
     "Approve the protected files as they are now, so tasks run again:": "Схвалити захищені файли в їхньому теперішньому вигляді, щоб задачі знову запускалися:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "Ці файли вирішують, що можуть агенти і як оцінюється їхня робота: схвалюйте лише зміну, яку ви переглянули (desman protected show --diff).",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

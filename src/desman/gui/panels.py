@@ -20,7 +20,12 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
     """Open an existing WAL database read-only, independently of the chat connection."""
     if not path.exists():
         return (
-            {"current": None, "temporary": False, "sessions": []}
+            {
+                "current": None,
+                "temporary": False,
+                "sessions": [],
+                "terminal": {"id": None, "unread": 0},
+            }
             if kind == "sessions"
             else {"tasks": []}
         )
@@ -41,7 +46,19 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
             if kind == "sessions":
                 with front.condition:
                     current, temporary = front.current, front.temporary
+                    seen = front.terminal_seq
+                terminal = conn.execute("SELECT id FROM sessions WHERE terminal = 1").fetchone()
+                terminal_id = terminal["id"] if terminal else None
+                unread = (
+                    conn.execute(
+                        "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' AND seq > ?",
+                        (terminal_id, seen),
+                    ).fetchone()[0]
+                    if terminal_id != current
+                    else 0
+                )
                 return {
+                    "terminal": {"id": terminal_id, "unread": unread},
                     "current": current,
                     "temporary": temporary,
                     "sessions": [

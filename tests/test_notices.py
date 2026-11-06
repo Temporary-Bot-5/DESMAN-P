@@ -175,5 +175,16 @@ def test_the_chat_shows_what_waits_when_it_opens() -> None:
         store.conn.close()
     result = CliRunner().invoke(cli, [], input="/exit\n")
     assert result.exit_code == 0, result.output
-    assert "1 subtask waits for your decision:" in result.output
-    assert "left from yesterday" in result.output and "desman inbox" in result.output
+    assert "1 new in General_Terminal (/terminal)" in result.output
+    assert "left from yesterday" not in result.output
+    conn = db.open_db(db.default_db_path())
+    try:
+        sessions = Sessions(conn)
+        text = "\n".join(message.text for message in sessions.messages(sessions.terminal()))
+        assert "1 subtask waits for your decision:" in text
+        assert (
+            "left from yesterday" in text
+            and "Decide with `inbox`, or `retry`, `accept`, `fail` REF." in text
+        )
+    finally:
+        conn.close()

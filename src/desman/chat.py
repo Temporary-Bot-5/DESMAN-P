@@ -37,6 +37,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -104,12 +105,25 @@ LISTED_SESSIONS = 20
 _EARLIER = "earlier"  # not a session id: those are uuid hex
 
 
+TERMINAL_COMMANDS = {
+    "/help",
+    "/new",
+    "/temporary",
+    "/sessions",
+    "/messages",
+    "/back",
+    "/exit",
+    "/terminal",
+}
+
 KEPT_ONLY = ("/sessions", "/rename", "/compact", "/delete", "/pin")
 """The chat's commands about kept sessions: a temporary chat has none of them."""
 
 
-def _commands(temporary: bool = False) -> dict[str, str]:
+def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]:
     every = {
+        "/terminal": t("open General_Terminal"),
+        "/back": t("return from General_Terminal to the previous chat"),
         "/help": t("the chat's commands"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
@@ -123,6 +137,8 @@ def _commands(temporary: bool = False) -> dict[str, str]:
         "/temporary": t("start a temporary chat"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
+    if terminal:
+        return {name: what for name, what in every.items() if name in TERMINAL_COMMANDS}
     if temporary:
         every["/new"] = t("start a normal session (this temporary chat is erased)")
     return {name: what for name, what in every.items() if not (temporary and name in KEPT_ONLY)}
@@ -143,10 +159,15 @@ class Chat:
         self.temporary = temporary
         """Nothing said is kept (C.11): the session is erased when the chat ends; no profile
         notes, no summaries, no cached replies."""
+        self._terminal_id = sessions.terminal()
+        self._previous: tuple[str | None, bool] | None = None
+        self._terminal_seen = 0
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
         self.read = read or (
-            lambda: ui.line({**_commands(self.temporary), **commands.completions()})
+            lambda: ui.line(
+                {**_commands(self.temporary, self.in_terminal), **commands.completions()}
+            )
         )
         self.models: runs.Models | None = None
         """Built at the first message that needs them, again when the config changes."""
@@ -173,8 +194,7 @@ class Chat:
             self._show_last()
         try:
             while True:
-                self._tell_waiting()  # at the start, then after whatever was done
-                self._tell_blocked()
+                self._notices()
                 ui.session(self.session_id, self.temporary)
                 if (line := self.read()) is None:
                     break
@@ -185,17 +205,123 @@ class Chat:
                 if not command:
                     continue
                 if command.startswith("/"):
-                    if not self._slash(command):
+                    if self.in_terminal:
+                        name = command.split()[0].lower()
+                        if name in {
+                            "/new",
+                            "/temporary",
+                            "/sessions",
+                            "/back",
+                            "/terminal",
+                            "/exit",
+                        }:
+                            self.sessions.add(
+                                self._terminal_id,
+                                Role.USER,
+                                providers.redact_keys(line, self._saved_config())[0],
+                            )
+                            keep_going = self._slash(command)
+                        else:
+                            keep_going = self._terminal_output(partial(self._slash, command), line)
+                    else:
+                        keep_going = self._slash(command)
+                    if not keep_going:
                         return
                     continue
-                if command.startswith("!"):
-                    self._typed(command[1:])
+                if command.startswith("!") or self.in_terminal:
+                    self._terminal_command(line)
                     continue
                 self._message(line)  # kept as typed: indentation may matter (code, a list)
         finally:
             if self._http is not None:
                 self._http.close()
             self._erase()
+            if self._previous is not None and self._previous[1] and self._previous[0] is not None:
+                self.sessions.erase(self._previous[0])
+
+    @property
+    def in_terminal(self) -> bool:
+        return self.session_id == self._terminal_id
+
+    def _terminal_open(self) -> None:
+        if self.in_terminal:
+            return
+        self._previous = (self.session_id, self.temporary)
+        self.session_id, self.temporary = self._terminal_id, False
+        self.models, self._models_for = None, None
+        ui.reset()
+        ui.session(self.session_id, False)
+        ui.note("→ General_Terminal")
+        self._show_last()
+        self._seen_terminal()
+
+    def _seen_terminal(self) -> None:
+        row = self.sessions.conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE session_id = ? AND kind = 'event'",
+            (self._terminal_id,),
+        ).fetchone()
+        self._terminal_seen = int(row[0])
+        ui.terminal_seen(self._terminal_seen)
+
+    def _back(self) -> None:
+        if not self.in_terminal:
+            return
+        previous, self._previous = self._previous, None
+        if previous is None:
+            self._new()
+            return
+        session_id, temporary = previous
+        if session_id is not None and (
+            (temporary and not self.sessions.messages(session_id))
+            or (not temporary and self.sessions.get(session_id) is None)
+        ):
+            session_id, temporary = None, False
+        self.session_id, self.temporary = session_id, temporary
+        self.models, self._models_for = None, None
+        ui.reset()
+        ui.session(session_id, temporary)
+        if session_id is not None:
+            self._show_last()
+        else:
+            self._greet()
+
+    def _terminal_output(self, operation: Callable[[], Any], line: str | None = None) -> Any:
+        config = self._saved_config()
+        if line is not None:
+            self.sessions.add(self._terminal_id, Role.USER, providers.redact_keys(line, config)[0])
+        with ui.recording(redact=lambda text: providers.redact_keys(text, config)[0]) as rec:
+            try:
+                return operation()
+            finally:
+                text = providers.redact_keys(rec.text, config)[0]
+                text = providers.redact_keys(text, self._saved_config())[0]
+                if text.strip():
+                    self.sessions.add(self._terminal_id, Role.DESMAN, text, kind=Kind.EVENT)
+                self._seen_terminal()
+
+    def _terminal_command(self, line: str) -> None:
+        self._terminal_open()
+        command = line.strip()
+        self._terminal_output(lambda: self._typed(command.removeprefix("!")), line)
+
+    def _notices(self) -> None:
+        with ui.recording(
+            show=self.in_terminal,
+            redact=lambda text: providers.redact_keys(text, self._saved_config())[0],
+        ) as rec:
+            self._tell_waiting()
+            self._tell_blocked()
+        if rec.text.strip():
+            text = providers.redact_keys(rec.text, self._saved_config())[0]
+            self.sessions.add(self._terminal_id, Role.DESMAN, text, kind=Kind.EVENT)
+            if self.in_terminal:
+                self._seen_terminal()
+            else:
+                count = self.sessions.conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' AND seq > ?",
+                    (self._terminal_id, self._terminal_seen),
+                ).fetchone()[0]
+                ui.note(t("{n} new in General_Terminal (/terminal)", n=count))
 
     def _erase(self) -> None:
         """A temporary chat's session, erased: when it ends or a new one starts."""
@@ -303,7 +429,7 @@ class Chat:
         ui.out(_render(message))
 
     def _event(self, text: str, task_id: str | None = None) -> None:
-        if self.session_id is None:
+        if self.session_id is None or self.in_terminal:
             ui.note(text)
             return
         message = self.sessions.add(
@@ -375,14 +501,12 @@ class Chat:
         command = commands.shown(entry, args)
         kind = entry.kind_of(args)
         before = self._saved_config()
-        if entry.name in ("run", "resume", "worker", "proposals analyze") and (
-            models is None or interlocutor is None
-        ):
+        if entry.name in ("run", "resume", "worker", "proposals analyze") and models is None:
             ui.error(t("DESMAN needs configuring before this command can use models."))
             return
 
         def start_task(title: str, goal: str, runs_code: bool) -> None:
-            assert models is not None and interlocutor is not None
+            assert models is not None
             self._task(
                 NewTask(type="task", title=title, goal=goal, runs_code=runs_code),
                 config,
@@ -391,7 +515,7 @@ class Chat:
             )
 
         def resume_task(task_id: str) -> None:
-            assert models is not None and interlocutor is not None
+            assert models is not None
             self._resume(task_id, config, models, interlocutor)
 
         context = commands.Context(
@@ -438,6 +562,17 @@ class Chat:
         config = self._config()
         if config is None:
             return
+        word = line.split(maxsplit=1)[0] if line.split() else ""
+        known = {entry.name.split()[0] for entry in commands.CATALOG} | {"desman"}
+        if self.in_terminal and word and word not in known:
+            ui.error(
+                t(
+                    "“{word}” is not a command. General_Terminal takes only DESMAN's commands "
+                    "(`help` lists them); to talk, go back to a chat with /back.",
+                    word=providers.redact_keys(word, config)[0],
+                )
+            )
+            return
         try:
             parsed = commands.parse_line(line, config)
         except (commands.BadArgs, click.ClickException, ValueError) as e:
@@ -451,7 +586,7 @@ class Chat:
         interlocutor = None
         if entry.name in ("run", "resume", "worker", "proposals analyze"):
             models = self._models(config, command=True)
-            if models is not None:
+            if models is not None and not self.in_terminal:
                 interlocutor = Interlocutor(
                     models.for_(calls.Role.INTERLOCUTOR),
                     config.language,
@@ -525,7 +660,7 @@ class Chat:
     def _result(self, said: str, data: Any, config: Config | None) -> None:
         """What a command did, for the interlocutor's next turns: an event of the session,
         not printed (the person saw it already). Never a key: see `commands.for_interlocutor`."""
-        if self.session_id is None:
+        if self.session_id is None or self.in_terminal:
             return
         text = providers.redact_keys(said, config)[0]
         if data is not None:
@@ -618,7 +753,7 @@ class Chat:
     # ── Tasks ────────────────────────────────────────────────────────────────
 
     def _task(
-        self, turn: NewTask, config: Config, models: runs.Models, interlocutor: Interlocutor
+        self, turn: NewTask, config: Config, models: runs.Models, interlocutor: Interlocutor | None
     ) -> None:
         access = self._access(config)
         if access is None:
@@ -727,7 +862,7 @@ class Chat:
         return found
 
     def _resume(
-        self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor
+        self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor | None
     ) -> None:
         access = self._access(config)
         if access is None:
@@ -751,7 +886,7 @@ class Chat:
         config: Config,
         models: runs.Models,
         access: Access,
-        interlocutor: Interlocutor,
+        interlocutor: Interlocutor | None,
     ) -> None:
         """Run the task while the chat waits, then retell how it went."""
         try:
@@ -780,7 +915,10 @@ class Chat:
                 t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
             )
             return
-        self._outcome(task_id, ref, interlocutor)
+        if interlocutor is None:
+            actions.print_report(task_report(self.store, task_id))
+        else:
+            self._outcome(task_id, ref, interlocutor)
 
     def _catch_up(self, interlocutor: Interlocutor) -> None:
         """Retell the session's tasks that changed while the chat was not watching them (a
@@ -944,7 +1082,7 @@ class Chat:
         has just retold them (`_outcome` marks those told)."""
         actions.print_waiting(
             self.waiting.new(),
-            t("Ask here to retry, accept or fail one, or decide in the terminal: desman inbox."),
+            t("Decide with `inbox`, or `retry`, `accept`, `fail` REF."),
         )
 
     def _tell_blocked(self) -> None:
@@ -957,7 +1095,9 @@ class Chat:
             said = e.message
         if said is not None and said != self._told_blocked:
             ui.warn(said)
-            ui.note(t("Ask here to show the change or approve it."))
+            ui.note(
+                t("Type `protected show` to see the change and `protected approve` to approve it.")
+            )
         self._told_blocked = said
 
     def _show_last(self) -> None:
@@ -965,7 +1105,9 @@ class Chat:
         for message in self.sessions.messages(
             self.session_id, last=max(SHOWN_ON_RETURN, ui.transcript_limit())
         ):
-            if message.kind is Kind.EVENT:  # a command's data or a result shown once is enough
+            if (
+                message.kind is Kind.EVENT and not self.in_terminal
+            ):  # a command's data or a result shown once is enough
                 first = message.text.split("\n", 1)[0]
                 message = message.model_copy(update={"text": first})
             elif message.kind is Kind.SUMMARY:  # its start says what it is; /compact shows it
@@ -977,12 +1119,19 @@ class Chat:
     def _slash(self, line: str) -> bool:
         """Run a chat command; False when it ends the chat."""
         name = line.split()[0].lower()
+        if self.in_terminal and name not in TERMINAL_COMMANDS:
+            ui.error(t("{name} is not available in General_Terminal", name=name))
+            return True
         if self.temporary and name in KEPT_ONLY:
             ui.error(t("{name} is not available in a temporary chat", name=name))
             return True
         if name == "/exit":
             return False
-        if name == "/help":
+        if name == "/terminal":
+            self._terminal_open()
+        elif name == "/back":
+            self._back()
+        elif name == "/help":
             self._help()
         elif name == "/new":
             self._new()
@@ -1018,6 +1167,18 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
+        if isinstance(action, ui.SimpleAction) and action.type == "terminal":
+            self._terminal_open()
+            return
+        if isinstance(action, ui.DecideAction) or (
+            isinstance(action, ui.SimpleAction) and action.type in ("messenger", "settings")
+        ):
+            self._terminal_open()
+            self._terminal_output(lambda: self._dispatch_action(action))
+        else:
+            self._dispatch_action(action)
+
+    def _dispatch_action(self, action: ui.Action) -> None:
         """Dispatch validated browser choices through the chat's existing command bodies."""
         if isinstance(action, ui.SessionAction):
             selected = self.sessions.get(action.id)
@@ -1066,13 +1227,21 @@ class Chat:
     def _help(self) -> None:
         commands = ui.table("", "")
         commands.show_header = False
-        for name, what in _commands(self.temporary).items():
+        for name, what in _commands(self.temporary, self.in_terminal).items():
             commands.add_row(Text(name, style="key"), Text(what, style="muted"))
         ui.out(commands)
         ui.note(t("!COMMAND runs a DESMAN command; !help lists them."))
-        ui.note(t("Anything else you write is a message."))
+        if not self.in_terminal:
+            ui.note(t("Anything else you write is a message."))
+
+    def _leave_terminal(self) -> None:
+        if self.in_terminal and self._previous is not None:
+            previous, self._previous = self._previous, None
+            if previous[1] and previous[0] is not None:
+                self.sessions.erase(previous[0])
 
     def _new(self, temporary: bool = False) -> None:
+        self._leave_terminal()
         if self.session_id is None and self.temporary == temporary:
             ui.reset()
             ui.note(t("This session is new already."))
@@ -1124,6 +1293,7 @@ class Chat:
         operator.record(self.store.conn, "operator_sessions_deleted", {"count": deleted})
         if (
             not self.temporary
+            and not self.in_terminal
             and self.session_id is not None
             and self.sessions.get(self.session_id) is None
         ):
@@ -1357,6 +1527,7 @@ class Chat:
             self._open_session(selected)
 
     def _open_session(self, selected: SessionInfo) -> None:
+        self._leave_terminal()
         self._erase()
         self.temporary = False
         self.session_id = selected.id

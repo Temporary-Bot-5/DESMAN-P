@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "« {word} » n’est pas une commande. General_Terminal accepte uniquement les commandes DESMAN (`help` les liste) ; pour discuter, retourne au chat avec /back.",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "Tapez `protected show` pour voir la modification et `protected approve` pour l’approuver.",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "Décidez avec `inbox` ou `retry`, `accept`, `fail` REF.",
+    "open General_Terminal": "ouvrir General_Terminal",
+    "return from General_Terminal to the previous chat": "revenir de General_Terminal à la conversation précédente",
+    "{name} is not available in General_Terminal": "{name} n’est pas disponible dans General_Terminal",
+    "{n} new in General_Terminal (/terminal)": "{n} nouveaux dans General_Terminal (/terminal)",
+    "Type a command here": "Saisissez une commande ici",
     "Pinned": "Épinglés",
     "Modules": "Modules",
     "Tokens": "Jetons",
@@ -260,7 +268,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} sous-tâche attend votre décision :",
         "{n} sous-tâches attendent votre décision :",
     ),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Demandez ici de relancer, d'accepter ou d'abandonner l'une d'elles, ou décidez dans le terminal : desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Décidez avec : desman retry|accept|fail <ref> [--note TEXTE]",
     "say why it failed": "dites pourquoi cela a échoué",
     "it changed meanwhile, try again: {error}": "cela a changé entre-temps, réessayez : {error}",
@@ -733,7 +740,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {model} pour {server}, {size} : {reason}",
     "To use it: {command}": "Pour l'utiliser : {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "Demandez ici d'afficher la modification ou de l'approuver.",
     "Approve the protected files as they are now, so tasks run again:": "Approuver les fichiers protégés tels qu'ils sont maintenant, pour que les tâches s'exécutent à nouveau :",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "Ces fichiers décident de ce que les agents peuvent faire et de la façon dont leur travail est jugé : n'approuvez qu'une modification que vous avez examinée (desman protected show --diff).",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

@@ -345,7 +345,12 @@ def test_a_protected_change_during_a_summary_leaves_the_chat_open(
     monkeypatch.setattr(runs, "guard", guard)
     result = chat("/compact", "hotels?")
     assert "Summarised" not in result.output
-    assert "Protected files changed without your approval" in result.output
+    assert "Protected files changed without your approval" not in result.output
+    assert "new in General_Terminal (/terminal)" in result.output
     sessions = stored()
+    assert any(
+        "Protected files changed without your approval" in message.text
+        for message in sessions.messages(sessions.terminal())
+    )
     [task_id] = [r["id"] for r in sessions.conn.execute("SELECT id FROM tasks")]
     assert Store(sessions.conn).task_status(task_id) is TaskStatus.CANCELLED
