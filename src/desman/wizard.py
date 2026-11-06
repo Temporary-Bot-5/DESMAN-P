@@ -158,26 +158,40 @@ def ask_roles(config: Config) -> None:
         if role is None:
             return
         row = next(row for row in rows if row["role"] == role)
+        model_choices = [ui.Choice(t("DESMAN's choice"), tuning_cli.AUTO)] + [
+            ui.Choice(label, label) for label in row["candidate_models"]
+        ]
+        if row["model"] and row["model"] not in row["candidate_models"]:
+            model_choices.append(
+                ui.Choice(f"{row['model']} ({t('not available now')})", row["model"])
+            )
         model = ui.select(
             t("model: {role}", role=role),
-            [ui.Choice(t("DESMAN's choice"), tuning_cli.AUTO)]
-            + [ui.Choice(label, label) for label in row["candidate_models"]],
+            model_choices,
             default=row["model"] or tuning_cli.AUTO,
         )
         provider = None if model == tuning_cli.AUTO else model.split("/", 1)[0]
         keys = [k for k in row["candidate_keys"] if provider is None or k["provider"] == provider]
+        key_choices = [ui.Choice(t("DESMAN's choice"), tuning_cli.AUTO)] + [
+            ui.Choice(f"{k['provider']}: {k['label']}", k["selector"]) for k in keys
+        ]
+        # None means keep the saved fingerprint, even if its key is missing or filtered out.
+        if row["key_fingerprint"] and not any(
+            k["fingerprint"] == row["key_fingerprint"] for k in keys
+        ):
+            key_choices.append(ui.Choice(f"{row['key_label']} ({t('not available now')})", None))
         key = ui.select(
             t("key: {role}", role=role),
-            [ui.Choice(t("DESMAN's choice"), tuning_cli.AUTO)]
-            + [ui.Choice(f"{k['provider']}: {k['label']}", k["selector"]) for k in keys],
+            key_choices,
             default=next(
                 (k["selector"] for k in keys if k["fingerprint"] == row["key_fingerprint"]),
-                tuning_cli.AUTO,
+                None if row["key_fingerprint"] else tuning_cli.AUTO,
             ),
         )
         # Persist with the rest of the wizard, preserving cancellation and conflict checks.
         old, config.tuning, _ = tuning_cli.changed_tuning(
-            config, tuning_cli.TuningChange(models={role: model}, keys={role: key})
+            config,
+            tuning_cli.TuningChange(models={role: model}, keys={} if key is None else {role: key}),
         )
         tuning_cli.print_change(old, config.tuning, config)
 

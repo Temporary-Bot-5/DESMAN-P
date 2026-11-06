@@ -320,3 +320,33 @@ def test_chat_wizard_role_section_journals_changes(monkeypatch: pytest.MonkeyPat
         and e.details == {"changed": ["models.planner", "keys.planner"]}
         for e in operator.entries(db.open_db())
     )
+
+
+@pytest.mark.parametrize("missing", ["model", "key"])
+@pytest.mark.parametrize("reset", [False, True])
+def test_wizard_keeps_unavailable_defaults_unless_auto_selected(missing: str, reset: bool) -> None:
+    cfg = config()
+    if missing == "model":
+        cfg.tuning.models.planner = "mistral/saved-model"
+        cfg.api_keys.pop("MISTRAL_API_KEY", None)
+    else:
+        cfg.tuning.keys.planner = key_id(SECOND)
+        cfg.api_keys["GROQ_API_KEY"] = cfg.api_keys["GROQ_API_KEY"][:1]
+    saved = cfg.tuning.model_copy(deep=True)
+    open_config().save(cfg)
+
+    @click.command()
+    def section() -> None:
+        wizard.run_section(open_config(), "roles")
+
+    # Empty answers in the numbered fallback retain both menu defaults.
+    answers = "1\n1\n1\n8\n" if reset else "1\n\n\n8\n"
+    result = CliRunner().invoke(section, [], input=answers)
+    assert result.exit_code == 0, result.output
+    assert "not available now" in result.output
+    if missing == "key":
+        assert "missing" in result.output
+    else:
+        assert "mistral/saved-model" in result.output
+    assert open_config().load().tuning == (Tuning() if reset else saved)
+    assert FIRST not in result.output and SECOND not in result.output

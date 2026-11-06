@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "not available now": "derzeit nicht verfügbar",
     "Models and keys for roles": "Modelle und Schlüssel für Rollen",
     "key: {role}": "Schlüssel: {role}",
     "Unknown provider or key. Available: {choices}": "Unbekannter Anbieter oder Schlüssel. Verfügbar: {choices}",
