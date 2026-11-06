@@ -2010,7 +2010,7 @@ def completions() -> dict[str, str]:
 
 
 def _windows_words(line: str) -> list[str]:
-    """Split quoted command arguments while keeping every backslash literal."""
+    """Split double-quoted arguments; apostrophes and backslashes stay literal."""
     words: list[str] = []
     token: list[str] = []
     quote: str | None = None
@@ -2021,7 +2021,7 @@ def _windows_words(line: str) -> list[str]:
                 quote = None
             else:
                 token.append(char)
-        elif char in ('"', "'"):
+        elif char == '"':
             quote = char
             started = True
         elif char.isspace():

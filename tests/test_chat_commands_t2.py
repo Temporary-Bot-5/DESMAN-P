@@ -623,7 +623,7 @@ def test_typed_upload_shows_proposal_before_applying(
         (False, r"C:\keys.txt", "C:keys.txt"),
         (False, r'"C:\my keys.txt"', r"C:\my keys.txt"),
         (False, "'/tmp/my keys.txt'", "/tmp/my keys.txt"),
-        (True, "'C:\\my keys.txt'", "C:\\my keys.txt"),
+        (True, "'C:\\keys.txt'", "'C:\\keys.txt'"),
     ],
 )
 def test_path_tokenization(
@@ -646,7 +646,9 @@ def test_path_tokenization(
         (r'keys import "C:\My Files\k.txt"', ["keys", "import", r"C:\My Files\k.txt"]),
         ('list --status="active"', ["list", "--status=active"]),
         ('protected approve --note="two words"', ["protected", "approve", "--note=two words"]),
-        ("protected approve --note='x y'", ["protected", "approve", "--note=x y"]),
+        ("protected approve --note=can't", ["protected", "approve", "--note=can't"]),
+        (r"keys import C:\Users\O'Brien\key.txt", ["keys", "import", r"C:\Users\O'Brien\key.txt"]),
+        ('protected approve --note "it\'s here"', ["protected", "approve", "--note", "it's here"]),
         ('protected approve --note ""', ["protected", "approve", "--note", ""]),
     ],
 )
@@ -678,7 +680,6 @@ def test_windows_tokenization(
     assert seen == [expected]
 
 
-@pytest.mark.parametrize("quote", ['"', "'"])
-def test_windows_unclosed_quote(quote: str) -> None:
+def test_windows_unclosed_quote() -> None:
     with pytest.raises(commands.BadArgs, match="Invalid quoting"):
-        commands.parse_line("protected approve --note=" + quote + "unfinished", None, windows=True)
+        commands.parse_line('protected approve --note="unfinished', None, windows=True)
