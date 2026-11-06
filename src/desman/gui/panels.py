@@ -59,8 +59,16 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
             waiting = {item.subtask_id: item for item in inbox(store)}
             labels = key_labels(config) if config else {}
             tasks = []
-            for summary in task_summaries(store, limit=30):
-                report = task_report(store, summary.id)
+            ids = {summary.id for summary in task_summaries(store, limit=30)}
+            ids.update(item.task_id for item in waiting.values())
+            placeholders = ", ".join("?" for _ in ids)
+            rows = conn.execute(
+                f"SELECT id FROM tasks WHERE id IN ({placeholders}) "
+                "ORDER BY created_at DESC, rowid DESC",
+                tuple(ids),
+            )
+            for row in rows:
+                report = task_report(store, row["id"])
                 short = store.short_id(report.id)
                 subtasks = []
                 for sub in report.subtasks:

@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Iterator
+from html import escape, unescape
 from pathlib import Path
 from typing import Any
 
 import pytest
+from rich.panel import Panel
+from rich.text import Text
 
-from desman import ui, wizard
+from desman import providers, ui, wizard
 from desman.chat import Chat
 from desman.config import open_config
 from desman.core import calls, db
@@ -299,12 +302,67 @@ def test_actions_cannot_answer_a_confirmation(panel_app: tuple[Server, Store]) -
     assert got == [False]
 
 
-def test_opened_transcript_also_redacts_configured_keys(panel_app: tuple[Server, Store]) -> None:
+@pytest.mark.parametrize("key", ["gsk_" + "b" * 48, "configured&<key>\"'value"])
+def test_opened_transcript_also_redacts_configured_keys(
+    panel_app: tuple[Server, Store], key: str
+) -> None:
     app, store = panel_app
-    key = "gsk_" + "b" * 48
     open_config().save(make_config(api_keys={"GROQ_API_KEY": key}))
     sessions = Sessions(store.conn)
     id = sessions.add(None, Role.USER, key).session_id
     with ui.use(app.front):
         Chat(sessions)._action(ui.SessionAction(type="open_session", id=id))
-    assert key not in json.dumps(app.front.poll(0, 0))
+    data = app.front.poll(0, 0)
+    response = app.handle("GET", "/events?after=0", headers(app))
+    assert response.status == 200
+    for output in (json.dumps(data), response.body.decode()):
+        assert key not in unescape(output)
+        assert escape(key) not in output
+    assert providers.REDACTED in str(data)
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_tasks_keep_old_inbox_items(panel_app: tuple[Server, Store], failed: bool) -> None:
+    app, store = panel_app
+    oldest = waiting(store, "oldest waiting")
+    if failed:
+        store.transition(
+            store.list_subtasks(oldest)[0].id,
+            SubtaskStatus.NEEDS_HUMAN,
+            SubtaskStatus.FAILED,
+            Actor.HUMAN,
+            reason="operator failed",
+        )
+    newer = [
+        store.create_task(
+            TaskSpec(
+                goal=str(i), subtasks=[SubtaskSpec(description="new", acceptance_criteria="ok")]
+            )
+        )
+        for i in range(30)
+    ]
+    tasks = json.loads(app.handle("GET", "/tasks", headers(app)).body)["tasks"]
+    assert [task["id"] for task in tasks] == [*reversed(newer), oldest]
+    old = tasks[-1]
+    item = inbox(store)[0]
+    assert old["needs_human"]
+    assert old["subtasks"][0]["ref"] == item.ref
+    assert old["subtasks"][0]["version"] == item.version
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_output_and_live_redact_html_keys(panel_app: tuple[Server, Store], wrapped: bool) -> None:
+    app, _ = panel_app
+    key = "configured&<key>\"'value"
+    open_config().save(make_config(api_keys={"GROQ_API_KEY": key}))
+    message = Text("message " + key)
+    app.front.out(Panel(message) if wrapped else message)
+    app.front.out("plain " + key)
+    app.front.live_update(Panel(message))
+    response = app.handle("GET", "/events?after=0", headers(app))
+    assert response.status == 200
+    data = json.loads(response.body)
+    for output in [*(e.get("html", "") for e in data["events"]), data["live"]]:
+        assert key not in unescape(output)
+        assert escape(key) not in output
+        assert providers.REDACTED in output
