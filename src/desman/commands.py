@@ -20,6 +20,7 @@ data in the first place.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
@@ -146,6 +147,9 @@ class Entry:
     chat_only: tuple[tuple[str, str], ...] = ()
     private: tuple[str, ...] = ()
     """Argument fields whose values must never enter the operator journal."""
+
+    typed_confirm: bool = False
+    """Keep the CLI confirmation or payload preview for an explicit command line."""
 
     def kind_of(self, args: Args) -> Kind:
         return self.kind if isinstance(self.kind, Kind) else self.kind(args)
@@ -1675,6 +1679,7 @@ CATALOG: tuple[Entry, ...] = (
         Kind.CHANGE,
         _global_report,
         private=("text",),
+        typed_confirm=True,
     ),
     Entry(
         "global share",
@@ -1683,6 +1688,7 @@ CATALOG: tuple[Entry, ...] = (
         GlobalShareArgs,
         Kind.CHANGE,
         _global_share,
+        typed_confirm=True,
     ),
     Entry(
         "global submit-proposal",
@@ -1692,6 +1698,7 @@ CATALOG: tuple[Entry, ...] = (
         GlobalProposalArgs,
         Kind.CHANGE,
         _global_submit_proposal,
+        typed_confirm=True,
     ),
     Entry(
         "global join",
@@ -1809,6 +1816,7 @@ CATALOG: tuple[Entry, ...] = (
         NoArgs,
         Kind.CHANGE,
         _config_reset,
+        typed_confirm=True,
     ),
     Entry(
         "init-db",
@@ -2001,7 +2009,9 @@ def completions() -> dict[str, str]:
     return {"!" + entry.name: _short_help(entry) for entry in CATALOG}
 
 
-def parse_line(line: str, config: Config | None) -> tuple[Entry, Args] | None:
+def parse_line(
+    line: str, config: Config | None, *, windows: bool | None = None
+) -> tuple[Entry, Args] | None:
     """Parse without invoking Click: all execution still goes through the catalog."""
     import shlex
 
@@ -2011,7 +2021,15 @@ def parse_line(line: str, config: Config | None) -> tuple[Entry, Args] | None:
 
     i18n.translate_commands(cli)
     try:
-        words = shlex.split(line)
+        use_windows = os.name == "nt" if windows is None else windows
+        words = shlex.split(line, posix=not use_windows)
+        if use_windows:
+            words = [
+                word[1:-1]
+                if len(word) >= 2 and word[0] == word[-1] and word[0] in ('"', "'")
+                else word
+                for word in words
+            ]
     except ValueError:
         raise BadArgs(t("Invalid quoting in the command.")) from None
     if words and words[0] == "desman":
@@ -2036,6 +2054,10 @@ def parse_line(line: str, config: Config | None) -> tuple[Entry, Args] | None:
         for name, value in ctx.params.items():
             field_name = mapping.get(name, name)
             supplied = ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+            if entry.name == "config reset" and name == "yes":
+                if value:
+                    entry = replace(entry, typed_confirm=False)
+                continue
             if field_name in entry.args.model_fields:
                 raw[field_name] = str(value) if isinstance(value, Path) else value
             elif supplied and not (

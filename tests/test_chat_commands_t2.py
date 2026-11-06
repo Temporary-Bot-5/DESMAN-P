@@ -553,3 +553,87 @@ def test_delete_all_without_unpinned_sessions_skips_confirmation(
     assert operator.entries(sessions.conn) == []
     if pinned:
         assert chat.session_id is not None and sessions.get(chat.session_id)
+
+
+def test_cli_confirmations_are_explicit_in_catalog() -> None:
+    # CLI reset asks; uploads preview and require --confirm SHA256 to send.
+    confirming = {"config reset", "global report", "global share", "global submit-proposal"}
+    assert {entry.name for entry in commands.CATALOG if entry.typed_confirm} == confirming
+    for entry in commands.CATALOG:
+        command = commands.cli_command(cli, entry.name)
+        assert command is not None
+        if any("--confirm" in param.opts for param in command.params):
+            assert entry.name in confirming, entry.name
+    for name in confirming:
+        command = commands.cli_command(cli, name)
+        assert command is not None
+        assert any(set(param.opts) & {"--yes", "--confirm"} for param in command.params)
+
+
+@pytest.mark.parametrize("yes", [False, True])
+def test_typed_reset_keeps_cli_confirmation(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, yes: bool
+) -> None:
+    seen: list[commands.Proposal] = []
+
+    def decline(self: Chat, proposal: commands.Proposal) -> bool:
+        seen.append(proposal)
+        return False
+
+    monkeypatch.setattr(Chat, "_confirmed", decline)
+    Chat(sessions)._typed("config reset" + (" --yes" if yes else ""))
+    assert bool(seen) is not yes
+    assert open_config().config_path.exists() is not yes
+
+
+@pytest.mark.parametrize("name", ["global report", "global share", "global submit-proposal"])
+def test_typed_upload_shows_proposal_before_applying(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    from dataclasses import replace
+
+    entry = commands.find(name)
+    assert entry is not None
+    applied: list[bool] = []
+
+    def apply() -> commands.Outcome:
+        applied.append(True)
+        return commands.Outcome({})
+
+    proposal = commands.Proposal(['{"exact": "payload"}'], apply)
+    entry = replace(entry, args=commands.NoArgs, handler=lambda ctx, args: proposal)
+    monkeypatch.setattr(commands, "parse_line", lambda *a: (entry, commands.NoArgs()))
+    seen: list[commands.Proposal] = []
+
+    def decline(self: Chat, made: commands.Proposal) -> bool:
+        seen.append(made)
+        return False
+
+    monkeypatch.setattr(Chat, "_confirmed", decline)
+    Chat(sessions)._typed(name)
+    assert seen == [proposal]
+    assert applied == []
+
+
+@pytest.mark.parametrize(
+    ("windows", "argument", "expected"),
+    [
+        (True, r"C:\keys.txt", r"C:\keys.txt"),
+        (True, r'"C:\my keys.txt"', r"C:\my keys.txt"),
+        (False, r"C:\keys.txt", "C:keys.txt"),
+        (False, r'"C:\my keys.txt"', r"C:\my keys.txt"),
+        (False, "'/tmp/my keys.txt'", "/tmp/my keys.txt"),
+        (True, "'C:\\my keys.txt'", "C:\\my keys.txt"),
+    ],
+)
+def test_path_tokenization(
+    windows: bool, argument: str, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import click
+
+    command = commands.cli_command(cli, "keys import")
+    assert command is not None
+    monkeypatch.setattr(command.params[0], "type", click.STRING)
+    parsed = commands.parse_line("keys import " + argument, None, windows=windows)
+    assert parsed is not None
+    assert str(parsed[1].model_dump()["file"]) == expected

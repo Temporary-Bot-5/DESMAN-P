@@ -341,10 +341,11 @@ class Chat:
         interlocutor: Interlocutor | None,
         *,
         typed: bool = False,
+        typed_entry: commands.Entry | None = None,
     ) -> None:
         """The command the interlocutor asked for, through the catalog; never as it was
-        written. Model-requested changes need the person's answer in a code-built window; typed commands apply immediately."""
-        entry = commands.find(turn.name)
+        written. Model-requested changes need the person's answer in a code-built window; typed commands keep confirmations and previews required by the CLI."""
+        entry = typed_entry if typed else commands.find(turn.name)
         if entry is None:
             name = providers.redact_keys(turn.name, config)[0]
             ui.error(t("DESMAN has no command {name}.", name=name))
@@ -396,7 +397,7 @@ class Chat:
         try:
             made = entry.handler(context, args)
             if isinstance(made, commands.Proposal):
-                if not typed and not self._confirmed(made):
+                if (not typed or entry.typed_confirm) and not self._confirmed(made):
                     made = commands.Outcome({"declined": True}, done=False)
                 else:
                     made = made.apply()
@@ -456,6 +457,7 @@ class Chat:
             models,
             interlocutor,
             typed=True,
+            typed_entry=entry,
         )
 
     def _confirmed(self, proposal: commands.Proposal) -> bool:

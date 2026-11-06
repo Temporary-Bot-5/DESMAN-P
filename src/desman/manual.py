@@ -190,7 +190,7 @@ TOPICS: Final = (
         "is typed by the person into a window. Decisions enter the operator's journal.\n"
         "The chat's own commands: `/help`, `/new` (a new session), `/sessions` (pick an "
         "earlier one), `/rename`, `/compact`, `/profile`, `/delete` (out of the list; its "
-        "messages stay in the database), `/pin` (toggle pin), `/delete-all` (confirm deleting unpinned sessions; messages stay), `/temporary` (erase on exit), `/exit`. `/new` always starts a normal session, erasing a temporary one. Pinned sessions appear first. Typing / lists chat commands. !COMMAND runs a DESMAN CLI command immediately. It needs no model or confirmation. Input opens a window. !help lists them.\n"
+        "messages stay in the database), `/pin` (toggle pin), `/delete-all` (confirm deleting unpinned sessions; messages stay), `/temporary` (erase on exit), `/exit`. `/new` always starts a normal session, erasing a temporary one. Pinned sessions appear first. Typing / lists chat commands. !COMMAND runs a DESMAN CLI command without a model; CLI confirmations and previews still apply. Input opens a window. !help lists them.\n"
         "The interlocutor sees only the newest messages that fit its budget; older ones are "
         "summarised by a small task of their own (`/compact` does it now) and it sees the "
         "summary. A summary that fails leaves the older messages out of its view. A pasted "
