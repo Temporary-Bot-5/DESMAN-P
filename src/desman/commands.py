@@ -305,11 +305,22 @@ class TuningArgs(Args):
     max_transient: Limit | None = None
     models: (
         dict[
-            Literal["planner", "reviewer", "decomposer", "text", "code", "analysis"],
+            Literal[
+                "planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"
+            ],
             Annotated[str, StringConstraints(min_length=1, max_length=200)],
         ]
         | None
     ) = Field(None, description='role -> "provider/model" it asks first, or "auto"')
+    keys: (
+        dict[
+            Literal[
+                "planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"
+            ],
+            Annotated[str, StringConstraints(min_length=1, max_length=200)],
+        ]
+        | None
+    ) = Field(None, description='role -> "provider:label" or "provider:#N", or "auto"')
     reset: bool = False
 
     def change(self) -> tuning_cli.TuningChange:
@@ -317,6 +328,7 @@ class TuningArgs(Args):
         return tuning_cli.TuningChange(
             limits={n: getattr(self, n) for n in numbers if getattr(self, n) is not None},
             models={str(k): v for k, v in (self.models or {}).items()},
+            keys={str(k): v for k, v in (self.keys or {}).items()},
             reset=self.reset,
         )
 
@@ -367,9 +379,9 @@ class QuotaArgs(DonateArgs):
 
 
 class ConfigArgs(Args):
-    section: Literal["providers", "permissions", "personalize", "behaviour", "network"] | None = (
-        Field(None, description="one section of the setup wizard; none: the whole wizard")
-    )
+    section: (
+        Literal["providers", "permissions", "personalize", "behaviour", "network", "roles"] | None
+    ) = Field(None, description="one section of the setup wizard; none: the whole wizard")
 
 
 Permission = Literal["admin_rights", "fs_outside_access", "network_access", "shell_execution"]
@@ -627,18 +639,18 @@ def _tuning(ctx: Context, args: TuningArgs) -> Outcome | Proposal:
     current = config.tuning
     change = args.change()
     if change.empty():
-        tuning_cli.print_tuning(current)
-        return Outcome(tuning_cli.tuning_json(current))
-    new = change.applied(current)
-    lines = tuning_cli.lines(current, new)
+        tuning_cli.print_tuning(current, config)
+        return Outcome(tuning_cli.tuning_json(current, config))
+    _, new, _ = tuning_cli.changed_tuning(config, change)
+    lines = tuning_cli.lines(current, new, config)
     if not lines:
         ui.note(t("Nothing changed."))
-        return Outcome({"changed": False, "tuning": tuning_cli.tuning_json(current)})
+        return Outcome({"changed": False, "tuning": tuning_cli.tuning_json(current, config)})
 
     def apply() -> Outcome:
         old, now, saved = tuning_cli.set_tuning(ctx.manager, change)
         tuning_cli.print_change(old, now, saved)
-        return Outcome({"changed": True, "tuning": tuning_cli.tuning_json(now)})
+        return Outcome({"changed": True, "tuning": tuning_cli.tuning_json(now, saved)})
 
     return Proposal([t("How the work is done:")] + lines, apply)
 
@@ -1368,6 +1380,8 @@ def _config(ctx: Context, args: ConfigArgs) -> Proposal:
         line = t("Open the setup wizard at personalisation: whether the agent keeps notes.")
     elif args.section == "behaviour":
         line = t("Open the setup wizard at how the interlocutor talks.")
+    elif args.section == "roles":
+        line = t("Models and keys for roles")
     elif args.section == "network":
         line = t("Open the setup wizard at desman-global: whether this machine takes part.")
     else:
@@ -1508,7 +1522,7 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "tuning",
-        "Without arguments: show how the work is done (the model each role asks first; the "
+        "Without arguments: show how the work is done (the model and key each role asks first; the "
         "most subtasks in a plan, parts of a split, tokens of dependency results shown, "
         'attempts and interruptions before the person decides). With any of them ("auto": '
         "back to the default): change it (the person confirms). A proposal of the Improvement "
@@ -1799,7 +1813,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "config",
         "Open the setup wizard, or one section of it (providers: keys and settings; "
-        "permissions; personalize; behaviour; network: desman-global), for the person to fill in; only when they ask to set DESMAN up or to "
+        "permissions; personalize; behaviour; roles: model and key preferences; network: desman-global), for the person to fill in; only when they ask to set DESMAN up or to "
         "change settings. To show providers, keys or settings use keys list or config show.",
         ConfigArgs,
         Kind.INPUT,
@@ -1971,12 +1985,17 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
         parts = [
             n
             for n in Tuning.model_fields
-            if n != "models" and getattr(old.tuning, n) != getattr(new.tuning, n)
+            if n not in ("models", "keys") and getattr(old.tuning, n) != getattr(new.tuning, n)
         ]
         parts += [
             f"models.{r}"
             for r in ModelChoices.model_fields
             if getattr(old.tuning.models, r) != getattr(new.tuning.models, r)
+        ]
+        parts += [
+            f"keys.{r}"
+            for r in ModelChoices.model_fields
+            if getattr(old.tuning.keys, r) != getattr(new.tuning.keys, r)
         ]
         changes.append(("operator_tuning", {"changed": parts}))
     if old.network != new.network:  # which parts, by name; quotas are not secret
@@ -2102,6 +2121,9 @@ def parse_line(
         if entry.name == "tuning":
             raw["models"] = {
                 k: v for k, v in tuning_cli.parse_models(ctx.params["models"]).items()
+            } or None
+            raw["keys"] = {
+                k: v for k, v in tuning_cli.parse_keys(ctx.params["keys"]).items()
             } or None
         if entry.name == "personalize" and raw.get("on") is not None:
             raw["on"] = raw["on"] == "on"

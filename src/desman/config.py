@@ -89,7 +89,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -159,6 +159,25 @@ class ModelChoices(BaseModel):
     """The executor's, for a subtask of that kind."""
     code: ModelLabel | None = None
     analysis: ModelLabel | None = None
+    interlocutor: ModelLabel | None = None
+
+
+KeyFingerprint = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{12}$")]
+"""The twelve lowercase hexadecimal characters returned by key_id()."""
+
+
+class KeyChoices(BaseModel):
+    """The key each role asks first; absent keys are ignored at call time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    planner: KeyFingerprint | None = None
+    reviewer: KeyFingerprint | None = None
+    decomposer: KeyFingerprint | None = None
+    text: KeyFingerprint | None = None
+    code: KeyFingerprint | None = None
+    analysis: KeyFingerprint | None = None
+    interlocutor: KeyFingerprint | None = None
 
 
 TUNING_LIMITS = tuple(TUNING_BOUNDS)
@@ -172,11 +191,13 @@ def _bounded(name: str) -> Any:
 
 class Tuning(BaseModel):
     """How the work is done, as the person tuned it (`desman tuning`); the Improvement Analyst
-    may propose a change. None: DESMAN's default (`runs.TUNING_DEFAULTS`)."""
+    may propose limits and benchmarked models, never keys or the interlocutor.
+    None: DESMAN's default (`runs.TUNING_DEFAULTS`)."""
 
     model_config = ConfigDict(extra="forbid")
 
     models: ModelChoices = Field(default_factory=ModelChoices)
+    keys: KeyChoices = Field(default_factory=KeyChoices)
     max_subtasks: StrictInt | None = _bounded("max_subtasks")
     """The most subtasks in a plan."""
     max_parts: StrictInt | None = _bounded("max_parts")
@@ -254,7 +275,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[5] = 5
+    schema_version: Literal[6] = 6
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -307,6 +328,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     3: `personalize` (off unless it says otherwise) and `behaviour`.
     4: `tuning` (empty: DESMAN's defaults).
     5: `network` (desman-global off).
+    6: per-role key preferences and the interlocutor’s model.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -345,6 +367,8 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         version = 4  # `tuning` has a default
     if version == 4:
         version = 5  # `network` has a default: off
+    if version == 5:
+        version = 6  # role keys and interlocutor model have defaults
     if data.get("profile") in (True, False):
         # Written by a 3 before its release (62d084b): `profile`, on unless it said otherwise,
         # was never the person's consent, so `personalize` stays as the file says, off if unsaid.

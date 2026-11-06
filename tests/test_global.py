@@ -101,7 +101,7 @@ def test_a_schema_4_config_upgrades_to_desman_global_off() -> None:
     data["schema_version"] = 4
     del data["network"]
     config = Config.model_validate(upgrade(data))
-    assert config.schema_version == 5 and config.network == Network()
+    assert config.schema_version == 6 and config.network == Network()
     assert config.language == "ru"
 
 

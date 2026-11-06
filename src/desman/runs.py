@@ -38,6 +38,7 @@ from desman.llm import hub, router
 from desman.llm.base import LLM
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
+from desman.llm.openai_compat import key_id
 from desman.net import jobs
 from desman.net.node import capabilities
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
@@ -120,15 +121,23 @@ def models(
     leaves no other model for retries. `only`: the models of these providers alone (the ones
     lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
     `router.NoProvider`."""
-    clients: dict[str, LLM] = {}
+    clients: dict[tuple[str, str | None], LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
 
-    def member(choice: router.Choice) -> LLM:
-        # One client per model, shared by the roles: its keys' state (refused, limited) is one.
-        if choice.label not in clients:
-            api = router.connect(config, choice, on_call=recorder, client=client)
+    def member(choice: router.Choice, first: str | None) -> LLM:
+        # Share key state between roles with the same model and effective key order.
+        keys = config.keys(choice.provider.key_env or "")
+        applicable = first if any(key_id(k.value) == first for k in keys) else None
+        # Identical orders share refusal/limit state, including an explicit default key.
+        if keys and applicable == key_id(keys[0].value):
+            applicable = None
+        identity = (choice.label, applicable)
+        if identity not in clients:
+            api = router.connect(
+                config, choice, first_key=applicable, on_call=recorder, client=client
+            )
             timeouts.append(api.timeout)
             paced: LLM
             server = None
@@ -136,18 +145,25 @@ def models(
                 server = f"{choice.provider.id}@{api.base_url}"
                 paced = Local(api, buckets, choice.label, server, sleep=sleep)
             else:
-                keys = max(1, len(api.keys))
-                paced = Limited(api, buckets, choice.label, choice.spec.rpm * keys, sleep=sleep)
+                key_count = max(1, len(api.keys))
+                paced = Limited(
+                    api, buckets, choice.label, choice.spec.rpm * key_count, sleep=sleep
+                )
             backed: LLM = router.Backoff(paced, sleep=sleep)
             if wrap is not None:
                 backed = wrap(backed, choice)
-            clients[choice.label] = (
+            clients[identity] = (
                 Cached(backed, conn, choice.model, server=server) if cache else backed
             )
-        return clients[choice.label]
+        return clients[identity]
 
-    def chain(choices: list[router.Choice]) -> router.Fallback:
-        return router.Fallback([(member(c), c) for c in choices])
+    def chain(
+        choices: list[router.Choice],
+        role: calls.Role = calls.Role.EXECUTOR,
+        kind: Kind | None = None,
+    ) -> router.Fallback:
+        first = router.preferred_key(config, role, kind)
+        return router.Fallback([(member(c, first), c) for c in choices])
 
     def lineup(role: calls.Role, kind: Kind | None = None) -> list[router.Choice]:
         choices = router.lineup(config, role, provider, model, kind=kind)
@@ -158,12 +174,15 @@ def models(
         return choices
 
     lineups = {role: lineup(role) for role in calls.Role}
-    roles = {role: chain(choices) for role, choices in lineups.items()}
+    roles = {role: chain(choices, role) for role, choices in lineups.items()}
     kinds: dict[Kind, tuple[LLM, LLM | None]] = {}
     for kind in Kind:
         own = lineup(calls.Role.EXECUTOR, kind)
         others = [] if model is not None else router.other_lineup(own)
-        kinds[kind] = (chain(own), chain(others) if others else None)
+        kinds[kind] = (
+            chain(own, calls.Role.EXECUTOR, kind),
+            chain(others, calls.Role.EXECUTOR, kind) if others else None,
+        )
     executor = lineups[calls.Role.EXECUTOR]
     others = [] if model is not None else router.other_lineup(executor)
     return Models(

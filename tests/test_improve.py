@@ -98,7 +98,7 @@ def test_every_target_is_a_plain_value_outside_the_protected_files() -> None:
 
 def test_every_setting_is_a_part_of_the_tuning_and_never_a_key_or_permission() -> None:
     names = {s.name for s in improve.SETTINGS}
-    assert names == set(TUNING_LIMITS) | set(ModelChoices.model_fields)
+    assert names == set(TUNING_LIMITS) | (set(ModelChoices.model_fields) - {"interlocutor"})
     assert all(s.id.startswith("tuning.") for s in improve.SETTINGS)
 
 
@@ -459,6 +459,8 @@ def test_the_analyst_sees_the_settings_and_the_models_stats(tmp_path: Path) -> N
     s = store()
     config = make_config(api_keys={"GROQ_API_KEY": "gsk_test"})
     config.tuning.max_subtasks = 4
+    config.tuning.models.interlocutor = "groq/test-chat"
+    config.tuning.keys.planner = "abcdef123456"
     task = improve.spec(s, None, config)
     assert task is not None
     inputs = task.subtasks[0].inputs
@@ -466,6 +468,10 @@ def test_the_analyst_sees_the_settings_and_the_models_stats(tmp_path: Path) -> N
     assert by_id["tuning.max_subtasks"]["current"] == 4
     assert by_id["tuning.model.code"]["choices"]
     assert "models" in inputs["stats"] and "roles" in inputs["stats"]
+    assert "tuning.model.interlocutor" not in by_id
+    assert not any("key" in name for name in by_id)
+    assert "abcdef123456" not in json.dumps(inputs)
+    assert "test-chat" not in json.dumps(inputs)
     assert "api_keys" not in json.dumps(inputs) and "gsk_test" not in json.dumps(inputs)
 
 

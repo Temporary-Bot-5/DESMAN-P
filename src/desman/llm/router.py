@@ -48,7 +48,7 @@ from desman.llm.base import (
     among,
     unfit_seen,
 )
-from desman.llm.openai_compat import CallRecord, OpenAICompatible
+from desman.llm.openai_compat import CallRecord, OpenAICompatible, key_id
 from desman.providers import Provider
 
 
@@ -158,10 +158,10 @@ def lineup(
 
 def tuning_field(role: Role, kind: Kind | None = None) -> str | None:
     """The field of `ModelChoices` for `role` (the executor's: its subtask's kind); None for a
-    role the person does not choose a model for (the interlocutor)."""
+    role without a tuning preference."""
     if role is Role.EXECUTOR:
         return (kind or Kind.TEXT).value
-    if role in (Role.PLANNER, Role.REVIEWER, Role.DECOMPOSER):
+    if role in (Role.PLANNER, Role.REVIEWER, Role.DECOMPOSER, Role.INTERLOCUTOR):
         return role.value
     return None
 
@@ -181,6 +181,12 @@ def preferred(config: Config, role: Role, kind: Kind | None = None) -> str | Non
     """The model the person chose for `role` (`config.tuning.models`), as `provider/model`."""
     name = tuning_field(role, kind)
     return None if name is None else getattr(config.tuning.models, name)
+
+
+def preferred_key(config: Config, role: Role, kind: Kind | None = None) -> str | None:
+    """The fingerprint of the key the person chose to ask first for this role."""
+    name = tuning_field(role, kind)
+    return None if name is None else getattr(config.tuning.keys, name)
 
 
 def _choices(config: Config, p: Provider) -> list[Choice]:
@@ -211,12 +217,15 @@ def connect(
     config: Config,
     choice: Choice,
     *,
+    first_key: str | None = None,
     on_call: Callable[[CallRecord], None] | None = None,
     client: httpx.Client | None = None,
 ) -> OpenAICompatible:
-    """The client of one model: every key of its provider (a local server takes none)."""
+    """Every provider key, the selected fingerprint first if present; local takes no key."""
     chosen = choice.provider
     keys = [""] if chosen.key_env is None else [k.value for k in config.keys(chosen.key_env)]
+    if first_key is not None:
+        keys.sort(key=lambda key: key_id(key) != first_key)
     return OpenAICompatible(
         chosen.id,
         chosen.endpoint(config),
