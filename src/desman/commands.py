@@ -2009,6 +2009,36 @@ def completions() -> dict[str, str]:
     return {"!" + entry.name: _short_help(entry) for entry in CATALOG}
 
 
+def _windows_words(line: str) -> list[str]:
+    """Split quoted command arguments while keeping every backslash literal."""
+    words: list[str] = []
+    token: list[str] = []
+    quote: str | None = None
+    started = False
+    for char in line:
+        if quote is not None:
+            if char == quote:
+                quote = None
+            else:
+                token.append(char)
+        elif char in ('"', "'"):
+            quote = char
+            started = True
+        elif char.isspace():
+            if started:
+                words.append("".join(token))
+                token = []
+                started = False
+        else:
+            token.append(char)
+            started = True
+    if quote is not None:
+        raise ValueError("Unclosed quote")
+    if started:
+        words.append("".join(token))
+    return words
+
+
 def parse_line(
     line: str, config: Config | None, *, windows: bool | None = None
 ) -> tuple[Entry, Args] | None:
@@ -2022,14 +2052,7 @@ def parse_line(
     i18n.translate_commands(cli)
     try:
         use_windows = os.name == "nt" if windows is None else windows
-        words = shlex.split(line, posix=not use_windows)
-        if use_windows:
-            words = [
-                word[1:-1]
-                if len(word) >= 2 and word[0] == word[-1] and word[0] in ('"', "'")
-                else word
-                for word in words
-            ]
+        words = _windows_words(line) if use_windows else shlex.split(line)
     except ValueError:
         raise BadArgs(t("Invalid quoting in the command.")) from None
     if words and words[0] == "desman":

@@ -637,3 +637,48 @@ def test_path_tokenization(
     parsed = commands.parse_line("keys import " + argument, None, windows=windows)
     assert parsed is not None
     assert str(parsed[1].model_dump()["file"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        (r"keys import C:\keys.txt", ["keys", "import", r"C:\keys.txt"]),
+        (r'keys import "C:\My Files\k.txt"', ["keys", "import", r"C:\My Files\k.txt"]),
+        ('list --status="active"', ["list", "--status=active"]),
+        ('protected approve --note="two words"', ["protected", "approve", "--note=two words"]),
+        ("protected approve --note='x y'", ["protected", "approve", "--note=x y"]),
+        ('protected approve --note ""', ["protected", "approve", "--note", ""]),
+    ],
+)
+def test_windows_tokenization(
+    line: str, expected: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tokenizer = commands._windows_words
+    seen: list[list[str]] = []
+
+    def capture(text: str) -> list[str]:
+        words = tokenizer(text)
+        seen.append(words.copy())
+        return words
+
+    import click
+
+    command = commands.cli_command(cli, "keys import")
+    assert command is not None
+    monkeypatch.setattr(command.params[0], "type", click.STRING)
+    monkeypatch.setattr(commands, "_windows_words", capture)
+    if expected[-1] == "":
+        # The tokenizer keeps the empty value; the note contract rejects it.
+        with pytest.raises(commands.BadArgs, match="at least 1 character"):
+            commands.parse_line(line, None, windows=True)
+    else:
+        parsed = commands.parse_line(line, None, windows=True)
+        assert parsed is not None
+        assert expected[-1].split("=", 1)[-1] in parsed[1].model_dump().values()
+    assert seen == [expected]
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_windows_unclosed_quote(quote: str) -> None:
+    with pytest.raises(commands.BadArgs, match="Invalid quoting"):
+        commands.parse_line("protected approve --note=" + quote + "unfinished", None, windows=True)
