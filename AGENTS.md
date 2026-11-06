@@ -42,7 +42,8 @@ DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving 
 - Human control is mandatory - no silent self-modification
 - Accessible to non-developers: after configuration, bare `desman` becomes a chat (ROADMAP
   phase C, after phase 3). Requests become ordinary tasks; changes to DESMAN itself asked in
-  the chat take effect only after the human confirms them in a field rendered by code
+  the chat take effect only after the human confirms them in a field rendered by code. An
+  explicit `!COMMAND` typed by the person runs immediately, like the CLI.
 
 ## Architecture Principles (from PROJECT_PLAN.md)
 
@@ -326,7 +327,8 @@ preemption, self-improvement or network features before their phase).
 - A change that alters what DESMAN does for the person also updates the topic of
   `src/desman/manual.py` that describes it, in the same commit (the interlocutor answers from it).
 - Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
-  (confirmation, `--yes` skips it) and `keys add` (the hidden key; `--stdin` for scripts) may
+  (confirmation, `--yes` skips it), `inbox` in a terminal, and `keys add` (the hidden key;
+  `--stdin` for scripts) may
   prompt. A key is never accepted as a command-line argument.
 
 ## Code Style & Conventions (ADR 0001)

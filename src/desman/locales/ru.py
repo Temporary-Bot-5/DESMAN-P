@@ -137,7 +137,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "Временный чат: ничего не сохраняется, всё стирается при выходе.",
     "-c and -t are for the chat: give them without a command.": "-c и -t относятся к чату: укажите их без команды.",
     "A temporary chat starts afresh: -c and -t do not go together.": "Временный чат начинается с чистого листа: -c и -t вместе не используются.",
-    "start a new temporary chat (this one is erased)": "начать новый временный чат (этот будет стёрт)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "Временный чат: сказанное здесь не сохраняется и стирается при выходе; задачи, которые вы попросите, остаются, как любые задачи. /help — команды чата.",
     "{name} is not available in a temporary chat": "{name} недоступна во временном чате",
     "{prog}, version {version}": "{prog}, версия {version}",
@@ -1536,6 +1535,51 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "Просмотреть или подтвердить подписанный корнем релиз проверенной отправки.",
         "The owner's checkout to release into.": "Рабочая копия владельца для создания релиза.",
         "Confirm the exact release preview hash.": "Подтвердить точный хеш просмотра релиза.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND выполняет команду DESMAN; !help показывает список.",
+        "Accept": "Принять",
+        "Choose a decision": "Выберите решение",
+        "Choose a subtask": "Выберите подзадачу",
+        "DESMAN needs configuring before this command can use models.": "Настройте DESMAN, чтобы эта команда могла использовать модели.",
+        "Delete them?": "Удалить их?",
+        "Fail": "Отметить неудачу",
+        "Include each task’s subtasks.": "Включить подзадачи каждой задачи.",
+        "Leave it for now": "Пока оставить",
+        "List waiting subtasks without choosing a decision.": "Показать ожидающие подзадачи без выбора решения.",
+        "Optional guidance for the next attempt": "Необязательное указание для следующей попытки",
+        "Retry": "Повторить",
+        "Session pinned.": "Сессия закреплена.",
+        "Session unpinned.": "Сессия откреплена.",
+        "The person ran {command}.": "Пользователь выполнил {command}.",
+        "Why did it fail?": "Почему произошла неудача?",
+        "delete all unpinned sessions after confirmation": "удалить все незакреплённые сессии после подтверждения",
+        "pin or unpin this session": "закрепить или открепить эту сессию",
+        "pinned": "закреплена",
+        "start a normal session (this temporary chat is erased)": "начать обычную сессию (этот временный чат будет стёрт)",
+        "start a temporary chat": "начать временный чат",
+        "{option} is not available in the chat": "{option} недоступен в чате",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "Неверные кавычки в команде."})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "Удалить {count} незакреплённую сессию? Закреплённые останутся; сообщения сохранятся в базе данных.",
+            "Удалить {count} незакреплённые сессии? Закреплённые останутся; сообщения сохранятся в базе данных.",
+            "Удалить {count} незакреплённых сессий? Закреплённые останутся; сообщения сохранятся в базе данных.",
+        ),
+        "Deleted {count} session.": (
+            "Удалена {count} сессия.",
+            "Удалены {count} сессии.",
+            "Удалено {count} сессий.",
+        ),
+        "No unpinned sessions to delete.": "Нет незакреплённых сессий для удаления.",
     }
 )
 

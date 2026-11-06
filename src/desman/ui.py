@@ -295,10 +295,23 @@ def _chat_prompt() -> Any:
     global _prompt
     if _prompt is None:
         from prompt_toolkit import PromptSession
+        from prompt_toolkit.history import InMemoryHistory
         from prompt_toolkit.styles import Style
+
+        class RedactedHistory(InMemoryHistory):
+            def append_string(self, string: str) -> None:
+                from desman.config import ConfigError, open_config
+                from desman.providers import redact_keys
+
+                try:
+                    config = open_config().load()
+                except ConfigError:
+                    config = None
+                super().append_string(redact_keys(string, config)[0])
 
         _prompt = PromptSession(
             [("class:mark", "› ")],
+            history=RedactedHistory(),
             complete_while_typing=True,
             reserve_space_for_menu=6,
             style=Style.from_dict(
@@ -316,9 +329,10 @@ def _chat_prompt() -> Any:
 
 
 def slash_matches(typed: str, commands: Mapping[str, str]) -> list[tuple[str, str]]:
-    """The commands (name, what it does) a line typed so far may become: while it is `/` and
-    the start of a name; nothing once it holds a space or is a message."""
-    if not typed.startswith("/") or any(c.isspace() for c in typed):
+    """Match slash names and explicit CLI paths; only ! paths may cross spaces."""
+    if not typed.startswith(("/", "!")) or (
+        typed.startswith("/") and any(c.isspace() for c in typed)
+    ):
         return []
     return [(name, what) for name, what in commands.items() if name.startswith(typed.lower())]
 

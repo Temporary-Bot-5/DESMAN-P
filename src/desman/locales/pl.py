@@ -134,7 +134,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "Czat tymczasowy: nic z tego, co powiedziane, nie jest zachowywane, znika po wyjściu.",
     "-c and -t are for the chat: give them without a command.": "-c i -t dotyczą czatu: podaj je bez polecenia.",
     "A temporary chat starts afresh: -c and -t do not go together.": "Czat tymczasowy zaczyna się od nowa: -c i -t nie idą w parze.",
-    "start a new temporary chat (this one is erased)": "zacznij nowy czat tymczasowy (ten zostanie usunięty)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "Czat tymczasowy: to, co tu powiesz, nie jest zachowywane i znika po wyjściu; zadania, o które poprosisz, zostają jak każde zadanie. /help pokazuje polecenia czatu.",
     "{name} is not available in a temporary chat": "{name} nie jest dostępne w czacie tymczasowym",
     "{prog}, version {version}": "{prog}, wersja {version}",
@@ -1293,6 +1292,51 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "Podejrzyj lub potwierdź wydanie sprawdzonego zgłoszenia podpisane kluczem głównym.",
         "The owner's checkout to release into.": "Kopia robocza właściciela, w której powstanie wydanie.",
         "Confirm the exact release preview hash.": "Potwierdź dokładny skrót podglądu wydania.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND uruchamia polecenie DESMAN; !help wyświetla listę.",
+        "Accept": "Akceptuj",
+        "Choose a decision": "Wybierz decyzję",
+        "Choose a subtask": "Wybierz podzadanie",
+        "DESMAN needs configuring before this command can use models.": "Skonfiguruj DESMAN, aby to polecenie mogło używać modeli.",
+        "Delete them?": "Usunąć je?",
+        "Fail": "Oznacz niepowodzenie",
+        "Include each task’s subtasks.": "Uwzględnij podzadania każdego zadania.",
+        "Leave it for now": "Zostaw na razie",
+        "List waiting subtasks without choosing a decision.": "Wyświetl oczekujące podzadania bez wybierania decyzji.",
+        "Optional guidance for the next attempt": "Opcjonalne wskazówki dla kolejnej próby",
+        "Retry": "Ponów",
+        "Session pinned.": "Sesja przypięta.",
+        "Session unpinned.": "Sesja odpięta.",
+        "The person ran {command}.": "Użytkownik uruchomił {command}.",
+        "Why did it fail?": "Dlaczego się nie udało?",
+        "delete all unpinned sessions after confirmation": "usuń wszystkie nieprzypięte sesje po potwierdzeniu",
+        "pin or unpin this session": "przypnij lub odepnij tę sesję",
+        "pinned": "przypięta",
+        "start a normal session (this temporary chat is erased)": "rozpocznij zwykłą sesję (ten tymczasowy czat zostanie wymazany)",
+        "start a temporary chat": "rozpocznij tymczasowy czat",
+        "{option} is not available in the chat": "{option} jest niedostępne na czacie",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "Nieprawidłowe cudzysłowy w poleceniu."})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "Usunąć {count} nieprzypiętą sesję? Przypięte pozostaną; wiadomości pozostaną w bazie danych.",
+            "Usunąć {count} nieprzypięte sesje? Przypięte pozostaną; wiadomości pozostaną w bazie danych.",
+            "Usunąć {count} nieprzypiętych sesji? Przypięte pozostaną; wiadomości pozostaną w bazie danych.",
+        ),
+        "Deleted {count} session.": (
+            "Usunięto {count} sesję.",
+            "Usunięto {count} sesje.",
+            "Usunięto {count} sesji.",
+        ),
+        "No unpinned sessions to delete.": "Brak nieprzypiętych sesji do usunięcia.",
     }
 )
 

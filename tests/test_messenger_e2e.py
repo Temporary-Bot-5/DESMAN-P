@@ -214,7 +214,7 @@ def test_node_upgrade(tmp_path: Path, clock: FakeClock) -> None:
     session = Sessions(conn).add(None, Role.USER, "kept across upgrade").session_id
     conn.close()
     with db.open_db(path) as conn:
-        assert db.schema_version(conn) == 33
+        assert db.schema_version(conn) == db.SCHEMA_VERSION
         assert Sessions(conn).messages(session)[0].text == "kept across upgrade"
         conn.execute(
             "INSERT INTO messenger_peers VALUES (?,?,?,?,?)",

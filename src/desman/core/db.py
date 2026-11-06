@@ -650,6 +650,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         registry TEXT PRIMARY KEY, node TEXT NOT NULL, published_at TEXT NOT NULL
     ) STRICT;
     """,
+    # 34: kept sessions may be pinned; temporary sessions never may.
+    """
+    ALTER TABLE sessions ADD COLUMN pinned_at TEXT
+        CHECK (pinned_at IS NULL OR temporary = 0);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

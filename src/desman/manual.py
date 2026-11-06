@@ -53,7 +53,7 @@ TOPICS: Final = (
         "cancelled), cancelled.\n"
         "A task is active while the system can still move on its own, needs_human when "
         "nothing moves until the person decides, done when every subtask is done, failed or "
-        "cancelled otherwise. `desman list` lists tasks, `desman status TASK` shows one with its "
+        'cancelled otherwise. `desman list` lists tasks, one line each (that answers "what are my tasks"); `desman list --subtasks` adds their subtasks. `desman status TASK` shows one with its '
         "subtasks, `desman audit TASK` its full history, `desman stats` how well tasks go.",
     ),
     Topic(
@@ -85,7 +85,7 @@ TOPICS: Final = (
         "paused until the limit resets. A failure retrying cannot help (a refused key, a "
         "denied permission) goes to the person at once.\n"
         "DESMAN never gives up by itself: when the attempts run out the subtask waits for the "
-        "person (needs_human). `desman inbox` lists what waits, with the reason. The person "
+        "person (needs_human). `desman inbox` lists what waits, with the reason, and in a terminal or the chat lets the person pick a subtask and decide; `desman inbox --list` only lists. The person "
         "decides: `desman retry SUBTASK` sends it back to work with fresh attempts (a note becomes a "
         "hint to the next attempt), `desman accept SUBTASK` takes it as it is, `desman fail SUBTASK --note TEXT` gives "
         "up on it (what depends on it is blocked), `desman cancel TASK` stops the whole task. A "
@@ -184,14 +184,13 @@ TOPICS: Final = (
         "`desman -t` opens a temporary chat: nothing said there is "
         "kept, it is erased when the chat ends (its tasks stay, like any task), and it keeps no "
         "profile notes and no summaries. Each message gets one "
-        "turn of the interlocutor: an answer, a question back, a task, or a DESMAN command. "
+        "turn: an answer, a question back, a task, or a DESMAN command. "
         "A command that shows something runs at once; one that changes something is shown "
         "in a window and done only after the person's yes; a key or a section of the wizard "
-        "is typed by the person into a window. Every confirmed or declined change is kept "
-        "in the operator's journal.\n"
+        "is typed by the person into a window. Decisions enter the operator's journal.\n"
         "The chat's own commands: `/help`, `/new` (a new session), `/sessions` (pick an "
         "earlier one), `/rename`, `/compact`, `/profile`, `/delete` (out of the list; its "
-        "messages stay in the database), `/exit`. Typing / lists them.\n"
+        "messages stay in the database), `/pin` (toggle pin), `/delete-all` (confirm deleting unpinned sessions; messages stay), `/temporary` (erase on exit), `/exit`. `/new` always starts a normal session, erasing a temporary one. Pinned sessions appear first. Typing / lists chat commands. !COMMAND runs a DESMAN CLI command immediately. It needs no model or confirmation. Input opens a window. !help lists them.\n"
         "The interlocutor sees only the newest messages that fit its budget; older ones are "
         "summarised by a small task of their own (`/compact` does it now) and it sees the "
         "summary. A summary that fails leaves the older messages out of its view. A pasted "

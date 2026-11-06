@@ -104,7 +104,7 @@ LISTED_SESSIONS = 20
 _EARLIER = "earlier"  # not a session id: those are uuid hex
 
 
-KEPT_ONLY = ("/sessions", "/rename", "/compact", "/delete")
+KEPT_ONLY = ("/sessions", "/rename", "/compact", "/delete", "/pin")
 """The chat's commands about kept sessions: a temporary chat has none of them."""
 
 
@@ -118,10 +118,13 @@ def _commands(temporary: bool = False) -> dict[str, str]:
         "/messages": t("read messages privately: /messages [NAME]"),
         "/profile": t("how the interlocutor talks to you and what it notes about you"),
         "/delete": t("delete this session from the list (after your yes)"),
+        "/pin": t("pin or unpin this session"),
+        "/delete-all": t("delete all unpinned sessions after confirmation"),
+        "/temporary": t("start a temporary chat"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
     if temporary:
-        every["/new"] = t("start a new temporary chat (this one is erased)")
+        every["/new"] = t("start a normal session (this temporary chat is erased)")
     return {name: what for name, what in every.items() if not (temporary and name in KEPT_ONLY)}
 
 
@@ -142,7 +145,9 @@ class Chat:
         notes, no summaries, no cached replies."""
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
-        self.read = read or (lambda: ui.line(_commands(temporary)))
+        self.read = read or (
+            lambda: ui.line({**_commands(self.temporary), **commands.completions()})
+        )
         self.models: runs.Models | None = None
         """Built at the first message that needs them, again when the config changes."""
         self._models_for: Config | None = None
@@ -175,6 +180,9 @@ class Chat:
                 if command.startswith("/"):
                     if not self._slash(command):
                         return
+                    continue
+                if command.startswith("!"):
+                    self._typed(command[1:])
                     continue
                 self._message(line)  # kept as typed: indentation may matter (code, a list)
         finally:
@@ -256,7 +264,7 @@ class Chat:
             ui.error(str(e))
             return None
 
-    def _models(self, config: Config) -> runs.Models | None:
+    def _models(self, config: Config, *, command: bool = False) -> runs.Models | None:
         """The models for `config`: built anew when it changed (a key replaced meanwhile)."""
         if self.models is None or config != self._models_for:
             self.models, self._models_for = None, None
@@ -265,6 +273,8 @@ class Chat:
                 self.models = runs.models(config, self.sessions.conn, cache=not self.temporary)
                 self._models_for = config
             except router.NoProvider:
+                if command:
+                    return None
                 ui.warn(
                     t(
                         "Your message is kept, but no model is ready to answer it. Add a key "
@@ -279,12 +289,16 @@ class Chat:
         return calls.for_(calls.Purpose(role, session_id=self.session_id))
 
     def _say(self, text: str, task_id: str | None = None) -> None:
-        assert self.session_id is not None
+        if self.session_id is None:
+            ui.out(Text(text))
+            return
         message = self.sessions.add(self.session_id, Role.INTERLOCUTOR, text, task_id=task_id)
         ui.out(_render(message))
 
     def _event(self, text: str, task_id: str | None = None) -> None:
-        assert self.session_id is not None
+        if self.session_id is None:
+            ui.note(text)
+            return
         message = self.sessions.add(
             self.session_id, Role.DESMAN, text, kind=Kind.EVENT, task_id=task_id
         )
@@ -320,10 +334,16 @@ class Chat:
     # ── Commands ─────────────────────────────────────────────────────────────
 
     def _command(
-        self, turn: Command, config: Config, models: runs.Models, interlocutor: Interlocutor
+        self,
+        turn: Command,
+        config: Config,
+        models: runs.Models | None,
+        interlocutor: Interlocutor | None,
+        *,
+        typed: bool = False,
     ) -> None:
         """The command the interlocutor asked for, through the catalog; never as it was
-        written. Only the person's answer in a window built here applies a change."""
+        written. Model-requested changes need the person's answer in a code-built window; typed commands apply immediately."""
         entry = commands.find(turn.name)
         if entry is None:
             name = providers.redact_keys(turn.name, config)[0]
@@ -347,22 +367,36 @@ class Chat:
         command = commands.shown(entry, args)
         kind = entry.kind_of(args)
         before = self._saved_config()
-        context = commands.Context(
-            self.store,
-            open_config(),
-            start_task=lambda title, goal, runs_code: self._task(
+        if entry.name in ("run", "resume", "worker", "proposals analyze") and (
+            models is None or interlocutor is None
+        ):
+            ui.error(t("DESMAN needs configuring before this command can use models."))
+            return
+
+        def start_task(title: str, goal: str, runs_code: bool) -> None:
+            assert models is not None and interlocutor is not None
+            self._task(
                 NewTask(type="task", title=title, goal=goal, runs_code=runs_code),
                 config,
                 models,
                 interlocutor,
-            ),
-            resume_task=lambda task_id: self._resume(task_id, config, models, interlocutor),
+            )
+
+        def resume_task(task_id: str) -> None:
+            assert models is not None and interlocutor is not None
+            self._resume(task_id, config, models, interlocutor)
+
+        context = commands.Context(
+            self.store,
+            open_config(),
+            start_task=start_task,
+            resume_task=resume_task,
             session_id=lambda: self.session_id,
         )
         try:
             made = entry.handler(context, args)
             if isinstance(made, commands.Proposal):
-                if not self._confirmed(made):
+                if not typed and not self._confirmed(made):
                     made = commands.Outcome({"declined": True}, done=False)
                 else:
                     made = made.apply()
@@ -377,13 +411,52 @@ class Chat:
         except (ui.Cancelled, click.Abort):
             ui.out("")
             made = commands.Outcome({"declined": True}, done=False)
-        if kind is not commands.Kind.READ:
-            self._journal(entry, args, made.done, before)
+        if typed or kind is not commands.Kind.READ:
+            self._journal(entry, args, made.done, before, typed=typed)
         if not made.done:
             ui.note(t("Nothing changed."))
             self._result(t("{command}: the person declined.", command=command), None, config)
-        elif made.data is not None:
-            self._result(t("{command} ran.", command=command), made.data, config)
+        elif made.data is not None or typed:
+            self._result(
+                t("The person ran {command}.", command=command)
+                if typed
+                else t("{command} ran.", command=command),
+                made.data,
+                config,
+            )
+
+    def _typed(self, line: str) -> None:
+        """A person's explicit command line never becomes a model turn or a user message."""
+        config = self._config()
+        if config is None:
+            return
+        try:
+            parsed = commands.parse_line(line, config)
+        except (commands.BadArgs, click.ClickException, ValueError) as e:
+            message = e.format_message() if isinstance(e, click.ClickException) else str(e)
+            ui.error(providers.redact_keys(message, config)[0])
+            return
+        if parsed is None:
+            return
+        entry, args = parsed
+        models = None
+        interlocutor = None
+        if entry.name in ("run", "resume", "worker", "proposals analyze"):
+            models = self._models(config, command=True)
+            if models is not None:
+                interlocutor = Interlocutor(
+                    models.for_(calls.Role.INTERLOCUTOR),
+                    config.language,
+                    self.profile.notes() if config.personalize and not self.temporary else None,
+                    config.behaviour,
+                )
+        self._command(
+            Command(type="command", name=entry.name, args=args.model_dump(mode="json")),
+            config,
+            models,
+            interlocutor,
+            typed=True,
+        )
 
     def _confirmed(self, proposal: commands.Proposal) -> bool:
         """The window of a change: what it does, as the command worded it, and the person's
@@ -396,7 +469,13 @@ class Chat:
         return ui.confirm(proposal.question or t("Apply this change?"), default=False)
 
     def _journal(
-        self, entry: commands.Entry, args: commands.Args, done: bool, before: Config | None
+        self,
+        entry: commands.Entry,
+        args: commands.Args,
+        done: bool,
+        before: Config | None,
+        *,
+        typed: bool = False,
     ) -> None:
         """The operator's journal: the command, confirmed or declined, and what it changed in
         the config (a key by its fingerprint, a permission by its name). Private fields
@@ -412,10 +491,17 @@ class Chat:
             details["args_private"] = list(entry.private)
         if self.temporary:  # the decision is the person's, kept; what the chat said is not
             details = {"command": entry.name, "args_given": sorted(given), "temporary": True}
+        if typed:
+            details["typed"] = True
         action = "operator_command" if done else "operator_declined"
         operator.record(conn, action, details, session_id=self.session_id)
         for change, about in commands.config_changes(before, self._saved_config()):
-            operator.record(conn, change, about, session_id=self.session_id)
+            operator.record(
+                conn,
+                change,
+                {**about, **({"typed": True} if typed else {})},
+                session_id=self.session_id,
+            )
 
     def _saved_config(self) -> Config | None:
         """The config as saved (None: no file, or one that does not load)."""
@@ -430,8 +516,9 @@ class Chat:
     def _result(self, said: str, data: Any, config: Config | None) -> None:
         """What a command did, for the interlocutor's next turns: an event of the session,
         not printed (the person saw it already). Never a key: see `commands.for_interlocutor`."""
-        assert self.session_id is not None
-        text = said
+        if self.session_id is None:
+            return
+        text = providers.redact_keys(said, config)[0]
         if data is not None:
             configs = [config, self._saved_config()]
             budget = COMMAND_RESULT_TOKENS * CHARS_PER_TOKEN
@@ -887,6 +974,12 @@ class Chat:
             self._help()
         elif name == "/new":
             self._new()
+        elif name == "/temporary":
+            self._new(temporary=True)
+        elif name == "/pin":
+            self._pin()
+        elif name == "/delete-all":
+            self._delete_all()
         elif name == "/sessions":
             self._choose_session()
         elif name == "/rename":
@@ -918,15 +1011,62 @@ class Chat:
         for name, what in _commands(self.temporary).items():
             commands.add_row(Text(name, style="key"), Text(what, style="muted"))
         ui.out(commands)
+        ui.note(t("!COMMAND runs a DESMAN command; !help lists them."))
         ui.note(t("Anything else you write is a message."))
 
-    def _new(self) -> None:
-        if self.session_id is None:
+    def _new(self, temporary: bool = False) -> None:
+        if self.session_id is None and self.temporary == temporary:
             ui.note(t("This session is new already."))
             return
         self._erase()
+        self.temporary = temporary
+        self.models, self._models_for = None, None
         self.session_id = None
-        ui.ok(t("New session: it starts with your next message."))
+        if temporary:
+            self._greet()
+        else:
+            ui.ok(t("New session: it starts with your next message."))
+
+    def _pin(self) -> None:
+        current = self._current()
+        if current is None:
+            return
+        self.sessions.pin(current.id, not current.pinned)
+        operator.record(
+            self.store.conn,
+            "operator_session_unpinned" if current.pinned else "operator_session_pinned",
+            session_id=current.id,
+        )
+        ui.ok(t("Session unpinned.") if current.pinned else t("Session pinned."))
+
+    def _delete_all(self) -> None:
+        count = sum(not session.pinned for session in self.sessions.recent(limit=-1))
+        if not count:
+            ui.note(t("No unpinned sessions to delete."))
+            return
+        ui.section(t("Confirm"))
+        ui.note(
+            tn(
+                count,
+                "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.",
+                "Delete {count} unpinned sessions? Pinned sessions stay; messages remain in the database.",
+                count=count,
+            )
+        )
+        try:
+            if not ui.confirm(t("Delete them?"), default=False):
+                return
+        except (ui.Cancelled, click.Abort):
+            return
+        deleted = self.sessions.delete_all()
+        operator.record(self.store.conn, "operator_sessions_deleted", {"count": deleted})
+        if (
+            not self.temporary
+            and self.session_id is not None
+            and self.sessions.get(self.session_id) is None
+        ):
+            self.session_id = None
+        ui.ok(tn(deleted, "Deleted {count} session.", "Deleted {count} sessions.", count=deleted))
 
     def _current(self) -> SessionInfo | None:
         """The session written to, or None (with a note) while it has not started."""
@@ -1118,7 +1258,8 @@ class Chat:
                 ui.Choice(
                     label=f"{_when(s.last_at)}  {_shorten(s.name) or '…'}",
                     value=s.id,
-                    hint=tn(s.messages, "{n} message", "{n} messages")
+                    hint=(t("pinned") + " · " if s.pinned else "")
+                    + tn(s.messages, "{n} message", "{n} messages")
                     + (" · " + t("current") if s.id == self.session_id else ""),
                 )
                 for s in page

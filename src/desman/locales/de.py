@@ -129,7 +129,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "Ein temporärer Chat: nichts Gesagtes wird behalten, beim Verlassen wird er gelöscht.",
     "-c and -t are for the chat: give them without a command.": "-c und -t gelten für den Chat: ohne Befehl angeben.",
     "A temporary chat starts afresh: -c and -t do not go together.": "Ein temporärer Chat beginnt neu: -c und -t passen nicht zusammen.",
-    "start a new temporary chat (this one is erased)": "einen neuen temporären Chat beginnen (dieser wird gelöscht)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "Temporärer Chat: was hier gesagt wird, wird nicht behalten und beim Verlassen gelöscht; Aufgaben, um die du bittest, bleiben wie jede Aufgabe. /help listet die Befehle des Chats.",
     "{name} is not available in a temporary chat": "{name} ist in einem temporären Chat nicht verfügbar",
     "{prog}, version {version}": "{prog}, Version {version}",
@@ -1249,6 +1248,46 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "Vorschau oder Bestätigung eines vom Stammschlüssel signierten Releases einer geprüften Einreichung.",
         "The owner's checkout to release into.": "Die Arbeitskopie des Eigentümers für das Release.",
         "Confirm the exact release preview hash.": "Den genauen Hash der Release-Vorschau bestätigen.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND führt einen DESMAN-Befehl aus; !help zeigt die Liste.",
+        "Accept": "Annehmen",
+        "Choose a decision": "Entscheidung wählen",
+        "Choose a subtask": "Teilaufgabe wählen",
+        "DESMAN needs configuring before this command can use models.": "DESMAN muss konfiguriert werden, bevor dieser Befehl Modelle nutzen kann.",
+        "Delete them?": "Diese löschen?",
+        "Fail": "Als fehlgeschlagen markieren",
+        "Include each task’s subtasks.": "Teilaufgaben jeder Aufgabe einschließen.",
+        "Leave it for now": "Vorerst belassen",
+        "List waiting subtasks without choosing a decision.": "Wartende Teilaufgaben ohne Entscheidung auflisten.",
+        "Optional guidance for the next attempt": "Optionale Hinweise für den nächsten Versuch",
+        "Retry": "Erneut versuchen",
+        "Session pinned.": "Sitzung angeheftet.",
+        "Session unpinned.": "Sitzung gelöst.",
+        "The person ran {command}.": "Die Person hat {command} ausgeführt.",
+        "Why did it fail?": "Warum ist es fehlgeschlagen?",
+        "delete all unpinned sessions after confirmation": "alle nicht angehefteten Sitzungen nach Bestätigung löschen",
+        "pin or unpin this session": "diese Sitzung anheften oder lösen",
+        "pinned": "angeheftet",
+        "start a normal session (this temporary chat is erased)": "normale Sitzung starten (dieser temporäre Chat wird gelöscht)",
+        "start a temporary chat": "temporären Chat starten",
+        "{option} is not available in the chat": "{option} ist im Chat nicht verfügbar",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "Ungültige Anführungszeichen im Befehl."})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "{count} nicht angeheftete Sitzung löschen? Angeheftete bleiben; Nachrichten bleiben in der Datenbank.",
+            "{count} nicht angeheftete Sitzungen löschen? Angeheftete bleiben; Nachrichten bleiben in der Datenbank.",
+        ),
+        "Deleted {count} session.": ("{count} Sitzung gelöscht.", "{count} Sitzungen gelöscht."),
+        "No unpinned sessions to delete.": "Keine nicht angehefteten Sitzungen zum Löschen.",
     }
 )
 

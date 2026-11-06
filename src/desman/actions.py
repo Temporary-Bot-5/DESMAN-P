@@ -17,10 +17,18 @@ import click
 from rich.text import Text
 
 from desman import providers, ui
-from desman.core import db
+from desman.config import ConfigError, open_config
+from desman.core import db, operator
 from desman.core.audit import AuditEntry, check_history, history
 from desman.core.models import Subtask
-from desman.core.report import InboxItem, ModelSuggestion, TaskReport
+from desman.core.report import (
+    InboxItem,
+    ModelSuggestion,
+    TaskReport,
+    inbox,
+    task_report,
+    task_summaries,
+)
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.stats import Stats
 from desman.core.store import StaleStateError, Store
@@ -155,12 +163,24 @@ def suggestion_lines(suggestions: list[ModelSuggestion]) -> list[str]:
     return lines
 
 
-def print_summaries(summaries: list[TaskReport]) -> None:
+def list_tasks(
+    store: Store, *, status: TaskStatus | None, limit: int, subtasks: bool = False
+) -> list[TaskReport]:
+    """A consistent task list, with full subtask data only when requested."""
+    with db.read_snapshot(store.conn):
+        summaries = task_summaries(store, status=status, limit=limit)
+        return [task_report(store, summary.id) for summary in summaries] if subtasks else summaries
+
+
+def print_summaries(summaries: list[TaskReport], subtasks: bool = False) -> None:
     for summary in summaries:
         click.echo(
             f"{summary.id}  {summary.status:<11}  {summary.done:>3}/{summary.total:<3}  "
             f"{summary.created_at}  {one_line(summary.goal, 60)}"
         )
+        if subtasks:
+            for sub in summary.subtasks:
+                click.echo(f"  [{sub.seq}] {sub.status}  {one_line(sub.description, 80)}")
 
 
 def one_line(text: str, limit: int) -> str:
@@ -245,7 +265,7 @@ def _short(value: Any, limit: int = 80) -> str:
 # ── inbox, operator decisions ────────────────────────────────────────────────
 
 
-def print_inbox(items: list[InboxItem]) -> None:
+def print_inbox(items: list[InboxItem], hint: bool = True) -> None:
     if not items:
         click.echo(t("Nothing is waiting for you."))
         return
@@ -256,7 +276,86 @@ def print_inbox(items: list[InboxItem]) -> None:
         )
         if item.reason:
             click.echo(f"{'':<12} {one_line(item.reason, 110)}")
-    click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
+    if hint:
+        click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
+
+
+def choose_inbox(store: Store, session_id: str | None = None) -> dict[str, Any]:
+    """Code-owned decision window, with optimistic versions from the displayed list."""
+    waited = inbox(store)
+    decisions: list[dict[str, Any]] = []
+    try:
+        while True:
+            items = inbox(store)
+            print_inbox(items, hint=False)
+            if not items:
+                break
+            chosen = ui.select(
+                t("Choose a subtask"),
+                [
+                    ui.Choice(
+                        label=f"{i.ref}  {i.status}  {i.description}  [{i.goal}]",
+                        value=i,
+                        hint=i.reason or "",
+                    )
+                    for i in items
+                ]
+                + [ui.Choice(label=t("Leave it for now"), value=None)],
+            )
+            if chosen is None:
+                break
+            action = ui.select(
+                t("Choose a decision"),
+                [
+                    ui.Choice(label=t("Retry"), value="retry"),
+                    ui.Choice(label=t("Accept"), value="accept"),
+                    ui.Choice(label=t("Fail"), value="fail"),
+                    ui.Choice(label=t("Back"), value=None),
+                ],
+            )
+            if action is None:
+                continue
+            note = ""
+            if action == "retry":
+                note = ui.text(t("Optional guidance for the next attempt"))
+            elif action == "fail":
+                note = ui.text(t("Why did it fail?"))
+                if not note.strip():
+                    ui.error(t("say why it failed"))
+                    continue
+            try:
+                config = open_config().load()
+            except ConfigError:
+                config = None
+            note = providers.redact_keys(note, config)[0]
+            target = {
+                "retry": SubtaskStatus.READY,
+                "accept": SubtaskStatus.DONE,
+                "fail": SubtaskStatus.FAILED,
+            }[action]
+            try:
+                pending = prepare_decision(store, chosen.ref, target, chosen.version)
+                decision = apply_decision(
+                    store,
+                    pending,
+                    note.strip() or f"{action} requested by operator",
+                    f"operator_{action}",
+                )
+            except click.ClickException as e:
+                ui.error(e.format_message())
+                continue
+            print_decision(decision)
+            data = decision.as_json()
+            decisions.append(data)
+            operator.record(
+                store.conn,
+                "operator_command",
+                {"command": action, "args": {"subtask": chosen.ref}, "args_private": ["note"]},
+                session_id=session_id,
+            )
+    except (ui.Cancelled, click.Abort):
+        pass  # Decisions already applied remain in the returned result.
+    return {"waiting": [i.model_dump(mode="json") for i in waited], "decisions": decisions}
 
 
 def print_waiting(items: list[InboxItem], hint: str) -> None:

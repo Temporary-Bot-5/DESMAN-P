@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner, Result
 
 from conftest import FakeClock
-from desman import ui
+from desman import commands, ui
 from desman.chat import Chat
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
@@ -254,19 +254,9 @@ def test_the_chat_offers_its_own_commands(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(ui, "line", line)
     Chat(stored()).run()
-    assert offered == [
-        [
-            "/help",
-            "/new",
-            "/sessions",
-            "/rename",
-            "/compact",
-            "/messages",
-            "/profile",
-            "/delete",
-            "/exit",
-        ]
-    ]
+    from desman.chat import _commands
+
+    assert offered == [[*_commands(), *commands.completions()]]
 
 
 # ── Naming and deleting sessions ─────────────────────────────────────────────
@@ -397,7 +387,7 @@ def test_a_temporary_chat_has_no_commands_about_kept_sessions() -> None:
     result = temporary("/help", "hello", "/sessions", "/rename X", "/compact", "/delete")
     for name in ("/sessions", "/rename", "/compact", "/delete"):
         assert f"{name} is not available in a temporary chat" in result.output
-    assert "start a new temporary chat" in result.output
+    assert "start a normal session" in result.output
     assert texts() == []
 
 
@@ -413,8 +403,8 @@ def test_new_in_a_temporary_chat_erases_the_one_before(sessions: Sessions) -> No
 
     sessions.erase = watched  # type: ignore[method-assign]
     chat_.run()
-    assert seen == [["first secret"], ["second secret"]]  # at /new, then at the end
-    assert sessions.conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    assert seen == [["first secret"]]  # /new switches to a normal, kept session
+    assert [m.text for m in sessions.messages(chat_.session_id or "")] == ["second secret"]
 
 
 def test_what_a_crashed_temporary_chat_left_is_erased_by_the_next_chat(

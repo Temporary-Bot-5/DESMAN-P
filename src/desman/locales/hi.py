@@ -129,7 +129,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "अस्थायी चैट: कही गई कोई बात रखी नहीं जाती, बाहर निकलने पर मिटा दी जाती है।",
     "-c and -t are for the chat: give them without a command.": "-c और -t चैट के लिए हैं: इन्हें बिना किसी कमांड के दें।",
     "A temporary chat starts afresh: -c and -t do not go together.": "अस्थायी चैट नए सिरे से शुरू होती है: -c और -t साथ नहीं चलते।",
-    "start a new temporary chat (this one is erased)": "नई अस्थायी चैट शुरू करें (यह वाली मिटा दी जाएगी)",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "अस्थायी चैट: यहाँ कही गई बातें रखी नहीं जातीं और बाहर निकलने पर मिटा दी जाती हैं; आपके माँगे गए कार्य किसी भी कार्य की तरह बने रहते हैं। /help चैट की कमांड दिखाता है।",
     "{name} is not available in a temporary chat": "{name} अस्थायी चैट में उपलब्ध नहीं है",
     "{prog}, version {version}": "{prog}, संस्करण {version}",
@@ -1246,6 +1245,46 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "जाँची गई प्रस्तुति की मूल हस्ताक्षरित रिलीज़ का पूर्वावलोकन या पुष्टि करें।",
         "The owner's checkout to release into.": "रिलीज़ बनाने के लिए मालिक की कार्य प्रति।",
         "Confirm the exact release preview hash.": "रिलीज़ पूर्वावलोकन के सटीक हैश की पुष्टि करें।",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND DESMAN कमांड चलाता है; !help सूची दिखाता है।",
+        "Accept": "स्वीकार करें",
+        "Choose a decision": "निर्णय चुनें",
+        "Choose a subtask": "उपकार्य चुनें",
+        "DESMAN needs configuring before this command can use models.": "इस कमांड में मॉडल इस्तेमाल करने के लिए DESMAN को कॉन्फ़िगर करें।",
+        "Delete them?": "इन्हें मिटाएँ?",
+        "Fail": "विफल चिह्नित करें",
+        "Include each task’s subtasks.": "हर कार्य के उपकार्य शामिल करें।",
+        "Leave it for now": "अभी रहने दें",
+        "List waiting subtasks without choosing a decision.": "निर्णय चुने बिना प्रतीक्षारत उपकार्य दिखाएँ।",
+        "Optional guidance for the next attempt": "अगले प्रयास के लिए वैकल्पिक निर्देश",
+        "Retry": "फिर प्रयास करें",
+        "Session pinned.": "सत्र पिन किया गया।",
+        "Session unpinned.": "सत्र का पिन हटाया गया।",
+        "The person ran {command}.": "व्यक्ति ने {command} चलाया।",
+        "Why did it fail?": "यह विफल क्यों हुआ?",
+        "delete all unpinned sessions after confirmation": "पुष्टि के बाद बिना पिन वाले सभी सत्र मिटाएँ",
+        "pin or unpin this session": "इस सत्र का पिन लगाएँ या हटाएँ",
+        "pinned": "पिन किया हुआ",
+        "start a normal session (this temporary chat is erased)": "सामान्य सत्र शुरू करें (यह अस्थायी चैट मिट जाएगी)",
+        "start a temporary chat": "अस्थायी चैट शुरू करें",
+        "{option} is not available in the chat": "चैट में {option} उपलब्ध नहीं है",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "कमांड में उद्धरण चिह्न सही नहीं हैं।"})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "{count} अनपिन किया गया सत्र हटाएँ? पिन किए गए सत्र रहेंगे; संदेश डेटाबेस में रहेंगे।",
+            "{count} अनपिन किए गए सत्र हटाएँ? पिन किए गए सत्र रहेंगे; संदेश डेटाबेस में रहेंगे।",
+        ),
+        "Deleted {count} session.": ("{count} सत्र हटाया गया।", "{count} सत्र हटाए गए।"),
+        "No unpinned sessions to delete.": "हटाने के लिए कोई अनपिन किया गया सत्र नहीं है।",
     }
 )
 

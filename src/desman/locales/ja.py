@@ -129,7 +129,6 @@ MESSAGES: dict[str, Forms] = {
     "A temporary chat: nothing said is kept, it is erased when you leave.": "一時チャット：話した内容は保存されず、終了時に消去されます。",
     "-c and -t are for the chat: give them without a command.": "-c と -t はチャット用です：コマンドなしで指定してください。",
     "A temporary chat starts afresh: -c and -t do not go together.": "一時チャットは新しく始まります：-c と -t は同時に使えません。",
-    "start a new temporary chat (this one is erased)": "新しい一時チャットを始める（このチャットは消去されます）",
     "Temporary chat: what is said here is not kept and is erased when you leave; tasks you ask for stay, like any task. /help lists the chat's commands.": "一時チャット：ここで話した内容は保存されず、終了時に消去されます。依頼したタスクは通常のタスクとして残ります。/help でチャットのコマンドを表示します。",
     "{name} is not available in a temporary chat": "{name} は一時チャットでは使えません",
     "{prog}, version {version}": "{prog}、バージョン {version}",
@@ -1176,6 +1175,45 @@ MESSAGES.update(
         "Preview or confirm a root-signed release of a checked submission.": "確認済み提出のルート署名付きリリースをプレビューまたは確定します。",
         "The owner's checkout to release into.": "リリース先となる所有者の作業コピー。",
         "Confirm the exact release preview hash.": "リリースプレビューの正確なハッシュを確認します。",
+    }
+)
+
+MESSAGES.update(
+    {
+        "!COMMAND runs a DESMAN command; !help lists them.": "!COMMAND は DESMAN コマンドを実行します。!help で一覧を表示します。",
+        "Accept": "承認",
+        "Choose a decision": "操作を選択",
+        "Choose a subtask": "サブタスクを選択",
+        "DESMAN needs configuring before this command can use models.": "このコマンドでモデルを使うには DESMAN の設定が必要です。",
+        "Delete them?": "削除しますか？",
+        "Fail": "失敗として記録",
+        "Include each task’s subtasks.": "各タスクのサブタスクを含めます。",
+        "Leave it for now": "今はそのままにする",
+        "List waiting subtasks without choosing a decision.": "操作を選ばず待機中のサブタスクを表示します。",
+        "Optional guidance for the next attempt": "次の試行への指示（任意）",
+        "Retry": "再試行",
+        "Session pinned.": "セッションを固定しました。",
+        "Session unpinned.": "セッションの固定を解除しました。",
+        "The person ran {command}.": "利用者が {command} を実行しました。",
+        "Why did it fail?": "失敗の理由は？",
+        "delete all unpinned sessions after confirmation": "確認後、固定されていない全セッションを削除",
+        "pin or unpin this session": "このセッションの固定を切り替える",
+        "pinned": "固定済み",
+        "start a normal session (this temporary chat is erased)": "通常のセッションを開始（この一時チャットは消去されます）",
+        "start a temporary chat": "一時チャットを開始",
+        "{option} is not available in the chat": "チャットでは {option} を使用できません",
+    }
+)
+
+MESSAGES.update({"Invalid quoting in the command.": "コマンドの引用符が正しくありません。"})
+
+MESSAGES.update(
+    {
+        "Delete {count} unpinned session? Pinned sessions stay; messages remain in the database.": (
+            "ピン留めされていないセッションを{count}件削除しますか？ ピン留めされたセッションは残り、メッセージはデータベースに残ります。",
+        ),
+        "Deleted {count} session.": ("セッションを{count}件削除しました。",),
+        "No unpinned sessions to delete.": "削除するピン留めされていないセッションはありません。",
     }
 )
 
