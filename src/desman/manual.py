@@ -197,6 +197,23 @@ TOPICS: Final = (
         "API key is cut from a message before anything keeps it.",
     ),
     Topic(
+        "gui",
+        "browser page, chat and task panels, buttons and keyboard completion",
+        "`desman gui` opens the same chat in a local browser, with setup and confirmation windows. "
+        "The page lists chats on the left (new, temporary, pin, delete, settings and messenger) "
+        "and tasks on the right (subtasks, modules, and answers to waiting work). Panels can "
+        "be read while work runs; their actions are available only at the chat input. "
+        "The transcript scrolls above a growing input at the bottom; suggestions open above it. "
+        "Pinned chats have their own section; dates follow the interface language. "
+        "Opening a chat shows its latest 200 messages. "
+        "Deleting a chat or all unpinned chats requires confirmation. Decisions for waiting "
+        "subtasks use the displayed version: if work changed, refresh and decide again. "
+        "Fail requires an answer. During a task, panels only read; Stop interrupts the task. "
+        "On narrow screens, top buttons open the panels. Command suggestions accept arrow "
+        "keys, Tab, Enter, Escape and clicks. The first sent line hides the greeting. "
+        "Reloading replays the current transcript; changing chats replaces it.",
+    ),
+    Topic(
         "profile",
         "how the interlocutor talks, and the notes it keeps about the person",
         "How the interlocutor talks is the person's setting: length of answers (short, "

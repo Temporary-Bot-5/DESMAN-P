@@ -131,3 +131,83 @@ small {
 h2 {
   font-size: 1.1rem;
 }
+
+/* Panels read snapshots; actions become available only at the chat's line prompt. */
+body { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; }
+main { width: 100%; min-width: 0; }
+aside { padding: .8rem; background: #161e24; height: 100vh; position: sticky; top: 0; overflow-y: auto; font-size: .85rem; }
+#sidebar { display: flex; flex-direction: column; }
+#sessions { flex: 1; min-height: 0; overflow-y: auto; }
+#sidebar-bottom { margin-top: auto; }
+aside button { padding: .35rem .5rem; font-size: .85rem; }
+.session > button:first-child { display: block; width: 100%; text-align: left; overflow-wrap: anywhere; }
+.current { border-left: 3px solid #00eeff; }
+.task { border-bottom: 1px solid #33434b; padding: .6rem 0; overflow-wrap: anywhere; }
+.task-toggle { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.task.waiting .task-toggle { color: #ffb000; }
+.task.active .task-toggle { color: #00eeff; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #00eeff; outline-offset: 2px; }
+#suggestions .selected { border-color: #00eeff; background: #314b58; }
+#suggestions button { display: block; width: 100%; text-align: left; }
+#topbar { display: none; }
+@media (max-width: 1050px) {
+  body { display: block; }
+  #topbar { display: flex; position: sticky; top: 0; background: #101418; z-index: 3; }
+  aside { display: none !important; position: fixed; top: 3.5rem; bottom: 0; height: auto; width: min(90vw, 340px); z-index: 4; box-shadow: 0 0 20px #000; }
+  aside.open { display: flex !important; flex-direction: column; }
+  #sidebar { left: 0; }
+  #tasks-panel { right: 0; }
+}
+
+/* A viewport-sized chat: only the transcript and panels scroll. */
+body { height: 100dvh; overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+main { height: 100%; display: flex; flex-direction: column; padding: 1rem 1.4rem; margin: 0 auto; }
+#messages { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+#messages .greeting { font-size: .72rem; }
+#live { flex: 0 1 auto; max-height: 25vh; overflow-y: auto; font-size: .75rem; }
+#prompt { flex: none; max-height: 55vh; overflow-y: auto; padding: .8rem 0 0; }
+#prompt:empty { display: none; }
+#prompt.line-prompt { display: flex; align-items: flex-end; gap: .5rem; overflow: visible; position: relative; }
+.line-prompt textarea { min-height: 0; line-height: 1.5rem; padding: 12px; resize: none; flex: 1; width: 0; }
+.line-prompt > button { margin: 0; width: 2.8rem; height: 2.8rem; padding: 0; flex: none; background: #00eeff; color: #101418; font-size: 1.4rem; }
+#suggestions { position: absolute; bottom: calc(100% + .4rem); left: 0; right: 0; max-height: 20rem; overflow-y: auto; background: #161e24; border-radius: .5rem; box-shadow: 0 4px 20px #0008; z-index: 2; }
+#suggestions:empty { display: none; }
+#suggestions button { display: flex; gap: .7rem; align-items: center; height: 2.5rem; margin: 0; padding: .4rem .7rem; border-radius: 0; border: 1px solid transparent; }
+.command-name { color: #00eeff; white-space: nowrap; }
+.command-hint { color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+aside { height: 100%; position: static; }
+#sidebar h1 { font-size: 1.1rem; margin: .3rem .4rem 1rem; }
+#session-tools button, #sidebar-bottom button { display: block; width: 100%; margin: .3rem 0; text-align: left; }
+#session-tools > button:first-child { background: #00eeff; color: #101418; border-color: #00eeff; }
+#sessions h2 { color: #aaa; font-size: .72rem; font-weight: 500; margin: 1rem .4rem .4rem; }
+.session { display: flex; align-items: center; gap: .25rem; border-radius: .4rem; padding: .2rem .3rem; min-height: 2.2rem; }
+.session.current { background: #23343d; border: 0; }
+.session > button.session-name { flex: 1; min-width: 0; width: 0; background: transparent; border: 0; margin: 0; padding: .2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session time { font-size: .65rem; color: #aaa; white-space: nowrap; }
+.session .icon-action { display: none; padding: .1rem .25rem; margin: 0; background: transparent; border: 0; }
+.session:hover .icon-action, .session:focus-within .icon-action { display: block; }
+.delete-chats { background: transparent; border: 0; color: #aaa; margin: .6rem 0; font-size: .72rem; }
+.task-toggle { display: flex; align-items: center; gap: .5rem; margin: 0; background: transparent; border: 0; padding: .4rem 0; }
+.task-goal { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.task .task-toggle { color: #eee; }
+.status-dot { color: #00eeff; font-size: .65rem; }
+.task.waiting .status-dot { color: #ffb000; }
+.task.done .status-dot { color: #00ff99; }
+.task.failed .status-dot, .task.cancelled .status-dot { color: #ff5577; }
+.subtask { display: flex; align-items: baseline; gap: .4rem; margin: .7rem 0; font-size: .75rem; }
+.status-chip { background: #23343d; color: #aaa; border-radius: .3rem; padding: .1rem .3rem; font-size: .62rem; flex: none; }
+.task h3 { color: #aaa; font-size: .72rem; margin: .8rem 0 .3rem; }
+.task small { font-size: .65rem; margin: .35rem 0; }
+.task p { font-size: .72rem; }
+.task textarea { min-height: 0; padding: .4rem; font-size: .75rem; }
+.decisions { display: flex; gap: .2rem; }
+.decisions button { flex: 1; min-width: 0; margin: .3rem 0; padding: .3rem .15rem; font-size: .62rem; }
+.danger { color: #ff5577; border-color: #ff5577; }
+@media (hover: none) { .session .icon-action { display: block; } }
+@media (max-width: 1050px) {
+  body { display: flex; flex-direction: column; }
+  main { flex: 1; min-height: 0; padding: .6rem; }
+  #topbar { flex: none; position: static; }
+  aside { position: fixed; height: auto; }
+}

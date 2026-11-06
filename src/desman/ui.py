@@ -12,11 +12,12 @@ import re
 import sys
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar
+from typing import Annotated, Any, Literal, Protocol, TypeVar
 
 import click
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from rich.cells import cell_len
 from rich.console import Console, RenderableType
 from rich.live import Live
@@ -392,9 +393,55 @@ def clean(text: str) -> str:
     )
 
 
+class Action(BaseModel):
+    """A panel action answered by the person, consumed only by the chat thread."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True, hide_input_in_errors=True)
+
+
+class SessionAction(Action):
+    type: Literal["open_session", "pin", "unpin", "delete_session"]
+    id: str = Field(min_length=1, max_length=128)
+
+
+class NewSessionAction(Action):
+    type: Literal["new_session"]
+    temporary: bool
+
+
+class SimpleAction(Action):
+    type: Literal["delete_all", "settings", "messenger"]
+
+
+class DecideAction(Action):
+    type: Literal["decide"]
+    ref: str = Field(min_length=1, max_length=128)
+    version: int = Field(ge=0)
+    decision: Literal["retry", "accept", "fail"]
+    note: str = Field(max_length=20000)
+
+    @model_validator(mode="after")
+    def required_note(self) -> DecideAction:
+        if self.decision == "fail" and not self.note.strip():
+            raise ValueError("fail needs a note")
+        return self
+
+
+ACTIONS = TypeAdapter(
+    Annotated[
+        SessionAction | NewSessionAction | SimpleAction | DecideAction, Field(discriminator="type")
+    ]
+)
+
+
 class Front(Protocol):
     """Define shared UI operations so chat and commands can use either front."""
 
+    def banner(self, value: str) -> str: ...
+    def reset(self) -> None: ...
+    def greeting(self) -> AbstractContextManager[None]: ...
+    def session(self, id: str | None, temporary: bool) -> None: ...
+    def transcript_limit(self) -> int: ...
     def interactive(self) -> bool: ...
     def out(self, *items: RenderableType | str) -> None: ...
     def header(self, title: str, subtitle: str = "") -> None: ...
@@ -409,7 +456,7 @@ class Front(Protocol):
     def checkbox(self, question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]: ...
     def confirm(self, question: str, default: bool = False) -> bool: ...
     def text(self, question: str, default: str = "") -> str: ...
-    def line(self, commands: Mapping[str, str] | None = None) -> str | None: ...
+    def line(self, commands: Mapping[str, str] | None = None) -> str | Action | None: ...
     def secret(self, question: str) -> str: ...
     def live_start(self, terminal: bool | None = None) -> bool: ...
     def live_update(self, renderable: RenderableType) -> None: ...
@@ -421,6 +468,22 @@ class TerminalFront:
 
     def __init__(self) -> None:
         self._live: Live | None = None
+
+    def banner(self, value: str) -> str:
+        return value
+
+    def reset(self) -> None:
+        pass
+
+    @contextmanager
+    def greeting(self) -> Iterator[None]:
+        yield
+
+    def session(self, id: str | None, temporary: bool) -> None:
+        pass
+
+    def transcript_limit(self) -> int:
+        return 6
 
     def interactive(self) -> bool:
         return _terminal_interactive()
@@ -555,9 +618,31 @@ def text(question: str, default: str = "") -> str:
     return _front.text(question, default)
 
 
-def line(commands: Mapping[str, str] | None = None) -> str | None:
+def line(commands: Mapping[str, str] | None = None) -> str | Action | None:
     return _front.line(commands)
 
 
 def secret(question: str) -> str:
     return _front.secret(question)
+
+
+def banner(value: str) -> str:
+    return _front.banner(value)
+
+
+def reset() -> None:
+    _front.reset()
+
+
+@contextmanager
+def greeting() -> Iterator[None]:
+    with _front.greeting():
+        yield
+
+
+def session(id: str | None, temporary: bool) -> None:
+    _front.session(id, temporary)
+
+
+def transcript_limit() -> int:
+    return _front.transcript_limit()

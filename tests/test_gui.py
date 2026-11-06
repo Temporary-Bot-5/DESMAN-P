@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import threading
 from collections.abc import Callable
@@ -22,7 +23,7 @@ from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.sessions import Sessions
 from desman.core.store import Store
 from desman.gui.front import WebFront
-from desman.gui.server import MAX_BODY, SECURITY, Server, http_server, strings
+from desman.gui.server import MAX_BODY, SECURITY, QuietHTTPServer, Server, http_server, strings
 from desman.interlocutor import CHAT
 from desman.live import Progress
 from desman.llm.fake import FakeLLM
@@ -552,3 +553,86 @@ def test_a_startup_error_is_shown_on_the_page(monkeypatch: pytest.MonkeyPatch) -
     events = list(app.front.events)
     assert [e["type"] for e in events][-2:] == ["out", "end"]
     assert "config.json does not load" in events[-2]["html"]
+
+
+def test_web_banner_uses_spaces_without_changing_terminal_banner() -> None:
+    from desman.info import BANNER, print_project_info
+
+    manager = open_config()
+    manager.save(make_config())
+    front = WebFront()
+    with ui.use(front), ui.greeting():
+        print_project_info(manager)
+    banner = front.events[0]
+    assert banner["greeting"] is True
+    assert "░" not in banner["html"] and "█" in banner["html"]
+    assert ui.TerminalFront().banner(BANNER) == BANNER and "░" in BANNER
+
+
+def test_panel_labels_cover_every_status_and_role() -> None:
+    from desman.core.calls import Role
+    from desman.core.states import SubtaskStatus, TaskStatus
+
+    i18n.set_language("ru")
+    try:
+        labels = strings()
+        assert labels["lang"] == "ru"
+        assert labels["pinned"] == "Закреплённые"
+        assert labels["modules"] == "Модули"
+        for status in {*SubtaskStatus, *TaskStatus}:
+            assert labels[f"status_{status.value}"] != status.value
+        for role in Role:
+            assert labels[f"role_{role.value}"] != role.value
+    finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize("fail_on", [1, 2])
+@pytest.mark.parametrize("error", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError])
+def test_disconnected_browser_is_silent(
+    app: Server,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error: type[OSError],
+    fail_on: int,
+) -> None:
+    def initialize(server: Any, address: Any, handler: Any) -> None:
+        server.server_port = app.port
+        server.RequestHandlerClass = handler
+
+    class Disconnected:
+        writes = 0
+
+        def makefile(self, mode: str, buffering: int) -> io.BytesIO:
+            return io.BytesIO(b"GET / HTTP/1.0\r\nHost: localhost:12345\r\n\r\n")
+
+        def sendall(self, data: bytes) -> None:
+            self.writes += 1
+            if self.writes == fail_on:
+                raise error("browser went away")
+
+    monkeypatch.setattr(QuietHTTPServer, "__init__", initialize)
+    server = http_server(app)
+    connection = Disconnected()
+    with app.front.capture():
+        server.RequestHandlerClass(connection, ("127.0.0.1", 1234), server)
+    assert connection.writes == fail_on
+    assert not app.front.events
+    output = capsys.readouterr()
+    assert output.out == output.err == ""
+
+
+def test_server_errors_never_reach_captured_output(
+    app: Server,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    server = QuietHTTPServer.__new__(QuietHTTPServer)
+    request: Any = object()
+    with app.front.capture():
+        try:
+            raise RuntimeError("private request details")
+        except RuntimeError:
+            server.handle_error(request, ("127.0.0.1", 1234))
+    assert not app.front.events
+    output = capsys.readouterr()
+    assert output.out == output.err == ""

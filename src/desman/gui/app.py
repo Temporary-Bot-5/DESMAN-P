@@ -42,7 +42,8 @@ def run(
                 manager = load_config()
                 if not manager.is_configured():
                     run_wizard(manager)
-                print_project_info(manager)
+                with ui.greeting():
+                    print_project_info(manager)
                 try:
                     conn = db.open_db()
                 except (db.SchemaVersionError, db.SchemaMismatchError) as exc:

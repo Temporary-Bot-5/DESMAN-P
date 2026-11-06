@@ -5,15 +5,24 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
+import sqlite3
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from pathlib import Path
+from socket import socket
 from urllib.parse import parse_qs, urlsplit
 
+from pydantic import ValidationError
+
+from desman import ui
+from desman.core import db
 from desman.gui.front import WebFront
-from desman.i18n import t
+from desman.gui.panels import snapshot
+from desman.i18n import language, t
 
 MAX_BODY = 64 * 1024
 SECURITY = {
@@ -26,7 +35,44 @@ SECURITY = {
 
 def strings() -> dict[str, str]:
     return {
+        "lang": language(),
+        "pinned": t("Pinned"),
+        "modules": t("Modules"),
+        "calls": t("Calls"),
+        "tokens": t("Tokens"),
+        "status_pending": t("Pending"),
+        "status_ready": t("Ready"),
+        "status_running": t("Running"),
+        "status_review": t("Review"),
+        "status_done": t("Done"),
+        "status_paused": t("Paused"),
+        "status_needs_human": t("Needs human"),
+        "status_failed": t("Failed"),
+        "status_blocked": t("Blocked"),
+        "status_cancelled": t("Cancelled"),
+        "status_active": t("Active"),
+        "role_planner": t("Planner"),
+        "role_executor": t("Executor"),
+        "role_reviewer": t("Reviewer"),
+        "role_decomposer": t("Decomposer"),
+        "role_interlocutor": t("Interlocutor"),
         "send": t("Send"),
+        "new_chat": t("New chat"),
+        "temporary_chat": t("Temporary chat"),
+        "delete_chats": t("Delete all chats"),
+        "settings": t("Settings"),
+        "messenger": t("Messenger"),
+        "sessions": t("Chats"),
+        "tasks": t("Tasks"),
+        "pin": t("Pin"),
+        "unpin": t("Unpin"),
+        "delete": t("Delete"),
+        "answer": t("Your answer"),
+        "retry": t("Retry with this answer"),
+        "accept": t("Accept as is"),
+        "fail": t("Fail"),
+        "wait": t("Available when the chat is ready for your next message."),
+        "unavailable": t("This session is no longer available."),
         "cancel": t("Cancel"),
         "yes": t("yes"),
         "no": t("no"),
@@ -52,7 +98,10 @@ class Response:
 class Server:
     """Authenticate local browser requests before exposing the synchronous UI front."""
 
-    def __init__(self, front: WebFront, port: int, *, poll_timeout: float = 25) -> None:
+    def __init__(
+        self, front: WebFront, port: int, *, poll_timeout: float = 25, database: Path | None = None
+    ) -> None:
+        self.database = database or db.default_db_path()
         self.front = front
         self.port = port
         self.token = secrets.token_urlsafe(32)
@@ -112,6 +161,12 @@ class Server:
                 return Response(400)
             if not isinstance(data, dict):
                 return Response(400)
+            if url.path == "/action":
+                try:
+                    action = ui.ACTIONS.validate_python(data)
+                except ValidationError:
+                    return Response(400)
+                return Response(200 if self.front.action(action) else 409)
             if url.path == "/answer":
                 return Response(200 if self.front.answer(data) else 400)
             if url.path == "/stop":
@@ -130,6 +185,11 @@ class Server:
                     files("desman.gui").joinpath("static", name).read_bytes(),
                     {"Content-Type": content_type},
                 )
+            if url.path in {"/sessions", "/tasks"}:
+                try:
+                    return self._json(snapshot(self.database, url.path[1:], self.front))
+                except sqlite3.Error:
+                    return Response(503)
             if url.path == "/strings.json":
                 return self._json(strings())
             if url.path == "/events":
@@ -150,6 +210,14 @@ class Server:
             json.dumps(data, ensure_ascii=False).encode("utf-8"),
             {"Content-Type": "application/json; charset=utf-8"},
         )
+
+
+class QuietHTTPServer(ThreadingHTTPServer):
+    """Keep transport failures out of the chat's captured stdout and stderr."""
+
+    def handle_error(self, request: socket | tuple[bytes, socket], client_address: object) -> None:
+        # ADR 0005: no server logs, including tracebacks and request details.
+        pass
 
 
 def http_server(app: Server) -> ThreadingHTTPServer:
@@ -174,6 +242,11 @@ def http_server(app: Server) -> ThreadingHTTPServer:
             for key, value in SECURITY.items():
                 self.send_header(key, value)
             super().end_headers()
+
+        def handle(self) -> None:
+            # Reloading or closing a tab can abandon a pending long poll.
+            with suppress(BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                super().handle()
 
         def respond(self) -> None:
             try:
@@ -200,6 +273,6 @@ def http_server(app: Server) -> ThreadingHTTPServer:
             if self.command != "HEAD":
                 self.wfile.write(response.body)
 
-    server = ThreadingHTTPServer(("127.0.0.1", app.port), Handler)
+    server = QuietHTTPServer(("127.0.0.1", app.port), Handler)
     app.port = server.server_port
     return server

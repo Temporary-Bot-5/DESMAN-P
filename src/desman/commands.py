@@ -212,11 +212,13 @@ class ListArgs(Args):
 
 
 class DecisionArgs(Args):
+    if_version: int | None = Field(None, ge=0)
     subtask: Ref = Field(description='"<task>/<number>" as status and inbox show it')
     note: Note | None = Field(None, description="guidance for the next attempt, or why")
 
 
 class FailArgs(Args):
+    if_version: int | None = Field(None, ge=0)
     subtask: Ref
     note: Note = Field(description="why it failed (required)")
 
@@ -1206,7 +1208,7 @@ def _decision(name: str) -> Callable[[Context, DecisionArgs | FailArgs], Proposa
     target, action, default = _DECISIONS[name]
 
     def handler(ctx: Context, args: DecisionArgs | FailArgs) -> Proposal:
-        pending = actions.prepare_decision(ctx.store, args.subtask, target)
+        pending = actions.prepare_decision(ctx.store, args.subtask, target, args.if_version)
         note = (args.note or "").strip() or default
         sub = pending.sub
 
