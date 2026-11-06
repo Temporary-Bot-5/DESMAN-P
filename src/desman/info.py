@@ -34,7 +34,7 @@ def _commands() -> list[tuple[str, str]]:
 def print_project_info(config_manager: ConfigManager) -> None:
     config = config_manager.load()
 
-    ui.out(Text(BANNER, style="accent"))
+    ui.out(Text(ui.banner(BANNER), style="accent"))
     ui.out(Text(t("Decentralized Self-Evolving Modular Agents Network"), style="bold"))
     ui.out(Text(f"v{__version__} · {__author__}; AI", style="muted"))
     ui.out("")

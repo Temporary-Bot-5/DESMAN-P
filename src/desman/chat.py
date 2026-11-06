@@ -132,7 +132,7 @@ class Chat:
     def __init__(
         self,
         sessions: Sessions,
-        read: Callable[[], str | None] | None = None,
+        read: Callable[[], str | ui.Action | None] | None = None,
         *,
         resume: bool = False,
         temporary: bool = False,
@@ -167,13 +167,20 @@ class Chat:
 
     def run(self) -> None:
         self.sessions.sweep()  # what a temporary chat that crashed left behind
-        self._greet()
+        with ui.greeting():
+            self._greet(show_messages=False)
+        if self.session_id is not None:
+            self._show_last()
         try:
             while True:
                 self._tell_waiting()  # at the start, then after whatever was done
                 self._tell_blocked()
+                ui.session(self.session_id, self.temporary)
                 if (line := self.read()) is None:
                     break
+                if isinstance(line, ui.Action):
+                    self._action(line)
+                    continue
                 command = line.strip()
                 if not command:
                     continue
@@ -903,7 +910,7 @@ class Chat:
             task_id,
         )
 
-    def _greet(self) -> None:
+    def _greet(self, *, show_messages: bool = True) -> None:
         if self.temporary:
             ui.note(
                 t(
@@ -928,7 +935,8 @@ class Chat:
                 when=_when(latest.last_at),
             )
         )
-        self._show_last()
+        if show_messages:
+            self._show_last()
 
     def _tell_waiting(self) -> None:
         """Subtasks that came to wait for the person since the last look, from any task: a
@@ -954,7 +962,9 @@ class Chat:
 
     def _show_last(self) -> None:
         assert self.session_id is not None
-        for message in self.sessions.messages(self.session_id, last=SHOWN_ON_RETURN):
+        for message in self.sessions.messages(
+            self.session_id, last=max(SHOWN_ON_RETURN, ui.transcript_limit())
+        ):
             if message.kind is Kind.EVENT:  # a command's data or a result shown once is enough
                 first = message.text.split("\n", 1)[0]
                 message = message.model_copy(update={"text": first})
@@ -1007,6 +1017,52 @@ class Chat:
             ui.error(t("unknown command {name}: /help lists the chat's commands", name=name))
         return True
 
+    def _action(self, action: ui.Action) -> None:
+        """Dispatch validated browser choices through the chat's existing command bodies."""
+        if isinstance(action, ui.SessionAction):
+            selected = self.sessions.get(action.id)
+            if selected is None:
+                ui.error(t("This session is no longer available."))
+                return
+            if action.type == "open_session":
+                self._open_session(selected)
+            elif action.type == "delete_session":
+                self._delete(selected.id)
+            else:
+                self._pin(selected.id, action.type == "pin")
+        elif isinstance(action, ui.NewSessionAction):
+            self._new(action.temporary)
+        elif isinstance(action, ui.SimpleAction):
+            if action.type == "delete_all":
+                self._delete_all()
+            elif action.type == "messenger":
+                self._slash("/messages")
+            else:
+                self._typed("config")
+        elif isinstance(action, ui.DecideAction):
+            config = self._config()
+            if config is None:
+                return
+            entry = commands.find(action.decision)
+            assert entry is not None
+            self._command(
+                Command(
+                    type="command",
+                    name=action.decision,
+                    args={
+                        "subtask": action.ref,
+                        "if_version": action.version,
+                        "note": action.note or None,
+                    },
+                ),
+                config,
+                None,
+                None,
+                typed=True,
+                typed_entry=entry,
+            )
+        ui.session(self.session_id, self.temporary)
+
     def _help(self) -> None:
         commands = ui.table("", "")
         commands.show_header = False
@@ -1018,28 +1074,32 @@ class Chat:
 
     def _new(self, temporary: bool = False) -> None:
         if self.session_id is None and self.temporary == temporary:
+            ui.reset()
             ui.note(t("This session is new already."))
             return
         self._erase()
         self.temporary = temporary
         self.models, self._models_for = None, None
         self.session_id = None
+        ui.reset()
+        ui.session(None, temporary)
         if temporary:
             self._greet()
         else:
             ui.ok(t("New session: it starts with your next message."))
 
-    def _pin(self) -> None:
-        current = self._current()
+    def _pin(self, id: str | None = None, pinned: bool | None = None) -> None:
+        current = self.sessions.get(id) if id is not None else self._current()
         if current is None:
             return
-        self.sessions.pin(current.id, not current.pinned)
+        pinned = not current.pinned if pinned is None else pinned
+        self.sessions.pin(current.id, pinned)
         operator.record(
             self.store.conn,
-            "operator_session_unpinned" if current.pinned else "operator_session_pinned",
+            "operator_session_pinned" if pinned else "operator_session_unpinned",
             session_id=current.id,
         )
-        ui.ok(t("Session unpinned.") if current.pinned else t("Session pinned."))
+        ui.ok(t("Session pinned.") if pinned else t("Session unpinned."))
 
     def _delete_all(self) -> None:
         count = sum(not session.pinned for session in self.sessions.recent(limit=-1))
@@ -1068,6 +1128,7 @@ class Chat:
             and self.sessions.get(self.session_id) is None
         ):
             self.session_id = None
+            ui.reset()
         ui.ok(tn(deleted, "Deleted {count} session.", "Deleted {count} sessions.", count=deleted))
 
     def _current(self) -> SessionInfo | None:
@@ -1103,8 +1164,8 @@ class Chat:
         )
         ui.ok(t("The session is called {name} now.", name=_shorten(renamed.name) or "…"))
 
-    def _delete(self) -> None:
-        current = self._current()
+    def _delete(self, id: str | None = None) -> None:
+        current = self.sessions.get(id) if id is not None else self._current()
         if current is None:
             return
         ui.section(t("Confirm"))
@@ -1133,8 +1194,13 @@ class Chat:
             return
         self.sessions.delete(current.id)
         operator.record(self.store.conn, "operator_session_deleted", session_id=current.id)
-        self.session_id = None
-        ui.ok(t("Session deleted. A new one starts with your next message."))
+        if current.id == self.session_id:
+            self.session_id = None
+            ui.reset()
+        if self.session_id is None:
+            ui.ok(t("Session deleted. A new one starts with your next message."))
+        else:
+            ui.ok(tn(1, "Deleted {count} session.", "Deleted {count} sessions.", count=1))
 
     def _profile(self) -> None:
         """`/profile`: the two things that shape how the interlocutor talks (how the person set
@@ -1281,12 +1347,23 @@ class Chat:
             offset += LISTED_SESSIONS
         if chosen == self.session_id:
             return
-        self.session_id = chosen
         if chosen is None:
-            ui.ok(t("New session: it starts with your next message."))
-            return
-        last_at = next(s.last_at for s in page if s.id == chosen)
-        ui.ok(t("Switched to the session of {when}.", when=_when(last_at)))
+            self._new()
+        else:
+            selected = self.sessions.get(chosen)
+            if selected is None:
+                ui.error(t("This session is no longer available."))
+                return
+            self._open_session(selected)
+
+    def _open_session(self, selected: SessionInfo) -> None:
+        self._erase()
+        self.temporary = False
+        self.session_id = selected.id
+        self.models, self._models_for = None, None
+        ui.reset()
+        ui.session(selected.id, False)
+        ui.ok(t("Switched to the session of {when}.", when=_when(selected.last_at)))
         self._show_last()
 
 

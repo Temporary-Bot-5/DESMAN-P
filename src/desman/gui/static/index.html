@@ -9,8 +9,9 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
+    <nav id="topbar"></nav>
+    <aside id="sidebar"><h1>DESMAN<span>(P)</span></h1><div id="session-tools"></div><div id="sessions"></div><div id="sidebar-bottom"></div></aside>
     <main>
-      <h1>DESMAN<span>(P)</span></h1>
       <div id="status" role="status"></div>
       <!-- Transcript events and transient progress have separate lifetimes. -->
       <div id="messages" aria-live="polite"></div>
@@ -18,5 +19,6 @@
       <button id="stop" hidden></button>
       <form id="prompt"></form>
     </main>
+    <aside id="tasks-panel"><h2 id="tasks-title"></h2><div id="tasks"></div></aside>
   </body>
 </html>

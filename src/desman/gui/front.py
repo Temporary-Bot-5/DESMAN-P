@@ -45,14 +45,61 @@ class WebFront(ui.Front):
         """What typed text is shown as: the event log is replayed to every reload, so a key
         pasted into a line never stays in it (the chat itself cuts it before keeping it)."""
         self.ended = False
+        self.current: str | None = None
+        self.temporary = False
+        self._greeting = False
 
     def emit(self, event_type: str, **data: Any) -> None:
         """Append retained display output and wake readers waiting for changes."""
+        if event_type == "out" and isinstance(data.get("html"), str):
+            data["html"] = self.redact(data["html"])
         with self.condition:
             self.seq += 1
             self.state += 1
-            self.events.append({"seq": self.seq, "type": event_type, **data})
+            self.events.append(
+                {
+                    "seq": self.seq,
+                    "type": event_type,
+                    **({"greeting": True} if self._greeting and event_type == "out" else {}),
+                    **data,
+                }
+            )
             self.condition.notify_all()
+
+    def reset(self) -> None:
+        with self.condition:
+            self.events.clear()
+            self.emit("reset")
+
+    @contextmanager
+    def greeting(self) -> Iterator[None]:
+        previous, self._greeting = self._greeting, True
+        try:
+            yield
+        finally:
+            self._greeting = previous
+
+    def session(self, id: str | None, temporary: bool) -> None:
+        with self.condition:
+            self.current, self.temporary = id, temporary
+
+    def banner(self, value: str) -> str:
+        return value.replace("░", " ")
+
+    def transcript_limit(self) -> int:
+        return 200
+
+    def action(self, action: ui.Action) -> bool:
+        """Use the open line once; never run application code in a server thread."""
+        with self.condition:
+            if self.prompt is None or self.prompt["kind"] != "line" or self._answer is not None:
+                return False
+            prompt = self.prompt
+            self._answer = {"value": action}
+            self.prompt = None
+            self.emit("prompt_closed", id=prompt["id"], kind="line", echo=None)
+            self.condition.notify_all()
+            return True
 
     def poll(self, after: int, timeout: float = 25, state: int | None = None) -> dict[str, Any]:
         """Return retained events and current state so reloads preserve prompts and progress."""
@@ -246,10 +293,10 @@ class WebFront(ui.Front):
         """Read a secret without retaining its value in browser events."""
         return str(self._ask("secret", question)).strip()
 
-    def line(self, commands: Mapping[str, str] | None = None) -> str | None:
+    def line(self, commands: Mapping[str, str] | None = None) -> str | ui.Action | None:
         """Wait for a chat line with the same command hints as the terminal."""
         value = self._ask("line", commands=dict(commands or {}))
-        return None if value is None else str(value)
+        return value if isinstance(value, ui.Action) else (None if value is None else str(value))
 
     def live_start(self, terminal: bool | None = None) -> bool:
         """Mark work busy so the page exposes its Stop control."""
@@ -260,7 +307,7 @@ class WebFront(ui.Front):
 
     def live_update(self, renderable: RenderableType) -> None:
         """Replace transient progress without evicting transcript events."""
-        html = self.render(renderable)
+        html = self.redact(self.render(renderable))
         with self.condition:
             self.live = html
             self.state += 1
