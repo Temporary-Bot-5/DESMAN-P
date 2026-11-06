@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "当前不可用",
     "Models and keys for roles": "角色的模型和密钥",
     "key: {role}": "密钥：{role}",

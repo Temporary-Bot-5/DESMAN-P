@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "şu anda kullanılamıyor",
     "Models and keys for roles": "Roller için modeller ve anahtarlar",
     "key: {role}": "anahtar: {role}",

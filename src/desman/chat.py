@@ -251,7 +251,7 @@ class Chat:
         self.models, self._models_for = None, None
         ui.reset()
         ui.session(self.session_id, False)
-        ui.note("→ General_Terminal")
+        ui.note(t("→ General_Terminal"))
         self._show_last()
         self._seen_terminal()
 
@@ -917,6 +917,15 @@ class Chat:
             return
         if interlocutor is None:
             actions.print_report(task_report(self.store, task_id))
+            result = self.store.final_result(task_id)
+            if result is not None:
+                text = (
+                    t("The result as it is:")
+                    + "\n"
+                    + json.dumps(result, ensure_ascii=False, indent=2)
+                )
+                ui.out(Text(providers.redact_keys(text, config)[0]))
+            self._files(task_id, ref, workspace_root_for(self.store.conn))
         else:
             self._outcome(task_id, ref, interlocutor)
 
