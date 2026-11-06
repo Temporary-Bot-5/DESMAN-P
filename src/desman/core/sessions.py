@@ -25,7 +25,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
-from desman.core import db
+from desman.core import choices, db
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.store import Clock
 
@@ -268,6 +268,11 @@ class Sessions:
         """Erase the messages of a temporary session (the database refuses any other)."""
         with db.transaction(self.conn):
             self.conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            row = self.conn.execute(
+                "SELECT temporary FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is not None and row["temporary"]:
+                choices.write_clear(self.conn, "session", session_id)
 
     def sweep(self) -> int:
         """Erase what temporary sessions left behind when their chat could not (it crashed, its

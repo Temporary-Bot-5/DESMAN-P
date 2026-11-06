@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "仅在此处选择模型或密钥。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "请只选择 --task 或 --session 其中之一。",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "清除此处的选择。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "请提供 --model 或 --key。",
+    "Invalid module choice.": "模块选择无效。",
+    "Key": "密钥",
+    "Model": "模型",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "单个任务或聊天的模型和密钥。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "模块选择已清除。",
+    "Role": "角色",
+    "Show the modules of active tasks, or one task.": "显示活跃任务或单个任务的模块。",
+    "Source": "来源",
+    "State": "状态",
+    "Task": "任务",
+    "Unknown or ambiguous session ID.": "会话 ID 未知或不明确。",
     "not available now": "当前不可用",
     "Models and keys for roles": "角色的模型和密钥",
     "key: {role}": "密钥：{role}",

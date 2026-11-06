@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Yalnızca burada model veya anahtar seçin. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task ve --session seçeneklerinden tam birini seçin.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Yalnızca buradaki seçimleri temizleyin. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model veya --key belirtin.",
+    "Invalid module choice.": "Geçersiz modül seçimi.",
+    "Key": "Anahtar",
+    "Model": "Model",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Bir görev veya sohbet için modeller ve anahtarlar. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Modül seçimleri temizlendi.",
+    "Role": "Rol",
+    "Show the modules of active tasks, or one task.": "Etkin görevlerin veya bir görevin modüllerini göster.",
+    "Source": "Kaynak",
+    "State": "Durum",
+    "Task": "Görev",
+    "Unknown or ambiguous session ID.": "Bilinmeyen veya belirsiz oturum kimliği.",
     "not available now": "şu anda kullanılamıyor",
     "Models and keys for roles": "Roller için modeller ve anahtarlar",
     "key: {role}": "anahtar: {role}",

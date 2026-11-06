@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Choisir un modèle ou une clé uniquement ici. Rôles : planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "Choisissez exactement un de --task et --session.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Réinitialiser les choix uniquement ici. Rôles : planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "Indiquez --model ou --key.",
+    "Invalid module choice.": "Choix de module invalide.",
+    "Key": "Clé",
+    "Model": "Modèle",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Modèles et clés pour une tâche ou un chat. Rôles : planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Choix des modules réinitialisés.",
+    "Role": "Rôle",
+    "Show the modules of active tasks, or one task.": "Afficher les modules des tâches actives ou d’une tâche.",
+    "Source": "Origine",
+    "State": "État",
+    "Task": "Tâche",
+    "Unknown or ambiguous session ID.": "ID de session inconnu ou ambigu.",
     "not available now": "indisponible pour le moment",
     "Models and keys for roles": "Modèles et clés par rôle",
     "key: {role}": "clé : {role}",

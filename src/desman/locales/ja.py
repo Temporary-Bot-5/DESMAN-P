@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "ここだけのモデルまたはキーを選択。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task または --session のどちらか一方を指定してください。",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "ここだけの選択を解除。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model または --key を指定してください。",
+    "Invalid module choice.": "モジュールの選択が無効です。",
+    "Key": "キー",
+    "Model": "モデル",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "1つのタスクまたはチャットのモデルとキー。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "モジュールの選択を解除しました。",
+    "Role": "役割",
+    "Show the modules of active tasks, or one task.": "実行中のタスクまたは1つのタスクのモジュールを表示。",
+    "Source": "選択元",
+    "State": "状態",
+    "Task": "タスク",
+    "Unknown or ambiguous session ID.": "セッション ID が不明または曖昧です。",
     "not available now": "現在利用できません",
     "Models and keys for roles": "役割ごとのモデルとキー",
     "key: {role}": "キー：{role}",

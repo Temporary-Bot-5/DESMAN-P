@@ -661,6 +661,20 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         CHECK (terminal IN (0, 1) AND (terminal = 0 OR temporary = 0));
     CREATE UNIQUE INDEX sessions_terminal ON sessions (terminal) WHERE terminal = 1;
     """,
+    # 36: the person's model/key preferences for one task or chat.
+    """
+    CREATE TABLE module_choices (
+        scope TEXT NOT NULL CHECK (scope IN ('task', 'session')),
+        scope_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN
+            ('planner', 'reviewer', 'decomposer', 'text', 'code', 'analysis', 'interlocutor')),
+        model TEXT,
+        key TEXT,
+        set_at TEXT NOT NULL,
+        PRIMARY KEY (scope, scope_id, role),
+        CHECK (model IS NOT NULL OR key IS NOT NULL)
+    ) STRICT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

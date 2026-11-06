@@ -50,6 +50,7 @@ from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.messenger_cli import register_commands
 from desman.models_cli import models
+from desman.modules_cli import modules
 from desman.net import node
 from desman.planner import Planned, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
@@ -198,6 +199,7 @@ cli.add_command(permissions)
 cli.add_command(personalize)
 cli.add_command(behaviour)
 cli.add_command(tuning)
+cli.add_command(modules)
 cli.add_command(models)
 cli.add_command(protected_group, name="protected")
 cli.add_command(proposals_group, name="proposals")

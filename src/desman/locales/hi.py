@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "केवल यहाँ मॉडल या कुंजी चुनें। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task और --session में से ठीक एक चुनें।",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "केवल यहाँ के चुनाव मिटाएँ। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model या --key दें।",
+    "Invalid module choice.": "अमान्य मॉड्यूल चयन।",
+    "Key": "कुंजी",
+    "Model": "मॉडल",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "एक कार्य या चैट के मॉडल और कुंजियाँ। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "मॉड्यूल चयन मिटा दिए गए।",
+    "Role": "भूमिका",
+    "Show the modules of active tasks, or one task.": "सक्रिय कार्यों या एक कार्य के मॉड्यूल दिखाएँ।",
+    "Source": "स्रोत",
+    "State": "स्थिति",
+    "Task": "कार्य",
+    "Unknown or ambiguous session ID.": "अज्ञात या अस्पष्ट सत्र ID।",
     "not available now": "अभी उपलब्ध नहीं",
     "Models and keys for roles": "भूमिकाओं के लिए मॉडल और कुंजियाँ",
     "key: {role}": "कुंजी: {role}",

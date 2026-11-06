@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "여기에서만 모델 또는 키를 선택합니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task 또는 --session 중 하나만 선택하세요.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "여기에서만 선택을 초기화합니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model 또는 --key를 지정하세요.",
+    "Invalid module choice.": "잘못된 모듈 선택입니다.",
+    "Key": "키",
+    "Model": "모델",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "한 작업 또는 채팅의 모델과 키입니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "모듈 선택을 초기화했습니다.",
+    "Role": "역할",
+    "Show the modules of active tasks, or one task.": "활성 작업 또는 한 작업의 모듈을 표시합니다.",
+    "Source": "출처",
+    "State": "상태",
+    "Task": "작업",
+    "Unknown or ambiguous session ID.": "알 수 없거나 모호한 세션 ID입니다.",
     "not available now": "현재 사용할 수 없음",
     "Models and keys for roles": "역할별 모델 및 키",
     "key: {role}": "키: {role}",

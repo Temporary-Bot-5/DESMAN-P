@@ -21,6 +21,7 @@ from desman import net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config, Tuning
 from desman.core import calls, protected
+from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS
 from desman.core.coordinator import Coordinator, Crew, Labels
 from desman.core.effects import evidence
@@ -35,7 +36,7 @@ from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
 from desman.llm import hub, router
-from desman.llm.base import LLM
+from desman.llm.base import LLM, Completion, Request
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
@@ -94,7 +95,8 @@ class Models:
     def labels(self, subtask: Subtask) -> Labels:
         """How the coordinator tells apart the models the executor asks for `subtask`."""
         main, other = self.executor(subtask.kind)
-        return label(main), None if other is None else label(other)
+        with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=subtask.task_id)):
+            return label(main), None if other is None else label(other)
 
     def first(self, role: calls.Role) -> router.Choice | None:
         """The model `role` asks first (None for a fake)."""
@@ -161,39 +163,101 @@ def models(
         choices: list[router.Choice],
         role: calls.Role = calls.Role.EXECUTOR,
         kind: Kind | None = None,
+        current: Config = config,
     ) -> router.Fallback:
-        first = router.preferred_key(config, role, kind)
+        first = router.preferred_key(current, role, kind)
         return router.Fallback([(member(c, first), c) for c in choices])
 
-    def lineup(role: calls.Role, kind: Kind | None = None) -> list[router.Choice]:
-        choices = router.lineup(config, role, provider, model, kind=kind)
+    def lineup(
+        role: calls.Role, kind: Kind | None = None, current: Config = config
+    ) -> list[router.Choice]:
+        choices = router.lineup(current, role, provider, model, kind=kind)
         if only is not None:
             choices = [c for c in choices if c.provider.id in only]
             if not choices:
                 raise router.NoProvider("none of the providers lent has a model for this")
         return choices
 
-    lineups = {role: lineup(role) for role in calls.Role}
-    roles = {role: chain(choices, role) for role, choices in lineups.items()}
+    def scoped(role: calls.Role, kind: Kind | None = None, *, other: bool = False) -> LLM | None:
+        own = lineup(role, kind)
+        selected = router.other_lineup(own) if other else own
+        if other and (model is not None or not selected):
+            return None
+        default = chain(selected, role, kind)
+        # Network chains never read the person's scoped choices.
+        if only is not None:
+            return default
+        field = router.tuning_field(role, kind)
+        chains: dict[module_choices.Choice, router.Fallback] = {}
+
+        def current() -> router.Fallback:
+            purpose = calls.purpose()
+            scope: module_choices.Scope = "session" if role == calls.Role.INTERLOCUTOR else "task"
+            identity = purpose.session_id if scope == "session" else purpose.task_id
+            if identity is None or field is None:
+                return default
+            choice = module_choices.get(conn, scope, identity, field)
+            if choice == module_choices.Choice():
+                return default
+            if choice not in chains:
+                cfg = module_choices.effective(config, field, choice)
+                own = lineup(role, kind, cfg)
+                selected = router.other_lineup(own) if other else own
+                chains[choice] = chain(selected, role, kind, cfg)
+            return chains[choice]
+
+        return Scoped(current)
+
+    main_roles: dict[calls.Role, LLM] = {}
+    for role in calls.Role:
+        main = scoped(role)
+        assert main is not None
+        main_roles[role] = main
     kinds: dict[Kind, tuple[LLM, LLM | None]] = {}
     for kind in Kind:
-        own = lineup(calls.Role.EXECUTOR, kind)
-        others = [] if model is not None else router.other_lineup(own)
-        kinds[kind] = (
-            chain(own, calls.Role.EXECUTOR, kind),
-            chain(others, calls.Role.EXECUTOR, kind) if others else None,
-        )
-    executor = lineups[calls.Role.EXECUTOR]
+        main = scoped(calls.Role.EXECUTOR, kind)
+        assert main is not None
+        kinds[kind] = (main, scoped(calls.Role.EXECUTOR, kind, other=True))
+    executor = lineup(calls.Role.EXECUTOR)
     others = [] if model is not None else router.other_lineup(executor)
     return Models(
-        roles[calls.Role.EXECUTOR],
-        chain(others) if others else None,
+        main_roles[calls.Role.EXECUTOR],
+        scoped(calls.Role.EXECUTOR, other=True),
         executor[0],
-        roles,
+        main_roles,
         others[0] if others else None,
         kinds,
         step_seconds(max(timeouts, default=0.0)),
     )
+
+
+class Scoped(router.Fallback):
+    """Resolve a task/session preference at every call, retaining acceptance on its chain."""
+
+    def __init__(self, current: Callable[[], router.Fallback]) -> None:
+        super().__init__(current().members)
+        self.current = current
+        self.last: router.Fallback | None = None
+
+    @property
+    def label(self) -> str:
+        return self.current().label if hasattr(self, "current") else self._label
+
+    @label.setter
+    def label(self, value: str) -> None:
+        self._label = value
+
+    @property
+    def choices(self) -> list[router.Choice]:
+        return self.current().choices
+
+    def complete(self, request: Request) -> Completion:
+        self.last = self.current()
+        return self.last.complete(request)
+
+    def accept(self, request: Request, reply: Completion) -> None:
+        if self.last is not None:
+            self.last.accept(request, reply)
 
 
 CALLS_PER_STEP = 2

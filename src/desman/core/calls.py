@@ -48,6 +48,11 @@ _purpose: ContextVar[Purpose | None] = ContextVar("purpose", default=None)
 _watchers: ContextVar[tuple[Callable[[], None], ...]] = ContextVar("watchers", default=())
 
 
+def purpose() -> Purpose:
+    """The attribution of the current call, also used for scoped module choices."""
+    return _purpose.get() or _UNATTRIBUTED
+
+
 @contextmanager
 def for_(purpose: Purpose) -> Iterator[None]:
     """Calls made inside are recorded as made for `purpose`."""
