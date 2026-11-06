@@ -95,7 +95,7 @@ def test_a_model_no_ready_provider_serves_is_kept_with_a_warning() -> None:
 
 def test_a_config_from_before_has_no_tuning() -> None:
     config = Config.model_validate(upgrade({"schema_version": 3, "language": "de"}))
-    assert config.schema_version == 5 and config.tuning == Tuning()
+    assert config.schema_version == 6 and config.tuning == Tuning()
 
 
 # ── Honoured ─────────────────────────────────────────────────────────────────

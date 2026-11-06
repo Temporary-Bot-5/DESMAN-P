@@ -1,7 +1,8 @@
 """The interactive `desman config` wizard, in the configured language (`desman.i18n`).
 
 Language, then a provider menu that stays open until "Done": pick a provider, add or remove
-its keys (several per provider are fine) or change its settings, pick the next one. Then the
+its keys (several per provider are fine) or change its settings, pick the next one. Its role
+settings menu chooses the model and key each role asks first. Then the
 permissions, then personalisation: whether the interlocutor may study the conversation and keep
 notes about the person, and how it talks (`Config.behaviour`), which holds either way. Last,
 whether this machine takes part in desman-global (off unless the person says yes). Nothing is
@@ -106,7 +107,7 @@ def run(manager: ConfigManager) -> None:
     ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
 
 
-SECTIONS = ("providers", "permissions", "personalize", "behaviour", "network")
+SECTIONS = ("providers", "permissions", "personalize", "behaviour", "network", "roles")
 """Parts of the wizard that can be opened on their own (from the chat, ADR 0003 §3)."""
 
 
@@ -122,6 +123,8 @@ def run_section(manager: ConfigManager, section: str) -> None:
         config.personalize = ask_personalize(config.personalize)
     elif section == "behaviour":
         config.behaviour = ask_behaviour(config.behaviour, config)
+    elif section == "roles":
+        ask_roles(config)
     elif section == "network":
         entries, settle, said = network_change(config, ask_network(config))
         save(manager, config, seen, entries, settle)
@@ -131,6 +134,52 @@ def run_section(manager: ConfigManager, section: str) -> None:
         raise ValueError(f"no wizard section {section!r}")
     manager.save_if_unchanged(config, seen)
     ui.ok(t("Configuration saved to {path}", path=manager.config_path))
+
+
+def ask_roles(config: Config) -> None:
+    """Edit role preferences on the wizard's unsaved copy via the shared change function."""
+    from desman import tuning_cli
+
+    ui.section(t("Models and keys for roles"))
+    while True:
+        rows = tuning_cli.role_rows(config)
+        role = ui.select(
+            t("Models and keys for roles"),
+            [
+                ui.Choice(
+                    row["label"],
+                    row["role"],
+                    f"{row['model'] or tuning_cli.AUTO} · {row['key_label']}",
+                )
+                for row in rows
+            ]
+            + [ui.Choice(t("Done — continue"), None)],
+        )
+        if role is None:
+            return
+        row = next(row for row in rows if row["role"] == role)
+        model = ui.select(
+            t("model: {role}", role=role),
+            [ui.Choice(t("DESMAN's choice"), tuning_cli.AUTO)]
+            + [ui.Choice(label, label) for label in row["candidate_models"]],
+            default=row["model"] or tuning_cli.AUTO,
+        )
+        provider = None if model == tuning_cli.AUTO else model.split("/", 1)[0]
+        keys = [k for k in row["candidate_keys"] if provider is None or k["provider"] == provider]
+        key = ui.select(
+            t("key: {role}", role=role),
+            [ui.Choice(t("DESMAN's choice"), tuning_cli.AUTO)]
+            + [ui.Choice(f"{k['provider']}: {k['label']}", k["selector"]) for k in keys],
+            default=next(
+                (k["selector"] for k in keys if k["fingerprint"] == row["key_fingerprint"]),
+                tuning_cli.AUTO,
+            ),
+        )
+        # Persist with the rest of the wizard, preserving cancellation and conflict checks.
+        old, config.tuning, _ = tuning_cli.changed_tuning(
+            config, tuning_cli.TuningChange(models={role: model}, keys={role: key})
+        )
+        tuning_cli.print_change(old, config.tuning, config)
 
 
 def _status(config: Config, p: Provider) -> str:
@@ -170,11 +219,15 @@ def _providers_menu(s: _Session) -> None:
             choices.append(ui.Heading(title))
             choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
         choices.append(ui.Choice(t("Done — continue"), None))
+        choices.append(ui.Choice(t("Models and keys for roles"), "roles"))
         picked = ui.select(
             t("Pick a provider to add keys or change settings"), choices, default=last
         )
         if picked is None:
             return
+        if picked == "roles":
+            ask_roles(s.config)
+            continue
         last = picked
         if picked.key_env is None or s.config.keys(picked.key_env):
             _provider_menu(s, picked)
