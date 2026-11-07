@@ -1,9 +1,11 @@
 name: CI
 
+# Before a release only (owner, 2026-11-07): a `v*` tag, or by hand (`gh workflow run ci.yml
+# --ref BRANCH`). Pull requests are merged on the local checks (AGENTS.md).
 on:
   push:
-    branches: [master]
-  pull_request:
+    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   check:
