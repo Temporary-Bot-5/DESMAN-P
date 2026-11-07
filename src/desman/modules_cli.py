@@ -38,15 +38,10 @@ def scope_id(
     return "session", str(rows[0]["id"])
 
 
-def preview(
-    conn: sqlite3.Connection,
-    config: Config,
-    scope: choices.Scope,
-    identity: str,
-    role: str,
-    model: str | None = None,
-    key: str | None = None,
-) -> tuple[choices.Choice, choices.Choice]:
+def check_role(scope: choices.Scope, role: str | None) -> None:
+    """Refuse a role that no call of `scope` reads (`choices.ROLES_BY_SCOPE`)."""
+    if role is None:
+        return
     if role not in choices.ROLES_BY_SCOPE[scope]:
         raise click.ClickException(
             t(
@@ -57,6 +52,18 @@ def preview(
                 roles=", ".join(choices.ROLES_BY_SCOPE[scope]),
             )
         )
+
+
+def preview(
+    conn: sqlite3.Connection,
+    config: Config,
+    scope: choices.Scope,
+    identity: str,
+    role: str,
+    model: str | None = None,
+    key: str | None = None,
+) -> tuple[choices.Choice, choices.Choice]:
+    check_role(scope, role)
     try:
         choices.validate(conn, scope, identity, role)
         old = choices.get(conn, scope, identity, role)
@@ -286,5 +293,6 @@ def clear_command(role: str | None, task: str | None, session: str | None) -> No
     """Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor."""
     with closing(db.open_db()) as conn:
         scope, identity = scope_id(conn, task, session)
+        check_role(scope, role)
         choices.clear(conn, scope, identity, role)
     ui.ok(t("Module choices cleared."))
