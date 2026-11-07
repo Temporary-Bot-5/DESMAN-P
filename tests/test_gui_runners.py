@@ -660,7 +660,11 @@ def test_previous_schema_upgrade_preserves_messages_and_recovers_only_live(
             "INSERT INTO messages (session_id, at, role, kind, text) "
             "VALUES ('old', '2026-01-01', 'user', 'message', 'pending')"
         )
+        conn.execute("INSERT INTO chat_turns (user_seq) VALUES (1)")
         db.migrate(conn)
+        assert (
+            conn.execute("SELECT task_id FROM chat_turns WHERE user_seq = 1").fetchone()[0] is None
+        )
         sessions = Sessions(conn, clock=clock)
         pending = sessions.pending_turns()
         assert [m.text for m in pending] == ["pending"]
@@ -692,3 +696,123 @@ def test_old_outcome_does_not_settle_new_input_and_reply_receipt_is_atomic(
     chat._say("the answer")
     assert page.sessions.turn_settled(message.seq)
     assert not page.sessions.pending_turns()
+
+
+def test_task_commit_survives_crash_before_start_event(
+    page: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.chat import Chat
+
+    page.outcomes["task input"] = {"type": "task", "title": "One", "goal": "Do it"}
+    original = Chat._event
+
+    def crash(self: Chat, text: str, task_id: str | None = None) -> None:
+        if task_id is not None:
+            raise RuntimeError("crash after task commit")
+        original(self, text, task_id)
+
+    monkeypatch.setattr(Chat, "_event", crash)
+    session = page.send("task input")
+    page.done(session)
+    tasks = page.conn.execute("SELECT id FROM tasks WHERE session_id = ?", (session,)).fetchall()
+    assert len(tasks) == 1
+    receipt = page.conn.execute("SELECT task_id, settled_at FROM chat_turns").fetchone()
+    assert receipt["task_id"] == tasks[0]["id"] and receipt["settled_at"] is not None
+    page.runners.recover(page.sessions)
+    page.done(session)
+    assert (
+        len(page.conn.execute("SELECT id FROM tasks WHERE session_id = ?", (session,)).fetchall())
+        == 1
+    )
+    assert [text for text, _ in page.requests] == ["task input"]
+
+
+def test_summary_commit_does_not_answer_pending_turn(page: Harness) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.sessions import Kind
+    from desman.gui.runners import runner_chat
+
+    internal_task = page.chat.store.create_task(
+        TaskSpec(
+            goal="Summarise",
+            subtasks=[SubtaskSpec(description="Summarise", acceptance_criteria="Summary")],
+        )
+    )
+    user = page.sessions.add(None, Role.USER, "still needs an answer")
+    page.sessions.register_turn(user.seq)
+    sessions = runner_chat(page.sessions).sessions
+    sessions.reply_to = user.seq
+    sessions.add(
+        user.session_id,
+        Role.DESMAN,
+        "summary",
+        kind=Kind.SUMMARY,
+        covers=user.seq,
+        task_id=internal_task,
+    )
+    sessions.add(
+        user.session_id, Role.DESMAN, "internal task output", kind=Kind.EVENT, task_id=internal_task
+    )
+    assert not sessions.turn_settled(user.seq)
+    page.runners.recover(page.sessions)
+    page.done(user.session_id)
+    assert page.answers(user.session_id) == ["reply:still needs an answer"]
+    page.runners.recover(page.sessions)
+    assert [text for text, _ in page.requests] == ["still needs an answer"]
+
+
+def test_stop_after_reply_commit_preserves_question(
+    page: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.chat import Chat
+
+    committed = Event()
+    release = Event()
+    original = Chat._say
+
+    def reply(self: Chat, text: str, task_id: str | None = None) -> None:
+        original(self, text, task_id)
+        if text == "reply:answered question":
+            committed.set()
+            assert release.wait(10)
+
+    monkeypatch.setattr(Chat, "_say", reply)
+    session = page.send("answered question")
+    assert committed.wait(10)
+    try:
+        page.runners.stop(session)
+    finally:
+        release.set()
+    page.done(session)
+    assert page.sessions.messages(session)[0].cancelled_at is None
+    page.send("next question")
+    page.done(session)
+    request = next(data for text, data in page.requests if text == "next question")
+    assert {"from": "person", "text": "answered question"} in request["conversation"]
+    assert {"from": "you", "text": "reply:answered question"} in request["conversation"]
+
+
+def test_turn_lock_entries_are_released(tmp_path: Path) -> None:
+    from desman.gui.runners import _turn_locks, turn_lock
+
+    for seq in range(100):
+        with turn_lock((tmp_path, seq)):
+            assert (tmp_path, seq) in _turn_locks
+        assert (tmp_path, seq) not in _turn_locks
+    with pytest.raises(RuntimeError), turn_lock((tmp_path, 101)):
+        raise RuntimeError("failed turn")
+    assert (tmp_path, 101) not in _turn_locks
+
+
+def test_command_explanation_does_not_settle_until_result(page: Harness) -> None:
+    from desman.gui.runners import runner_chat
+
+    user = page.sessions.add(None, Role.USER, "change tuning")
+    page.sessions.register_turn(user.seq)
+    page.sessions.reply_to = user.seq
+    chat = runner_chat(page.sessions)
+    chat.session_id = user.session_id
+    chat._say("I will change the tuning", settle=False)
+    assert not page.sessions.turn_settled(user.seq)
+    chat._result("Declined", None, None)
+    assert page.sessions.turn_settled(user.seq)

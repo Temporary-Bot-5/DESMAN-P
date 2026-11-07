@@ -699,6 +699,10 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         cancelled_at TEXT
     );
     """,
+    # 41: bind a page turn to its task in the task creation transaction.
+    """
+    ALTER TABLE chat_turns ADD COLUMN task_id TEXT REFERENCES tasks(id);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

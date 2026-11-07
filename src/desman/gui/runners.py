@@ -6,7 +6,8 @@ import io
 import sqlite3
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Condition, Event, Lock, Thread
@@ -27,8 +28,25 @@ from desman.i18n import t
 from desman.interlocutor import Interlocutor
 from desman.llm.structured import completion_guard
 
-_turn_locks: dict[tuple[Path, int], Lock] = {}
+_turn_locks: dict[tuple[Path, int], tuple[Lock, int]] = {}
 _turn_locks_guard = Lock()
+
+
+@contextmanager
+def turn_lock(key: tuple[Path, int]) -> Iterator[None]:
+    with _turn_locks_guard:
+        lock, users = _turn_locks.get(key, (Lock(), 0))
+        _turn_locks[key] = (lock, users + 1)
+    try:
+        with lock:
+            yield
+    finally:
+        with _turn_locks_guard:
+            _, users = _turn_locks[key]
+            if users == 1:
+                del _turn_locks[key]
+            else:
+                _turn_locks[key] = (lock, users - 1)
 
 
 class Stopped(BaseException):
@@ -372,14 +390,9 @@ class Runners:
                             if work.user_seq is None:
                                 self._execute(chat, runner, work)
                             else:
-                                with _turn_locks_guard:
-                                    lock = _turn_locks.setdefault(
-                                        (self.path.resolve(), work.user_seq), Lock()
-                                    )
-                                with lock:
+                                with turn_lock((self.path.resolve(), work.user_seq)):
                                     if not sessions.turn_settled(work.user_seq):
                                         self._execute(chat, runner, work)
-                                        sessions.settle_turn(work.user_seq)
                     except Stopped as stopped:
                         if not stopped.recorded:
                             sessions.add(
@@ -387,6 +400,7 @@ class Runners:
                                 Role.DESMAN,
                                 t("Stopped; the reply that came later was dropped"),
                                 kind=Kind.EVENT,
+                                settle=True,
                             )
                     except ui.Cancelled:
                         pass

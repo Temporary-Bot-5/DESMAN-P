@@ -437,7 +437,7 @@ class Chat:
             self._task(turn, config, models, interlocutor)
         else:
             if turn.text is not None:
-                self._say(turn.text)
+                self._say(turn.text, settle=False)
             self._command(turn, config, models, interlocutor)
 
     def _add_user(self, text: str) -> str:
@@ -482,7 +482,7 @@ class Chat:
         """The model calls inside are the session's own (not any task's)."""
         return calls.for_(calls.Purpose(role, session_id=self.session_id))
 
-    def _say(self, text: str, task_id: str | None = None) -> None:
+    def _say(self, text: str, task_id: str | None = None, *, settle: bool = True) -> None:
         if self.session_id is None:
             ui.out(Text(text))
             return
@@ -492,6 +492,7 @@ class Chat:
             text,
             task_id=task_id,
             outcome_audit=self._outcome_audit,
+            settle=settle and task_id is None and self._outcome_audit is None,
         )
         if self.turn_sink is not None:
             self.turn_sink(message.session_id)
@@ -800,7 +801,7 @@ class Chat:
             configs = [config, self._saved_config()]
             budget = COMMAND_RESULT_TOKENS * CHARS_PER_TOKEN
             text += "\n" + commands.for_interlocutor(data, configs, budget)
-        self.sessions.add(self.session_id, Role.DESMAN, text, kind=Kind.EVENT)
+        self.sessions.add(self.session_id, Role.DESMAN, text, kind=Kind.EVENT, settle=True)
 
     # ── Compaction ───────────────────────────────────────────────────────────
 
@@ -932,13 +933,15 @@ class Chat:
             # before the files its goal names are there, and a failed copy leaves no task.
             for handover in given:
                 copied[handover.ref] = task_files.hand_over(root, new_task, handover)
+            if self.sessions.reply_to is not None:
+                self.sessions.settle_turn(self.sessions.reply_to, task_id=new_task)
 
         try:
             task_id = self.store.create_task(
                 runs.tuned_spec(spec, config.tuning),
                 details={**planned.details(), "title": turn.title},
                 session_id=self.session_id,
-                also=copy if given else None,
+                also=copy,
             )
         except (OSError, PathEscapeError) as e:
             ui.error(
