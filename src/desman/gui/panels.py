@@ -105,11 +105,12 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                             "last_at": s.last_at,
                             "messages": s.messages,
                             "pinned": s.pinned,
+                            **(front.runners.status(s.id) if front.runners is not None else {}),
                             "unread": s.id != current
                             and bool(
                                 conn.execute(
-                                    "SELECT 1 FROM messages WHERE session_id = ? AND task_id IS NOT NULL "
-                                    "AND outcome_audit IS NOT NULL AND seq > ? LIMIT 1",
+                                    "SELECT 1 FROM messages WHERE session_id = ? AND role != 'user' "
+                                    "AND seq > ? LIMIT 1",
                                     (
                                         s.id,
                                         conn.execute(

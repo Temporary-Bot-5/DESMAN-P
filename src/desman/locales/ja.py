@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "/clear で以前のメッセージを非表示にしました（モデルには引き続き見えます）。",
+    "Stopped": "停止済み",
+    "Concurrent page chat turns (1–8).": "ページの同時チャットターン数（1–8）。",
+    "Concurrent page chat turns": "ページの同時チャットターン数",
+    "Waiting for a free module: {n} ahead": "空きモジュールを待機中：前に {n} 件",
+    "Queued ({n})": "待機中（{n}）",
+    "Answering": "回答中",
+    "Waits for you": "入力待ち",
+    "Stopped; the reply that came later was dropped": "停止しました。後から届いた回答は破棄されました",
+    "The chat turn failed ({error}).": "チャットターンに失敗しました（{error}）。",
     "Background workers wait: config.json does not load ({error}).": "バックグラウンドワーカーは待機中です: config.json を読み込めません ({error})。",
     "Background workers started again.": "バックグラウンドワーカーが再起動しました。",
     "Background workers wait for a model: add a key or a local model in Settings.": "バックグラウンドワーカーはモデルを待っています。設定でキーまたはローカルモデルを追加してください。",

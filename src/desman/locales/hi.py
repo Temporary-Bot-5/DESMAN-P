@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "/clear से पुराने संदेश छिपे हैं (मॉडल अभी भी उन्हें देखता है)।",
+    "Stopped": "रोका गया",
+    "Concurrent page chat turns (1–8).": "पेज पर एक साथ चैट की बारी (1–8)।",
+    "Concurrent page chat turns": "पेज पर एक साथ चैट की बारी",
+    "Waiting for a free module: {n} ahead": "खाली मॉड्यूल की प्रतीक्षा: आगे {n}",
+    "Queued ({n})": "कतार में ({n})",
+    "Answering": "उत्तर दे रहा है",
+    "Waits for you": "आपकी प्रतीक्षा में",
+    "Stopped; the reply that came later was dropped": "रोक दिया गया; बाद में आया उत्तर हटा दिया गया",
+    "The chat turn failed ({error}).": "चैट की बारी विफल हुई ({error})।",
     "Background workers wait: config.json does not load ({error}).": "पृष्ठभूमि वर्कर प्रतीक्षा में हैं: config.json लोड नहीं होती ({error})।",
     "Background workers started again.": "पृष्ठभूमि वर्कर फिर से शुरू हो गए।",
     "Background workers wait for a model: add a key or a local model in Settings.": "पृष्ठभूमि वर्कर मॉडल की प्रतीक्षा में हैं: सेटिंग्स में कुंजी या स्थानीय मॉडल जोड़ें।",

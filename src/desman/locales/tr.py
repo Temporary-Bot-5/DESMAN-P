@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "Önceki mesajlar /clear ile gizlendi (model hâlâ onları görüyor).",
+    "Stopped": "Durduruldu",
+    "Concurrent page chat turns (1–8).": "Sayfada eşzamanlı sohbet turları (1–8).",
+    "Concurrent page chat turns": "Sayfada eşzamanlı sohbet turları",
+    "Waiting for a free module: {n} ahead": "Boş modül bekleniyor: önde {n}",
+    "Queued ({n})": "Sırada ({n})",
+    "Answering": "Yanıtlıyor",
+    "Waits for you": "Sizi bekliyor",
+    "Stopped; the reply that came later was dropped": "Durduruldu; sonradan gelen yanıt atıldı",
+    "The chat turn failed ({error}).": "Sohbet turu başarısız oldu ({error}).",
     "Background workers wait: config.json does not load ({error}).": "Arka plan işçileri bekliyor: config.json yüklenemiyor ({error}).",
     "Background workers started again.": "Arka plan çalışanları yeniden başlatıldı.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Arka plan çalışanları bir model bekliyor: Ayarlar bölümünde bir anahtar veya yerel model ekleyin.",

@@ -81,7 +81,13 @@ class Behaviour(Fields):
 class Limits(Fields):
     section: Literal["limits"]
     name: Literal[
-        "workers", "max_subtasks", "max_parts", "context_tokens", "max_attempts", "max_transient"
+        "chat_turns",
+        "workers",
+        "max_subtasks",
+        "max_parts",
+        "context_tokens",
+        "max_attempts",
+        "max_transient",
     ]
     value: int | Literal["auto"]
 

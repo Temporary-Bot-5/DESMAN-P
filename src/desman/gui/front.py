@@ -8,10 +8,14 @@ import json
 import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import contextmanager
 from html import escape
+from pathlib import Path
 from threading import Condition
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from desman.gui.runners import Runners
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 from rich.console import Console, RenderableType
@@ -20,6 +24,7 @@ from rich.text import Text
 
 from desman import providers, ui
 from desman.config import ConfigError, open_config
+from desman.thread_output import redirect_stderr, redirect_stdout
 
 
 class Answer(BaseModel):
@@ -41,6 +46,10 @@ class WebFront(ui.Front):
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        self.runners: Runners | None = None
+        self.database: Path | None = None
+        self._changed: set[str] = set()
+        self._transcript_cache: tuple[tuple[Any, ...], list[str]] | None = None
         self.clock = clock
         self.worker_count = 3
         self.idle: Callable[[], None] | None = None
@@ -51,6 +60,7 @@ class WebFront(ui.Front):
         self.live: str | None = None
         self.prompt: dict[str, Any] | None = None
         self._answer: dict[str, Any] | None = None
+        self._input_recordings: tuple[ui.Recording, ...] = ()
         self._prompt_id = 0
         self.busy = False
         self.redact: Callable[[str], str] = redact or redact_keys
@@ -65,6 +75,18 @@ class WebFront(ui.Front):
         self._panel_quiet = False
         self.pending_choice: dict[str, str | None] | None = None
         self.settings_outcome: dict[str, Any] | None = None
+
+    def session_changed(self, id: str) -> None:
+        """Invalidate only a session; its transcript is read from SQLite by the page poll."""
+        with self.condition:
+            self._changed.add(id)
+            self.state += 1
+            self.condition.notify_all()
+
+    def next_prompt_id(self) -> int:
+        with self.condition:
+            self._prompt_id += 1
+            return self._prompt_id
 
     def pending_module(self, choice: dict[str, str | None] | None) -> None:
         with self.condition:
@@ -120,6 +142,8 @@ class WebFront(ui.Front):
     def session(self, id: str | None, temporary: bool) -> None:
         with self.condition:
             self.current, self.temporary = id, temporary
+            if id is not None and self.runners is not None:
+                self.session_changed(id)
 
     def terminal_seen(self, seq: int) -> None:
         with self.condition:
@@ -155,9 +179,82 @@ class WebFront(ui.Front):
                 "prompt": self.prompt,
                 "live": self.live,
                 "state": self.state,
-                "busy": self.busy,
+                "busy": self.busy
+                if self.runners is None
+                else bool(self.runners.status(self.current or "")["state"]),
+                **self._session_poll(),
                 "ended": self.ended,
             }
+
+    def _session_poll(self) -> dict[str, Any]:
+        if self.runners is None:
+            return {}
+        import sqlite3
+
+        from desman.chat import _render
+        from desman.core.sessions import Sessions
+
+        mailbox = self.runners.mailbox(self.current)
+        result: dict[str, Any] = {
+            "pending": mailbox.prompt if mailbox else None,
+            "turn": self.runners.status(self.current or ""),
+        }
+        if mailbox is not None:
+            result["session_live"] = mailbox.live
+        if self.current in self._changed and self.database is not None:
+            conn = sqlite3.connect(self.database.resolve().as_uri() + "?mode=ro", uri=True)
+            try:
+                conn.row_factory = sqlite3.Row
+                messages = Sessions(conn).screen(self.current, last=200)
+                boundary = conn.execute(
+                    "SELECT cleared_seq, terminal FROM sessions WHERE id = ?", (self.current,)
+                ).fetchone()
+                hidden = bool(boundary and boundary["cleared_seq"] and not boundary["terminal"])
+                cancelled = tuple(m.seq for m in messages if m.cancelled_at is not None)
+                from desman.i18n import language, t
+
+                try:
+                    config_stamp = open_config().config_path.stat().st_mtime_ns
+                except OSError:
+                    config_stamp = 0
+                cache_key = (
+                    self.current,
+                    hidden,
+                    cancelled,
+                    messages[0].seq if messages else 0,
+                    messages[-1].seq if messages else 0,
+                    config_stamp,
+                    language(),
+                )
+                if self._transcript_cache is None or self._transcript_cache[0] != cache_key:
+                    self._transcript_cache = (
+                        cache_key,
+                        (
+                            [
+                                self.render(
+                                    Text(
+                                        t(
+                                            "Earlier messages hidden by /clear (the model still sees them)."
+                                        ),
+                                        style="muted",
+                                    )
+                                )
+                            ]
+                            if hidden
+                            else []
+                        )
+                        + [self._redact_html(self.render(_render(m))) for m in messages],
+                    )
+                result["transcript"] = self._transcript_cache[1]
+                result["session_id"] = self.current
+                result["transcript_version"] = (
+                    f"{hidden}:{cancelled}:{self.current}:{messages[0].seq if messages else 0}:{messages[-1].seq if messages else 0}:{config_stamp}:{language()}"
+                )
+            finally:
+                conn.close()
+            # Every poll returns a current DB snapshot after a change, so reconnects/reloads
+            # do not depend on consuming a transient notification exactly once.
+        return result
 
     @staticmethod
     def render(*items: RenderableType | str) -> str:
@@ -237,11 +334,12 @@ class WebFront(ui.Front):
 
     def _ask(self, kind: str, question: str = "", **data: Any) -> Any:
         with self.condition:
-            self._prompt_id += 1
+            prompt_id = self.next_prompt_id()
             self._answer = None
+            self._input_recordings = ui._recordings.get()
             prompt = {
                 "type": "prompt",
-                "id": self._prompt_id,
+                "id": prompt_id,
                 "kind": kind,
                 "question": question,
                 "terminal": self._panel_quiet,
@@ -266,6 +364,8 @@ class WebFront(ui.Front):
                 # Timed waits let Ctrl+C reach the main thread on Windows too.
                 due = self.clock() + 2
                 while self._answer is None:
+                    if self.ended:
+                        raise ui.Cancelled
                     self.condition.wait(
                         timeout=min(0.2, max(0, due - self.clock())) if kind == "line" else 0.2
                     )
@@ -288,6 +388,7 @@ class WebFront(ui.Front):
             finally:
                 self.prompt = None
                 self._answer = None
+                self._input_recordings = ()
 
     def answer(self, data: dict[str, Any]) -> bool:
         """Validate input against the open prompt before waking its caller."""
@@ -295,6 +396,14 @@ class WebFront(ui.Front):
             answer = Answer.model_validate(data)
         except ValidationError:
             return False
+        if self.runners is not None:
+            mailbox = self.runners.mailbox(self.current)
+            if (
+                mailbox is not None
+                and mailbox.prompt is not None
+                and mailbox.prompt["id"] == answer.id
+            ):
+                return mailbox.answer(data)
         with self.condition:
             prompt = self.prompt
             if prompt is None or answer.id != prompt["id"] or self._answer is not None:
@@ -333,7 +442,8 @@ class WebFront(ui.Front):
             self._answer = {"cancel": True} if cancelled else {"value": value}
             self.prompt = None
             if prompt.get("terminal") and echo is not None:
-                ui._record(Text(str(echo)))
+                for recording in self._input_recordings:
+                    ui._RecordingConsole(recording).print(Text(str(echo)))
                 echo = None
             self.emit("prompt_closed", id=prompt["id"], kind=kind, echo=echo)
             self.condition.notify_all()
@@ -411,6 +521,9 @@ class WebFront(ui.Front):
 
     def stop(self) -> None:
         """Interrupt busy work on the main thread, where the chat handles cancellation."""
+        if self.runners is not None:
+            self.runners.stop(self.current)
+            return
         with self.condition:
             if self.busy:
                 _thread.interrupt_main()

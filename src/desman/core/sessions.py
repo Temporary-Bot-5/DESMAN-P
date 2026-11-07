@@ -56,6 +56,7 @@ class Message(BaseModel):
     kind: Kind
     text: str
     task_id: str | None = None
+    cancelled_at: str | None = None
     covers: int | None = None
     """A summary's: the last message (by `seq`) it stands in for."""
 
@@ -99,6 +100,8 @@ def _utcnow() -> datetime:
 
 
 class Sessions:
+    reply_to: int | None = None
+
     def __init__(self, conn: sqlite3.Connection, clock: Clock = _utcnow) -> None:
         self.conn = conn
         self.clock = clock
@@ -120,6 +123,62 @@ class Sessions:
         ).fetchone()
         return row is not None and bool(row["terminal"])
 
+    def clear_screen(self, session_id: str) -> None:
+        """Hide saved messages on screen, retaining the entire model history."""
+        with db.transaction(self.conn):
+            self.conn.execute(
+                "UPDATE sessions SET cleared_seq = COALESCE("
+                "(SELECT MAX(seq) FROM messages WHERE session_id = ?), 0) WHERE id = ?",
+                (session_id, session_id),
+            )
+
+    def pending_turns(self) -> list[Message]:
+        """Unfinished live page inputs, in their original submission order."""
+        rows = self.conn.execute(
+            "SELECT m.*, (SELECT cancelled_at FROM chat_turns WHERE user_seq = m.seq) AS cancelled_at "
+            "FROM messages m JOIN sessions s ON s.id = m.session_id "
+            "LEFT JOIN chat_turns c ON c.user_seq = m.seq "
+            "WHERE s.temporary = 0 AND s.deleted_at IS NULL AND s.terminal = 0 "
+            "AND m.role = 'user' AND c.cancelled_at IS NULL AND c.settled_at IS NULL "
+            "AND (c.user_seq IS NOT NULL OR ("
+            "m.seq = (SELECT MAX(u.seq) FROM messages u WHERE u.session_id = s.id "
+            "AND u.role = 'user' AND NOT EXISTS (SELECT 1 FROM chat_turns x "
+            "WHERE x.user_seq = u.seq AND x.cancelled_at IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM messages r "
+            "WHERE r.session_id = s.id AND r.seq > m.seq "
+            "AND (r.role = 'interlocutor' OR r.kind = 'event')))) ORDER BY m.seq"
+        ).fetchall()
+        return [Message.model_validate(dict(r)) for r in rows]
+
+    def register_turn(self, seq: int) -> None:
+        with db.transaction(self.conn):
+            self.conn.execute("INSERT OR IGNORE INTO chat_turns (user_seq) VALUES (?)", (seq,))
+
+    def settle_turn(self, seq: int, *, cancelled: bool = False, task_id: str | None = None) -> None:
+        def write() -> None:
+            self.conn.execute("INSERT OR IGNORE INTO chat_turns (user_seq) VALUES (?)", (seq,))
+            self.conn.execute(
+                "UPDATE chat_turns SET settled_at = ?, cancelled_at = ?, task_id = ? "
+                "WHERE user_seq = ? AND settled_at IS NULL",
+                (
+                    db.to_iso(self.clock()),
+                    db.to_iso(self.clock()) if cancelled else None,
+                    task_id,
+                    seq,
+                ),
+            )
+
+        if self.conn.in_transaction:
+            write()
+        else:
+            with db.transaction(self.conn):
+                write()
+
+    def turn_settled(self, seq: int) -> bool:
+        row = self.conn.execute(
+            "SELECT settled_at FROM chat_turns WHERE user_seq = ?", (seq,)
+        ).fetchone()
+        return row is not None and row[0] is not None
+
     def clear_terminal(self) -> None:
         """Move the screen boundary without deleting any messages."""
         with db.transaction(self.conn):
@@ -132,7 +191,8 @@ class Sessions:
     def screen(self, session_id: str, last: int | None = None) -> list[Message]:
         """Visible transcript, respecting a terminal's durable clear boundary."""
         rows = self.conn.execute(
-            "SELECT m.* FROM messages m JOIN sessions s ON s.id = m.session_id "
+            "SELECT m.*, (SELECT cancelled_at FROM chat_turns WHERE user_seq = m.seq) AS cancelled_at "
+            "FROM messages m JOIN sessions s ON s.id = m.session_id "
             "WHERE m.session_id = ? AND m.seq > s.cleared_seq ORDER BY m.seq DESC LIMIT ?",
             (session_id, -1 if last is None else last),
         ).fetchall()
@@ -149,6 +209,7 @@ class Sessions:
         temporary: bool = False,
         initial_choice: choices.Choice | None = None,
         outcome_audit: int | None = None,
+        settle: bool = False,
     ) -> Message:
         """Append a message; `session_id` None starts a new session with it, `temporary` one if
         asked (this process holds it). A summary says which messages it `covers`."""
@@ -191,6 +252,8 @@ class Sessions:
                 f"VALUES ({', '.join('?' * len(columns))})",
                 tuple(columns.values()),
             )
+            if settle and self.reply_to is not None:
+                self.settle_turn(self.reply_to)
         assert cursor.lastrowid is not None
         return Message(
             seq=cursor.lastrowid,
@@ -206,7 +269,8 @@ class Sessions:
     def messages(self, session_id: str, last: int | None = None) -> list[Message]:
         """The session's messages in order; only the `last` few if given."""
         rows = self.conn.execute(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+            "SELECT m.*, (SELECT cancelled_at FROM chat_turns WHERE user_seq = m.seq) AS cancelled_at "
+            "FROM messages m WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
             (session_id, -1 if last is None else last),
         ).fetchall()
         return [Message.model_validate(dict(r)) for r in reversed(rows)]
@@ -223,7 +287,11 @@ class Sessions:
         ).fetchone()
         summary = None if row is None else Message.model_validate(dict(row))
         after = 0 if summary is None else summary.covers
-        after_summary = "FROM messages WHERE session_id = ? AND seq > ? AND kind != 'summary'"
+        after_summary = (
+            "FROM messages WHERE session_id = ? AND seq > ? AND kind != 'summary' "
+            "AND NOT EXISTS (SELECT 1 FROM chat_turns c WHERE c.user_seq = messages.seq "
+            "AND c.cancelled_at IS NOT NULL)"
+        )
         rows = self.conn.execute(
             f"SELECT * {after_summary} ORDER BY seq DESC LIMIT ?",
             (session_id, after, -1 if last is None else last),

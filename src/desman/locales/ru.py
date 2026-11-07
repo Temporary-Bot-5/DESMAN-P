@@ -15,6 +15,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "Предыдущие сообщения скрыты командой /clear (модель по-прежнему их видит).",
+    "Stopped": "Остановлено",
+    "Concurrent page chat turns (1–8).": "Одновременные ответы в чатах страницы (1–8).",
+    "Concurrent page chat turns": "Одновременные ответы в чатах страницы",
+    "Waiting for a free module: {n} ahead": "Ожидание свободного модуля: впереди {n}",
+    "Queued ({n})": "В очереди ({n})",
+    "Answering": "Отвечает",
+    "Waits for you": "Ждёт вас",
+    "Stopped; the reply that came later was dropped": "Остановлено; пришедший позже ответ отброшен",
+    "The chat turn failed ({error}).": "Не удалось выполнить ход чата ({error}).",
     "Background workers wait: config.json does not load ({error}).": "Фоновые рабочие процессы ждут: config.json не загружается ({error}).",
     "Background workers started again.": "Фоновые рабочие процессы снова запущены.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Фоновые рабочие процессы ждут модель: добавьте ключ или локальную модель в настройках.",

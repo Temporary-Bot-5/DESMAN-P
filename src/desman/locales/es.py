@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "Mensajes anteriores ocultos por /clear (el modelo aún los ve).",
+    "Stopped": "Detenido",
+    "Concurrent page chat turns (1–8).": "Turnos simultáneos de chat en la página (1–8).",
+    "Concurrent page chat turns": "Turnos simultáneos de chat en la página",
+    "Waiting for a free module: {n} ahead": "Esperando un módulo libre: {n} por delante",
+    "Queued ({n})": "En cola ({n})",
+    "Answering": "Respondiendo",
+    "Waits for you": "Te espera",
+    "Stopped; the reply that came later was dropped": "Detenido; se descartó la respuesta que llegó después",
+    "The chat turn failed ({error}).": "El turno de chat falló ({error}).",
     "Background workers wait: config.json does not load ({error}).": "Los procesos en segundo plano esperan: config.json no se carga ({error}).",
     "Background workers started again.": "Los procesos en segundo plano se han reiniciado.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Los procesos en segundo plano esperan un modelo: añade una clave o un modelo local en Ajustes.",

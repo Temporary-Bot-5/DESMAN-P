@@ -176,7 +176,7 @@ def test_hung_workers_are_terminated_then_killed(tmp_path: Path) -> None:
 
 def test_schema_six_upgrades_without_changing_tuning() -> None:
     config = Config.model_validate(upgrade({"schema_version": 6, "tuning": {"max_subtasks": 4}}))
-    assert config.schema_version == 7 and config.tuning.workers is None
+    assert config.schema_version == 8 and config.tuning.workers is None
     assert config.tuning.max_subtasks == 4
     assert Tuning(workers=8).workers == 8
     with pytest.raises(ValueError):
@@ -248,7 +248,7 @@ def test_idle_line_checks_every_two_seconds_without_replacing_prompt(
 def test_outcome_marker_migration_from_previous_schema() -> None:
     conn = db.connect(":memory:")
     try:
-        db.migrate(conn, db.MIGRATIONS[:-1])
+        db.migrate(conn, db.MIGRATIONS[:38])
         assert "outcome_audit" not in {
             r["name"] for r in conn.execute("PRAGMA table_info(messages)")
         }

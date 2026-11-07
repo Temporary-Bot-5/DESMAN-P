@@ -368,12 +368,13 @@ def test_real_loopback_request() -> None:
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
-def test_app_runs_wizard_then_chat_on_main_thread_and_cleans_up(
+def test_app_runs_wizard_then_dispatcher_on_main_thread_and_cleans_up(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     interrupted: bool,
 ) -> None:
     from desman.gui import app as gui_app
+    from desman.gui.runners import Runners
 
     stopped = threading.Event()
     seen: list[str] = []
@@ -404,9 +405,9 @@ def test_app_runs_wizard_then_chat_on_main_thread_and_cleans_up(
 
     class FakeChat:
         def __init__(
-            self, sessions: Sessions, *, resume: bool, temporary: bool, background_tasks: bool
+            self, sessions: Sessions, runners: Any, *, resume: bool, temporary: bool
         ) -> None:
-            assert resume and not temporary and background_tasks
+            assert resume and not temporary and runners.cap == 4
             seen.append("chat")
 
         def run(self) -> None:
@@ -430,7 +431,13 @@ def test_app_runs_wizard_then_chat_on_main_thread_and_cleans_up(
             seen.append("pool stop")
 
     monkeypatch.setattr(gui_app, "Pool", FakePool)
-    monkeypatch.setattr(gui_app, "Chat", FakeChat)
+    monkeypatch.setattr(gui_app, "PageChat", FakeChat)
+    if interrupted:
+
+        def interrupted_close(runners: Any, timeout: float = 10) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(Runners, "close", interrupted_close)
     monkeypatch.setattr("desman.gui.app.webbrowser.open", browser.append)
     gui_app.run(True, False, 0, True, sleep=pauses.append)
     [app] = apps

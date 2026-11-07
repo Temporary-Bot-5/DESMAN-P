@@ -316,6 +316,7 @@ Limit = Annotated[int, Field(ge=1, le=16000)] | Literal["auto"]
 
 
 class TuningArgs(Args):
+    chat_turns: Limit | None = None
     workers: Limit | None = None
     max_subtasks: Limit | None = None
     max_parts: Limit | None = None
@@ -344,6 +345,7 @@ class TuningArgs(Args):
 
     def change(self) -> tuning_cli.TuningChange:
         numbers = (
+            "chat_turns",
             "workers",
             "max_subtasks",
             "max_parts",

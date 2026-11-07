@@ -44,7 +44,7 @@ from desman.net import jobs
 from desman.net.node import capabilities
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
 
-PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3}
+PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3, "chat_turns": 4}
 
 TUNING_DEFAULTS: Mapping[str, int] = {
     "max_subtasks": MAX_SUBTASKS,

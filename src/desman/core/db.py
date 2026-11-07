@@ -691,6 +691,18 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE messages ADD COLUMN outcome_audit INTEGER CHECK (outcome_audit >= 0);
     ALTER TABLE sessions ADD COLUMN read_seq INTEGER NOT NULL DEFAULT 0 CHECK (read_seq >= 0);
     """,
+    # 40: page turn receipts and durable cancellation, without changing message text.
+    """
+    CREATE TABLE chat_turns (
+        user_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
+        settled_at TEXT,
+        cancelled_at TEXT
+    );
+    """,
+    # 41: bind a page turn to its task in the task creation transaction.
+    """
+    ALTER TABLE chat_turns ADD COLUMN task_id TEXT REFERENCES tasks(id);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -71,7 +71,7 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
     }
     assert len(data["general"]["languages"]) == 13
     assert len(data["permissions"]) == 4
-    assert len(data["limits"]) == 6
+    assert len(data["limits"]) == 7
     groq = next(p for p in data["providers"] if p["id"] == "groq")
     assert groq["ready"] and groq["keys"][0]["fingerprint"] == key_id(secret)
     assert "value" not in groq["keys"][0]

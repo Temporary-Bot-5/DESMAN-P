@@ -92,7 +92,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -201,6 +201,7 @@ class Tuning(BaseModel):
 
     models: ModelChoices = Field(default_factory=ModelChoices)
     keys: KeyChoices = Field(default_factory=KeyChoices)
+    chat_turns: StrictInt | None = Field(default=None, ge=1, le=8)
     workers: StrictInt | None = Field(default=None, ge=1, le=8)
     max_subtasks: StrictInt | None = _bounded("max_subtasks")
     """The most subtasks in a plan."""
@@ -279,7 +280,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[7] = 7
+    schema_version: Literal[8] = 8
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -379,6 +380,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         # Written by a 3 before its release (62d084b): `profile`, on unless it said otherwise,
         # was never the person's consent, so `personalize` stays as the file says, off if unsaid.
         del data["profile"]
+    if version == 7:
+        version = 8  # page turns default to four
+
     data["schema_version"] = version
     return data
 
