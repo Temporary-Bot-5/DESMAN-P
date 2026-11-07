@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "अमान्य लॉन्च पथ।",
+    "Report a problem": "समस्या की रिपोर्ट करें",
+    "Describe the problem:": "समस्या का वर्णन करें:",
+    "Create a shortcut to the page without starting it.": "पेज शुरू किए बिना शॉर्टकट बनाएँ।",
+    "Shortcut created: {path}": "शॉर्टकट बनाया गया: {path}",
+    "Could not create shortcut: {error}": "शॉर्टकट नहीं बनाया जा सका: {error}",
+    "Shortcuts are not supported on this system yet.": "इस सिस्टम पर शॉर्टकट अभी समर्थित नहीं हैं।",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "टर्मिनल में desman gui से पेज खोलें; desman gui --shortcut शॉर्टकट बनाता है।",
     "Conversation": "बातचीत",
     "Download": "डाउनलोड करें",
     "Role models": "भूमिका मॉडल",

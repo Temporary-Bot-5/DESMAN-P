@@ -15,6 +15,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "Недопустимый путь запуска.",
+    "Report a problem": "Сообщить о неполадке",
+    "Describe the problem:": "Опишите неполадку:",
+    "Create a shortcut to the page without starting it.": "Создать ярлык страницы, не запуская её.",
+    "Shortcut created: {path}": "Ярлык создан: {path}",
+    "Could not create shortcut: {error}": "Не удалось создать ярлык: {error}",
+    "Shortcuts are not supported on this system yet.": "Ярлыки для этой системы пока не поддерживаются.",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Откройте страницу командой desman gui в терминале; desman gui --shortcut создаёт ярлык.",
     "Conversation": "Общение",
     "Download": "Скачать",
     "Role models": "Модели ролей",

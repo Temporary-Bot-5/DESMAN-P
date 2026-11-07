@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "Ungültiger Startpfad.",
+    "Report a problem": "Problem melden",
+    "Describe the problem:": "Beschreiben Sie das Problem:",
+    "Create a shortcut to the page without starting it.": "Eine Verknüpfung zur Seite erstellen, ohne sie zu starten.",
+    "Shortcut created: {path}": "Verknüpfung erstellt: {path}",
+    "Could not create shortcut: {error}": "Verknüpfung konnte nicht erstellt werden: {error}",
+    "Shortcuts are not supported on this system yet.": "Verknüpfungen werden auf diesem System noch nicht unterstützt.",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Öffnen Sie die Seite mit desman gui im Terminal; desman gui --shortcut erstellt eine Verknüpfung.",
     "Conversation": "Gespräch",
     "Download": "Herunterladen",
     "Role models": "Rollenmodelle",

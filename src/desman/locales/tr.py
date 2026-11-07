@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "Geçersiz başlatma yolu.",
+    "Report a problem": "Sorun bildir",
+    "Describe the problem:": "Sorunu açıklayın:",
+    "Create a shortcut to the page without starting it.": "Sayfayı başlatmadan bir kısayol oluştur.",
+    "Shortcut created: {path}": "Kısayol oluşturuldu: {path}",
+    "Could not create shortcut: {error}": "Kısayol oluşturulamadı: {error}",
+    "Shortcuts are not supported on this system yet.": "Bu sistemde kısayollar henüz desteklenmiyor.",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Sayfayı terminalde desman gui ile açın; desman gui --shortcut bir kısayol oluşturur.",
     "Conversation": "Sohbet",
     "Download": "İndir",
     "Role models": "Rol modelleri",

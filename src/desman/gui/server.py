@@ -123,6 +123,7 @@ def strings() -> dict[str, str]:
         "delete_chats": t("Delete all chats"),
         "settings": t("Settings"),
         "messenger": t("Messenger"),
+        "report_problem": t("Report a problem"),
         "sessions": t("Chats"),
         "tasks": t("Tasks"),
         "pin": t("Pin"),

@@ -36,6 +36,22 @@ class Topic:
 
 TOPICS: Final = (
     Topic(
+        "page",
+        "the browser page, panels, settings, problem reports and desktop shortcuts",
+        "`desman gui` opens the local browser page with the same chat and confirmation windows. "
+        "The left panel lists sessions: new and temporary chats, General_Terminal for commands "
+        "and their output, pinned sessions and delete all (confirmed). At the bottom, Report a "
+        "problem asks for a description, then previews the exact report for confirmation; "
+        "sending needs desman-global. Its result goes to General_Terminal without leaving the "
+        "chat; the unread badge points there. Messenger opens messages. Settings opens a window "
+        "for configuration; changes use the same command bodies and confirmations. "
+        "The right panel switches between Tasks and Modules. Module cards show state, calls, "
+        "model and key; the pencil chooses a model/key for here or for the role. The "
+        "interlocutor card sits above the chat. `desman gui --shortcut` creates launch shortcuts "
+        "without starting the page: Desktop and Start menu on Windows; the applications menu "
+        "and an existing desktop folder on Linux. Other systems are not supported yet.",
+    ),
+    Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
         "Work the person asks for becomes a task. A planner model splits its goal into at "

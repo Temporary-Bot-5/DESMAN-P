@@ -413,7 +413,7 @@ class NewSessionAction(Action):
 
 
 class SimpleAction(Action):
-    type: Literal["delete_all", "messenger", "terminal"]
+    type: Literal["delete_all", "messenger", "terminal", "report_problem"]
 
 
 class DecideAction(Action):
