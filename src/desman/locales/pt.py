@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "indisponível no momento",
     "Models and keys for roles": "Modelos e chaves por função",
     "key: {role}": "chave: {role}",
@@ -19,6 +20,14 @@ MESSAGES: dict[str, Forms] = {
     "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "A primeira chave de uma função: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use um rótulo ou número. Repetível.",
     "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "O primeiro modelo de uma função: planner, reviewer, decomposer, text, code, analysis, interlocutor. Repetível.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "Mude com `desman tuning --max-subtasks N|auto` (e --max-parts, --context-tokens, --max-attempts, --max-transient), `--model PAPEL=PROVEDOR/MODELO|auto` ou `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}” não é um comando. General_Terminal aceita apenas comandos do DESMAN (`help` lista-os); para conversar, volte ao chat com /back.",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "Digite `protected show` para ver a alteração e `protected approve` para aprová-la.",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "Decida com `inbox` ou `retry`, `accept`, `fail` REF.",
+    "open General_Terminal": "abrir General_Terminal",
+    "return from General_Terminal to the previous chat": "voltar de General_Terminal à conversa anterior",
+    "{name} is not available in General_Terminal": "{name} não está disponível em General_Terminal",
+    "{n} new in General_Terminal (/terminal)": "{n} novos em General_Terminal (/terminal)",
+    "Type a command here": "Digite um comando aqui",
     "Pinned": "Fixados",
     "Modules": "Módulos",
     "Tokens": "Tokens",
@@ -269,7 +278,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} subtarefa aguarda sua decisão:",
         "{n} subtarefas aguardam sua decisão:",
     ),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Peça aqui para tentar de novo, aceitar ou falhar uma, ou decida no terminal: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Decida com: desman retry|accept|fail <ref> [--note TEXTO]",
     "say why it failed": "diga por que falhou",
     "it changed meanwhile, try again: {error}": "mudou nesse meio-tempo, tente de novo: {error}",
@@ -742,7 +750,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {model} para {server}, {size}: {reason}",
     "To use it: {command}": "Para usá-lo: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "Peça aqui para mostrar a mudança ou aprová-la.",
     "Approve the protected files as they are now, so tasks run again:": "Aprovar os arquivos protegidos como estão agora, para que as tarefas voltem a rodar:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "Esses arquivos decidem o que os agentes podem fazer e como o trabalho deles é avaliado: aprove só uma mudança que você examinou (desman protected show --diff).",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

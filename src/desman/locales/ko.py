@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "현재 사용할 수 없음",
     "Models and keys for roles": "역할별 모델 및 키",
     "key: {role}": "키: {role}",
@@ -19,6 +20,14 @@ MESSAGES: dict[str, Forms] = {
     "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "역할이 먼저 사용하는 키: planner, reviewer, decomposer, text, code, analysis, interlocutor. 라벨이나 번호를 사용하세요. 반복 지정할 수 있습니다.",
     "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "역할이 먼저 사용하는 모델: planner, reviewer, decomposer, text, code, analysis, interlocutor. 반복 지정할 수 있습니다.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "변경: `desman tuning --max-subtasks N|auto` (그리고 --max-parts, --context-tokens, --max-attempts, --max-transient), `--model 역할=제공자/모델|auto`, 또는 `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}”은(는) 명령이 아닙니다. General_Terminal은 DESMAN 명령만 받습니다 (`help`로 목록 확인). 대화하려면 /back으로 채팅에 돌아가세요.",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "`protected show`로 변경 사항을 보고 `protected approve`로 승인하세요.",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "`inbox` 또는 `retry`, `accept`, `fail` REF로 결정하세요.",
+    "open General_Terminal": "General_Terminal 열기",
+    "return from General_Terminal to the previous chat": "General_Terminal에서 이전 채팅으로 돌아가기",
+    "{name} is not available in General_Terminal": "General_Terminal에서 {name}을 사용할 수 없습니다",
+    "{n} new in General_Terminal (/terminal)": "General_Terminal에 새 이벤트 {n}개 (/terminal)",
+    "Type a command here": "여기에 명령을 입력하세요",
     "Pinned": "고정됨",
     "Modules": "모듈",
     "Tokens": "토큰",
@@ -256,7 +265,6 @@ MESSAGES: dict[str, Forms] = {
     "strategy": "전략",
     "{n} task: {statuses}.": ("작업 {n}개: {statuses}.",),
     "{n} subtask waits for your decision:": ("하위 작업 {n}개가 결정을 기다리고 있습니다:",),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "여기서 재시도, 승인 또는 실패 처리를 요청하거나 터미널에서 결정하세요: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "결정 방법: desman retry|accept|fail <ref> [--note 텍스트]",
     "say why it failed": "실패한 이유를 적어 주세요",
     "it changed meanwhile, try again: {error}": "그 사이에 변경되었습니다. 다시 시도하세요: {error}",
@@ -693,7 +701,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server}용 {model}, {size}: {reason}",
     "To use it: {command}": "사용하려면: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "여기서 변경 내용을 보여 달라고 하거나 승인할 수 있습니다.",
     "Approve the protected files as they are now, so tasks run again:": "보호된 파일을 지금 상태로 승인해 작업이 다시 실행되게 합니다:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "이 파일들은 에이전트가 무엇을 할 수 있는지, 그 작업을 어떻게 평가하는지 정합니다. 직접 살펴본 변경만 승인하세요 (desman protected show --diff).",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (

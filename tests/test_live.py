@@ -277,7 +277,7 @@ def test_a_chat_task_shows_its_progress_and_every_call_is_attributed(
     assert "TP 1351." in result.output and KEY not in result.output
 
     conn = sqlite3.connect(db.default_db_path())
-    [(session_id,)] = conn.execute("SELECT id FROM sessions")
+    [(session_id,)] = conn.execute("SELECT id FROM sessions WHERE terminal = 0")
     [(task_id,)] = conn.execute("SELECT id FROM tasks")
     [(subtask_id,)] = conn.execute("SELECT id FROM subtasks")
     rows = conn.execute(

@@ -7,21 +7,23 @@ typing numbers. A cancelled prompt (Ctrl+C, Esc) raises `Cancelled`.
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import sys
 import unicodedata
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Protocol, TypeVar
 
 import click
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from rich.cells import cell_len
-from rich.console import Console, RenderableType
+from rich.console import Console, ConsoleOptions, RenderableType
 from rich.live import Live
 from rich.panel import Panel
+from rich.segment import Segment
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
@@ -410,7 +412,7 @@ class NewSessionAction(Action):
 
 
 class SimpleAction(Action):
-    type: Literal["delete_all", "settings", "messenger"]
+    type: Literal["delete_all", "settings", "messenger", "terminal"]
 
 
 class DecideAction(Action):
@@ -441,6 +443,7 @@ class Front(Protocol):
     def reset(self) -> None: ...
     def greeting(self) -> AbstractContextManager[None]: ...
     def session(self, id: str | None, temporary: bool) -> None: ...
+    def terminal_seen(self, seq: int) -> None: ...
     def transcript_limit(self) -> int: ...
     def interactive(self) -> bool: ...
     def out(self, *items: RenderableType | str) -> None: ...
@@ -480,6 +483,9 @@ class TerminalFront:
         yield
 
     def session(self, id: str | None, temporary: bool) -> None:
+        pass
+
+    def terminal_seen(self, seq: int) -> None:
         pass
 
     def transcript_limit(self) -> int:
@@ -558,6 +564,110 @@ def use(front: Front) -> Iterator[None]:
         _front = previous
 
 
+@contextmanager
+def _ui_writes() -> Iterator[None]:
+    global _ui_depth
+    stdout = sys.stdout.target if isinstance(sys.stdout, _Tee) else sys.stdout
+    stderr = sys.stderr.target if isinstance(sys.stderr, _Tee) else sys.stderr
+    _ui_depth += 1
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            yield
+    finally:
+        _ui_depth -= 1
+
+
+_ui_depth = 0
+
+
+@dataclass
+class Recording:
+    buffer: io.StringIO
+    redact: Callable[[str], str]
+
+    @property
+    def text(self) -> str:
+        return Text.from_ansi(self.buffer.getvalue()).plain
+
+
+_recordings: list[Recording] = []
+
+
+def _record(*items: RenderableType | str) -> None:
+    if _ui_depth:
+        return
+    for recording in _recordings:
+        _RecordingConsole(recording).print(*items)
+
+
+class _RecordingConsole(Console):
+    """Redact Rich text before layout can wrap a key across lines or table borders."""
+
+    def __init__(self, recording: Recording) -> None:
+        super().__init__(file=recording.buffer, width=100, color_system=None, theme=THEME)
+        self.recording = recording
+
+    def render(
+        self, renderable: RenderableType, options: ConsoleOptions | None = None
+    ) -> Iterable[Segment]:
+        if isinstance(renderable, str):
+            renderable = Text.from_markup(renderable)
+        if isinstance(renderable, Text):
+            redacted = self.recording.redact(renderable.plain)
+            if redacted != renderable.plain:
+                renderable = Text(redacted, style=renderable.style)
+        yield from super().render(renderable, options)
+
+
+class _Tee(io.TextIOBase):
+    def __init__(self, target: Any, recording: Recording) -> None:
+        self.target = target
+        self.recording = recording
+
+    encoding = "utf-8"
+
+    def isatty(self) -> bool:
+        return bool(self.target.isatty())
+
+    def fileno(self) -> int:
+        return int(self.target.fileno())
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, value: str) -> int:
+        self.recording.buffer.write(value)
+        return int(self.target.write(value))
+
+    def flush(self) -> None:
+        self.target.flush()
+
+
+@contextmanager
+def recording(
+    *, show: bool = True, redact: Callable[[str], str] | None = None
+) -> Iterator[Recording]:
+    """Tee output into colourless text, optionally keeping notices off the active front."""
+    rec = Recording(io.StringIO(), redact or (lambda value: value))
+    _recordings.append(rec)
+    previous = _front
+    try:
+        if not show:
+            # A quiet terminal front still uses the same UI rendering paths.
+            with (
+                redirect_stdout(_Tee(io.StringIO(), rec)),
+                redirect_stderr(_Tee(io.StringIO(), rec)),
+                use(TerminalFront()),
+            ):
+                yield rec
+        else:
+            with redirect_stdout(_Tee(sys.stdout, rec)), redirect_stderr(_Tee(sys.stderr, rec)):
+                yield rec
+    finally:
+        _recordings.remove(rec)
+        assert _front is previous
+
+
 def live_start(terminal: bool | None = None) -> bool:
     return _front.live_start(terminal)
 
@@ -575,31 +685,47 @@ def interactive() -> bool:
 
 
 def out(*items: RenderableType | str) -> None:
-    return _front.out(*items)
+    _record(*items)
+    with _ui_writes():
+        _front.out(*items)
 
 
 def header(title: str, subtitle: str = "") -> None:
-    return _front.header(title, subtitle)
+    _record(
+        Panel(Text(title + ("\n" + subtitle if subtitle else "")), padding=(0, 2), expand=False)
+    )
+    with _ui_writes():
+        _front.header(title, subtitle)
 
 
 def section(title: str) -> None:
-    return _front.section(title)
+    _record(Text(f"── {title} " + "─" * max(0, 50 - len(title))))
+    with _ui_writes():
+        _front.section(title)
 
 
 def note(text: str) -> None:
-    return _front.note(text)
+    _record(Text(text))
+    with _ui_writes():
+        _front.note(text)
 
 
 def ok(text: str) -> None:
-    return _front.ok(text)
+    _record(Text("✓ " + text))
+    with _ui_writes():
+        _front.ok(text)
 
 
 def warn(text: str, *, stderr: bool = False) -> None:
-    return _front.warn(text, stderr=stderr)
+    _record(Text("! " + text))
+    with _ui_writes():
+        _front.warn(text, stderr=stderr)
 
 
 def error(text: str) -> None:
-    return _front.error(text)
+    _record(Text("✗ " + text))
+    with _ui_writes():
+        _front.error(text)
 
 
 def select(question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
@@ -646,3 +772,7 @@ def session(id: str | None, temporary: bool) -> None:
 
 def transcript_limit() -> int:
     return _front.transcript_limit()
+
+
+def terminal_seen(seq: int) -> None:
+    _front.terminal_seen(seq)

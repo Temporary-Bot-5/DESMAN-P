@@ -16,6 +16,7 @@ from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db, operator, protected
 from desman.core.protected import Blocked, Change, Kind, Layout, ProtectedError
+from desman.core.sessions import Sessions
 from desman.interlocutor import CHAT
 from desman.llm.fake import FakeLLM
 from helpers import make_config
@@ -412,8 +413,25 @@ def test_the_chat_says_tasks_are_blocked_and_runs_none(fake: FakeLLM, here: Pack
     here.edit("agents.py", b"")
     fake.on(CHAT, json.dumps({"type": "task", "title": "Haiku", "goal": "Write a haiku"}))
     result = chat("write me a haiku")
-    assert result.output.count("Protected files changed without your approval") == 2
-    assert "Ask here to show the change or approve it." in result.output  # told once
+    # The failed conversation turn explains its refusal; the startup notice stays in the console.
+    assert result.output.count("Protected files changed without your approval") == 1
+    assert "1 new in General_Terminal (/terminal)" in result.output
+    assert (
+        "Type `protected show` to see the change and `protected approve` to approve it."
+        not in result.output
+    )
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        events = sessions.messages(sessions.terminal())
+        assert len(events) == 1
+        assert "Protected files changed without your approval" in events[0].text
+        assert (
+            "Type `protected show` to see the change and `protected approve` to approve it."
+            in events[0].text
+        )
+    finally:
+        conn.close()
     assert "Planning…" not in result.output
     assert tasks() == 0
 

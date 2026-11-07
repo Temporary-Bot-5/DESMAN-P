@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "şu anda kullanılamıyor",
     "Models and keys for roles": "Roller için modeller ve anahtarlar",
     "key: {role}": "anahtar: {role}",
@@ -19,6 +20,14 @@ MESSAGES: dict[str, Forms] = {
     "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "Rolün ilk denediği anahtar: planner, reviewer, decomposer, text, code, analysis, interlocutor. Etiket veya numara kullanın. Tekrarlanabilir.",
     "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "Rolün ilk denediği model: planner, reviewer, decomposer, text, code, analysis, interlocutor. Tekrarlanabilir.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "Değiştirmek için `desman tuning --max-subtasks N|auto` (ve --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROL=SAĞLAYICI/MODEL|auto` veya `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
+    "“{word}” is not a command. General_Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}” bir komut değil. General_Terminal yalnızca DESMAN komutlarını kabul eder (`help` listeler); konuşmak için /back ile sohbete dönün.",
+    "Type `protected show` to see the change and `protected approve` to approve it.": "Değişikliği görmek için `protected show`, onaylamak için `protected approve` yazın.",
+    "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "`inbox` veya `retry`, `accept`, `fail` REF ile karar verin.",
+    "open General_Terminal": "General_Terminal aç",
+    "return from General_Terminal to the previous chat": "General_Terminal üzerinden önceki sohbete dön",
+    "{name} is not available in General_Terminal": "{name}, General_Terminal içinde kullanılamaz",
+    "{n} new in General_Terminal (/terminal)": "General_Terminal içinde {n} yeni olay (/terminal)",
+    "Type a command here": "Buraya bir komut yazın",
     "Pinned": "Sabitlenenler",
     "Modules": "Modüller",
     "Tokens": "Tokenler",
@@ -256,7 +265,6 @@ MESSAGES: dict[str, Forms] = {
     "strategy": "strateji",
     "{n} task: {statuses}.": ("{n} görev: {statuses}.",),
     "{n} subtask waits for your decision:": ("{n} alt görev kararınızı bekliyor:",),
-    "Ask here to retry, accept or fail one, or decide in the terminal: desman inbox.": "Burada yeniden denemeyi, kabul etmeyi veya başarısız saymayı isteyin ya da terminalde karar verin: desman inbox.",
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Karar verin: desman retry|accept|fail <ref> [--note METİN]",
     "say why it failed": "neden başarısız olduğunu yazın",
     "it changed meanwhile, try again: {error}": "bu arada değişti, tekrar deneyin: {error}",
@@ -697,7 +705,6 @@ MESSAGES: dict[str, Forms] = {
     "[{seq}] {model} for {server}, {size}: {reason}": "[{seq}] {server} için {model}, {size}: {reason}",
     "To use it: {command}": "Kullanmak için: {command}",
     # ── Protected files (5.3) ──
-    "Ask here to show the change or approve it.": "Değişikliği göstermesini ya da onaylamasını buradan isteyin.",
     "Approve the protected files as they are now, so tasks run again:": "Korunan dosyaları şimdiki halleriyle onaylayın, böylece görevler yeniden çalışır:",
     "These files decide what agents may do and how their work is judged: approve only a change you have looked at (desman protected show --diff).": "Bu dosyalar ajanların neler yapabileceğine ve işlerinin nasıl değerlendirileceğine karar verir: yalnızca incelediğiniz bir değişikliği onaylayın (desman protected show --diff).",
     "{n} protected file changed without your approval: nothing runs until you approve it.": (
