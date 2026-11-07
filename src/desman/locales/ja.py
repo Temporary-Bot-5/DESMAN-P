@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This role does not read choices here: choose it for the role everywhere.": "この役割はここでの選択を参照しません。役割全体に適用してください。",
     "Chat": "チャット",
     "Change": "変更",
     "Only here": "ここだけ",

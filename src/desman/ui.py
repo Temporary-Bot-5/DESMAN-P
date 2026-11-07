@@ -429,6 +429,13 @@ class DecideAction(Action):
         return self
 
 
+# Config-independent for the registry; tested against core.choices.ROLES_BY_SCOPE.
+MODULE_ROLES_BY_SCOPE: dict[str, tuple[str, ...]] = {
+    "task": ("reviewer", "decomposer", "text", "code", "analysis"),
+    "session": ("interlocutor",),
+}
+
+
 class ModuleAction(Action):
     type: Literal["module"]
     role: Literal["planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"]
@@ -442,8 +449,8 @@ class ModuleAction(Action):
     def valid_scope(self) -> ModuleAction:
         if (self.scope == "role") != (self.scope_id is None):
             raise ValueError("scope id required only for task/session")
-        if self.scope == "session" and self.role != "interlocutor":
-            raise ValueError("session card is the interlocutor")
+        if self.scope != "role" and self.role not in MODULE_ROLES_BY_SCOPE[self.scope]:
+            raise ValueError("role does not read choices in this scope")
         return self
 
 

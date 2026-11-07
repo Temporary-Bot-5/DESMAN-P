@@ -15,6 +15,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This role does not read choices here: choose it for the role everywhere.": "Ta rola nie odczytuje tutaj wyborów: wybierz je dla roli wszędzie.",
     "Chat": "Czat",
     "Change": "Zmień",
     "Only here": "Tylko tutaj",

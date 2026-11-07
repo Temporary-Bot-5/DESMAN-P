@@ -30,7 +30,12 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 "terminal": {"id": None, "unread": 0},
             }
             if kind == "sessions"
-            else {"modules": [], "roles": [], "interlocutor": None}
+            else {
+                "modules": [],
+                "roles": [],
+                "roles_by_scope": choices.ROLES_BY_SCOPE,
+                "interlocutor": None,
+            }
             if kind == "modules"
             else {"tasks": []}
         )
@@ -95,6 +100,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 result = {
                     "modules": module_rows,
                     "roles": tuning_cli.role_rows(config),
+                    "roles_by_scope": choices.ROLES_BY_SCOPE,
                     "interlocutor": chat,
                 }
                 # Redact every string, including user-controlled labels and stored model names.

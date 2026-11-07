@@ -558,9 +558,14 @@ function moduleCard(parent, m, placement = "modules") {
   const model = select(words.model);
   const key = select(words.key);
   const scope = select(words.scope);
-  option(scope, m.scope, words.only_here).disabled = !m.scope_id;
+  const allowedHere = (moduleSnapshot.roles_by_scope?.[m.scope] || []).includes(m.role);
+  option(scope, m.scope, words.only_here).disabled = !m.scope_id || !allowedHere;
+  if (!allowedHere) {
+    scope.disabled = true;
+    scope.title = words.scope_unavailable;
+  }
   option(scope, "role", words.everywhere);
-  scope.value = m.scope_id ? m.scope : "role";
+  scope.value = m.scope_id && allowedHere ? m.scope : "role";
   function keys(preferred) {
     key.replaceChildren();
     option(key, "", words.auto);

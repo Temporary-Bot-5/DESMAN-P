@@ -38,6 +38,9 @@ def strings() -> dict[str, str]:
         "lang": language(),
         "change": t("Change"),
         "only_here": t("Only here"),
+        "scope_unavailable": t(
+            "This role does not read choices here: choose it for the role everywhere."
+        ),
         "everywhere": t("For the role everywhere"),
         "apply": t("Apply"),
         "scope": t("Scope"),

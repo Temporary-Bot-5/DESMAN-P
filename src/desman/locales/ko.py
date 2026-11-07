@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This role does not read choices here: choose it for the role everywhere.": "이 역할은 여기의 선택을 읽지 않습니다. 역할 전체에 적용하세요.",
     "Chat": "채팅",
     "Change": "변경",
     "Only here": "여기에서만",

@@ -77,6 +77,7 @@ def test_module_snapshot_and_session_usage(module_app: Any) -> None:
 
         check(json.loads(response.body))
     data = json.loads(app.handle("GET", "/modules", headers(app)).body)
+    assert data["roles_by_scope"] == {k: list(v) for k, v in choices.ROLES_BY_SCOPE.items()}
     assert data["modules"][0]["task_id"] == task
     assert {r["role"] for r in data["modules"]} == {"text", "reviewer"}
     card = data["interlocutor"]
@@ -102,6 +103,8 @@ def payload(**fields: Any) -> dict[str, Any]:
     "fields",
     [
         dict(extra=1),
+        dict(role="planner"),
+        dict(role="interlocutor"),
         dict(scope="global"),
         dict(role="unknown"),
         dict(key="secret"),
@@ -111,11 +114,13 @@ def payload(**fields: Any) -> dict[str, Any]:
     ],
 )
 def test_module_action_is_strict(module_app: Any, fields: dict[str, Any]) -> None:
-    app, _ = module_app
+    app, store = module_app
+    before = store.conn.total_changes
     assert (
         app.handle("POST", "/action", headers(app), json.dumps(payload(**fields)).encode()).status
         == 400
     )
+    assert store.conn.total_changes == before
     with pytest.raises(ValidationError):
         ui.ACTIONS.validate_python(payload(**fields))
 
@@ -279,3 +284,7 @@ def test_interlocutor_inherits_role_until_session_override(module_app: Any) -> N
     assert card()["key_fingerprint"] == config.tuning.keys.interlocutor
     modules_cli.set_module(store.conn, config, "session", session, "interlocutor", "auto", "auto")
     assert card()["source"] == "role"
+
+
+def test_ui_scope_roles_match_choices() -> None:
+    assert ui.MODULE_ROLES_BY_SCOPE == choices.ROLES_BY_SCOPE
