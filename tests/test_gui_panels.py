@@ -68,16 +68,20 @@ def test_action_validation_and_line_gate(panel_app: tuple[Server, Store]) -> Non
     ]
     for bad in bad_actions:
         assert send(bad) == 400
-    assert send({"type": "settings"}) == 409
+    assert send({"type": "settings", "id": "setup", "change": {"section": "wizard"}}) == 409
     got: list[Any] = []
     thread = threading.Thread(target=lambda: got.append(app.front.line()))
     thread.start()
     with app.front.condition:
         assert app.front.condition.wait_for(lambda: app.front.prompt is not None, timeout=2)
-    assert send({"type": "settings"}) == 200
-    assert send({"type": "settings"}) == 409
+    assert send({"type": "settings", "id": "setup", "change": {"section": "wizard"}}) == 200
+    assert send({"type": "settings", "id": "setup", "change": {"section": "wizard"}}) == 409
     thread.join(2)
-    assert got == [ui.SimpleAction(type="settings")]
+    assert got == [
+        ui.ACTIONS.validate_python(
+            {"type": "settings", "id": "setup", "change": {"section": "wizard"}}
+        )
+    ]
 
 
 def test_greeting_reset_and_replay() -> None:
@@ -228,9 +232,9 @@ def test_simple_actions_reuse_chat_commands(
     monkeypatch.setattr(chat, "_typed", seen.append)
     monkeypatch.setattr(chat, "_slash", seen.append)
     monkeypatch.setattr(chat, "_delete_all", lambda: seen.append("delete_all"))
-    for type in ["settings", "messenger", "delete_all"]:
+    for type in ["messenger", "delete_all"]:
         chat._action(ui.ACTIONS.validate_python({"type": type}))
-    assert seen == ["config", "/messages", "delete_all"]
+    assert seen == ["/messages", "delete_all"]
 
 
 def test_switch_shows_200_messages_and_erases_temporary(panel_app: tuple[Server, Store]) -> None:
@@ -287,7 +291,11 @@ def test_settings_action_enters_wizard_without_extra_confirmation(
     seen: list[str] = []
     monkeypatch.setattr(wizard, "run", lambda manager: seen.append("wizard"))
     with ui.use(app.front):
-        Chat(Sessions(store.conn))._action(ui.SimpleAction(type="settings"))
+        Chat(Sessions(store.conn))._action(
+            ui.ACTIONS.validate_python(
+                {"type": "settings", "id": "setup", "change": {"section": "wizard"}}
+            )
+        )
     assert seen == ["wizard"]
 
 

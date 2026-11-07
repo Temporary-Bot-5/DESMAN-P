@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import _thread
 import io
+import json
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -51,6 +52,11 @@ class WebFront(ui.Front):
         self.temporary = False
         self.terminal_seq = 0
         self._greeting = False
+        self.settings_outcome: dict[str, Any] | None = None
+
+    def settings_result(self, id: str, ok: bool, message: str) -> None:
+        with self.condition:
+            self.settings_outcome = {"id": id, "ok": ok, "message": self.redact(message)}
 
     def emit(self, event_type: str, **data: Any) -> None:
         """Append retained display output and wake readers waiting for changes."""
@@ -197,13 +203,25 @@ class WebFront(ui.Front):
         with self.condition:
             self._prompt_id += 1
             self._answer = None
-            self.prompt = {
+            prompt = {
                 "type": "prompt",
                 "id": self._prompt_id,
                 "kind": kind,
                 "question": question,
                 **data,
             }
+
+            def public(value: Any) -> Any:
+                if isinstance(value, str):
+                    return self._redact_html(self.redact(value))
+                if isinstance(value, dict):
+                    return {k: public(v) for k, v in value.items()}
+                if isinstance(value, list):
+                    return [public(v) for v in value]
+                return value
+
+            # Even code-built previews/defaults can contain a key copied into a setting.
+            self.prompt = public(prompt)
             self.emit("prompt", **{k: v for k, v in self.prompt.items() if k != "type"})
             try:
                 # Timed waits let Ctrl+C reach the main thread on Windows too.
@@ -363,9 +381,18 @@ def redact_keys(text: str, *, escaped: bool = False) -> str:
         config = open_config().load()
     except (ConfigError, OSError):
         config = None  # the shapes of keys are still cut
-    if escaped and config is not None:
-        # Rich export_html uses html.escape with its default quote=True.
-        keys = {escape(k.value) for keys in config.api_keys.values() for k in keys}
+    if config is not None:
+        # Settings and previews may contain JSON-escaped copies; Rich uses html.escape.
+        keys = {
+            form
+            for keys in config.api_keys.values()
+            for k in keys
+            for form in (
+                [json.dumps(k.value)[1:-1], escape(k.value)]
+                if escaped
+                else [json.dumps(k.value)[1:-1]]
+            )
+        }
         for key in sorted(keys, key=len, reverse=True):
             if key:
                 text = text.replace(key, providers.REDACTED)

@@ -287,12 +287,16 @@ class Chat:
         else:
             self._greet()
 
-    def _terminal_output(self, operation: Callable[[], Any], line: str | None = None) -> Any:
+    def _terminal_output(
+        self, operation: Callable[[], Any], line: str | None = None, *, keep_inputs: bool = False
+    ) -> Any:
         config = self._saved_config()
         if line is not None:
             self.sessions.add(self._terminal_id, Role.USER, providers.redact_keys(line, config)[0])
         with ui.recording(
-            show=self.in_terminal, redact=lambda text: providers.redact_keys(text, config)[0]
+            show=self.in_terminal,
+            redact=lambda text: providers.redact_keys(text, config)[0],
+            keep_inputs=keep_inputs,
         ) as rec:
             try:
                 return operation()
@@ -607,9 +611,20 @@ class Chat:
             typed_entry=entry,
         )
 
-    def _confirmed(self, proposal: commands.Proposal) -> bool:
+    def _confirmed(self, proposal: commands.Proposal, *, in_prompt: bool = False) -> bool:
         """The window of a change: what it does, as the command worded it, and the person's
         answer. Nothing the model said is shown here or counts as an answer."""
+        if in_prompt:
+            return ui.confirm(
+                "\n".join(
+                    [
+                        *proposal.lines,
+                        *proposal.warnings,
+                        proposal.question or t("Apply this change?"),
+                    ]
+                ),
+                default=False,
+            )
         ui.section(t("Confirm"))
         for line in proposal.lines:
             ui.out(Text("  " + line))
@@ -1172,6 +1187,9 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
+        if isinstance(action, ui.SettingsAction):
+            self._terminal_output(lambda: self._settings_action(action), keep_inputs=True)
+            return
         if isinstance(action, ui.ModuleAction):
             # Validate the originating chat before recording the change.
             if action.scope == "session" and (
@@ -1185,13 +1203,93 @@ class Chat:
             self._terminal_open()
             return
         if isinstance(action, ui.DecideAction) or (
-            isinstance(action, ui.SimpleAction) and action.type in ("messenger", "settings")
+            isinstance(action, ui.SimpleAction) and action.type == "messenger"
         ):
             if not isinstance(action, ui.DecideAction):
                 self._terminal_open()
             self._terminal_output(lambda: self._dispatch_action(action))
         else:
             self._dispatch_action(action)
+
+    def _settings_action(self, action: ui.SettingsAction) -> None:
+        """Human fields use catalog bodies and the same redacted operator journal."""
+        from desman.gui.settings import command
+        from desman.settings_actions import Forget, ProviderSetting
+
+        before = self._saved_config()
+        message, ok = "", True
+        try:
+            config = open_config().load()
+            change = action.change
+            if isinstance(change, Forget):
+                if not config.personalize:
+                    raise ValueError("personalisation off")
+                self.profile.forget(change.note, Author.PERSON, session_id=self.session_id)
+            elif isinstance(change, ProviderSetting):
+                from desman import wizard
+
+                if providers.redact_keys(change.value, config)[1]:
+                    raise ValueError("a key belongs only in the hidden field")
+                p = providers.find(change.provider)
+                setting = next(s for s in p.settings if s.env == change.setting)
+                with open_config().edit() as edited:
+                    wizard.set_provider_setting(edited, p, setting, change.value)
+                entry = commands.find("config")
+                assert entry is not None
+                self._journal(
+                    entry, commands.ConfigArgs(section="providers"), True, before, typed=True
+                )
+            else:
+                entry, args = command(change, config)
+                context = commands.Context(
+                    self.store,
+                    open_config(),
+                    start_task=lambda *_: None,
+                    resume_task=lambda _: None,
+                    session_id=lambda: self.session_id,
+                )
+                with ui.recording() as shown:
+                    made = entry.handler(context, args)
+                    if isinstance(made, commands.Proposal):
+                        # Keep confirmations belonging to downloads/join/reset. Ordinary fields
+                        # are already the person's explicit act, as with !COMMAND.
+                        confirm = entry.name in ("models add", "global join", "config reset")
+                        made = (
+                            made.apply()
+                            if not confirm or self._confirmed(made, in_prompt=True)
+                            else commands.Outcome(None, done=False)
+                        )
+                if isinstance(args, commands.KeyAddArgs):
+                    # The newly saved key may also have been pasted into its label.
+                    args = args.model_copy(
+                        update={"label": providers.redact_keys(args.label, self._saved_config())[0]}
+                    )
+                self._journal(entry, args, made.done, before, typed=True)
+                ok = made.done
+                if entry.name in ("keys check", "models show", "protected show"):
+                    message = shown.text.strip()
+                if not ok:
+                    message = t("Nothing changed.")
+        except (ui.Cancelled, click.Abort):
+            ok, message = False, t("Nothing changed.")
+        except (
+            ValueError,
+            StopIteration,
+            ConfigError,
+            click.ClickException,
+            commands.BadArgs,
+        ) as e:
+            ok = False
+            message = (
+                e.format_message()
+                if isinstance(e, click.ClickException)
+                else t("Please check your answer and try again.")
+            )
+            ui.error(message)
+        if ok and not message:
+            message = t("Saved")
+            ui.ok(message)
+        ui.settings_result(action.id, ok, message)
 
     def _module_action(self, action: ui.ModuleAction) -> None:
         config = self._config()

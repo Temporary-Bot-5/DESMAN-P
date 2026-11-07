@@ -203,7 +203,7 @@ TOPICS: Final = (
         "and a Tasks/Modules switch on the right. Uniform module cards show model, masked key, "
         "source and usage; Change chooses a model and key only for this task/chat or for the "
         "role everywhere. A new unsaved chat allows only role choices. The collapsible chat "
-        "header shows its interlocutor. Module edits and task decisions keep the chat open; output and unread counts go to General_Terminal. Messenger and Settings open General_Terminal. Panels can "
+        "header shows its interlocutor. Module edits and task decisions keep the chat open; output and unread counts go to General_Terminal. Messenger opens General_Terminal. Settings opens a sectioned window; selects and switches save on change, text and numbers on Enter or blur. Saving keeps the chat open. Panels can "
         "be read while work runs; their actions are available only at the chat input. "
         "The transcript scrolls above a growing input at the bottom; suggestions open above it. "
         "Pinned chats have their own section; dates follow the interface language. "

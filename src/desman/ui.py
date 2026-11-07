@@ -15,7 +15,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Protocol, TypeVar
+from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
 import click
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -29,6 +29,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from desman.i18n import t
+from desman.settings_actions import Setting
 
 T = TypeVar("T")
 
@@ -412,7 +413,7 @@ class NewSessionAction(Action):
 
 
 class SimpleAction(Action):
-    type: Literal["delete_all", "settings", "messenger", "terminal"]
+    type: Literal["delete_all", "messenger", "terminal"]
 
 
 class DecideAction(Action):
@@ -427,6 +428,12 @@ class DecideAction(Action):
         if self.decision == "fail" and not self.note.strip():
             raise ValueError("fail needs a note")
         return self
+
+
+class SettingsAction(Action):
+    type: Literal["settings"]
+    id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$", min_length=1, max_length=80)
+    change: Setting
 
 
 class ModuleAction(Action):
@@ -449,7 +456,12 @@ class ModuleAction(Action):
 
 ACTIONS = TypeAdapter(
     Annotated[
-        SessionAction | NewSessionAction | SimpleAction | DecideAction | ModuleAction,
+        SessionAction
+        | NewSessionAction
+        | SimpleAction
+        | DecideAction
+        | ModuleAction
+        | SettingsAction,
         Field(discriminator="type"),
     ]
 )
@@ -662,9 +674,21 @@ class _Tee(io.TextIOBase):
         self.target.flush()
 
 
+class _QuietOutput:
+    """Keep code-built prompts on the active front while recording panel output silently."""
+
+    def __init__(self, front: Front) -> None:
+        self.front = front
+
+    def __getattr__(self, name: str) -> Any:
+        if name in {"out", "header", "section", "note", "ok", "warn", "error"}:
+            return lambda *args, **kwargs: None
+        return getattr(self.front, name)
+
+
 @contextmanager
 def recording(
-    *, show: bool = True, redact: Callable[[str], str] | None = None
+    *, show: bool = True, redact: Callable[[str], str] | None = None, keep_inputs: bool = False
 ) -> Iterator[Recording]:
     """Tee output into colourless text, optionally keeping notices off the active front."""
     rec = Recording(io.StringIO(), redact or (lambda value: value))
@@ -676,7 +700,7 @@ def recording(
             with (
                 redirect_stdout(_Tee(io.StringIO(), rec)),
                 redirect_stderr(_Tee(io.StringIO(), rec)),
-                use(TerminalFront()),
+                use(cast(Front, _QuietOutput(previous)) if keep_inputs else TerminalFront()),
             ):
                 yield rec
         else:
@@ -795,3 +819,10 @@ def transcript_limit() -> int:
 
 def terminal_seen(seq: int) -> None:
     _front.terminal_seen(seq)
+
+
+def settings_result(id: str, ok: bool, message: str) -> None:
+    """Publish a settings receipt when the front supports the settings window."""
+    hook = getattr(_front, "settings_result", None)
+    if hook is not None:
+        hook(id, ok, message)

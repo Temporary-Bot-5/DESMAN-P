@@ -92,6 +92,7 @@ async function answer(p, value, cancel = false) {
 
 function showPrompt(p) {
   lineOpen = !!p && p.kind === "line";
+  document.body.classList.toggle("settings-prompt", !!p && p.kind !== "line");
   updateActions();
   if (!p) {
     $("prompt").replaceChildren();
@@ -211,12 +212,15 @@ function showPrompt(p) {
         return false;
       };
     }
-    input.focus();
+    if (p.kind === "line" && !$("settings-window").hidden) {
+      $("settings-dialog").focus({preventScroll: true});
+    } else input.focus();
   }
   if (p.kind !== "line") button(form, words.cancel, () => {
     if (input && p.kind === "secret") input.value = "";
     answer(p, null, true);
   });
+  if (p.kind !== "line" && !input) form.querySelector("button")?.focus({preventScroll: true});
   form.onsubmit = e => e.preventDefault();
 }
 
@@ -303,8 +307,13 @@ async function poll() {
 
 
 function updateActions() {
+  if (lineOpen && !sending && !settingsPending) {
+    for (const save of settingsDeferred) queueMicrotask(save);
+    settingsDeferred.clear();
+  }
+  $("settings-wait").textContent = lineOpen ? "" : words.wait;
   document.querySelectorAll("[data-action]").forEach(b => {
-    b.disabled = !lineOpen;
+    b.disabled = !lineOpen || (!!b.closest("#settings-window") && !!settingsPending);
     b.title = lineOpen ? (b.dataset.label || "") : words.wait;
   });
 }
@@ -325,6 +334,11 @@ async function act(action) {
     lineOpen = false;
     updateActions();
   } catch {
+    if (action.type === "settings") {
+      settingsPending = null;
+      settingsReceipt?.settled?.(false);
+      $("settings-result").textContent = words.invalid;
+    }
     $("status").textContent = words.invalid;
   } finally { sending = false; }
 }
@@ -350,7 +364,7 @@ function setupPanels() {
   terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
-  actionButton($("sidebar-bottom"), `⚙ ${words.settings}`, {type: "settings"});
+  button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
   $("topbar").replaceChildren();
   for (const [label, id] of [[words.sessions, "sidebar"], [words.tasks, "tasks-panel"]]) {
     const b = button($("topbar"), label, () => {
@@ -617,3 +631,277 @@ function showModules() {
   }
   updateActions();
 }
+
+// Settings are local UI state; authority stays with the chat's open line.
+let settingsData = null;
+let settingsSection = "general";
+let settingsPending = null;
+let settingsTimer = null;
+let settingsFocus = null;
+let settingsReceipt = null;
+let settingsReceiptTimer = null;
+const settingsDeferred = new Set();
+const settingsSections = ["general", "keys", "roles", "permissions", "personalize", "behaviour", "limits", "models", "network", "protected"];
+
+function closeSettings() {
+  $("settings-window").hidden = true;
+  document.body.classList.remove("settings-open");
+  clearInterval(settingsTimer);
+  settingsFocus?.focus({preventScroll: true});
+}
+
+async function refreshSettings(redraw = false) {
+  try {
+    const response = await fetch("/settings");
+    if (!response.ok) throw new Error();
+    settingsData = await response.json();
+    const result = settingsData.result;
+    if (settingsPending && result?.id === settingsPending) {
+      settingsPending = null;
+      settingsReceipt?.settled?.(result.ok);
+      clearTimeout(settingsReceiptTimer);
+      if (settingsReceipt?.isConnected) {
+        settingsReceipt.textContent = result.ok ? `✓ ${words.saved}` : result.message;
+        settingsReceipt.className = `setting-receipt ${result.ok ? "good" : "bad"}`;
+        const receipt = settingsReceipt;
+        settingsReceiptTimer = setTimeout(() => { receipt.textContent = ""; }, 2000);
+      }
+      $("settings-result").textContent = settingsReceipt?.isConnected ? "" : result.message;
+      $("settings-result").className = result.ok ? "good" : "bad";
+      updateActions();
+      redraw = !settingsReceipt?.isConnected;
+      if (result.ok) {
+        const labels = await fetch("/strings.json");
+        if (labels.ok) { words = await labels.json(); setupPanels(); }
+      }
+    }
+    if (redraw) drawSettings();
+  } catch { $("settings-result").textContent = words.invalid; }
+}
+
+function openSettings() {
+  settingsFocus = document.activeElement;
+  $("settings-window").hidden = false;
+  document.body.classList.add("settings-open");
+  if (document.body.classList.contains("settings-prompt")) {
+    $("prompt").querySelector("input, textarea, button")?.focus({preventScroll: true});
+  } else $("settings-close").focus();
+  refreshSettings(true);
+  clearInterval(settingsTimer);
+  settingsTimer = setInterval(() => {
+    if (!document.hidden) refreshSettings();
+  }, 1500);
+}
+
+function settingSelect(parent, label, options, current) {
+  const row = text("label", "", parent);
+  row.className = "setting-row";
+  text("span", label, row);
+  const select = document.createElement("select");
+  for (const o of options) {
+    const option = text("option", o.label, select);
+    option.value = o.value;
+  }
+  select.value = current ?? "auto";
+  row.append(select);
+  return select;
+}
+
+function settingInput(parent, label, value, type = "text") {
+  const row = text("label", "", parent);
+  row.className = "setting-row";
+  text("span", label, row);
+  const input = document.createElement(type === "textarea" ? "textarea" : "input");
+  if (type !== "textarea") input.type = type;
+  if (type === "checkbox") { input.checked = value; input.setAttribute("role", "switch"); }
+  else input.value = value ?? "";
+  row.append(input);
+  return input;
+}
+
+function settingAuto(parent, change, controls = null) {
+  controls ||= [...parent.querySelectorAll("input, select, textarea")].filter(c => !c.dataset.autosave);
+  const receipt = text("small", "", controls.at(-1)?.parentElement || parent);
+  receipt.className = "setting-receipt";
+  let previous = JSON.stringify(change());
+  const save = () => {
+    if (!receipt.isConnected) return;
+    const value = change();
+    const next = JSON.stringify(value);
+    if (next === previous || controls.some(c => !c.checkValidity())) return;
+    if (!lineOpen || sending || settingsPending) { settingsDeferred.add(save); return; }
+    const id = crypto.randomUUID();
+    settingsPending = id;
+    settingsReceipt = receipt;
+    const before = previous;
+    receipt.settled = ok => { if (!ok) previous = before; };
+    previous = next;
+    act({type: "settings", id, change: value});
+  };
+  for (const control of controls) {
+    control.dataset.autosave = "true";
+    if (control.tagName === "SELECT" || control.type === "checkbox") control.addEventListener("change", save);
+    else {
+      control.addEventListener("blur", save);
+      control.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); } });
+    }
+  }
+}
+
+function settingSave(parent, change, label = words.save) {
+  const b = actionButton(parent, label, () => {
+    if (!lineOpen || sending || settingsPending) return null;
+    const id = crypto.randomUUID();
+    settingsPending = id;
+    settingsReceipt = null;
+    $("settings-result").textContent = "";
+    return {type: "settings", id, change: typeof change === "function" ? change() : change};
+  });
+  if ([words.add_key, words.join, words.lend, words.download, words.approve].includes(label)) b.classList.add("primary");
+  return b;
+}
+
+function drawSettings() {
+  if (!settingsData) return;
+  const d = settingsData;
+  if (settingsSection === "protected" && !d.protected.blocked) settingsSection = "general";
+  const root = $("settings-form");
+  root.replaceChildren();
+  $("settings-nav").replaceChildren();
+  $("settings-heading").textContent = words.settings;
+  $("settings-close").setAttribute("aria-label", words.close);
+  for (const section of settingsSections) {
+    if (section === "protected" && !d.protected.blocked) continue;
+    const b = button($("settings-nav"), words[`settings_${section}`], () => {
+      settingsSection = section; drawSettings();
+    });
+    b.setAttribute("aria-current", String(section === settingsSection));
+  }
+  text("h2", words[`settings_${settingsSection}`], root);
+  if (settingsSection === "general") {
+    const language = settingSelect(root, words.language, d.general.languages, d.general.language);
+    settingAuto(root, () => ({section: "general", language: language.value}));
+    settingSave(root, {section: "wizard"}, words.setup_wizard);
+  } else if (settingsSection === "keys") {
+    const others = text("details", "", root);
+    text("summary", words.other_providers, others);
+    for (const p of [...d.providers].sort((a, b) => Number(b.ready) - Number(a.ready))) {
+      const card = text("section", "", p.ready ? root : others);
+      card.className = "provider-block";
+      const heading = text("div", "", card); heading.className = "provider-heading";
+      text("strong", p.name, heading);
+      text("small", p.ready ? words.status_ready : words.missing, heading).className = "setting-badge";
+      if (/^https?:\/\//.test(p.url)) {
+        const a = text("a", words.get_key, heading);
+        a.href = p.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      }
+      for (const key of p.keys) {
+        const row = text("div", "", card); row.className = "key-row";
+        text("span", `${key.label} ${key.mask}`, row);
+        settingSave(row, {section: "keys", operation: "check", provider: p.id}, words.check);
+        settingSave(row, {section: "keys", operation: "remove", provider: p.id, key: key.fingerprint}, words.delete);
+      }
+      if (p.keyed) button(heading, `+ ${words.add_key}`, () => {
+        if (card.querySelector(".key-entry")) return;
+        const entry = text("div", "", card); entry.className = "key-entry";
+        const label = settingInput(entry, words.key_label, ""); label.maxLength = 60;
+        settingSave(entry, () => ({section: "keys", operation: "add", provider: p.id, label: label.value}), words.add_key);
+        label.focus();
+      });
+      for (const field of p.settings) {
+        const value = settingInput(card, field.label, field.value); value.maxLength = 1000;
+        settingAuto(card, () => ({section: "provider", provider: p.id, setting: field.name, value: value.value || "-"}), [value]);
+      }
+    }
+    root.append(others);
+  } else if (settingsSection === "roles") {
+    const head = text("div", "", root); head.className = "role-row role-head";
+    for (const label of [words.settings_roles, words.model, words.key]) text("small", label, head);
+    for (const role of d.roles) {
+      const card = text("section", "", root); card.className = "role-row"; text("strong", role.label, card);
+      const candidates = [...new Set([...role.candidate_models, ...(role.model ? [role.model] : [])])];
+      const model = settingSelect(card, words.model, [{value: "auto", label: words.auto}, ...candidates.map(m => ({value: m, label: m}))], role.model);
+      const key = settingSelect(card, words.key, [], "auto");
+      const fill = () => {
+        const previous = key.value || role.key_fingerprint || "auto";
+        key.replaceChildren();
+        const provider = (model.value === "auto" ? role.candidate_models[0] || "" : model.value).split("/")[0];
+        const choices = [{value: "auto", label: words.auto}, ...role.candidate_keys.filter(k => k.provider === provider).map(k => ({value: k.fingerprint, label: k.label}))];
+        if (role.key_fingerprint && !choices.some(k => k.value === role.key_fingerprint)) choices.push({value: role.key_fingerprint, label: role.key_label});
+        for (const k of choices) { const o = text("option", k.label, key); o.value = k.value; }
+        key.value = choices.some(k => k.value === previous) ? previous : "auto";
+      };
+      fill(); model.addEventListener("change", fill);
+      settingAuto(card, () => ({section: "roles", role: role.role, model: model.value === "auto" ? null : model.value, key: key.value === "auto" ? null : key.value}));
+    }
+  } else if (settingsSection === "permissions") {
+    for (const p of d.permissions) {
+      const on = settingInput(root, p.label, p.on, "checkbox");
+      settingAuto(root, () => ({section: "permissions", name: p.name, on: on.checked}));
+    }
+  } else if (settingsSection === "personalize") {
+    text("p", d.personalize.consent, root);
+    const on = settingInput(root, words.settings_personalize, d.personalize.on, "checkbox");
+    settingAuto(root, () => ({section: "personalize", on: on.checked}));
+    for (const note of d.personalize.notes) {
+      const row = text("div", note.text, root);
+      settingSave(row, {section: "forget", note: note.id}, words.forget);
+    }
+  } else if (settingsSection === "behaviour") {
+    const values = {};
+    for (const part of ["length", "tone", "style"]) values[part] = settingSelect(root, d.behaviour.labels[part], d.behaviour.choices[part], d.behaviour.values[part]);
+    const custom = settingInput(root, d.behaviour.labels.custom, d.behaviour.values.custom, "textarea"); custom.maxLength = 500;
+    settingAuto(root, () => ({section: "behaviour", ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.value])), custom: custom.value}));
+    settingSave(root, {section: "behaviour", reset: true}, words.reset);
+  } else if (settingsSection === "limits") {
+    for (const limit of d.limits) {
+      const row = text("section", "", root);
+      const input = settingInput(row, limit.label, limit.value, "number");
+      input.placeholder = String(limit.default);
+      text("small", `${limit.min}–${limit.max} · ${words.auto}: ${limit.default}`, input.parentElement.firstChild).className = "setting-description";
+      input.min = limit.min; input.max = limit.max; input.step = 1;
+      settingAuto(row, () => ({section: "limits", name: limit.name, value: input.value === "" ? "auto" : Number(input.value)}));
+      const reset = settingSave(input.parentElement, {section: "limits", name: limit.name, value: "auto"}, "↺");
+      reset.title = words.auto; reset.setAttribute("aria-label", words.auto);
+    }
+  } else if (settingsSection === "models") {
+    for (const p of d.providers.filter(p => ["ollama", "llamacpp"].includes(p.id))) {
+      text("p", `${p.name}: ${p.settings.map(s => `${s.label}: ${s.value}`).join(" · ")}`, root);
+    }
+    const model = settingInput(root, words.model, ""); model.maxLength = 200;
+    const server = settingSelect(root, words.provider, ["ollama", "llamacpp"].map(v => ({value: v, label: v})), "ollama");
+    for (const op of ["show", "add"]) settingSave(root, () => ({section: "models", operation: op, model: model.value, server: server.value}), op === "add" ? words.download : words[op]);
+  } else if (settingsSection === "network") {
+    const status = text("div", "desman-global", root); status.className = "provider-heading";
+    text("small", d.network.enabled ? words.status_active : words.off, status).className = "setting-badge";
+    const advanced = text("details", "", root); text("summary", words.advanced, advanced);
+    const registry = settingInput(advanced, words.registry, d.network.registry || ""); registry.maxLength = 200;
+    settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registry.value || null})}), d.network.enabled ? words.leave : words.join);
+    for (const p of d.providers.filter(p => p.lendable)) {
+      const card = text("section", "", root); card.className = "lending-row"; text("strong", p.name, card);
+      const quota = d.network.donated[p.id];
+      const calls = settingInput(card, words.calls_daily, quota?.calls_per_day ?? d.network.default_quota.calls_per_day, "number"); calls.min = 1; calls.max = 100000;
+      const tokens = settingInput(card, words.tokens_daily, quota?.tokens_per_day ?? d.network.default_quota.tokens_per_day, "number"); tokens.min = 1000; tokens.max = 100000000;
+      const change = () => ({section: "network", operation: quota ? "quota" : "donate", provider: p.id, calls: Number(calls.value), tokens: Number(tokens.value)});
+      if (quota) settingAuto(card, change);
+      else settingSave(card, change, words.lend);
+      if (quota) settingSave(card, {section: "network", operation: "undonate", provider: p.id}, words.unlend);
+    }
+  } else if (settingsSection === "protected") {
+    for (const line of d.protected.lines) text("p", line, root);
+    for (const op of ["show", "approve"]) settingSave(root, {section: "protected", operation: op}, words[op]);
+  }
+  updateActions();
+}
+
+$("settings-close").addEventListener("click", closeSettings);
+document.addEventListener("keydown", e => {
+  if ($("settings-window").hidden || document.body.classList.contains("settings-prompt")) return;
+  if (e.key === "Escape") { e.preventDefault(); closeSettings(); }
+  if (e.key === "Tab") {
+    const controls = [...$("settings-dialog").querySelectorAll("button, input, select, textarea, a[href]")].filter(n => !n.disabled && n.getClientRects().length);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
