@@ -360,3 +360,49 @@ def test_fingerprint_bodies_refuse_unknown_or_wrong_provider(
             fingerprints={"text": fingerprint},
         )
     assert store.conn.total_changes == before
+
+
+@pytest.mark.parametrize("scope", ["role", "task", "session"])
+@pytest.mark.parametrize("secret", ["provider-b", "provider-a", "unknown"])
+def test_auto_model_accepts_any_configured_key(
+    module_app: Any, scope: Literal["role", "task", "session"], secret: str
+) -> None:
+    app, store = module_app
+    config = make_config(api_keys={"GROQ_API_KEY": "provider-a"})
+    config.api_keys["NVIDIA_API_KEY"] = [ApiKey(value="provider-b")]
+    role = "interlocutor" if scope == "session" else "text"
+    models = next(r for r in tuning_cli.role_rows(config) if r["role"] == role)["candidate_models"]
+    tuned = next(m for m in models if m.startswith("nvidia/"))
+    setattr(config.tuning.models, role, tuned)
+    setattr(config.tuning.keys, role, key_id("provider-b"))
+    open_config().save(config)
+    task = store.create_task(
+        TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
+    )
+    sessions = Sessions(store.conn)
+    session = sessions.add(None, Role.USER, "hello").session_id
+    chat = Chat(sessions)
+    chat.session_id = session
+    identity = task if scope == "task" else session if scope == "session" else None
+    if scope != "role":
+        assert identity is not None
+        modules_cli.set_module(store.conn, config, scope, identity, role, tuned, "nvidia:#1")
+    original = open_config().config_path.read_bytes()
+    before = store.conn.execute("SELECT * FROM module_choices").fetchall()
+    with ui.use(app.front):
+        chat._action(
+            ui.ACTIONS.validate_python(
+                payload(role=role, scope=scope, scope_id=identity, model=None, key=key_id(secret))
+            )
+        )
+    if secret == "unknown":
+        assert open_config().config_path.read_bytes() == original
+        assert store.conn.execute("SELECT * FROM module_choices").fetchall() == before
+    elif scope == "role":
+        saved = open_config().load()
+        assert getattr(saved.tuning.models, role) is None
+        assert getattr(saved.tuning.keys, role) == key_id(secret)
+    else:
+        assert identity is not None
+        saved_choice = choices.get(store.conn, scope, identity, role)
+        assert saved_choice.model is None and saved_choice.key == key_id(secret)

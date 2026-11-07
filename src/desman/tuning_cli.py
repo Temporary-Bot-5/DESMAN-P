@@ -184,9 +184,9 @@ def resolved_key(
     """Validate a page's public key identity without interpreting CLI selectors."""
     if fingerprint is None:
         return None
-    selected_model = model or next(iter(router.candidates(config, role)), "")
     if not any(
-        k["fingerprint"] == fingerprint and k["provider"] == selected_model.split("/", 1)[0]
+        k["fingerprint"] == fingerprint
+        and (model is None or k["provider"] == model.split("/", 1)[0])
         for k in key_choices(config)
     ):
         raise click.ClickException(t("Invalid module choice."))

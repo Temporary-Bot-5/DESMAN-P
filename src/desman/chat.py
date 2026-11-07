@@ -1207,14 +1207,7 @@ class Chat:
             row = next(r for r in tuning_cli.role_rows(config) if r["role"] == action.role)
             if action.model is not None and action.model not in row["candidate_models"]:
                 raise ValueError("unavailable model")
-            selected_key = next(
-                (k for k in row["candidate_keys"] if k["fingerprint"] == action.key), None
-            )
-            first_model = action.model or next(iter(row["candidate_models"]), "")
-            if action.key is not None and (
-                selected_key is None or selected_key["provider"] != first_model.split("/", 1)[0]
-            ):
-                raise ValueError("unavailable key")
+            tuning_cli.resolved_key(config, action.role, action.model, action.key)
             if action.scope == "role":
                 old, new, edited = tuning_cli.set_tuning(
                     open_config(),

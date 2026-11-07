@@ -200,9 +200,9 @@ TOPICS: Final = (
         "browser page, chat and task panels, buttons and keyboard completion",
         "`desman gui` opens the same chat in a local browser, with setup and confirmation windows. "
         "The page lists chats on the left (new, temporary, pin, delete, settings and messenger) "
-        "and a Tasks/Modules switch on the right. Uniform module cards show model, masked key, "
+        "and a Tasks/Modules switch on the right. Module cards show model, masked key, "
         "source and model usage (role totals in the tooltip); Change chooses a model and key only for this task/chat or for the "
-        "role everywhere. Only roles that read this scope allow a local choice; the planner allows "
+        "role everywhere. Auto accepts any configured key, used for its provider; a chosen model requires its provider’s key. Only roles that read this scope allow a local choice; the planner allows "
         "only role choices. A new unsaved chat allows only role choices. The collapsible chat "
         "header shows its interlocutor. Module edits and task decisions keep the chat open; output and unread counts go to General_Terminal. Messenger and Settings open General_Terminal. Panels can "
         "be read while work runs; their actions are available only at the chat input. "
