@@ -44,6 +44,7 @@ from desman import (
     local_models,
     messenger_cli,
     models_cli,
+    modules_cli,
     net,
     proposals_cli,
     protected_cli,
@@ -62,7 +63,7 @@ from desman.config import (
     RegistryUrl,
     Tuning,
 )
-from desman.core import db, proposals
+from desman.core import choices, db, proposals
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
@@ -331,6 +332,33 @@ class TuningArgs(Args):
             keys={str(k): v for k, v in (self.keys or {}).items()},
             reset=self.reset,
         )
+
+
+ModuleRole = Literal[
+    "planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"
+]
+
+
+class ModulesShowArgs(Args):
+    task: Ref | None = None
+
+
+class ModulesClearArgs(Args):
+    task: Ref | None = Field(
+        None, description="Task reference: reviewer, decomposer, text, code, analysis only."
+    )
+    session: Ref | None = Field(None, description="Chat ID: interlocutor only.")
+    role: ModuleRole | None = None
+
+
+class ModulesSetArgs(Args):
+    task: Ref | None = Field(
+        None, description="Task reference: reviewer, decomposer, text, code, analysis only."
+    )
+    session: Ref | None = Field(None, description="Chat ID: interlocutor only.")
+    role: ModuleRole
+    model: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
+    key: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
 
 
 ProviderName = Annotated[str, StringConstraints(min_length=1, max_length=40)]
@@ -628,6 +656,61 @@ def _behaviour(ctx: Context, args: BehaviourArgs) -> Outcome | Proposal:
         return Outcome({"changed": True, "behaviour": now.model_dump()})
 
     return Proposal([t("How the interlocutor talks to you:")] + lines, apply)
+
+
+def _modules_show(ctx: Context, args: ModulesShowArgs) -> Outcome:
+    data = modules_cli.modules_data(ctx.store.conn, ctx.config(), args.task)
+    modules_cli.print_modules(data)
+    return Outcome(data)
+
+
+def _module_scope(
+    ctx: Context, args: ModulesSetArgs | ModulesClearArgs
+) -> tuple[choices.Scope, str]:
+    session = args.session
+    if args.task is None and session is None and args.role == "interlocutor":
+        session = ctx.session_id()
+    return modules_cli.scope_id(ctx.store.conn, args.task, session)
+
+
+def _modules_set(ctx: Context, args: ModulesSetArgs) -> Proposal:
+    if args.model is None and args.key is None:
+        raise click.ClickException(t("Give --model or --key."))
+    scope, identity = _module_scope(ctx, args)
+    config = ctx.config()
+    old, new = modules_cli.preview(
+        ctx.store.conn, config, scope, identity, args.role, args.model, args.key
+    )
+
+    def apply() -> Outcome:
+        before, after = choices.set_choice(ctx.store.conn, scope, identity, args.role, new)
+        for line in modules_cli.change_lines(args.role, before, after, config):
+            ui.ok(line)
+        return Outcome(
+            {"scope": scope, "scope_id": identity, "role": args.role, "choice": after.model_dump()}
+        )
+
+    return Proposal(modules_cli.change_lines(args.role, old, new, config), apply)
+
+
+def _modules_clear(ctx: Context, args: ModulesClearArgs) -> Proposal:
+    scope, identity = _module_scope(ctx, args)
+    modules_cli.check_role(scope, args.role)  # before the window: nothing to approve then
+    config = ctx.config()
+    current = choices.list_choices(ctx.store.conn, scope, identity)
+    lines = [
+        line
+        for role, old in current.items()
+        if args.role in (None, role)
+        for line in modules_cli.change_lines(role, old, choices.Choice(), config)
+    ]
+
+    def apply() -> Outcome:
+        choices.clear(ctx.store.conn, scope, identity, args.role)
+        ui.ok(t("Module choices cleared."))
+        return Outcome({"scope": scope, "scope_id": identity, "cleared": args.role})
+
+    return Proposal(lines or [t("Nothing changed.")], apply)
 
 
 def _tuning_kind(args: TuningArgs) -> Kind:
@@ -1519,6 +1602,30 @@ CATALOG: tuple[Entry, ...] = (
         BehaviourArgs,
         _behaviour_kind,
         _behaviour,
+    ),
+    Entry(
+        "modules show",
+        "Show modules and effective choices of active tasks or one task.",
+        ModulesShowArgs,
+        Kind.READ,
+        _modules_show,
+        aliases=("modules",),
+    ),
+    Entry(
+        "modules set",
+        "Choose a model/key for one task (reviewer, decomposer, text, code, analysis) "
+        "or the interlocutor of one chat. "
+        "Omitted session defaults to the current chat for interlocutor. The person confirms.",
+        ModulesSetArgs,
+        Kind.CHANGE,
+        _modules_set,
+    ),
+    Entry(
+        "modules clear",
+        "Clear choices for one task/chat, optionally one role. The person confirms.",
+        ModulesClearArgs,
+        Kind.CHANGE,
+        _modules_clear,
     ),
     Entry(
         "tuning",

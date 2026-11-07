@@ -1500,7 +1500,7 @@ class Chat:
             more, page = len(page) > LISTED_SESSIONS, page[:LISTED_SESSIONS]
             choices = [
                 ui.Choice(
-                    label=f"{_when(s.last_at)}  {_shorten(s.name) or '…'}",
+                    label=f"{s.id[:8]}  {_when(s.last_at)}  {_shorten(s.name) or '…'}",
                     value=s.id,
                     hint=(t("pinned") + " · " if s.pinned else "")
                     + tn(s.messages, "{n} message", "{n} messages")

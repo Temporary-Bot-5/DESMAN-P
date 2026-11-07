@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "仅在此处选择模型或密钥。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "请只选择 --task 或 --session 其中之一。",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "清除此处的选择。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "请提供 --model 或 --key。",
+    "Invalid module choice.": "模块选择无效。",
+    "Key": "密钥",
+    "Model": "模型",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "单个任务或聊天的模型和密钥。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "模块选择已清除。",
+    "Role": "角色",
+    "Show the modules of active tasks, or one task.": "显示活跃任务或单个任务的模块。",
+    "Source": "来源",
+    "State": "状态",
+    "Task": "任务",
+    "Unknown or ambiguous session ID.": "会话 ID 未知或不明确。",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "当前不可用",
     "Models and keys for roles": "角色的模型和密钥",
@@ -1245,6 +1260,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("已删除 {count} 个会话。",),
         "No unpinned sessions to delete.": "没有可删除的未置顶会话。",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "无法为单个 {scope} 选择 {role}：仅限 {roles}。请通过 `desman tuning` 为该角色选择。",
+        "One task (its reference).": "单个任务（其引用）。",
+        "One chat (its id as /sessions shows it): the interlocutor.": "单个聊天（/sessions 显示的 id）：仅限对话者。",
+        "The model asked first; auto: the role's.": "优先请求的模型；auto：使用角色的模型。",
+        "The key tried first (label or #N); auto: the role's.": "优先尝试的密钥（标签或 #N）；auto：使用角色的密钥。",
     }
 )
 

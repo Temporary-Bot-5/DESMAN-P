@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "여기에서만 모델 또는 키를 선택합니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task 또는 --session 중 하나만 선택하세요.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "여기에서만 선택을 초기화합니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model 또는 --key를 지정하세요.",
+    "Invalid module choice.": "잘못된 모듈 선택입니다.",
+    "Key": "키",
+    "Model": "모델",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "한 작업 또는 채팅의 모델과 키입니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "모듈 선택을 초기화했습니다.",
+    "Role": "역할",
+    "Show the modules of active tasks, or one task.": "활성 작업 또는 한 작업의 모듈을 표시합니다.",
+    "Source": "출처",
+    "State": "상태",
+    "Task": "작업",
+    "Unknown or ambiguous session ID.": "알 수 없거나 모호한 세션 ID입니다.",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "현재 사용할 수 없음",
     "Models and keys for roles": "역할별 모델 및 키",
@@ -1255,6 +1270,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("세션 {count}개를 삭제했습니다.",),
         "No unpinned sessions to delete.": "삭제할 고정되지 않은 세션이 없습니다.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "단일 {scope}에 {role}을 선택할 수 없습니다. {roles}만 가능합니다. `desman tuning`으로 역할에 대해 선택하세요.",
+        "One task (its reference).": "단일 작업(참조).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "단일 채팅(/sessions에 표시되는 id): 대화자만.",
+        "The model asked first; auto: the role's.": "먼저 요청할 모델; auto: 역할의 모델.",
+        "The key tried first (label or #N); auto: the role's.": "먼저 시도할 키(레이블 또는 #N); auto: 역할의 키.",
     }
 )
 

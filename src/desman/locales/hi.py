@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "केवल यहाँ मॉडल या कुंजी चुनें। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task और --session में से ठीक एक चुनें।",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "केवल यहाँ के चुनाव मिटाएँ। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model या --key दें।",
+    "Invalid module choice.": "अमान्य मॉड्यूल चयन।",
+    "Key": "कुंजी",
+    "Model": "मॉडल",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "एक कार्य या चैट के मॉडल और कुंजियाँ। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "मॉड्यूल चयन मिटा दिए गए।",
+    "Role": "भूमिका",
+    "Show the modules of active tasks, or one task.": "सक्रिय कार्यों या एक कार्य के मॉड्यूल दिखाएँ।",
+    "Source": "स्रोत",
+    "State": "स्थिति",
+    "Task": "कार्य",
+    "Unknown or ambiguous session ID.": "अज्ञात या अस्पष्ट सत्र ID।",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "अभी उपलब्ध नहीं",
     "Models and keys for roles": "भूमिकाओं के लिए मॉडल और कुंजियाँ",
@@ -1332,6 +1347,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} सत्र हटाया गया।", "{count} सत्र हटाए गए।"),
         "No unpinned sessions to delete.": "हटाने के लिए कोई अनपिन किया गया सत्र नहीं है।",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "एक {scope} के लिए {role} नहीं चुन सकते: केवल {roles}। भूमिका के लिए `desman tuning` से चुनें।",
+        "One task (its reference).": "एक कार्य (उसका संदर्भ)।",
+        "One chat (its id as /sessions shows it): the interlocutor.": "एक चैट (/sessions में दिखने वाली उसकी id): संवादकर्ता।",
+        "The model asked first; auto: the role's.": "पहले अनुरोध किया जाने वाला मॉडल; auto: भूमिका का मॉडल।",
+        "The key tried first (label or #N); auto: the role's.": "पहले आज़माई जाने वाली कुंजी (लेबल या #N); auto: भूमिका की कुंजी।",
     }
 )
 

@@ -15,6 +15,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Обрати модель або ключ лише тут. Ролі: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "Вкажіть рівно одне: --task або --session.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Скинути вибір лише тут. Ролі: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "Вкажіть --model або --key.",
+    "Invalid module choice.": "Неприпустимий вибір модуля.",
+    "Key": "Ключ",
+    "Model": "Модель",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Моделі й ключі однієї задачі або чату. Ролі: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Вибір модулів скинуто.",
+    "Role": "Роль",
+    "Show the modules of active tasks, or one task.": "Показати модулі активних задач або однієї задачі.",
+    "Source": "Джерело",
+    "State": "Стан",
+    "Task": "Задача",
+    "Unknown or ambiguous session ID.": "Невідомий або неоднозначний ID сесії.",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "зараз недоступно",
     "Models and keys for roles": "Моделі та ключі для ролей",
@@ -1384,6 +1399,16 @@ MESSAGES.update(
             "Видалено {count} сесій.",
         ),
         "No unpinned sessions to delete.": "Немає незакріплених сесій для видалення.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Не можна вибрати {role} для одного {scope}: доступні лише {roles}. Виберіть для ролі через `desman tuning`.",
+        "One task (its reference).": "Одне завдання (його ідентифікатор).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Один чат (його id з /sessions): співрозмовник.",
+        "The model asked first; auto: the role's.": "Модель, яку запитують першою; auto: модель ролі.",
+        "The key tried first (label or #N); auto: the role's.": "Ключ, який пробують першим (мітка або #N); auto: ключ ролі.",
     }
 )
 

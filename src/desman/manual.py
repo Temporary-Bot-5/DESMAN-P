@@ -95,26 +95,24 @@ TOPICS: Final = (
     Topic(
         "providers",
         "models, API keys, free tiers, limits and local models",
-        "DESMAN works through language models of providers whose API keys the person added. "
-        "By default only free tiers are used: free quotas are small and change, so every "
-        "provider is treated as unreliable. Paid providers (OpenAI, Anthropic, DeepSeek, xAI) "
-        "are never chosen by themselves, only when the person names one for a run.\n"
-        "Each role (planner, executor, reviewer, interlocutor) has a lineup of models, best "
-        "for it first. A call that hits a limit, an outage, a refused key or too small a "
-        "context moves to the next model; a provider with several keys uses all of them. "
-        "Calls are paced to each model's free rate, and limits a provider reports are kept "
-        "in the database, so they hold across restarts and parallel workers. When everything "
-        "is limited, work pauses until a quota resets, without spending attempts. The person "
-        "may choose each role’s model and key with `desman tuning` or `desman config`. "
-        "The chosen key is tried first for its provider, then the other keys and models follow.\n"
-        "A local model (Ollama or llama.cpp on the person's machine) costs nothing and has "
-        "no quota but is slow, so it comes after the cloud models. `desman models show MODEL` says "
-        "whether a Hugging Face model fits the machine's memory, `desman models add MODEL` has the "
-        "server download one; agents may only suggest a model.\n"
-        "Keys: added by the person into a hidden field (`desman keys add PROVIDER`), never written in "
-        "the chat; never shown, sent to a model or logged. `desman keys list`, `desman keys "
-        "check` (does a key work, what limits; spends nothing) and `desman usage` (calls and "
-        "tokens per key) show them.",
+        "DESMAN uses providers whose keys the person added. Only free tiers are chosen "
+        "automatically; paid providers require an explicit choice for a run. Quotas change "
+        "and every provider is treated as unreliable.\n"
+        "Each role has a model lineup. Limits, outages, refused keys and small contexts move "
+        "a call to the next model. Multiple keys are tried in turn. Pacing and reported limits "
+        "are shared across workers and restarts; exhausted quotas pause work without spending attempts. "
+        "Choose the model and key asked first per role with `desman tuning` or `desman config`. "
+        "The selected key goes first, followed by the others.\n"
+        "For one task (reviewer, decomposer, text, code, analysis) use `desman modules set ROLE --task REF --model PROVIDER/MODEL`; "
+        "for one chat (interlocutor only) use `desman modules set ROLE --session ID --key PROVIDER:KEY`. "
+        "Both options can be combined. These choices override the role; auto inherits it again. "
+        "`desman modules` shows active tasks; `desman modules clear --task REF` resets choices.\n"
+        "Local Ollama/llama.cpp models cost nothing but are slower, so follow cloud models. "
+        "`desman models show MODEL` checks a Hugging Face model's size; `desman models add MODEL` "
+        "downloads it after confirmation. Agents may only suggest models.\n"
+        "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
+        "model or logs. Inspect with `desman keys list`, `desman keys check` (no tokens) "
+        "and `desman usage`.",
     ),
     Topic(
         "permissions",

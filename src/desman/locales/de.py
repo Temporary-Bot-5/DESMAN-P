@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Modell oder Schlüssel nur hier wählen. Rollen: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "Genau eines von --task und --session angeben.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Auswahl nur hier zurücksetzen. Rollen: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model oder --key angeben.",
+    "Invalid module choice.": "Ungültige Modulauswahl.",
+    "Key": "Schlüssel",
+    "Model": "Modell",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Modelle und Schlüssel einer Aufgabe oder eines Chats. Rollen: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Modulauswahl zurückgesetzt.",
+    "Role": "Rolle",
+    "Show the modules of active tasks, or one task.": "Module aktiver Aufgaben oder einer Aufgabe anzeigen.",
+    "Source": "Quelle",
+    "State": "Status",
+    "Task": "Aufgabe",
+    "Unknown or ambiguous session ID.": "Unbekannte oder mehrdeutige Sitzungs-ID.",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "derzeit nicht verfügbar",
     "Models and keys for roles": "Modelle und Schlüssel für Rollen",
@@ -1335,6 +1350,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} Sitzung gelöscht.", "{count} Sitzungen gelöscht."),
         "No unpinned sessions to delete.": "Keine nicht angehefteten Sitzungen zum Löschen.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "{role} kann nicht für einzelne {scope} gewählt werden: nur {roles}. Wählen Sie für die Rolle mit `desman tuning`.",
+        "One task (its reference).": "Eine Aufgabe (ihre Referenz).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Ein Chat (seine ID aus /sessions): der Gesprächspartner.",
+        "The model asked first; auto: the role's.": "Zuerst angefragtes Modell; auto: das der Rolle.",
+        "The key tried first (label or #N); auto: the role's.": "Zuerst versuchter Schlüssel (Label oder #N); auto: der der Rolle.",
     }
 )
 

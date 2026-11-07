@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Yalnızca burada model veya anahtar seçin. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task ve --session seçeneklerinden tam birini seçin.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Yalnızca buradaki seçimleri temizleyin. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model veya --key belirtin.",
+    "Invalid module choice.": "Geçersiz modül seçimi.",
+    "Key": "Anahtar",
+    "Model": "Model",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Bir görev veya sohbet için modeller ve anahtarlar. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Modül seçimleri temizlendi.",
+    "Role": "Rol",
+    "Show the modules of active tasks, or one task.": "Etkin görevlerin veya bir görevin modüllerini göster.",
+    "Source": "Kaynak",
+    "State": "Durum",
+    "Task": "Görev",
+    "Unknown or ambiguous session ID.": "Bilinmeyen veya belirsiz oturum kimliği.",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "şu anda kullanılamıyor",
     "Models and keys for roles": "Roller için modeller ve anahtarlar",
@@ -1259,6 +1274,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} oturum silindi.",),
         "No unpinned sessions to delete.": "Silinecek sabitlenmemiş oturum yok.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Tek bir {scope} için {role} seçilemez: yalnızca {roles}. Rol için `desman tuning` ile seçin.",
+        "One task (its reference).": "Tek bir görev (referansı).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Tek bir sohbet (/sessions içindeki kimliği): muhatap.",
+        "The model asked first; auto: the role's.": "İlk sorulan model; auto: rolün modeli.",
+        "The key tried first (label or #N); auto: the role's.": "İlk denenen anahtar (etiket veya #N); auto: rolün anahtarı.",
     }
 )
 

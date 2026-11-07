@@ -15,6 +15,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Выбрать модель или ключ только здесь. Роли: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "Укажите ровно одно: --task или --session.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Сбросить выбор только здесь. Роли: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "Укажите --model или --key.",
+    "Invalid module choice.": "Недопустимый выбор модуля.",
+    "Key": "Ключ",
+    "Model": "Модель",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Модели и ключи одной задачи или чата. Роли: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Выбор модулей сброшен.",
+    "Role": "Роль",
+    "Show the modules of active tasks, or one task.": "Показать модули активных задач или одной задачи.",
+    "Source": "Источник",
+    "State": "Состояние",
+    "Task": "Задача",
+    "Unknown or ambiguous session ID.": "Неизвестный или неоднозначный ID сессии.",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "сейчас недоступно",
     "Models and keys for roles": "Модели и ключи для ролей",
@@ -1627,6 +1642,16 @@ MESSAGES.update(
             "Удалено {count} сессий.",
         ),
         "No unpinned sessions to delete.": "Нет незакреплённых сессий для удаления.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Нельзя выбрать {role} для одного {scope}: доступны только {roles}. Выберите для роли через `desman tuning`.",
+        "One task (its reference).": "Одна задача (её идентификатор).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Один чат (его id из /sessions): собеседник.",
+        "The model asked first; auto: the role's.": "Модель, запрашиваемая первой; auto: модель роли.",
+        "The key tried first (label or #N); auto: the role's.": "Ключ, используемый первым (метка или #N); auto: ключ роли.",
     }
 )
 

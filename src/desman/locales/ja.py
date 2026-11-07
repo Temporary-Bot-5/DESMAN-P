@@ -10,6 +10,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "ここだけのモデルまたはキーを選択。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "--task または --session のどちらか一方を指定してください。",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "ここだけの選択を解除。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "--model または --key を指定してください。",
+    "Invalid module choice.": "モジュールの選択が無効です。",
+    "Key": "キー",
+    "Model": "モデル",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "1つのタスクまたはチャットのモデルとキー。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "モジュールの選択を解除しました。",
+    "Role": "役割",
+    "Show the modules of active tasks, or one task.": "実行中のタスクまたは1つのタスクのモジュールを表示。",
+    "Source": "選択元",
+    "State": "状態",
+    "Task": "タスク",
+    "Unknown or ambiguous session ID.": "セッション ID が不明または曖昧です。",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "現在利用できません",
     "Models and keys for roles": "役割ごとのモデルとキー",
@@ -1261,6 +1276,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("セッションを{count}件削除しました。",),
         "No unpinned sessions to delete.": "削除するピン留めされていないセッションはありません。",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "単一の {scope} に {role} は選択できません。対象は {roles} のみです。`desman tuning` で役割に対して選択してください。",
+        "One task (its reference).": "単一のタスク（参照）。",
+        "One chat (its id as /sessions shows it): the interlocutor.": "単一のチャット（/sessions に表示される ID）：対話者のみ。",
+        "The model asked first; auto: the role's.": "最初に問い合わせるモデル。auto：役割のモデル。",
+        "The key tried first (label or #N); auto: the role's.": "最初に試すキー（ラベルまたは #N）。auto：役割のキー。",
     }
 )
 

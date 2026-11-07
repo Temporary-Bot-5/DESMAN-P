@@ -15,6 +15,21 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Wybierz model lub klucz tylko tutaj. Role: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Choose exactly one of --task and --session.": "Wybierz dokładnie jedno z --task i --session.",
+    "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Wyczyść wybór tylko tutaj. Role: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Give --model or --key.": "Podaj --model lub --key.",
+    "Invalid module choice.": "Nieprawidłowy wybór modułu.",
+    "Key": "Klucz",
+    "Model": "Model",
+    "Models and keys for one task or chat. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Modele i klucze jednego zadania lub czatu. Role: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
+    "Module choices cleared.": "Wybory modułów wyczyszczone.",
+    "Role": "Rola",
+    "Show the modules of active tasks, or one task.": "Pokaż moduły aktywnych zadań lub jednego zadania.",
+    "Source": "Źródło",
+    "State": "Stan",
+    "Task": "Zadanie",
+    "Unknown or ambiguous session ID.": "Nieznany lub niejednoznaczny identyfikator sesji.",
     "→ General_Terminal": "→ General_Terminal",
     "not available now": "obecnie niedostępny",
     "Models and keys for roles": "Modele i klucze dla ról",
@@ -1384,6 +1399,16 @@ MESSAGES.update(
             "Usunięto {count} sesji.",
         ),
         "No unpinned sessions to delete.": "Brak nieprzypiętych sesji do usunięcia.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Nie można wybrać {role} dla pojedynczego {scope}: tylko {roles}. Wybierz dla roli przez `desman tuning`.",
+        "One task (its reference).": "Jedno zadanie (jego identyfikator).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Jeden czat (jego id z /sessions): rozmówca.",
+        "The model asked first; auto: the role's.": "Model pytany jako pierwszy; auto: model roli.",
+        "The key tried first (label or #N); auto: the role's.": "Klucz próbowany jako pierwszy (etykieta lub #N); auto: klucz roli.",
     }
 )
 
