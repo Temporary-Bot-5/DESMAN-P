@@ -38,40 +38,12 @@ TOPICS: Final = (
     Topic(
         "page",
         "the browser page, panels, settings, problem reports and desktop shortcuts",
-        "`desman gui` opens the local browser page with the same chat and confirmation windows. "
-        "Searchable provider/model/key pickers stay open across refreshes. The left panel lists sessions: new and temporary chats, General Terminal for commands "
-        "and their output (help lists commands, including clear and /back), pinned sessions "
-        "and delete all (confirmed). At the bottom, Report a "
-        "problem asks for a description, then previews the exact report for confirmation; "
-        "sending needs desman-global. Its result goes to General Terminal without leaving the "
-        "chat; the unread badge points there. Messenger opens messages. Settings opens a window "
-        "for configuration; changes use the same command bodies and confirmations. "
-        "The right panel switches between Tasks and Modules. Module cards show state, calls, "
-        "model and key; the pencil chooses a model/key for here or for the role. The "
-        "interlocutor card sits above the chat. `desman gui --shortcut` creates launch shortcuts "
-        "without starting the page: Desktop and Start menu on Windows; the applications menu "
-        "and an existing desktop folder on Linux. Other systems are not supported yet.",
+        "`desman gui` opens the local browser page with the same chat and confirmation windows. The left sidebar lists chats, pinned first; Delete all chats sits above Report a problem. The right column switches between Tasks and Modules. Its footer stays visible: Delete all tasks hides finished unpinned tasks, preserving their history; Stop all modules pauses unfinished unpinned tasks. Both show a confirmation with the affected tasks. Pin a task to protect it from bulk actions; its modules inherit the pin. Paused tasks have Continue. Module cards show state, usage, the chosen model and the last answering model when different. Their source/model editor is shared with Settings → Roles. Settings saves changes with receipts. General Terminal shows command output. Report a problem collects a description and shows the exact payload for confirmation. `desman gui --shortcut` creates launch shortcuts on Windows and Linux without starting the page.",
     ),
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "Work the person asks for becomes a task. A planner model splits its goal into at "
-        "most 8 subtasks (by default; the tuning may change it) that may depend on each other, "
-        "each tagged text, code or analysis, which picks the executor's model; if planning "
-        "fails, a simple template plan is used. For each subtask an executor model does the "
-        "work, then a reviewer model accepts it or rejects it with feedback. Everything is "
-        "kept in a database, so work survives a crash or a closed terminal: a stopped task "
-        "continues from its last checkpoint with `desman resume TASK`. In the chat a task runs while "
-        "the chat waits; Ctrl+C stops it. `desman worker` works on every unfinished task.\n"
-        "Subtask states: pending (waits for the subtasks it depends on), ready, running, "
-        "review (waits for the reviewer), done, paused (a provider's limit was hit; it goes "
-        "on by itself when the limit resets), needs_human (waits for the person's decision), "
-        "failed (the person gave up on it), blocked (something it depends on failed or was "
-        "cancelled), cancelled.\n"
-        "A task is active while the system can still move on its own, needs_human when "
-        "nothing moves until the person decides, done when every subtask is done, failed or "
-        'cancelled otherwise. `desman list` lists tasks, one line each (that answers "what are my tasks"); `desman list --subtasks` adds their subtasks. `desman status TASK` shows one with its '
-        "subtasks, `desman audit TASK` its full history, `desman stats` how well tasks go.",
+        "Work becomes a durable task: a planner makes up to 8 subtasks by default, tagged text/code/analysis; a template is used if planning fails. Executors work, reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. Task status is derived from subtasks. `desman list` shows visible tasks; `desman list --subtasks` includes subtasks; `desman list --all` includes hidden tasks. `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned tasks. Nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. List marks pinned/paused tasks. Subtask rows show the first sentence, up to 100 characters; page details/tooltips, status JSON and audit keep the full description. In chats, /task … and /resume TASK do the same; page bulk actions show confirmation.",
     ),
     Topic(
         "files",
@@ -113,23 +85,28 @@ TOPICS: Final = (
         "providers",
         "models, API keys, free tiers, limits and local models",
         "DESMAN uses providers whose keys the person added. Only free tiers are chosen "
-        "automatically; paid providers require an explicit choice for a run. Quotas change "
+        "automatically; paid providers require explicit choice. Quotas change "
         "and every provider is treated as unreliable.\n"
         "Each role has a model lineup. Limits, outages, refused keys and small contexts move "
-        "a call to the next model. Multiple keys are tried in turn. Pacing and reported limits "
+        "a call to the next model. Chat notes name the answering model and skipped reasons. Keys rotate. Limits "
         "are shared across workers and restarts; exhausted quotas pause work without spending attempts. "
         "Choose the model and key asked first per role with `desman tuning` or `desman config`. "
-        "The selected key goes first, followed by the others.\n"
+        "The selected key goes first.\n"
         "For one task (reviewer, decomposer, text, code, analysis) use `desman modules set ROLE --task REF --model PROVIDER/MODEL`; "
         "for one chat (interlocutor only) use `desman modules set ROLE --session ID --key PROVIDER:KEY`. "
-        "Both options can be combined. These choices override the role; auto inherits it again. "
+        "Auto inherits the role again. "
         "`desman modules` shows active tasks; `desman modules clear --task REF` resets choices.\n"
-        "Auto uses configured local models last; chosen Ollama models go first, with fallback if removed. "
-        "`desman models show MODEL` checks a Hugging Face model's size; `desman models add MODEL` "
-        "downloads it after confirmation. Settings lists installed Ollama and Hugging Face GGUF models; choose an installed one to use it. llama.cpp uses the CLI. Agents may only suggest models.\n"
+        "For installed models and downloads see the localmodels topic.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
         "model or logs. Inspect with `desman keys list`, `desman keys check` (no tokens) "
         "and `desman usage`.",
+    ),
+    Topic(
+        "localmodels",
+        "Ollama models: downloads, removal and memory",
+        "Auto uses configured local models last; chosen Ollama models go first, with fallback if removed. "
+        "`desman models show MODEL` checks a Hugging Face model's size; `desman models add MODEL` "
+        "downloads it after confirmation. Settings lists installed Ollama and HF GGUF models. Remove one installed model there or with `desman models remove NAME`; confirmation shows size, saved choices stay, and missing references are reported. Ollama context starts at 16384, capped by the model maximum and reduced for free memory after weights and KV cache, down to 8192. Calls still run if memory is insufficient; fallback notes warn. OLLAMA_CONTEXT overrides it. llama.cpp keeps its server context. Agents only suggest models.\n",
     ),
     Topic(
         "permissions",
@@ -194,45 +171,12 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Bare `desman` opens the chat in a new session; `desman -c` continues the last one and "
-        "`/sessions` any earlier one. "
-        "`desman gui` opens it in a browser. "
-        "`desman -t` opens a temporary chat: nothing said there is "
-        "kept, it is erased when the chat ends (its tasks stay, like any task), and it keeps no "
-        "profile notes and no summaries. Each message gets a "
-        "turn: an answer, a question back, a task, or a DESMAN command. "
-        "A command that shows something runs at once; one that changes something is shown "
-        "in a window and done only after the person's yes; a key or a section of the wizard "
-        "is typed by the person into a window. Decisions are journaled.\n"
-        "Chat commands: `/help`, `/new` (a new session), `/sessions` (pick an "
-        "earlier one), `/rename`, `/compact`, `/profile`, `/delete` (out of the list; its "
-        "messages stay in the database), `/pin` (toggle pin), `/delete-all` (confirm deleting unpinned sessions; messages stay), `/temporary` (erase on exit), `/exit`. `/new` always starts a normal session, erasing a temporary one. Pinned sessions appear first. Typed !COMMAND, panel results and notices go to General Terminal (/terminal opens it, /back returns). There clear hides earlier output in both interfaces, retaining messages; other lines are commands, never model turns. Tasks show their files/results.\n"
-        "The interlocutor sees only the newest messages that fit its budget; older ones are "
-        "summarised by a small task of their own (`/compact` does it now) and it sees the "
-        "summary. A summary that fails leaves the older messages out of its view. A pasted "
-        "API key is cut from a message before anything keeps it.",
+        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
     ),
     Topic(
         "gui",
         "browser page, chat and task panels, buttons and keyboard completion",
-        "`desman gui` opens the same chat in a browser with setup and confirmation windows. "
-        "Chats are on the left; Tasks/Modules on the right. Cards show model, masked key, "
-        "source and usage; the chat header shows its interlocutor. Change uses searchable "
-        "Provider → Model → Key pickers: only that provider’s models/keys, no key for Ollama. "
-        "Only here applies to eligible task/chat roles; the planner only supports Everywhere, "
-        "with the reason shown. A new chat keeps a pending choice until its first message; "
-        "opening another chat or /new drops it. Polls keep open editors and pickers intact. "
-        "Module/task edits keep the chat open; their output goes to General Terminal. "
-        "Settings saves changes (text/numbers on Enter or blur), with receipts; its output "
-        "and prompt answers go only to General Terminal. Messenger opens that terminal. "
-        "Local models lists installed Ollama models and searches text-generation Hugging Face GGUF repositories (parameters, approximate Q4_K_M size, downloads and memory fit; confirmation resolves the exact size) "
-        "Installed choices apply immediately; new downloads "
-        "require confirmation. llama.cpp remains available through the CLI. "
-        "Panels can be read during work; actions need an open chat input. Stop interrupts work. "
-        "Waiting decisions use the displayed version; refresh if it changed. Fail needs an answer. "
-        "Pinned chats are separate; dates are localised. Opening a chat shows its latest 200 "
-        "messages. Deletion needs confirmation. On narrow screens, top buttons open panels. "
-        "Suggestions accept arrows, Tab, Enter, Escape and clicks. Reload restores the transcript.",
+        "The page shares the terminal chat, commands and confirmation windows. Source and Model are the only two module dropdowns. Source offers Auto, each configured provider key (masked), and configured or discovered Ollama. Cloud model lists are fetched only when a source is selected or the picker opens; known catalog models are marked and come first. Failed discovery shows catalog models with a note; saved missing models remain selectable. Paid keys require explicit selection. Ollama lists installed models and supports Hugging Face GGUF search/download with confirmation. A checkbox applies the choice to every chat/task; otherwise it is local where that role allows it. New chats retain pending choices until their first message. Editors survive polling. Cards show the last successful answering model when different. Modules inherit their task's pin. Settings and module edits keep the chat open, with output in General Terminal. `/clear` clears only this chat's screen; history remains and reopening restores it. Chat and General Terminal use the same /COMMAND catalog and `/help`; !COMMAND remains an alias. Tab cycles commands from the first match, Shift+Tab goes back, Enter runs the line and Esc closes suggestions. General Terminal has no model. `/context` there explains this.",
     ),
     Topic(
         "profile",
@@ -248,6 +192,11 @@ TOPICS: Final = (
         "sees, changes and erases them in `/profile`, and turning it off hides them. Notes "
         "never hold secrets, never allow anything and never confirm a change. The journal "
         "records that a note changed, never its text.",
+    ),
+    Topic(
+        "language",
+        "the chat language and confirmed language changes",
+        "Configure the language with `desman language CODE`. Replies follow the person’s language; when it differs from configuration, a language command proposes switching. Declining stops further switch proposals in that session. Settings keep their configured language until confirmation.",
     ),
     Topic(
         "data",

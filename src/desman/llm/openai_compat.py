@@ -1,5 +1,5 @@
-"""A client for OpenAI-compatible chat APIs (every cloud provider in `providers.CLOUD`, and the
-local servers of `providers.LOCAL`, which take no key: their one "key" is empty).
+"""A client for cloud OpenAI-compatible APIs, llama.cpp and native Ollama chat.
+Local servers take no key: their one "key" is empty.
 
 One `complete()` is one chat completion. HTTP outcomes become the typed errors of
 `llm/base.py`, so the retry policy can tell a bad key from a rate limit from an outage:
@@ -83,7 +83,7 @@ class CallRecord:
 
 
 class OpenAICompatible:
-    """An `LLM` over one provider's OpenAI-compatible API, with one or more keys."""
+    """One provider's chat API, with key rotation and shared HTTP journaling."""
 
     def __init__(
         self,
@@ -101,6 +101,7 @@ class OpenAICompatible:
         send_temperature: bool = True,
         max_tokens: int | None = None,
         paid: bool = False,
+        context: int | None = None,
     ) -> None:
         if not keys:
             raise ValueError(f"{provider}: no API key")
@@ -121,6 +122,9 @@ class OpenAICompatible:
         self.send_temperature = send_temperature
         self.max_tokens = max_tokens
         self.paid = paid
+        self.prepare_context: Callable[[str], tuple[int, bool]] | None = None
+        self.memory_risk = False
+        self.context = context
         self.pace: Callable[[], None] | None = None
         """Called before every request sent (one per key tried): the rate limiter
         (`llm.limiter.Limited`) waits there, or raises `RateLimited` and nothing is sent."""
@@ -136,6 +140,17 @@ class OpenAICompatible:
         max_tokens = request.max_tokens if request.max_tokens is not None else self.max_tokens
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
+        if self.name == "ollama":
+            if self.prepare_context is not None:
+                self.context, self.memory_risk = self.prepare_context(model)
+            options = {"num_ctx": self.context or 16384}
+            if self.send_temperature:
+                options["temperature"] = body.pop("temperature")
+            if "max_tokens" in body:
+                options["num_predict"] = body.pop("max_tokens")
+            body.update(stream=False, options=options)
+            if body.pop("response_format", None) is not None:
+                body["format"] = "json"
         prompt_hash = text_hash(json.dumps(body["messages"], ensure_ascii=False))
 
         now = self.clock()
@@ -197,7 +212,7 @@ class OpenAICompatible:
             if self.on_call is None:
                 return
             spent = (
-                _usage(response)
+                _usage(response, native=self.name == "ollama")
                 if response is not None
                 else Usage(prompt_tokens=0, completion_tokens=0)
             )
@@ -223,7 +238,9 @@ class OpenAICompatible:
 
         try:
             response = self.client.post(
-                f"{self.base_url}/chat/completions",
+                (self.base_url.removesuffix("/v1") + "/api/chat")
+                if self.name == "ollama"
+                else f"{self.base_url}/chat/completions",
                 json=body,
                 headers={name: value.format(key=key) for name, value in self.auth},
                 timeout=self.timeout,
@@ -253,7 +270,7 @@ class OpenAICompatible:
     def _parse(self, response: httpx.Response, model: str) -> Completion:
         try:
             data = response.json()
-            choice = data["choices"][0]
+            choice = data if self.name == "ollama" else data["choices"][0]
             text = choice["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError):
             raise ProviderUnavailable(self.name, 200, "reply without a message") from None
@@ -263,8 +280,10 @@ class OpenAICompatible:
             text=text,
             provider=self.name,
             model=str(data.get("model") or model),
-            usage=_usage(response),
-            finish_reason=str(choice.get("finish_reason") or "stop"),
+            usage=_usage(response, native=self.name == "ollama"),
+            finish_reason=str(
+                choice.get("done_reason" if self.name == "ollama" else "finish_reason") or "stop"
+            ),
         )
 
     def _error(self, response: httpx.Response) -> ProviderError:
@@ -300,11 +319,16 @@ class OpenAICompatible:
         return text
 
 
-def _usage(response: httpx.Response) -> Usage:
+def _usage(response: httpx.Response, *, native: bool = False) -> Usage:
     try:
         data = response.json()
     except ValueError:
         data = None
+    if native and isinstance(data, dict):
+        return Usage(
+            prompt_tokens=_count(data.get("prompt_eval_count")),
+            completion_tokens=_count(data.get("eval_count")),
+        )
     usage = data.get("usage") if isinstance(data, dict) else None
     usage = usage if isinstance(usage, dict) else {}
     return Usage(

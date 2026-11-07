@@ -297,6 +297,8 @@ class Coordinator:
         """
         result = RunResult(task_id=task_id, status=self.store.task_status(task_id), ticks=0)
         while result.status is TaskStatus.ACTIVE:
+            if self.store.find_task(task_id)["paused_at"] is not None:
+                return result
             if result.ticks >= max_ticks:
                 raise RuntimeError(f"task {task_id} still active after {max_ticks} ticks")
             result.ticks += 1
@@ -434,6 +436,9 @@ class Coordinator:
                 # A run resuming from the checkpoint skips the calls before it: so does the replay.
                 effects=None if checkpoint is None else journal.position,
             )
+            if self.store.yield_paused(subtask.id, lease):
+                events.append(f"task {subtask.task_id} paused")
+                raise PreemptedError(subtask.id, "operator pause")
             if subtask.priority >= Priority.CRITICAL:
                 return
             critical = self.store.preempt(
@@ -756,7 +761,7 @@ class Coordinator:
     def _earliest(self, task_id: str | None, status: str, column: str) -> str | None:
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
         row = self.store.conn.execute(
-            f"SELECT MIN({column}) FROM subtasks WHERE status = ? {scope}",
+            f"SELECT MIN({column}) FROM subtasks WHERE task_id IN (SELECT id FROM tasks WHERE paused_at IS NULL) AND status = ? {scope}",
             (status, *params),
         ).fetchone()
         moment: str | None = row[0]
@@ -769,7 +774,7 @@ class Coordinator:
         row = self.store.conn.execute(
             f"""SELECT MIN(CASE WHEN status = 'running' THEN lease_until ELSE review_until END)
                 FROM subtasks
-                WHERE (status = 'running' OR (status = 'review' AND review_owner != ?)) {scope}""",
+                WHERE task_id IN (SELECT id FROM tasks WHERE paused_at IS NULL) AND (status = 'running' OR (status = 'review' AND review_owner != ?)) {scope}""",
             (self.owner, *params),
         ).fetchone()
         moment: str | None = row[0]

@@ -41,6 +41,7 @@ from desman.llm.base import (
     LLM,
     Completion,
     ProviderError,
+    ProviderRejected,
     ProviderTimeout,
     ProviderUnavailable,
     RateLimited,
@@ -48,6 +49,7 @@ from desman.llm.base import (
     among,
     unfit_seen,
 )
+from desman.llm.limiter import Busy
 from desman.llm.openai_compat import CallRecord, OpenAICompatible, key_id
 from desman.providers import Provider
 
@@ -144,12 +146,15 @@ def lineup(
     """The models `role` asks, best first; the executor's for a subtask of `kind`. Raises
     `NoProvider` (with what to do about it)."""
     chosen = preferred(config, role, kind)
-    local_choice = chosen is not None and chosen.startswith("ollama/")
-    first = (
-        providers.find("ollama")
-        if provider is None and model is None and local_choice
-        else choose(config, provider)
-    )
+    selected: Provider | None = None
+    if chosen is not None and provider is None and model is None:
+        try:
+            candidate = providers.find(chosen.split("/", 1)[0])
+            if candidate.id == "ollama" or _ready(config, candidate):
+                selected = candidate
+        except providers.UnknownProvider:
+            pass
+    first = selected if selected is not None else choose(config, provider)
     if model is not None:
         return [_choice(config, first, model)]
     pool = [first] if provider is not None else _free(config)
@@ -160,13 +165,14 @@ def lineup(
         for order, c in enumerate(_choices(config, p))
     ]
     choices = [row[-1] for row in sorted(ranked, key=lambda row: row[:5])]
-    if (
-        local_choice
-        and chosen is not None
-        and provider is None
-        and all(c.label != chosen for c in choices)
-    ):
-        choices.append(_choice(config, providers.find("ollama"), chosen.removeprefix("ollama/")))
+    if chosen is not None and provider is None and all(c.label != chosen for c in choices):
+        provider_id, _, model_id = chosen.partition("/")
+        try:
+            selected = providers.find(provider_id)
+        except providers.UnknownProvider:
+            selected = None
+        if selected is not None and (selected.id == "ollama" or _ready(config, selected)):
+            choices.append(_choice(config, selected, model_id))
     if chosen is not None:  # the person's choice goes first, if it is among them
         choices.sort(key=lambda c: c.label != chosen)
     return choices
@@ -211,9 +217,17 @@ def _choices(config: Config, p: Provider) -> list[Choice]:
     return [Choice(p, m.id) for m in catalog.models_of(p)]
 
 
+def _local_context(config: Config, p: Provider, model: str) -> int | None:
+    if p.id == "ollama":
+        from desman.local_models import ollama_context
+
+        return ollama_context(config, model)[0]
+    return p.context(config)
+
+
 def _choice(config: Config, p: Provider, model: str) -> Choice:
     if p.local:
-        return Choice(p, model, catalog.local_model(model, p.context(config)))
+        return Choice(p, model, catalog.local_model(model, _local_context(config, p, model)))
     return Choice(p, model)
 
 
@@ -242,7 +256,7 @@ def connect(
     keys = [""] if chosen.key_env is None else [k.value for k in config.keys(chosen.key_env)]
     if first_key is not None:
         keys.sort(key=lambda key: key_id(key) != first_key)
-    return OpenAICompatible(
+    connected = OpenAICompatible(
         chosen.id,
         chosen.endpoint(config),
         keys,
@@ -254,7 +268,17 @@ def connect(
         send_temperature=chosen.send_temperature,
         max_tokens=chosen.max_tokens,
         paid=chosen.paid,
+        context=_local_context(config, chosen, choice.model),
     )
+
+    if chosen.id == "ollama":
+        from desman.local_models import ollama_context, prepare_ollama_context
+
+        connected.prepare_context = lambda model: prepare_ollama_context(
+            config, model, connected.client
+        )
+        connected.memory_risk = ollama_context(config, choice.model)[1]
+    return connected
 
 
 # ── Fallback ─────────────────────────────────────────────────────────────────
@@ -268,6 +292,21 @@ REPLY_TOKENS = 1_024
 def estimated_tokens(request: Request) -> int:
     chars = sum(len(m.content) for m in request.messages)
     return chars // CHARS_PER_TOKEN + (request.max_tokens or REPLY_TOKENS)
+
+
+@dataclass(frozen=True)
+class SkippedModel:
+    model: str
+    reason: str
+    status: int | None = None
+    needed: int | None = None
+    context: int | None = None
+
+
+@dataclass(frozen=True)
+class LastCall:
+    answered: str | None = None
+    skipped: tuple[SkippedModel, ...] = ()
 
 
 class Fallback:
@@ -296,14 +335,21 @@ class Fallback:
         self.name = first.name
         self.label = first.name if choice is None else choice.label
         self._last: tuple[Completion, LLM] | None = None
+        self._call = LastCall()
         self._unfit: set[str] = set()
         """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
+
+    @property
+    def last_call(self) -> LastCall:
+        return self._call
 
     @property
     def choices(self) -> list[Choice]:
         return [c for _, c in self.members if c is not None]
 
     def complete(self, request: Request) -> Completion:
+        self._call = LastCall()
+        skipped: list[SkippedModel] = []
         need = estimated_tokens(request)
         fit = [
             (llm, choice)
@@ -312,13 +358,58 @@ class Fallback:
             and (choice.label if choice is not None else llm.name) not in self._unfit
         ]
         fit = fit or self.members
-        large = [m for m in fit if m[1] is None or m[1].spec.context >= need]
+        # An uncatalogued cloud model has a conservative guessed context, not a measured
+        # limit. Give the person's choice a chance instead of skipping it on that guess.
+        large = [
+            m
+            for m in fit
+            if m[1] is None
+            or m[1].spec.context >= need
+            or (
+                m[1].known is None
+                and not any(known.id == m[1].model for known in catalog.models_of(m[1].provider))
+            )
+        ]
         members = large or fit
+        for llm, choice in self.members:
+            if (llm, choice) not in members:
+                skipped.append(
+                    SkippedModel(
+                        llm.name if choice is None else choice.label,
+                        "context" if (llm, choice) in fit else "unfit",
+                        needed=need,
+                        context=choice.spec.context if choice else None,
+                    )
+                )
         errors: list[ProviderError] = []
         for i, (llm, choice) in enumerate(members):
             try:
                 reply = llm.complete(request)
             except ProviderError as e:
+                label = llm.name if choice is None else choice.label
+                reason = (
+                    "busy"
+                    if isinstance(e, Busy)
+                    else "limit"
+                    if e.kind is FailureKind.LIMIT
+                    or (isinstance(e, ProviderRejected) and e.status == 429)
+                    else "refused"
+                    if isinstance(e, ProviderRejected)
+                    else "unavailable"
+                )
+                inner = llm
+                nested = getattr(inner, "inner", None)
+                while nested is not None:
+                    inner = nested
+                    nested = getattr(inner, "inner", None)
+                if getattr(inner, "memory_risk", False):
+                    reason = "memory"
+                skipped.append(
+                    SkippedModel(
+                        label, reason, e.status if isinstance(e, ProviderRejected) else None
+                    )
+                )
+                self._call = LastCall(skipped=tuple(skipped))
                 if e.kind is FailureKind.QUALITY:
                     if not e.unfit_model or i == len(members) - 1:
                         raise
@@ -331,6 +422,12 @@ class Fallback:
                     break
                 continue
             self._last = (reply, llm)
+            ahead = [
+                c.label if c else m.name
+                for m, c in self.members[: self.members.index((llm, choice))]
+            ]
+            ordered = tuple(item for label in ahead for item in skipped if item.model == label)
+            self._call = LastCall(f"{reply.provider}/{reply.model}", ordered)
             return reply
         raise _telling(errors)
 

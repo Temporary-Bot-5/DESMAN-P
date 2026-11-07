@@ -51,6 +51,9 @@ def ok(text: str = '{"v": 1}', model: str = "llama3.2") -> httpx.Response:
         200,
         json={
             "model": model,
+            "message": {"content": text},
+            "prompt_eval_count": 3,
+            "eval_count": 2,
             "choices": [{"message": {"role": "assistant", "content": text}}],
             "usage": {"prompt_tokens": 3, "completion_tokens": 2},
         },
@@ -71,7 +74,7 @@ def test_a_local_provider_is_ready_once_its_model_is_set() -> None:
     config = make_config(settings=OLLAMA)
     assert [p.id for p in providers.ready(config)] == ["ollama"]
     assert ollama.endpoint(config) == "http://localhost:11434/v1"  # the default address
-    assert ollama.model(config) == "llama3.2" and ollama.context(config) == 4096
+    assert ollama.model(config) == "llama3.2" and ollama.context(config) == 16384
     described = {row["id"]: row for row in providers.describe(config)["providers"]}
     assert described["ollama"]["ready"] and not described["llamacpp"]["ready"]
 
@@ -345,6 +348,8 @@ def test_when_the_cloud_is_limited_the_local_model_answers(store: Store, clock: 
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": []})
         seen.append(str(request.url.host))
         if request.url.host == "api.groq.com":
             return httpx.Response(429, headers={"retry-after": "3600"})

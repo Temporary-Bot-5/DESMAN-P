@@ -43,7 +43,7 @@ DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving 
 - Accessible to non-developers: after configuration, bare `desman` becomes a chat (ROADMAP
   phase C, after phase 3). Requests become ordinary tasks; changes to DESMAN itself asked in
   the chat take effect only after the human confirms them in a field rendered by code. An
-  explicit `!COMMAND` typed by the person runs immediately, like the CLI.
+  explicit `/COMMAND` (or `!COMMAND`) typed by the person runs immediately, like the CLI.
 
 ## Architecture Principles (from PROJECT_PLAN.md)
 
@@ -125,7 +125,7 @@ src/desman/
 ├── info.py        # Banner / project info
 ├── chat.py        # The chat of bare `desman`: a new session (`-c` continues the last one,
 │                  #   `-t` a temporary chat, erased when it ends); /help, /new,
-│                  #   /sessions, /rename, /compact, /profile, /delete, /exit; each message gets the interlocutor's turn; a task turn
+│                  #   /sessions, /rename, /compact, /profile, /delete, /clear, /context, /exit; each message gets the interlocutor's turn; a task turn
 │                  #   runs a task of the session while the chat waits, then it is retold; a
 │                  #   command turn goes through the catalog: the window and the person's "yes"
 │                  #   are code's, the result goes back as an event, changes to operator_log

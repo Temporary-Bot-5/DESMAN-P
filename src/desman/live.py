@@ -25,7 +25,7 @@ from rich.text import Text
 from desman import providers, ui
 from desman.config import Config
 from desman.core import calls
-from desman.core.report import SubtaskReport, TaskReport, task_report
+from desman.core.report import SubtaskReport, TaskReport, short_description, task_report
 from desman.core.states import SubtaskStatus
 from desman.core.store import Store
 from desman.i18n import t, tn
@@ -99,7 +99,7 @@ class Progress:
             subtasks.add_row(
                 Text(_number(sub), style="muted"),
                 Text(sub.status.value, style=_status_style(sub.status)),
-                Text(_shorten(sub.description, 70)),
+                Text(short_description(sub.description)),
             )
         rows = Table.grid(padding=(0, 2))
         by_id = {s.id: s for s in report.subtasks}
@@ -117,7 +117,7 @@ class Progress:
         """(what, line) for each subtask and module: printed when its line changes. Calls and
         tokens are left out, or every call would print a line."""
         out = [
-            (sub.id, f"{_number(sub)} {sub.status.value}  {_shorten(sub.description, 70)}")
+            (sub.id, f"{_number(sub)} {sub.status.value}  {short_description(sub.description)}")
             for sub in report.subtasks
         ]
         by_id = {s.id: s for s in report.subtasks}

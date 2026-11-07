@@ -680,6 +680,12 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE sessions ADD COLUMN cleared_seq INTEGER NOT NULL DEFAULT 0
         CHECK (cleared_seq >= 0);
     """,
+    # 38: operator task pins, hidden finished tasks and resumable task pauses.
+    """
+    ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1));
+    ALTER TABLE tasks ADD COLUMN hidden_at TEXT;
+    ALTER TABLE tasks ADD COLUMN paused_at TEXT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -12,7 +12,7 @@ from typing import Any
 from desman import modules_cli, providers, tuning_cli
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, choices, db
-from desman.core.report import inbox, task_report, task_summaries
+from desman.core.report import inbox, short_description, task_report, task_summaries
 from desman.core.sessions import Sessions
 from desman.core.store import Store
 from desman.gui.front import WebFront
@@ -147,7 +147,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
             placeholders = ", ".join("?" for _ in ids)
             rows = conn.execute(
                 f"SELECT id FROM tasks WHERE id IN ({placeholders}) "
-                "ORDER BY created_at DESC, rowid DESC",
+                "AND hidden_at IS NULL ORDER BY pinned DESC, created_at DESC, rowid DESC",
                 tuple(ids),
             )
             for row in rows:
@@ -161,6 +161,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                             "seq": sub.seq,
                             "status": sub.status.value,
                             "description": redact(sub.description),
+                            "title": short_description(redact(sub.description)),
                             "reason": redact(sub.reason or "") if item else None,
                             "ref": item.ref if item else None,
                             "version": item.version if item else None,
@@ -176,6 +177,8 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 tasks.append(
                     {
                         "id": report.id,
+                        "pinned": report.pinned,
+                        "paused_at": report.paused_at,
                         "ref": short,
                         "goal": redact(report.goal),
                         "status": report.status.value,
@@ -223,6 +226,19 @@ def decorate(
             for sub in report.subtasks
         ):
             row["state"] = t("Needs human")
+    if scope == "task":
+        row["pinned"] = bool(
+            conn.execute("SELECT pinned FROM tasks WHERE id = ?", (identity,)).fetchone()[0]
+        )
+    role = "executor" if row["role"] in {"text", "code", "analysis"} else row["role"]
+    kind_filter = (
+        "AND subtask_id IN (SELECT id FROM subtasks WHERE kind = ?)" if role == "executor" else ""
+    )
+    latest = conn.execute(
+        f"SELECT provider, model FROM model_calls WHERE {'task_id' if scope == 'task' else 'session_id'} = ? AND role = ? AND error_kind IS NULL {kind_filter} ORDER BY seq DESC LIMIT 1",
+        (identity, role, *([row["role"]] if kind_filter else [])),
+    ).fetchone()
+    row["last_model"] = f"{latest['provider']}/{latest['model']}" if latest else None
     own = choices.get(conn, scope, identity, row["role"])
     row.update(
         icon="module",
@@ -274,7 +290,12 @@ def interlocutor(
         "AND provider = ? AND model = ?",
         (identity, first.provider.id if first else None, first.model if first else None),
     ).fetchone()
+    latest = conn.execute(
+        "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+        (identity,),
+    ).fetchone()
     return {
+        "last_model": f"{latest[0]}/{latest[1]}" if latest else None,
         "role": "interlocutor",
         "icon": "module",
         "scope": "session",

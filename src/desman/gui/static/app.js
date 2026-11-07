@@ -114,7 +114,7 @@ function picker(parent, label, options = [], current = "") {
     openPicker?.close(); openPicker = root; root.open = true;
     panel.hidden = false; search.value = "";
     trigger.setAttribute("aria-expanded", "true"); search.setAttribute("aria-expanded", "true");
-    render(); position(); search.focus(); root.onsearch?.("");
+    render(); position(); search.focus(); root.onopen?.(); root.onsearch?.("");
   }
   function keys(e) {
     if (["ArrowDown", "ArrowUp"].includes(e.key)) {
@@ -161,32 +161,82 @@ function preserveEditor(root) {
     !!document.activeElement?.closest?.('.picker') && root.contains(document.activeElement);
 }
 
-// Provider → its models → its keys. Values sent to Python remain model/fingerprint.
+// Shared source/model editor. Only fingerprints and model labels leave this component.
 function rolePickers(parent, role, chosen, fingerprint) {
   const providers = role.providers || [];
-  const provider = picker(parent, words.provider, [{value: "", label: words.auto}, ...providers.map(p => ({value: p.id, label: p.name}))], "");
-  const model = picker(parent, words.model);
-  const key = picker(parent, words.key);
-  function fillKeys(preferred = "") {
-    const p = providers.find(p => p.id === provider.value);
-    const keys = p ? p.keys : role.candidate_keys;
-    key.setOptions([{value: "", label: words.auto}, ...keys.map(k => ({value: k.fingerprint, label: k.label, group: p ? null : k.provider}))]);
-    key.value = keys.some(k => k.fingerprint === preferred) ? preferred : "";
-    key.hidden = provider.value === "ollama";
+  const sources = [{value: "", label: words.auto}];
+  for (const p of providers) {
+    for (const k of p.keys) sources.push({value: k.fingerprint, label: `${p.name} · ${k.label}`, provider: p});
+    if (p.id === "ollama") sources.push({value: "ollama", label: "Ollama", provider: p});
   }
-  function fillModels(preferred = "", preferredKey = "") {
-    const p = providers.find(p => p.id === provider.value);
-    const models = [...(p?.models || [])];
-    if (p && preferred.startsWith(`${p.id}/`) && !models.includes(preferred)) models.push(preferred);
-    model.setOptions(p ? models.map(m => ({value: m, label: m.slice(m.indexOf("/") + 1)})) : [{value: "", label: words.auto}]);
-    model.value = models.includes(preferred) ? preferred : models[0] || "";
-    fillKeys(preferredKey);
+  const provider = picker(parent, words.source, sources);
+  const model = picker(parent, words.model);
+  // Existing action contracts receive the selected source's fingerprint.
+  const key = {get value() { return provider.value === "ollama" ? "" : provider.value; }};
+  const note = text("small", "", parent); note.className = "model-note";
+  let generation = 0, searchTimer, localChoices = [], previousModel = chosen || "";
+  Object.defineProperty(model, "requestValue", {get: () => model.value || sources.find(s => s.value === provider.value)?.provider?.models?.[0] || ""});
+  function fill(preferred = "", rows = null) {
+    const p = sources.find(s => s.value === provider.value)?.provider;
+    const models = rows || (p?.models || []).map(m => ({value: m, label: m.slice(m.indexOf("/") + 1)}));
+    if (preferred && !models.some(m => m.value === preferred)) models.push({value: preferred, label: preferred.slice(preferred.indexOf("/") + 1)});
+    model.setOptions([{value: "", label: words.auto}, ...models.map(m => ({...m, label: m.label + (m.known ? ` · ${words.known}` : "")}))]);
+    model.value = preferred;
+  }
+  async function load(query = "") {
+    const source = sources.find(s => s.value === provider.value);
+    const p = source?.provider;
+    if (!p) return;
+    const current = ++generation;
+    try {
+      const url = p.id === "ollama" ? `/local-models?q=${encodeURIComponent(query)}${query ? "" : "&installed=1"}` : `/source-models?provider=${encodeURIComponent(p.id)}&fingerprint=${encodeURIComponent(source.value)}`;
+      const response = await fetch(url);
+      if (!response.ok || current !== generation) return;
+      const data = await response.json();
+      if (current !== generation) return;
+      localChoices = p.id === "ollama" ? data.options || [] : [];
+      const rows = p.id === "ollama" ? localChoices.map(m => ({...m, value: m.downloaded ? `ollama/${m.value}` : `hf:${m.value}`})) : data.models;
+      fill(model.value, rows);
+      note.textContent = data.note || (data.notes || []).join(" · ");
+    } catch {}
   }
   function set(modelValue, keyValue) {
-    provider.value = modelValue ? modelValue.split("/", 1)[0] : "";
-    fillModels(modelValue || "", keyValue || "");
+    ++generation; previousModel = modelValue || "";
+    const pid = modelValue?.split("/", 1)[0];
+    provider.value = pid === "ollama" ? "ollama" : keyValue || "";
+    if (pid === "ollama" && !sources.some(s => s.value === "ollama")) { sources.push({value: "ollama", label: "Ollama", provider: {id: "ollama", models: [modelValue]}}); provider.setOptions(sources); }
+    if (keyValue && !sources.some(s => s.value === keyValue)) {
+      sources.push({value: keyValue, label: words.missing}); provider.setOptions(sources);
+    }
+    fill(modelValue || "");
   }
-  provider.onchange = () => fillModels(); model.onchange = () => fillKeys(key.value);
+  provider.onchange = () => { fill(); note.textContent = ""; load(); };
+  provider.onopen = async () => {
+    if (sources.some(s => s.value === "ollama")) return;
+    try {
+      const response = await fetch("/local-models?installed=1");
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!(data.options || []).some(m => m.downloaded)) return;
+      const p = {id: "ollama", models: data.options.filter(m => m.downloaded).map(m => `ollama/${m.value}`)};
+      sources.push({value: "ollama", label: "Ollama", provider: p}); provider.setOptions(sources);
+    } catch {}
+  };
+  model.onopen = () => load();
+  model.onsearch = query => {
+    if (provider.value !== "ollama") return;
+    clearTimeout(searchTimer); searchTimer = setTimeout(() => load(query), 300);
+  };
+  model.onchange = event => {
+    if (model.value.startsWith("hf:")) {
+      event.stopImmediatePropagation();
+      const name = model.value.slice(3); model.value = previousModel;
+      if (lineOpen && !sending && !settingsPending) {
+        const id = crypto.randomUUID();
+        act({type: "settings", id, change: {section: "models", operation: "add", model: name, server: "ollama"}});
+      }
+    } else previousModel = model.value;
+  };
   set(chosen, fingerprint);
   return {provider, model, key, set};
 }
@@ -324,7 +374,8 @@ function showPrompt(p) {
       input.addEventListener("input", () => {
         const value = input.value.toLowerCase();
         const bare = terminalOpen && value.length > 0 && !/^[!/]|\s/.test(value);
-        const commands = Object.entries(p.commands || {});
+        const commands = Object.entries(p.commands || {}).sort((a, b) =>
+          Number(a[0].includes(" ")) - Number(b[0].includes(" ")) || a[0].localeCompare(b[0]));
         matches = bare ?
           commands.filter(([name]) => name.startsWith("!"))
             .map(([name, hint]) => [name.slice(1), hint])
@@ -342,8 +393,11 @@ function showPrompt(p) {
             (selected + (e.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length;
           draw(); e.preventDefault(); return true;
         }
-        if ((e.key === "Tab" && (selected >= 0 || matches.length === 1)) || (e.key === "Enter" && selected >= 0)) {
-          choose(matches[selected < 0 ? 0 : selected][0]); e.preventDefault(); return true;
+        if (e.key === "Tab") {
+          selected = selected < 0 ? (e.shiftKey ? matches.length - 1 : 0) :
+            (selected + (e.shiftKey ? -1 : 1) + matches.length) % matches.length;
+          input.value = matches[selected][0]; resize(); draw();
+          e.preventDefault(); return true;
         }
         return false;
       };
@@ -372,7 +426,7 @@ function event(e) {
   }
   if (e.type === "out") {
     const node = text("div", "", $("messages"));
-    node.className = e.greeting ? "out greeting" : "out";
+    node.className = e.context ? "out context-output" : e.greeting ? "out greeting" : "out";
     rich(node, e.html);
   }
   if (e.type === "prompt_closed" && e.echo !== null) {
@@ -503,6 +557,9 @@ function setupPanels() {
     });
     control.setAttribute("aria-pressed", String(panelMode === mode));
   }
+  $("panel-footer").replaceChildren();
+  actionButton($("panel-footer"), panelMode === "tasks" ? words.delete_tasks : words.stop_modules,
+    {type: panelMode === "tasks" ? "hide_finished" : "pause_tasks"});
   $("sidebar").setAttribute("aria-label", words.sessions);
   $("tasks-panel").setAttribute("aria-label", words.tasks);
   $("session-tools").replaceChildren();
@@ -511,6 +568,7 @@ function setupPanels() {
   const terminal = actionButton($("session-tools"), words.terminal, {type: "terminal"});
   terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
+  actionButton($("sidebar-bottom"), words.delete_chats, {type: "delete_all"});
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
   button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
@@ -576,7 +634,7 @@ function showSessions(data) {
       iconAction(row, "×", words.delete, {type: "delete_session", id: s.id});
     }
   }
-  actionButton(root, words.delete_chats, {type: "delete_all"}).className = "delete-chats";
+
   updateActions();
 }
 
@@ -589,10 +647,15 @@ function showTasks(data) {
   const root = $("tasks");
   // moduleCard reattaches open editors from moduleEditors; redraw the live task state.
   root.replaceChildren();
-  for (const task of data.tasks) {
+  let section;
+  for (const task of [...data.tasks].sort((a, b) => Number(b.pinned) - Number(a.pinned))) {
+    const heading = task.pinned ? words.pinned : words.tasks;
+    if (heading !== section) { text("h2", heading, root); section = heading; }
     const card = text("article", "", root);
     card.className = `task ${task.needs_human ? "waiting" : task.status}`;
-    const toggle = button(card, "", () => {
+    const titleRow = text("div", "", card);
+    titleRow.className = "task-title-row";
+    const toggle = button(titleRow, "", () => {
       if (expanded.has(task.id)) expanded.delete(task.id); else expanded.add(task.id);
       showTasks(data);
     });
@@ -603,12 +666,21 @@ function showTasks(data) {
     text("span", expanded.has(task.id) ? "⌃" : "⌄", toggle);
     toggle.title = task.goal + " · " + words[`status_${task.status}`];
     toggle.setAttribute("aria-expanded", String(expanded.has(task.id)));
+    const pin = iconAction(titleRow, "⌖", task.pinned ? words.unpin : words.pin, {type: "task_control", operation: task.pinned ? "unpin" : "pin", id: task.id});
+    pin.title = task.pinned ? words.unpin : words.pin;
+    pin.setAttribute("aria-pressed", String(!!task.pinned));
+    if (task.paused_at) {
+      text("span", words.paused, card).className = "status-chip";
+      actionButton(card, words.continue_task, {type: "task_control", operation: "resume", id: task.id});
+    }
     if (!expanded.has(task.id)) continue;
     for (const sub of task.subtasks) {
       const row = text("div", "", card);
       row.className = "subtask";
       text("span", words[`status_${sub.status}`], row).className = "status-chip";
-      text("span", `${sub.seq} · ${sub.description}`, row);
+      const heading = text("span", `${sub.seq} · ${sub.title}`, row);
+      heading.title = sub.description;
+      text("p", sub.description, card);
       if (sub.version === null) continue;
       text("p", sub.reason, card);
       const input = document.createElement("textarea");
@@ -682,6 +754,8 @@ function moduleCard(parent, m, placement = "modules") {
   text("small", `${words.key}: ${m.key_label && m.key_label !== "auto" ? m.key_label : words.auto}`, info);
   const usage = text("div", "", info);
   usage.className = "module-usage";
+  if (m.pinned) text("span", "⌖", usage).title = words.pinned;
+  if (m.last_model && m.last_model !== m.model) text("small", `${words.answered_by} ${m.last_model}`, info);
   text("span", words[`source_${m.source}`], usage).className = "status-chip";
   text("small", words.model_usage.replace("{calls}", m.model_calls).replace("{tokens}", m.model_tokens), usage);
   usage.title = (m.scope === "session" ? words.role_usage_chat : words.role_usage_task)
@@ -707,17 +781,19 @@ function moduleCard(parent, m, placement = "modules") {
   const role = moduleSnapshot.roles.find(r => r.role === m.role);
   if (!role) return card;
   const allowedHere = (moduleSnapshot.roles_by_scope?.[m.scope] || []).includes(m.role);
-  const scope = picker(editor, words.scope, [
-    {value: m.scope, label: words.only_here, disabled: !allowedHere, hint: allowedHere ? "" : words.scope_unavailable},
-    {value: "role", label: words.everywhere}
-  ], allowedHere ? m.scope : "role");
+  const scopeLabel = text("label", "", editor);
+  const everywhere = document.createElement("input"); everywhere.type = "checkbox";
+  everywhere.checked = !allowedHere; everywhere.disabled = !allowedHere;
+  if (!allowedHere) everywhere.title = words.scope_unavailable;
+  scopeLabel.append(everywhere, document.createTextNode(m.scope === "session" ? words.every_chat : words.every_task));
+  const scope = {get value() { return everywhere.checked ? "role" : m.scope; }};
   const choices = rolePickers(editor, role, null, null);
   const {model, key} = choices;
   function defaults() {
     const global = scope.value === "role";
     choices.set(global ? role.model : m.choice_model, global ? role.key_fingerprint : m.choice_key);
   }
-  scope.onchange = defaults;
+  everywhere.onchange = defaults;
   defaults();
   actionButton(editor, words.apply, () => {
     moduleEditors.delete(identity);
@@ -725,7 +801,7 @@ function moduleCard(parent, m, placement = "modules") {
     change.hidden = false;
     return {type: "module", role: m.role, scope: scope.value,
       scope_id: scope.value === "role" ? null : m.scope_id,
-      model: model.value || null, key: key.value || null};
+      model: model.requestValue || null, key: key.value || null};
   });
   button(editor, words.cancel, () => {
     moduleEditors.delete(identity);
@@ -947,11 +1023,11 @@ function drawSettings() {
     root.append(others);
   } else if (settingsSection === "roles") {
     const head = text("div", "", root); head.className = "role-row role-head";
-    for (const label of [words.settings_roles, words.provider, words.model, words.key]) text("small", label, head);
+    for (const label of [words.settings_roles, words.source, words.model]) text("small", label, head);
     for (const role of d.roles) {
       const card = text("section", "", root); card.className = "role-row"; text("strong", role.label, card);
       const {provider, model, key} = rolePickers(card, role, role.model, role.key_fingerprint);
-      settingAuto(card, () => ({section: "roles", role: role.role, model: model.value || null, key: key.value || null}), [provider, model, key]);
+      settingAuto(card, () => ({section: "roles", role: role.role, model: model.requestValue || null, key: key.value || null}), [provider, model]);
     }
   } else if (settingsSection === "permissions") {
     for (const p of d.permissions) {
@@ -987,6 +1063,7 @@ function drawSettings() {
     const p = d.providers.find(p => p.id === "ollama");
     const state = text("p", `Ollama · ${p?.settings.find(s => s.name === "OLLAMA_HOST")?.value || ""}`, root);
     const notes = text("small", "", root);
+    const downloaded = text("div", "", root);
     const model = picker(root, words.model); model.dataset.localModels = "true";
     model.reload = () => load("");
     let choices = [], timer, request = 0;
@@ -998,6 +1075,12 @@ function drawSettings() {
         const data = await response.json();
         if (id !== request || !model.isConnected) return;
         choices = data.options;
+        downloaded.replaceChildren();
+        for (const option of choices.filter(o => o.downloaded)) {
+          const row = text("div", "", downloaded); row.className = "setting-row";
+          text("span", `${option.label} · ${option.hint}`, row);
+          settingSave(row, {section: "models", operation: "remove", model: option.value}, words.delete);
+        }
         model.setOptions(choices.map(o => ({...o, hint: `${o.selected ? "✓ · " : ""}${o.hint}`})));
         model.value ||= data.selected;
         state.textContent = `Ollama · ${data.host} · ${data.reachable ? words.status_ready : words.off}`;

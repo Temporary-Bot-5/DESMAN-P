@@ -300,6 +300,7 @@ def _chat_prompt() -> Any:
     if _prompt is None:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import InMemoryHistory
+        from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.styles import Style
 
         class RedactedHistory(InMemoryHistory):
@@ -313,9 +314,45 @@ def _chat_prompt() -> Any:
                     config = None
                 super().append_string(redact_keys(string, config)[0])
 
+        bindings = KeyBindings()
+
+        @bindings.add("tab")
+        def next_completion(event: Any) -> None:
+            buffer = event.current_buffer
+            if buffer.complete_state is None:
+                buffer.start_completion(select_first=True)
+            else:
+                state = buffer.complete_state
+                if state.completions:
+                    index = state.complete_index
+                    buffer.go_to_completion(
+                        0 if index is None else (index + 1) % len(state.completions)
+                    )
+
+        @bindings.add("s-tab")
+        def previous_completion(event: Any) -> None:
+            buffer = event.current_buffer
+            if buffer.complete_state is None:
+                buffer.start_completion(select_last=True)
+            else:
+                state = buffer.complete_state
+                if state.completions:
+                    index = state.complete_index
+                    buffer.go_to_completion(
+                        (len(state.completions) - 1)
+                        if index is None
+                        else (index - 1) % len(state.completions)
+                    )
+
+        @bindings.add("escape")
+        def close_completion(event: Any) -> None:
+            # Keep the inserted completion when dismissing the list.
+            event.current_buffer.complete_state = None
+
         _prompt = PromptSession(
             [("class:mark", "› ")],
             history=RedactedHistory(),
+            key_bindings=bindings,
             complete_while_typing=True,
             reserve_space_for_menu=6,
             style=Style.from_dict(
@@ -334,11 +371,13 @@ def _chat_prompt() -> Any:
 
 def slash_matches(typed: str, commands: Mapping[str, str]) -> list[tuple[str, str]]:
     """Match slash names and explicit CLI paths; only ! paths may cross spaces."""
-    if not typed.startswith(("/", "!")) or (
-        typed.startswith("/") and any(c.isspace() for c in typed)
-    ):
+    if not typed.startswith(("/", "!")):
         return []
-    return [(name, what) for name, what in commands.items() if name.startswith(typed.lower())]
+    return [
+        (name, what)
+        for name, what in sorted(commands.items(), key=lambda item: (" " in item[0], item[0]))
+        if name.startswith(typed.lower())
+    ]
 
 
 def _completer(commands: Mapping[str, str]) -> Any:
@@ -407,13 +446,21 @@ class SessionAction(Action):
     id: str = Field(min_length=1, max_length=128)
 
 
+class TaskControlAction(Action):
+    type: Literal["task_control"]
+    operation: Literal["pin", "unpin", "resume", "pause", "hide"]
+    id: str = Field(min_length=1, max_length=128)
+
+
 class NewSessionAction(Action):
     type: Literal["new_session"]
     temporary: bool
 
 
 class SimpleAction(Action):
-    type: Literal["delete_all", "messenger", "terminal", "report_problem"]
+    type: Literal[
+        "delete_all", "messenger", "terminal", "report_problem", "hide_finished", "pause_tasks"
+    ]
 
 
 class DecideAction(Action):
@@ -466,6 +513,7 @@ class ModuleAction(Action):
 ACTIONS = TypeAdapter(
     Annotated[
         SessionAction
+        | TaskControlAction
         | NewSessionAction
         | SimpleAction
         | DecideAction
@@ -748,6 +796,10 @@ def live_stop() -> None:
 
 def interactive() -> bool:
     return _front.interactive()
+
+
+class ContextText(Text):
+    """An exact request, displayed as a scrollable monospace block by the page."""
 
 
 def out(*items: RenderableType | str) -> None:

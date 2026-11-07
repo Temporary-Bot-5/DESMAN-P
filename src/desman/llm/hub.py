@@ -30,7 +30,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import httpx
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter
 
 HUB = "https://huggingface.co"
 DEFAULT_QUANT = "Q4_K_M"
@@ -424,11 +424,21 @@ def _windows_ram() -> int | None:
         return None
 
 
+class InstalledDetails(BaseModel):
+    parameter_size: str | None = None
+    block_count: int | None = Field(default=None, gt=0)
+    embedding_length: int | None = Field(default=None, gt=0)
+    head_count: int | None = Field(default=None, gt=0)
+    head_count_kv: int | None = Field(default=None, gt=0)
+    context_length: int | None = Field(default=None, gt=0)
+
+
 class InstalledModel(BaseModel):
     """The public subset of an Ollama tag response."""
 
     name: str = Field(min_length=1, max_length=200, pattern=r"^\S+$")
     size: int = Field(default=0, ge=0)
+    details: InstalledDetails | None = None
 
 
 class Tags(BaseModel):
@@ -439,9 +449,39 @@ def ollama_tags(host: str, client: httpx.Client) -> list[InstalledModel]:
     """Read installed models; never send Hugging Face credentials to a local server."""
     if "://" not in host:
         host = "http://" + host
-    response = client.get(host.rstrip("/") + "/api/tags", timeout=2.0)
+    response = client.get(host.rstrip("/") + "/api/tags", timeout=2.0, follow_redirects=False)
     response.raise_for_status()
     return Tags.model_validate(response.json()).models
+
+
+class OllamaInfo(BaseModel):
+    model_info: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+def ollama_details(host: str, model: InstalledModel, client: httpx.Client) -> InstalledModel:
+    """Best-effort architectural metadata from Ollama's official show endpoint."""
+    if "://" not in host:
+        host = "http://" + host
+    response = client.post(
+        host.rstrip("/") + "/api/show",
+        json={"model": model.name},
+        timeout=2.0,
+        follow_redirects=False,
+    )
+    response.raise_for_status()
+    info = OllamaInfo.model_validate(response.json()).model_info
+    values = model.details.model_dump() if model.details else {}
+    for name, suffix in (
+        ("context_length", ".context_length"),
+        ("block_count", ".block_count"),
+        ("embedding_length", ".embedding_length"),
+        ("head_count", ".attention.head_count"),
+        ("head_count_kv", ".attention.head_count_kv"),
+    ):
+        found = next((v for key, v in info.items() if key.endswith(suffix)), None)
+        if isinstance(found, int) and not isinstance(found, bool) and found > 0:
+            values[name] = found
+    return model.model_copy(update={"details": InstalledDetails.model_validate(values)})
 
 
 class SearchFile(BaseModel):

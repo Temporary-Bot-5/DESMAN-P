@@ -182,7 +182,7 @@ def test_help_and_unknown_commands() -> None:
     result = chat("/help", "/frobnicate", "/EXIT")
     for command in ("/help", "/new", "/sessions", "/exit"):
         assert command in result.output
-    assert "unknown command /frobnicate" in result.output
+    assert "“frobnicate” is not a command." in result.output
     assert stored().recent() == []  # a command is not a message
 
 
@@ -221,7 +221,7 @@ SLASH = {"/help": "list", "/new": "new", "/sessions": "earlier", "/exit": "leave
 @pytest.mark.parametrize(
     ("typed", "names"),
     [
-        ("/", ["/help", "/new", "/sessions", "/exit"]),
+        ("/", ["/exit", "/help", "/new", "/sessions"]),
         ("/s", ["/sessions"]),
         ("/E", ["/exit"]),
         ("/x", []),
@@ -256,7 +256,7 @@ def test_the_chat_offers_its_own_commands(monkeypatch: pytest.MonkeyPatch) -> No
     Chat(stored()).run()
     from desman.chat import _commands
 
-    assert offered == [[*_commands(), *commands.completions()]]
+    assert offered == [list({**_commands(), **commands.completions()})]
 
 
 # ── Naming and deleting sessions ─────────────────────────────────────────────

@@ -114,9 +114,10 @@ def test_command_switches_and_back_preserves_chat(
     ]
     events = [m for m in messages if m.kind is Kind.EVENT]
     assert len(events) == 3
-    assert all("No tasks." in event.text for event in events[:2])
-    assert "“nonsense” is not a command." in events[2].text
-    assert "help" in events[2].text and "/back" in events[2].text
+    assert "No tasks." in events[0].text
+    assert "Commands start with /" in events[1].text
+    assert "Commands start with /" in events[2].text
+    assert "/status" in events[2].text
     assert not llm.calls
 
 
@@ -400,6 +401,7 @@ def test_unknown_terminal_word_redacts_key(sessions: Sessions) -> None:
     messages = sessions.messages(sessions.terminal())
     assert secret not in "\n".join(m.text for m in messages)
     assert "is not a command" in messages[-1].text
+    assert "`/help`" in messages[-1].text
 
 
 def test_plain_cyrillic_terminal_text_is_not_model_input(
@@ -410,8 +412,8 @@ def test_plain_cyrillic_terminal_text_is_not_model_input(
     lines = iter(["/terminal", "привет", "/exit"])
     Chat(sessions, read=lambda: next(lines, None)).run()
     text = "\n".join(m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT)
-    assert "“привет” is not a command." in text
-    assert "`help`" in text and "/back" in text
+    assert "Commands start with /" in text
+    assert "/status" in text
     assert not llm.calls
 
 
@@ -462,22 +464,22 @@ def test_terminal_result_keeps_fields_whose_names_held_keys() -> None:
     assert one not in json.dumps(shown) and two not in json.dumps(shown)
 
 
-@pytest.mark.parametrize("line", ["help", "/help"])
+@pytest.mark.parametrize("line", ["!help", "/help"])
 def test_terminal_help_is_one_catalog_listing(sessions: Sessions, line: str) -> None:
     chat = Chat(sessions)
     lines = iter(["/terminal", line, "/exit"])
     chat.read = lambda: next(lines, None)
     chat.run()
     events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
-    listing = next(text for text in events if "clear the General Terminal screen" in text)
-    assert listing.count("clear the General Terminal screen") == 1
+    listing = next(text for text in events if "clear the screen" in text)
+    assert listing.count("clear the screen") == 1
     assert listing.count("return from General Terminal to the previous chat") == 1
     assert listing.count("init-db") == 1
     assert "the chat's commands" not in listing
     assert "Ask for any of them" not in listing
 
 
-@pytest.mark.parametrize("line", ["help", "/help"])
+@pytest.mark.parametrize("line", ["!help", "/help"])
 def test_terminal_help_lists_commands_with_a_broken_config(
     sessions: Sessions, line: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -491,4 +493,4 @@ def test_terminal_help_lists_commands_with_a_broken_config(
     chat.read = lambda: next(lines, None)
     chat.run()
     events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
-    assert any("clear the General Terminal screen" in text and "init-db" in text for text in events)
+    assert any("clear the screen" in text and "init-db" in text for text in events)

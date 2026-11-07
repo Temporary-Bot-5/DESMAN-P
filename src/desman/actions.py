@@ -26,6 +26,7 @@ from desman.core.report import (
     ModelSuggestion,
     TaskReport,
     inbox,
+    short_description,
     task_report,
     task_summaries,
 )
@@ -95,7 +96,7 @@ def print_report(report: TaskReport) -> None:
     )
     click.echo(t("Goal: {goal}", goal=one_line(report.goal, 200)))
     for sub in report.subtasks:
-        line = f"  [{sub.seq}] {sub.status:<11}  {one_line(sub.description, 60)}"
+        line = f"  [{sub.seq}] {sub.status:<11}  {short_description(sub.description)}"
         notes = []
         if sub.part_of is not None:
             notes.append(t("part of {seq}", seq=sub.part_of))
@@ -164,11 +165,16 @@ def suggestion_lines(suggestions: list[ModelSuggestion]) -> list[str]:
 
 
 def list_tasks(
-    store: Store, *, status: TaskStatus | None, limit: int, subtasks: bool = False
+    store: Store,
+    *,
+    status: TaskStatus | None,
+    limit: int,
+    subtasks: bool = False,
+    all: bool = False,
 ) -> list[TaskReport]:
     """A consistent task list, with full subtask data only when requested."""
     with db.read_snapshot(store.conn):
-        summaries = task_summaries(store, status=status, limit=limit)
+        summaries = task_summaries(store, status=status, limit=limit, all=all)
         return [task_report(store, summary.id) for summary in summaries] if subtasks else summaries
 
 
@@ -177,10 +183,12 @@ def print_summaries(summaries: list[TaskReport], subtasks: bool = False) -> None
         click.echo(
             f"{summary.id}  {summary.status:<11}  {summary.done:>3}/{summary.total:<3}  "
             f"{summary.created_at}  {one_line(summary.goal, 60)}"
+            + ("  " + t("Pinned") if summary.pinned else "")
+            + ("  " + t("paused") if summary.paused_at else "")
         )
         if subtasks:
             for sub in summary.subtasks:
-                click.echo(f"  [{sub.seq}] {sub.status}  {one_line(sub.description, 80)}")
+                click.echo(f"  [{sub.seq}] {sub.status}  {short_description(sub.description)}")
 
 
 def one_line(text: str, limit: int) -> str:
@@ -461,7 +469,7 @@ def apply_decision(store: Store, pending: Pending, note: str, action: str) -> De
 
 def print_decision(decision: Decision) -> None:
     sub = decision.sub
-    click.echo(f"[{sub.seq}] {one_line(sub.description, 60)}: {sub.status} -> {decision.to}")
+    click.echo(f"[{sub.seq}] {short_description(sub.description)}: {sub.status} -> {decision.to}")
     if decision.task_status is TaskStatus.ACTIVE:
         click.echo(
             t("Task is active again. Continue with: desman resume {ref}", ref=decision.short)
@@ -609,3 +617,38 @@ def _counts(counts: dict[str, int]) -> str:
 
 def _share(part: int, whole: int) -> str:
     return f"{round(100 * part / whole)}%" if whole else "-"
+
+
+def task_change(
+    store: Store, operation: str, task: str | None = None, *, targets: list[str] | None = None
+) -> dict[str, Any]:
+    """Shared operator task controls; bulk operations recheck pins at application time."""
+    try:
+        if (
+            operation not in {"pin", "unpin", "pause", "hide"}
+            or task is None
+            and operation in {"pin", "unpin"}
+        ):
+            raise ValueError("unknown task operation")
+        if task is None:
+            only = set(targets) if targets is not None else None
+            count = (
+                store.hide_finished(only=only)
+                if operation == "hide"
+                else store.pause_unfinished(only=only)
+            )
+            return {"operation": operation, "count": count}
+        task_id = find_task(store, task)
+        if operation == "pin":
+            changed = store.pin_task(task_id)
+        elif operation == "unpin":
+            changed = store.pin_task(task_id, False)
+        elif operation == "hide":
+            changed = store.hide_task(task_id)
+        elif operation == "pause":
+            changed = store.pause_task(task_id)
+        else:
+            raise ValueError("unknown task operation")
+    except ValueError as e:
+        raise click.ClickException(t("Cannot change this task: {error}", error=str(e))) from e
+    return {"task": task_id, "operation": operation, "changed": changed}

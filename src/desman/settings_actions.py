@@ -93,8 +93,8 @@ class Limits(Fields):
 
 class Models(Fields):
     section: Literal["models"]
-    operation: Literal["show", "add", "use"]
-    model: str = Field(min_length=3, max_length=200)
+    operation: Literal["show", "add", "use", "remove"]
+    model: str = Field(min_length=1, max_length=200)
     server: Literal["ollama", "llamacpp"] = "ollama"
 
 

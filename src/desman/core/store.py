@@ -17,6 +17,7 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
@@ -257,6 +258,98 @@ class Store:
             raise NotFoundError(f"task {task_id} not found")
         return derive_task_status(SubtaskStatus(r[0]) for r in rows)
 
+    def pin_task(self, task_id: str, pinned: bool = True) -> bool:
+        """Pin a task; its modules inherit the pin."""
+        return self._task_flag(
+            task_id, "pinned", int(pinned), "task_pinned" if pinned else "task_unpinned"
+        )
+
+    def hide_task(self, task_id: str) -> bool:
+        """Hide finished work without deleting its history."""
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            if self.task_status(task_id) not in {
+                TaskStatus.DONE,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            }:
+                raise ValueError("cannot hide an unfinished task")
+            return self._task_flag(task_id, "hidden_at", self._now(), "task_hidden")
+
+    def pause_task(self, task_id: str) -> bool:
+        """Stop scheduling a task; a running executor yields at its next step."""
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            if self.task_status(task_id) in {
+                TaskStatus.DONE,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            }:
+                return False
+            return self._task_flag(task_id, "paused_at", self._now(), "task_paused")
+
+    def resume_task(self, task_id: str) -> bool:
+        return self._task_flag(task_id, "paused_at", None, "task_resumed")
+
+    def affected_tasks(self, operation: str) -> list[str]:
+        """Unpinned tasks eligible for a bulk hide or pause, in stable order."""
+        if operation not in {"hide", "pause"}:
+            raise ValueError("unknown task operation")
+        column = "hidden_at" if operation == "hide" else "paused_at"
+        finished = {TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED}
+        return [
+            r["id"]
+            for r in self.conn.execute(
+                f"SELECT id FROM tasks WHERE pinned = 0 AND {column} IS NULL ORDER BY created_at, id"
+            ).fetchall()
+            if (self.task_status(r["id"]) in finished) == (operation == "hide")
+        ]
+
+    def hide_finished(self, *, only: set[str] | None = None) -> int:
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            return sum(
+                self.hide_task(ref)
+                for ref in self.affected_tasks("hide")
+                if only is None or ref in only
+            )
+
+    def pause_unfinished(self, *, only: set[str] | None = None) -> int:
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            return sum(
+                self.pause_task(ref)
+                for ref in self.affected_tasks("pause")
+                if only is None or ref in only
+            )
+
+    def _task_flag(self, task_id: str, column: str, value: str | int | None, action: str) -> bool:
+        if column not in {"pinned", "hidden_at", "paused_at"}:
+            raise ValueError("unknown task flag")
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            row = self.find_task(task_id)
+            task_id = row["id"]
+            if row[column] == value or (
+                column != "pinned" and row[column] is not None and value is not None
+            ):
+                return False
+            self.conn.execute(f"UPDATE tasks SET {column} = ? WHERE id = ?", (value, task_id))
+            self.note(self.list_subtasks(task_id)[0].id, Actor.HUMAN, action)
+            return True
+
+    def yield_paused(self, subtask_id: str, lease: str) -> bool:
+        """Release an executor through the existing preemption edge, keeping its checkpoint."""
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            subtask = self.get_subtask(subtask_id)
+            if self.find_task(subtask.task_id)["paused_at"] is None:
+                return False
+            self._apply(
+                subtask_id,
+                S.RUNNING,
+                S.READY,
+                Actor.EXECUTOR,
+                lease=lease,
+                reason="task paused by operator",
+                action="preempted",
+            )
+            return True
+
     def cancel_task(self, task_id: str, reason: str) -> list[Subtask]:
         """Operator stops a whole task: every subtask not finished yet becomes CANCELLED.
 
@@ -361,7 +454,7 @@ class Store:
             scope += f" AND NOT {NETWORK_SQL}"
         chosen = self.conn.execute(
             f"""SELECT id, {self.aging.urgency_sql()} AS urgency FROM subtasks
-                WHERE status = 'ready' {scope}
+                WHERE status = 'ready' AND task_id IN (SELECT id FROM tasks WHERE paused_at IS NULL) {scope}
                 ORDER BY {NETWORK_SQL}, urgency DESC, queued_at, seq LIMIT 1""",
             (now, *params),
         ).fetchone()
@@ -426,7 +519,8 @@ class Store:
             scope += " AND priority >= ?"
             params.append(least)
         waiting = self.conn.execute(  # without the write lock: almost always nothing waits
-            f"SELECT 1 FROM subtasks WHERE status = 'ready' {scope} LIMIT 1", params
+            f"SELECT 1 FROM subtasks WHERE status = 'ready' AND task_id IN (SELECT id FROM tasks WHERE paused_at IS NULL) {scope} LIMIT 1",
+            params,
         ).fetchone()
         if waiting is None:
             return None
@@ -912,7 +1006,7 @@ class Store:
             now = self._now()
             rows = self.conn.execute(
                 f"""SELECT id, resume_status FROM subtasks
-                    WHERE status = 'paused' AND (paused_until IS NULL OR paused_until <= ?) {scope}
+                    WHERE task_id IN (SELECT id FROM tasks WHERE paused_at IS NULL) AND status = 'paused' AND (paused_until IS NULL OR paused_until <= ?) {scope}
                     ORDER BY paused_until""",
                 (now, *params),
             ).fetchall()
@@ -968,7 +1062,7 @@ class Store:
         if not network:
             scope += f" AND NOT {NETWORK_SQL}"
         rows = self.conn.execute(
-            f"""SELECT * FROM subtasks WHERE status = ? {scope}
+            f"""SELECT * FROM subtasks WHERE status = ? AND task_id IN (SELECT id FROM tasks WHERE paused_at IS NULL) {scope}
                 ORDER BY {NETWORK_SQL}, {self.aging.urgency_sql()} DESC, queued_at, seq LIMIT ?""",
             (status, *params, self._now(), limit),
         ).fetchall()
@@ -997,7 +1091,11 @@ class Store:
                 "SELECT status, review_owner, review_until FROM subtasks WHERE id = ?",
                 (subtask_id,),
             ).fetchone()
-            if row is None or row["status"] != S.REVIEW.value:
+            if (
+                row is None
+                or row["status"] != S.REVIEW.value
+                or self.find_task(self.get_subtask(subtask_id).task_id)["paused_at"] is not None
+            ):
                 return None
             holder = row["review_owner"]
             if (
@@ -1416,7 +1514,7 @@ class Store:
     ) -> None:
         """Record something that happened to a subtask without changing it (e.g. work that was
         thrown away because its lease was lost), so the history explains every outcome."""
-        with db.transaction(self.conn):
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
             self._audit(actor, action, subtask=self.get_subtask(subtask_id), details=details)
 
     def _audit(

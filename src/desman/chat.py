@@ -87,7 +87,7 @@ from desman.interlocutor import (
 )
 from desman.live import Progress
 from desman.llm import hub, router
-from desman.llm.base import ProviderError
+from desman.llm.base import Completion, ProviderError, Request
 from desman.llm.structured import StructuredOutputError
 from desman.net import protocol
 from desman.planner import must_run, plan
@@ -109,6 +109,8 @@ _EARLIER = "earlier"  # not a session id: those are uuid hex
 
 TERMINAL_COMMANDS = {
     "/help",
+    "/clear",
+    "/context",
     "/new",
     "/temporary",
     "/sessions",
@@ -127,6 +129,8 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/terminal": t("open General Terminal"),
         "/back": t("return from General Terminal to the previous chat"),
         "/help": t("the chat's commands"),
+        "/clear": t("clear the screen (history is kept)"),
+        "/context": t("show the context of the next model call: /context [full]"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
@@ -140,12 +144,7 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
     if terminal:
-        every["clear"] = t("clear the General Terminal screen (messages are kept)")
-        return {
-            name: what
-            for name, what in every.items()
-            if name in TERMINAL_COMMANDS or name == "clear"
-        }
+        return {name: what for name, what in every.items() if name in TERMINAL_COMMANDS}
     if temporary:
         every["/new"] = t("start a normal session (this temporary chat is erased)")
     return {name: what for name, what in every.items() if not (temporary and name in KEPT_ONLY)}
@@ -318,9 +317,14 @@ class Chat:
                     self._seen_terminal()
 
     def _terminal_command(self, line: str) -> None:
+        if self.in_terminal and not line.strip().startswith(("/", "!")):
+            self._terminal_output(lambda: ui.note(t("Commands start with /, e.g. /status")), line)
+            return
         self._terminal_open()
         command = line.strip()
-        self._terminal_output(lambda: self._typed(command.removeprefix("!")), line)
+        self._terminal_output(
+            lambda: self._typed(command[1:] if command.startswith(("!", "/")) else command), line
+        )
 
     def _notices(self) -> None:
         with ui.recording(
@@ -399,8 +403,10 @@ class Chat:
             interlocutor.profile = self.profile.notes()  # a task's retelling follows them
         if isinstance(turn, Reply):
             self._say(turn.text)
+            self._fallback_note(interlocutor)
         elif isinstance(turn, Clarify):
             self._say(turn.question)
+            self._fallback_note(interlocutor)
         elif isinstance(turn, NewTask):
             self._task(turn, config, models, interlocutor)
         else:
@@ -556,7 +562,14 @@ class Chat:
         try:
             made = entry.handler(context, args)
             if isinstance(made, commands.Proposal):
-                if (not typed or entry.typed_confirm) and not self._confirmed(made):
+                if (
+                    not typed
+                    or entry.typed_confirm
+                    or isinstance(args, commands.TaskPauseArgs)
+                    and args.all
+                    or isinstance(args, commands.TaskHideArgs)
+                    and args.finished
+                ) and not self._confirmed(made):
                     made = commands.Outcome({"declined": True}, done=False)
                 else:
                     made = made.apply()
@@ -575,7 +588,16 @@ class Chat:
             self._journal(entry, args, made.done, before, typed=typed)
         if not made.done:
             ui.note(t("Nothing changed."))
-            self._result(t("{command}: the person declined.", command=command), None, config)
+            self._result(
+                t("{command}: the person declined.", command=command),
+                {
+                    "language_switch_declined": True,
+                    "instruction": "Do not propose another language switch in this session.",
+                }
+                if entry.name == "language"
+                else None,
+                config,
+            )
         elif made.data is not None or typed:
             self._result(
                 t("The person ran {command}.", command=command)
@@ -620,7 +642,7 @@ class Chat:
                     "“{word}” is not a command. General Terminal takes only DESMAN's commands "
                     "(`help` lists them); to talk, go back to a chat with /back.",
                     word=providers.redact_keys(word, config)[0],
-                )
+                ).replace("`help`", "`/help`")
             )
             return
         try:
@@ -976,6 +998,9 @@ class Chat:
                 t("Task {ref} stopped. `desman resume {ref}` continues it.", ref=ref), task_id
             )
             return
+        if self.store.find_task(task_id)["paused_at"] is not None:
+            self._event(t("Task {ref} paused. `/resume {ref}` continues it.", ref=ref), task_id)
+            return
         if interlocutor is None:
             actions.print_report(task_report(self.store, task_id))
             result = self.store.final_result(task_id)
@@ -1093,6 +1118,7 @@ class Chat:
                 )
             else:
                 self._say(retold, task_id)
+                self._fallback_note(interlocutor, task_id)
         self._files(task_id, ref, root)
 
     def _files(self, task_id: str, ref: str, root: Path) -> None:
@@ -1186,6 +1212,20 @@ class Chat:
     def _slash(self, line: str) -> bool:
         """Run a chat command; False when it ends the chat."""
         name = line.split()[0].lower()
+        if name not in _commands():
+            if self.in_terminal:
+                self._typed(line[1:])
+            else:
+                self._terminal_command(line)
+            return True
+        if name == "/clear":
+            if self.in_terminal:
+                self.sessions.clear_terminal()
+            ui.clear_screen()
+            return True
+        if name == "/context":
+            self._context(line.split()[1:])
+            return True
         if self.in_terminal and name not in TERMINAL_COMMANDS:
             ui.error(t("{name} is not available in General Terminal", name=name))
             return True
@@ -1234,6 +1274,18 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
+        if isinstance(action, ui.TaskControlAction):
+            command = (
+                f"resume {action.id}"
+                if action.operation == "resume"
+                else f"task {action.operation} {action.id}"
+            )
+            self._terminal_output(lambda: self._typed(command), keep_inputs=True)
+            return
+        if isinstance(action, ui.SimpleAction) and action.type in {"hide_finished", "pause_tasks"}:
+            operation = "hide" if action.type == "hide_finished" else "pause"
+            self._terminal_output(lambda: self._bulk_tasks(operation), keep_inputs=True)
+            return
         if isinstance(action, ui.SimpleAction) and action.type == "report_problem":
             self._terminal_output(self._report_problem, keep_inputs=True)
             return
@@ -1255,6 +1307,22 @@ class Chat:
             self._terminal_output(lambda: self._dispatch_action(action))
         else:
             self._dispatch_action(action)
+
+    def _bulk_tasks(self, operation: str) -> None:
+        entry = commands.find("task " + operation)
+        assert entry is not None
+        args = (
+            commands.TaskHideArgs(finished=True)
+            if operation == "hide"
+            else commands.TaskPauseArgs(all=True)
+        )
+        context = commands.Context(self.store, open_config(), lambda *_: None, lambda _: None)
+        proposal = entry.handler(context, args)
+        if isinstance(proposal, commands.Proposal):
+            confirmed = self._confirmed(proposal, in_prompt=True)
+            if confirmed:
+                proposal.apply()
+            self._journal(entry, args, confirmed, self._saved_config(), typed=True)
 
     def _report_problem(self) -> None:
         try:
@@ -1369,7 +1437,12 @@ class Chat:
                     if isinstance(made, commands.Proposal):
                         # Keep confirmations belonging to downloads/join/reset. Ordinary fields
                         # are already the person's explicit act, as with !COMMAND.
-                        confirm = entry.name in ("models add", "global join", "config reset")
+                        confirm = entry.name in (
+                            "models add",
+                            "models remove",
+                            "global join",
+                            "config reset",
+                        )
                         made = (
                             made.apply()
                             if not confirm or self._confirmed(made, in_prompt=True)
@@ -1413,13 +1486,26 @@ class Chat:
         config = self._config()
         if config is None:
             return
+        from desman.gui.settings import listed_choice
+
         try:
             if action.scope == "session" and (
                 action.scope_id != self.session_id or self.in_terminal
             ):
                 raise ValueError("not the current chat")
             row = next(r for r in tuning_cli.role_rows(config) if r["role"] == action.role)
-            if action.model is not None and action.model not in row["candidate_models"]:
+            if action.scope == "role":
+                saved = choices.Choice(model=row["model"], key=row["key_fingerprint"])
+            elif action.scope_id is None:
+                saved = self._pending_choice or choices.Choice()
+            else:
+                saved = choices.get(self.store.conn, action.scope, action.scope_id, action.role)
+            if (
+                action.model is not None
+                and action.model not in row["candidate_models"]
+                and action.model != saved.model
+                and not listed_choice(config, action.model, action.key)
+            ):
                 raise ValueError("unavailable model")
             tuning_cli.resolved_key(config, action.role, action.model, action.key)
             if action.scope == "role":
@@ -1501,18 +1587,107 @@ class Chat:
             )
         ui.session(self.session_id, self.temporary)
 
-    def _help(self) -> None:
-        if self.in_terminal:
-            self._typed("help")
+    def _fallback_note(self, interlocutor: Interlocutor, task_id: str | None = None) -> None:
+        llm = interlocutor.llm
+        if not isinstance(llm, router.Fallback):
             return
-        commands = ui.table("", "")
-        commands.show_header = False
-        for name, what in _commands(self.temporary, self.in_terminal).items():
-            commands.add_row(Text(name, style="key"), Text(what, style="muted"))
-        ui.out(commands)
-        ui.note(t("!COMMAND runs a DESMAN command; !help lists them."))
-        if not self.in_terminal:
-            ui.note(t("Anything else you write is a message."))
+        call = llm.last_call
+        if not call.answered or not any(item.model == llm.label for item in call.skipped):
+            return
+        reasons = {
+            "memory": t("model may not fit in memory"),
+            "busy": t("busy"),
+            "limit": t("limit reached"),
+            "refused": t("no such model or no access"),
+            "key": t("key refused"),
+            "unavailable": t("unavailable"),
+            "context": t("context too small"),
+            "unfit": t("model skipped"),
+        }
+        skipped = "; ".join(
+            f"{item.model}: "
+            + (
+                t(
+                    "context too small for this chat ({needed} tokens needed, {context} set)",
+                    needed=item.needed,
+                    context=item.context,
+                )
+                if item.reason == "context"
+                else reasons[
+                    "key" if item.reason == "refused" and item.status in (401, 403) else item.reason
+                ]
+            )
+            for item in call.skipped
+        )
+        self._event(
+            providers.redact_keys(
+                t("Answered by {model}. Skipped: {skipped}", model=call.answered, skipped=skipped),
+                self._saved_config(),
+            )[0],
+            task_id,
+        )
+
+    def _context(self, args: list[str]) -> None:
+        if self.in_terminal:
+            ui.note(t("General Terminal talks to no model."))
+            return
+        if args not in ([], ["full"]):
+            ui.note(t("Usage: /context [full]"))
+            return
+        config = self._config()
+        if config is None:
+            return
+        own = (
+            choices.get(self.store.conn, "session", self.session_id, "interlocutor")
+            if self.session_id
+            else self._pending_choice or choices.Choice()
+        )
+        config = choices.effective(config, "interlocutor", own)
+        try:
+            lineup = router.lineup(config, calls.Role.INTERLOCUTOR)
+        except router.NoProvider:
+            lineup = []
+        labels = [c.label for c in lineup]
+        model_line = t("Model: {model}", model=labels[0] if labels else t("missing"))
+        if len(labels) > 1:
+            rest = ", ".join(labels[1:4])
+            if len(labels) > 4:
+                rest += " " + t("+{count} more", count=len(labels) - 4)
+            model_line += " · " + t("then: {models}", models=rest)
+        history = (
+            self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
+            if self.session_id
+            else History(summary=None, messages=[])
+        )
+        notes = self.profile.notes() if config.personalize and not self.temporary else None
+        interlocutor = Interlocutor(_InspectionLLM(), config.language, notes, config.behaviour)
+        placeholder = Message(
+            seq=0,
+            session_id=self.session_id or "",
+            at="",
+            role=Role.USER,
+            kind=Kind.MESSAGE,
+            text="[your next message]",
+        )
+        history = history.model_copy(update={"messages": [*history.messages, placeholder]})
+        request = interlocutor.build_request(history)
+        system = sum(estimate_tokens(m.content) for m in request.messages if m.role == "system")
+        messages = sum(estimate_tokens(m.content) for m in request.messages if m.role != "system")
+        lines = [
+            model_line,
+            t(
+                "≈ {total} tokens in total (system {system}, messages {messages})",
+                total=system + messages,
+                system=system,
+                messages=messages,
+            ),
+        ]
+        for message in request.messages:
+            lines.extend(["", str(message.role), message.content])
+        ui.out(ui.ContextText(providers.redact_keys("\n".join(lines), config)[0]))
+
+    def _help(self) -> None:
+        commands.print_help(terminal=self.in_terminal, temporary=self.temporary)
 
     def _leave_terminal(self) -> None:
         if self.in_terminal and self._previous is not None:
@@ -1884,3 +2059,12 @@ def _size(size: int) -> str:
 def _shorten(text: str, width: int = 50) -> str:
     text = " ".join(text.split())
     return text if len(text) <= width else text[: width - 1] + "…"
+
+
+class _InspectionLLM:
+    """Context inspection builds requests without constructing a network client."""
+
+    name = "inspection"
+
+    def complete(self, request: Request) -> Completion:
+        raise AssertionError("context inspection must not call a model")
