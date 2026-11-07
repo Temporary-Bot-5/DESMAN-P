@@ -105,6 +105,9 @@ INTERLOCUTOR_SYSTEM = (
     "and state of tasks, decisions on them. The name and arguments come from this list "
     '(an argument with "?" may be left out):\n'
     "{commands}\n"
+    "Commands may include optional text: one or two sentences in the person’s language, "
+    "said before the confirmation window. Include text for a language proposal, for example: "
+    '"You wrote in English; shall I switch DESMAN to English?" '
     "A question about the state of DESMAN (its settings, keys, tasks) is answered with a "
     "command that shows something, never with one that changes something or opens a field. "
     "{manual}When you tell the person what DESMAN can do, "
@@ -249,6 +252,7 @@ class NewTask(Noting):
 
 class Command(Noting):
     type: Literal["command"]
+    text: Text | None = None
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
     args: dict[str, JsonValue] = Field(default_factory=dict)
 

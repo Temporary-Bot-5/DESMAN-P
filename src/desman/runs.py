@@ -44,6 +44,8 @@ from desman.net import jobs
 from desman.net.node import capabilities
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
 
+PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3}
+
 TUNING_DEFAULTS: Mapping[str, int] = {
     "max_subtasks": MAX_SUBTASKS,
     "max_parts": MAX_PARTS,
@@ -57,7 +59,7 @@ TUNING_DEFAULTS: Mapping[str, int] = {
 def tuned(tuning: Tuning, name: str) -> int:
     """A number of the tuning: the person's, or the default."""
     value: int | None = getattr(tuning, name)
-    return TUNING_DEFAULTS[name] if value is None else value
+    return {**TUNING_DEFAULTS, **PAGE_TUNING_DEFAULTS}[name] if value is None else value
 
 
 def tuned_spec(spec: TaskSpec, tuning: Tuning) -> TaskSpec:

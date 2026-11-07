@@ -15,6 +15,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers (1–8); applies on the next page start.": "Фонові працівники (1–8); діє з наступного запуску сторінки.",
+    "Background workers (next page start)": "Фонові працівники (з наступного запуску сторінки)",
+    "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
+        "Задачу {ref} запущено: {title} ({n} підзадача). Я повідомлю тут, коли воно завершиться.",
+        "Задачу {ref} запущено: {title} ({n} підзадачі). Я повідомлю тут, коли воно завершиться.",
+        "Задачу {ref} запущено: {title} ({n} підзадач). Я повідомлю тут, коли воно завершиться.",
+    ),
+    "Background worker stopped after repeated failures. See {path}.": "Фонового працівника зупинено після повторних збоїв. Див. {path}.",
+    "Queued: waiting for a free worker": "У черзі: очікує вільного працівника",
     "Model: {model}": "Модель: {model}",
     "then: {models}": "далі: {models}",
     "+{count} more": "ще +{count}",

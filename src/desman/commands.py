@@ -316,6 +316,7 @@ Limit = Annotated[int, Field(ge=1, le=16000)] | Literal["auto"]
 
 
 class TuningArgs(Args):
+    workers: Limit | None = None
     max_subtasks: Limit | None = None
     max_parts: Limit | None = None
     context_tokens: Limit | None = None
@@ -342,7 +343,14 @@ class TuningArgs(Args):
     reset: bool = False
 
     def change(self) -> tuning_cli.TuningChange:
-        numbers = ("max_subtasks", "max_parts", "context_tokens", "max_attempts", "max_transient")
+        numbers = (
+            "workers",
+            "max_subtasks",
+            "max_parts",
+            "context_tokens",
+            "max_attempts",
+            "max_transient",
+        )
         return tuning_cli.TuningChange(
             limits={n: getattr(self, n) for n in numbers if getattr(self, n) is not None},
             models={str(k): v for k, v in (self.models or {}).items()},

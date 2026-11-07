@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers (1–8); applies on the next page start.": "Procesos en segundo plano (1–8); se aplica al reiniciar la página.",
+    "Background workers (next page start)": "Procesos en segundo plano (al reiniciar la página)",
+    "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
+        "Tarea {ref} iniciada: {title} ({n} subtarea). Te avisaré aquí cuando termine.",
+        "Tarea {ref} iniciada: {title} ({n} subtareas). Te avisaré aquí cuando termine.",
+    ),
+    "Background worker stopped after repeated failures. See {path}.": "Proceso en segundo plano detenido tras fallos repetidos. Consulta {path}.",
+    "Queued: waiting for a free worker": "En cola: esperando un proceso libre",
     "Model: {model}": "Modelo: {model}",
     "then: {models}": "después: {models}",
     "+{count} more": "+{count} más",

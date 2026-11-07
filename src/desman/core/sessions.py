@@ -148,6 +148,7 @@ class Sessions:
         covers: int | None = None,
         temporary: bool = False,
         initial_choice: choices.Choice | None = None,
+        outcome_audit: int | None = None,
     ) -> Message:
         """Append a message; `session_id` None starts a new session with it, `temporary` one if
         asked (this process holds it). A summary says which messages it `covers`."""
@@ -181,6 +182,8 @@ class Sessions:
                 "text": text,
                 "task_id": task_id,
             }
+            if outcome_audit is not None:
+                columns["outcome_audit"] = outcome_audit
             if covers is not None:  # the column is newer than the other ones (migration 14)
                 columns["covers"] = covers
             cursor = self.conn.execute(
@@ -235,17 +238,31 @@ class Sessions:
             earlier=earlier,
         )
 
+    def mark_read(self, session_id: str) -> None:
+        """Clear task-result unread marks when the chat renders this session."""
+        with db.transaction(self.conn):
+            self.conn.execute(
+                "UPDATE sessions SET read_seq = COALESCE("
+                "(SELECT MAX(seq) FROM messages WHERE session_id = sessions.id), 0) WHERE id = ?",
+                (session_id,),
+            )
+
     def changed_tasks(self, session_id: str) -> list[str]:
-        """The session's tasks with audit entries newer than the last message about them: what
-        happened while the chat was not watching (`desman resume`, decisions in the terminal).
-        The messages are the marker, so a task is retold once for each change."""
+        """Tasks with status changes newer than their outcome messages. Audit sequence
+        watermarks survive equal timestamps; older retellings use their message time.
+        Metadata changes such as pins do not cause another retelling."""
         rows = self.conn.execute(
             """
             SELECT t.id FROM tasks t
             WHERE t.session_id = ?
-              AND (SELECT MAX(a.ts) FROM audit_log a WHERE a.task_id = t.id)
-                  > COALESCE((SELECT MAX(m.at) FROM messages m
-                              WHERE m.session_id = t.session_id AND m.task_id = t.id), '')
+              AND (SELECT MAX(a.seq) FROM audit_log a WHERE a.task_id = t.id
+                   AND a.to_status IS NOT NULL)
+                  > COALESCE((SELECT MAX(m.outcome_audit) FROM messages m
+                              WHERE m.session_id = t.session_id AND m.task_id = t.id),
+                    (SELECT MAX(a.seq) FROM audit_log a WHERE a.task_id = t.id
+                     AND a.ts <= COALESCE((SELECT MAX(m.at) FROM messages m
+                         WHERE m.session_id = t.session_id AND m.task_id = t.id
+                         AND m.role = 'interlocutor'), '')), 0)
             ORDER BY t.created_at, t.id
             """,
             (session_id,),

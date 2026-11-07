@@ -11,7 +11,7 @@ import click
 import httpx
 
 from desman import commands, global_cli, i18n, protected_cli, providers, runs, tuning_cli, wizard
-from desman.config import TUNING_BOUNDS, Config
+from desman.config import TUNING_BOUNDS, Config, Tuning
 from desman.core import protected
 from desman.core.profile import Profile
 from desman.gui.front import WebFront
@@ -109,7 +109,7 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
                 "value": getattr(config.tuning, n),
                 "min": bounds[0],
                 "max": bounds[1],
-                "default": runs.TUNING_DEFAULTS[n],
+                "default": runs.tuned(Tuning(), n),
             }
             for n, bounds in TUNING_BOUNDS.items()
         ],

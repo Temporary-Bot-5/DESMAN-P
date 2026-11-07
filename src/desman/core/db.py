@@ -686,6 +686,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE tasks ADD COLUMN hidden_at TEXT;
     ALTER TABLE tasks ADD COLUMN paused_at TEXT;
     """,
+    # 39: audit watermark on task outcome messages (timestamps can coincide).
+    """
+    ALTER TABLE messages ADD COLUMN outcome_audit INTEGER CHECK (outcome_audit >= 0);
+    ALTER TABLE sessions ADD COLUMN read_seq INTEGER NOT NULL DEFAULT 0 CHECK (read_seq >= 0);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -30,6 +30,9 @@ ROLES = tuple(ModelChoices.model_fields)
 
 
 @click.command("tuning")
+@click.option(
+    "--workers", metavar="N|auto", help="Background workers (1–8); applies on the next page start."
+)
 @click.option("--max-subtasks", metavar="N|auto", help="The most subtasks in a plan (1–12).")
 @click.option(
     "--max-parts", metavar="N|auto", help="The most parts a failing subtask is split into (2–6)."
@@ -68,6 +71,7 @@ ROLES = tuple(ModelChoices.model_fields)
 @click.option("--reset", is_flag=True, help="Everything back to DESMAN's defaults.")
 @json_option
 def tuning(
+    workers: str | None,
     max_subtasks: str | None,
     max_parts: str | None,
     context_tokens: str | None,
@@ -82,6 +86,7 @@ def tuning(
     Show, or change."""
     manager = load_config()
     numbers = {
+        "workers": workers,
         "max_subtasks": max_subtasks,
         "max_parts": max_parts,
         "context_tokens": context_tokens,
@@ -311,6 +316,7 @@ def set_tuning(manager: ConfigManager, change: TuningChange) -> tuple[Tuning, Tu
 
 def labels() -> dict[str, str]:
     return {
+        "workers": t("Background workers (next page start)"),
         "max_subtasks": t("most subtasks in a plan"),
         "max_parts": t("most parts of a split subtask"),
         "context_tokens": t("tokens of dependency results shown"),
@@ -324,7 +330,7 @@ def shown(tuning: Tuning, name: str) -> str:
     if name in TUNING_LIMITS:
         value = getattr(tuning, name)
         return (
-            t("default ({value})", value=runs.TUNING_DEFAULTS[name])
+            t("default ({value})", value=runs.tuned(Tuning(), name))
             if value is None
             else str(value)
         )
@@ -438,7 +444,10 @@ def print_change(old: Tuning, new: Tuning, config: Config) -> None:
 
 
 def tuning_json(tuning: Tuning, config: Config | None = None) -> dict[str, Any]:
-    result = {**tuning.model_dump(), "defaults": dict(runs.TUNING_DEFAULTS)}
+    result = {
+        **tuning.model_dump(),
+        "defaults": {**runs.TUNING_DEFAULTS, **runs.PAGE_TUNING_DEFAULTS},
+    }
     if config is not None:
         result["roles"] = role_rows(config)
     return result

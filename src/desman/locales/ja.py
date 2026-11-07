@@ -10,6 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers (1–8); applies on the next page start.": "バックグラウンドワーカー（1～8）。次回のページ起動時に適用。",
+    "Background workers (next page start)": "バックグラウンドワーカー（次回のページ起動時）",
+    "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
+        "タスク {ref} を開始しました：{title}（サブタスク {n} 件）。 完了したらここでお知らせします。",
+    ),
+    "Background worker stopped after repeated failures. See {path}.": "繰り返しの失敗によりバックグラウンドワーカーを停止しました。{path} をご覧ください。",
+    "Queued: waiting for a free worker": "待機中：空いているワーカーを待っています",
     "Model: {model}": "モデル：{model}",
     "then: {models}": "次：{models}",
     "+{count} more": "ほか {count} 件",

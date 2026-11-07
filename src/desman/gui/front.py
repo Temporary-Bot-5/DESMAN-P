@@ -5,6 +5,7 @@ from __future__ import annotations
 import _thread
 import io
 import json
+import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -33,7 +34,16 @@ class Answer(BaseModel):
 class WebFront(ui.Front):
     """Adapt synchronous UI calls to browser state without moving authority to the page."""
 
-    def __init__(self, limit: int = 5000, redact: Callable[[str], str] | None = None) -> None:
+    def __init__(
+        self,
+        limit: int = 5000,
+        redact: Callable[[str], str] | None = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.clock = clock
+        self.worker_count = 3
+        self.idle: Callable[[], None] | None = None
         self.condition = Condition()
         self.events: deque[dict[str, Any]] = deque(maxlen=limit)
         self.seq = 0
@@ -254,8 +264,20 @@ class WebFront(ui.Front):
             self.emit("prompt", **{k: v for k, v in self.prompt.items() if k != "type"})
             try:
                 # Timed waits let Ctrl+C reach the main thread on Windows too.
+                due = self.clock() + 2
                 while self._answer is None:
-                    self.condition.wait(timeout=0.2)
+                    self.condition.wait(
+                        timeout=min(0.2, max(0, due - self.clock())) if kind == "line" else 0.2
+                    )
+                    if kind == "line" and self.idle is not None and self.clock() >= due:
+                        self.condition.release()
+                        try:
+                            self.idle()
+                        finally:
+                            self.condition.acquire()
+                            due = self.clock() + 2
+                    elif self.clock() >= due:
+                        due = self.clock() + 2
                 answer = self._answer
                 assert answer is not None
                 if answer.get("cancel") is True:
