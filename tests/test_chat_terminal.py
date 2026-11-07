@@ -428,3 +428,14 @@ def test_terminal_result_json_never_shows_an_escaped_key() -> None:
     )
     assert key not in shown
     assert json.dumps(key)[1:-1] not in shown
+
+
+def test_terminal_result_keeps_fields_whose_names_held_keys() -> None:
+    from desman import chat as chat_module
+    from desman.config import ApiKey, Config
+
+    one, two = "gsk_first_0123456789abcdefghij", "gsk_second_0123456789abcdefghi"
+    config = Config(api_keys={"GROQ_API_KEY": [ApiKey(value=one), ApiKey(value=two)]})
+    shown = chat_module._redacted({one: "a", two: "b"}, config)
+    assert sorted(shown.values()) == ["a", "b"]
+    assert one not in json.dumps(shown) and two not in json.dumps(shown)

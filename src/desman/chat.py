@@ -1551,7 +1551,14 @@ def _redacted(value: Any, config: Config | None) -> Any:
     if isinstance(value, list):
         return [_redacted(v, config) for v in value]
     if isinstance(value, dict):
-        return {_redacted(k, config): _redacted(v, config) for k, v in value.items()}
+        out: dict[Any, Any] = {}
+        for k, v in value.items():
+            name, n = _redacted(k, config), 1
+            while name in out:  # two names that each held a key: keep both values
+                n += 1
+                name = f"{_redacted(k, config)} ({n})"
+            out[name] = _redacted(v, config)
+        return out
     return value
 
 
