@@ -695,6 +695,7 @@ def _modules_set(ctx: Context, args: ModulesSetArgs) -> Proposal:
 
 def _modules_clear(ctx: Context, args: ModulesClearArgs) -> Proposal:
     scope, identity = _module_scope(ctx, args)
+    modules_cli.check_role(scope, args.role)  # before the window: nothing to approve then
     config = ctx.config()
     current = choices.list_choices(ctx.store.conn, scope, identity)
     lines = [
@@ -705,7 +706,6 @@ def _modules_clear(ctx: Context, args: ModulesClearArgs) -> Proposal:
     ]
 
     def apply() -> Outcome:
-        modules_cli.check_role(scope, args.role)
         choices.clear(ctx.store.conn, scope, identity, args.role)
         ui.ok(t("Module choices cleared."))
         return Outcome({"scope": scope, "scope_id": identity, "cleared": args.role})
