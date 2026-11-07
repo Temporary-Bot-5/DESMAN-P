@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="DESMAN: a research prototype for a network of small AI agents under human supervision.">
+  <title>DESMAN(P)</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="#"><img src="img/logo.png" alt="" width="32" height="32">DESMAN(P)</a>
+    <label><span data-en="Language" data-ru="Язык">Language</span> <select id="language" aria-label="Language / Язык"><option value="en">English</option><option value="ru">Русский</option></select></label>
+  </header>
+  <main>
+    <img class="banner" src="img/banner.png" alt="DESMAN">
+    <p class="eyebrow" data-en="A research prototype · Under your supervision" data-ru="Исследовательский прототип · Под вашим контролем">A research prototype · Under your supervision</p>
+    <h1 data-en="Small agents. Shared work." data-ru="Маленькие агенты. Общая работа.">Small agents. Shared work.</h1>
+    <p class="intro" data-en="A research prototype for a decentralized, fault-tolerant, self-evolving network of small AI agents." data-ru="Исследовательский прототип децентрализованной, отказоустойчивой, саморазвивающейся сети небольших ИИ-агентов.">A research prototype for a decentralized, fault-tolerant, self-evolving network of small AI agents.</p>
+    <div class="downloads">
+      <button id="linux" type="button" aria-expanded="false" aria-controls="linux-command">Linux <span aria-hidden="true">↓</span></button>
+      <a class="button" href="https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.bat" download="install.bat">Windows <span aria-hidden="true">↓</span></a>
+    </div>
+    <section id="linux-command" hidden>
+      <p data-en="Paste this command into a terminal. It asks before installing uv; --yes skips the question (see the guide)." data-ru="Вставьте команду в терминал. Перед установкой uv появится вопрос; --yes пропускает его (см. руководство).">Paste this command into a terminal. It asks before installing uv; --yes skips the question (see the guide).</p>
+      <code id="command">(f="$(mktemp)" &amp;&amp; trap 'rm -f "$f"' EXIT &amp;&amp; curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" &amp;&amp; sh "$f")</code>
+      <button id="copy" type="button" data-en="Copy" data-ru="Копировать">Copy</button>
+      <p id="copy-status" role="status"></p>
+    </section>
+    <p class="note" data-en="Windows: save install.bat (use Save link as), then double-click it. On Windows the agents do not run code because there is no sandbox." data-ru="Windows: сохраните install.bat («Сохранить ссылку как»), затем откройте его двойным щелчком. На Windows агенты не запускают код: там нет песочницы.">Windows: save install.bat (use Save link as), then double-click it. On Windows the agents do not run code because there is no sandbox.</p>
+    <section class="getting-started" aria-label="Getting started">
+      <img class="module" src="img/module.png" alt="DESMAN module portrait" width="160" height="160">
+      <ol>
+        <li><strong data-en="Install" data-ru="Установите">Install</strong><p data-en="Choose your system. The installer sets up Python and opens the interface." data-ru="Выберите систему. Установщик подготовит Python и откроет интерфейс.">Choose your system. The installer sets up Python and opens the interface.</p></li>
+        <li><strong data-en="Add a free key" data-ru="Добавьте бесплатный ключ">Add a free key</strong><p data-en="Use the setup window to add a free provider’s API key." data-ru="Добавьте API-ключ бесплатного провайдера в окне настройки.">Use the setup window to add a free provider’s API key.</p></li>
+        <li><strong data-en="Chat" data-ru="Общайтесь">Chat</strong><p data-en="Describe your task. You approve changes and control permissions." data-ru="Опишите задачу. Вы подтверждаете изменения и управляете разрешениями.">Describe your task. You approve changes and control permissions.</p></li>
+      </ol>
+    </section>
+    <a class="guide" href="https://github.com/Temporary-Bot-5/DESMAN-P/blob/master/README.md" data-en="Read the guide →" data-ru="Читать руководство →">Read the guide →</a>
+    <noscript><p>Enable JavaScript for language switching and the Linux command. / Включите JavaScript для смены языка и команды Linux.</p><a href="https://github.com/Temporary-Bot-5/DESMAN-P/blob/master/docs/install.md">Installation guide / Установка</a></noscript>
+  </main>
+  <footer>DESMAN(P) · <a href="https://github.com/Temporary-Bot-5/DESMAN-P">GitHub</a></footer>
+</body>
+</html>

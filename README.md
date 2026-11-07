@@ -21,6 +21,18 @@ gradually improve its own components under human supervision.
 - **Controlled self-evolution** - Changes through reviewable pipeline only
 - **Budget awareness** - Designed for free-tier LLM APIs with rate limits
 
+## Install
+
+For Linux and Windows, use the [installers and installation guide](docs/install.md).
+They install Python, create shortcuts and open the interface. Updates use signed releases
+through `desman global update`.
+
+On Linux:
+
+```sh
+(f="$(mktemp)" && trap 'rm -f "$f"' EXIT && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f")
+```
+
 ## Quick Start
 
 On Windows agents cannot run code: the sandbox needs Linux (bubblewrap).
@@ -76,7 +88,3 @@ ruff check . && ruff format --check . && mypy && pytest
 - `docs/adr/` - architecture decisions
 - `docs/demo-d9.md` - the chat demo, checked by hand on real providers
 - `CLAUDE.md` - guidance for AI assistants
-
-## License
-
-MIT
