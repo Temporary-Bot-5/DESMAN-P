@@ -25,6 +25,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "स्थिति",
     "Task": "कार्य",
     "Unknown or ambiguous session ID.": "अज्ञात या अस्पष्ट सत्र ID।",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "अभी उपलब्ध नहीं",
     "Models and keys for roles": "भूमिकाओं के लिए मॉडल और कुंजियाँ",
     "key: {role}": "कुंजी: {role}",

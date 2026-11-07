@@ -25,6 +25,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "状態",
     "Task": "タスク",
     "Unknown or ambiguous session ID.": "セッション ID が不明または曖昧です。",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "現在利用できません",
     "Models and keys for roles": "役割ごとのモデルとキー",
     "key: {role}": "キー：{role}",

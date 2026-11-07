@@ -25,6 +25,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "状态",
     "Task": "任务",
     "Unknown or ambiguous session ID.": "会话 ID 未知或不明确。",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "当前不可用",
     "Models and keys for roles": "角色的模型和密钥",
     "key: {role}": "密钥：{role}",

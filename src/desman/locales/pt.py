@@ -25,6 +25,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Estado",
     "Task": "Tarefa",
     "Unknown or ambiguous session ID.": "ID de sessão desconhecido ou ambíguo.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "indisponível no momento",
     "Models and keys for roles": "Modelos e chaves por função",
     "key: {role}": "chave: {role}",

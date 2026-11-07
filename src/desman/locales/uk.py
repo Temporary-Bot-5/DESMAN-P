@@ -30,6 +30,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Стан",
     "Task": "Задача",
     "Unknown or ambiguous session ID.": "Невідомий або неоднозначний ID сесії.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "зараз недоступно",
     "Models and keys for roles": "Моделі та ключі для ролей",
     "key: {role}": "ключ: {role}",

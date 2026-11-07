@@ -25,6 +25,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "상태",
     "Task": "작업",
     "Unknown or ambiguous session ID.": "알 수 없거나 모호한 세션 ID입니다.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "현재 사용할 수 없음",
     "Models and keys for roles": "역할별 모델 및 키",
     "key: {role}": "키: {role}",
