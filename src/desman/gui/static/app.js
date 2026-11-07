@@ -585,9 +585,16 @@ function moduleCard(parent, m, placement = "modules") {
   function keys(preferred) {
     key.replaceChildren();
     option(key, "", words.auto);
-    const provider = (model.value || role.candidate_models[0] || "").split("/", 1)[0];
-    for (const k of role.candidate_keys.filter(k => k.provider === provider)) {
-      option(key, k.fingerprint, k.label);
+    const provider = model.value.split("/", 1)[0];
+    const groups = new Map();
+    for (const k of role.candidate_keys.filter(k => !provider || k.provider === provider)) {
+      if (!groups.has(k.provider)) {
+        const group = document.createElement("optgroup");
+        group.label = k.provider;
+        key.append(group);
+        groups.set(k.provider, group);
+      }
+      option(groups.get(k.provider), k.fingerprint, k.label);
     }
     key.value = [...key.options].some(o => o.value === preferred) ? preferred : "";
   }
@@ -603,7 +610,7 @@ function moduleCard(parent, m, placement = "modules") {
     keys((global ? role.key_fingerprint : m.choice_key) || "");
   }
   scope.onchange = defaults;
-  model.onchange = () => keys("");
+  model.onchange = () => keys(key.value);
   defaults();
   actionButton(editor, words.apply, () => {
     moduleEditors.delete(identity);
