@@ -60,6 +60,7 @@ assert.equal(choices.model.requestValue, ''); // Auto is sent as Auto, never as 
 assert.equal(panel.children.filter(n => n.dataset.picker).length, 3); // scope plus two module dropdowns
 choices.model.value = 'groq/two'; choices.model.onchange({}); assert.equal(choices.key.value, 'a');
 choices.provider.value = 'ollama'; choices.provider.onchange(); assert.equal(choices.key.value, '');
+choices.model.value = ''; assert.equal(choices.model.requestValue, 'ollama/local'); // Ollama + Auto stays on the machine
 choices.set('groq/two', 'a'); assert.equal(choices.model.value, 'groq/two');
 // Saved custom labels and removed Ollama models stay selectable.
 for (const saved of ['groq/custom-label', 'ollama/removed']) {

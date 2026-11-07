@@ -175,8 +175,10 @@ function rolePickers(parent, role, chosen, fingerprint) {
   const key = {get value() { return provider.value === "ollama" ? "" : provider.value; }};
   const note = text("small", "", parent); note.className = "model-note";
   let generation = 0, searchTimer, localChoices = [], previousModel = chosen || "";
-  // Auto stays Auto: an empty model is sent as no preference, whatever the source.
-  Object.defineProperty(model, "requestValue", {get: () => model.value});
+  // Auto stays Auto for a key (the router asks that key's provider first); Auto with the
+  // Ollama source means Ollama's own default model, so the choice stays on the machine.
+  Object.defineProperty(model, "requestValue", {get: () => model.value ||
+    (provider.value === "ollama" ? sources.find(s => s.value === "ollama")?.provider?.models?.[0] || "" : "")});
   function fill(preferred = "", rows = null) {
     const p = sources.find(s => s.value === provider.value)?.provider;
     const models = rows || (p?.models || []).map(m => ({value: m, label: m.slice(m.indexOf("/") + 1)}));
