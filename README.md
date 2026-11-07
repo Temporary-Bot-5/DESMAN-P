@@ -27,6 +27,12 @@ For Linux and Windows, use the [installers and installation guide](docs/install.
 They install Python, create shortcuts and open the interface. Updates use signed releases
 through `desman global update`.
 
+On Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh && sh /tmp/desman-install.sh
+```
+
 ## Quick Start
 
 On Windows agents cannot run code: the sandbox needs Linux (bubblewrap).

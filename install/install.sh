@@ -53,6 +53,10 @@ for path in "$DATA" "$CONFIG" "$HOME/.config/desman"; do
     case "$path/" in "$APP/"*) fail 'Data/config must be outside the install directory.' ;; esac
 done
 if [ "$UNINSTALL" = 1 ]; then
+    if [ ! -d "$APP" ]; then
+        echo 'No verified installer-owned app directory; nothing removed.'
+        exit 0
+    fi
     confirm "Remove DESMAN app $APP, ~/.local/bin/desman and DESMAN shortcuts. Keep data and config."
     if [ "$PURGE" = 1 ]; then
         # Reject dangerous overrides before recursive deletion.
@@ -67,7 +71,22 @@ if [ "$UNINSTALL" = 1 ]; then
         mv "$APP/config.json" "$HOME/.config/desman/config.json"
         chmod 600 "$HOME/.config/desman/config.json"
     fi
-    rm -f "$HOME/.local/bin/desman" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/desman.desktop"
+    launcher=$HOME/.local/bin/desman
+    target=$(readlink -f "$APP/.venv/bin/desman" || true)
+    if [ -n "$target" ] && [ -L "$launcher" ] && [ "$(readlink -f "$launcher" || true)" = "$target" ]; then
+        rm -f "$launcher"
+    fi
+    # Encode the app path using the same Desktop Entry quoting as gui --shortcut.
+    desktop_app=$(printf '%s' "$APP" | sed 's/[\\"`$]/\\&/g; s/%/%%/g; s/\\/\\\\/g')
+    remove_shortcut() {
+        # Match the installer's executable, never a name alone. Unknown formats stay.
+        [ -f "$1" ] && [ ! -L "$1" ] || return 0
+        if grep -Fx "Exec=\"$desktop_app/.venv/bin/desman\" gui" "$1" >/dev/null ||
+            grep -Fx "Exec=\"$desktop_app/.venv/bin/python\" -m desman gui" "$1" >/dev/null; then
+            rm -f "$1"
+        fi
+    }
+    remove_shortcut "${XDG_DATA_HOME:-$HOME/.local/share}/applications/desman.desktop"
     desktop=${XDG_DESKTOP_DIR:-}
     if [ -z "$desktop" ]; then
         dirs=${XDG_CONFIG_HOME:-$HOME/.config}/user-dirs.dirs
@@ -77,7 +96,7 @@ if [ "$UNINSTALL" = 1 ]; then
         fi
     fi
     desktop=${desktop:-$HOME/Desktop}
-    rm -f "$desktop/desman.desktop"
+    remove_shortcut "$desktop/desman.desktop"
     rm -rf -- "$APP"
     if [ "$PURGE" = 1 ]; then rm -rf -- "$DATA" "$CONFIG"; fi
     echo 'DESMAN removed. uv and git were kept.'

@@ -11,19 +11,18 @@ Install git first if needed (the installer prints the command for apt, dnf, pacm
 and stops). Download the script, then run it from a terminal so you can answer its question:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o install.sh
-sh install.sh
+curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh && sh /tmp/desman-install.sh
 ```
 
 The script explains before downloading and running the official uv installer. uv installs
 Python as needed. For unattended installation, explicitly accept with `--yes`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh | sh -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh && sh /tmp/desman-install.sh --yes
 ```
 
-The site's shorter `curl … | sh` command asks questions through `/dev/tty` when stdin is
-a pipe. Without an accessible terminal, pass `--yes` explicitly or it refuses.
+The installer also asks questions through `/dev/tty` when stdin is a pipe. Without an
+accessible terminal, pass `--yes` explicitly or it refuses.
 Add `~/.local/bin` to PATH to use `desman` in a terminal. The shortcuts work without this.
 The Desktop launcher may need to be marked trusted by your desktop environment.
 
@@ -89,9 +88,12 @@ be descendants of the installed commit. A git tag alone is not a root-signed net
 
 ## Uninstall and data
 
-Close DESMAN first. Run `sh install.sh --uninstall` or `install.bat -Uninstall` using the saved
+Without a verified installer-owned app directory, uninstall removes nothing. Launchers and
+shortcuts belonging to another installation are preserved.
+
+Close DESMAN first. Run `sh /tmp/desman-install.sh --uninstall` or `install.bat -Uninstall` using the saved
 installer. Confirmation lists the app and shortcuts. uv, Python, git and portable MinGit stay.
-The Linux `~/.local/bin/desman` launcher is removed too.
+The Linux `~/.local/bin/desman` launcher is removed only if it resolves to this app’s executable.
 
 Data locations on **both platforms** (Windows uses `%USERPROFILE%` for `~`, not LOCALAPPDATA):
 

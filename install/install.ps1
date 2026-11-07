@@ -37,6 +37,8 @@ function Safe-Directory([string]$Path) {
 # DryRun never downloads, prompts, writes files or invokes an installed command.
 if ($DryRun) {
     if ($Uninstall) {
+        Write-Output 'Verify installer-owned app directory (.desman-install, .git, src/desman/cli.py); if absent remove nothing, including purge paths.'
+        Write-Output 'Check each .lnk TargetPath is under App before removing it; preserve foreign shortcuts.'
         Write-Output "Confirm removal: $App; Desktop/DESMAN.lnk; Start menu/DESMAN.lnk. Preserve config and data."
         if ($Purge) { Write-Output "Separate purge confirmation: $Data; $Config; $App\config.json" }
     } else {
@@ -66,6 +68,10 @@ try {
         }
     }
     if ($Uninstall) {
+        if (!(Test-Path -LiteralPath $App)) {
+            Write-Host 'No verified installer-owned app directory; nothing removed.'
+            return
+        }
         Confirm-Action "Remove $App and DESMAN shortcuts; keep config and data."
         if ($Purge) {
             Safe-Directory $Data
@@ -76,9 +82,15 @@ try {
             New-Item -ItemType Directory -Force -Path $HomeConfig | Out-Null
             Move-Item -LiteralPath "$App\config.json" -Destination "$HomeConfig\config.json"
         }
+        $Shell = New-Object -ComObject WScript.Shell
         foreach ($Folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
             $Link = Join-Path $Folder 'DESMAN.lnk'
-            if (Test-Path -LiteralPath $Link) { Remove-Item -LiteralPath $Link -Force }
+            if (Test-Path -LiteralPath $Link) {
+                $Target = $Shell.CreateShortcut($Link).TargetPath
+                if ($Target -and [IO.Path]::GetFullPath($Target).StartsWith($App + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    Remove-Item -LiteralPath $Link -Force
+                }
+            }
         }
         if (Test-Path -LiteralPath $App) { Remove-Item -LiteralPath $App -Recurse -Force }
         if ($Purge) {

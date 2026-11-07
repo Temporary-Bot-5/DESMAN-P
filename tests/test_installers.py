@@ -45,7 +45,9 @@ if [ "$1" = venv ]; then
 echo "desman $*" >> "$LOG"
 if [ "$*" = 'gui --shortcut' ]; then
     mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"
-    touch "$HOME/.local/share/applications/desman.desktop" "$HOME/Desktop/desman.desktop"
+    for shortcut in "$HOME/.local/share/applications/desman.desktop" "$HOME/Desktop/desman.desktop"; do
+        printf '[Desktop Entry]\nExec="%s/.venv/bin/desman" gui\n' "$PWD" > "$shortcut"
+    done
 fi
 SCRIPT
     chmod +x .venv/bin/desman
@@ -134,9 +136,9 @@ def test_install_rerun_uninstall_and_config_preserved(
         assert not path.exists()
     result = run_installer(env, "--uninstall", "--purge", "--yes")
     assert result.returncode == 0, result.stderr
-    assert str(data) in result.stdout
-    assert not data.exists()
-    assert not (home / ".config/desman").exists()
+    assert "nothing removed" in result.stdout
+    assert data.exists()
+    assert (home / ".config/desman").exists()
 
 
 @linux
@@ -249,6 +251,8 @@ def test_site_assets_and_languages() -> None:
     for path in parser.paths:
         assert ":" not in path and not path.startswith("/")
         assert (ROOT / "site" / path).is_file()
+    assert "-o /tmp/desman-install.sh &amp;&amp; sh /tmp/desman-install.sh" in html
+    assert "| sh" not in html
     assert "install.ps1" not in html
     assert "MIT" not in html
     assert "On Windows the agents do not run code because there is no sandbox." in html
@@ -317,7 +321,7 @@ def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str
     assert run_installer(env, "--yes", "--no-start").returncode == 0
     for folder in (data, config, desktop):
         folder.mkdir()
-    (desktop / "desman.desktop").touch()
+    (desktop / "desman.desktop").write_text(f'Exec="{app}/.venv/bin/desman" gui\n')
     result = run_installer(env, "--yes", "--uninstall", "--purge")
     assert result.returncode == 0, result.stderr
     for path in (app, data, config):
@@ -348,41 +352,77 @@ def test_windows_uninstall_dry_run(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
+    assert "if absent remove nothing" in result.stdout
+    assert "TargetPath is under App" in result.stdout
     assert "Separate purge confirmation:" in result.stdout
     assert str(tmp_path / ".local" / "share" / "desman") in result.stdout
     assert list(tmp_path.iterdir()) == []
 
 
+if sys.platform != "win32":
+
+    @linux
+    @pytest.mark.parametrize("answer, expected", [(b"y\n", 0), (b"n\n", 1)])
+    def test_piped_install_asks_controlling_terminal(
+        installer: tuple[Path, dict[str, str]], answer: bytes, expected: int
+    ) -> None:
+        _, env = installer
+        tools = Path(env["UV_STUB"]).parent
+        stub = tools / "uv-source"
+        (tools / "uv").rename(stub)
+        env["UV_STUB"] = str(stub)
+        master, slave = os.openpty()
+        env["DESMAN_TTY"] = os.ttyname(slave)
+        questions: list[bytes] = []
+
+        def respond() -> None:
+            output = b""
+            while b"Continue? (y/N) " not in output:
+                output += os.read(master, 4096)
+            questions.append(output)
+            os.write(master, answer)
+
+        responder = threading.Thread(target=respond, daemon=True)
+        responder.start()
+        try:
+            result = run_installer(env, "--no-start")
+            responder.join(timeout=5)
+            assert result.returncode == expected, result.stderr
+            assert questions and b"Install uv" in questions[0]
+            assert b"Continue? (y/N) " in questions[0]
+            assert Path(env["LOG"]).exists() == (expected == 0)
+        finally:
+            os.close(slave)
+            os.close(master)
+
+
 @linux
-@pytest.mark.parametrize("answer, expected", [(b"y\n", 0), (b"n\n", 1)])
-def test_piped_install_asks_controlling_terminal(
-    installer: tuple[Path, dict[str, str]], answer: bytes, expected: int
+@pytest.mark.parametrize("app_present", [True, False])
+def test_uninstall_preserves_foreign_launchers(
+    installer: tuple[Path, dict[str, str]], app_present: bool
 ) -> None:
-    _, env = installer
-    tools = Path(env["UV_STUB"]).parent
-    stub = tools / "uv-source"
-    (tools / "uv").rename(stub)
-    env["UV_STUB"] = str(stub)
-    master, slave = os.openpty()
-    env["DESMAN_TTY"] = os.ttyname(slave)
-    questions: list[bytes] = []
-
-    def respond() -> None:
-        output = b""
-        while b"Continue? (y/N) " not in output:
-            output += os.read(master, 4096)
-        questions.append(output)
-        os.write(master, answer)
-
-    responder = threading.Thread(target=respond, daemon=True)
-    responder.start()
-    try:
-        result = run_installer(env, "--no-start")
-        responder.join(timeout=5)
-        assert result.returncode == expected, result.stderr
-        assert questions and b"Install uv" in questions[0]
-        assert b"Continue? (y/N) " in questions[0]
-        assert Path(env["LOG"]).exists() == (expected == 0)
-    finally:
-        os.close(slave)
-        os.close(master)
+    home, env = installer
+    assert run_installer(env, "--yes", "--no-start").returncode == 0
+    app = home / ".local/share/desman-app"
+    launcher = home / ".local/bin/desman"
+    launcher.unlink()
+    foreign = home / "pipx/desman"
+    foreign.parent.mkdir()
+    foreign.write_text("foreign")
+    launcher.symlink_to(foreign)
+    shortcuts = [home / "Desktop/desman.desktop", home / ".local/share/applications/desman.desktop"]
+    for shortcut in shortcuts:
+        shortcut.write_text(f'Exec="{foreign}" gui\n')
+    data = home / ".local/share/desman"
+    data.mkdir()
+    (data / "keep").write_text("history")
+    if not app_present:
+        shutil.rmtree(app)
+    result = run_installer(env, "--yes", "--uninstall", "--purge")
+    assert result.returncode == 0, result.stderr
+    assert launcher.resolve() == foreign
+    for shortcut in shortcuts:
+        assert shortcut.read_text() == f'Exec="{foreign}" gui\n'
+    if not app_present:
+        assert "nothing removed" in result.stdout
+        assert (data / "keep").read_text() == "history"
