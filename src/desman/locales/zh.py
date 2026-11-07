@@ -34,6 +34,8 @@ MESSAGES: dict[str, Forms] = {
     "Commands start with /, e.g. /status": "命令以 / 开头，例如 /status",
     "Continue": "继续",
     "Delete all tasks": "删除所有任务",
+    "Before the next call, what became of these tasks is added: {tasks}.": "下一次调用前，将加入这些任务的结果：{tasks}。",
+    "Before the next call, older messages are summarised: the request will be shorter.": "下一次调用前，较早的消息将被总结：请求会更短。",
     "General Terminal talks to no model.": "通用终端不与任何模型对话。",
     "Hide finished TASK, or all finished unpinned tasks.": "隐藏已完成的任务，或所有未固定的已完成任务。",
     "Hide finished unpinned tasks.": "隐藏未固定的已完成任务。",

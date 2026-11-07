@@ -403,3 +403,27 @@ def test_worker_reports_operator_pause_once_while_idle(tmp_path: Path) -> None:
     assert text.count("paused") == 1
     assert "desman resume" in text and store.short_id(ref) in text
     conn.close()
+
+
+def test_context_says_what_the_next_message_changes_first(tmp_path: Path) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+
+    conn = db.open_db(tmp_path / "pending.db")
+    open_config().save(make_config(api_keys={"GROQ_API_KEY": "pending-secret"}))
+    sessions = Sessions(conn)
+    ref = sessions.add(None, Role.USER, "make it").session_id
+    chat = Chat(sessions)
+    chat.session_id = ref
+    task = chat.store.create_task(
+        TaskSpec(goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="a")]),
+        session_id=ref,
+    )
+    chat.store.cancel_task(task, "settled while the chat looked away")
+    sessions.add(ref, Role.INTERLOCUTOR, "x " * 20000)  # over the history budget
+    front = WebFront()
+    with ui.use(front):
+        chat._slash("/context")
+    output = " ".join(str(e) for e in front.events)
+    assert "what became of these tasks is added" in output
+    assert chat.store.short_id(task) in output
+    assert "older messages are summarised" in output

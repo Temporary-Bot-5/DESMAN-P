@@ -1692,9 +1692,41 @@ class Chat:
                 messages=messages,
             ),
         ]
+        lines.extend(self._context_changes(history))
         for message in request.messages:
             lines.extend(["", str(message.role), message.content])
         ui.out(ui.ContextText(providers.redact_keys("\n".join(lines), config)[0]))
+
+    def _context_changes(self, history: History) -> list[str]:
+        """What the next message changes before the model is asked (shown, not done): the
+        retelling of tasks that settled meanwhile and a summary of older messages."""
+        if self.session_id is None:
+            return []
+        lines: list[str] = []
+        settled = []
+        for task_id in self.sessions.changed_tasks(self.session_id):
+            report = task_report(self.store, task_id)
+            if report.status is not TaskStatus.ACTIVE or _paused_until(report) is not None:
+                settled.append(self.store.short_id(task_id))
+        if settled:
+            lines.append(
+                t(
+                    "Before the next call, what became of these tasks is added: {tasks}.",
+                    tasks=", ".join(settled),
+                )
+            )
+        stored = History(
+            summary=history.summary,
+            messages=[m for m in history.messages if m.seq != 0],  # without the placeholder
+        )
+        after = self._gave_up.get(self.session_id, 0)
+        if not self.temporary and compaction.needed(stored, after=after, extra=0):
+            lines.append(
+                t(
+                    "Before the next call, older messages are summarised: the request will be shorter."
+                )
+            )
+        return lines
 
     def _help(self) -> None:
         commands.print_help(terminal=self.in_terminal, temporary=self.temporary)

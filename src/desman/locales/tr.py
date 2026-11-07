@@ -34,6 +34,8 @@ MESSAGES: dict[str, Forms] = {
     "Commands start with /, e.g. /status": "Komutlar / ile başlar, ör. /status",
     "Continue": "Devam et",
     "Delete all tasks": "Tüm görevleri sil",
+    "Before the next call, what became of these tasks is added: {tasks}.": "Bir sonraki çağrıdan önce bu görevlerin sonucu eklenecek: {tasks}.",
+    "Before the next call, older messages are summarised: the request will be shorter.": "Bir sonraki çağrıdan önce eski mesajlar özetlenecek: istek kısalacak.",
     "General Terminal talks to no model.": "Genel Terminal hiçbir modelle konuşmaz.",
     "Hide finished TASK, or all finished unpinned tasks.": "Tamamlanan GÖREVİ veya sabitlenmemiş tüm tamamlanan görevleri gizle.",
     "Hide finished unpinned tasks.": "Sabitlenmemiş tamamlanan görevleri gizle.",
