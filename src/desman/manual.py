@@ -40,7 +40,8 @@ TOPICS: Final = (
         "the browser page, panels, settings, problem reports and desktop shortcuts",
         "`desman gui` opens the local browser page with the same chat and confirmation windows. "
         "Searchable provider/model/key pickers stay open across refreshes. The left panel lists sessions: new and temporary chats, General Terminal for commands "
-        "and their output, pinned sessions and delete all (confirmed). At the bottom, Report a "
+        "and their output (help lists commands, including clear and /back), pinned sessions "
+        "and delete all (confirmed). At the bottom, Report a "
         "problem asks for a description, then previews the exact report for confirmation; "
         "sending needs desman-global. Its result goes to General Terminal without leaving the "
         "chat; the unread badge points there. Messenger opens messages. Settings opens a window "

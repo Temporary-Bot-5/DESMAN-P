@@ -176,7 +176,8 @@ function rolePickers(parent, role, chosen, fingerprint) {
   }
   function fillModels(preferred = "", preferredKey = "") {
     const p = providers.find(p => p.id === provider.value);
-    const models = p?.models || [];
+    const models = [...(p?.models || [])];
+    if (p && preferred.startsWith(`${p.id}/`) && !models.includes(preferred)) models.push(preferred);
     model.setOptions(p ? models.map(m => ({value: m, label: m.slice(m.indexOf("/") + 1)})) : [{value: "", label: words.auto}]);
     model.value = models.includes(preferred) ? preferred : models[0] || "";
     fillKeys(preferredKey);
@@ -586,7 +587,7 @@ function showTasks(data) {
   const focused = active && active.dataset.ref;
   const selection = focused ? [active.selectionStart, active.selectionEnd] : null;
   const root = $("tasks");
-  if (preserveEditor(root)) return;
+  // moduleCard reattaches open editors from moduleEditors; redraw the live task state.
   root.replaceChildren();
   for (const task of data.tasks) {
     const card = text("article", "", root);
@@ -637,6 +638,8 @@ function showTasks(data) {
 
   }
   updateActions();
+  if (openPicker && root.contains(openPicker)) openPicker.position();
+  if (active && root.contains(active) && !focused) active.focus({preventScroll: true});
   if (focused) {
     const input = [...root.querySelectorAll("textarea")].find(n => n.dataset.ref === focused);
     if (input) { input.focus({preventScroll: true}); input.setSelectionRange(...selection); }

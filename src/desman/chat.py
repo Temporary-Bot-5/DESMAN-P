@@ -551,6 +551,7 @@ class Chat:
             start_task=start_task,
             resume_task=resume_task,
             session_id=lambda: self.session_id,
+            in_terminal=self.in_terminal,
         )
         try:
             made = entry.handler(context, args)
@@ -592,8 +593,6 @@ class Chat:
                 ui.clear_screen()
                 self._seen_terminal()
             return
-        if line.strip() == "help" and self.in_terminal:
-            self._help()
         config = self._config()
         if config is None:
             return
@@ -1487,6 +1486,9 @@ class Chat:
         ui.session(self.session_id, self.temporary)
 
     def _help(self) -> None:
+        if self.in_terminal:
+            self._typed("help")
+            return
         commands = ui.table("", "")
         commands.show_header = False
         for name, what in _commands(self.temporary, self.in_terminal).items():

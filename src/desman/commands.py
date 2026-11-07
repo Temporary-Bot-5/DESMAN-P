@@ -122,6 +122,8 @@ class Context:
     session_id: Callable[[], str | None] = lambda: None
     """The chat's session now: for the operator's journal."""
 
+    in_terminal: bool = False
+
     def config(self) -> Config:
         try:
             return self.manager.load()
@@ -463,8 +465,18 @@ def _help(ctx: Context, args: NoArgs) -> Outcome:
     table.show_header = False
     for entry in CATALOG:
         table.add_row(Text(entry.name, style="key"), Text(_short_help(entry), style="muted"))
+    if ctx.in_terminal:
+        table.add_row(
+            Text("clear", style="key"),
+            Text(t("clear the General Terminal screen (messages are kept)"), style="muted"),
+        )
+        table.add_row(
+            Text("/back", style="key"),
+            Text(t("return from General Terminal to the previous chat"), style="muted"),
+        )
     ui.out(table)
-    ui.note(t("Ask for any of them in your own words."))
+    if not ctx.in_terminal:
+        ui.note(t("Ask for any of them in your own words."))
     return Outcome({"commands": [e.name for e in CATALOG]})
 
 

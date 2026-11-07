@@ -460,3 +460,18 @@ def test_terminal_result_keeps_fields_whose_names_held_keys() -> None:
     shown = chat_module._redacted({one: "a", two: "b"}, config)
     assert sorted(shown.values()) == ["a", "b"]
     assert one not in json.dumps(shown) and two not in json.dumps(shown)
+
+
+@pytest.mark.parametrize("line", ["help", "/help"])
+def test_terminal_help_is_one_catalog_listing(sessions: Sessions, line: str) -> None:
+    chat = Chat(sessions)
+    lines = iter(["/terminal", line, "/exit"])
+    chat.read = lambda: next(lines, None)
+    chat.run()
+    events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
+    listing = next(text for text in events if "clear the General Terminal screen" in text)
+    assert listing.count("clear the General Terminal screen") == 1
+    assert listing.count("return from General Terminal to the previous chat") == 1
+    assert listing.count("init-db") == 1
+    assert "the chat's commands" not in listing
+    assert "Ask for any of them" not in listing
