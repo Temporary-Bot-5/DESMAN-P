@@ -11,14 +11,14 @@ Install git first if needed (the installer prints the command for apt, dnf, pacm
 and stops). Download the script, then run it from a terminal so you can answer its question:
 
 ```sh
-f="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f"; rm -f "$f"
+(f="$(mktemp)" && trap 'rm -f "$f"' EXIT && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f")
 ```
 
 The script explains before downloading and running the official uv installer. uv installs
 Python as needed. For unattended installation, explicitly accept with `--yes`:
 
 ```sh
-f="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f" --yes; rm -f "$f"
+(f="$(mktemp)" && trap 'rm -f "$f"' EXIT && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f" --yes)
 ```
 
 The installer also asks questions through `/dev/tty` when stdin is a pipe. Without an

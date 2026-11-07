@@ -24,7 +24,7 @@
     </div>
     <section id="linux-command" hidden>
       <p data-en="Paste this command into a terminal. It asks before installing uv; --yes skips the question (see the guide)." data-ru="Вставьте команду в терминал. Перед установкой uv появится вопрос; --yes пропускает его (см. руководство).">Paste this command into a terminal. It asks before installing uv; --yes skips the question (see the guide).</p>
-      <code id="command">f="$(mktemp)" &amp;&amp; curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" &amp;&amp; sh "$f"; rm -f "$f"</code>
+      <code id="command">(f="$(mktemp)" &amp;&amp; trap 'rm -f "$f"' EXIT &amp;&amp; curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" &amp;&amp; sh "$f")</code>
       <button id="copy" type="button" data-en="Copy" data-ru="Копировать">Copy</button>
       <p id="copy-status" role="status"></p>
     </section>

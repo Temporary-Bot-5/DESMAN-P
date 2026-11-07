@@ -261,11 +261,12 @@ def test_site_assets_and_languages() -> None:
     for path in parser.paths:
         assert ":" not in path and not path.startswith("/")
         assert (ROOT / "site" / path).is_file()
-    command = 'f="$(mktemp)" &amp;&amp; curl -fsSL '
+    # A subshell: its status is the installer's (or curl's), and the trap removes the file.
+    command = '(f="$(mktemp)" &amp;&amp; trap \'rm -f "$f"\' EXIT &amp;&amp; curl -fsSL '
     command += (
         "https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh"
     )
-    command += ' -o "$f" &amp;&amp; sh "$f"; rm -f "$f"'
+    command += ' -o "$f" &amp;&amp; sh "$f")'
     assert command in html
     for name in ("README.md", "docs/install.md"):
         assert command.replace("&amp;", "&") in (ROOT / name).read_text(encoding="utf-8")
