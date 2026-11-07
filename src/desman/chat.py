@@ -253,7 +253,7 @@ class Chat:
         self.models, self._models_for = None, None
         ui.reset()
         ui.session(self.session_id, False)
-        ui.note("→ General_Terminal")
+        ui.note(t("→ General_Terminal"))
         self._show_last()
         self._seen_terminal()
 
@@ -937,6 +937,12 @@ class Chat:
             return
         if interlocutor is None:
             actions.print_report(task_report(self.store, task_id))
+            result = self.store.final_result(task_id)
+            if result is not None:
+                # Cut keys from each string before json.dumps escapes quotes and backslashes.
+                shown = json.dumps(_redacted(result, config), ensure_ascii=False, indent=2)
+                ui.out(Text(t("The result as it is:") + "\n" + shown))
+            self._files(task_id, ref, workspace_root_for(self.store.conn))
         else:
             self._outcome(task_id, ref, interlocutor)
 
@@ -1307,12 +1313,12 @@ class Chat:
                 selected_key is None or selected_key["provider"] != first_model.split("/", 1)[0]
             ):
                 raise ValueError("unavailable key")
-            selector = selected_key["selector"] if selected_key else "auto"
             if action.scope == "role":
                 old, new, edited = tuning_cli.set_tuning(
                     open_config(),
                     tuning_cli.TuningChange(
-                        models={action.role: action.model or "auto"}, keys={action.role: selector}
+                        models={action.role: action.model or "auto"},
+                        fingerprints={action.role: action.key},
                     ),
                 )
                 before = edited.model_copy(update={"tuning": old})
@@ -1328,7 +1334,7 @@ class Chat:
                     action.scope_id,
                     action.role,
                     action.model or "auto",
-                    selector,
+                    fingerprints={action.role: action.key},
                 )
                 lines = modules_cli.change_lines(action.role, old_choice, new_choice, config)
             for line in lines:
@@ -1694,6 +1700,24 @@ class Chat:
         ui.session(selected.id, False)
         ui.ok(t("Switched to the session of {when}.", when=_when(selected.last_at)))
         self._show_last()
+
+
+def _redacted(value: Any, config: Config | None) -> Any:
+    """`value` (JSON data) with configured keys and key-shaped strings cut from every string."""
+    if isinstance(value, str):
+        return providers.redact_keys(value, config)[0]
+    if isinstance(value, list):
+        return [_redacted(v, config) for v in value]
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for k, v in value.items():
+            name, n = _redacted(k, config), 1
+            while name in out:  # two names that each held a key: keep both values
+                n += 1
+                name = f"{_redacted(k, config)} ({n})"
+            out[name] = _redacted(v, config)
+        return out
+    return value
 
 
 def _render(message: Message) -> Text:

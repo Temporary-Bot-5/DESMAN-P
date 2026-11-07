@@ -193,8 +193,14 @@ function showPrompt(p) {
       };
       input.addEventListener("input", () => {
         const value = input.value.toLowerCase();
-        matches = (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) ?
-          Object.entries(p.commands || {}).filter(([name]) => name.startsWith(value)) : [];
+        const bare = terminalOpen && value.length > 0 && !/^[!/]|\s/.test(value);
+        const commands = Object.entries(p.commands || {});
+        matches = bare ?
+          commands.filter(([name]) => name.startsWith("!"))
+            .map(([name, hint]) => [name.slice(1), hint])
+            .filter(([name]) => name.startsWith(value)) :
+          (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) ?
+            commands.filter(([name]) => name.startsWith(value)) : [];
         selected = -1;
         draw();
       });
@@ -531,7 +537,9 @@ function moduleCard(parent, m, placement = "modules") {
   const usage = text("div", "", info);
   usage.className = "module-usage";
   text("span", words[`source_${m.source}`], usage).className = "status-chip";
-  text("small", `${words.calls}: ${m.calls} · ${words.tokens}: ${m.tokens}`, usage);
+  text("small", words.model_usage.replace("{calls}", m.model_calls).replace("{tokens}", m.model_tokens), usage);
+  usage.title = (m.scope === "session" ? words.role_usage_chat : words.role_usage_task)
+    .replace("{calls}", m.calls).replace("{tokens}", m.tokens);
   if (m.state) text("small", m.state, info).className = `module-state ${m.state_style || "muted"}`;
   const change = button(card, "✎", () => {
     moduleEditors.set(identity, editor);
@@ -566,9 +574,14 @@ function moduleCard(parent, m, placement = "modules") {
   const model = select(words.model);
   const key = select(words.key);
   const scope = select(words.scope);
-  option(scope, m.scope, words.only_here).disabled = !m.scope_id;
+  const allowedHere = (moduleSnapshot.roles_by_scope?.[m.scope] || []).includes(m.role);
+  option(scope, m.scope, words.only_here).disabled = !m.scope_id || !allowedHere;
+  if (!allowedHere) {
+    scope.disabled = true;
+    scope.title = words.scope_unavailable;
+  }
   option(scope, "role", words.everywhere);
-  scope.value = m.scope_id ? m.scope : "role";
+  scope.value = m.scope_id && allowedHere ? m.scope : "role";
   function keys(preferred) {
     key.replaceChildren();
     option(key, "", words.auto);

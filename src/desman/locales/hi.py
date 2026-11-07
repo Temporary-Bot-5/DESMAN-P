@@ -46,6 +46,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "उधार दें",
     "Take back": "वापस लें",
     "Saved": "सहेजा गया",
+    "This model: {calls} calls · {tokens} tokens": "यह मॉडल: {calls} कॉल · {tokens} टोकन",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "इस कार्य में भूमिका के कुल आँकड़े: {calls} कॉल · {tokens} टोकन",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "इस चैट में भूमिका के कुल आँकड़े: {calls} कॉल · {tokens} टोकन",
+    "This role does not read choices here: choose it for the role everywhere.": "यह भूमिका यहाँ के विकल्प नहीं पढ़ती: पूरी भूमिका के लिए हर जगह चुनें।",
     "Chat": "चैट",
     "Change": "बदलें",
     "Only here": "केवल यहाँ",
@@ -71,6 +75,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "स्थिति",
     "Task": "कार्य",
     "Unknown or ambiguous session ID.": "अज्ञात या अस्पष्ट सत्र ID।",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "अभी उपलब्ध नहीं",
     "Models and keys for roles": "भूमिकाओं के लिए मॉडल और कुंजियाँ",
     "key: {role}": "कुंजी: {role}",
@@ -1392,6 +1397,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} सत्र हटाया गया।", "{count} सत्र हटाए गए।"),
         "No unpinned sessions to delete.": "हटाने के लिए कोई अनपिन किया गया सत्र नहीं है।",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "एक {scope} के लिए {role} नहीं चुन सकते: केवल {roles}। भूमिका के लिए `desman tuning` से चुनें।",
+        "One task (its reference).": "एक कार्य (उसका संदर्भ)।",
+        "One chat (its id as /sessions shows it): the interlocutor.": "एक चैट (/sessions में दिखने वाली उसकी id): संवादकर्ता।",
+        "The model asked first; auto: the role's.": "पहले अनुरोध किया जाने वाला मॉडल; auto: भूमिका का मॉडल।",
+        "The key tried first (label or #N); auto: the role's.": "पहले आज़माई जाने वाली कुंजी (लेबल या #N); auto: भूमिका की कुंजी।",
     }
 )
 

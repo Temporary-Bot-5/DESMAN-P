@@ -407,3 +407,63 @@ def test_existing_chat_honours_its_session_choice(
     assert result.exit_code == 0, result.output
     assert "Scoped chat reply." in result.output
     assert seen == [(chosen.split("/", 1)[1], f"Bearer {SECOND}")]
+
+
+@pytest.mark.parametrize(
+    "scope,role",
+    [("task", "planner"), ("task", "interlocutor"), ("session", "reviewer")],
+)
+def test_unused_scope_roles_are_refused_without_writes(scope: choices.Scope, role: str) -> None:
+    import click
+
+    cfg = config()
+    open_config().save(cfg)
+    conn = db.open_db()
+    task_id = task(conn)
+    session = Sessions(conn).add(None, SessionRole.USER, "chat").session_id
+    identity = task_id if scope == "task" else session
+    ref = Store(conn).short_id(task_id) if scope == "task" else session[:8]
+    message = (
+        f"{role} cannot be chosen for one {scope}: only "
+        f"{', '.join(choices.ROLES_BY_SCOPE[scope])}. "
+        "Choose it for the role with `desman tuning`."
+    )
+    before = operator.entries(conn)
+
+    def assert_no_writes() -> None:
+        assert conn.execute("SELECT count(*) FROM module_choices").fetchone()[0] == 0
+        assert operator.entries(conn) == before
+
+    result = CliRunner().invoke(cli, ["modules", "set", role, f"--{scope}", ref, "--key", "auto"])
+    assert result.exit_code == 1, result.output
+    assert message in result.output
+    assert_no_writes()
+
+    with pytest.raises(ValueError, match=f"a {scope} choice is not read by the {role}"):
+        choices.set_choice(conn, scope, identity, role, choices.Choice(model="groq/test"))
+    assert_no_writes()
+
+    ctx = commands.Context(
+        Store(conn), open_config(), lambda *_: None, lambda _: None, session_id=lambda: session
+    )
+    entry = commands.find("modules set")
+    assert entry is not None
+    args = entry.args.model_validate({"role": role, scope: ref, "key": "auto"})
+    with pytest.raises(click.ClickException) as error:
+        entry.handler(ctx, args)
+    assert str(error.value) == message
+    assert_no_writes()
+    conn.close()
+
+
+def test_clearing_a_role_its_scope_does_not_read_is_refused_plainly() -> None:
+    import click
+    import pytest as _pytest
+
+    from desman import modules_cli
+
+    with _pytest.raises(click.ClickException, match="planner"):
+        modules_cli.check_role("task", "planner")
+    with _pytest.raises(click.ClickException, match="reviewer"):
+        modules_cli.check_role("session", "reviewer")
+    modules_cli.check_role("task", None)  # every role of the scope

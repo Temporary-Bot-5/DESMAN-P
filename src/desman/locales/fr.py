@@ -46,6 +46,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "Prêter",
     "Take back": "Reprendre",
     "Saved": "Enregistré",
+    "This model: {calls} calls · {tokens} tokens": "Ce modèle: {calls} appels · {tokens} jetons",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Totaux du rôle dans cette tâche: {calls} appels · {tokens} jetons",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Totaux du rôle dans cette discussion: {calls} appels · {tokens} jetons",
+    "This role does not read choices here: choose it for the role everywhere.": "Ce rôle ne lit pas les choix ici : choisissez-les pour le rôle partout.",
     "Chat": "Discussion",
     "Change": "Modifier",
     "Only here": "Ici seulement",
@@ -71,6 +75,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "État",
     "Task": "Tâche",
     "Unknown or ambiguous session ID.": "ID de session inconnu ou ambigu.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "indisponible pour le moment",
     "Models and keys for roles": "Modèles et clés par rôle",
     "key: {role}": "clé : {role}",
@@ -1395,6 +1400,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} session supprimée.", "{count} sessions supprimées."),
         "No unpinned sessions to delete.": "Aucune session non épinglée à supprimer.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Impossible de choisir {role} pour un seul {scope} : uniquement {roles}. Choisissez pour le rôle avec `desman tuning`.",
+        "One task (its reference).": "Une tâche (sa référence).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Une conversation (son id dans /sessions) : l’interlocuteur.",
+        "The model asked first; auto: the role's.": "Modèle sollicité en premier ; auto : celui du rôle.",
+        "The key tried first (label or #N); auto: the role's.": "Clé essayée en premier (libellé ou #N) ; auto : celle du rôle.",
     }
 )
 
