@@ -454,3 +454,16 @@ def test_unused_scope_roles_are_refused_without_writes(scope: choices.Scope, rol
     assert str(error.value) == message
     assert_no_writes()
     conn.close()
+
+
+def test_clearing_a_role_its_scope_does_not_read_is_refused_plainly() -> None:
+    import click
+    import pytest as _pytest
+
+    from desman import modules_cli
+
+    with _pytest.raises(click.ClickException, match="planner"):
+        modules_cli.check_role("task", "planner")
+    with _pytest.raises(click.ClickException, match="reviewer"):
+        modules_cli.check_role("session", "reviewer")
+    modules_cli.check_role("task", None)  # every role of the scope

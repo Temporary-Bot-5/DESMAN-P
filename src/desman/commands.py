@@ -705,6 +705,7 @@ def _modules_clear(ctx: Context, args: ModulesClearArgs) -> Proposal:
     ]
 
     def apply() -> Outcome:
+        modules_cli.check_role(scope, args.role)
         choices.clear(ctx.store.conn, scope, identity, args.role)
         ui.ok(t("Module choices cleared."))
         return Outcome({"scope": scope, "scope_id": identity, "cleared": args.role})
