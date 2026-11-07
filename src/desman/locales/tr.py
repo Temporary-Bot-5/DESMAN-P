@@ -55,6 +55,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "Ödünç ver",
     "Take back": "Geri al",
     "Saved": "Kaydedildi",
+    "This model: {calls} calls · {tokens} tokens": "Bu model: {calls} çağrı · {tokens} token",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Bu görevdeki rol toplamları: {calls} çağrı · {tokens} token",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Bu sohbetteki rol toplamları: {calls} çağrı · {tokens} token",
+    "This role does not read choices here: choose it for the role everywhere.": "Bu rol buradaki seçimleri okumaz: rol için her yerde seçin.",
     "Chat": "Sohbet",
     "Change": "Değiştir",
     "Only here": "Yalnızca burada",
@@ -80,6 +84,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Durum",
     "Task": "Görev",
     "Unknown or ambiguous session ID.": "Bilinmeyen veya belirsiz oturum kimliği.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "şu anda kullanılamıyor",
     "Models and keys for roles": "Roller için modeller ve anahtarlar",
     "key: {role}": "anahtar: {role}",
@@ -1328,6 +1333,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} oturum silindi.",),
         "No unpinned sessions to delete.": "Silinecek sabitlenmemiş oturum yok.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Tek bir {scope} için {role} seçilemez: yalnızca {roles}. Rol için `desman tuning` ile seçin.",
+        "One task (its reference).": "Tek bir görev (referansı).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Tek bir sohbet (/sessions içindeki kimliği): muhatap.",
+        "The model asked first; auto: the role's.": "İlk sorulan model; auto: rolün modeli.",
+        "The key tried first (label or #N); auto: the role's.": "İlk denenen anahtar (etiket veya #N); auto: rolün anahtarı.",
     }
 )
 

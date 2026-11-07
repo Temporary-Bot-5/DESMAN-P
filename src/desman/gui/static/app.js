@@ -193,8 +193,14 @@ function showPrompt(p) {
       };
       input.addEventListener("input", () => {
         const value = input.value.toLowerCase();
-        matches = (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) ?
-          Object.entries(p.commands || {}).filter(([name]) => name.startsWith(value)) : [];
+        const bare = terminalOpen && value.length > 0 && !/^[!/]|\s/.test(value);
+        const commands = Object.entries(p.commands || {});
+        matches = bare ?
+          commands.filter(([name]) => name.startsWith("!"))
+            .map(([name, hint]) => [name.slice(1), hint])
+            .filter(([name]) => name.startsWith(value)) :
+          (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) ?
+            commands.filter(([name]) => name.startsWith(value)) : [];
         selected = -1;
         draw();
       });
@@ -532,7 +538,9 @@ function moduleCard(parent, m, placement = "modules") {
   const usage = text("div", "", info);
   usage.className = "module-usage";
   text("span", words[`source_${m.source}`], usage).className = "status-chip";
-  text("small", `${words.calls}: ${m.calls} · ${words.tokens}: ${m.tokens}`, usage);
+  text("small", words.model_usage.replace("{calls}", m.model_calls).replace("{tokens}", m.model_tokens), usage);
+  usage.title = (m.scope === "session" ? words.role_usage_chat : words.role_usage_task)
+    .replace("{calls}", m.calls).replace("{tokens}", m.tokens);
   if (m.state) text("small", m.state, info).className = `module-state ${m.state_style || "muted"}`;
   const change = button(card, "✎", () => {
     moduleEditors.set(identity, editor);
@@ -567,15 +575,27 @@ function moduleCard(parent, m, placement = "modules") {
   const model = select(words.model);
   const key = select(words.key);
   const scope = select(words.scope);
-  option(scope, m.scope, words.only_here).disabled = !m.scope_id;
+  const allowedHere = (moduleSnapshot.roles_by_scope?.[m.scope] || []).includes(m.role);
+  option(scope, m.scope, words.only_here).disabled = !m.scope_id || !allowedHere;
+  if (!allowedHere) {
+    scope.disabled = true;
+    scope.title = words.scope_unavailable;
+  }
   option(scope, "role", words.everywhere);
-  scope.value = m.scope_id ? m.scope : "role";
+  scope.value = m.scope_id && allowedHere ? m.scope : "role";
   function keys(preferred) {
     key.replaceChildren();
     option(key, "", words.auto);
-    const provider = (model.value || role.candidate_models[0] || "").split("/", 1)[0];
-    for (const k of role.candidate_keys.filter(k => k.provider === provider)) {
-      option(key, k.fingerprint, k.label);
+    const provider = model.value.split("/", 1)[0];
+    const groups = new Map();
+    for (const k of role.candidate_keys.filter(k => !provider || k.provider === provider)) {
+      if (!groups.has(k.provider)) {
+        const group = document.createElement("optgroup");
+        group.label = k.provider;
+        key.append(group);
+        groups.set(k.provider, group);
+      }
+      option(groups.get(k.provider), k.fingerprint, k.label);
     }
     key.value = [...key.options].some(o => o.value === preferred) ? preferred : "";
   }
@@ -591,7 +611,7 @@ function moduleCard(parent, m, placement = "modules") {
     keys((global ? role.key_fingerprint : m.choice_key) || "");
   }
   scope.onchange = defaults;
-  model.onchange = () => keys("");
+  model.onchange = () => keys(key.value);
   defaults();
   actionButton(editor, words.apply, () => {
     moduleEditors.delete(identity);
@@ -826,11 +846,21 @@ function drawSettings() {
       const fill = () => {
         const previous = key.value || role.key_fingerprint || "auto";
         key.replaceChildren();
-        const provider = (model.value === "auto" ? role.candidate_models[0] || "" : model.value).split("/")[0];
-        const choices = [{value: "auto", label: words.auto}, ...role.candidate_keys.filter(k => k.provider === provider).map(k => ({value: k.fingerprint, label: k.label}))];
-        if (role.key_fingerprint && !choices.some(k => k.value === role.key_fingerprint)) choices.push({value: role.key_fingerprint, label: role.key_label});
-        for (const k of choices) { const o = text("option", k.label, key); o.value = k.value; }
-        key.value = choices.some(k => k.value === previous) ? previous : "auto";
+        const provider = model.value === "auto" ? "" : model.value.split("/")[0];
+        const choices = role.candidate_keys.filter(k => !provider || k.provider === provider || k.fingerprint === previous);
+        const auto = text("option", words.auto, key); auto.value = "auto";
+        const groups = new Map();
+        for (const k of choices) {
+          if (!groups.has(k.provider)) {
+            const group = document.createElement("optgroup"); group.label = k.provider;
+            key.append(group); groups.set(k.provider, group);
+          }
+          const o = text("option", k.label, groups.get(k.provider)); o.value = k.fingerprint;
+        }
+        if (role.key_fingerprint && !choices.some(k => k.fingerprint === role.key_fingerprint)) {
+          const o = text("option", role.key_label, key); o.value = role.key_fingerprint;
+        }
+        key.value = [...key.options].some(k => k.value === previous) ? previous : "auto";
       };
       fill(); model.addEventListener("change", fill);
       settingAuto(card, () => ({section: "roles", role: role.role, model: model.value === "auto" ? null : model.value, key: key.value === "auto" ? null : key.value}));

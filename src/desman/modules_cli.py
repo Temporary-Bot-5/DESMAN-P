@@ -38,6 +38,22 @@ def scope_id(
     return "session", str(rows[0]["id"])
 
 
+def check_role(scope: choices.Scope, role: str | None) -> None:
+    """Refuse a role that no call of `scope` reads (`choices.ROLES_BY_SCOPE`)."""
+    if role is None:
+        return
+    if role not in choices.ROLES_BY_SCOPE[scope]:
+        raise click.ClickException(
+            t(
+                "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role "
+                "with `desman tuning`.",
+                role=role,
+                scope=scope,
+                roles=", ".join(choices.ROLES_BY_SCOPE[scope]),
+            )
+        )
+
+
 def preview(
     conn: sqlite3.Connection,
     config: Config,
@@ -46,7 +62,10 @@ def preview(
     role: str,
     model: str | None = None,
     key: str | None = None,
+    *,
+    fingerprints: dict[str, str | None] | None = None,
 ) -> tuple[choices.Choice, choices.Choice]:
+    check_role(scope, role)
     try:
         choices.validate(conn, scope, identity, role)
         old = choices.get(conn, scope, identity, role)
@@ -56,6 +75,11 @@ def preview(
         )
     except ValueError:
         raise click.ClickException(t("Invalid module choice.")) from None
+    if fingerprints is not None and role in fingerprints:
+        new = choices.Choice(
+            model=new.model,
+            key=tuning_cli.resolved_key(config, role, new.model, fingerprints[role]),
+        )
     return old, new
 
 
@@ -76,8 +100,10 @@ def set_module(
     role: str,
     model: str | None = None,
     key: str | None = None,
+    *,
+    fingerprints: dict[str, str | None] | None = None,
 ) -> tuple[choices.Choice, choices.Choice]:
-    _, new = preview(conn, config, scope, identity, role, model, key)
+    _, new = preview(conn, config, scope, identity, role, model, key, fingerprints=fingerprints)
     return choices.set_choice(conn, scope, identity, role, new)
 
 
@@ -118,6 +144,21 @@ def modules_data(
         ).fetchall()
         used = {(r["kind"] or "text") if r["role"] == "executor" else r["role"]: r for r in history}
         roles.update(r for r in used if r in tuning_cli.ROLES)
+        model_history = conn.execute(
+            "SELECT c.role, s.kind, c.provider, c.model, COUNT(*) AS calls, "
+            "COALESCE(SUM(c.prompt_tokens + c.completion_tokens), 0) AS tokens "
+            "FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
+            "WHERE c.task_id = ? GROUP BY c.role, "
+            "CASE WHEN c.role = 'executor' THEN s.kind ELSE NULL END, c.provider, c.model",
+            (identity,),
+        ).fetchall()
+        model_usage = {
+            (
+                (r["kind"] or "text") if r["role"] == "executor" else r["role"],
+                f"{r['provider']}/{r['model']}",
+            ): r
+            for r in model_history
+        }
         by_id = {s.id: s for s in report.subtasks}
         for role in tuning_cli.ROLES:
             if role not in roles or role == "interlocutor":
@@ -143,6 +184,7 @@ def modules_data(
                 None,
             )
             prior = used.get(role)
+            shown_usage = model_usage.get((role, first.label)) if first else None
             relevant = [
                 m
                 for m in modules
@@ -178,6 +220,8 @@ def modules_data(
                     else "role"
                     if (getattr(config.tuning.models, role) or getattr(config.tuning.keys, role))
                     else "auto",
+                    "model_calls": shown_usage["calls"] if shown_usage else 0,
+                    "model_tokens": shown_usage["tokens"] if shown_usage else 0,
                     "calls": prior["calls"] if prior else 0,
                     "tokens": (prior["tokens"] or 0) if prior else 0,
                     "state": state,
@@ -215,7 +259,7 @@ def print_modules(rows: list[dict[str, Any]], as_json: bool = False) -> None:
 
 
 @click.group("modules", invoke_without_command=True)
-@click.option("--task", metavar="REF")
+@click.option("--task", metavar="REF", help="One task (its reference).")
 @json_option
 @click.pass_context
 def modules(ctx: click.Context, task: str | None, as_json: bool) -> None:
@@ -231,7 +275,7 @@ def show_modules(task: str | None, as_json: bool) -> None:
 
 
 @modules.command("show")
-@click.option("--task", metavar="REF")
+@click.option("--task", metavar="REF", help="One task (its reference).")
 @json_option
 def show(task: str | None, as_json: bool) -> None:
     """Show the modules of active tasks, or one task."""
@@ -240,10 +284,18 @@ def show(task: str | None, as_json: bool) -> None:
 
 @modules.command("set")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES))
-@click.option("--task", metavar="REF")
-@click.option("--session", metavar="ID")
-@click.option("--model", metavar="PROVIDER/MODEL|auto")
-@click.option("--key", metavar="PROVIDER:KEY|auto")
+@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option(
+    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+)
+@click.option(
+    "--model", metavar="PROVIDER/MODEL|auto", help="The model asked first; auto: the role's."
+)
+@click.option(
+    "--key",
+    metavar="PROVIDER:KEY|auto",
+    help="The key tried first (label or #N); auto: the role's.",
+)
 def set_command(
     role: str, task: str | None, session: str | None, model: str | None, key: str | None
 ) -> None:
@@ -260,11 +312,14 @@ def set_command(
 
 @modules.command("clear")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES), required=False)
-@click.option("--task", metavar="REF")
-@click.option("--session", metavar="ID")
+@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option(
+    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+)
 def clear_command(role: str | None, task: str | None, session: str | None) -> None:
     """Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor."""
     with closing(db.open_db()) as conn:
         scope, identity = scope_id(conn, task, session)
+        check_role(scope, role)
         choices.clear(conn, scope, identity, role)
     ui.ok(t("Module choices cleared."))

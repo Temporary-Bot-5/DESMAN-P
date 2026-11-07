@@ -14,7 +14,7 @@ import sys
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, redirect_stderr, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
 import click
@@ -436,6 +436,13 @@ class SettingsAction(Action):
     change: Setting
 
 
+# Config-independent for the registry; tested against core.choices.ROLES_BY_SCOPE.
+MODULE_ROLES_BY_SCOPE: dict[str, tuple[str, ...]] = {
+    "task": ("reviewer", "decomposer", "text", "code", "analysis"),
+    "session": ("interlocutor",),
+}
+
+
 class ModuleAction(Action):
     type: Literal["module"]
     role: Literal["planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"]
@@ -449,8 +456,8 @@ class ModuleAction(Action):
     def valid_scope(self) -> ModuleAction:
         if (self.scope == "role") != (self.scope_id is None):
             raise ValueError("scope id required only for task/session")
-        if self.scope == "session" and self.role != "interlocutor":
-            raise ValueError("session card is the interlocutor")
+        if self.scope != "role" and self.role not in MODULE_ROLES_BY_SCOPE[self.scope]:
+            raise ValueError("role does not read choices in this scope")
         return self
 
 
@@ -615,6 +622,7 @@ _ui_depth = 0
 class Recording:
     buffer: io.StringIO
     redact: Callable[[str], str]
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -760,6 +768,8 @@ def ok(text: str) -> None:
 
 
 def warn(text: str, *, stderr: bool = False) -> None:
+    for rec in _recordings:
+        rec.warnings.append(rec.redact(text))
     _record(Text("! " + text))
     with _ui_writes():
         _front.warn(text, stderr=stderr)

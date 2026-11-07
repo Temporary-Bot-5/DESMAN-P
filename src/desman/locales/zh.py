@@ -55,6 +55,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "出借",
     "Take back": "收回",
     "Saved": "已保存",
+    "This model: {calls} calls · {tokens} tokens": "此模型: {calls} 次调用 · {tokens} 令牌",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "此任务中角色总计: {calls} 次调用 · {tokens} 令牌",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "此聊天中角色总计: {calls} 次调用 · {tokens} 令牌",
+    "This role does not read choices here: choose it for the role everywhere.": "此角色不会读取此处的选择：请为该角色在所有位置选择。",
     "Chat": "聊天",
     "Change": "更改",
     "Only here": "仅此处",
@@ -80,6 +84,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "状态",
     "Task": "任务",
     "Unknown or ambiguous session ID.": "会话 ID 未知或不明确。",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "当前不可用",
     "Models and keys for roles": "角色的模型和密钥",
     "key: {role}": "密钥：{role}",
@@ -1314,6 +1319,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("已删除 {count} 个会话。",),
         "No unpinned sessions to delete.": "没有可删除的未置顶会话。",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "无法为单个 {scope} 选择 {role}：仅限 {roles}。请通过 `desman tuning` 为该角色选择。",
+        "One task (its reference).": "单个任务（其引用）。",
+        "One chat (its id as /sessions shows it): the interlocutor.": "单个聊天（/sessions 显示的 id）：仅限对话者。",
+        "The model asked first; auto: the role's.": "优先请求的模型；auto：使用角色的模型。",
+        "The key tried first (label or #N); auto: the role's.": "优先尝试的密钥（标签或 #N）；auto：使用角色的密钥。",
     }
 )
 

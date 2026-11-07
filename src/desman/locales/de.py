@@ -55,6 +55,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "Verleihen",
     "Take back": "Zurücknehmen",
     "Saved": "Gespeichert",
+    "This model: {calls} calls · {tokens} tokens": "Dieses Modell: {calls} Aufrufe · {tokens} Tokens",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Rollensummen in dieser Aufgabe: {calls} Aufrufe · {tokens} Tokens",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Rollensummen in diesem Chat: {calls} Aufrufe · {tokens} Tokens",
+    "This role does not read choices here: choose it for the role everywhere.": "Diese Rolle liest hier keine Auswahl: Wählen Sie sie überall für die Rolle.",
     "Chat": "Chat",
     "Change": "Ändern",
     "Only here": "Nur hier",
@@ -80,6 +84,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Status",
     "Task": "Aufgabe",
     "Unknown or ambiguous session ID.": "Unbekannte oder mehrdeutige Sitzungs-ID.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "derzeit nicht verfügbar",
     "Models and keys for roles": "Modelle und Schlüssel für Rollen",
     "key: {role}": "Schlüssel: {role}",
@@ -1404,6 +1409,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} Sitzung gelöscht.", "{count} Sitzungen gelöscht."),
         "No unpinned sessions to delete.": "Keine nicht angehefteten Sitzungen zum Löschen.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "{role} kann nicht für einzelne {scope} gewählt werden: nur {roles}. Wählen Sie für die Rolle mit `desman tuning`.",
+        "One task (its reference).": "Eine Aufgabe (ihre Referenz).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Ein Chat (seine ID aus /sessions): der Gesprächspartner.",
+        "The model asked first; auto: the role's.": "Zuerst angefragtes Modell; auto: das der Rolle.",
+        "The key tried first (label or #N); auto: the role's.": "Zuerst versuchter Schlüssel (Label oder #N); auto: der der Rolle.",
     }
 )
 

@@ -253,7 +253,7 @@ class Chat:
         self.models, self._models_for = None, None
         ui.reset()
         ui.session(self.session_id, False)
-        ui.note("→ General_Terminal")
+        ui.note(t("→ General_Terminal"))
         self._show_last()
         self._seen_terminal()
 
@@ -937,6 +937,12 @@ class Chat:
             return
         if interlocutor is None:
             actions.print_report(task_report(self.store, task_id))
+            result = self.store.final_result(task_id)
+            if result is not None:
+                # Cut keys from each string before json.dumps escapes quotes and backslashes.
+                shown = json.dumps(_redacted(result, config), ensure_ascii=False, indent=2)
+                ui.out(Text(t("The result as it is:") + "\n" + shown))
+            self._files(task_id, ref, workspace_root_for(self.store.conn))
         else:
             self._outcome(task_id, ref, interlocutor)
 
@@ -1248,9 +1254,15 @@ class Chat:
             ui.error(providers.redact_keys(message, config)[0])
 
     def _settings_action(self, action: ui.SettingsAction) -> None:
+        with ui.recording(
+            redact=lambda text: providers.redact_keys(text, self._saved_config())[0]
+        ) as notices:
+            self._apply_settings_action(action, notices)
+
+    def _apply_settings_action(self, action: ui.SettingsAction, notices: ui.Recording) -> None:
         """Human fields use catalog bodies and the same redacted operator journal."""
-        from desman.gui.settings import command
-        from desman.settings_actions import Forget, ProviderSetting
+        from desman.gui.settings import command, role_change
+        from desman.settings_actions import Forget, ProviderSetting, Roles
 
         before = self._saved_config()
         message, ok = "", True
@@ -1261,6 +1273,18 @@ class Chat:
                 if not config.personalize:
                     raise ValueError("personalisation off")
                 self.profile.forget(change.note, Author.PERSON, session_id=self.session_id)
+            elif isinstance(change, Roles):
+                old, new, edited = tuning_cli.set_tuning(open_config(), role_change(change, config))
+                tuning_cli.print_change(old, new, edited)
+                entry = commands.find("tuning")
+                assert entry is not None
+                self._journal(
+                    entry,
+                    commands.TuningArgs(models={change.role: change.model or "auto"}, keys=None),
+                    True,
+                    before,
+                    typed=True,
+                )
             elif isinstance(change, ProviderSetting):
                 from desman import wizard
 
@@ -1325,6 +1349,8 @@ class Chat:
         if ok and not message:
             message = t("Saved")
             ui.ok(message)
+        if notices.warnings:
+            message = "\n".join([message, *dict.fromkeys(notices.warnings)])
         ui.settings_result(action.id, ok, message)
 
     def _module_action(self, action: ui.ModuleAction) -> None:
@@ -1335,20 +1361,13 @@ class Chat:
             row = next(r for r in tuning_cli.role_rows(config) if r["role"] == action.role)
             if action.model is not None and action.model not in row["candidate_models"]:
                 raise ValueError("unavailable model")
-            selected_key = next(
-                (k for k in row["candidate_keys"] if k["fingerprint"] == action.key), None
-            )
-            first_model = action.model or next(iter(row["candidate_models"]), "")
-            if action.key is not None and (
-                selected_key is None or selected_key["provider"] != first_model.split("/", 1)[0]
-            ):
-                raise ValueError("unavailable key")
-            selector = selected_key["selector"] if selected_key else "auto"
+            tuning_cli.resolved_key(config, action.role, action.model, action.key)
             if action.scope == "role":
                 old, new, edited = tuning_cli.set_tuning(
                     open_config(),
                     tuning_cli.TuningChange(
-                        models={action.role: action.model or "auto"}, keys={action.role: selector}
+                        models={action.role: action.model or "auto"},
+                        fingerprints={action.role: action.key},
                     ),
                 )
                 before = edited.model_copy(update={"tuning": old})
@@ -1364,7 +1383,7 @@ class Chat:
                     action.scope_id,
                     action.role,
                     action.model or "auto",
-                    selector,
+                    fingerprints={action.role: action.key},
                 )
                 lines = modules_cli.change_lines(action.role, old_choice, new_choice, config)
             for line in lines:
@@ -1730,6 +1749,24 @@ class Chat:
         ui.session(selected.id, False)
         ui.ok(t("Switched to the session of {when}.", when=_when(selected.last_at)))
         self._show_last()
+
+
+def _redacted(value: Any, config: Config | None) -> Any:
+    """`value` (JSON data) with configured keys and key-shaped strings cut from every string."""
+    if isinstance(value, str):
+        return providers.redact_keys(value, config)[0]
+    if isinstance(value, list):
+        return [_redacted(v, config) for v in value]
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for k, v in value.items():
+            name, n = _redacted(k, config), 1
+            while name in out:  # two names that each held a key: keep both values
+                n += 1
+                name = f"{_redacted(k, config)} ({n})"
+            out[name] = _redacted(v, config)
+        return out
+    return value
 
 
 def _render(message: Message) -> Text:

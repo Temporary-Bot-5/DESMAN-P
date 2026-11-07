@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from desman import modules_cli, tuning_cli, ui
 from desman.chat import Chat
-from desman.config import open_config
+from desman.config import ApiKey, open_config
 from desman.core import calls, choices, db
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.sessions import Role, Sessions
@@ -77,6 +77,7 @@ def test_module_snapshot_and_session_usage(module_app: Any) -> None:
 
         check(json.loads(response.body))
     data = json.loads(app.handle("GET", "/modules", headers(app)).body)
+    assert data["roles_by_scope"] == {k: list(v) for k, v in choices.ROLES_BY_SCOPE.items()}
     assert data["modules"][0]["task_id"] == task
     assert {r["role"] for r in data["modules"]} == {"text", "reviewer"}
     card = data["interlocutor"]
@@ -102,6 +103,8 @@ def payload(**fields: Any) -> dict[str, Any]:
     "fields",
     [
         dict(extra=1),
+        dict(role="planner"),
+        dict(role="interlocutor"),
         dict(scope="global"),
         dict(role="unknown"),
         dict(key="secret"),
@@ -111,11 +114,13 @@ def payload(**fields: Any) -> dict[str, Any]:
     ],
 )
 def test_module_action_is_strict(module_app: Any, fields: dict[str, Any]) -> None:
-    app, _ = module_app
+    app, store = module_app
+    before = store.conn.total_changes
     assert (
         app.handle("POST", "/action", headers(app), json.dumps(payload(**fields)).encode()).status
         == 400
     )
+    assert store.conn.total_changes == before
     with pytest.raises(ValidationError):
         ui.ACTIONS.validate_python(payload(**fields))
 
@@ -142,6 +147,10 @@ def test_module_action_uses_bodies_and_console(
     app, store = module_app
     secret = "gsk_" + "a" * 48
     config = make_config(api_keys={"GROQ_API_KEY": secret})
+    config.api_keys["GROQ_API_KEY"] = [
+        ApiKey(value=secret, label="first"),
+        ApiKey(value="other-secret", label="#1"),
+    ]
     open_config().save(config)
     task = store.create_task(
         TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
@@ -279,3 +288,121 @@ def test_interlocutor_inherits_role_until_session_override(module_app: Any) -> N
     assert card()["key_fingerprint"] == config.tuning.keys.interlocutor
     modules_cli.set_module(store.conn, config, "session", session, "interlocutor", "auto", "auto")
     assert card()["source"] == "role"
+
+
+def test_ui_scope_roles_match_choices() -> None:
+    assert ui.MODULE_ROLES_BY_SCOPE == choices.ROLES_BY_SCOPE
+
+
+def test_card_usage_distinguishes_model_from_role(module_app: Any) -> None:
+    app, store = module_app
+    config = make_config(api_keys={"GROQ_API_KEY": "configured-key"})
+    open_config().save(config)
+    task = store.create_task(
+        TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
+    )
+    subtask = store.conn.execute("SELECT id FROM subtasks WHERE task_id = ?", (task,)).fetchone()[0]
+    model = next(r for r in tuning_cli.role_rows(config) if r["role"] == "text")[
+        "candidate_models"
+    ][0].split("/", 1)[1]
+    with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=task, subtask_id=subtask)):
+        calls.recorder(store.conn)(call(model=model, prompt_tokens=10, completion_tokens=2))
+        calls.recorder(store.conn)(call(model="fallback", prompt_tokens=20, completion_tokens=3))
+    row = next(r for r in modules_cli.modules_data(store.conn, config, task) if r["role"] == "text")
+    assert (row["calls"], row["tokens"]) == (2, 35)
+    assert (row["model_calls"], row["model_tokens"]) == (1, 12)
+
+    sessions = Sessions(store.conn)
+    session = sessions.add(None, Role.USER, "hello").session_id
+    app.front.session(session, False)
+    model = next(r for r in tuning_cli.role_rows(config) if r["role"] == "interlocutor")[
+        "candidate_models"
+    ][0].split("/", 1)[1]
+    with calls.for_(calls.Purpose(calls.Role.INTERLOCUTOR, session_id=session)):
+        calls.recorder(store.conn)(call(model=model, prompt_tokens=10, completion_tokens=2))
+        calls.recorder(store.conn)(call(model="fallback", prompt_tokens=20, completion_tokens=3))
+    card = json.loads(app.handle("GET", "/modules", headers(app)).body)["interlocutor"]
+    assert (card["calls"], card["tokens"]) == (2, 35)
+    assert (card["model_calls"], card["model_tokens"]) == (1, 12)
+
+
+@pytest.mark.parametrize("fingerprint", [key_id("unconfigured"), key_id("other-provider")])
+def test_fingerprint_bodies_refuse_unknown_or_wrong_provider(
+    module_app: Any, fingerprint: str
+) -> None:
+    import click
+
+    app, store = module_app
+    config = make_config(api_keys={"GROQ_API_KEY": "configured-key"})
+    config.api_keys["CEREBRAS_API_KEY"] = [ApiKey(value="other-provider")]
+    open_config().save(config)
+    task = store.create_task(
+        TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
+    )
+    original = open_config().config_path.read_bytes()
+    with pytest.raises(click.ClickException):
+        tuning_cli.set_tuning(
+            open_config(),
+            tuning_cli.TuningChange(
+                models={"text": "groq/model"}, fingerprints={"text": fingerprint}
+            ),
+        )
+    assert open_config().config_path.read_bytes() == original
+    before = store.conn.total_changes
+    with pytest.raises(click.ClickException):
+        modules_cli.set_module(
+            store.conn,
+            config,
+            "task",
+            task,
+            "text",
+            "groq/model",
+            fingerprints={"text": fingerprint},
+        )
+    assert store.conn.total_changes == before
+
+
+@pytest.mark.parametrize("scope", ["role", "task", "session"])
+@pytest.mark.parametrize("secret", ["provider-b", "provider-a", "unknown"])
+def test_auto_model_accepts_any_configured_key(
+    module_app: Any, scope: Literal["role", "task", "session"], secret: str
+) -> None:
+    app, store = module_app
+    config = make_config(api_keys={"GROQ_API_KEY": "provider-a"})
+    config.api_keys["NVIDIA_API_KEY"] = [ApiKey(value="provider-b")]
+    role = "interlocutor" if scope == "session" else "text"
+    models = next(r for r in tuning_cli.role_rows(config) if r["role"] == role)["candidate_models"]
+    tuned = next(m for m in models if m.startswith("nvidia/"))
+    setattr(config.tuning.models, role, tuned)
+    setattr(config.tuning.keys, role, key_id("provider-b"))
+    open_config().save(config)
+    task = store.create_task(
+        TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
+    )
+    sessions = Sessions(store.conn)
+    session = sessions.add(None, Role.USER, "hello").session_id
+    chat = Chat(sessions)
+    chat.session_id = session
+    identity = task if scope == "task" else session if scope == "session" else None
+    if scope != "role":
+        assert identity is not None
+        modules_cli.set_module(store.conn, config, scope, identity, role, tuned, "nvidia:#1")
+    original = open_config().config_path.read_bytes()
+    before = store.conn.execute("SELECT * FROM module_choices").fetchall()
+    with ui.use(app.front):
+        chat._action(
+            ui.ACTIONS.validate_python(
+                payload(role=role, scope=scope, scope_id=identity, model=None, key=key_id(secret))
+            )
+        )
+    if secret == "unknown":
+        assert open_config().config_path.read_bytes() == original
+        assert store.conn.execute("SELECT * FROM module_choices").fetchall() == before
+    elif scope == "role":
+        saved = open_config().load()
+        assert getattr(saved.tuning.models, role) is None
+        assert getattr(saved.tuning.keys, role) == key_id(secret)
+    else:
+        assert identity is not None
+        saved_choice = choices.get(store.conn, scope, identity, role)
+        assert saved_choice.model is None and saved_choice.key == key_id(secret)

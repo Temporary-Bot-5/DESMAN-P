@@ -77,6 +77,9 @@ def strings() -> dict[str, str]:
         "unlend": t("Take back"),
         "change": t("Change"),
         "only_here": t("Only here"),
+        "scope_unavailable": t(
+            "This role does not read choices here: choose it for the role everywhere."
+        ),
         "everywhere": t("For the role everywhere"),
         "apply": t("Apply"),
         "scope": t("Scope"),
@@ -93,6 +96,9 @@ def strings() -> dict[str, str]:
         "terminal_input": t("Type a command here"),
         "pinned": t("Pinned"),
         "modules": t("Modules"),
+        "model_usage": t("This model: {calls} calls · {tokens} tokens"),
+        "role_usage_task": t("Role totals in this task: {calls} calls · {tokens} tokens"),
+        "role_usage_chat": t("Role totals in this chat: {calls} calls · {tokens} tokens"),
         "calls": t("Calls"),
         "tokens": t("Tokens"),
         "status_pending": t("Pending"),

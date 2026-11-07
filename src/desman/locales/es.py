@@ -55,6 +55,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "Prestar",
     "Take back": "Recuperar",
     "Saved": "Guardado",
+    "This model: {calls} calls · {tokens} tokens": "Este modelo: {calls} llamadas · {tokens} tokens",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Totales del rol en esta tarea: {calls} llamadas · {tokens} tokens",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Totales del rol en este chat: {calls} llamadas · {tokens} tokens",
+    "This role does not read choices here: choose it for the role everywhere.": "Este rol no lee las opciones aquí: elíjalas para el rol en todas partes.",
     "Chat": "Chat",
     "Change": "Cambiar",
     "Only here": "Solo aquí",
@@ -80,6 +84,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Estado",
     "Task": "Tarea",
     "Unknown or ambiguous session ID.": "ID de sesión desconocido o ambiguo.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "no disponible ahora",
     "Models and keys for roles": "Modelos y claves por rol",
     "key: {role}": "clave: {role}",
@@ -1407,6 +1412,16 @@ MESSAGES.update(
             "Se eliminaron {count} sesiones.",
         ),
         "No unpinned sessions to delete.": "No hay sesiones sin fijar para eliminar.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "No se puede elegir {role} para un solo {scope}: solo {roles}. Elija para el rol con `desman tuning`.",
+        "One task (its reference).": "Una tarea (su referencia).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Un chat (su id en /sessions): el interlocutor.",
+        "The model asked first; auto: the role's.": "Modelo consultado primero; auto: el del rol.",
+        "The key tried first (label or #N); auto: the role's.": "Clave probada primero (etiqueta o #N); auto: la del rol.",
     }
 )
 

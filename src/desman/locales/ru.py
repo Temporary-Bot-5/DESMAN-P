@@ -60,6 +60,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "Предоставить",
     "Take back": "Забрать",
     "Saved": "Сохранено",
+    "This model: {calls} calls · {tokens} tokens": "Эта модель: {calls} вызовов · {tokens} токенов",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Всего для роли в этой задаче: {calls} вызовов · {tokens} токенов",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Всего для роли в этом чате: {calls} вызовов · {tokens} токенов",
+    "This role does not read choices here: choose it for the role everywhere.": "Эта роль не читает выбор здесь: выберите для роли везде.",
     "Chat": "Чат",
     "Change": "Изменить",
     "Only here": "Только здесь",
@@ -85,6 +89,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Состояние",
     "Task": "Задача",
     "Unknown or ambiguous session ID.": "Неизвестный или неоднозначный ID сессии.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "сейчас недоступно",
     "Models and keys for roles": "Модели и ключи для ролей",
     "key: {role}": "ключ: {role}",
@@ -1696,6 +1701,16 @@ MESSAGES.update(
             "Удалено {count} сессий.",
         ),
         "No unpinned sessions to delete.": "Нет незакреплённых сессий для удаления.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Нельзя выбрать {role} для одного {scope}: доступны только {roles}. Выберите для роли через `desman tuning`.",
+        "One task (its reference).": "Одна задача (её идентификатор).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Один чат (его id из /sessions): собеседник.",
+        "The model asked first; auto: the role's.": "Модель, запрашиваемая первой; auto: модель роли.",
+        "The key tried first (label or #N); auto: the role's.": "Ключ, используемый первым (метка или #N); auto: ключ роли.",
     }
 )
 

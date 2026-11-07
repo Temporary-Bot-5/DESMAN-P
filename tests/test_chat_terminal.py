@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from collections.abc import Iterator
@@ -258,14 +259,28 @@ def test_terminal_slash_restrictions_and_full_event_return(
 
 @pytest.mark.parametrize("command", ["run", "resume", "worker"])
 def test_terminal_task_commands_use_code_report_without_retelling(
-    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, command: str
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, command: str, tmp_path: Path
 ) -> None:
+    from desman.config import ApiKey
     from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.workspace import Workspace
     from desman.interlocutor import RETELL
 
+    secret = "terminal-task-result-secret"
+    config = open_config().load()
+    config.api_keys["groq"] = [ApiKey(value=secret)]
+    open_config().save(config)
+    monkeypatch.setattr("desman.chat.workspace_root_for", lambda conn: tmp_path)
+    original_work = Chat._work
+
+    def work(self: Chat, task_id: str, *args: object) -> None:
+        Workspace(tmp_path, task_id).write("answer.txt", "task file")
+        original_work(self, task_id, *args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Chat, "_work", work)
     llm = FakeLLM()
     llm.on("Plan task", '{"subtasks": [{"description": "find", "acceptance_criteria": "found"}]}')
-    llm.on("Execute subtask", '{"ok": true}')
+    llm.on("Execute subtask", json.dumps({"answer": "terminal answer", "key": secret}))
     llm.on("Review subtask", '{"verdict": "accept"}')
     monkeypatch.setattr(runs, "models", lambda *a, **kw: runs.Models(llm, None))
     chat = Chat(sessions)
@@ -282,6 +297,16 @@ def test_terminal_task_commands_use_code_report_without_retelling(
     chat._terminal_command(line)
     messages = sessions.messages(sessions.terminal())
     assert any("Goal: find it" in m.text for m in messages if m.kind is Kind.EVENT)
+    if command != "worker":
+        output = "\n".join(m.text for m in messages if m.kind is Kind.EVENT)
+        assert "The result as it is:" in output and "terminal answer" in output
+        assert "Files of task" in output and "answer.txt" in output
+        assert secret not in output
+        assert (
+            output.index("Goal: find it")
+            < output.index("terminal answer")
+            < output.index("answer.txt")
+        )
     assert all(not request.prompt.startswith(RETELL) for request in llm.calls)
     assert not any(m.role is Role.INTERLOCUTOR for m in messages)
     if chat._http is not None:
@@ -409,3 +434,29 @@ def test_panel_decision_keeps_chat_and_output_unread(
     assert not front.events
     assert sessions.messages(sessions.terminal())[-1].text.strip() == "✓ decision saved"
     assert [m.text for m in sessions.messages(normal)] == ["hello"]
+
+
+def test_terminal_result_json_never_shows_an_escaped_key() -> None:
+    """A key with a quote or backslash is cut before json.dumps escapes it (Devin, PR #97)."""
+    from desman import chat as chat_module
+    from desman.config import ApiKey, Config
+
+    key = 'gsk_quote"and\\slash_0123456789abcdef'
+    config = Config(api_keys={"GROQ_API_KEY": [ApiKey(value=key)]})
+    shown = json.dumps(
+        chat_module._redacted({"answer": f"the key is {key}", key: [key]}, config),
+        ensure_ascii=False,
+    )
+    assert key not in shown
+    assert json.dumps(key)[1:-1] not in shown
+
+
+def test_terminal_result_keeps_fields_whose_names_held_keys() -> None:
+    from desman import chat as chat_module
+    from desman.config import ApiKey, Config
+
+    one, two = "gsk_first_0123456789abcdefghij", "gsk_second_0123456789abcdefghi"
+    config = Config(api_keys={"GROQ_API_KEY": [ApiKey(value=one), ApiKey(value=two)]})
+    shown = chat_module._redacted({one: "a", two: "b"}, config)
+    assert sorted(shown.values()) == ["a", "b"]
+    assert one not in json.dumps(shown) and two not in json.dumps(shown)

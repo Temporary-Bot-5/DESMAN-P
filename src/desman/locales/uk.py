@@ -60,6 +60,10 @@ MESSAGES: dict[str, Forms] = {
     "Lend": "Надати",
     "Take back": "Забрати",
     "Saved": "Збережено",
+    "This model: {calls} calls · {tokens} tokens": "Ця модель: {calls} викликів · {tokens} токенів",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Усього для ролі в цьому завданні: {calls} викликів · {tokens} токенів",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Усього для ролі в цьому чаті: {calls} викликів · {tokens} токенів",
+    "This role does not read choices here: choose it for the role everywhere.": "Ця роль не читає вибір тут: виберіть для ролі всюди.",
     "Chat": "Чат",
     "Change": "Змінити",
     "Only here": "Лише тут",
@@ -85,6 +89,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Стан",
     "Task": "Задача",
     "Unknown or ambiguous session ID.": "Невідомий або неоднозначний ID сесії.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "зараз недоступно",
     "Models and keys for roles": "Моделі та ключі для ролей",
     "key: {role}": "ключ: {role}",
@@ -1453,6 +1458,16 @@ MESSAGES.update(
             "Видалено {count} сесій.",
         ),
         "No unpinned sessions to delete.": "Немає незакріплених сесій для видалення.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Не можна вибрати {role} для одного {scope}: доступні лише {roles}. Виберіть для ролі через `desman tuning`.",
+        "One task (its reference).": "Одне завдання (його ідентифікатор).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Один чат (його id з /sessions): співрозмовник.",
+        "The model asked first; auto: the role's.": "Модель, яку запитують першою; auto: модель ролі.",
+        "The key tried first (label or #N); auto: the role's.": "Ключ, який пробують першим (мітка або #N); auto: ключ ролі.",
     }
 )
 
