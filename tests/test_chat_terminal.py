@@ -475,3 +475,20 @@ def test_terminal_help_is_one_catalog_listing(sessions: Sessions, line: str) -> 
     assert listing.count("init-db") == 1
     assert "the chat's commands" not in listing
     assert "Ask for any of them" not in listing
+
+
+@pytest.mark.parametrize("line", ["help", "/help"])
+def test_terminal_help_lists_commands_with_a_broken_config(
+    sessions: Sessions, line: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    (Path(os.environ["DESMAN_CONFIG_DIR"]) / "config.json").write_text(
+        "{not json", encoding="utf-8"
+    )
+    chat = Chat(sessions)
+    lines = iter(["/terminal", line, "/exit"])
+    chat.read = lambda: next(lines, None)
+    chat.run()
+    events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
+    assert any("clear the General Terminal screen" in text and "init-db" in text for text in events)

@@ -593,6 +593,22 @@ class Chat:
                 ui.clear_screen()
                 self._seen_terminal()
             return
+        if line.strip() == "help" and self.in_terminal:
+            # The listing needs no saved settings: shown even when config.json is broken.
+            entry = commands.find("help")
+            assert entry is not None
+            entry.handler(
+                commands.Context(
+                    self.store,
+                    open_config(),
+                    start_task=lambda *_: None,
+                    resume_task=lambda _: None,
+                    session_id=lambda: self.session_id,
+                    in_terminal=True,
+                ),
+                commands.NoArgs(),
+            )
+            return
         config = self._config()
         if config is None:
             return
