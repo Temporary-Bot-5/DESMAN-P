@@ -48,6 +48,8 @@ MESSAGES: dict[str, Forms] = {
     "Commands start with /, e.g. /status": "Polecenia zaczynają się od /, np. /status",
     "Continue": "Kontynuuj",
     "Delete all tasks": "Usuń wszystkie zadania",
+    "Before the next call, what became of these tasks is added: {tasks}.": "Przed następnym wywołaniem zostanie dodane, jak zakończyły się te zadania: {tasks}.",
+    "Before the next call, older messages are summarised: the request will be shorter.": "Przed następnym wywołaniem starsze wiadomości zostaną streszczone: zapytanie będzie krótsze.",
     "General Terminal talks to no model.": "Terminal ogólny nie rozmawia z modelem.",
     "Hide finished TASK, or all finished unpinned tasks.": "Ukryj ukończone ZADANIE lub wszystkie ukończone nieprzypięte zadania.",
     "Hide finished unpinned tasks.": "Ukryj ukończone nieprzypięte zadania.",

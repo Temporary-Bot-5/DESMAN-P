@@ -439,8 +439,8 @@ def resume(
             raise click.ClickException(
                 t("A job from desman-global runs only in `desman worker`, with the models lent.")
             )
-        store.resume_task(task_id)
         models = _attach(source, store, cache=not no_cache, as_json=as_json)
+        store.resume_task(task_id)  # only once the models are there: a failed resume stays paused
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()

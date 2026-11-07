@@ -175,7 +175,8 @@ function rolePickers(parent, role, chosen, fingerprint) {
   const key = {get value() { return provider.value === "ollama" ? "" : provider.value; }};
   const note = text("small", "", parent); note.className = "model-note";
   let generation = 0, searchTimer, localChoices = [], previousModel = chosen || "";
-  Object.defineProperty(model, "requestValue", {get: () => model.value || sources.find(s => s.value === provider.value)?.provider?.models?.[0] || ""});
+  // Auto stays Auto: an empty model is sent as no preference, whatever the source.
+  Object.defineProperty(model, "requestValue", {get: () => model.value});
   function fill(preferred = "", rows = null) {
     const p = sources.find(s => s.value === provider.value)?.provider;
     const models = rows || (p?.models || []).map(m => ({value: m, label: m.slice(m.indexOf("/") + 1)}));

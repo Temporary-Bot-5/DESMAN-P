@@ -56,7 +56,7 @@ const role = {providers:[
 global.fetch = async () => ({ok:true, json: async () => ({models:[{value:'groq/live',label:'live',known:false}]})});
 const choices = rolePickers(panel, role, null, 'a');
 assert.equal(choices.provider.value, 'a'); assert.equal(choices.model.value, ''); assert.equal(choices.key.value, 'a');
-assert.equal(choices.model.requestValue, 'groq/one');
+assert.equal(choices.model.requestValue, ''); // Auto is sent as Auto, never as the first model
 assert.equal(panel.children.filter(n => n.dataset.picker).length, 3); // scope plus two module dropdowns
 choices.model.value = 'groq/two'; choices.model.onchange({}); assert.equal(choices.key.value, 'a');
 choices.provider.value = 'ollama'; choices.provider.onchange(); assert.equal(choices.key.value, '');

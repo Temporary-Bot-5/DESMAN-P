@@ -185,3 +185,29 @@ def test_manual_pause_blocks_provider_timed_resume(store: Store, clock: FakeCloc
     store.resume_task(ref)
     assert [s.id for s in store.resume_due()] == [running.id]
     assert store.claim("executor") is not None
+
+
+def test_failed_resume_leaves_the_task_paused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import click
+    from click.testing import CliRunner
+
+    from desman import cli as cli_module
+
+    path = tmp_path / "resume.db"
+    store = Store(db.open_db(path))
+    task = store.create_task(
+        TaskSpec(goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="a")])
+    )
+    store.pause_task(task)
+
+    def no_models(*_: object, **__: object) -> None:
+        raise click.ClickException("models failed to attach")
+
+    monkeypatch.setattr(cli_module, "_provider", lambda *_: None)
+    monkeypatch.setattr(cli_module, "_executor_access", lambda *_: None)
+    monkeypatch.setattr(cli_module, "_attach", no_models)
+    result = CliRunner().invoke(cli_module.cli, ["resume", task, "--db", str(path)])
+    assert result.exit_code != 0 and "models failed to attach" in result.output
+    assert store.find_task(task)["paused_at"] is not None
