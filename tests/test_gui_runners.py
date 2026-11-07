@@ -816,3 +816,18 @@ def test_command_explanation_does_not_settle_until_result(page: Harness) -> None
     assert not page.sessions.turn_settled(user.seq)
     chat._result("Declined", None, None)
     assert page.sessions.turn_settled(user.seq)
+
+
+def test_a_turn_that_ends_without_a_reply_is_settled(
+    page: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.chat import Chat
+
+    # A command such as `resume` or `worker` returns no result and writes no reply.
+    monkeypatch.setattr(Chat, "_command", lambda *_args, **_kwargs: None)
+    page.outcomes["go on"] = {"type": "command", "name": "help", "args": {}}
+    session = page.send("go on")
+    page.done(session)
+    user = next(m for m in page.sessions.messages(session) if m.role is Role.USER)
+    assert page.sessions.turn_settled(user.seq)
+    assert page.sessions.pending_turns() == []

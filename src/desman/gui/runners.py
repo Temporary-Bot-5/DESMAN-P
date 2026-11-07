@@ -393,6 +393,9 @@ class Runners:
                                 with turn_lock((self.path.resolve(), work.user_seq)):
                                     if not sessions.turn_settled(work.user_seq):
                                         self._execute(chat, runner, work)
+                                        # A turn that ended without an error is answered, even
+                                        # when it wrote no reply (a command with no result).
+                                        sessions.settle_turn(work.user_seq)
                     except Stopped as stopped:
                         if not stopped.recorded:
                             sessions.add(
