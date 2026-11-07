@@ -1218,6 +1218,12 @@ class Chat:
             self._dispatch_action(action)
 
     def _settings_action(self, action: ui.SettingsAction) -> None:
+        with ui.recording(
+            redact=lambda text: providers.redact_keys(text, self._saved_config())[0]
+        ) as notices:
+            self._apply_settings_action(action, notices)
+
+    def _apply_settings_action(self, action: ui.SettingsAction, notices: ui.Recording) -> None:
         """Human fields use catalog bodies and the same redacted operator journal."""
         from desman.gui.settings import command, role_change
         from desman.settings_actions import Forget, ProviderSetting, Roles
@@ -1233,8 +1239,7 @@ class Chat:
                 self.profile.forget(change.note, Author.PERSON, session_id=self.session_id)
             elif isinstance(change, Roles):
                 old, new, edited = tuning_cli.set_tuning(open_config(), role_change(change, config))
-                for line in tuning_cli.lines(old, new, edited):
-                    ui.ok(line)
+                tuning_cli.print_change(old, new, edited)
                 entry = commands.find("tuning")
                 assert entry is not None
                 self._journal(
@@ -1308,6 +1313,8 @@ class Chat:
         if ok and not message:
             message = t("Saved")
             ui.ok(message)
+        if notices.warnings:
+            message = "\n".join([message, *dict.fromkeys(notices.warnings)])
         ui.settings_result(action.id, ok, message)
 
     def _module_action(self, action: ui.ModuleAction) -> None:

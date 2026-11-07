@@ -464,7 +464,7 @@ def test_settings_autosave_events(tmp_path: Path) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is needed for the browser event regression")
-    source = Path("src/desman/gui/static/app.js").read_text()
+    source = Path("src/desman/gui/static/app.js").read_text(encoding="utf-8")
     helper = source[source.index("function settingAuto(") : source.index("function settingSave(")]
     script = tmp_path / "autosave.cjs"
     script.write_text(
@@ -556,3 +556,111 @@ def test_settings_role_refuses_invalid_fingerprint(settings_app: Any, key: str) 
     assert not snapshot(app)["result"]["ok"]
     assert open_config().config_path.read_bytes() == before
     assert not store.conn.execute("SELECT * FROM operator_log").fetchall()
+
+
+@pytest.mark.parametrize("auto", [True, False])
+def test_settings_role_keeps_independent_key(settings_app: Any, auto: bool) -> None:
+    app, store = settings_app
+    secret, other = "groq-secret", "openrouter-secret"
+    config = make_config(api_keys={"GROQ_API_KEY": secret, "OPENROUTER_API_KEY": other})
+    config.tuning.keys.planner = key_id(other)
+    open_config().save(config)
+    model = next(
+        m for m in tuning_cli.role_rows(config)[0]["candidate_models"] if m.startswith("groq/")
+    )
+    with ui.use(app.front):
+        Chat(Sessions(store.conn))._action(
+            action(
+                {
+                    "section": "roles",
+                    "role": "planner",
+                    "model": None if auto else model,
+                    "key": key_id(other),
+                }
+            )
+        )
+    result = snapshot(app)["result"]
+    assert result["ok"], result
+    saved = open_config().load()
+    assert saved.tuning.keys.planner == key_id(other)
+    assert saved.tuning.models.planner == (None if auto else model)
+    if not auto:
+        assert "only applies" in result["message"]
+
+
+def test_settings_auto_accepts_any_configured_key(settings_app: Any) -> None:
+    app, store = settings_app
+    config = make_config(api_keys={"GROQ_API_KEY": "groq", "OPENROUTER_API_KEY": "other"})
+    open_config().save(config)
+    with ui.use(app.front):
+        Chat(Sessions(store.conn))._action(
+            action({"section": "roles", "role": "planner", "model": None, "key": key_id("other")})
+        )
+    assert snapshot(app)["result"]["ok"]
+    assert open_config().load().tuning.keys.planner == key_id("other")
+
+
+def test_settings_remote_server_warning_is_inline(settings_app: Any) -> None:
+    app, store = settings_app
+    open_config().save(make_config())
+    sessions = Sessions(store.conn)
+    with ui.use(app.front):
+        Chat(sessions)._action(
+            action(
+                {
+                    "section": "provider",
+                    "provider": "ollama",
+                    "setting": "OLLAMA_HOST",
+                    "value": "https://models.example.org",
+                }
+            )
+        )
+    result = snapshot(app)["result"]
+    assert result["ok"]
+    terminal = sessions.messages(sessions.terminal())[-1].text
+    assert "models.example.org" in open_config().load().settings["OLLAMA_HOST"]
+    assert result["message"] != "Saved"
+    warning = result["message"].split("\n", 1)[1]
+    assert "prompts, context and data will be sent there" in warning
+    assert " ".join(warning.split()) in " ".join(terminal.split())
+
+
+def test_settings_role_key_options(tmp_path: Path) -> None:
+    """Auto groups every provider; changing model retains the selected key."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed for the browser event regression")
+    source = Path("src/desman/gui/static/app.js").read_text(encoding="utf-8")
+    start = source.index("      const fill = () => {", source.index('settingsSection === "roles"'))
+    helper = source[start : source.index("      fill();", start)]
+    script = tmp_path / "role-keys.cjs"
+    script.write_text(
+        'const assert = require("node:assert/strict");\n'
+        + """
+const element = () => ({children: [], value: '', append(child) {this.children.push(child);}});
+const key = element(); key.replaceChildren = () => key.children = [];
+Object.defineProperty(key, 'options', {get() {return key.children.flatMap(c => c.children.length ? c.children : [c]);}});
+const document = {createElement: element};
+const text = (_, label, parent) => {const o = element(); o.label = label; parent.append(o); return o;};
+const words = {auto: 'Auto'}, model = {value: 'auto'};
+const role = {key_fingerprint: 'b', key_label: 'saved', candidate_keys: [
+  {provider: 'groq', fingerprint: 'a', label: 'A'},
+  {provider: 'openrouter', fingerprint: 'b', label: 'B'}]};
+"""
+        + helper
+        + """
+fill();
+assert.deepEqual(key.children.slice(1).map(g => g.label), ['groq', 'openrouter']);
+assert.equal(key.value, 'b');
+model.value = 'groq/model'; fill();
+assert.equal(key.value, 'b');
+assert.deepEqual(key.options.map(o => o.value), ['auto', 'a', 'b']);
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [node, str(script)], check=True, capture_output=True, text=True, encoding="utf-8"
+    )

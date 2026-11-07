@@ -14,7 +14,7 @@ import sys
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, redirect_stderr, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
 import click
@@ -622,6 +622,7 @@ _ui_depth = 0
 class Recording:
     buffer: io.StringIO
     redact: Callable[[str], str]
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -767,6 +768,8 @@ def ok(text: str) -> None:
 
 
 def warn(text: str, *, stderr: bool = False) -> None:
+    for rec in _recordings:
+        rec.warnings.append(rec.redact(text))
     _record(Text("! " + text))
     with _ui_writes():
         _front.warn(text, stderr=stderr)

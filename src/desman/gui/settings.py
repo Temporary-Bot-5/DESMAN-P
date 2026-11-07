@@ -184,17 +184,13 @@ def role_change(change: Roles, config: Config) -> tuning_cli.TuningChange:
         row["model"],
     ]:
         raise click.ClickException(t("Invalid module choice."))
-    selected = next((k for k in row["candidate_keys"] if k["fingerprint"] == change.key), None)
-    # An unavailable saved key may be kept; changing the model must not silently clear it.
-    if change.key is not None and selected is None:
-        if change.key != row["key_fingerprint"]:
-            raise click.ClickException(t("Invalid module choice."))
+    if change.key is not None and change.key == row["key_fingerprint"]:
+        # Like a CLI model edit, retain the independent saved key.
         fingerprints = {}
     else:
-        provider = (change.model or next(iter(row["candidate_models"]), "")).split("/", 1)[0]
-        if selected and selected["provider"] != provider:
-            raise click.ClickException(t("Invalid module choice."))
-        fingerprints = {change.role: change.key}
+        fingerprints = {
+            change.role: tuning_cli.resolved_key(config, change.role, change.model, change.key)
+        }
     return tuning_cli.TuningChange(
         models={change.role: change.model or "auto"}, fingerprints=fingerprints
     )

@@ -845,11 +845,21 @@ function drawSettings() {
       const fill = () => {
         const previous = key.value || role.key_fingerprint || "auto";
         key.replaceChildren();
-        const provider = (model.value === "auto" ? role.candidate_models[0] || "" : model.value).split("/")[0];
-        const choices = [{value: "auto", label: words.auto}, ...role.candidate_keys.filter(k => k.provider === provider).map(k => ({value: k.fingerprint, label: k.label}))];
-        if (role.key_fingerprint && !choices.some(k => k.value === role.key_fingerprint)) choices.push({value: role.key_fingerprint, label: role.key_label});
-        for (const k of choices) { const o = text("option", k.label, key); o.value = k.value; }
-        key.value = choices.some(k => k.value === previous) ? previous : "auto";
+        const provider = model.value === "auto" ? "" : model.value.split("/")[0];
+        const choices = role.candidate_keys.filter(k => !provider || k.provider === provider || k.fingerprint === previous);
+        const auto = text("option", words.auto, key); auto.value = "auto";
+        const groups = new Map();
+        for (const k of choices) {
+          if (!groups.has(k.provider)) {
+            const group = document.createElement("optgroup"); group.label = k.provider;
+            key.append(group); groups.set(k.provider, group);
+          }
+          const o = text("option", k.label, groups.get(k.provider)); o.value = k.fingerprint;
+        }
+        if (role.key_fingerprint && !choices.some(k => k.fingerprint === role.key_fingerprint)) {
+          const o = text("option", role.key_label, key); o.value = role.key_fingerprint;
+        }
+        key.value = [...key.options].some(k => k.value === previous) ? previous : "auto";
       };
       fill(); model.addEventListener("change", fill);
       settingAuto(card, () => ({section: "roles", role: role.role, model: model.value === "auto" ? null : model.value, key: key.value === "auto" ? null : key.value}));

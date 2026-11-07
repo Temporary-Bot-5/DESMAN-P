@@ -207,17 +207,18 @@ TOPICS: Final = (
         "key. The collapsible chat header shows its interlocutor. Module edits and task "
         "decisions keep the chat open; output and unread counts go to General_Terminal. "
         "Messenger opens General_Terminal. Settings opens a sectioned window that saves on "
-        "change (text and numbers on Enter or blur) and keeps the chat open. Panels can "
+        "change (text and numbers on Enter or blur) and keeps the chat open. Its role editor "
+        "keeps saved keys across models, groups Auto keys by provider and shows warnings inline. Panels can "
         "be read while work runs; their actions are available only at the chat input. "
-        "The transcript scrolls above a growing input at the bottom; suggestions open above it. "
-        "Pinned chats have their own section; dates follow the interface language. "
+        "The transcript scrolls above the input and suggestions. "
+        "Pinned chats are separate; dates are localised. "
         "Opening a chat shows its latest 200 messages. "
         "Deleting a chat or all unpinned chats requires confirmation. Decisions for waiting "
         "subtasks use the displayed version: if work changed, refresh and decide again. "
         "Fail requires an answer. During a task, panels only read; Stop interrupts the task. "
         "On narrow screens, top buttons open the panels. Command suggestions accept arrow "
         "keys, Tab, Enter, Escape and clicks. The first sent line hides the greeting. "
-        "Reloading replays the current transcript; changing chats replaces it.",
+        "Reload restores the transcript.",
     ),
     Topic(
         "profile",
