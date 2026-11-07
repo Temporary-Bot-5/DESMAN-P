@@ -66,12 +66,13 @@ def set_choice(
     conn: sqlite3.Connection, scope: Scope, scope_id: str, role: str, choice: Choice
 ) -> tuple[Choice, Choice]:
     with db.transaction(conn):
-        return _set(conn, scope, scope_id, role, choice)
+        return write_set(conn, scope, scope_id, role, choice)
 
 
-def _set(
+def write_set(
     conn: sqlite3.Connection, scope: Scope, scope_id: str, role: str, choice: Choice
 ) -> tuple[Choice, Choice]:
+    """Set within the caller's transaction (also used with a chat's first message)."""
     validate(conn, scope, scope_id, role)
     old = get(conn, scope, scope_id, role)
     if old == choice:
@@ -115,7 +116,7 @@ def write_clear(
     """Clear inside the caller's transaction (also used when erasing a temporary chat)."""
     validate(conn, scope, scope_id, role)
     for name in [role] if role else list_choices(conn, scope, scope_id):
-        _set(conn, scope, scope_id, name, Choice())
+        write_set(conn, scope, scope_id, name, Choice())
 
 
 def effective(config: Config, role: str, choice: Choice) -> Config:

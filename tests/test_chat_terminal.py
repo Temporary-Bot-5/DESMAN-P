@@ -130,7 +130,7 @@ def test_notices_stay_out_of_chat_and_pointer_is_one_per_batch(
     monkeypatch.setattr(chat, "_tell_blocked", lambda: ui.note("blocked notice"))
     chat._notices()
     output = capsys.readouterr().out
-    assert output.count("new in General_Terminal") == 1
+    assert output.count("new in General Terminal") == 1
     assert "waiting notice" not in output and "blocked notice" not in output
     assert [m.text for m in sessions.messages(normal)] == ["hello"]
     event = sessions.messages(sessions.terminal())[-1]
@@ -254,7 +254,7 @@ def test_terminal_slash_restrictions_and_full_event_return(
     assert "second line" in capsys.readouterr().out
     for command in ("/rename test", "/pin", "/compact", "/profile", "/delete", "/delete-all"):
         assert chat._slash(command)
-    assert capsys.readouterr().err.count("not available in General_Terminal") == 6
+    assert capsys.readouterr().err.count("not available in General Terminal") == 6
 
 
 @pytest.mark.parametrize("command", ["run", "resume", "worker"])
@@ -460,3 +460,55 @@ def test_terminal_result_keeps_fields_whose_names_held_keys() -> None:
     shown = chat_module._redacted({one: "a", two: "b"}, config)
     assert sorted(shown.values()) == ["a", "b"]
     assert one not in json.dumps(shown) and two not in json.dumps(shown)
+
+
+@pytest.mark.parametrize("line", ["help", "/help"])
+def test_terminal_help_is_one_catalog_listing(sessions: Sessions, line: str) -> None:
+    chat = Chat(sessions)
+    lines = iter(["/terminal", line, "/exit"])
+    chat.read = lambda: next(lines, None)
+    chat.run()
+    events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
+    listing = next(text for text in events if "clear the General Terminal screen" in text)
+    assert listing.count("clear the General Terminal screen") == 1
+    assert listing.count("return from General Terminal to the previous chat") == 1
+    assert listing.count("init-db") == 1
+    assert "the chat's commands" not in listing
+    assert "Ask for any of them" not in listing
+
+
+@pytest.mark.parametrize("line", ["help", "/help"])
+def test_terminal_help_lists_commands_with_a_broken_config(
+    sessions: Sessions, line: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    (Path(os.environ["DESMAN_CONFIG_DIR"]) / "config.json").write_text(
+        "{not json", encoding="utf-8"
+    )
+    chat = Chat(sessions)
+    lines = iter(["/terminal", line, "/exit"])
+    chat.read = lambda: next(lines, None)
+    chat.run()
+    events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
+    assert any("clear the General Terminal screen" in text and "init-db" in text for text in events)
+
+
+def test_terminal_help_is_journaled_and_follows_the_language(sessions: Sessions) -> None:
+    from desman import i18n
+
+    chat = Chat(sessions)
+    lines = iter(["/terminal", "help", "/exit"])
+    chat.read = lambda: next(lines, None)
+    try:
+        i18n.set_language("ru")
+        chat.run()
+    finally:
+        i18n.set_language("en")
+    events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
+    listing = next(text for text in events if "init-db" in text)
+    assert "Create the database or apply pending migrations." not in listing
+    rows = sessions.conn.execute(
+        "SELECT details_json FROM operator_log WHERE action = 'operator_command'"
+    ).fetchall()
+    assert any(json.loads(r[0])["command"] == "help" and json.loads(r[0])["typed"] for r in rows)

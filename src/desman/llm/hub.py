@@ -30,6 +30,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import httpx
+from pydantic import BaseModel, Field, TypeAdapter
 
 HUB = "https://huggingface.co"
 DEFAULT_QUANT = "Q4_K_M"
@@ -421,3 +422,80 @@ def _windows_ram() -> int | None:
         return int(status.avail_phys) if kernel.GlobalMemoryStatusEx(ctypes.byref(status)) else None
     else:
         return None
+
+
+class InstalledModel(BaseModel):
+    """The public subset of an Ollama tag response."""
+
+    name: str = Field(min_length=1, max_length=200, pattern=r"^\S+$")
+    size: int = Field(default=0, ge=0)
+
+
+class Tags(BaseModel):
+    models: list[InstalledModel]
+
+
+def ollama_tags(host: str, client: httpx.Client) -> list[InstalledModel]:
+    """Read installed models; never send Hugging Face credentials to a local server."""
+    if "://" not in host:
+        host = "http://" + host
+    response = client.get(host.rstrip("/") + "/api/tags", timeout=2.0)
+    response.raise_for_status()
+    return Tags.model_validate(response.json()).models
+
+
+class SearchFile(BaseModel):
+    rfilename: str
+    size: int | None = Field(default=None, ge=0)
+
+
+class GgufMetadata(BaseModel):
+    total: int | None = Field(default=None, ge=0)
+    context_length: int | None = Field(default=None, ge=0)
+
+
+class SearchModel(BaseModel):
+    metadata: GgufMetadata | None = Field(default=None, alias="gguf")
+    downloads: int | None = Field(default=None, ge=0)
+    pipeline_tag: str | None = None
+    siblings: list[SearchFile] = Field(default_factory=list)
+    id: str = Field(pattern=r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
+
+    def gguf(self) -> Gguf | None:
+        """Known default-quant file sizes, when included by the search API."""
+        files = [
+            f
+            for f in self.siblings
+            if f.rfilename.lower().endswith(".gguf")
+            and DEFAULT_QUANT.lower() in f.rfilename.lower()
+            and "mmproj" not in f.rfilename.lower()
+        ]
+        if not files or any(f.size is None for f in files):
+            return None
+        return Gguf(
+            Ref(self.id, DEFAULT_QUANT),
+            tuple(f.rfilename for f in files),
+            sum(f.size or 0 for f in files),
+            False,
+            (DEFAULT_QUANT,),
+        )
+
+
+def search(query: str, client: httpx.Client, token: str | None = None) -> list[SearchModel]:
+    """Official GGUF repository search; no redirects carrying a token to another host."""
+    response = client.get(
+        HUB + "/api/models",
+        params={
+            "search": query,
+            "filter": "gguf",
+            "sort": "downloads",
+            "limit": 20,
+            "pipeline_tag": "text-generation",
+            "expand[]": ["gguf", "downloads", "pipeline_tag"],
+        },
+        headers=_headers(token),
+        timeout=3.0,
+        follow_redirects=False,
+    )
+    response.raise_for_status()
+    return TypeAdapter(list[SearchModel]).validate_python(response.json())

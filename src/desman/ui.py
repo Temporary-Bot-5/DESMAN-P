@@ -454,8 +454,10 @@ class ModuleAction(Action):
 
     @model_validator(mode="after")
     def valid_scope(self) -> ModuleAction:
-        if (self.scope == "role") != (self.scope_id is None):
-            raise ValueError("scope id required only for task/session")
+        if (self.scope == "role" and self.scope_id is not None) or (
+            self.scope == "task" and self.scope_id is None
+        ):
+            raise ValueError("task requires a scope id; role cannot have one")
         if self.scope != "role" and self.role not in MODULE_ROLES_BY_SCOPE[self.scope]:
             raise ValueError("role does not read choices in this scope")
         return self
@@ -479,9 +481,12 @@ class Front(Protocol):
 
     def banner(self, value: str) -> str: ...
     def reset(self) -> None: ...
+    def clear_screen(self) -> None: ...
     def greeting(self) -> AbstractContextManager[None]: ...
     def session(self, id: str | None, temporary: bool) -> None: ...
     def terminal_seen(self, seq: int) -> None: ...
+    def pending_module(self, choice: dict[str, str | None] | None) -> None: ...
+    def panel_output(self, quiet: bool) -> AbstractContextManager[None]: ...
     def transcript_limit(self) -> int: ...
     def interactive(self) -> bool: ...
     def out(self, *items: RenderableType | str) -> None: ...
@@ -516,12 +521,22 @@ class TerminalFront:
     def reset(self) -> None:
         pass
 
+    def clear_screen(self) -> None:
+        click.clear()
+
     @contextmanager
     def greeting(self) -> Iterator[None]:
         yield
 
     def session(self, id: str | None, temporary: bool) -> None:
         pass
+
+    def pending_module(self, choice: dict[str, str | None] | None) -> None:
+        pass
+
+    @contextmanager
+    def panel_output(self, quiet: bool) -> Iterator[None]:
+        yield
 
     def terminal_seen(self, seq: int) -> None:
         pass
@@ -836,3 +851,16 @@ def settings_result(id: str, ok: bool, message: str) -> None:
     hook = getattr(_front, "settings_result", None)
     if hook is not None:
         hook(id, ok, message)
+
+
+def pending_module(choice: dict[str, str | None] | None) -> None:
+    _front.pending_module(choice)
+
+
+def panel_output(quiet: bool) -> AbstractContextManager[None]:
+    return _front.panel_output(quiet)
+
+
+def clear_screen() -> None:
+    with _ui_writes():
+        _front.clear_screen()

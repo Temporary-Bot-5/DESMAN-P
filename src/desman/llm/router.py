@@ -63,7 +63,7 @@ def choose(config: Config, wanted: str | None = None) -> Provider:
             provider = providers.find(wanted)
         except providers.UnknownProvider as e:
             raise NoProvider(str(e)) from e
-        if not provider.is_ready(config):
+        if not _ready(config, provider):
             if provider.local:
                 raise NoProvider(
                     t(
@@ -105,6 +105,10 @@ def choose(config: Config, wanted: str | None = None) -> Provider:
     raise NoProvider(t("no provider is configured: add a key with `desman keys add PROVIDER`"))
 
 
+def _ready(config: Config, provider: Provider) -> bool:
+    return provider.is_ready(config)
+
+
 def _free(config: Config) -> list[Provider]:
     """The ready free providers in the preference order, the local ones last."""
     ready = {p.id: p for p in providers.ready(config) if not p.paid}
@@ -139,7 +143,13 @@ def lineup(
 ) -> list[Choice]:
     """The models `role` asks, best first; the executor's for a subtask of `kind`. Raises
     `NoProvider` (with what to do about it)."""
-    first = choose(config, provider)
+    chosen = preferred(config, role, kind)
+    local_choice = chosen is not None and chosen.startswith("ollama/")
+    first = (
+        providers.find("ollama")
+        if provider is None and model is None and local_choice
+        else choose(config, provider)
+    )
     if model is not None:
         return [_choice(config, first, model)]
     pool = [first] if provider is not None else _free(config)
@@ -150,7 +160,13 @@ def lineup(
         for order, c in enumerate(_choices(config, p))
     ]
     choices = [row[-1] for row in sorted(ranked, key=lambda row: row[:5])]
-    chosen = preferred(config, role, kind)
+    if (
+        local_choice
+        and chosen is not None
+        and provider is None
+        and all(c.label != chosen for c in choices)
+    ):
+        choices.append(_choice(config, providers.find("ollama"), chosen.removeprefix("ollama/")))
     if chosen is not None:  # the person's choice goes first, if it is among them
         choices.sort(key=lambda c: c.label != chosen)
     return choices

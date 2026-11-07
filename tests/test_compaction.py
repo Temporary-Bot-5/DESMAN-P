@@ -346,7 +346,7 @@ def test_a_protected_change_during_a_summary_leaves_the_chat_open(
     result = chat("/compact", "hotels?")
     assert "Summarised" not in result.output
     assert "Protected files changed without your approval" not in result.output
-    assert "new in General_Terminal (/terminal)" in result.output
+    assert "new in General Terminal (/terminal)" in result.output
     sessions = stored()
     assert any(
         "Protected files changed without your approval" in message.text
