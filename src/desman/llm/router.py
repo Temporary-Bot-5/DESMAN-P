@@ -175,7 +175,21 @@ def lineup(
             choices.append(_choice(config, selected, model_id))
     if chosen is not None:  # the person's choice goes first, if it is among them
         choices.sort(key=lambda c: c.label != chosen)
+    elif provider is None and (source := _key_provider(config, preferred_key(config, role, kind))):
+        # Auto model with a chosen key: that key's provider is asked first (its best models
+        # first, as ranked), the others stay behind it for a fallback.
+        choices.sort(key=lambda c: c.provider.id != source)
     return choices
+
+
+def _key_provider(config: Config, fingerprint: str | None) -> str | None:
+    """The provider whose configured key has `fingerprint` (None: none, or no fingerprint)."""
+    if fingerprint is None:
+        return None
+    for p in providers.ready(config):
+        if p.key_env and any(key_id(k.value) == fingerprint for k in config.keys(p.key_env)):
+            return p.id
+    return None
 
 
 def tuning_field(role: Role, kind: Kind | None = None) -> str | None:

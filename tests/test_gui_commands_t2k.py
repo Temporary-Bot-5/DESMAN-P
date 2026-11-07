@@ -427,3 +427,16 @@ def test_context_says_what_the_next_message_changes_first(tmp_path: Path) -> Non
     assert "what became of these tasks is added" in output
     assert chat.store.short_id(task) in output
     assert "older messages are summarised" in output
+
+
+def test_auto_model_with_a_chosen_key_asks_that_keys_provider_first() -> None:
+    config = make_config(
+        api_keys={"GROQ_API_KEY": "groq-first-secret", "GOOGLE_API_KEY": "gemini-chosen-secret"}
+    )
+    before = router.lineup(config, calls.Role.INTERLOCUTOR)
+    chosen = next(c.provider.id for c in before if c.provider.id != before[0].provider.id)
+    env = "GROQ_API_KEY" if chosen == "groq" else "GOOGLE_API_KEY"
+    config.tuning.keys.interlocutor = key_id(config.keys(env)[0].value)
+    after = router.lineup(config, calls.Role.INTERLOCUTOR)
+    assert after[0].provider.id == chosen
+    assert {c.label for c in after} == {c.label for c in before}  # the rest stays for a fallback
