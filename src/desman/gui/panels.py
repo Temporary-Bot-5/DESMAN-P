@@ -105,6 +105,19 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                             "last_at": s.last_at,
                             "messages": s.messages,
                             "pinned": s.pinned,
+                            "unread": s.id != current
+                            and bool(
+                                conn.execute(
+                                    "SELECT 1 FROM messages WHERE session_id = ? AND task_id IS NOT NULL "
+                                    "AND outcome_audit IS NOT NULL AND seq > ? LIMIT 1",
+                                    (
+                                        s.id,
+                                        conn.execute(
+                                            "SELECT read_seq FROM sessions WHERE id = ?", (s.id,)
+                                        ).fetchone()[0],
+                                    ),
+                                ).fetchone()
+                            ),
                         }
                         for s in Sessions(conn).recent(limit=-1)
                     ],
@@ -150,6 +163,15 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 "AND hidden_at IS NULL ORDER BY pinned DESC, created_at DESC, rowid DESC",
                 tuple(ids),
             )
+            busy = (
+                conn.execute(
+                    "SELECT COUNT(DISTINCT owner) FROM ("
+                    "SELECT lease_owner AS owner FROM subtasks WHERE lease_until > ? "
+                    "UNION SELECT review_owner AS owner FROM subtasks WHERE review_until > ?)",
+                    (db.now_iso(), db.now_iso()),
+                ).fetchone()[0]
+                >= front.worker_count
+            )
             for row in rows:
                 report = task_report(store, row["id"])
                 short = store.short_id(report.id)
@@ -182,6 +204,13 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                         "ref": short,
                         "goal": redact(report.goal),
                         "status": report.status.value,
+                        "queued": busy
+                        and report.status.value == "active"
+                        and report.paused_at is None
+                        and any(s.status.value == "ready" for s in report.subtasks)
+                        and not any(
+                            s.status.value in ("running", "review") for s in report.subtasks
+                        ),
                         "done": report.done,
                         "total": report.total,
                         "created_at": report.created_at,

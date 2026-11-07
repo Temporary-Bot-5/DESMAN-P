@@ -27,7 +27,10 @@ from pydantic import (
 
 from desman.core import filelock
 from desman.core.atomic import replace_file
-from desman.tuning_limits import TUNING_BOUNDS as TUNING_BOUNDS
+from desman.tuning_limits import PAGE_TUNING_BOUNDS
+from desman.tuning_limits import TUNING_BOUNDS as WORKFLOW_TUNING_BOUNDS
+
+TUNING_BOUNDS = {**PAGE_TUNING_BOUNDS, **WORKFLOW_TUNING_BOUNDS}
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
@@ -89,7 +92,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -198,6 +201,7 @@ class Tuning(BaseModel):
 
     models: ModelChoices = Field(default_factory=ModelChoices)
     keys: KeyChoices = Field(default_factory=KeyChoices)
+    workers: StrictInt | None = Field(default=None, ge=1, le=8)
     max_subtasks: StrictInt | None = _bounded("max_subtasks")
     """The most subtasks in a plan."""
     max_parts: StrictInt | None = _bounded("max_parts")
@@ -275,7 +279,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[6] = 6
+    schema_version: Literal[7] = 7
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -369,6 +373,8 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         version = 5  # `network` has a default: off
     if version == 5:
         version = 6  # role keys and interlocutor model have defaults
+    if version == 6:
+        version = 7  # background workers default to three
     if data.get("profile") in (True, False):
         # Written by a 3 before its release (62d084b): `profile`, on unless it said otherwise,
         # was never the person's consent, so `personalize` stays as the file says, off if unsaid.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -18,7 +18,7 @@ from desman.cli import cli
 from desman.config import Config, ConfigManager, default_config_path
 from desman.core import db
 from desman.core.sessions import Kind, Message, Role, Sessions
-from desman.interlocutor import CHAT, RETELL, fit
+from desman.interlocutor import CHAT, RETELL, FirstTurn, fit
 from desman.llm import hub
 from desman.llm.base import Request
 from desman.llm.fake import FakeLLM, Rejected, garbage
@@ -373,7 +373,8 @@ def test_a_suggested_model_is_shown_and_retold(
         return found
 
     monkeypatch.setattr(hub, "inspect", inspect)
-    monkeypatch.setattr(hub, "memory", lambda: hub.Memory(ram=16_000_000_000, video=None))
+    monkeypatch.setattr(hub, "_ram", lambda: 16_000_000_000)
+    monkeypatch.setattr(hub, "_video", lambda: None)
     suggest = {"model": repo, "reason": "it writes code well"}
     fake.on(CHAT, TASK_TURN).on("Plan task", PLAN).on(
         "Execute subtask",
@@ -396,3 +397,171 @@ def test_a_suggested_model_is_shown_and_retold(
     ]
     saved = ConfigManager(default_config_path()).load()
     assert "OLLAMA_MODEL" not in saved.settings  # only the person's "yes" sets it
+
+
+def test_page_task_returns_after_planning_without_execution(fake: FakeLLM) -> None:
+    fake.on(CHAT, TASK_TURN).on("Plan task", PLAN)
+    conn = db.open_db()
+    try:
+        page = Chat(Sessions(conn), background_tasks=True)
+        page._message("find flights")
+        assert len(calls(fake, "Plan task")) == 1
+        assert not calls(fake, "Execute subtask") and not calls(fake, RETELL)
+        [row] = conn.execute("SELECT id FROM tasks")
+        assert page.store.task_status(row["id"]).value == "active"
+        events = page.sessions.messages(page.session_id or "")[1:]
+        assert len(events) == 1
+        assert events[0].text.endswith(
+            "started: Flights to Lisbon (1 subtask). I will tell you here when it is done."
+        )
+    finally:
+        conn.close()
+
+
+def test_background_retells_own_session_marks_other_unread_and_survives_restart(
+    fake: FakeLLM,
+) -> None:
+    from desman import ui
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.gui.front import WebFront
+    from desman.gui.panels import snapshot
+
+    fake.on(RETELL, '{"text": "The task was cancelled."}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        first = sessions.add(None, Role.USER, "first").session_id
+        second = sessions.add(None, Role.USER, "second").session_id
+        page = Chat(sessions, background_tasks=True)
+        page.session_id = first
+        for sid in (first, second):
+            task = page.store.create_task(
+                TaskSpec(
+                    goal="goal",
+                    subtasks=[SubtaskSpec(description="step", acceptance_criteria="ok")],
+                ),
+                session_id=sid,
+            )
+            # No clock advance: audit order, rather than timestamp order, is the marker.
+            page.store.cancel_task(task, "cancelled")
+        front = WebFront()
+        front.session(first, False)
+        with ui.use(front):
+            page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+        assert page.session_id == first
+        assert sum("The task was cancelled." in e.get("html", "") for e in front.events) == 1
+        panel = snapshot(db.default_db_path(), "sessions", front)
+        assert {s["id"]: s["unread"] for s in panel["sessions"]} == {first: False, second: True}
+        selected = sessions.get(second)
+        assert selected is not None
+        with ui.use(front):
+            page._open_session(selected)
+        front.session(second, False)
+        panel = snapshot(db.default_db_path(), "sessions", front)
+        assert not any(s["unread"] for s in panel["sessions"])
+        conn.close()
+        conn = db.open_db()
+        restarted = Chat(Sessions(conn), background_tasks=True)
+        restarted.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+        restarted.store.pin_task(task)
+        restarted.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("repair", [False, True])
+@pytest.mark.parametrize("text", [None, "You wrote in English; shall I switch DESMAN to English?"])
+def test_command_optional_text_before_confirmation(
+    fake: FakeLLM, repair: bool, text: str | None
+) -> None:
+    turn: dict[str, Any] = {"type": "command", "name": "language", "args": {"code": "ru"}}
+    if text is not None:
+        turn["text"] = text
+    answers = ([json.dumps({**turn, "text": ""})] if repair else []) + [json.dumps(turn)]
+    schema = FirstTurn.model_json_schema()["$defs"]
+    command_schema = schema["Command"]
+    assert "text" not in command_schema["required"]
+    reply_text = {k: v for k, v in schema["Reply"]["properties"]["text"].items() if k != "title"}
+    assert reply_text in command_schema["properties"]["text"]["anyOf"]
+    fake.on(CHAT, *answers)
+    result = chat("switch language", "n")
+    assert "Nothing changed." in result.output
+    messages = conversation()
+    if text is not None:
+        assert result.output.index(text) < result.output.index("English → Русский")
+        assert (messages[1].role, messages[1].kind, messages[1].text) == (
+            Role.INTERLOCUTOR,
+            Kind.MESSAGE,
+            text,
+        )
+        assert "declined" in messages[2].text
+    else:
+        assert "declined" in messages[1].text
+
+
+def test_background_provider_pause_then_final_once(fake: FakeLLM) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor, SubtaskStatus
+
+    fake.on(RETELL, '{"text": "Outcome."}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        sid = sessions.add(None, Role.USER, "go").session_id
+        page = Chat(sessions, background_tasks=True)
+        task = page.store.create_task(
+            TaskSpec(
+                goal="goal", subtasks=[SubtaskSpec(description="step", acceptance_criteria="ok")]
+            ),
+            session_id=sid,
+        )
+        claimed = page.store.claim("worker")
+        assert claimed is not None
+        page.store.record_failure(
+            claimed.id,
+            SubtaskStatus.RUNNING,
+            Actor.EXECUTOR,
+            FailureKind.LIMIT,
+            lease=claimed.lease_token,
+            paused_until=db.to_iso(datetime.now(UTC) + timedelta(hours=1)),
+        )
+        page.background_outcomes()
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 1
+        page.store.cancel_task(task, "cancelled")
+        page.background_outcomes()
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("erased", [False, True])
+def test_background_never_retells_temporary_session(fake: FakeLLM, erased: bool) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+
+    fake.on(RETELL, '{"text": "Private outcome."}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        sid = sessions.add(None, Role.USER, "private", temporary=True).session_id
+        page = Chat(sessions, background_tasks=True)
+        task = page.store.create_task(
+            TaskSpec(
+                goal="private", subtasks=[SubtaskSpec(description="step", acceptance_criteria="ok")]
+            ),
+            session_id=sid,
+        )
+        if erased:
+            sessions.erase(sid)
+        page.store.cancel_task(task, "cancelled")
+        before = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        page.background_outcomes()
+        assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == before
+        assert not calls(fake, RETELL)
+    finally:
+        conn.close()

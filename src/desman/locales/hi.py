@@ -10,6 +10,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers wait: config.json does not load ({error}).": "पृष्ठभूमि वर्कर प्रतीक्षा में हैं: config.json लोड नहीं होती ({error})।",
+    "Background workers started again.": "पृष्ठभूमि वर्कर फिर से शुरू हो गए।",
+    "Background workers wait for a model: add a key or a local model in Settings.": "पृष्ठभूमि वर्कर मॉडल की प्रतीक्षा में हैं: सेटिंग्स में कुंजी या स्थानीय मॉडल जोड़ें।",
+    "Background workers (1–8); applies on the next page start.": "पृष्ठभूमि वर्कर (1–8); पेज अगली बार शुरू होने पर लागू होगा।",
+    "Background workers (next page start)": "पृष्ठभूमि वर्कर (पेज अगली बार शुरू होने पर)",
+    "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
+        "कार्य {ref} शुरू हुआ: {title} ({n} उप-कार्य)। पूरा होने पर यहीं बताऊँगा।",
+        "कार्य {ref} शुरू हुआ: {title} ({n} उप-कार्य)। पूरा होने पर यहीं बताऊँगा।",
+    ),
+    "Background worker stopped after repeated failures. See {path}.": "बार-बार विफल होने के कारण पृष्ठभूमि वर्कर बंद हुआ। {path} देखें।",
+    "Queued: waiting for a free worker": "कतार में: खाली वर्कर की प्रतीक्षा",
     "Model: {model}": "मॉडल: {model}",
     "then: {models}": "फिर: {models}",
     "+{count} more": "+{count} और",

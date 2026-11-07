@@ -403,8 +403,10 @@ def test_app_runs_wizard_then_chat_on_main_thread_and_cleans_up(
         ui.note("wizard output")
 
     class FakeChat:
-        def __init__(self, sessions: Sessions, *, resume: bool, temporary: bool) -> None:
-            assert resume and not temporary
+        def __init__(
+            self, sessions: Sessions, *, resume: bool, temporary: bool, background_tasks: bool
+        ) -> None:
+            assert resume and not temporary and background_tasks
             seen.append("chat")
 
         def run(self) -> None:
@@ -416,11 +418,23 @@ def test_app_runs_wizard_then_chat_on_main_thread_and_cleans_up(
     monkeypatch.setattr(gui_app, "http_server", http)
     monkeypatch.setattr(gui_app, "run_wizard", wizard)
     monkeypatch.setattr(gui_app, "print_project_info", lambda manager: seen.append("banner"))
+
+    class FakePool:
+        def __init__(self, *args: Any) -> None:
+            pass
+
+        def start(self) -> None:
+            seen.append("pool start")
+
+        def stop(self) -> None:
+            seen.append("pool stop")
+
+    monkeypatch.setattr(gui_app, "Pool", FakePool)
     monkeypatch.setattr(gui_app, "Chat", FakeChat)
     monkeypatch.setattr("desman.gui.app.webbrowser.open", browser.append)
     gui_app.run(True, False, 0, True, sleep=pauses.append)
     [app] = apps
-    assert seen == ["wizard", "banner", "chat", "shutdown", "closed"]
+    assert seen == ["wizard", "banner", "chat", "pool start", "pool stop", "shutdown", "closed"]
     assert browser == [app.url] and app.url in capsys.readouterr().out
     assert pauses == [0.5] and app.front.ended
     assert list(app.front.events)[-1]["type"] == "end"

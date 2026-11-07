@@ -10,6 +10,17 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers wait: config.json does not load ({error}).": "Os processos em segundo plano aguardam: config.json não carrega ({error}).",
+    "Background workers started again.": "Os processos em segundo plano foram reiniciados.",
+    "Background workers wait for a model: add a key or a local model in Settings.": "Os processos em segundo plano aguardam um modelo: adicione uma chave ou um modelo local nas Configurações.",
+    "Background workers (1–8); applies on the next page start.": "Processos em segundo plano (1–8); no próximo início da página.",
+    "Background workers (next page start)": "Processos em segundo plano (no próximo início)",
+    "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
+        "Tarefa {ref} iniciada: {title} ({n} subtarefa). Avisarei aqui quando terminar.",
+        "Tarefa {ref} iniciada: {title} ({n} subtarefas). Avisarei aqui quando terminar.",
+    ),
+    "Background worker stopped after repeated failures. See {path}.": "Processo em segundo plano parado após falhas repetidas. Consulte {path}.",
+    "Queued: waiting for a free worker": "Na fila: à espera de um processo livre",
     "Model: {model}": "Modelo: {model}",
     "then: {models}": "depois: {models}",
     "+{count} more": "+{count} mais",

@@ -629,7 +629,7 @@ function showSessions(data) {
     for (const s of sessions) {
       const row = text("div", "", root);
       row.className = s.id === data.current ? "session current" : "session";
-      const open = actionButton(row, s.name || "…", {type: "open_session", id: s.id});
+      const open = actionButton(row, (s.unread ? "● " : "") + (s.name || "…"), {type: "open_session", id: s.id});
       open.className = "session-name";
       if (s.id === data.current) open.setAttribute("aria-current", "true");
       text("time", relativeDate(s.last_at), row).dateTime = new Date(s.last_at).toISOString();
@@ -672,6 +672,7 @@ function showTasks(data) {
     const pin = iconAction(titleRow, "⌖", task.pinned ? words.unpin : words.pin, {type: "task_control", operation: task.pinned ? "unpin" : "pin", id: task.id});
     pin.title = task.pinned ? words.unpin : words.pin;
     pin.setAttribute("aria-pressed", String(!!task.pinned));
+    if (task.queued) text("span", words.worker_queue, card).className = "status-chip";
     if (task.paused_at) {
       text("span", words.paused, card).className = "status-chip";
       actionButton(card, words.continue_task, {type: "task_control", operation: "resume", id: task.id});

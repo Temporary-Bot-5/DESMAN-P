@@ -9,13 +9,14 @@ from collections.abc import Callable
 
 import click
 
-from desman import ui
+from desman import runs, ui
 from desman.chat import Chat
 from desman.config_cli import load_config, run_wizard
 from desman.core import db
 from desman.core.sessions import Sessions
 from desman.gui.front import WebFront
 from desman.gui.server import Server, http_server
+from desman.gui.workers import Pool
 from desman.info import print_project_info
 
 
@@ -49,7 +50,28 @@ def run(
                 except (db.SchemaVersionError, db.SchemaMismatchError) as exc:
                     raise click.ClickException(str(exc)) from exc
                 try:
-                    Chat(Sessions(conn), resume=resume, temporary=temporary).run()
+                    sessions = Sessions(conn)
+                    front.worker_count = runs.tuned(manager.load().tuning, "workers")
+                    pool = Pool(
+                        db.default_db_path(),
+                        manager.config_path.parent,
+                        front.worker_count,
+                    )
+                    chat = Chat(sessions, resume=resume, temporary=temporary, background_tasks=True)
+
+                    def idle() -> None:
+                        while pool.messages:
+                            text = pool.messages.popleft()
+                            chat.worker_notice(text, blocked=pool.blocked)
+                        chat.background_outcomes()
+
+                    front.idle = idle
+                    try:
+                        pool.start()
+                        chat.run()
+                    finally:
+                        front.idle = None
+                        pool.stop()
                 finally:
                     conn.close()
             except (KeyboardInterrupt, ui.Cancelled):

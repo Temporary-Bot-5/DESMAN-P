@@ -46,9 +46,9 @@ def test_v5_load_save_and_fingerprint_contract() -> None:
     manager.config_path.parent.mkdir(parents=True, exist_ok=True)
     manager.config_path.write_text(json.dumps({"schema_version": 5, "language": "en"}))
     loaded = manager.load()
-    assert loaded.schema_version == 6 and loaded.tuning == Tuning()
+    assert loaded.schema_version == 7 and loaded.tuning == Tuning()
     manager.save(loaded)
-    assert json.loads(manager.config_path.read_text())["schema_version"] == 6
+    assert json.loads(manager.config_path.read_text())["schema_version"] == 7
     assert KeyChoices(planner=key_id(FIRST)).planner == key_id(FIRST)
     assert Tuning(keys=KeyChoices(planner=key_id(FIRST))).is_set()
     for value in (FIRST, "a" * 11, "A" * 12, "g" * 12, "a" * 13):

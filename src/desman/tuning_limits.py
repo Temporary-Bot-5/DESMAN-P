@@ -8,3 +8,6 @@ TUNING_BOUNDS: dict[str, tuple[int, int]] = {
     "max_transient": (2, 10),
 }
 """The least and the most each number of `Tuning` may be."""
+
+PAGE_TUNING_BOUNDS: dict[str, tuple[int, int]] = {"workers": (1, 8)}
+"""Page concurrency, set only by the person; never lent to network jobs."""

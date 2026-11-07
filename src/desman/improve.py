@@ -154,7 +154,7 @@ _ROLE_ABOUT = {
     "analysis": "The model that executes analysis subtasks.",
 }
 SETTINGS: tuple[Setting, ...] = tuple(
-    Setting(f"tuning.{n}", n, _LIMIT_ABOUT[n]) for n in TUNING_LIMITS
+    Setting(f"tuning.{n}", n, _LIMIT_ABOUT[n]) for n in TUNING_LIMITS if n != "workers"
 ) + tuple(
     Setting(
         f"tuning.model.{r}", r, _ROLE_ABOUT[r] + " It is asked first; the others stay behind it."

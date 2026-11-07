@@ -159,9 +159,12 @@ class Chat:
         *,
         resume: bool = False,
         temporary: bool = False,
+        background_tasks: bool = False,
     ) -> None:
         if resume and temporary:
             raise ValueError("a temporary chat never continues a session")
+        self._outcome_audit: int | None = None
+        self.background_tasks = background_tasks
         self.sessions = sessions
         self.temporary = temporary
         """Nothing said is kept (C.11): the session is erased when the chat ends; no profile
@@ -328,6 +331,8 @@ class Chat:
         )
 
     def _notices(self) -> None:
+        if self.background_tasks:
+            self.background_outcomes()
         with ui.recording(
             show=self.in_terminal,
             redact=lambda text: providers.redact_keys(text, self._saved_config())[0],
@@ -411,6 +416,8 @@ class Chat:
         elif isinstance(turn, NewTask):
             self._task(turn, config, models, interlocutor)
         else:
+            if turn.text is not None:
+                self._say(turn.text)
             self._command(turn, config, models, interlocutor)
 
     def _add_user(self, text: str) -> str:
@@ -459,7 +466,13 @@ class Chat:
         if self.session_id is None:
             ui.out(Text(text))
             return
-        message = self.sessions.add(self.session_id, Role.INTERLOCUTOR, text, task_id=task_id)
+        message = self.sessions.add(
+            self.session_id,
+            Role.INTERLOCUTOR,
+            text,
+            task_id=task_id,
+            outcome_audit=self._outcome_audit,
+        )
         ui.out(_render(message))
 
     def _event(self, text: str, task_id: str | None = None) -> None:
@@ -467,7 +480,12 @@ class Chat:
             ui.note(text)
             return
         message = self.sessions.add(
-            self.session_id, Role.DESMAN, text, kind=Kind.EVENT, task_id=task_id
+            self.session_id,
+            Role.DESMAN,
+            text,
+            kind=Kind.EVENT,
+            task_id=task_id,
+            outcome_audit=self._outcome_audit,
         )
         ui.out(_render(message))
 
@@ -906,16 +924,23 @@ class Chat:
             )
             return
         ref = self.store.short_id(task_id)
-        self._event(
-            tn(
+        if self.background_tasks:
+            started = tn(
+                len(planned.spec.subtasks),
+                "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.",
+                "Task {ref} started: {title} ({n} subtasks). I will tell you here when it is done.",
+                ref=ref,
+                title=turn.title,
+            )
+        else:
+            started = tn(
                 len(planned.spec.subtasks),
                 "Task {ref} started: {title} ({n} subtask).",
                 "Task {ref} started: {title} ({n} subtasks).",
                 ref=ref,
                 title=turn.title,
-            ),
-            task_id,
-        )
+            )
+        self._event(started, task_id)
         for source_ref, made in copied.items():
             if made:
                 self._event(
@@ -927,6 +952,8 @@ class Chat:
                     ),
                     task_id,
                 )
+        if self.background_tasks:
+            return
         self._work(task_id, ref, config, models, access, interlocutor)
 
     def _sources(self, turn: NewTask) -> list[tuple[str, str]]:
@@ -958,6 +985,8 @@ class Chat:
             return
         ref = self.store.short_id(task_id)
         self._event(t("Task {ref} continues.", ref=ref), task_id)
+        if self.background_tasks:
+            return
         self._work(task_id, ref, config, models, access, interlocutor)
 
     def _access(self, config: Config) -> Access | None:
@@ -1018,6 +1047,60 @@ class Chat:
         else:
             self._outcome(task_id, ref, interlocutor)
 
+    def worker_notice(self, text: str, *, blocked: bool = False) -> None:
+        """Keep worker diagnostics in General Terminal and coalesce the guard notice."""
+        if not blocked:
+            self._told_blocked = None
+        if text == self._told_blocked:
+            return
+        self._terminal_output(lambda: ui.warn(text))
+        if blocked:
+            self._told_blocked = text
+
+    def background_outcomes(self) -> None:
+        """Retell settled tasks in their own sessions, including while the line is idle."""
+        current, temporary = self.session_id, self.temporary
+        rows = self.sessions.conn.execute(
+            "SELECT DISTINCT s.id, s.temporary FROM sessions s JOIN tasks t ON t.session_id = s.id "
+            "WHERE s.deleted_at IS NULL AND s.temporary = 0 AND s.terminal = 0"
+        ).fetchall()
+        try:
+            for row in rows:
+                pending = self.sessions.changed_tasks(row["id"])
+                settled = [
+                    task
+                    for task in pending
+                    if (report := task_report(self.store, task)).status is not TaskStatus.ACTIVE
+                    or _paused_until(report) is not None
+                ]
+                if not settled:
+                    continue
+                self.session_id, self.temporary = row["id"], bool(row["temporary"])
+                with ui.recording(show=row["id"] == current):
+                    config = self._config()
+                    if config is None:
+                        continue
+                    config = choices.effective(
+                        config,
+                        "interlocutor",
+                        choices.get(self.sessions.conn, "session", row["id"], "interlocutor"),
+                    )
+                    models = self._models(config, command=True)
+                    if models is None:
+                        continue
+                    speaker = Interlocutor(
+                        models.for_(calls.Role.INTERLOCUTOR),
+                        config.language,
+                        self.profile.notes() if config.personalize and not self.temporary else None,
+                        config.behaviour,
+                    )
+                    for task in settled:
+                        self._outcome(task, self.store.short_id(task), speaker)
+                    if row["id"] == current:
+                        self.sessions.mark_read(row["id"])
+        finally:
+            self.session_id, self.temporary = current, temporary
+
     def _catch_up(self, interlocutor: Interlocutor) -> None:
         """Retell the session's tasks that changed while the chat was not watching them (a
         `desman resume` or a decision in the terminal), once they have settled."""
@@ -1030,6 +1113,17 @@ class Chat:
             self._outcome(task_id, self.store.short_id(task_id), interlocutor)
 
     def _outcome(self, task_id: str, ref: str, interlocutor: Interlocutor) -> None:
+        previous = self._outcome_audit
+        self._outcome_audit = self.sessions.conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM audit_log WHERE task_id = ?", (task_id,)
+        ).fetchone()[0]
+        try:
+            self._retell_outcome(task_id, ref, interlocutor)
+        finally:
+            self._outcome_audit = previous
+
+    def _retell_outcome(self, task_id: str, ref: str, interlocutor: Interlocutor) -> None:
+        watermark, self._outcome_audit = self._outcome_audit, None
         report = task_report(self.store, task_id)
         paused_until = _paused_until(report)
         waiting = [item for item in inbox(self.store) if item.task_id == task_id]
@@ -1092,10 +1186,13 @@ class Chat:
                 }
                 for s in report.suggestions
             ]
+        self._outcome_audit = watermark
         try:
             with self._for(calls.Role.INTERLOCUTOR):
                 retold = interlocutor.retell(outcome)
         except (ProviderError, StructuredOutputError):
+            if result is None:
+                self._event(t("Task {ref} is {status}.", ref=ref, status=report.status), task_id)
             if result is not None:  # the work is not lost with the retelling
                 self._event(
                     t("The model could not retell the result; here it is as it is:")
@@ -1201,6 +1298,8 @@ class Chat:
 
     def _show_last(self) -> None:
         assert self.session_id is not None
+        if self.background_tasks:
+            self.sessions.mark_read(self.session_id)
         for message in self.sessions.screen(
             self.session_id, last=max(SHOWN_ON_RETURN, ui.transcript_limit())
         ):

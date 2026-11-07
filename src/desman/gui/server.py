@@ -124,6 +124,7 @@ def strings() -> dict[str, str]:
         "status_failed": t("Failed"),
         "status_blocked": t("Blocked"),
         "status_cancelled": t("Cancelled"),
+        "worker_queue": t("Queued: waiting for a free worker"),
         "status_active": t("Active"),
         "role_planner": t("Planner"),
         "role_executor": t("Executor"),
