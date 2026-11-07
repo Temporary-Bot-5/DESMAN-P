@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from desman import modules_cli, tuning_cli, ui
 from desman.chat import Chat
-from desman.config import open_config
+from desman.config import ApiKey, open_config
 from desman.core import calls, choices, db
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.sessions import Role, Sessions
@@ -147,6 +147,10 @@ def test_module_action_uses_bodies_and_console(
     app, store = module_app
     secret = "gsk_" + "a" * 48
     config = make_config(api_keys={"GROQ_API_KEY": secret})
+    config.api_keys["GROQ_API_KEY"] = [
+        ApiKey(value=secret, label="first"),
+        ApiKey(value="other-secret", label="#1"),
+    ]
     open_config().save(config)
     task = store.create_task(
         TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
@@ -288,3 +292,71 @@ def test_interlocutor_inherits_role_until_session_override(module_app: Any) -> N
 
 def test_ui_scope_roles_match_choices() -> None:
     assert ui.MODULE_ROLES_BY_SCOPE == choices.ROLES_BY_SCOPE
+
+
+def test_card_usage_distinguishes_model_from_role(module_app: Any) -> None:
+    app, store = module_app
+    config = make_config(api_keys={"GROQ_API_KEY": "configured-key"})
+    open_config().save(config)
+    task = store.create_task(
+        TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
+    )
+    subtask = store.conn.execute("SELECT id FROM subtasks WHERE task_id = ?", (task,)).fetchone()[0]
+    model = next(r for r in tuning_cli.role_rows(config) if r["role"] == "text")[
+        "candidate_models"
+    ][0].split("/", 1)[1]
+    with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=task, subtask_id=subtask)):
+        calls.recorder(store.conn)(call(model=model, prompt_tokens=10, completion_tokens=2))
+        calls.recorder(store.conn)(call(model="fallback", prompt_tokens=20, completion_tokens=3))
+    row = next(r for r in modules_cli.modules_data(store.conn, config, task) if r["role"] == "text")
+    assert (row["calls"], row["tokens"]) == (2, 35)
+    assert (row["model_calls"], row["model_tokens"]) == (1, 12)
+
+    sessions = Sessions(store.conn)
+    session = sessions.add(None, Role.USER, "hello").session_id
+    app.front.session(session, False)
+    model = next(r for r in tuning_cli.role_rows(config) if r["role"] == "interlocutor")[
+        "candidate_models"
+    ][0].split("/", 1)[1]
+    with calls.for_(calls.Purpose(calls.Role.INTERLOCUTOR, session_id=session)):
+        calls.recorder(store.conn)(call(model=model, prompt_tokens=10, completion_tokens=2))
+        calls.recorder(store.conn)(call(model="fallback", prompt_tokens=20, completion_tokens=3))
+    card = json.loads(app.handle("GET", "/modules", headers(app)).body)["interlocutor"]
+    assert (card["calls"], card["tokens"]) == (2, 35)
+    assert (card["model_calls"], card["model_tokens"]) == (1, 12)
+
+
+@pytest.mark.parametrize("fingerprint", [key_id("unconfigured"), key_id("other-provider")])
+def test_fingerprint_bodies_refuse_unknown_or_wrong_provider(
+    module_app: Any, fingerprint: str
+) -> None:
+    import click
+
+    app, store = module_app
+    config = make_config(api_keys={"GROQ_API_KEY": "configured-key"})
+    config.api_keys["CEREBRAS_API_KEY"] = [ApiKey(value="other-provider")]
+    open_config().save(config)
+    task = store.create_task(
+        TaskSpec(goal="work", subtasks=[SubtaskSpec(description="go", acceptance_criteria="ok")])
+    )
+    original = open_config().config_path.read_bytes()
+    with pytest.raises(click.ClickException):
+        tuning_cli.set_tuning(
+            open_config(),
+            tuning_cli.TuningChange(
+                models={"text": "groq/model"}, fingerprints={"text": fingerprint}
+            ),
+        )
+    assert open_config().config_path.read_bytes() == original
+    before = store.conn.total_changes
+    with pytest.raises(click.ClickException):
+        modules_cli.set_module(
+            store.conn,
+            config,
+            "task",
+            task,
+            "text",
+            "groq/model",
+            fingerprints={"text": fingerprint},
+        )
+    assert store.conn.total_changes == before

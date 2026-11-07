@@ -1215,12 +1215,12 @@ class Chat:
                 selected_key is None or selected_key["provider"] != first_model.split("/", 1)[0]
             ):
                 raise ValueError("unavailable key")
-            selector = selected_key["selector"] if selected_key else "auto"
             if action.scope == "role":
                 old, new, edited = tuning_cli.set_tuning(
                     open_config(),
                     tuning_cli.TuningChange(
-                        models={action.role: action.model or "auto"}, keys={action.role: selector}
+                        models={action.role: action.model or "auto"},
+                        fingerprints={action.role: action.key},
                     ),
                 )
                 before = edited.model_copy(update={"tuning": old})
@@ -1236,7 +1236,7 @@ class Chat:
                     action.scope_id,
                     action.role,
                     action.model or "auto",
-                    selector,
+                    fingerprints={action.role: action.key},
                 )
                 lines = modules_cli.change_lines(action.role, old_choice, new_choice, config)
             for line in lines:

@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This model: {calls} calls · {tokens} tokens": "이 모델: {calls} 호출 · {tokens} 토큰",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "이 작업의 역할 합계: {calls} 호출 · {tokens} 토큰",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "이 채팅의 역할 합계: {calls} 호출 · {tokens} 토큰",
     "This role does not read choices here: choose it for the role everywhere.": "이 역할은 여기의 선택을 읽지 않습니다. 역할 전체에 적용하세요.",
     "Chat": "채팅",
     "Change": "변경",

@@ -62,6 +62,8 @@ def preview(
     role: str,
     model: str | None = None,
     key: str | None = None,
+    *,
+    fingerprints: dict[str, str | None] | None = None,
 ) -> tuple[choices.Choice, choices.Choice]:
     check_role(scope, role)
     try:
@@ -73,6 +75,11 @@ def preview(
         )
     except ValueError:
         raise click.ClickException(t("Invalid module choice.")) from None
+    if fingerprints is not None and role in fingerprints:
+        new = choices.Choice(
+            model=new.model,
+            key=tuning_cli.resolved_key(config, role, new.model, fingerprints[role]),
+        )
     return old, new
 
 
@@ -93,8 +100,10 @@ def set_module(
     role: str,
     model: str | None = None,
     key: str | None = None,
+    *,
+    fingerprints: dict[str, str | None] | None = None,
 ) -> tuple[choices.Choice, choices.Choice]:
-    _, new = preview(conn, config, scope, identity, role, model, key)
+    _, new = preview(conn, config, scope, identity, role, model, key, fingerprints=fingerprints)
     return choices.set_choice(conn, scope, identity, role, new)
 
 
@@ -135,6 +144,21 @@ def modules_data(
         ).fetchall()
         used = {(r["kind"] or "text") if r["role"] == "executor" else r["role"]: r for r in history}
         roles.update(r for r in used if r in tuning_cli.ROLES)
+        model_history = conn.execute(
+            "SELECT c.role, s.kind, c.provider, c.model, COUNT(*) AS calls, "
+            "COALESCE(SUM(c.prompt_tokens + c.completion_tokens), 0) AS tokens "
+            "FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
+            "WHERE c.task_id = ? GROUP BY c.role, "
+            "CASE WHEN c.role = 'executor' THEN s.kind ELSE NULL END, c.provider, c.model",
+            (identity,),
+        ).fetchall()
+        model_usage = {
+            (
+                (r["kind"] or "text") if r["role"] == "executor" else r["role"],
+                f"{r['provider']}/{r['model']}",
+            ): r
+            for r in model_history
+        }
         by_id = {s.id: s for s in report.subtasks}
         for role in tuning_cli.ROLES:
             if role not in roles or role == "interlocutor":
@@ -160,6 +184,7 @@ def modules_data(
                 None,
             )
             prior = used.get(role)
+            shown_usage = model_usage.get((role, first.label)) if first else None
             relevant = [
                 m
                 for m in modules
@@ -195,6 +220,8 @@ def modules_data(
                     else "role"
                     if (getattr(config.tuning.models, role) or getattr(config.tuning.keys, role))
                     else "auto",
+                    "model_calls": shown_usage["calls"] if shown_usage else 0,
+                    "model_tokens": shown_usage["tokens"] if shown_usage else 0,
                     "calls": prior["calls"] if prior else 0,
                     "tokens": (prior["tokens"] or 0) if prior else 0,
                     "state": state,

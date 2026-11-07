@@ -15,6 +15,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This model: {calls} calls · {tokens} tokens": "Ten model: {calls} wywołań · {tokens} tokenów",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Sumy roli w tym zadaniu: {calls} wywołań · {tokens} tokenów",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Sumy roli w tym czacie: {calls} wywołań · {tokens} tokenów",
     "This role does not read choices here: choose it for the role everywhere.": "Ta rola nie odczytuje tutaj wyborów: wybierz je dla roli wszędzie.",
     "Chat": "Czat",
     "Change": "Zmień",

@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This model: {calls} calls · {tokens} tokens": "このモデル: {calls} 呼び出し · {tokens} トークン",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "このタスクの役割の合計: {calls} 呼び出し · {tokens} トークン",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "このチャットの役割の合計: {calls} 呼び出し · {tokens} トークン",
     "This role does not read choices here: choose it for the role everywhere.": "この役割はここでの選択を参照しません。役割全体に適用してください。",
     "Chat": "チャット",
     "Change": "変更",

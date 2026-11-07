@@ -523,7 +523,9 @@ function moduleCard(parent, m, placement = "modules") {
   const usage = text("div", "", info);
   usage.className = "module-usage";
   text("span", words[`source_${m.source}`], usage).className = "status-chip";
-  text("small", `${words.calls}: ${m.calls} · ${words.tokens}: ${m.tokens}`, usage);
+  text("small", words.model_usage.replace("{calls}", m.model_calls).replace("{tokens}", m.model_tokens), usage);
+  usage.title = (m.scope === "session" ? words.role_usage_chat : words.role_usage_task)
+    .replace("{calls}", m.calls).replace("{tokens}", m.tokens);
   if (m.state) text("small", m.state, info).className = `module-state ${m.state_style || "muted"}`;
   const change = button(card, "✎", () => {
     moduleEditors.set(identity, editor);

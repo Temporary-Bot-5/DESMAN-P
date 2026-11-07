@@ -229,6 +229,12 @@ def interlocutor(conn: sqlite3.Connection, config: Config, identity: str | None)
         "FROM model_calls WHERE session_id = ? AND role = 'interlocutor'",
         (identity,),
     ).fetchone()
+    model_usage = conn.execute(
+        "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens "
+        "FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+        "AND provider = ? AND model = ?",
+        (identity, first.provider.id if first else None, first.model if first else None),
+    ).fetchone()
     return {
         "role": "interlocutor",
         "icon": "module",
@@ -245,6 +251,8 @@ def interlocutor(conn: sqlite3.Connection, config: Config, identity: str | None)
         else "role"
         if config.tuning.models.interlocutor or config.tuning.keys.interlocutor
         else "auto",
+        "model_calls": model_usage["calls"],
+        "model_tokens": model_usage["tokens"],
         "calls": usage["calls"],
         "tokens": usage["tokens"],
         "state": t("idle"),
