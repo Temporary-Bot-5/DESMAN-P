@@ -139,3 +139,21 @@ def test_report_action_only_answers_an_open_line() -> None:
     thread.join(2)
     assert received == [ui.ACTIONS.validate_python({"type": "report_problem"})]
     assert app.handle("POST", "/action", headers(app), body).status == 409
+
+
+def test_cancelling_the_description_returns_to_the_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancel on the description window is not an end of the chat (Devin, PR #101)."""
+    open_config().save(make_config())
+    conn = db.open_db(":memory:")
+    sessions = Sessions(conn)
+    chat = Chat(sessions)
+    session = sessions.add(None, Role.USER, "open chat").session_id
+    chat.session_id = session
+
+    def cancel(question: str) -> str:
+        raise ui.Cancelled
+
+    monkeypatch.setattr(ui, "text", cancel)
+    chat._action(ui.ACTIONS.validate_python({"type": "report_problem"}))  # raises nothing
+    assert chat.session_id == session
+    conn.close()

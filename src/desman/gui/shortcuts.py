@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -75,16 +74,20 @@ def _create(runner: Callable[..., subprocess.CompletedProcess[str]]) -> list[Pat
         return [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
     if not sys.platform.startswith("linux"):
         raise click.ClickException(t("Shortcuts are not supported on this system yet."))
-    script_name = shutil.which("desman")
-    script_path = Path(script_name).absolute() if script_name else executable.parent / "desman"
-    if not script_path.is_file():
-        raise click.ClickException(t("The installed desman script was not found."))
+    # The installation that made the shortcut: its own script next to this Python, else this
+    # Python itself (`-m desman`), never whichever `desman` comes first on PATH.
+    script_path = executable.parent / "desman"
+    command = (
+        f"{_desktop_quote(str(script_path))} gui"
+        if script_path.is_file()
+        else f"{_desktop_quote(str(executable))} -m desman gui"
+    )
     home = Path.home()
     data = Path(os.environ.get("XDG_DATA_HOME", str(home / ".local" / "share")))
     application = data / "applications" / "desman.desktop"
     content = (
         "[Desktop Entry]\nType=Application\nName=DESMAN\n"
-        f"Exec={_desktop_quote(str(script_path))} gui\n"
+        f"Exec={command}\n"
         f"Icon={str(images / 'logo.png')}\n"
         "Terminal=false\nCategories=Utility;\n"
     )

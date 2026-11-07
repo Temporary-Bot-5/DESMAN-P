@@ -28,7 +28,9 @@ def test_linux_shortcuts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deskto
     script = tmp_path / "bin space" / "desman"
     script.parent.mkdir()
     script.touch()
-    monkeypatch.setattr(shutil, "which", lambda _: str(script))
+    monkeypatch.setattr(sys, "executable", str(script.parent / "python"))
+    # Another installation first on PATH is never what the shortcut opens (Devin, PR #101).
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/desman")
     if desktop:
         (tmp_path / "config").mkdir()
         (tmp_path / "config" / "user-dirs.dirs").write_text('XDG_DESKTOP_DIR="$HOME/My Desktop"\n')
@@ -96,3 +98,20 @@ def test_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(cli, ["gui", "--shortcut"])
     assert result.exit_code == 1
     assert "not supported" in result.output
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Linux desktop entries")
+def test_linux_shortcut_without_a_script_runs_this_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("XDG_DESKTOP_DIR", raising=False)
+    python = tmp_path / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/desman")
+    content = shortcuts.create()[0].read_text()
+    assert f'Exec="{python}" -m desman gui\n' in content

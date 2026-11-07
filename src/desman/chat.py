@@ -1221,7 +1221,11 @@ class Chat:
             self._dispatch_action(action)
 
     def _report_problem(self) -> None:
-        description = ui.text(t("Describe the problem:")).strip()
+        try:
+            description = ui.text(t("Describe the problem:")).strip()
+        except (ui.Cancelled, click.Abort):  # Cancel on the window: back to the chat
+            ui.note(t("Nothing changed."))
+            return
         if not description:
             return
         config = self._config()
