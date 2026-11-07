@@ -5,6 +5,7 @@ param(
     [switch]$Yes, [switch]$NoStart, [switch]$Uninstall, [switch]$Purge,
     [switch]$DryRun
 )
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $ErrorActionPreference = 'Stop'
 $Repository = 'https://github.com/Temporary-Bot-5/DESMAN-P.git'
 $App = Join-Path $env:LOCALAPPDATA 'DESMAN\app'

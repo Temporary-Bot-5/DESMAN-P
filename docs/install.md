@@ -11,14 +11,14 @@ Install git first if needed (the installer prints the command for apt, dnf, pacm
 and stops). Download the script, then run it from a terminal so you can answer its question:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh && sh /tmp/desman-install.sh
+f="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f"; rm -f "$f"
 ```
 
 The script explains before downloading and running the official uv installer. uv installs
 Python as needed. For unattended installation, explicitly accept with `--yes`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh && sh /tmp/desman-install.sh --yes
+f="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f" --yes; rm -f "$f"
 ```
 
 The installer also asks questions through `/dev/tty` when stdin is a pipe. Without an
@@ -91,8 +91,11 @@ be descendants of the installed commit. A git tag alone is not a root-signed net
 Without a verified installer-owned app directory, uninstall removes nothing. Launchers and
 shortcuts belonging to another installation are preserved.
 
-Close DESMAN first. Run `sh /tmp/desman-install.sh --uninstall` or `install.bat -Uninstall` using the saved
-installer. Confirmation lists the app and shortcuts. uv, Python, git and portable MinGit stay.
+Close DESMAN first. Run the installer copy inside the installation:
+`sh ~/.local/share/desman-app/install/install.sh --uninstall` on Linux, or
+`"%LOCALAPPDATA%\DESMAN\app\install\install.bat" -Uninstall` in Windows Command Prompt.
+If you set `DESMAN_HOME`, use `sh "$DESMAN_HOME/install/install.sh" --uninstall` or
+`"%DESMAN_HOME%\install\install.bat" -Uninstall` instead. Confirmation lists the app and shortcuts. uv, Python, git and portable MinGit stay.
 The Linux `~/.local/bin/desman` launcher is removed only if it resolves to this app’s executable.
 
 Data locations on **both platforms** (Windows uses `%USERPROFILE%` for `~`, not LOCALAPPDATA):

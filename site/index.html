@@ -23,8 +23,8 @@
       <a class="button" href="https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.bat" download="install.bat">Windows <span aria-hidden="true">↓</span></a>
     </div>
     <section id="linux-command" hidden>
-      <p data-en="Paste this command into a terminal. For a piped install, confirmation is required with --yes (see the guide)." data-ru="Вставьте команду в терминал. При установке через канал нужен --yes для подтверждения (см. руководство).">Paste this command into a terminal. For a piped install, confirmation is required with --yes (see the guide).</p>
-      <code id="command">curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh &amp;&amp; sh /tmp/desman-install.sh</code>
+      <p data-en="Paste this command into a terminal. It asks before installing uv; --yes skips the question (see the guide)." data-ru="Вставьте команду в терминал. Перед установкой uv появится вопрос; --yes пропускает его (см. руководство).">Paste this command into a terminal. It asks before installing uv; --yes skips the question (see the guide).</p>
+      <code id="command">f="$(mktemp)" &amp;&amp; curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" &amp;&amp; sh "$f"; rm -f "$f"</code>
       <button id="copy" type="button" data-en="Copy" data-ru="Копировать">Copy</button>
       <p id="copy-status" role="status"></p>
     </section>

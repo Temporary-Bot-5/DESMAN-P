@@ -30,7 +30,7 @@ through `desman global update`.
 On Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o /tmp/desman-install.sh && sh /tmp/desman-install.sh
+f="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh -o "$f" && sh "$f"; rm -f "$f"
 ```
 
 ## Quick Start

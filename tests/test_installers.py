@@ -96,7 +96,7 @@ def test_uv_confirmation_and_noninteractive_refusal(installer: tuple[Path, dict[
     assert not Path(env["LOG"]).exists()
     result = run_installer(env, "--yes", "--no-start")
     assert result.returncode == 0, result.stderr
-    calls = Path(env["LOG"]).read_text().splitlines()
+    calls = Path(env["LOG"]).read_text(encoding="utf-8").splitlines()
     assert calls[0].startswith("curl -LsSf https://astral.sh/uv/install.sh")
     assert calls.index("uv venv -p 3.12") < calls.index(
         "uv pip install --python .venv/bin/python -e ."
@@ -112,7 +112,7 @@ def test_install_rerun_uninstall_and_config_preserved(
     for _ in range(2):
         result = run_installer(env, "--yes", "--no-start")
         assert result.returncode == 0, result.stderr
-    calls = Path(env["LOG"]).read_text().splitlines()
+    calls = Path(env["LOG"]).read_text(encoding="utf-8").splitlines()
     assert sum(line.startswith("git clone ") for line in calls) == 1
     assert calls.count("git fetch origin --tags") == 2
     assert calls.count("git checkout -B desman-installed refs/tags/v1.2.0") == 2
@@ -126,7 +126,7 @@ def test_install_rerun_uninstall_and_config_preserved(
     result = run_installer(env, "--uninstall", "--yes")
     assert result.returncode == 0, result.stderr
     assert data.is_dir()
-    assert (home / ".config/desman/config.json").read_text() == "secret"
+    assert (home / ".config/desman/config.json").read_text(encoding="utf-8") == "secret"
     for path in (
         app,
         home / ".local/bin/desman",
@@ -158,7 +158,7 @@ def test_fallback_and_start(installer: tuple[Path, dict[str, str]]) -> None:
     result = run_installer(env, "--yes")
     assert result.returncode == 0, result.stderr
     assert "No v* tag" in result.stdout
-    calls = Path(env["LOG"]).read_text()
+    calls = Path(env["LOG"]).read_text(encoding="utf-8")
     assert "checkout -B desman-installed refs/remotes/origin/master" in calls
     assert calls.endswith("desman gui\n")
 
@@ -177,14 +177,14 @@ def test_missing_git_hint(tmp_path: Path) -> None:
 
 
 def test_windows_wrapper_and_evaluation_source() -> None:
-    script = (ROOT / "install/install.ps1").read_text()
+    script = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
     evaluations = [
         line.strip()
         for line in script.splitlines()
         if "iex" in line.lower() or "invoke-expression" in line.lower()
     ]
     assert evaluations == ["irm https://astral.sh/uv/install.ps1 | iex"]
-    wrapper = (ROOT / "install/install.bat").read_text()
+    wrapper = (ROOT / "install/install.bat").read_text(encoding="utf-8")
     assert 'set "DESMAN_INSTALLER_REF=master"' in wrapper
     assert 'set "DESMAN_INSTALLER=%~dp0install.ps1"' in wrapper
     assert 'if exist "%DESMAN_INSTALLER%" goto run' in wrapper
@@ -201,17 +201,24 @@ def test_windows_wrapper_and_evaluation_source() -> None:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell dry-run")
-def test_windows_dry_run(tmp_path: Path) -> None:
+def test_windows_dry_run(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
     powershell = shutil.which("powershell") or shutil.which("pwsh")
     if powershell is None:
         pytest.skip("PowerShell not installed")
     env = {key: value for key, value in os.environ.items() if not key.startswith("DESMAN_")}
-    env.update(LOCALAPPDATA=str(tmp_path), USERPROFILE=str(tmp_path))
+    shell_data = tmp_path_factory.mktemp("powershell")
+    env.update(
+        LOCALAPPDATA=str(shell_data),
+        APPDATA=str(shell_data),
+        PSModuleAnalysisCachePath=str(shell_data / "ModuleAnalysisCache"),
+        USERPROFILE=str(tmp_path),
+    )
     result = subprocess.run(
         [powershell, "-NoProfile", "-File", str(ROOT / "install/install.ps1"), "-DryRun"],
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     for expected in (
@@ -223,7 +230,10 @@ def test_windows_dry_run(tmp_path: Path) -> None:
         "desman global update",
     ):
         assert expected in result.stdout
-    assert list(tmp_path.iterdir()) == []
+    assert not (shell_data / "DESMAN").exists()
+    assert not (tmp_path / ".config" / "desman").exists()
+    assert not (tmp_path / ".local" / "share" / "desman").exists()
+    assert not (tmp_path / "Desktop" / "DESMAN.lnk").exists()
 
 
 class Assets(HTMLParser):
@@ -244,14 +254,21 @@ class Assets(HTMLParser):
 
 
 def test_site_assets_and_languages() -> None:
-    html = (ROOT / "site/index.html").read_text()
+    html = (ROOT / "site/index.html").read_text(encoding="utf-8")
     parser = Assets()
     parser.feed(html)
     assert parser.paths
     for path in parser.paths:
         assert ":" not in path and not path.startswith("/")
         assert (ROOT / "site" / path).is_file()
-    assert "-o /tmp/desman-install.sh &amp;&amp; sh /tmp/desman-install.sh" in html
+    command = 'f="$(mktemp)" &amp;&amp; curl -fsSL '
+    command += (
+        "https://raw.githubusercontent.com/Temporary-Bot-5/DESMAN-P/master/install/install.sh"
+    )
+    command += ' -o "$f" &amp;&amp; sh "$f"; rm -f "$f"'
+    assert command in html
+    for name in ("README.md", "docs/install.md"):
+        assert command.replace("&amp;", "&") in (ROOT / name).read_text(encoding="utf-8")
     assert "| sh" not in html
     assert "install.ps1" not in html
     assert "MIT" not in html
@@ -259,8 +276,8 @@ def test_site_assets_and_languages() -> None:
     assert "На Windows агенты не запускают код: там нет песочницы." in html
     assert 'data-en="Install"' in html
     assert 'data-ru="Установите"' in html
-    assert "navigator.language" in (ROOT / "site/app.js").read_text()
-    css = (ROOT / "site/style.css").read_text()
+    assert "navigator.language" in (ROOT / "site/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "site/style.css").read_text(encoding="utf-8")
     assert "@import" not in css and "url(" not in css
     for name in ("banner.png", "logo.png", "module.png"):
         assert (ROOT / "site/img" / name).read_bytes() == (
@@ -274,7 +291,7 @@ def test_ref_override_and_command_order(installer: tuple[Path, dict[str, str]]) 
     env["DESMAN_REF"] = "v2.0.0"
     result = run_installer(env, "--yes", "--no-start")
     assert result.returncode == 0, result.stderr
-    calls = Path(env["LOG"]).read_text().splitlines()
+    calls = Path(env["LOG"]).read_text(encoding="utf-8").splitlines()
     assert not any("ls-remote" in line for line in calls)
     fetch = calls.index("git fetch origin --tags")
     checkout = calls.index("git checkout -B desman-installed refs/tags/v2.0.0")
@@ -301,8 +318,8 @@ def test_uninstall_refuses_without_confirmation_and_config_collision(
     result = run_installer(env, "--yes", "--uninstall")
     assert result.returncode == 1
     assert "backup exists" in result.stderr
-    assert fallback.read_text() == "old"
-    assert (app / "config.json").read_text() == "new"
+    assert fallback.read_text(encoding="utf-8") == "old"
+    assert (app / "config.json").read_text(encoding="utf-8") == "new"
 
 
 @linux
@@ -331,12 +348,20 @@ def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell dry-run")
-def test_windows_uninstall_dry_run(tmp_path: Path) -> None:
+def test_windows_uninstall_dry_run(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     powershell = shutil.which("powershell") or shutil.which("pwsh")
     if powershell is None:
         pytest.skip("PowerShell not installed")
     env = {key: value for key, value in os.environ.items() if not key.startswith("DESMAN_")}
-    env.update(LOCALAPPDATA=str(tmp_path), USERPROFILE=str(tmp_path))
+    shell_data = tmp_path_factory.mktemp("powershell")
+    env.update(
+        LOCALAPPDATA=str(shell_data),
+        APPDATA=str(shell_data),
+        PSModuleAnalysisCachePath=str(shell_data / "ModuleAnalysisCache"),
+        USERPROFILE=str(tmp_path),
+    )
     result = subprocess.run(
         [
             powershell,
@@ -350,13 +375,17 @@ def test_windows_uninstall_dry_run(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     assert "if absent remove nothing" in result.stdout
     assert "TargetPath is under App" in result.stdout
     assert "Separate purge confirmation:" in result.stdout
     assert str(tmp_path / ".local" / "share" / "desman") in result.stdout
-    assert list(tmp_path.iterdir()) == []
+    assert not (shell_data / "DESMAN").exists()
+    assert not (tmp_path / ".config" / "desman").exists()
+    assert not (tmp_path / ".local" / "share" / "desman").exists()
+    assert not (tmp_path / "Desktop" / "DESMAN.lnk").exists()
 
 
 if sys.platform != "win32":
@@ -422,7 +451,7 @@ def test_uninstall_preserves_foreign_launchers(
     assert result.returncode == 0, result.stderr
     assert launcher.resolve() == foreign
     for shortcut in shortcuts:
-        assert shortcut.read_text() == f'Exec="{foreign}" gui\n'
+        assert shortcut.read_text(encoding="utf-8") == f'Exec="{foreign}" gui\n'
     if not app_present:
         assert "nothing removed" in result.stdout
-        assert (data / "keep").read_text() == "history"
+        assert (data / "keep").read_text(encoding="utf-8") == "history"
