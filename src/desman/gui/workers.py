@@ -20,9 +20,11 @@ from typing import Protocol
 import click
 
 from desman import runs
-from desman.core import db
+from desman.config import ConfigError, ConfigManager
+from desman.core import calls, db
 from desman.core.store import Store
 from desman.i18n import t
+from desman.llm import router
 
 
 class Process(Protocol):
@@ -97,6 +99,7 @@ class Pool:
         launcher: Launcher = launch,
         clock: Callable[[], float] = time.monotonic,
         guard: Callable[[], None] | None = None,
+        ready: Callable[[], bool] | None = None,
     ) -> None:
         if not 1 <= size <= 8:
             raise ValueError("worker count must be 1–8")
@@ -114,6 +117,13 @@ class Pool:
         self.messages: deque[str] = deque()
         self.guard = guard or self._guard
         self.blocked = False
+        self.guard_due = 0.0
+        self.config_path = config_dir.resolve() / "config.json"
+        self.config_stamp: tuple[int, int] | None = None
+        self.ready = ready or self._ready
+        self.model_due = 0.0
+        self.model_ready = False
+        self.waiting_model = False
         self.end = threading.Event()
         self.thread: threading.Thread | None = None
 
@@ -124,10 +134,64 @@ class Pool:
         finally:
             conn.close()
 
+    def _ready(self) -> bool:
+        if "--fake-llm" in self.argv:
+            return True
+        try:
+            router.lineup(ConfigManager(self.config_path).load(), calls.Role.EXECUTOR)
+        except (router.NoProvider, ConfigError):
+            return False
+        return True
+
+    def _check_guard(self, now: float) -> bool:
+        try:
+            self.guard()
+        except click.ClickException as exc:
+            if not self.blocked:
+                self.messages.append(exc.format_message())
+            self.blocked = True
+            self.guard_due = now + 5
+            return False
+        if self.blocked:
+            self.blocked = False
+            for slot in self.slots:
+                slot.deaths, slot.stopped, slot.due = 0, False, 0
+            self.messages.append(t("Background workers started again."))
+        return True
+
     def tick(self) -> None:
-        if self.blocked or self.end.is_set():
+        if self.end.is_set():
             return
         now = self.clock()
+        if self.blocked and (now < self.guard_due or not self._check_guard(now)):
+            return
+        try:
+            stat = self.config_path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            stamp = None
+        changed = stamp != self.config_stamp
+        if changed:
+            self.config_stamp = stamp
+            for slot in self.slots:
+                if slot.stopped:
+                    slot.deaths, slot.stopped, slot.due = 0, False, 0
+        if changed or now >= self.model_due:
+            self.model_ready = self.ready()
+            self.model_due = now + 10
+        if not self.model_ready:
+            for slot in self.slots:
+                if slot.process is not None and slot.process.poll() is not None:
+                    slot.process, slot.due = None, 0
+            if not self.waiting_model:
+                self.messages.append(
+                    t(
+                        "Background workers wait for a model: add a key or a local model in Settings."
+                    )
+                )
+            self.waiting_model = True
+            return
+        self.waiting_model = False
         for index, slot in enumerate(self.slots, 1):
             if slot.stopped:
                 continue
@@ -136,12 +200,12 @@ class Pool:
                 if slot.process.poll() is None:
                     continue
                 slot.process = None
+                self.model_ready = self.ready()
+                if not self.model_ready:
+                    self.model_due = now
+                    return
                 slot.deaths = slot.deaths + 1 if now - slot.started < 60 else 1
-                try:
-                    self.guard()
-                except click.ClickException as exc:
-                    self.messages.append(exc.format_message())
-                    self.blocked = True
+                if not self._check_guard(now):
                     return
                 if slot.deaths >= 5:
                     slot.stopped = True
@@ -154,11 +218,7 @@ class Pool:
                     continue
                 slot.due = now + min(60, 2 ** (slot.deaths - 1))
             if now >= slot.due:
-                try:
-                    self.guard()
-                except click.ClickException as exc:
-                    self.messages.append(exc.format_message())
-                    self.blocked = True
+                if not self._check_guard(now):
                     return
                 try:
                     slot.process = self.launcher(self.argv, self.env, path)

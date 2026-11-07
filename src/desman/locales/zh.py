@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers started again.": "后台工作进程已重新启动。",
+    "Background workers wait for a model: add a key or a local model in Settings.": "后台工作进程正在等待模型：请在设置中添加密钥或本地模型。",
     "Background workers (1–8); applies on the next page start.": "后台工作进程（1–8）；下次启动页面时生效。",
     "Background workers (next page start)": "后台工作进程（下次启动页面时生效）",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

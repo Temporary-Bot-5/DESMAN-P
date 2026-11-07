@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers started again.": "Arka plan çalışanları yeniden başlatıldı.",
+    "Background workers wait for a model: add a key or a local model in Settings.": "Arka plan çalışanları bir model bekliyor: Ayarlar bölümünde bir anahtar veya yerel model ekleyin.",
     "Background workers (1–8); applies on the next page start.": "Arka plan çalışanları (1–8); sayfanın sonraki açılışında uygulanır.",
     "Background workers (next page start)": "Arka plan çalışanları (sonraki sayfa açılışı)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers started again.": "백그라운드 작업자가 다시 시작되었습니다.",
+    "Background workers wait for a model: add a key or a local model in Settings.": "백그라운드 작업자가 모델을 기다립니다. 설정에서 키 또는 로컬 모델을 추가하세요.",
     "Background workers (1–8); applies on the next page start.": "백그라운드 작업자(1–8); 다음 페이지 시작 시 적용됩니다.",
     "Background workers (next page start)": "백그라운드 작업자(다음 페이지 시작 시)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
