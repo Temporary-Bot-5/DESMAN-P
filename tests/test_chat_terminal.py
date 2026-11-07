@@ -130,7 +130,7 @@ def test_notices_stay_out_of_chat_and_pointer_is_one_per_batch(
     monkeypatch.setattr(chat, "_tell_blocked", lambda: ui.note("blocked notice"))
     chat._notices()
     output = capsys.readouterr().out
-    assert output.count("new in General_Terminal") == 1
+    assert output.count("new in General Terminal") == 1
     assert "waiting notice" not in output and "blocked notice" not in output
     assert [m.text for m in sessions.messages(normal)] == ["hello"]
     event = sessions.messages(sessions.terminal())[-1]
@@ -254,7 +254,7 @@ def test_terminal_slash_restrictions_and_full_event_return(
     assert "second line" in capsys.readouterr().out
     for command in ("/rename test", "/pin", "/compact", "/profile", "/delete", "/delete-all"):
         assert chat._slash(command)
-    assert capsys.readouterr().err.count("not available in General_Terminal") == 6
+    assert capsys.readouterr().err.count("not available in General Terminal") == 6
 
 
 @pytest.mark.parametrize("command", ["run", "resume", "worker"])

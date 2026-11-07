@@ -52,7 +52,21 @@ class WebFront(ui.Front):
         self.temporary = False
         self.terminal_seq = 0
         self._greeting = False
+        self._panel_quiet = False
+        self.pending_choice: dict[str, str | None] | None = None
         self.settings_outcome: dict[str, Any] | None = None
+
+    def pending_module(self, choice: dict[str, str | None] | None) -> None:
+        with self.condition:
+            self.pending_choice = choice
+
+    @contextmanager
+    def panel_output(self, quiet: bool) -> Iterator[None]:
+        previous, self._panel_quiet = self._panel_quiet, quiet
+        try:
+            yield
+        finally:
+            self._panel_quiet = previous
 
     def settings_result(self, id: str, ok: bool, message: str) -> None:
         with self.condition:
@@ -60,6 +74,8 @@ class WebFront(ui.Front):
 
     def emit(self, event_type: str, **data: Any) -> None:
         """Append retained display output and wake readers waiting for changes."""
+        if event_type == "out" and self._panel_quiet:
+            return
         if event_type == "out" and isinstance(data.get("html"), str):
             data["html"] = self._redact_html(data["html"])
         with self.condition:
@@ -79,6 +95,9 @@ class WebFront(ui.Front):
         with self.condition:
             self.events.clear()
             self.emit("reset")
+
+    def clear_screen(self) -> None:
+        self.reset()
 
     @contextmanager
     def greeting(self) -> Iterator[None]:
@@ -155,6 +174,8 @@ class WebFront(ui.Front):
                 if redacted != item.plain:
                     item = Text(redacted, style=item.style)
             safe.append(item)
+        if self._panel_quiet:
+            ui._record(*safe)
         self.emit("out", level="out", html=self.render(*safe))
 
     def header(self, title: str, subtitle: str = "") -> None:
@@ -208,6 +229,7 @@ class WebFront(ui.Front):
                 "id": self._prompt_id,
                 "kind": kind,
                 "question": question,
+                "terminal": self._panel_quiet,
                 **data,
             }
 
@@ -222,6 +244,8 @@ class WebFront(ui.Front):
 
             # Even code-built previews/defaults can contain a key copied into a setting.
             self.prompt = public(prompt)
+            if self._panel_quiet and question:
+                ui._record(Text(self.redact(question)))
             self.emit("prompt", **{k: v for k, v in self.prompt.items() if k != "type"})
             try:
                 # Timed waits let Ctrl+C reach the main thread on Windows too.
@@ -281,6 +305,9 @@ class WebFront(ui.Front):
                 echo = choices[value] if kind == "select" else [choices[i] for i in value]
             self._answer = {"cancel": True} if cancelled else {"value": value}
             self.prompt = None
+            if prompt.get("terminal") and echo is not None:
+                ui._record(Text(str(echo)))
+                echo = None
             self.emit("prompt_closed", id=prompt["id"], kind=kind, echo=echo)
             self.condition.notify_all()
             return True

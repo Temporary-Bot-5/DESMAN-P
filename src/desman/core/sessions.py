@@ -120,6 +120,24 @@ class Sessions:
         ).fetchone()
         return row is not None and bool(row["terminal"])
 
+    def clear_terminal(self) -> None:
+        """Move the screen boundary without deleting any messages."""
+        with db.transaction(self.conn):
+            self.conn.execute(
+                "UPDATE sessions SET cleared_seq = COALESCE("
+                "(SELECT MAX(seq) FROM messages WHERE session_id = sessions.id), 0) "
+                "WHERE terminal = 1"
+            )
+
+    def screen(self, session_id: str, last: int | None = None) -> list[Message]:
+        """Visible transcript, respecting a terminal's durable clear boundary."""
+        rows = self.conn.execute(
+            "SELECT m.* FROM messages m JOIN sessions s ON s.id = m.session_id "
+            "WHERE m.session_id = ? AND m.seq > s.cleared_seq ORDER BY m.seq DESC LIMIT ?",
+            (session_id, -1 if last is None else last),
+        ).fetchall()
+        return [Message.model_validate(dict(r)) for r in reversed(rows)]
+
     def add(
         self,
         session_id: str | None,
@@ -129,9 +147,12 @@ class Sessions:
         task_id: str | None = None,
         covers: int | None = None,
         temporary: bool = False,
+        initial_choice: choices.Choice | None = None,
     ) -> Message:
         """Append a message; `session_id` None starts a new session with it, `temporary` one if
         asked (this process holds it). A summary says which messages it `covers`."""
+        if initial_choice is not None and session_id is not None:
+            raise ValueError("an initial choice belongs only to a new session")
         if (covers is not None) != (kind is Kind.SUMMARY):
             raise ValueError("a summary, and only a summary, covers earlier messages")
         if kind is Kind.SUMMARY and session_id is not None and self.is_terminal(session_id):
@@ -150,6 +171,8 @@ class Sessions:
                     self.conn.execute(
                         "INSERT INTO sessions (id, created_at) VALUES (?, ?)", (session_id, now)
                     )
+            if initial_choice is not None:
+                choices.write_set(self.conn, "session", session_id, "interlocutor", initial_choice)
             columns: dict[str, str | int | None] = {
                 "session_id": session_id,
                 "at": now,

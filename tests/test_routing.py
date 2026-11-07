@@ -777,3 +777,44 @@ def test_run_names_the_models_for_code_and_analysis(monkeypatch: pytest.MonkeyPa
     assert "Using Mistral AI · mistral-small-latest" in result.output
     assert "Code by Mistral AI · codestral-latest" in result.output
     assert "Analysis by Mistral AI · mistral-medium-latest" in result.output
+
+
+def test_ollama_auto_and_chosen_without_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman import local_models
+
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ})
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("routing must not discover installed models")
+
+    monkeypatch.setattr(local_models, "installed", forbidden)
+    for role in (Role.PLANNER, Role.EXECUTOR, Role.REVIEWER, Role.INTERLOCUTOR):
+        assert all(c.provider.id != "ollama" for c in router.lineup(config, role))
+    config.tuning.models.interlocutor = "ollama/removed"
+    choices = router.lineup(config, Role.INTERLOCUTOR)
+    assert choices[0].label == "ollama/removed"
+    assert sum(c.provider.id == "ollama" for c in choices) == 1
+
+    # A removed tag returns Ollama's ordinary 404; the existing fallback asks the next model.
+    def missing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "model 'removed' not found"})
+
+    with httpx.Client(transport=httpx.MockTransport(missing)) as client:
+        local = router.connect(config, choices[0], client=client)
+        fallback = router.Fallback([(local, choices[0]), (FakeLLM("cloud ok"), choices[1])])
+        assert fallback.complete(REQUEST).text == "cloud ok"
+    config.api_keys = {}
+    assert labels(router.lineup(config, Role.INTERLOCUTOR)) == ["ollama/removed"]
+
+
+def test_default_ollama_discovery_never_opens_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    from desman import local_models
+    from desman.config import Config
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("default Ollama discovery opened a socket")
+
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    assert local_models.installed(Config(), refresh=True) == ([], False)

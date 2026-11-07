@@ -250,6 +250,44 @@ def fetch(
 def use(config: Config, model: hub.Gguf, server: Provider) -> str:
     """Makes the model the server's in `config`; returns the name it is asked by."""
     name = model.ref.ollama if server.id == "ollama" else model.ref.spec
+    return use_name(config, name, server)
+
+
+# Small, bounded cache shared by page polls and role validation. No credentials are cached.
+_tags_cache: dict[str, tuple[float, list[hub.InstalledModel], bool]] = {}
+
+
+def installed(config: Config, *, refresh: bool = False) -> tuple[list[hub.InstalledModel], bool]:
+    """Installed Ollama models and reachability; a short failure cache avoids poll storms."""
+    import time
+
+    host = providers.find("ollama").setting(config, "OLLAMA_HOST")
+    cached = _tags_cache.get(host)
+    if not refresh and cached is not None and time.monotonic() - cached[0] < 15:
+        return cached[1], cached[2]
+    try:
+        with httpx.Client() as client:
+            models = hub.ollama_tags(host, client)
+        ready = True
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError):
+        models, ready = [], False
+    if len(_tags_cache) >= 16:
+        _tags_cache.clear()
+    _tags_cache[host] = (time.monotonic(), models, ready)
+    return models, ready
+
+
+def select_installed(config: Config, name: str) -> str:
+    """Use an installed tag, validated against the server; shares the config body with use()."""
+    tags, _ = installed(config, refresh=True)
+    if name not in {m.name for m in tags}:
+        raise click.ClickException(t("Invalid module choice."))
+    return use_name(config, name, target("ollama"))
+
+
+def use_name(config: Config, name: str, server: Provider) -> str:
     assert server.model_env is not None
     config.settings[server.model_env] = name
+    if server.id == "ollama":
+        _tags_cache.pop(server.setting(config, "OLLAMA_HOST"), None)
     return name

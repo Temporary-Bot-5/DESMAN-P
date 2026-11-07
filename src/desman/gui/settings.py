@@ -194,3 +194,77 @@ def role_change(change: Roles, config: Config) -> tuning_cli.TuningChange:
     return tuning_cli.TuningChange(
         models={change.role: change.model or "auto"}, fingerprints=fingerprints
     )
+
+
+def local_search(config: Config, query: str) -> dict[str, Any]:
+    """Read-only local/HF choices. External failures are ordinary translated status notes."""
+    import httpx
+
+    from desman import local_models
+    from desman.llm import hub
+
+    tags, reachable = local_models.installed(config)
+    selected = providers.find("ollama").model(config)
+    rows: list[dict[str, Any]] = [
+        {
+            "value": m.name,
+            "label": m.name,
+            "group": t("Downloaded"),
+            "hint": hub.size_text(m.size),
+            "downloaded": True,
+            "selected": m.name == selected,
+        }
+        for m in tags
+    ]
+    notes = [] if reachable else [t("Ollama cannot be reached right now.")]
+    try:
+        with httpx.Client() as client:
+            found = hub.search(
+                providers.redact_keys(query, config)[0], client, local_models.token(config)
+            )
+        machine = hub.memory()
+        for model in found:
+            known = model.gguf()
+            params = model.metadata.total if model.metadata else None
+            if params:
+                known = hub.Gguf(
+                    hub.Ref(model.id, hub.DEFAULT_QUANT),
+                    (),
+                    int(params * 0.6),
+                    False,
+                    (hub.DEFAULT_QUANT,),
+                )
+            size = (
+                f"{params / 1e9:.1f}B · "
+                + t("Approximately {size} (Q4_K_M)", size=hub.size_text(known.size))
+                if params and known
+                else hub.size_text(known.size)
+                if known
+                else t("Size unknown")
+            )
+            fits = hub.fits(known, machine) if known else None
+            hint = size + (
+                " · " + (t("Fits in memory") if fits else t("Does not fit in memory"))
+                if fits is not None
+                else ""
+            )
+            if model.downloads is not None:
+                hint += " · " + t("Downloads: {count}", count=model.downloads)
+            rows.append(
+                {
+                    "value": model.id,
+                    "label": model.id,
+                    "group": "Hugging Face",
+                    "hint": hint,
+                    "downloaded": False,
+                }
+            )
+    except (httpx.HTTPError, ValueError):
+        notes.append(t("Hugging Face cannot be reached right now."))
+    return {
+        "options": rows,
+        "notes": notes,
+        "reachable": reachable,
+        "host": providers.find("ollama").setting(config, "OLLAMA_HOST"),
+        "selected": selected,
+    }

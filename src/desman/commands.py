@@ -574,7 +574,11 @@ def _models_add(ctx: Context, args: ModelAddArgs) -> Proposal:
         return Outcome({"server": server.id, "model": name})
 
     # Too large for the memory: the "yes" has to be to that (the CLI's --force).
-    question = t("Download it anyway?") if hub.fits(found, machine) is False else None
+    question = (
+        t("Download it anyway?")
+        if hub.fits(found, machine) is False
+        else t("Download {name} ({size})?", name=found.ref.spec, size=hub.size_text(found.size))
+    )
     return Proposal(lines + planned, apply, warnings + cautions, question)
 
 

@@ -675,6 +675,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         CHECK (model IS NOT NULL OR key IS NOT NULL)
     ) STRICT;
     """,
+    # 37: terminal screen boundary; messages remain append-only.
+    """
+    ALTER TABLE sessions ADD COLUMN cleared_seq INTEGER NOT NULL DEFAULT 0
+        CHECK (cleared_seq >= 0);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

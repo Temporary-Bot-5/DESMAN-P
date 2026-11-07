@@ -626,41 +626,17 @@ def test_settings_remote_server_warning_is_inline(settings_app: Any) -> None:
 
 
 def test_settings_role_key_options(tmp_path: Path) -> None:
-    """Auto groups every provider; changing model retains the selected key."""
+    """Shared pickers filter provider choices and preserve open editors during polling."""
     import shutil
     import subprocess
 
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is needed for the browser event regression")
-    source = Path("src/desman/gui/static/app.js").read_text(encoding="utf-8")
-    start = source.index("      const fill = () => {", source.index('settingsSection === "roles"'))
-    helper = source[start : source.index("      fill();", start)]
-    script = tmp_path / "role-keys.cjs"
-    script.write_text(
-        'const assert = require("node:assert/strict");\n'
-        + """
-const element = () => ({children: [], value: '', append(child) {this.children.push(child);}});
-const key = element(); key.replaceChildren = () => key.children = [];
-Object.defineProperty(key, 'options', {get() {return key.children.flatMap(c => c.children.length ? c.children : [c]);}});
-const document = {createElement: element};
-const text = (_, label, parent) => {const o = element(); o.label = label; parent.append(o); return o;};
-const words = {auto: 'Auto'}, model = {value: 'auto'};
-const role = {key_fingerprint: 'b', key_label: 'saved', candidate_keys: [
-  {provider: 'groq', fingerprint: 'a', label: 'A'},
-  {provider: 'openrouter', fingerprint: 'b', label: 'B'}]};
-"""
-        + helper
-        + """
-fill();
-assert.deepEqual(key.children.slice(1).map(g => g.label), ['groq', 'openrouter']);
-assert.equal(key.value, 'b');
-model.value = 'groq/model'; fill();
-assert.equal(key.value, 'b');
-assert.deepEqual(key.options.map(o => o.value), ['auto', 'a', 'b']);
-""",
-        encoding="utf-8",
-    )
     subprocess.run(
-        [node, str(script)], check=True, capture_output=True, text=True, encoding="utf-8"
+        [node, "tests/js/gui_picker.cjs", "src/desman/gui/static/app.js"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
