@@ -9,7 +9,9 @@ model in the config. Problems are `click.ClickException`, worded for the person.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
+from contextlib import suppress
 
 import click
 import httpx
@@ -257,12 +259,23 @@ def use(config: Config, model: hub.Gguf, server: Provider) -> str:
 _tags_cache: dict[str, tuple[float, list[hub.InstalledModel], bool]] = {}
 
 
-def installed(config: Config, *, refresh: bool = False) -> tuple[list[hub.InstalledModel], bool]:
+def cached_installed(config: Config) -> tuple[list[hub.InstalledModel], bool]:
+    """Read picker metadata without discovery or network access."""
+    host = providers.find("ollama").setting(config, "OLLAMA_HOST")
+    cached = _tags_cache.get(host)
+    return (cached[1], cached[2]) if cached else ([], False)
+
+
+def installed(
+    config: Config, *, refresh: bool = False, cached_only: bool = False
+) -> tuple[list[hub.InstalledModel], bool]:
     """Installed Ollama models and reachability; a short failure cache avoids poll storms."""
     import time
 
     host = providers.find("ollama").setting(config, "OLLAMA_HOST")
     cached = _tags_cache.get(host)
+    if cached_only:
+        return cached_installed(config)
     if not refresh and cached is not None and time.monotonic() - cached[0] < 15:
         return cached[1], cached[2]
     try:
@@ -291,3 +304,127 @@ def use_name(config: Config, name: str, server: Provider) -> str:
     if server.id == "ollama":
         _tags_cache.pop(server.setting(config, "OLLAMA_HOST"), None)
     return name
+
+
+def ollama_name(name: str) -> str:
+    """Ollama interprets an omitted tag as :latest, including names with namespaces."""
+    return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+
+
+def removal_model(config: Config, name: str, client: httpx.Client) -> hub.InstalledModel:
+    """Resolve an exact installed name at the configured Ollama host."""
+    host = providers.find("ollama").setting(config, "OLLAMA_HOST")
+    try:
+        models = hub.ollama_tags(host, client)
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
+        raise click.ClickException(t("Ollama cannot be reached right now.")) from e
+    found = next((model for model in models if ollama_name(model.name) == ollama_name(name)), None)
+    if found is None:
+        raise click.ClickException(t("Ollama model not installed: {model}", model=name))
+    return found
+
+
+def missing_choices(config: Config, name: str, conn: sqlite3.Connection) -> list[str]:
+    """Saved references are intentionally retained when their model is removed."""
+    label = "ollama/" + ollama_name(name)
+    references = [
+        "role/" + role
+        for role, model in config.tuning.models.model_dump().items()
+        if model and model.startswith("ollama/") and "ollama/" + ollama_name(model[7:]) == label
+    ]
+    if ollama_name(providers.find("ollama").model(config)) == ollama_name(name):
+        references.insert(0, "OLLAMA_MODEL")
+    references.extend(
+        f"{row['scope']}/{row['scope_id']}/{row['role']}"
+        for row in conn.execute(
+            "SELECT scope, scope_id, role, model FROM module_choices WHERE model LIKE 'ollama/%' ORDER BY scope, scope_id, role",
+        )
+        if "ollama/" + ollama_name(row["model"][7:]) == label
+    )
+    return references
+
+
+def remove(config: Config, name: str, client: httpx.Client, conn: sqlite3.Connection) -> list[str]:
+    """Delete only on the configured host, without following redirects or changing choices."""
+    host = providers.find("ollama").setting(config, "OLLAMA_HOST")
+    if "://" not in host:
+        host = "http://" + host
+    try:
+        response = client.request(
+            "DELETE",
+            host.rstrip("/") + "/api/delete",
+            json={"model": name},
+            timeout=30.0,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        raise click.ClickException(t("Could not remove Ollama model {model}.", model=name)) from e
+    _tags_cache.pop(providers.find("ollama").setting(config, "OLLAMA_HOST"), None)
+    references = missing_choices(config, name, conn)
+    ui.ok(t("Removed Ollama model {model}.", model=name))
+    if references:
+        ui.note(
+            t(
+                "Saved choices now pointing at a missing model: {choices}",
+                choices=", ".join(references),
+            )
+        )
+    return references
+
+
+def ollama_context(config: Config, name: str) -> tuple[int, bool]:
+    """Context and memory risk, using cached metadata only (routing never discovers models)."""
+    provider = providers.find("ollama")
+    if "OLLAMA_CONTEXT" in config.settings:
+        return provider.context(config) or 16384, False
+    tags, _ = cached_installed(config)
+    model = next((m for m in tags if ollama_name(m.name) == ollama_name(name)), None)
+    if model is None:
+        return 16384, False
+    details = model.details
+    maximum = details.context_length if details else None
+    cap = min(16384, maximum or 16384)
+    floor = min(8192, cap)
+    # fp16 K and V per layer; GQA reduces the cached embedding width.
+    layers = details.block_count if details and details.block_count else 32
+    embedding = details.embedding_length if details and details.embedding_length else 4096
+    ratio = (
+        details.head_count_kv / details.head_count
+        if details and details.head_count_kv and details.head_count
+        else 1.0
+    )
+    per_token = max(1, int(4 * layers * embedding * ratio))
+    available = hub.memory().total
+    if available is None or not model.size:
+        return cap, False
+    # Leave room for Ollama's compute buffers as well as the weights.
+    room = max(0, available - model.size - 512 * 1024 * 1024)
+    fit = int(room // per_token)
+    return min(cap, max(floor, (fit // 1024) * 1024)), fit < floor
+
+
+def prepare_ollama_context(config: Config, name: str, client: httpx.Client) -> tuple[int, bool]:
+    """Resolve metadata only when actually calling Ollama, never while building a lineup."""
+    import time
+
+    if "OLLAMA_CONTEXT" in config.settings:
+        return ollama_context(config, name)
+    host = providers.find("ollama").setting(config, "OLLAMA_HOST")
+    tags, ready = cached_installed(config)
+    cached = _tags_cache.get(host)
+    if not ready and (cached is None or time.monotonic() - cached[0] >= 15):
+        if len(_tags_cache) >= 16:
+            _tags_cache.clear()
+        _tags_cache[host] = (time.monotonic(), [], False)
+        with suppress(httpx.HTTPError, httpx.InvalidURL, ValueError):
+            tags = hub.ollama_tags(host, client)
+            _tags_cache[host] = (time.monotonic(), tags, True)
+    for index, tag in enumerate(tags):
+        if ollama_name(tag.name) == ollama_name(name) and (
+            tag.details is None or tag.details.block_count is None
+        ):
+            with suppress(httpx.HTTPError, httpx.InvalidURL, ValueError):
+                tags[index] = hub.ollama_details(host, tag, client)
+            break
+    return ollama_context(config, name)

@@ -194,8 +194,9 @@ def gui(port: int, no_browser: bool, resume: bool, temporary: bool, shortcut: bo
 @click.pass_context
 def help(ctx: click.Context) -> None:
     """Show help for commands."""
-    if ctx.parent:
-        click.echo(ctx.parent.get_help())
+    from desman.commands import print_help
+
+    print_help(shell=True)
 
 
 cli.add_command(config)
@@ -439,6 +440,7 @@ def resume(
                 t("A job from desman-global runs only in `desman worker`, with the models lent.")
             )
         models = _attach(source, store, cache=not no_cache, as_json=as_json)
+        store.resume_task(task_id)  # only once the models are there: a failed resume stays paused
         _drive(store, models, access, task_id, wait, lease_seconds, as_json)
     finally:
         store.conn.close()
@@ -516,8 +518,8 @@ def worker(
             _keep_in_touch(network, as_json)
 
         def idle() -> bool:
-            if not as_json:
-                _tell_waiting(watch)
+            if progress is not None:
+                progress(None)
             event = _keep_in_touch(network, as_json, idle=True)
             return event is not None and event.change is node.Change.WORK_TAKEN
 
@@ -558,9 +560,24 @@ def _worker_progress(coordinator: Coordinator, watch: InboxWatch) -> Callable[[o
     """A line whenever the worker's counts change (not on housekeeping alone), and whatever
     came to wait for the operator since the last look (any worker's, any task's)."""
     last = (0, 0)
+    pause_seq = coordinator.store.conn.execute(
+        "SELECT COALESCE(MAX(seq), 0) FROM audit_log"
+    ).fetchone()[0]
 
     def show(_: object) -> None:
-        nonlocal last
+        nonlocal last, pause_seq
+        pauses = coordinator.store.conn.execute(
+            "SELECT seq, task_id FROM audit_log WHERE action = 'task_paused' AND seq > ? ORDER BY seq",
+            (pause_seq,),
+        ).fetchall()
+        for paused in pauses:
+            pause_seq = paused["seq"]
+            ui.note(
+                t(
+                    "Task {ref} paused. `desman resume {ref}` continues it.",
+                    ref=coordinator.store.short_id(paused["task_id"]),
+                )
+            )
         now = (coordinator.executed, coordinator.reviewed)
         if now != last:
             last = now
@@ -659,6 +676,7 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
 
 
 @cli.command("list")
+@click.option("--all", "all_tasks", is_flag=True, help="Include hidden tasks.")
 @click.option("--subtasks", is_flag=True, help="Include each task’s subtasks.")
 @click.option(
     "--status",
@@ -671,13 +689,20 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
 @db_option
 @json_option
 def list_tasks(
-    status_filter: str | None, limit: int, db_path: Path | None, as_json: bool, subtasks: bool
+    status_filter: str | None,
+    limit: int,
+    db_path: Path | None,
+    as_json: bool,
+    subtasks: bool,
+    all_tasks: bool,
 ) -> None:
     """List tasks, newest first."""
     store = open_existing(db_path)
     try:
         wanted = TaskStatus(status_filter) if status_filter else None
-        summaries = actions.list_tasks(store, status=wanted, limit=limit, subtasks=subtasks)
+        summaries = actions.list_tasks(
+            store, status=wanted, limit=limit, subtasks=subtasks, all=all_tasks
+        )
     finally:
         store.conn.close()
     if as_json:
@@ -956,6 +981,8 @@ def _drive(
         print_report(report)
         if then is not None:
             then(False)
+        if report.paused_at:
+            ui.note(t("Task {ref} paused. `desman resume {ref}` continues it.", ref=short))
         if result.paused_until:
             click.echo(
                 t(
@@ -964,7 +991,11 @@ def _drive(
                     ref=short,
                 )
             )
-    raise SystemExit(_exit_code(report.status, paused=result.paused_until is not None))
+    raise SystemExit(
+        _exit_code(
+            report.status, paused=report.paused_at is not None or result.paused_until is not None
+        )
+    )
 
 
 def _run_summary(result: RunResult) -> dict[str, Any]:
@@ -989,7 +1020,7 @@ def _has_paused(report: TaskReport) -> bool:
     """Only paused work is left: nothing can move before a pause ends."""
     moving = {"ready", "running", "review"}
     statuses = {s.status.value for s in report.subtasks}
-    return "paused" in statuses and not statuses & moving
+    return report.paused_at is not None or "paused" in statuses and not statuses & moving
 
 
 # ── Operator decisions (a minimal subset of ROADMAP 5.1) ─────────────────────
@@ -1157,3 +1188,60 @@ def _decide(
         click.echo(json.dumps(decision.as_json(), indent=2))
     else:
         actions.print_decision(decision)
+
+
+@cli.group("task")
+def task_group() -> None:
+    """Pin, hide or pause tasks."""
+
+
+@task_group.command("pin")
+@click.argument("task")
+@db_option
+def task_pin(task: str, db_path: Path | None) -> None:
+    """Pin TASK and its modules."""
+    _task_control("pin", task, db_path)
+
+
+@task_group.command("unpin")
+@click.argument("task")
+@db_option
+def task_unpin(task: str, db_path: Path | None) -> None:
+    """Unpin TASK and its modules."""
+    _task_control("unpin", task, db_path)
+
+
+@task_group.command("pause")
+@click.argument("task", required=False)
+@click.option("--all", "all_tasks", is_flag=True, help="Pause unfinished unpinned tasks.")
+@db_option
+def task_pause(task: str | None, all_tasks: bool, db_path: Path | None) -> None:
+    """Pause TASK, or all unfinished unpinned tasks."""
+    if (task is None) != all_tasks:
+        raise click.UsageError(t("Choose a task or the bulk option."))
+    _task_control("pause", task, db_path)
+
+
+@task_group.command("hide")
+@click.argument("task", required=False)
+@click.option("--finished", is_flag=True, help="Hide finished unpinned tasks.")
+@db_option
+def task_hide(task: str | None, finished: bool, db_path: Path | None) -> None:
+    """Hide finished TASK, or all finished unpinned tasks."""
+    if (task is None) != finished:
+        raise click.UsageError(t("Choose a task or the bulk option."))
+    _task_control("hide", task, db_path)
+
+
+def _task_control(operation: str, task: str | None, db_path: Path | None) -> None:
+    store = open_existing(db_path)
+    try:
+        result = actions.task_change(store, operation, task)
+        ui.note(
+            t(
+                "Task settings updated: {count}.",
+                count=result.get("count", int(result.get("changed", False))),
+            )
+        )
+    finally:
+        store.conn.close()

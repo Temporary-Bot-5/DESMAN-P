@@ -104,3 +104,27 @@ def print_model(model: hub.Gguf, machine: hub.Memory, *, quiet_warnings: bool = 
     if not quiet_warnings:
         for warning in warnings:
             ui.warn(warning)
+
+
+@models.command("remove")
+@click.argument("model")
+def remove(model: str) -> None:
+    """Remove one installed Ollama MODEL, keeping saved choices."""
+    from contextlib import closing
+
+    from desman.core import db, operator
+
+    config = load_config().load()
+    with closing(db.open_db()) as conn, httpx.Client() as client:
+        found = local_models.removal_model(config, model, client)
+        references = local_models.remove(config, found.name, client, conn)
+        operator.record(
+            conn,
+            "operator_command",
+            {
+                "command": "models remove",
+                "args": {"model": model},
+                "missing_choices": references,
+                "typed": True,
+            },
+        )

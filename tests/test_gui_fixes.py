@@ -160,7 +160,7 @@ def test_clear_upgrade_and_cross_front_screen(
     visible = json.dumps(list(front.events))
     assert "old screen" not in visible
     assert len(sessions.messages(terminal)) >= 2  # append-only originals and clear line
-    assert "clear" in _commands(terminal=True) and "clear" not in _commands()
+    assert "/clear" in _commands(terminal=True) and "/clear" in _commands()
     assert snapshot(path, "sessions", WebFront())["terminal"]["unread"] == 0
     sessions.add(terminal, Role.DESMAN, "new screen", Kind.EVENT)
     assert snapshot(path, "sessions", WebFront())["terminal"]["unread"] == 1

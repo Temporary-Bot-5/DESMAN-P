@@ -347,3 +347,19 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 @media (max-width: 650px) {
   #settings-form .role-row { grid-template-columns: 1fr; }
 }
+
+#tasks-panel { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+#tasks, #modules { flex: 1; min-height: 0; overflow-y: auto; }
+#panel-switch, #panel-footer { flex-shrink: 0; }
+#panel-footer { padding-top: .6rem; }
+#panel-footer button { width: 100%; }
+#settings-form .role-row { grid-template-columns: 90px repeat(2, minmax(0, 1fr)); }
+.model-note { grid-column: 2 / -1; }
+@media (max-width: 700px) { #settings-form .role-row { grid-template-columns: 1fr; } }
+
+.task-title-row { display: flex; align-items: center; gap: .4rem; }
+.task-title-row .task-toggle { flex: 1; min-width: 0; }
+.task-title-row .icon-action { padding: .2rem .4rem; margin: 0; background: transparent; border: 0; font-size: 1rem; }
+.icon-action[aria-pressed="true"] { color: #00eeff; background: #23343d; }
+
+.context-output { max-height: 65vh; overflow: auto; font-family: ui-monospace, monospace; white-space: pre-wrap; }

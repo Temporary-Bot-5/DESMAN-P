@@ -7,6 +7,7 @@ concurrent commit. Lease tokens are never included: holding one lets you act as 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Literal
 
@@ -70,6 +71,9 @@ class TaskReport(BaseModel):
     total: int
     subtasks: list[SubtaskReport] = Field(default_factory=list)
     """Filled by `task_report`; empty in `task_summaries`."""
+    pinned: bool = False
+    hidden_at: str | None = None
+    paused_at: str | None = None
     suggestions: list[ModelSuggestion] = Field(default_factory=list)
     """Models suggested while it ran, one per model and server (the latest); filled by
     `task_report`."""
@@ -126,7 +130,7 @@ def suggestions(store: Store, task_id: str, seq_of: dict[str, int]) -> list[Mode
 
 
 def task_summaries(
-    store: Store, *, status: TaskStatus | None = None, limit: int | None = 20
+    store: Store, *, status: TaskStatus | None = None, limit: int | None = 20, all: bool = False
 ) -> list[TaskReport]:
     """Tasks newest first, without their subtasks; `limit` None: every one that matches.
 
@@ -139,7 +143,7 @@ def task_summaries(
         offset = 0
         while limit is None or len(summaries) < limit:
             rows = store.conn.execute(
-                "SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM tasks {'' if all else 'WHERE hidden_at IS NULL'} ORDER BY pinned DESC, created_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 (page, offset),
             ).fetchall()
             if not rows:
@@ -166,6 +170,9 @@ def _report(
 ) -> TaskReport:
     return TaskReport(
         id=row["id"],
+        pinned=bool(row["pinned"]),
+        hidden_at=row["hidden_at"],
+        paused_at=row["paused_at"],
         goal=row["goal"],
         priority=row["priority"],
         created_at=row["created_at"],
@@ -269,3 +276,10 @@ def _reason(store: Store, sub: Subtask, by_id: dict[str, Subtask]) -> str | None
             return f"blocked by [{root.seq}] {root.description} ({root.status})"
     reason = details.get("reason")
     return reason if isinstance(reason, str) else None
+
+
+def short_description(text: str, limit: int = 100) -> str:
+    """First sentence for compact rows; the full description stays in reports."""
+    first = re.split(r"(?<=[.!?])\s|[\r\n]", text.strip(), maxsplit=1)[0]
+    first = " ".join(first.split())
+    return first if len(first) <= limit else first[: limit - 1].rstrip() + "…"

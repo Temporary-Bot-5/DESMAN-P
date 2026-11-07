@@ -82,7 +82,7 @@ def test_each_catalog_field_is_reachable_from_click() -> None:
         (
             "list --subtasks --status done",
             "list",
-            {"subtasks": True, "status": "done", "limit": 20},
+            {"all": False, "subtasks": True, "status": "done", "limit": 20},
         ),
         ("language ru", "language", {"code": "ru"}),
         ("personalize off", "personalize", {"on": False}),
@@ -167,8 +167,8 @@ def test_model_command_without_configuration_is_plain(
 
 def test_completion_crosses_spaces() -> None:
     names = commands.completions()
-    assert ui.slash_matches("!keys a", names) == [("!keys add", names["!keys add"])]
-    assert ui.slash_matches("/keys a", names) == []
+    assert ui.slash_matches("!keys a", names) == []
+    assert ui.slash_matches("/keys a", names) == [("/keys add", names["/keys add"])]
     assert all(hint for hint in names.values())
 
 
@@ -504,10 +504,10 @@ def test_completion_and_help_follow_language_switch(
 ) -> None:
     from desman import i18n
 
-    english = commands.completions()["!list"]
+    english = commands.completions()["/list"]
     Chat(sessions)._typed("language ru")
-    assert commands.completions()["!list"] == i18n.t("List tasks, newest first.")
-    assert commands.completions()["!list"] != english
+    assert commands.completions()["/list"] == i18n.t("List tasks, newest first.")
+    assert commands.completions()["/list"] != english
     capsys.readouterr()
     commands.parse_line("list --help", None)
     assert i18n.t("List tasks, newest first.") in capsys.readouterr().out

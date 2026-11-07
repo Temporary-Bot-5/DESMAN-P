@@ -204,11 +204,22 @@ class TaskArgs(Args):
     task: Ref = Field(description="task id or a unique prefix of it")
 
 
+class TaskPauseArgs(Args):
+    task: Ref | None = None
+    all: bool = False
+
+
+class TaskHideArgs(Args):
+    task: Ref | None = None
+    finished: bool = False
+
+
 class InboxArgs(Args):
     list: bool = False
 
 
 class ListArgs(Args):
+    all: bool = False
     subtasks: bool = False
     status: Literal["active", "done", "needs_human", "failed", "cancelled"] | None = None
     limit: Annotated[int, Field(ge=1, le=100)] = 20
@@ -259,6 +270,10 @@ class ModelArgs(Args):
     model: Annotated[str, StringConstraints(min_length=3, max_length=200)] = Field(
         description="a Hugging Face model: author/model or author/model:quantization"
     )
+
+
+class ModelRemoveArgs(Args):
+    model: Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=r"^\S+$")]
 
 
 class ModelAddArgs(ModelArgs):
@@ -460,23 +475,35 @@ def _gui(ctx: Context, args: NoArgs) -> Outcome:
     return Outcome({"message": message})
 
 
-def _help(ctx: Context, args: NoArgs) -> Outcome:
+def print_help(*, shell: bool = False, terminal: bool = False, temporary: bool = False) -> None:
+    """One listing for shell, chat and General Terminal."""
+    from desman.chat import _commands
+    from desman.cli import cli
+
+    i18n.translate_commands(cli)  # a language switched meanwhile shows in the listing
+
     table = ui.table("", "")
     table.show_header = False
     for entry in CATALOG:
-        table.add_row(Text(entry.name, style="key"), Text(_short_help(entry), style="muted"))
-    if ctx.in_terminal:
         table.add_row(
-            Text("clear", style="key"),
-            Text(t("clear the General Terminal screen (messages are kept)"), style="muted"),
-        )
-        table.add_row(
-            Text("/back", style="key"),
-            Text(t("return from General Terminal to the previous chat"), style="muted"),
+            Text(("desman " if shell else "/") + entry.name, style="key"),
+            Text(_short_help(entry), style="muted"),
         )
     ui.out(table)
-    if not ctx.in_terminal:
-        ui.note(t("Ask for any of them in your own words."))
+    if shell:
+        ui.note(t("In the chat"))
+    else:
+        ui.note(t("Chat commands"))
+    table = ui.table("", "")
+    table.show_header = False
+    for name, description in _commands(temporary, terminal).items():
+        if name != "/help":
+            table.add_row(Text(name, style="key"), Text(description, style="muted"))
+    ui.out(table)
+
+
+def _help(ctx: Context, args: NoArgs) -> Outcome:
+    print_help(terminal=ctx.in_terminal)
     return Outcome({"commands": [e.name for e in CATALOG]})
 
 
@@ -497,7 +524,7 @@ def _status(ctx: Context, args: TaskArgs) -> Outcome:
 def _list(ctx: Context, args: ListArgs) -> Outcome:
     wanted = TaskStatus(args.status) if args.status else None
     summaries = actions.list_tasks(
-        ctx.store, status=wanted, limit=args.limit, subtasks=args.subtasks
+        ctx.store, status=wanted, limit=args.limit, subtasks=args.subtasks, all=args.all
     )
     actions.print_summaries(summaries, subtasks=args.subtasks)
     if not summaries:
@@ -507,6 +534,58 @@ def _list(ctx: Context, args: ListArgs) -> Outcome:
             s.model_dump(mode="json", exclude=set() if args.subtasks else {"subtasks"})
             for s in summaries
         ]
+    )
+
+
+def _task_control(
+    ctx: Context, args: TaskArgs | TaskPauseArgs | TaskHideArgs, operation: str
+) -> Outcome | Proposal:
+    bulk = (
+        isinstance(args, TaskPauseArgs)
+        and args.all
+        or isinstance(args, TaskHideArgs)
+        and args.finished
+    )
+    if (args.task is None) != bulk:
+        raise click.ClickException(t("Choose a task or the bulk option."))
+
+    affected = ctx.store.affected_tasks(operation) if bulk else []
+
+    def apply() -> Outcome:
+        result = actions.task_change(
+            ctx.store, operation, args.task, targets=affected if bulk else None
+        )
+        ui.note(
+            t(
+                "Task settings updated: {count}.",
+                count=result.get("count", int(result.get("changed", False))),
+            )
+        )
+        return Outcome(result)
+
+    if not bulk:
+        task_id = actions.find_task(ctx.store, args.task or "")
+        entry = find("task " + operation)
+        assert entry is not None
+        return Proposal(
+            [
+                _short_help(entry),
+                f"{ctx.store.short_id(task_id)} — {actions.one_line(ctx.store.find_task(task_id)['goal'], 120)}",
+            ],
+            apply,
+        )
+    if not affected:
+        ui.note(t("No tasks."))
+        return Outcome({"count": 0})
+    return Proposal(
+        [
+            t("Tasks affected: {count}", count=len(affected)),
+            *[
+                f"{ctx.store.short_id(ref)}: {actions.one_line(ctx.store.find_task(ref)['goal'], 120)}"
+                for ref in affected
+            ],
+        ],
+        apply,
     )
 
 
@@ -565,6 +644,26 @@ def _models_show(ctx: Context, args: ModelArgs) -> Outcome:
     machine = hub.memory()
     models_cli.print_model(found, machine)
     return Outcome(models_cli.model_json(found, machine))
+
+
+def _models_remove(ctx: Context, args: ModelRemoveArgs) -> Proposal:
+    config = ctx.config()
+    host = providers.find("ollama").setting(config, "OLLAMA_HOST")
+    with httpx.Client() as client:
+        found = local_models.removal_model(config, args.model, client)
+
+    def apply() -> Outcome:
+        current = ctx.config()
+        if providers.find("ollama").setting(current, "OLLAMA_HOST") != host:
+            raise click.ClickException(t("Please check your answer and try again."))
+        with httpx.Client() as client:
+            references = local_models.remove(current, found.name, client, ctx.store.conn)
+        return Outcome({"model": found.name, "missing_choices": references})
+
+    question = t(
+        "Remove Ollama model {model} ({size})?", model=found.name, size=hub.size_text(found.size)
+    )
+    return Proposal([question], apply, question=question)
 
 
 def _models_add(ctx: Context, args: ModelAddArgs) -> Proposal:
@@ -1266,6 +1365,7 @@ def _resume(ctx: Context, args: TaskArgs) -> Proposal:
     report = task_report(ctx.store, task_id)
 
     def apply() -> Outcome:
+        ctx.store.resume_task(task_id)
         ctx.resume_task(task_id)
         return Outcome(None)
 
@@ -1290,7 +1390,11 @@ def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     equals), each as `resume` runs it (live progress, retold), until none has work left. It does
     not wait for new tasks: that is the CLI's `desman worker`, in a terminal of its own."""
     # Every unfinished task is a candidate: the most urgent may be the oldest.
-    active = task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=None)
+    active = [
+        r
+        for r in task_summaries(ctx.store, status=TaskStatus.ACTIVE, limit=None)
+        if r.paused_at is None
+    ]
     if not active:
         return Outcome({"unfinished_tasks": 0})
     in_order = sorted(reversed(active), key=lambda r: -r.priority)  # stable: oldest first
@@ -1299,7 +1403,8 @@ def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 
     def apply() -> Outcome:
         for task_id in ids:
-            ctx.resume_task(task_id)
+            if ctx.store.find_task(task_id)["paused_at"] is None:
+                ctx.resume_task(task_id)
         return Outcome(None)
 
     lines = [t("Work on the unfinished tasks in turn, until none has work left ({n}):", n=len(ids))]
@@ -1515,9 +1620,43 @@ CATALOG: tuple[Entry, ...] = (
         Kind.READ,
         _gui,
     ),
+    Entry(
+        "task pin",
+        "Pin a task and its modules.",
+        TaskArgs,
+        Kind.CHANGE,
+        lambda c, a: _task_control(c, a, "pin"),
+    ),
+    Entry(
+        "task unpin",
+        "Unpin a task and its modules.",
+        TaskArgs,
+        Kind.CHANGE,
+        lambda c, a: _task_control(c, a, "unpin"),
+    ),
+    Entry(
+        "task pause",
+        "Pause a task or unfinished unpinned tasks.",
+        TaskPauseArgs,
+        Kind.CHANGE,
+        lambda c, a: _task_control(c, a, "pause"),
+    ),
+    Entry(
+        "task hide",
+        "Hide finished tasks without deleting their history.",
+        TaskHideArgs,
+        Kind.CHANGE,
+        lambda c, a: _task_control(c, a, "hide"),
+    ),
     Entry("help", "List DESMAN's commands for the person.", NoArgs, Kind.READ, _help),
     Entry("status", "Show a task and its subtasks.", TaskArgs, Kind.READ, _status),
-    Entry("list", "List tasks, newest first.", ListArgs, Kind.READ, _list),
+    Entry(
+        "list",
+        "List tasks, newest first.",
+        ListArgs,
+        Kind.READ,
+        _list,
+    ),
     Entry("audit", "Show the full history of a task.", TaskArgs, Kind.READ, _audit),
     Entry(
         "inbox",
@@ -1896,6 +2035,13 @@ CATALOG: tuple[Entry, ...] = (
         _models_show,
     ),
     Entry(
+        "models remove",
+        "Remove one installed Ollama model from the configured host; retain saved choices. The person confirms.",
+        ModelRemoveArgs,
+        Kind.CHANGE,
+        _models_remove,
+    ),
+    Entry(
         "models add",
         "Have a local server (ollama or llamacpp) download a model from Hugging Face and make "
         "it that server's model; its size and the free memory are shown first. The person "
@@ -1983,7 +2129,8 @@ def _folded(name: str) -> str:
 
 # Click spelling differs from the model contract in these few entries.
 _CLI_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
-    "list": (("status_filter", "status"),),
+    "list": (("status_filter", "status"), ("all_tasks", "all")),
+    "task pause": (("all_tasks", "all"),),
     "inbox": (("list_only", "list"),),
     "language": (("name", "code"),),
     "personalize": (("state", "on"),),
@@ -2158,7 +2305,7 @@ def completions() -> dict[str, str]:
     from desman.cli import cli
 
     i18n.translate_commands(cli)
-    return {"!" + entry.name: _short_help(entry) for entry in CATALOG}
+    return {"/" + entry.name: _short_help(entry) for entry in CATALOG}
 
 
 def _windows_words(line: str) -> list[str]:
@@ -2216,7 +2363,7 @@ def parse_line(
         command = command.commands[path[-1]]
     entry = find(" ".join(path))
     if entry is None:
-        raise BadArgs(t("DESMAN has no command {name}.", name=" ".join(path) or "!"))
+        raise BadArgs(t("DESMAN has no command {name}.", name=" ".join(path or words[:1]) or "/"))
     if "--help" in words:
         with command.make_context(entry.name, [], resilient_parsing=True) as ctx:
             ui.out(Text(command.get_help(ctx)))

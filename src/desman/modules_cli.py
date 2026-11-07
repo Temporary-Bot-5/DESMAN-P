@@ -118,10 +118,10 @@ def modules_data(
         ids = [
             r["id"]
             for r in conn.execute(
-                "SELECT t.id FROM tasks t WHERE EXISTS (SELECT 1 FROM subtasks s WHERE "
+                "SELECT t.id FROM tasks t WHERE t.hidden_at IS NULL AND EXISTS (SELECT 1 FROM subtasks s WHERE "
                 "s.task_id = t.id AND s.status IN "
                 "('pending', 'ready', 'running', 'review', 'needs_human', 'paused')) "
-                "ORDER BY t.created_at DESC"
+                "ORDER BY t.pinned DESC, t.created_at DESC"
             )
         ]
     result = []

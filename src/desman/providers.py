@@ -294,7 +294,7 @@ LOCAL = (
         settings=(
             Setting("OLLAMA_HOST", "Host", "http://localhost:11434"),
             Setting("OLLAMA_MODEL", "Model"),
-            Setting("OLLAMA_CONTEXT", "Context (tokens)", LOCAL_CONTEXT),
+            Setting("OLLAMA_CONTEXT", "Context (tokens)", "16384"),
         ),
         local=True,
         base_url="{OLLAMA_HOST}/v1",

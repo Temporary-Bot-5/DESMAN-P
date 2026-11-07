@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
+import time
+from threading import Lock
 from typing import Any
 
 import click
+import httpx
 
 from desman import commands, global_cli, i18n, protected_cli, providers, runs, tuning_cli, wizard
 from desman.config import TUNING_BOUNDS, Config
@@ -179,10 +182,15 @@ def role_change(change: Roles, config: Config) -> tuning_cli.TuningChange:
     """Keep page key identities separate from label-sensitive CLI selectors."""
     fingerprints: dict[str, str | None]
     row = next(r for r in tuning_cli.role_rows(config) if r["role"] == change.role)
-    if change.model is not None and change.model not in [
-        *row["candidate_models"],
-        row["model"],
-    ]:
+    if (
+        change.model is not None
+        and change.model
+        not in [
+            *row["candidate_models"],
+            row["model"],
+        ]
+        and not listed_choice(config, change.model, change.key)
+    ):
         raise click.ClickException(t("Invalid module choice."))
     if change.key is not None and change.key == row["key_fingerprint"]:
         # Like a CLI model edit, retain the independent saved key.
@@ -196,7 +204,7 @@ def role_change(change: Roles, config: Config) -> tuning_cli.TuningChange:
     )
 
 
-def local_search(config: Config, query: str) -> dict[str, Any]:
+def local_search(config: Config, query: str, *, search: bool = True) -> dict[str, Any]:
     """Read-only local/HF choices. External failures are ordinary translated status notes."""
     import httpx
 
@@ -217,6 +225,14 @@ def local_search(config: Config, query: str) -> dict[str, Any]:
         for m in tags
     ]
     notes = [] if reachable else [t("Ollama cannot be reached right now.")]
+    if not search:
+        return {
+            "options": rows,
+            "notes": notes,
+            "reachable": reachable,
+            "host": providers.find("ollama").setting(config, "OLLAMA_HOST"),
+            "selected": selected,
+        }
     try:
         with httpx.Client() as client:
             found = hub.search(
@@ -268,3 +284,69 @@ def local_search(config: Config, query: str) -> dict[str, Any]:
         "host": providers.find("ollama").setting(config, "OLLAMA_HOST"),
         "selected": selected,
     }
+
+
+_MODEL_CACHE: dict[tuple[str, str, str], tuple[float, tuple[str, ...], bool]] = {}
+_MODEL_LOCK = Lock()
+
+
+def source_models(
+    config: Config, provider_id: str, fingerprint: str, *, client: httpx.Client | None = None
+) -> dict[str, Any]:
+    """Lazy read-only discovery. Cache public identifiers only, never a key or error body."""
+    from desman.llm import catalog, check
+
+    provider = providers.find(provider_id)
+    if provider not in providers.CLOUD:
+        raise ValueError("unknown source")
+    key = next(
+        (k.value for k in config.keys(provider.key_env or "") if key_id(k.value) == fingerprint),
+        None,
+    )
+    if key is None or not provider.is_ready(config):
+        raise ValueError("unknown source")
+    identity = (provider.id, fingerprint, provider.endpoint(config))
+    now = time.monotonic()
+    with _MODEL_LOCK:
+        cached = _MODEL_CACHE.get(identity)
+    failed = False
+    if cached is not None and now - cached[0] < 600:
+        ids, failed = cached[1], cached[2]
+    else:
+        try:
+            if client is None:
+                with httpx.Client() as connection:
+                    response = check.models_response(config, provider, key, connection)
+            else:
+                response = check.models_response(config, provider, key, client)
+            ids = check.chat_models(provider, check.listed_models(response))
+        except (httpx.HTTPError, ValueError):
+            ids = tuple(m.id for m in catalog.models_of(provider))
+            failed = True
+        with _MODEL_LOCK:
+            if len(_MODEL_CACHE) >= 128:
+                _MODEL_CACHE.clear()
+            _MODEL_CACHE[identity] = (now, ids, failed)
+    known = {m.id for m in catalog.models_of(provider)}
+    return {
+        "models": [{"value": f"{provider.id}/{m}", "label": m, "known": m in known} for m in ids],
+        "note": t("Model listing unavailable; showing known models.") if failed else "",
+    }
+
+
+def listed_choice(config: Config, model: str, fingerprint: str | None) -> bool:
+    """Accept a newly discovered cloud model only from its configured, recently listed key."""
+    provider_id, _, name = model.partition("/")
+    provider = next((p for p in providers.CLOUD if p.id == provider_id), None)
+    if provider is None or fingerprint is None or not provider.is_ready(config):
+        return False
+    if not any(key_id(k.value) == fingerprint for k in config.keys(provider.key_env or "")):
+        return False
+    with _MODEL_LOCK:
+        cached = _MODEL_CACHE.get((provider.id, fingerprint, provider.endpoint(config)))
+    return (
+        cached is not None
+        and time.monotonic() - cached[0] < 600
+        and not cached[2]
+        and name in cached[1]
+    )

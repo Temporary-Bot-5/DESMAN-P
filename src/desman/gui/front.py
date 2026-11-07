@@ -176,7 +176,12 @@ class WebFront(ui.Front):
             safe.append(item)
         if self._panel_quiet:
             ui._record(*safe)
-        self.emit("out", level="out", html=self.render(*safe))
+        self.emit(
+            "out",
+            level="out",
+            html=self.render(*safe),
+            context=any(isinstance(item, ui.ContextText) for item in items),
+        )
 
     def header(self, title: str, subtitle: str = "") -> None:
         """Render a heading panel with the shared terminal theme."""

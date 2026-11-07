@@ -43,6 +43,15 @@ def strings() -> dict[str, str]:
         "local_unreachable": t("Ollama cannot be reached right now."),
         "settings_general": t("General"),
         "settings_keys": t("Keys"),
+        "source": t("Source"),
+        "known": t("known"),
+        "every_chat": t("for every chat"),
+        "every_task": t("for every task"),
+        "delete_tasks": t("Delete all tasks"),
+        "stop_modules": t("Stop all modules"),
+        "paused": t("paused"),
+        "continue_task": t("Continue"),
+        "answered_by": t("Answered by"),
         "settings_roles": t("Role models"),
         "other_providers": t("Other providers"),
         "get_key": t("Get a key"),
@@ -258,6 +267,22 @@ class Server:
                     return self._json(snapshot(self.database, url.path[1:], self.front))
                 except (sqlite3.Error, ConfigError, OSError):
                     return Response(503)
+            if url.path == "/source-models":
+                from desman.gui.front import redact_keys
+                from desman.gui.panels import redact_snapshot
+                from desman.gui.settings import source_models
+
+                try:
+                    result = source_models(
+                        open_config().load(),
+                        query.get("provider", [""])[0],
+                        query.get("fingerprint", [""])[0],
+                    )
+                    return self._json(redact_snapshot(result, redact_keys))
+                except (ValueError, LookupError):
+                    return Response(400)
+                except (ConfigError, OSError):
+                    return Response(503)
             if url.path == "/local-models":
                 from desman.gui.front import redact_keys
                 from desman.gui.panels import redact_snapshot
@@ -268,7 +293,14 @@ class Server:
                     if len(q) > 200:
                         return Response(400)
                     return self._json(
-                        redact_snapshot(local_search(open_config().load(), q), redact_keys)
+                        redact_snapshot(
+                            local_search(
+                                open_config().load(),
+                                q,
+                                search=query.get("installed", ["0"])[0] != "1",
+                            ),
+                            redact_keys,
+                        )
                     )
                 except (ConfigError, OSError):
                     return Response(503)

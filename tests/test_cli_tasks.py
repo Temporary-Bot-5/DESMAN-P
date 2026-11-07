@@ -239,10 +239,12 @@ def test_status_json_and_running_subtask() -> None:
     assert claimed is not None and claimed.lease_token is not None
     text = desman("status", task_id)
     assert text.exit_code == EXIT_ACTIVE  # someone is working on it
-    assert "line one line two" in text.output and "held by worker-7" in text.output
+    assert "line one" in text.output and "line two" not in text.output
+    assert "held by worker-7" in text.output
     out = desman("status", task_id, "--json")
     report = json.loads(out.output)
     assert report["subtasks"][0]["lease_owner"] == "worker-7"
+    assert report["subtasks"][0]["description"] == "line one\nline two"
     assert claimed.lease_token not in out.output
 
 

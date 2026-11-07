@@ -20,7 +20,7 @@ from desman import local_models, providers, runs, ui
 from desman.config import TUNING_LIMITS, Config, ConfigManager, ModelChoices, Tuning
 from desman.config_cli import json_option, load_config
 from desman.i18n import t
-from desman.llm import router
+from desman.llm import catalog, router
 from desman.llm.openai_compat import key_id
 
 AUTO = "auto"
@@ -204,7 +204,7 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
         **{kind: f"{t('Executor')} ({kind})" for kind in ("text", "code", "analysis")},
     }
     ollama = providers.find("ollama")
-    installed = local_models.installed(config)[0]
+    installed = local_models.installed(config, cached_only=True)[0]
     out = []
     for role in ROLES:
         fingerprint = getattr(config.tuning.keys, role)
@@ -213,11 +213,18 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
         available: list[dict[str, Any]] = []
         for provider in (*providers.CLOUD, ollama):
             provider_keys = [dict(k) for k in keys if k["provider"] == provider.id]
-            if not provider_keys and not (
-                provider.id == "ollama" and (provider.is_ready(config) or installed)
+            if (provider_keys and not provider.is_ready(config)) or (
+                not provider_keys
+                and not (provider.id == "ollama" and (provider.is_ready(config) or installed))
             ):
                 continue
             models = [m for m in candidates if m.startswith(provider.id + "/")]
+            if not provider.local:
+                models = list(
+                    dict.fromkeys(
+                        [*(provider.id + "/" + m.id for m in catalog.models_of(provider)), *models]
+                    )
+                )
             if provider.id == "ollama":
                 models = list(dict.fromkeys([*models, *("ollama/" + m.name for m in installed)]))
             available.append(

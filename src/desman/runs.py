@@ -251,6 +251,10 @@ class Scoped(router.Fallback):
     def choices(self) -> list[router.Choice]:
         return self.current().choices
 
+    @property
+    def last_call(self) -> router.LastCall:
+        return self.last.last_call if self.last is not None else router.LastCall()
+
     def complete(self, request: Request) -> Completion:
         self.last = self.current()
         return self.last.complete(request)

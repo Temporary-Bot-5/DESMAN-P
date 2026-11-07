@@ -54,6 +54,57 @@ def check(
     return out
 
 
+def models_response(
+    config: Config, provider: Provider, key: str, client: httpx.Client, timeout: float = 20.0
+) -> httpx.Response:
+    """Token-free model listing, authenticated only to this provider's endpoint."""
+    return client.get(
+        f"{provider.endpoint(config)}/models", headers=provider.headers(key), timeout=timeout
+    )
+
+
+def listed_models(response: httpx.Response) -> tuple[str, ...]:
+    """Validate a provider's model list without accepting arbitrary objects as identifiers."""
+    response.raise_for_status()
+    data = response.json()
+    rows = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("unexpected model listing")
+    return tuple(
+        dict.fromkeys(
+            m["id"].removeprefix("models/")
+            for m in rows
+            if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]
+        )
+    )
+
+
+def chat_models(provider: Provider, ids: tuple[str, ...]) -> tuple[str, ...]:
+    """Known catalog models first; omit obvious audio, embedding and safety endpoints."""
+    known = {m.id: i for i, m in enumerate(catalog.models_of(provider))}
+    excluded = (
+        "whisper",
+        "tts",
+        "orpheus",
+        "playai",
+        "embed",
+        "guard",
+        "moderation",
+        "rerank",
+        "image-generation",
+        "vision-generation",
+        "dall-e",
+        "stable-diffusion",
+        "stable_diffusion",
+        "text-to-image",
+        "flux",
+        "sdxl",
+        "imagen",
+    )
+    eligible = [m for m in ids if m in known or not any(word in m.lower() for word in excluded)]
+    return tuple(sorted(eligible, key=lambda m: (known.get(m, len(known)), m)))
+
+
 def _check_key(
     config: Config,
     provider: Provider,
@@ -70,7 +121,7 @@ def _check_key(
             # /models is public there: /key is what tells a valid key from a bad one.
             response = client.get(f"{base}/key", headers=headers, timeout=timeout)
         else:
-            response = client.get(f"{base}/models", headers=headers, timeout=timeout)
+            response = models_response(config, provider, key, client, timeout)
     except httpx.HTTPError as e:
         return result(ok=False, http_status=None, detail=type(e).__name__)
 

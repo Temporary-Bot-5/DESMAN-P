@@ -12,9 +12,14 @@
   files, contracts, tests, the rules of this file that matter. It runs Codex itself
   (`codex exec -C <checkout>`), reads the diff, runs the checks below and sends fixes back.
   Codex works only on the branch it was given and does not push, open or merge PRs.
-- After a push: wait for Devin Review and CI, read every finding, fix the real ones (through
-  Codex), re-check. Claude Code then merges the PR itself (the owner allowed it, 2026-11-04):
-  only with CI green and Devin's review present and handled, never before Devin has posted.
+- After a push: wait for Devin Review, read every finding, fix the real ones (through Codex),
+  re-check. Claude Code then merges the PR itself (the owner allowed it, 2026-11-04): only with
+  the local checks green (ruff, format, mypy normal and `--platform win32`, the full pytest; see
+  below) and Devin's review present and handled, never before Devin has posted.
+- CI (GitHub Actions: Python 3.11–3.13 and Windows) runs only before a release — a `v*` tag —
+  or by hand (`gh workflow run ci.yml --ref BRANCH`), not on every PR (owner, 2026-11-07). Run
+  it by hand when a change touches platform code (paths, processes, signals, files, encodings):
+  Windows is tested nowhere else.
   It tells the owner what was merged and what they must do after (e.g.
   `desman protected approve`).
 
@@ -43,7 +48,7 @@ DESMAN(P) is a **prototype** for a decentralized, fault-tolerant, self-evolving 
 - Accessible to non-developers: after configuration, bare `desman` becomes a chat (ROADMAP
   phase C, after phase 3). Requests become ordinary tasks; changes to DESMAN itself asked in
   the chat take effect only after the human confirms them in a field rendered by code. An
-  explicit `!COMMAND` typed by the person runs immediately, like the CLI.
+  explicit `/COMMAND` (or `!COMMAND`) typed by the person runs immediately, like the CLI.
 
 ## Architecture Principles (from PROJECT_PLAN.md)
 
@@ -125,7 +130,7 @@ src/desman/
 ├── info.py        # Banner / project info
 ├── chat.py        # The chat of bare `desman`: a new session (`-c` continues the last one,
 │                  #   `-t` a temporary chat, erased when it ends); /help, /new,
-│                  #   /sessions, /rename, /compact, /profile, /delete, /exit; each message gets the interlocutor's turn; a task turn
+│                  #   /sessions, /rename, /compact, /profile, /delete, /clear, /context, /exit; each message gets the interlocutor's turn; a task turn
 │                  #   runs a task of the session while the chat waits, then it is retold; a
 │                  #   command turn goes through the catalog: the window and the person's "yes"
 │                  #   are code's, the result goes back as an event, changes to operator_log
@@ -385,7 +390,7 @@ preemption, self-improvement or network features before their phase).
 uv venv -p python3.12 .venv && uv pip install -e ".[dev]"
 pre-commit install
 
-# Checks (same as CI)
+# Checks (before every merge; CI runs the same before a release)
 ruff check .
 ruff format --check .
 mypy
