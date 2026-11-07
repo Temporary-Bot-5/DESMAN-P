@@ -192,8 +192,14 @@ function showPrompt(p) {
       };
       input.addEventListener("input", () => {
         const value = input.value.toLowerCase();
-        matches = (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) ?
-          Object.entries(p.commands || {}).filter(([name]) => name.startsWith(value)) : [];
+        const bare = terminalOpen && value.length > 0 && !/^[!/]|\s/.test(value);
+        const commands = Object.entries(p.commands || {});
+        matches = bare ?
+          commands.filter(([name]) => name.startsWith("!"))
+            .map(([name, hint]) => [name.slice(1), hint])
+            .filter(([name]) => name.startsWith(value)) :
+          (value.startsWith("!") || (value.startsWith("/") && !/\s/.test(value))) ?
+            commands.filter(([name]) => name.startsWith(value)) : [];
         selected = -1;
         draw();
       });

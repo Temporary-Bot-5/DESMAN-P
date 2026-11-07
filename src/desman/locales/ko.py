@@ -35,6 +35,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "상태",
     "Task": "작업",
     "Unknown or ambiguous session ID.": "알 수 없거나 모호한 세션 ID입니다.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "현재 사용할 수 없음",
     "Models and keys for roles": "역할별 모델 및 키",
     "key: {role}": "키: {role}",
@@ -1279,6 +1280,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("세션 {count}개를 삭제했습니다.",),
         "No unpinned sessions to delete.": "삭제할 고정되지 않은 세션이 없습니다.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "단일 {scope}에 {role}을 선택할 수 없습니다. {roles}만 가능합니다. `desman tuning`으로 역할에 대해 선택하세요.",
+        "One task (its reference).": "단일 작업(참조).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "단일 채팅(/sessions에 표시되는 id): 대화자만.",
+        "The model asked first; auto: the role's.": "먼저 요청할 모델; auto: 역할의 모델.",
+        "The key tried first (label or #N); auto: the role's.": "먼저 시도할 키(레이블 또는 #N); auto: 역할의 키.",
     }
 )
 

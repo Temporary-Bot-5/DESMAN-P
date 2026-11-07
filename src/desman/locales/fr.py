@@ -35,6 +35,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "État",
     "Task": "Tâche",
     "Unknown or ambiguous session ID.": "ID de session inconnu ou ambigu.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "indisponible pour le moment",
     "Models and keys for roles": "Modèles et clés par rôle",
     "key: {role}": "clé : {role}",
@@ -1359,6 +1360,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("{count} session supprimée.", "{count} sessions supprimées."),
         "No unpinned sessions to delete.": "Aucune session non épinglée à supprimer.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Impossible de choisir {role} pour un seul {scope} : uniquement {roles}. Choisissez pour le rôle avec `desman tuning`.",
+        "One task (its reference).": "Une tâche (sa référence).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Une conversation (son id dans /sessions) : l’interlocuteur.",
+        "The model asked first; auto: the role's.": "Modèle sollicité en premier ; auto : celui du rôle.",
+        "The key tried first (label or #N); auto: the role's.": "Clé essayée en premier (libellé ou #N) ; auto : celle du rôle.",
     }
 )
 

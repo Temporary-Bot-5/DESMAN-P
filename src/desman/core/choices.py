@@ -13,6 +13,13 @@ from desman.core import db, operator
 
 Scope = Literal["task", "session"]
 
+ROLES_BY_SCOPE: dict[str, tuple[str, ...]] = {
+    # The planner plans a task before it exists, so a task's own choice could never reach it.
+    "task": ("reviewer", "decomposer", "text", "code", "analysis"),
+    "session": ("interlocutor",),
+}
+"""The roles whose calls read a choice of that scope: anything else would be kept and never used."""
+
 
 class Choice(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -28,6 +35,8 @@ def validate(
         raise ValueError("unknown module choice scope")
     if role is not None and role not in ModelChoices.model_fields:
         raise ValueError("unknown module role")
+    if role is not None and role not in ROLES_BY_SCOPE[scope]:
+        raise ValueError(f"a {scope} choice is not read by the {role}")
     table = "tasks" if scope == "task" else "sessions"
     if conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (scope_id,)).fetchone() is None:
         raise ValueError("unknown module choice scope id")

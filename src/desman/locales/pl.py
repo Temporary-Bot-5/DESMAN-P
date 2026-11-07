@@ -40,6 +40,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Stan",
     "Task": "Zadanie",
     "Unknown or ambiguous session ID.": "Nieznany lub niejednoznaczny identyfikator sesji.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "obecnie niedostępny",
     "Models and keys for roles": "Modele i klucze dla ról",
     "key: {role}": "klucz: {role}",
@@ -1408,6 +1409,16 @@ MESSAGES.update(
             "Usunięto {count} sesji.",
         ),
         "No unpinned sessions to delete.": "Brak nieprzypiętych sesji do usunięcia.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Nie można wybrać {role} dla pojedynczego {scope}: tylko {roles}. Wybierz dla roli przez `desman tuning`.",
+        "One task (its reference).": "Jedno zadanie (jego identyfikator).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Jeden czat (jego id z /sessions): rozmówca.",
+        "The model asked first; auto: the role's.": "Model pytany jako pierwszy; auto: model roli.",
+        "The key tried first (label or #N); auto: the role's.": "Klucz próbowany jako pierwszy (etykieta lub #N); auto: klucz roli.",
     }
 )
 

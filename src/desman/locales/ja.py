@@ -35,6 +35,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "状態",
     "Task": "タスク",
     "Unknown or ambiguous session ID.": "セッション ID が不明または曖昧です。",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "現在利用できません",
     "Models and keys for roles": "役割ごとのモデルとキー",
     "key: {role}": "キー：{role}",
@@ -1285,6 +1286,16 @@ MESSAGES.update(
         ),
         "Deleted {count} session.": ("セッションを{count}件削除しました。",),
         "No unpinned sessions to delete.": "削除するピン留めされていないセッションはありません。",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "単一の {scope} に {role} は選択できません。対象は {roles} のみです。`desman tuning` で役割に対して選択してください。",
+        "One task (its reference).": "単一のタスク（参照）。",
+        "One chat (its id as /sessions shows it): the interlocutor.": "単一のチャット（/sessions に表示される ID）：対話者のみ。",
+        "The model asked first; auto: the role's.": "最初に問い合わせるモデル。auto：役割のモデル。",
+        "The key tried first (label or #N); auto: the role's.": "最初に試すキー（ラベルまたは #N）。auto：役割のキー。",
     }
 )
 

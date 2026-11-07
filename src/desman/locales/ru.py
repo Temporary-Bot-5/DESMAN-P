@@ -40,6 +40,7 @@ MESSAGES: dict[str, Forms] = {
     "State": "Состояние",
     "Task": "Задача",
     "Unknown or ambiguous session ID.": "Неизвестный или неоднозначный ID сессии.",
+    "→ General_Terminal": "→ General_Terminal",
     "not available now": "сейчас недоступно",
     "Models and keys for roles": "Модели и ключи для ролей",
     "key: {role}": "ключ: {role}",
@@ -1651,6 +1652,16 @@ MESSAGES.update(
             "Удалено {count} сессий.",
         ),
         "No unpinned sessions to delete.": "Нет незакреплённых сессий для удаления.",
+    }
+)
+
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Нельзя выбрать {role} для одного {scope}: доступны только {roles}. Выберите для роли через `desman tuning`.",
+        "One task (its reference).": "Одна задача (её идентификатор).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Один чат (его id из /sessions): собеседник.",
+        "The model asked first; auto: the role's.": "Модель, запрашиваемая первой; auto: модель роли.",
+        "The key tried first (label or #N); auto: the role's.": "Ключ, используемый первым (метка или #N); auto: ключ роли.",
     }
 )
 
