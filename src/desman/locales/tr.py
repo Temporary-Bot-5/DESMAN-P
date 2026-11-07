@@ -17,7 +17,6 @@ MESSAGES: dict[str, Forms] = {
     "Shortcut created: {path}": "Kısayol oluşturuldu: {path}",
     "Could not create shortcut: {error}": "Kısayol oluşturulamadı: {error}",
     "Shortcuts are not supported on this system yet.": "Bu sistemde kısayollar henüz desteklenmiyor.",
-    "The installed desman script was not found.": "Yüklü desman betiği bulunamadı.",
     "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Sayfayı terminalde desman gui ile açın; desman gui --shortcut bir kısayol oluşturur.",
     "Conversation": "Sohbet",
     "Download": "İndir",

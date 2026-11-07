@@ -22,7 +22,6 @@ MESSAGES: dict[str, Forms] = {
     "Shortcut created: {path}": "Utworzono skrót: {path}",
     "Could not create shortcut: {error}": "Nie udało się utworzyć skrótu: {error}",
     "Shortcuts are not supported on this system yet.": "Skróty nie są jeszcze obsługiwane w tym systemie.",
-    "The installed desman script was not found.": "Nie znaleziono zainstalowanego skryptu desman.",
     "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Otwórz stronę poleceniem desman gui w terminalu; desman gui --shortcut tworzy skrót.",
     "Conversation": "Rozmowa",
     "Download": "Pobierz",

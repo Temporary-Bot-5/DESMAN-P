@@ -17,7 +17,6 @@ MESSAGES: dict[str, Forms] = {
     "Shortcut created: {path}": "Atalho criado: {path}",
     "Could not create shortcut: {error}": "Não foi possível criar o atalho: {error}",
     "Shortcuts are not supported on this system yet.": "Este sistema ainda não suporta atalhos.",
-    "The installed desman script was not found.": "O script desman instalado não foi encontrado.",
     "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Abra a página com desman gui no terminal; desman gui --shortcut cria um atalho.",
     "Conversation": "Conversa",
     "Download": "Baixar",

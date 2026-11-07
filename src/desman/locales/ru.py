@@ -22,7 +22,6 @@ MESSAGES: dict[str, Forms] = {
     "Shortcut created: {path}": "Ярлык создан: {path}",
     "Could not create shortcut: {error}": "Не удалось создать ярлык: {error}",
     "Shortcuts are not supported on this system yet.": "Ярлыки для этой системы пока не поддерживаются.",
-    "The installed desman script was not found.": "Установленный скрипт desman не найден.",
     "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "Откройте страницу командой desman gui в терминале; desman gui --shortcut создаёт ярлык.",
     "Conversation": "Общение",
     "Download": "Скачать",
