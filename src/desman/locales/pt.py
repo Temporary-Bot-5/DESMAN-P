@@ -1353,4 +1353,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Não é possível escolher {role} para um único {scope}: apenas {roles}. Escolha para o papel com `desman tuning`.",
+        "One task (its reference).": "Uma tarefa (sua referência).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Uma conversa (seu id em /sessions): o interlocutor.",
+        "The model asked first; auto: the role's.": "Modelo consultado primeiro; auto: o do papel.",
+        "The key tried first (label or #N); auto: the role's.": "Chave tentada primeiro (rótulo ou #N); auto: a do papel.",
+    }
+)
+
 CATALOG = Catalog("Português (Brasil)", plural, MESSAGES, CLICK, forms=2)

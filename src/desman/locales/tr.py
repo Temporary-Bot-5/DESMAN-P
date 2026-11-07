@@ -1277,4 +1277,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Tek bir {scope} için {role} seçilemez: yalnızca {roles}. Rol için `desman tuning` ile seçin.",
+        "One task (its reference).": "Tek bir görev (referansı).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Tek bir sohbet (/sessions içindeki kimliği): muhatap.",
+        "The model asked first; auto: the role's.": "İlk sorulan model; auto: rolün modeli.",
+        "The key tried first (label or #N); auto: the role's.": "İlk denenen anahtar (etiket veya #N); auto: rolün anahtarı.",
+    }
+)
+
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

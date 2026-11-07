@@ -1263,4 +1263,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "无法为单个 {scope} 选择 {role}：仅限 {roles}。请通过 `desman tuning` 为该角色选择。",
+        "One task (its reference).": "单个任务（其引用）。",
+        "One chat (its id as /sessions shows it): the interlocutor.": "单个聊天（/sessions 显示的 id）：仅限对话者。",
+        "The model asked first; auto: the role's.": "优先请求的模型；auto：使用角色的模型。",
+        "The key tried first (label or #N); auto: the role's.": "优先尝试的密钥（标签或 #N）；auto：使用角色的密钥。",
+    }
+)
+
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

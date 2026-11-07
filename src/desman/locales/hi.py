@@ -1350,4 +1350,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "एक {scope} के लिए {role} नहीं चुन सकते: केवल {roles}। भूमिका के लिए `desman tuning` से चुनें।",
+        "One task (its reference).": "एक कार्य (उसका संदर्भ)।",
+        "One chat (its id as /sessions shows it): the interlocutor.": "एक चैट (/sessions में दिखने वाली उसकी id): संवादकर्ता।",
+        "The model asked first; auto: the role's.": "पहले अनुरोध किया जाने वाला मॉडल; auto: भूमिका का मॉडल।",
+        "The key tried first (label or #N); auto: the role's.": "पहले आज़माई जाने वाली कुंजी (लेबल या #N); auto: भूमिका की कुंजी।",
+    }
+)
+
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

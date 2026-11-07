@@ -1645,4 +1645,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "Нельзя выбрать {role} для одного {scope}: доступны только {roles}. Выберите для роли через `desman tuning`.",
+        "One task (its reference).": "Одна задача (её идентификатор).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "Один чат (его id из /sessions): собеседник.",
+        "The model asked first; auto: the role's.": "Модель, запрашиваемая первой; auto: модель роли.",
+        "The key tried first (label or #N); auto: the role's.": "Ключ, используемый первым (метка или #N); auto: ключ роли.",
+    }
+)
+
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)

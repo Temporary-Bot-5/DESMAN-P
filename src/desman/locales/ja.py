@@ -1279,4 +1279,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "単一の {scope} に {role} は選択できません。対象は {roles} のみです。`desman tuning` で役割に対して選択してください。",
+        "One task (its reference).": "単一のタスク（参照）。",
+        "One chat (its id as /sessions shows it): the interlocutor.": "単一のチャット（/sessions に表示される ID）：対話者のみ。",
+        "The model asked first; auto: the role's.": "最初に問い合わせるモデル。auto：役割のモデル。",
+        "The key tried first (label or #N); auto: the role's.": "最初に試すキー（ラベルまたは #N）。auto：役割のキー。",
+    }
+)
+
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

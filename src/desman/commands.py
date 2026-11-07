@@ -344,14 +344,18 @@ class ModulesShowArgs(Args):
 
 
 class ModulesClearArgs(Args):
-    task: Ref | None = None
-    session: Ref | None = None
+    task: Ref | None = Field(
+        None, description="Task reference: reviewer, decomposer, text, code, analysis only."
+    )
+    session: Ref | None = Field(None, description="Chat ID: interlocutor only.")
     role: ModuleRole | None = None
 
 
 class ModulesSetArgs(Args):
-    task: Ref | None = None
-    session: Ref | None = None
+    task: Ref | None = Field(
+        None, description="Task reference: reviewer, decomposer, text, code, analysis only."
+    )
+    session: Ref | None = Field(None, description="Chat ID: interlocutor only.")
     role: ModuleRole
     model: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
     key: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
@@ -1608,7 +1612,8 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "modules set",
-        "Choose a model/key for one task or the interlocutor of one chat. "
+        "Choose a model/key for one task (reviewer, decomposer, text, code, analysis) "
+        "or the interlocutor of one chat. "
         "Omitted session defaults to the current chat for interlocutor. The person confirms.",
         ModulesSetArgs,
         Kind.CHANGE,

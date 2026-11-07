@@ -1273,4 +1273,14 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role with `desman tuning`.": "단일 {scope}에 {role}을 선택할 수 없습니다. {roles}만 가능합니다. `desman tuning`으로 역할에 대해 선택하세요.",
+        "One task (its reference).": "단일 작업(참조).",
+        "One chat (its id as /sessions shows it): the interlocutor.": "단일 채팅(/sessions에 표시되는 id): 대화자만.",
+        "The model asked first; auto: the role's.": "먼저 요청할 모델; auto: 역할의 모델.",
+        "The key tried first (label or #N); auto: the role's.": "먼저 시도할 키(레이블 또는 #N); auto: 역할의 키.",
+    }
+)
+
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

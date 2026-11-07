@@ -47,6 +47,16 @@ def preview(
     model: str | None = None,
     key: str | None = None,
 ) -> tuple[choices.Choice, choices.Choice]:
+    if role not in choices.ROLES_BY_SCOPE[scope]:
+        raise click.ClickException(
+            t(
+                "{role} cannot be chosen for one {scope}: only {roles}. Choose it for the role "
+                "with `desman tuning`.",
+                role=role,
+                scope=scope,
+                roles=", ".join(choices.ROLES_BY_SCOPE[scope]),
+            )
+        )
     try:
         choices.validate(conn, scope, identity, role)
         old = choices.get(conn, scope, identity, role)
@@ -215,7 +225,7 @@ def print_modules(rows: list[dict[str, Any]], as_json: bool = False) -> None:
 
 
 @click.group("modules", invoke_without_command=True)
-@click.option("--task", metavar="REF")
+@click.option("--task", metavar="REF", help="One task (its reference).")
 @json_option
 @click.pass_context
 def modules(ctx: click.Context, task: str | None, as_json: bool) -> None:
@@ -231,7 +241,7 @@ def show_modules(task: str | None, as_json: bool) -> None:
 
 
 @modules.command("show")
-@click.option("--task", metavar="REF")
+@click.option("--task", metavar="REF", help="One task (its reference).")
 @json_option
 def show(task: str | None, as_json: bool) -> None:
     """Show the modules of active tasks, or one task."""
@@ -240,10 +250,18 @@ def show(task: str | None, as_json: bool) -> None:
 
 @modules.command("set")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES))
-@click.option("--task", metavar="REF")
-@click.option("--session", metavar="ID")
-@click.option("--model", metavar="PROVIDER/MODEL|auto")
-@click.option("--key", metavar="PROVIDER:KEY|auto")
+@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option(
+    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+)
+@click.option(
+    "--model", metavar="PROVIDER/MODEL|auto", help="The model asked first; auto: the role's."
+)
+@click.option(
+    "--key",
+    metavar="PROVIDER:KEY|auto",
+    help="The key tried first (label or #N); auto: the role's.",
+)
 def set_command(
     role: str, task: str | None, session: str | None, model: str | None, key: str | None
 ) -> None:
@@ -260,8 +278,10 @@ def set_command(
 
 @modules.command("clear")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES), required=False)
-@click.option("--task", metavar="REF")
-@click.option("--session", metavar="ID")
+@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option(
+    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+)
 def clear_command(role: str | None, task: str | None, session: str | None) -> None:
     """Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor."""
     with closing(db.open_db()) as conn:
