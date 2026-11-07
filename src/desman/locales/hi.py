@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Chat": "चैट",
+    "Change": "बदलें",
+    "Only here": "केवल यहाँ",
+    "For the role everywhere": "इस भूमिका के लिए हर जगह",
+    "Apply": "लागू करें",
+    "Scope": "दायरा",
+    "Automatic": "स्वचालित",
+    "Executor (text)": "निष्पादक (पाठ)",
+    "Executor (code)": "निष्पादक (कोड)",
+    "Executor (analysis)": "निष्पादक (विश्लेषण)",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "केवल यहाँ मॉडल या कुंजी चुनें। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "--task और --session में से ठीक एक चुनें।",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "केवल यहाँ के चुनाव मिटाएँ। भूमिकाएँ: planner, reviewer, decomposer, text, code, analysis, interlocutor.",

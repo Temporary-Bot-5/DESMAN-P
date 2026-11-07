@@ -15,6 +15,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Chat": "Чат",
+    "Change": "Змінити",
+    "Only here": "Лише тут",
+    "For the role everywhere": "Для ролі всюди",
+    "Apply": "Застосувати",
+    "Scope": "Область",
+    "Automatic": "Автоматично",
+    "Executor (text)": "Виконавець (текст)",
+    "Executor (code)": "Виконавець (код)",
+    "Executor (analysis)": "Виконавець (аналіз)",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Обрати модель або ключ лише тут. Ролі: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "Вкажіть рівно одне: --task або --session.",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Скинути вибір лише тут. Ролі: planner, reviewer, decomposer, text, code, analysis, interlocutor.",

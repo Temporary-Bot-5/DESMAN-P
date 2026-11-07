@@ -429,9 +429,28 @@ class DecideAction(Action):
         return self
 
 
+class ModuleAction(Action):
+    type: Literal["module"]
+    role: Literal["planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"]
+    scope: Literal["task", "session", "role"]
+    scope_id: str | None = Field(min_length=1, max_length=128)
+    model: str | None = Field(pattern=r"^[a-z0-9_-]+/\S+$", max_length=200)
+    """`provider/model` (config.ModelLabel's shape: ui imports no config, the registry uses ui)."""
+    key: str | None = Field(pattern=r"^[0-9a-f]{12}$")
+
+    @model_validator(mode="after")
+    def valid_scope(self) -> ModuleAction:
+        if (self.scope == "role") != (self.scope_id is None):
+            raise ValueError("scope id required only for task/session")
+        if self.scope == "session" and self.role != "interlocutor":
+            raise ValueError("session card is the interlocutor")
+        return self
+
+
 ACTIONS = TypeAdapter(
     Annotated[
-        SessionAction | NewSessionAction | SimpleAction | DecideAction, Field(discriminator="type")
+        SessionAction | NewSessionAction | SimpleAction | DecideAction | ModuleAction,
+        Field(discriminator="type"),
     ]
 )
 

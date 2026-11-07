@@ -15,6 +15,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Chat": "Czat",
+    "Change": "Zmień",
+    "Only here": "Tylko tutaj",
+    "For the role everywhere": "Dla roli wszędzie",
+    "Apply": "Zastosuj",
+    "Scope": "Zakres",
+    "Automatic": "Automatycznie",
+    "Executor (text)": "Wykonawca (tekst)",
+    "Executor (code)": "Wykonawca (kod)",
+    "Executor (analysis)": "Wykonawca (analiza)",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Wybierz model lub klucz tylko tutaj. Role: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "Wybierz dokładnie jedno z --task i --session.",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Wyczyść wybór tylko tutaj. Role: planner, reviewer, decomposer, text, code, analysis, interlocutor.",

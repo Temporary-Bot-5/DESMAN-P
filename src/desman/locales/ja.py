@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Chat": "チャット",
+    "Change": "変更",
+    "Only here": "ここだけ",
+    "For the role everywhere": "この役割のすべて",
+    "Apply": "適用",
+    "Scope": "範囲",
+    "Automatic": "自動",
+    "Executor (text)": "実行役（文章）",
+    "Executor (code)": "実行役（コード）",
+    "Executor (analysis)": "実行役（分析）",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "ここだけのモデルまたはキーを選択。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "--task または --session のどちらか一方を指定してください。",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "ここだけの選択を解除。役割：planner, reviewer, decomposer, text, code, analysis, interlocutor.",

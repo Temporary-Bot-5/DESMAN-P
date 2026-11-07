@@ -331,7 +331,16 @@ async function act(action) {
 
 function setupPanels() {
   document.documentElement.lang = words.lang;
-  $("tasks-title").textContent = words.tasks;
+  $("panel-switch").replaceChildren();
+  for (const mode of ["tasks", "modules"]) {
+    const control = button($("panel-switch"), words[mode], () => {
+      panelMode = mode;
+      $("tasks").hidden = mode !== "tasks";
+      $("modules").hidden = mode !== "modules";
+      setupPanels();
+    });
+    control.setAttribute("aria-pressed", String(panelMode === mode));
+  }
   $("sidebar").setAttribute("aria-label", words.sessions);
   $("tasks-panel").setAttribute("aria-label", words.tasks);
   $("session-tools").replaceChildren();
@@ -340,8 +349,8 @@ function setupPanels() {
   const terminal = actionButton($("session-tools"), "General_Terminal", {type: "terminal"});
   terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
-  actionButton($("sidebar-bottom"), `⚙ ${words.settings}`, {type: "settings"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
+  actionButton($("sidebar-bottom"), `⚙ ${words.settings}`, {type: "settings"});
   $("topbar").replaceChildren();
   for (const [label, id] of [[words.sessions, "sidebar"], [words.tasks, "tasks-panel"]]) {
     const b = button($("topbar"), label, () => {
@@ -459,10 +468,10 @@ function showTasks(data) {
         if (decision === "fail") b.className = "danger";
       }
     }
-    if (task.modules.length) text("h3", words.modules, card);
-    for (const m of task.modules) {
-      text("small", `${words[`role_${m.role}`] || m.role} · ${m.provider}/${m.model} · ${m.key} · ${words.calls}: ${m.calls} · ${words.tokens}: ${m.prompt_tokens}/${m.completion_tokens} · ${m.state}${m.subtask ? ` · #${m.subtask}` : ""}`, card);
-    }
+    const modules = task.cards || [];
+    if (modules.length) text("h3", words.modules, card);
+    for (const m of modules) moduleCard(card, m, "task");
+
   }
   updateActions();
   if (focused) {
@@ -476,10 +485,135 @@ async function refreshPanels() {
   if (document.visibilityState !== "visible" || panelsLoading || ended) return;
   panelsLoading = true;
   try {
-    const responses = await Promise.all([fetch("/sessions"), fetch("/tasks")]);
+    const responses = await Promise.all([fetch("/sessions"), fetch("/tasks"), fetch("/modules")]);
     if (responses.every(r => r.ok)) {
+      moduleSnapshot = await responses[2].json();
       showSessions(await responses[0].json());
+      showModules();
       showTasks(await responses[1].json());
     }
   } catch {} finally { panelsLoading = false; }
+}
+
+
+let panelMode = "tasks";
+let moduleSnapshot = {modules: [], roles: [], interlocutor: null};
+// Keep open editors intact across snapshot polls, including their unsent selections.
+const moduleEditors = new Map();
+
+function moduleCard(parent, m, placement = "modules") {
+  const identity = `${placement}:${m.scope}:${m.scope_id}:${m.role}`;
+  const card = text("article", "", parent);
+  card.className = "module-card";
+  const portrait = document.createElement("img");
+  portrait.src = `/img/${m.icon || "module"}.png`;
+  portrait.alt = "";
+  card.append(portrait);
+  const info = text("div", "", card);
+  info.className = "module-info";
+  text("strong", words[`role_${m.role}`] || m.label, info);
+  text("small", m.model || words.auto, info);
+  text("small", `${words.key}: ${m.key_label && m.key_label !== "auto" ? m.key_label : words.auto}`, info);
+  const usage = text("div", "", info);
+  usage.className = "module-usage";
+  text("span", words[`source_${m.source}`], usage).className = "status-chip";
+  text("small", `${words.calls}: ${m.calls} · ${words.tokens}: ${m.tokens}`, usage);
+  if (m.state) text("small", m.state, info).className = `module-state ${m.state_style || "muted"}`;
+  const change = button(card, "✎", () => {
+    moduleEditors.set(identity, editor);
+    editor.hidden = false;
+    change.hidden = true;
+  });
+  change.className = "module-change";
+  change.dataset.action = "true";
+  change.dataset.label = words.change;
+  change.setAttribute("aria-label", words.change);
+  const editor = moduleEditors.get(identity) || text("div", "", card);
+  if (moduleEditors.has(identity)) {
+    card.append(editor);
+    change.hidden = true;
+    return card;
+  }
+  editor.className = "module-editor";
+  editor.hidden = true;
+  const role = moduleSnapshot.roles.find(r => r.role === m.role);
+  if (!role) return card;
+  function select(label) {
+    const wrapper = text("label", label, editor);
+    return wrapper.appendChild(document.createElement("select"));
+  }
+  function option(select, value, label) {
+    const o = document.createElement("option");
+    o.value = value || "";
+    o.textContent = label;
+    select.append(o);
+    return o;
+  }
+  const model = select(words.model);
+  const key = select(words.key);
+  const scope = select(words.scope);
+  option(scope, m.scope, words.only_here).disabled = !m.scope_id;
+  option(scope, "role", words.everywhere);
+  scope.value = m.scope_id ? m.scope : "role";
+  function keys(preferred) {
+    key.replaceChildren();
+    option(key, "", words.auto);
+    const provider = (model.value || role.candidate_models[0] || "").split("/", 1)[0];
+    for (const k of role.candidate_keys.filter(k => k.provider === provider)) {
+      option(key, k.fingerprint, k.label);
+    }
+    key.value = [...key.options].some(o => o.value === preferred) ? preferred : "";
+  }
+  function defaults() {
+    const global = scope.value === "role";
+    const chosen = global ? role.model : m.choice_model;
+    model.replaceChildren();
+    option(model, "", words.auto);
+    for (const candidate of new Set([...role.candidate_models, ...(chosen ? [chosen] : [])])) {
+      option(model, candidate, candidate);
+    }
+    model.value = chosen || "";
+    keys((global ? role.key_fingerprint : m.choice_key) || "");
+  }
+  scope.onchange = defaults;
+  model.onchange = () => keys("");
+  defaults();
+  actionButton(editor, words.apply, () => {
+    moduleEditors.delete(identity);
+    return {type: "module", role: m.role, scope: scope.value,
+      scope_id: scope.value === "role" ? null : m.scope_id,
+      model: model.value || null, key: key.value || null};
+  });
+  button(editor, words.cancel, () => {
+    moduleEditors.delete(identity);
+    editor.hidden = true;
+    change.hidden = false;
+  });
+  return card;
+}
+
+function showModules() {
+  const root = $("modules");
+  root.replaceChildren();
+  const groups = new Map();
+  for (const m of moduleSnapshot.modules) {
+    if (!groups.has(m.task_id)) {
+      const group = text("section", "", root);
+      text("h3", `${m.task_ref} · ${m.goal}`, group);
+      groups.set(m.task_id, group);
+    }
+    moduleCard(groups.get(m.task_id), m);
+  }
+  $("chat-module").hidden = terminalOpen || !moduleSnapshot.interlocutor;
+  $("chat-module-title").textContent = words.role_interlocutor;
+  $("chat-module-title").onclick = e => {
+    e.preventDefault();
+    const collapsed = $("chat-module").classList.toggle("collapsed");
+    $("chat-module-title").setAttribute("aria-expanded", String(!collapsed));
+  };
+  $("chat-module-card").replaceChildren();
+  if (!terminalOpen && moduleSnapshot.interlocutor) {
+    moduleCard($("chat-module-card"), moduleSnapshot.interlocutor, "chat");
+  }
+  updateActions();
 }

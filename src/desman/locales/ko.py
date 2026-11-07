@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Chat": "채팅",
+    "Change": "변경",
+    "Only here": "여기에서만",
+    "For the role everywhere": "모든 곳에서 이 역할에 적용",
+    "Apply": "적용",
+    "Scope": "범위",
+    "Automatic": "자동",
+    "Executor (text)": "실행자 (텍스트)",
+    "Executor (code)": "실행자 (코드)",
+    "Executor (analysis)": "실행자 (분석)",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "여기에서만 모델 또는 키를 선택합니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "--task 또는 --session 중 하나만 선택하세요.",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "여기에서만 선택을 초기화합니다. 역할: planner, reviewer, decomposer, text, code, analysis, interlocutor.",

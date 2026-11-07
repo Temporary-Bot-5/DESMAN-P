@@ -52,9 +52,11 @@ from desman import (
     compaction,
     config_cli,
     messenger_cli,
+    modules_cli,
     providers,
     runs,
     task_files,
+    tuning_cli,
     ui,
     wizard,
 )
@@ -289,7 +291,9 @@ class Chat:
         config = self._saved_config()
         if line is not None:
             self.sessions.add(self._terminal_id, Role.USER, providers.redact_keys(line, config)[0])
-        with ui.recording(redact=lambda text: providers.redact_keys(text, config)[0]) as rec:
+        with ui.recording(
+            show=self.in_terminal, redact=lambda text: providers.redact_keys(text, config)[0]
+        ) as rec:
             try:
                 return operation()
             finally:
@@ -297,7 +301,8 @@ class Chat:
                 text = providers.redact_keys(text, self._saved_config())[0]
                 if text.strip():
                     self.sessions.add(self._terminal_id, Role.DESMAN, text, kind=Kind.EVENT)
-                self._seen_terminal()
+                if self.in_terminal:
+                    self._seen_terminal()
 
     def _terminal_command(self, line: str) -> None:
         self._terminal_open()
@@ -1167,16 +1172,71 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
+        if isinstance(action, ui.ModuleAction):
+            # Validate the originating chat before recording the change.
+            if action.scope == "session" and (
+                action.scope_id != self.session_id or self.in_terminal
+            ):
+                ui.error(t("Invalid module choice."))
+                return
+            self._terminal_output(lambda: self._module_action(action))
+            return
         if isinstance(action, ui.SimpleAction) and action.type == "terminal":
             self._terminal_open()
             return
         if isinstance(action, ui.DecideAction) or (
             isinstance(action, ui.SimpleAction) and action.type in ("messenger", "settings")
         ):
-            self._terminal_open()
+            if not isinstance(action, ui.DecideAction):
+                self._terminal_open()
             self._terminal_output(lambda: self._dispatch_action(action))
         else:
             self._dispatch_action(action)
+
+    def _module_action(self, action: ui.ModuleAction) -> None:
+        config = self._config()
+        if config is None:
+            return
+        try:
+            row = next(r for r in tuning_cli.role_rows(config) if r["role"] == action.role)
+            if action.model is not None and action.model not in row["candidate_models"]:
+                raise ValueError("unavailable model")
+            selected_key = next(
+                (k for k in row["candidate_keys"] if k["fingerprint"] == action.key), None
+            )
+            first_model = action.model or next(iter(row["candidate_models"]), "")
+            if action.key is not None and (
+                selected_key is None or selected_key["provider"] != first_model.split("/", 1)[0]
+            ):
+                raise ValueError("unavailable key")
+            selector = selected_key["selector"] if selected_key else "auto"
+            if action.scope == "role":
+                old, new, edited = tuning_cli.set_tuning(
+                    open_config(),
+                    tuning_cli.TuningChange(
+                        models={action.role: action.model or "auto"}, keys={action.role: selector}
+                    ),
+                )
+                before = edited.model_copy(update={"tuning": old})
+                for name, about in commands.config_changes(before, edited):
+                    operator.record(self.store.conn, name, about, session_id=self.session_id)
+                lines = tuning_cli.lines(old, new, edited)
+            else:
+                assert action.scope_id is not None
+                old_choice, new_choice = modules_cli.set_module(
+                    self.store.conn,
+                    config,
+                    action.scope,
+                    action.scope_id,
+                    action.role,
+                    action.model or "auto",
+                    selector,
+                )
+                lines = modules_cli.change_lines(action.role, old_choice, new_choice, config)
+            for line in lines:
+                ui.ok(line)
+        except (ValueError, click.ClickException):
+            ui.error(t("Invalid module choice."))
 
     def _dispatch_action(self, action: ui.Action) -> None:
         """Dispatch validated browser choices through the chat's existing command bodies."""
