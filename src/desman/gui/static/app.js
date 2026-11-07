@@ -5,6 +5,8 @@ let words = {};
 let after = 0;
 let state = 0;
 let promptId = null;
+let pendingId = null;
+let transcriptVersion = null;
 let ended = false;
 let sending = false;
 let lineOpen = false;
@@ -258,6 +260,10 @@ async function answer(p, value, cancel = false) {
     const body = cancel ? {id: p.id, cancel: true} : {id: p.id, value};
     const response = await post("/answer", body);
     if (!response.ok) throw new Error();
+    if (pendingId === p.id) {
+      $("pending").replaceChildren();
+      pendingId = null;
+    }
     if (promptId === p.id) {
       lineOpen = false;
       updateActions();
@@ -271,18 +277,20 @@ async function answer(p, value, cancel = false) {
   }
 }
 
-function showPrompt(p) {
-  lineOpen = !!p && p.kind === "line";
-  document.body.classList.toggle("settings-prompt", !!p && p.kind !== "line");
+function showPrompt(p, pending = false) {
+  const target = pending ? "pending" : "prompt";
+  let shownId = pending ? pendingId : promptId;
+  if (!pending) lineOpen = !!p && p.kind === "line";
+  if (!pending) document.body.classList.toggle("settings-prompt", !!p && p.kind !== "line");
   updateActions();
   if (!p) {
-    $("prompt").replaceChildren();
-    promptId = null;
+    $(target).replaceChildren();
+    if (pending) pendingId = null; else promptId = null;
     return;
   }
-  if (p.id === promptId) return;
-  promptId = p.id;
-  const form = $("prompt");
+  if (p.id === shownId) return;
+  if (pending) pendingId = p.id; else promptId = p.id;
+  const form = $(target);
   form.replaceChildren();
   form.classList.toggle("line-prompt", p.kind === "line");
   if (p.question) text("h2", p.question, form);
@@ -463,7 +471,16 @@ async function poll() {
         after = Math.max(after, e.seq);
       }
       state = data.state;
-      rich($("live"), data.live || "");
+      if (data.transcript && data.transcript_version !== transcriptVersion) {
+        transcriptVersion = data.transcript_version;
+        transcript.replaceChildren();
+        for (const html of data.transcript) rich(text("div", "", transcript), html);
+      }
+      let live = data.session_live || data.live || "";
+      if (data.turn?.state === "queued") {
+        $("live").textContent = words.waiting_module.replace("{n}", data.turn.ahead);
+      } else rich($("live"), live);
+      showPrompt(data.pending || null, true);
       showPrompt(data.prompt);
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
@@ -629,6 +646,11 @@ function showSessions(data) {
       row.className = s.id === data.current ? "session current" : "session";
       const open = actionButton(row, (s.unread ? "● " : "") + (s.name || "…"), {type: "open_session", id: s.id});
       open.className = "session-name";
+      if (s.state) {
+        const label = s.state === "pending" ? words.waits_for_you :
+          s.state === "queued" ? words.queued_turns.replace("{n}", s.queued) : words.answering;
+        text("small", label + (s.state === "answering" && s.queued ? " · " + words.queued_turns.replace("{n}", s.queued) : ""), row);
+      }
       if (s.id === data.current) open.setAttribute("aria-current", "true");
       text("time", relativeDate(s.last_at), row).dateTime = new Date(s.last_at).toISOString();
       iconAction(row, "⌖", s.pinned ? words.unpin : words.pin, {type: s.pinned ? "unpin" : "pin", id: s.id});

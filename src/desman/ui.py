@@ -13,7 +13,8 @@ import re
 import sys
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager, redirect_stderr, redirect_stdout
+from contextlib import AbstractContextManager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
@@ -30,6 +31,7 @@ from rich.theme import Theme
 
 from desman.i18n import t
 from desman.settings_actions import Setting
+from desman.thread_output import Routed, redirect_stderr, redirect_stdout
 
 T = TypeVar("T")
 
@@ -651,34 +653,43 @@ class TerminalFront:
             self._live = None
 
 
-_front: Front = TerminalFront()
+_terminal_front = TerminalFront()
+_active_front: ContextVar[Front] = ContextVar("front", default=_terminal_front)
+
+
+class _FrontProxy:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_active_front.get(), name)
+
+
+_front = cast(Front, _FrontProxy())
 
 
 @contextmanager
 def use(front: Front) -> Iterator[None]:
-    """Select a front for synchronous UI calls and restore it even after cancellation."""
-    global _front
-    previous, _front = _front, front
+    """Select this thread's front, restoring it after cancellation."""
+    token = _active_front.set(front)
     try:
         yield
     finally:
-        _front = previous
+        _active_front.reset(token)
 
 
 @contextmanager
 def _ui_writes() -> Iterator[None]:
-    global _ui_depth
-    stdout = sys.stdout.target if isinstance(sys.stdout, _Tee) else sys.stdout
-    stderr = sys.stderr.target if isinstance(sys.stderr, _Tee) else sys.stderr
-    _ui_depth += 1
+    stdout = sys.stdout.target if isinstance(sys.stdout, Routed) else sys.stdout
+    stdout = stdout.target if isinstance(stdout, _Tee) else stdout
+    stderr = sys.stderr.target if isinstance(sys.stderr, Routed) else sys.stderr
+    stderr = stderr.target if isinstance(stderr, _Tee) else stderr
+    token = _ui_depth.set(_ui_depth.get() + 1)
     try:
         with redirect_stdout(stdout), redirect_stderr(stderr):
             yield
     finally:
-        _ui_depth -= 1
+        _ui_depth.reset(token)
 
 
-_ui_depth = 0
+_ui_depth: ContextVar[int] = ContextVar("ui_depth", default=0)
 
 
 @dataclass
@@ -692,13 +703,13 @@ class Recording:
         return Text.from_ansi(self.buffer.getvalue()).plain
 
 
-_recordings: list[Recording] = []
+_recordings: ContextVar[tuple[Recording, ...]] = ContextVar("recordings", default=())
 
 
 def _record(*items: RenderableType | str) -> None:
-    if _ui_depth:
+    if _ui_depth.get():
         return
-    for recording in _recordings:
+    for recording in _recordings.get():
         _RecordingConsole(recording).print(*items)
 
 
@@ -723,7 +734,7 @@ class _RecordingConsole(Console):
 
 class _Tee(io.TextIOBase):
     def __init__(self, target: Any, recording: Recording) -> None:
-        self.target = target
+        self.target = target.target if isinstance(target, Routed) else target
         self.recording = recording
 
     encoding = "utf-8"
@@ -763,8 +774,8 @@ def recording(
 ) -> Iterator[Recording]:
     """Tee output into colourless text, optionally keeping notices off the active front."""
     rec = Recording(io.StringIO(), redact or (lambda value: value))
-    _recordings.append(rec)
-    previous = _front
+    token = _recordings.set((*_recordings.get(), rec))
+    previous = _active_front.get()
     try:
         if not show:
             # A quiet terminal front still uses the same UI rendering paths.
@@ -778,8 +789,8 @@ def recording(
             with redirect_stdout(_Tee(sys.stdout, rec)), redirect_stderr(_Tee(sys.stderr, rec)):
                 yield rec
     finally:
-        _recordings.remove(rec)
-        assert _front is previous
+        _recordings.reset(token)
+        assert _active_front.get() is previous
 
 
 def live_start(terminal: bool | None = None) -> bool:
@@ -835,7 +846,7 @@ def ok(text: str) -> None:
 
 
 def warn(text: str, *, stderr: bool = False) -> None:
-    for rec in _recordings:
+    for rec in _recordings.get():
         rec.warnings.append(rec.redact(text))
     _record(Text("! " + text))
     with _ui_writes():

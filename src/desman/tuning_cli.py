@@ -30,6 +30,7 @@ ROLES = tuple(ModelChoices.model_fields)
 
 
 @click.command("tuning")
+@click.option("--chat-turns", metavar="N|auto", help="Concurrent page chat turns (1–8).")
 @click.option(
     "--workers", metavar="N|auto", help="Background workers (1–8); applies on the next page start."
 )
@@ -71,6 +72,7 @@ ROLES = tuple(ModelChoices.model_fields)
 @click.option("--reset", is_flag=True, help="Everything back to DESMAN's defaults.")
 @json_option
 def tuning(
+    chat_turns: str | None,
     workers: str | None,
     max_subtasks: str | None,
     max_parts: str | None,
@@ -86,6 +88,7 @@ def tuning(
     Show, or change."""
     manager = load_config()
     numbers = {
+        "chat_turns": chat_turns,
         "workers": workers,
         "max_subtasks": max_subtasks,
         "max_parts": max_parts,
@@ -316,6 +319,7 @@ def set_tuning(manager: ConfigManager, change: TuningChange) -> tuple[Tuning, Tu
 
 def labels() -> dict[str, str]:
     return {
+        "chat_turns": t("Concurrent page chat turns"),
         "workers": t("Background workers (next page start)"),
         "max_subtasks": t("most subtasks in a plan"),
         "max_parts": t("most parts of a split subtask"),

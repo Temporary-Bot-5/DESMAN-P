@@ -98,7 +98,7 @@ def test_every_target_is_a_plain_value_outside_the_protected_files() -> None:
 
 def test_every_setting_is_a_part_of_the_tuning_and_never_a_key_or_permission() -> None:
     names = {s.name for s in improve.SETTINGS}
-    assert names == (set(TUNING_LIMITS) - {"workers"}) | (
+    assert names == (set(TUNING_LIMITS) - {"workers", "chat_turns"}) | (
         set(ModelChoices.model_fields) - {"interlocutor"}
     )
     assert all(s.id.startswith("tuning.") for s in improve.SETTINGS)

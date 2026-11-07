@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Concurrent page chat turns (1–8).": "페이지 동시 채팅 차례 수(1–8).",
+    "Concurrent page chat turns": "페이지 동시 채팅 차례 수",
+    "Waiting for a free module: {n} ahead": "사용 가능한 모듈 대기 중: 앞에 {n}개",
+    "Queued ({n})": "대기 중({n})",
+    "Answering": "답변 중",
+    "Waits for you": "입력 대기 중",
+    "Stopped; the reply that came later was dropped": "중지됨; 나중에 도착한 답변을 버렸습니다",
+    "The chat turn failed ({error}).": "채팅 차례에 실패했습니다({error}).",
     "Background workers (1–8); applies on the next page start.": "백그라운드 작업자(1–8); 다음 페이지 시작 시 적용됩니다.",
     "Background workers (next page start)": "백그라운드 작업자(다음 페이지 시작 시)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

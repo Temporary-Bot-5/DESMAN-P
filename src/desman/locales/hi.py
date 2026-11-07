@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Concurrent page chat turns (1–8).": "पेज पर एक साथ चैट की बारी (1–8)।",
+    "Concurrent page chat turns": "पेज पर एक साथ चैट की बारी",
+    "Waiting for a free module: {n} ahead": "खाली मॉड्यूल की प्रतीक्षा: आगे {n}",
+    "Queued ({n})": "कतार में ({n})",
+    "Answering": "उत्तर दे रहा है",
+    "Waits for you": "आपकी प्रतीक्षा में",
+    "Stopped; the reply that came later was dropped": "रोक दिया गया; बाद में आया उत्तर हटा दिया गया",
+    "The chat turn failed ({error}).": "चैट की बारी विफल हुई ({error})।",
     "Background workers (1–8); applies on the next page start.": "पृष्ठभूमि वर्कर (1–8); पेज अगली बार शुरू होने पर लागू होगा।",
     "Background workers (next page start)": "पृष्ठभूमि वर्कर (पेज अगली बार शुरू होने पर)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

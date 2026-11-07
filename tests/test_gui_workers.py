@@ -166,7 +166,7 @@ def test_hung_workers_are_terminated_then_killed(tmp_path: Path) -> None:
 
 def test_schema_six_upgrades_without_changing_tuning() -> None:
     config = Config.model_validate(upgrade({"schema_version": 6, "tuning": {"max_subtasks": 4}}))
-    assert config.schema_version == 7 and config.tuning.workers is None
+    assert config.schema_version == 8 and config.tuning.workers is None
     assert config.tuning.max_subtasks == 4
     assert Tuning(workers=8).workers == 8
     with pytest.raises(ValueError):

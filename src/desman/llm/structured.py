@@ -21,7 +21,9 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -47,6 +49,32 @@ class StructuredOutputError(ValueError):
         self.reply = reply
 
 
+_completion_guard: ContextVar[Callable[[], None] | None] = ContextVar(
+    "completion_guard", default=None
+)
+
+
+@contextmanager
+def completion_guard(check: Callable[[], None]) -> Iterator[None]:
+    """A page turn can discard late results without changing provider/cache identity."""
+    token = _completion_guard.set(check)
+    try:
+        yield
+    finally:
+        _completion_guard.reset(token)
+
+
+def _complete(llm: LLM, request: Request) -> Completion:
+    check = _completion_guard.get()
+    if check is not None:
+        check()
+    try:
+        return llm.complete(request)
+    finally:
+        if check is not None:
+            check()
+
+
 def complete_json(
     llm: LLM,
     request: Request,
@@ -61,7 +89,7 @@ def complete_json(
     that reports a failure: asked again later, the model may succeed). Provider errors
     propagate untouched: they are not the reply's fault.
     """
-    reply = llm.complete(request)
+    reply = _complete(llm, request)
     value, problem = _validate(reply, schema)
     if value is not None:
         if keep(value):
@@ -82,7 +110,7 @@ def complete_json(
             ]
         }
     )
-    second = llm.complete(repair)
+    second = _complete(llm, repair)
     value, problem = _validate(second, schema)
     if value is not None:
         if keep(value):

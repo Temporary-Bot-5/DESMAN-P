@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Concurrent page chat turns (1–8).": "页面同时进行的聊天轮次（1–8）。",
+    "Concurrent page chat turns": "页面同时进行的聊天轮次",
+    "Waiting for a free module: {n} ahead": "等待空闲模块：前面有 {n} 个",
+    "Queued ({n})": "排队中（{n}）",
+    "Answering": "正在回答",
+    "Waits for you": "等待你",
+    "Stopped; the reply that came later was dropped": "已停止；稍后到达的回复已丢弃",
+    "The chat turn failed ({error}).": "聊天轮次失败（{error}）。",
     "Background workers (1–8); applies on the next page start.": "后台工作进程（1–8）；下次启动页面时生效。",
     "Background workers (next page start)": "后台工作进程（下次启动页面时生效）",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

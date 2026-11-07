@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Concurrent page chat turns (1–8).": "Tours de discussion simultanés sur la page (1–8).",
+    "Concurrent page chat turns": "Tours de discussion simultanés sur la page",
+    "Waiting for a free module: {n} ahead": "En attente d’un module libre : {n} avant vous",
+    "Queued ({n})": "En file ({n})",
+    "Answering": "Répond",
+    "Waits for you": "Vous attend",
+    "Stopped; the reply that came later was dropped": "Arrêté ; la réponse arrivée ensuite a été écartée",
+    "The chat turn failed ({error}).": "Le tour de discussion a échoué ({error}).",
     "Background workers (1–8); applies on the next page start.": "Processus en arrière-plan (1–8) ; au prochain démarrage de la page.",
     "Background workers (next page start)": "Processus en arrière-plan (au prochain démarrage)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

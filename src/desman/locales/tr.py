@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Concurrent page chat turns (1–8).": "Sayfada eşzamanlı sohbet turları (1–8).",
+    "Concurrent page chat turns": "Sayfada eşzamanlı sohbet turları",
+    "Waiting for a free module: {n} ahead": "Boş modül bekleniyor: önde {n}",
+    "Queued ({n})": "Sırada ({n})",
+    "Answering": "Yanıtlıyor",
+    "Waits for you": "Sizi bekliyor",
+    "Stopped; the reply that came later was dropped": "Durduruldu; sonradan gelen yanıt atıldı",
+    "The chat turn failed ({error}).": "Sohbet turu başarısız oldu ({error}).",
     "Background workers (1–8); applies on the next page start.": "Arka plan çalışanları (1–8); sayfanın sonraki açılışında uygulanır.",
     "Background workers (next page start)": "Arka plan çalışanları (sonraki sayfa açılışı)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

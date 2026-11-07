@@ -151,6 +151,16 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
     return {name: what for name, what in every.items() if not (temporary and name in KEPT_ONLY)}
 
 
+def run_turn(session_id: str | None, text: str, *, context: Chat, added: bool = False) -> None:
+    """Execute a turn with an explicit connection/models/sink context.
+
+    The terminal supplies its synchronous chat context. Each page runner supplies a
+    private context, so changing the open session cannot redirect a turn in flight.
+    """
+    context.session_id = session_id
+    context._message(text, added=added)
+
+
 class Chat:
     def __init__(
         self,
@@ -163,6 +173,8 @@ class Chat:
     ) -> None:
         if resume and temporary:
             raise ValueError("a temporary chat never continues a session")
+        self.dispatch_turn: Callable[[str], bool] | None = None
+        self.turn_sink: Callable[[str], None] | None = None
         self._outcome_audit: int | None = None
         self.background_tasks = background_tasks
         self.sessions = sessions
@@ -215,6 +227,8 @@ class Chat:
                 command = line.strip()
                 if not command:
                     continue
+                if self.dispatch_turn is not None and self.dispatch_turn(line):
+                    continue
                 if command.startswith("/"):
                     if self.in_terminal:
                         name = command.split()[0].lower()
@@ -242,13 +256,13 @@ class Chat:
                 if command.startswith("!") or self.in_terminal:
                     self._terminal_command(line)
                     continue
-                self._message(line)  # kept as typed: indentation may matter (code, a list)
+                run_turn(self.session_id, line, context=self)
         finally:
             if self._http is not None:
                 self._http.close()
             self._erase()
             if self._previous is not None and self._previous[1] and self._previous[0] is not None:
-                self.sessions.erase(self._previous[0])
+                self._erase_session(self._previous[0])
 
     @property
     def in_terminal(self) -> bool:
@@ -352,14 +366,17 @@ class Chat:
                 ).fetchone()[0]
                 ui.note(t("{n} new in General Terminal (/terminal)", n=count))
 
+    def _erase_session(self, session_id: str) -> None:
+        self.sessions.erase(session_id)
+
     def _erase(self) -> None:
         """A temporary chat's session, erased: when it ends or a new one starts."""
         if self.temporary and self.session_id is not None:
-            self.sessions.erase(self.session_id)
+            self._erase_session(self.session_id)
 
     # ── Messages ─────────────────────────────────────────────────────────────
 
-    def _message(self, text: str) -> None:
+    def _message(self, text: str, *, added: bool = False) -> None:
         config = self._config()
         text, cut = providers.redact_keys(text, config)
         if cut:  # before anything keeps it: the history, a model, a task's goal
@@ -374,7 +391,8 @@ class Chat:
             config = choices.effective(config, "interlocutor", self._pending_choice)
         models = None if config is None else self._models(config)
         if config is None or models is None:
-            self.session_id = self._add_user(text)
+            if not added:
+                self.session_id = self._add_user(text)
             return
         personal = config.personalize and not self.temporary  # a temporary chat notes nothing
         notes = self.profile.notes() if personal else None
@@ -388,7 +406,9 @@ class Chat:
             incoming = estimate_tokens(text)
             if compaction.needed(before, after=after, extra=incoming):
                 self._compact(before, models, incoming=incoming)
-        self.session_id = self._add_user(text)
+        if not added:
+            self.session_id = self._add_user(text)
+        assert self.session_id is not None
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
             with self._for(calls.Role.INTERLOCUTOR):
@@ -473,7 +493,10 @@ class Chat:
             task_id=task_id,
             outcome_audit=self._outcome_audit,
         )
-        ui.out(_render(message))
+        if self.turn_sink is not None:
+            self.turn_sink(message.session_id)
+        else:
+            ui.out(_render(message))
 
     def _event(self, text: str, task_id: str | None = None) -> None:
         if self.session_id is None or self.in_terminal:
@@ -487,7 +510,10 @@ class Chat:
             task_id=task_id,
             outcome_audit=self._outcome_audit,
         )
-        ui.out(_render(message))
+        if self.turn_sink is not None:
+            self.turn_sink(message.session_id)
+        else:
+            ui.out(_render(message))
 
     def _note(self, edits: list[ProfileEdit], config: Config) -> None:
         """The interlocutor's edits of the profile, each shown as it is made. One that does
@@ -1055,7 +1081,7 @@ class Chat:
         if blocked:
             self._told_blocked = text
 
-    def background_outcomes(self) -> None:
+    def background_outcomes(self, enqueue: Callable[[str, bool], None] | None = None) -> None:
         """Retell settled tasks in their own sessions, including while the line is idle."""
         current, temporary = self.session_id, self.temporary
         rows = self.sessions.conn.execute(
@@ -1071,6 +1097,9 @@ class Chat:
                     if task_report(self.store, task).status is not TaskStatus.ACTIVE
                 ]
                 if not settled:
+                    continue
+                if enqueue is not None:
+                    enqueue(row["id"], bool(row["temporary"]))
                     continue
                 self.session_id, self.temporary = row["id"], bool(row["temporary"])
                 with ui.recording(show=row["id"] == current):
@@ -1831,7 +1860,7 @@ class Chat:
         if self.in_terminal and self._previous is not None:
             previous, self._previous = self._previous, None
             if previous[1] and previous[0] is not None:
-                self.sessions.erase(previous[0])
+                self._erase_session(previous[0])
 
     def _drop_pending(self) -> None:
         self._pending_choice = None
