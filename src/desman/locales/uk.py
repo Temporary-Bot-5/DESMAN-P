@@ -23,6 +23,7 @@ MESSAGES: dict[str, Forms] = {
     "Waits for you": "Чекає на вас",
     "Stopped; the reply that came later was dropped": "Зупинено; відповідь, що надійшла пізніше, відкинуто",
     "The chat turn failed ({error}).": "Не вдалося виконати хід чату ({error}).",
+    "Background workers wait: config.json does not load ({error}).": "Фонові робочі процеси чекають: config.json не завантажується ({error}).",
     "Background workers started again.": "Фонові робочі процеси знову запущено.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Фонові робочі процеси чекають на модель: додайте ключ або локальну модель в налаштуваннях.",
     "Background workers (1–8); applies on the next page start.": "Фонові працівники (1–8); діє з наступного запуску сторінки.",

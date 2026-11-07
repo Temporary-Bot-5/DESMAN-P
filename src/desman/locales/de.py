@@ -18,6 +18,7 @@ MESSAGES: dict[str, Forms] = {
     "Waits for you": "Wartet auf dich",
     "Stopped; the reply that came later was dropped": "Angehalten; die später eingetroffene Antwort wurde verworfen",
     "The chat turn failed ({error}).": "Die Chat-Runde ist fehlgeschlagen ({error}).",
+    "Background workers wait: config.json does not load ({error}).": "Hintergrund-Worker warten: config.json lässt sich nicht laden ({error}).",
     "Background workers started again.": "Hintergrundprozesse wurden wieder gestartet.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Hintergrundprozesse warten auf ein Modell: Fügen Sie in den Einstellungen einen Schlüssel oder ein lokales Modell hinzu.",
     "Background workers (1–8); applies on the next page start.": "Hintergrundprozesse (1–8); gilt beim nächsten Seitenstart.",

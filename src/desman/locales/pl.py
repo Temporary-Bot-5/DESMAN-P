@@ -23,6 +23,7 @@ MESSAGES: dict[str, Forms] = {
     "Waits for you": "Czeka na ciebie",
     "Stopped; the reply that came later was dropped": "Zatrzymano; późniejsza odpowiedź została odrzucona",
     "The chat turn failed ({error}).": "Tura czatu nie powiodła się ({error}).",
+    "Background workers wait: config.json does not load ({error}).": "Procesy w tle czekają: nie można wczytać config.json ({error}).",
     "Background workers started again.": "Procesy w tle zostały ponownie uruchomione.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Procesy w tle czekają na model: dodaj klucz lub model lokalny w Ustawieniach.",
     "Background workers (1–8); applies on the next page start.": "Procesy w tle (1–8); od następnego uruchomienia strony.",
