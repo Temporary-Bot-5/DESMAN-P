@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ from desman.llm import router
 
 def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
     """Open an existing WAL database read-only, independently of the chat connection."""
-    if not path.exists():
+    if kind != "settings" and not path.exists():
         return (
             {
                 "current": None,
@@ -42,10 +44,28 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
     try:
         config = open_config().load()
     except (ConfigError, OSError):
+        if kind == "settings":
+            raise
         config = None
 
+    # Labels/settings may themselves contain escaped copies of a configured secret.
+    forms = {
+        form
+        for keys in (config.api_keys.values() if config else [])
+        for key in keys
+        for form in (escape(key.value), json.dumps(key.value)[1:-1])
+        if form
+    }
+
     def redact(text: str) -> str:
+        for form in sorted(forms, key=len, reverse=True):
+            text = text.replace(form, providers.REDACTED)
         return providers.redact_keys(text, config)[0]
+
+    if kind == "settings" and not path.exists():
+        from desman.gui.settings import data
+
+        return redact_snapshot(data(None, config or Config(), front), redact)
 
     conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -53,6 +73,10 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
     conn.execute("PRAGMA query_only = ON")
     try:
         with db.read_snapshot(conn):
+            if kind == "settings":
+                from desman.gui.settings import data
+
+                return redact_snapshot(data(conn, config or Config(), front), redact)
             if kind == "sessions":
                 with front.condition:
                     current, temporary = front.current, front.temporary

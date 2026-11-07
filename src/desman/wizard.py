@@ -281,7 +281,11 @@ def _provider_menu(s: _Session, p: Provider) -> None:
             current = s.config.settings.get(setting.env) or setting.default
             actions.append(
                 ui.Choice(
-                    t("Set {label} ({env})", label=setting.label, env=setting.env),
+                    t(
+                        "Set {label} ({env})",
+                        label=provider_setting_label(setting),
+                        env=setting.env,
+                    ),
                     setting,
                     current or t("not set"),
                 )
@@ -428,25 +432,42 @@ def _remove_key(s: _Session, p: Provider) -> None:
     ui.ok(t("Key removed from {name}.", name=p.name))
 
 
+def provider_setting_label(setting: providers.Setting) -> str:
+    """Provider data uses stable English names; human surfaces translate them here."""
+    return {
+        "Account ID": t("Account ID"),
+        "Host": t("Host"),
+        "Model": t("Model"),
+        "Context (tokens)": t("Context (tokens)"),
+        "Server URL": t("Server URL"),
+        "URL": t("URL"),
+    }[setting.label]
+
+
 def _set(s: _Session, p: Provider, setting: Any) -> None:
     current = s.config.settings.get(setting.env) or setting.default
     value = ui.text(
         t(
             "{label} for {name} ({env}); '-' clears it",
-            label=setting.label,
+            label=provider_setting_label(setting),
             name=p.name,
             env=setting.env,
         ),
         current,
     )
+    set_provider_setting(s.config, p, setting, value)
+
+
+def set_provider_setting(config: Config, p: Provider, setting: Any, value: str) -> None:
+    """Apply one provider setting, shared by the wizard and settings window."""
     if value == "-":
-        s.config.settings.pop(setting.env, None)
+        config.settings.pop(setting.env, None)
     elif value:
-        s.config.settings[setting.env] = value
+        config.settings[setting.env] = value
         if p.id == "searxng":
             _check_searxng(value)
     if p.local and setting.env not in (p.model_env, p.context_env):
-        address = p.setting(s.config, setting.env)
+        address = p.setting(config, setting.env)
         if not providers.on_this_machine(address):
             ui.warn(
                 t(
@@ -482,15 +503,18 @@ def _permissions(current: Permissions) -> Permissions:
     return Permissions(**{name: name in granted for name in names})
 
 
+def personalize_consent() -> str:
+    """The consent text shared by both settings surfaces."""
+    return t(
+        "If you agree, the interlocutor studies how you talk with it, anything you write "
+        "included, and keeps short notes about you (/profile in the chat shows and erases "
+        "them). The notes go to the model providers with every message."
+    )
+
+
 def ask_personalize(current: bool) -> bool:
     ui.section(t("Personalisation"))
-    ui.note(
-        t(
-            "If you agree, the interlocutor studies how you talk with it, anything you write "
-            "included, and keeps short notes about you (/profile in the chat shows and erases "
-            "them). The notes go to the model providers with every message."
-        )
-    )
+    ui.note(personalize_consent())
     return ui.confirm(
         t("Do you want the agent to study your conversations and become more personal to you?"),
         default=current,

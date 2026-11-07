@@ -23,5 +23,12 @@
       <form id="prompt"></form>
     </main>
     <aside id="tasks-panel"><nav id="panel-switch"></nav><div id="tasks"></div><div id="modules" hidden></div></aside>
+    <div id="settings-window" hidden>
+      <section id="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-heading" tabindex="-1">
+        <header><h1 id="settings-heading"></h1><button id="settings-close" type="button">×</button></header>
+        <div id="settings-layout"><nav id="settings-nav"></nav><div id="settings-form"></div></div>
+        <footer><span id="settings-wait"></span><div id="settings-result" role="status"></div></footer>
+      </section>
+    </div>
   </body>
 </html>

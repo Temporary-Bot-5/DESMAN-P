@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from pydantic import ValidationError
 
 from desman import ui
+from desman.config import ConfigError
 from desman.core import db
 from desman.gui.front import WebFront
 from desman.gui.panels import snapshot
@@ -36,6 +37,44 @@ SECURITY = {
 def strings() -> dict[str, str]:
     return {
         "lang": language(),
+        "settings_general": t("General"),
+        "settings_keys": t("Keys"),
+        "settings_roles": t("Role models"),
+        "other_providers": t("Other providers"),
+        "get_key": t("Get a key"),
+        "advanced": t("Advanced"),
+        "saved": t("Saved"),
+        "settings_permissions": t("Permissions"),
+        "settings_personalize": t("Personalisation"),
+        "settings_behaviour": t("Conversation"),
+        "download": t("Download"),
+        "settings_limits": t("Work limits"),
+        "settings_models": t("Local models"),
+        "settings_network": t("desman-global"),
+        "settings_protected": t("Protected files"),
+        "save": t("Save"),
+        "close": t("Close"),
+        "language": t("Language"),
+        "setup_wizard": t("Run the setup wizard"),
+        "missing": t("missing"),
+        "provider_site": t("Provider website"),
+        "key_label": t("Key label"),
+        "add_key": t("Add key"),
+        "check": t("Check"),
+        "forget": t("Forget"),
+        "reset": t("Reset"),
+        "provider": t("provider"),
+        "show": t("Show"),
+        "add": t("Add"),
+        "approve": t("Approve"),
+        "off": t("off"),
+        "registry": t("Registry"),
+        "join": t("Join"),
+        "leave": t("Leave"),
+        "calls_daily": t("Calls per day"),
+        "tokens_daily": t("Tokens per day"),
+        "lend": t("Lend"),
+        "unlend": t("Take back"),
         "change": t("Change"),
         "only_here": t("Only here"),
         "scope_unavailable": t(
@@ -209,10 +248,10 @@ class Server:
                     files("desman.gui").joinpath("static", name).read_bytes(),
                     {"Content-Type": content_type},
                 )
-            if url.path in {"/sessions", "/tasks", "/modules"}:
+            if url.path in {"/sessions", "/tasks", "/modules", "/settings"}:
                 try:
                     return self._json(snapshot(self.database, url.path[1:], self.front))
-                except sqlite3.Error:
+                except (sqlite3.Error, ConfigError, OSError):
                     return Response(503)
             if url.path == "/strings.json":
                 return self._json(strings())
