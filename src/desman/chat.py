@@ -1353,7 +1353,9 @@ class Chat:
                 self._terminal_command(line)
             return True
         if name == "/clear":
-            if self.in_terminal:
+            if self.background_tasks and self.session_id is not None:
+                self.sessions.clear_screen(self.session_id)
+            elif self.in_terminal:
                 self.sessions.clear_terminal()
             ui.clear_screen()
             return True
@@ -2190,6 +2192,8 @@ def _redacted(value: Any, config: Config | None) -> Any:
 def _render(message: Message) -> Text:
     if message.kind is Kind.SUMMARY:
         return Text(t("Summary of the older messages:") + "\n" + message.text, style="muted")
+    if message.cancelled_at is not None:
+        message = message.model_copy(update={"text": message.text + " (" + t("Stopped") + ")"})
     if message.role is Role.USER:
         return Text("› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:

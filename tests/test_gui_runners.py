@@ -229,6 +229,12 @@ def test_stop_drops_late_reply_and_clears_only_a_queue(page: Harness) -> None:
     page.send("A3")
     page.done(a)
     assert page.answers(a) == ["reply:A3"]
+    request = next(data for text, data in page.requests if text == "A3")
+    assert all(m["text"] not in {"A1", "A2"} for m in request["conversation"])
+    assert not page.sessions.pending_turns()
+    stopped = [m for m in page.sessions.messages(a) if m.cancelled_at]
+    assert [m.text for m in stopped] == ["A1", "A2"]
+    assert "Stopped" in "".join(page.front.poll(0, timeout=0)["transcript"])
 
 
 def test_background_reply_unread_clears_on_open(page: Harness) -> None:
@@ -574,3 +580,115 @@ def test_queued_input_is_redacted_before_a_key_can_be_removed(page: Harness) -> 
     assert all(secret not in request.prompt for _, _, fake in page.models for request in fake.calls)
     assert secret not in " ".join(m.text for m in page.sessions.messages(b))
     assert page.answers(b)
+
+
+def test_restart_recovers_queued_inputs_and_waits_for_late_reply(page: Harness) -> None:
+    config = open_config().load()
+    config.tuning.chat_turns = 1
+    open_config().save(config)
+    gate = page.gate("A")
+    a = page.send("A")
+    assert page.entered["A"].wait(10)
+    page.new()
+    b = page.send("B")
+    page.wait(lambda: page.runners.status(b)["state"] == "queued")
+    old = page.runners
+    old.close(timeout=0)
+    front = WebFront()
+    new = Runners(page.path, front, cap=1)
+    try:
+        new.recover(page.sessions)
+        gate.set()
+        with front.condition:
+            assert front.condition.wait_for(lambda: not new.runners, timeout=10)
+        assert page.answers(a) == ["reply:A"]
+        assert page.answers(b) == ["reply:B"]
+        assert [text for text, _ in page.requests] == ["A", "B"]
+        new.recover(page.sessions)
+        assert not new.runners
+    finally:
+        gate.set()
+        new.close()
+
+
+def test_clear_persists_screen_boundary_without_changing_context(page: Harness) -> None:
+    a = page.send("hello")
+    page.done(a)
+    with ui.use(page.front):
+        assert page.chat._slash("/clear")
+    page.send("again")
+    page.done(a)
+    screen = "".join(page.front.poll(0, timeout=0)["transcript"])
+    assert "hello" not in screen and "again" in screen
+    assert screen.count("Earlier messages hidden") == 1
+    history = page.sessions.history(a)
+    assert "hello" in [m.text for m in history.messages]
+    request = next(data for text, data in page.requests if text == "again")
+    assert {"from": "person", "text": "hello"} in request["conversation"]
+    reload = WebFront()
+    reload.runners = page.runners
+    reload.database = page.path
+    reload.session(a, False)
+    assert "hello" not in "".join(reload.poll(0, timeout=0)["transcript"])
+
+
+def test_handed_off_command_saved_once_before_terminal_output(page: Harness) -> None:
+    page.send("/run example")
+    terminal = page.chat.session_id
+    assert terminal is not None
+    page.done(terminal)
+    messages = page.sessions.messages(terminal)
+    assert messages[0].role is Role.USER and messages[0].text == "/run example"
+    assert len([m for m in messages if m.role is Role.USER]) == 1
+    assert any(m.role is Role.DESMAN for m in messages[1:])
+    reload = WebFront()
+    reload.runners = page.runners
+    reload.database = page.path
+    reload.session(terminal, False)
+    screen = "".join(reload.poll(0, timeout=0)["transcript"])
+    assert screen.count("/run example") == 1
+
+
+def test_previous_schema_upgrade_preserves_messages_and_recovers_only_live(
+    clock: FakeClock,
+) -> None:
+    conn = db.connect(":memory:")
+    try:
+        db.migrate(conn, db.MIGRATIONS[:-1])
+        conn.execute("INSERT INTO sessions (id, created_at) VALUES ('old', '2026-01-01')")
+        conn.execute(
+            "INSERT INTO messages (session_id, at, role, kind, text) "
+            "VALUES ('old', '2026-01-01', 'user', 'message', 'pending')"
+        )
+        db.migrate(conn)
+        sessions = Sessions(conn, clock=clock)
+        pending = sessions.pending_turns()
+        assert [m.text for m in pending] == ["pending"]
+        sessions.settle_turn(pending[0].seq, cancelled=True)
+        assert not sessions.pending_turns() and not sessions.history("old").messages
+        assert sessions.messages("old")[0].text == "pending"
+    finally:
+        conn.close()
+
+
+def test_old_outcome_does_not_settle_new_input_and_reply_receipt_is_atomic(
+    page: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.chat import Chat
+    from desman.gui.runners import runner_chat
+
+    message = page.sessions.add(None, Role.USER, "new input")
+    page.sessions.register_turn(message.seq)
+    page.sessions.reply_to = message.seq
+    chat = runner_chat(page.sessions)
+    chat.session_id = message.session_id
+
+    def catch_up(self: Chat, interlocutor: Any) -> None:
+        self.sessions.add(message.session_id, Role.INTERLOCUTOR, "old outcome")
+
+    monkeypatch.setattr(Chat, "_catch_up", catch_up)
+    chat._catch_up(None)  # type: ignore[arg-type]
+    assert not page.sessions.turn_settled(message.seq)
+    chat._say("the answer")
+    assert page.sessions.turn_settled(message.seq)
+    assert not page.sessions.pending_turns()

@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "/clear से पुराने संदेश छिपे हैं (मॉडल अभी भी उन्हें देखता है)।",
+    "Stopped": "रोका गया",
     "Concurrent page chat turns (1–8).": "पेज पर एक साथ चैट की बारी (1–8)।",
     "Concurrent page chat turns": "पेज पर एक साथ चैट की बारी",
     "Waiting for a free module: {n} ahead": "खाली मॉड्यूल की प्रतीक्षा: आगे {n}",

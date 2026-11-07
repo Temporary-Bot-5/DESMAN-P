@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "较早的消息已被 /clear 隐藏（模型仍可看到）。",
+    "Stopped": "已停止",
     "Concurrent page chat turns (1–8).": "页面同时进行的聊天轮次（1–8）。",
     "Concurrent page chat turns": "页面同时进行的聊天轮次",
     "Waiting for a free module: {n} ahead": "等待空闲模块：前面有 {n} 个",

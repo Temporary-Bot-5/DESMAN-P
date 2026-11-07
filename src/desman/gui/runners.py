@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Condition, Event, Thread
+from threading import Condition, Event, Lock, Thread
 from typing import Any
 
 import click
@@ -26,6 +26,9 @@ from desman.gui.front import WebFront
 from desman.i18n import t
 from desman.interlocutor import Interlocutor
 from desman.llm.structured import completion_guard
+
+_turn_locks: dict[tuple[Path, int], Lock] = {}
+_turn_locks_guard = Lock()
 
 
 class Stopped(BaseException):
@@ -68,6 +71,14 @@ class TurnSessions(Sessions):
 
 
 class RunnerChat(Chat):
+    def _catch_up(self, interlocutor: Interlocutor) -> None:
+        # A previous task's retelling does not answer the new user input.
+        reply_to, self.sessions.reply_to = self.sessions.reply_to, None
+        try:
+            super()._catch_up(interlocutor)
+        finally:
+            self.sessions.reply_to = reply_to
+
     def _outcome(self, task_id: str, ref: str, interlocutor: Interlocutor) -> None:
         watermark = self.sessions.conn.execute(
             "SELECT COALESCE(MAX(seq), 0) FROM audit_log WHERE task_id = ?", (task_id,)
@@ -226,6 +237,12 @@ class Runners:
         front.runners = self
         front.database = path
 
+    def recover(self, sessions: Sessions) -> None:
+        """Called only at page startup; ordinary polling never replays inputs."""
+        for message in sessions.pending_turns():
+            sessions.register_turn(message.seq)
+            self.submit(message.session_id, message.text, added=True, user_seq=message.seq)
+
     def set_cap(self, cap: int) -> None:
         with self.condition:
             self.cap = cap
@@ -331,6 +348,7 @@ class Runners:
                             queued_users = [
                                 w.user_seq for w in runner.queue if w.user_seq is not None
                             ]
+                        sessions.reply_to = work.user_seq
                         sessions.current_user = work.user_seq
                         sessions.user_through = (
                             work.user_seq
@@ -351,7 +369,17 @@ class Runners:
                                 raise Stopped
 
                         with completion_guard(check):
-                            self._execute(chat, runner, work)
+                            if work.user_seq is None:
+                                self._execute(chat, runner, work)
+                            else:
+                                with _turn_locks_guard:
+                                    lock = _turn_locks.setdefault(
+                                        (self.path.resolve(), work.user_seq), Lock()
+                                    )
+                                with lock:
+                                    if not sessions.turn_settled(work.user_seq):
+                                        self._execute(chat, runner, work)
+                                        sessions.settle_turn(work.user_seq)
                     except Stopped as stopped:
                         if not stopped.recorded:
                             sessions.add(
@@ -446,6 +474,14 @@ class Runners:
             if runner is None:
                 return
             work = runner.current
+            conn = db.open_db(self.path)
+            try:
+                sessions = Sessions(conn)
+                for item in [work, *runner.queue]:
+                    if item is not None and item.user_seq is not None:
+                        sessions.settle_turn(item.user_seq, cancelled=True)
+            finally:
+                conn.close()
             if work is not None:
                 work.stopped.set()
             for queued in runner.queue:
@@ -473,8 +509,18 @@ class Runners:
     def close(self, timeout: float = 10) -> None:
         with self.condition:
             self.closed = True
+            # Queued inputs stay pending in SQLite for the next page. A running
+            # model may still finish durably during or after the grace period.
+            for runner in self.runners.values():
+                for work in runner.queue:
+                    work.stopped.set()
+                runner.queue.clear()
+                if runner.current is not None and not runner.current.slot:
+                    runner.current.stopped.set()
+            self.tickets = deque(w for w in self.tickets if not w.stopped.is_set())
+            self.condition.notify_all()
             sinks = [r.front for r in self.runners.values() if r.front is not None]
-        # Shutdown cancels human input but lets replies and queued turns finish durably.
+        # Shutdown cancels human input; an in-flight reply can still finish durably.
         for sink in sinks:
             assert sink is not None
             with sink.condition:
@@ -532,6 +578,7 @@ class PageChat(Chat):
             config = manager.load()
         except ConfigError:
             return False
+        handed_off = False
         model_command = text == "/compact"
         if text.startswith(("/", "!")) or self.in_terminal:
             try:
@@ -547,6 +594,7 @@ class PageChat(Chat):
             }:
                 model_command = True
                 self._terminal_open()
+                handed_off = True
                 line = "/" + text.lstrip("/!")
         else:
             model_command = True
@@ -560,6 +608,7 @@ class PageChat(Chat):
             user_seq = self.sessions.conn.execute(
                 "SELECT MAX(seq) FROM messages WHERE session_id = ?", (self.session_id,)
             ).fetchone()[0]
+            self.sessions.register_turn(user_seq)
             if cut:
                 self._event(
                     t(
@@ -571,6 +620,8 @@ class PageChat(Chat):
         # Queues retain only the redacted input. A key removed from configuration while
         # the turn waits must not reappear when that turn eventually calls a model.
         line = safe
+        if handed_off:
+            self.sessions.add(self.session_id, Role.USER, safe)
         assert self.session_id is not None
         ui.session(self.session_id, self.temporary)
         self.runners.set_cap(runs.tuned(config.tuning, "chat_turns"))

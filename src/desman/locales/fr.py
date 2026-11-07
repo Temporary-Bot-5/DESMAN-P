@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "Messages précédents masqués par /clear (le modèle les voit toujours).",
+    "Stopped": "Arrêté",
     "Concurrent page chat turns (1–8).": "Tours de discussion simultanés sur la page (1–8).",
     "Concurrent page chat turns": "Tours de discussion simultanés sur la page",
     "Waiting for a free module: {n} ahead": "En attente d’un module libre : {n} avant vous",

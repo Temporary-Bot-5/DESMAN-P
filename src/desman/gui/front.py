@@ -206,7 +206,12 @@ class WebFront(ui.Front):
             try:
                 conn.row_factory = sqlite3.Row
                 messages = Sessions(conn).screen(self.current, last=200)
-                from desman.i18n import language
+                boundary = conn.execute(
+                    "SELECT cleared_seq, terminal FROM sessions WHERE id = ?", (self.current,)
+                ).fetchone()
+                hidden = bool(boundary and boundary["cleared_seq"] and not boundary["terminal"])
+                cancelled = tuple(m.seq for m in messages if m.cancelled_at is not None)
+                from desman.i18n import language, t
 
                 try:
                     config_stamp = open_config().config_path.stat().st_mtime_ns
@@ -214,6 +219,8 @@ class WebFront(ui.Front):
                     config_stamp = 0
                 cache_key = (
                     self.current,
+                    hidden,
+                    cancelled,
                     messages[0].seq if messages else 0,
                     messages[-1].seq if messages else 0,
                     config_stamp,
@@ -222,12 +229,26 @@ class WebFront(ui.Front):
                 if self._transcript_cache is None or self._transcript_cache[0] != cache_key:
                     self._transcript_cache = (
                         cache_key,
-                        [self._redact_html(self.render(_render(m))) for m in messages],
+                        (
+                            [
+                                self.render(
+                                    Text(
+                                        t(
+                                            "Earlier messages hidden by /clear (the model still sees them)."
+                                        ),
+                                        style="muted",
+                                    )
+                                )
+                            ]
+                            if hidden
+                            else []
+                        )
+                        + [self._redact_html(self.render(_render(m))) for m in messages],
                     )
                 result["transcript"] = self._transcript_cache[1]
                 result["session_id"] = self.current
                 result["transcript_version"] = (
-                    f"{self.current}:{messages[0].seq if messages else 0}:{messages[-1].seq if messages else 0}:{config_stamp}:{language()}"
+                    f"{hidden}:{cancelled}:{self.current}:{messages[0].seq if messages else 0}:{messages[-1].seq if messages else 0}:{config_stamp}:{language()}"
                 )
             finally:
                 conn.close()

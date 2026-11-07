@@ -248,7 +248,7 @@ def test_idle_line_checks_every_two_seconds_without_replacing_prompt(
 def test_outcome_marker_migration_from_previous_schema() -> None:
     conn = db.connect(":memory:")
     try:
-        db.migrate(conn, db.MIGRATIONS[:-1])
+        db.migrate(conn, db.MIGRATIONS[:38])
         assert "outcome_audit" not in {
             r["name"] for r in conn.execute("PRAGMA table_info(messages)")
         }

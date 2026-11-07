@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Earlier messages hidden by /clear (the model still sees them).": "/clear로 이전 메시지가 숨겨졌습니다(모델은 계속 볼 수 있습니다).",
+    "Stopped": "중지됨",
     "Concurrent page chat turns (1–8).": "페이지 동시 채팅 차례 수(1–8).",
     "Concurrent page chat turns": "페이지 동시 채팅 차례 수",
     "Waiting for a free module: {n} ahead": "사용 가능한 모듈 대기 중: 앞에 {n}개",

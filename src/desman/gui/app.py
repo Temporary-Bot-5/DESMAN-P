@@ -76,6 +76,7 @@ def run(
 
                     front.idle = idle
                     try:
+                        runners.recover(sessions)
                         pool.start()
                         chat.run()
                     finally:
