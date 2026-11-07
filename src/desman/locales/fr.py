@@ -18,6 +18,8 @@ MESSAGES: dict[str, Forms] = {
     "Waits for you": "Vous attend",
     "Stopped; the reply that came later was dropped": "Arrêté ; la réponse arrivée ensuite a été écartée",
     "The chat turn failed ({error}).": "Le tour de discussion a échoué ({error}).",
+    "Background workers started again.": "Les processus en arrière-plan ont redémarré.",
+    "Background workers wait for a model: add a key or a local model in Settings.": "Les processus en arrière-plan attendent un modèle : ajoutez une clé ou un modèle local dans les paramètres.",
     "Background workers (1–8); applies on the next page start.": "Processus en arrière-plan (1–8) ; au prochain démarrage de la page.",
     "Background workers (next page start)": "Processus en arrière-plan (au prochain démarrage)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

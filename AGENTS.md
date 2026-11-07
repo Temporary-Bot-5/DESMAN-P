@@ -12,9 +12,14 @@
   files, contracts, tests, the rules of this file that matter. It runs Codex itself
   (`codex exec -C <checkout>`), reads the diff, runs the checks below and sends fixes back.
   Codex works only on the branch it was given and does not push, open or merge PRs.
-- After a push: wait for Devin Review and CI, read every finding, fix the real ones (through
-  Codex), re-check. Claude Code then merges the PR itself (the owner allowed it, 2026-11-04):
-  only with CI green and Devin's review present and handled, never before Devin has posted.
+- After a push: wait for Devin Review, read every finding, fix the real ones (through Codex),
+  re-check. Claude Code then merges the PR itself (the owner allowed it, 2026-11-04): only with
+  the local checks green (ruff, format, mypy normal and `--platform win32`, the full pytest; see
+  below) and Devin's review present and handled, never before Devin has posted.
+- CI (GitHub Actions: Python 3.11–3.13 and Windows) runs only before a release — a `v*` tag —
+  or by hand (`gh workflow run ci.yml --ref BRANCH`), not on every PR (owner, 2026-11-07). Run
+  it by hand when a change touches platform code (paths, processes, signals, files, encodings):
+  Windows is tested nowhere else.
   It tells the owner what was merged and what they must do after (e.g.
   `desman protected approve`).
 
@@ -355,7 +360,7 @@ preemption, self-improvement or network features before their phase).
 - Tests never touch the real config (autouse fixture sets `DESMAN_CONFIG_DIR`) or real LLM APIs
   (HTTP goes through `httpx.MockTransport`)
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
-  except in lock-contention tests, the subprocess crash and reassignment tests (`tests/test_crash.py`, `tests/test_reassign.py`) and the
+  except in lock-contention tests, the subprocess crash and reassignment tests (`tests/test_crash.py`, `tests/test_reassign.py`, `tests/test_gui_workers.py`) and the
   real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
@@ -385,7 +390,7 @@ preemption, self-improvement or network features before their phase).
 uv venv -p python3.12 .venv && uv pip install -e ".[dev]"
 pre-commit install
 
-# Checks (same as CI)
+# Checks (before every merge; CI runs the same before a release)
 ruff check .
 ruff format --check .
 mypy

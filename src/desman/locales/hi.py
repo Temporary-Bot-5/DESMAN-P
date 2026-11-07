@@ -18,6 +18,8 @@ MESSAGES: dict[str, Forms] = {
     "Waits for you": "आपकी प्रतीक्षा में",
     "Stopped; the reply that came later was dropped": "रोक दिया गया; बाद में आया उत्तर हटा दिया गया",
     "The chat turn failed ({error}).": "चैट की बारी विफल हुई ({error})।",
+    "Background workers started again.": "पृष्ठभूमि वर्कर फिर से शुरू हो गए।",
+    "Background workers wait for a model: add a key or a local model in Settings.": "पृष्ठभूमि वर्कर मॉडल की प्रतीक्षा में हैं: सेटिंग्स में कुंजी या स्थानीय मॉडल जोड़ें।",
     "Background workers (1–8); applies on the next page start.": "पृष्ठभूमि वर्कर (1–8); पेज अगली बार शुरू होने पर लागू होगा।",
     "Background workers (next page start)": "पृष्ठभूमि वर्कर (पेज अगली बार शुरू होने पर)",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (

@@ -65,7 +65,13 @@ class Launcher:
 
 def test_pool_launches_same_python_database_and_config_and_stops(tmp_path: Path) -> None:
     launcher = Launcher()
-    pool = Pool(tmp_path / "custom.db", tmp_path / "config", launcher=launcher, guard=lambda: None)
+    pool = Pool(
+        tmp_path / "custom.db",
+        tmp_path / "config",
+        launcher=launcher,
+        ready=lambda: True,
+        guard=lambda: None,
+    )
     pool.tick()
     assert len(launcher.calls) == 3
     for n, (argv, env, log) in enumerate(launcher.calls, 1):
@@ -98,6 +104,7 @@ def test_backoff_and_five_quick_deaths_stop_only_that_slot(
         size=2,
         launcher=launcher,
         clock=lambda: clock().timestamp(),
+        ready=lambda: True,
         guard=lambda: None,
     )
     pool.tick()
@@ -127,6 +134,7 @@ def test_long_lived_worker_resets_death_streak(tmp_path: Path, clock: FakeClock)
         1,
         launcher=launcher,
         clock=lambda: clock().timestamp(),
+        ready=lambda: True,
         guard=lambda: None,
     )
     pool.tick()
@@ -145,7 +153,7 @@ def test_protected_guard_warning_is_once_and_never_restarted(tmp_path: Path) -> 
         if blocked:
             raise click.ClickException("Protected files changed: approve them")
 
-    pool = Pool(tmp_path / "db", tmp_path, 1, launcher=launcher, guard=guard)
+    pool = Pool(tmp_path / "db", tmp_path, 1, launcher=launcher, ready=lambda: True, guard=guard)
     pool.tick()
     blocked = True
     launcher.processes[0].code = 1
@@ -157,7 +165,9 @@ def test_protected_guard_warning_is_once_and_never_restarted(tmp_path: Path) -> 
 
 def test_hung_workers_are_terminated_then_killed(tmp_path: Path) -> None:
     launcher = Launcher()
-    pool = Pool(tmp_path / "db", tmp_path, 1, launcher=launcher, guard=lambda: None)
+    pool = Pool(
+        tmp_path / "db", tmp_path, 1, launcher=launcher, ready=lambda: True, guard=lambda: None
+    )
     pool.tick()
     launcher.processes[0].hang = True
     pool.stop()
@@ -262,6 +272,7 @@ def test_missing_executable_gives_up_without_spinning(tmp_path: Path, clock: Fak
         1,
         launcher=unavailable,
         clock=lambda: clock().timestamp(),
+        ready=lambda: True,
         guard=lambda: None,
     )
     for _ in range(5):
@@ -378,3 +389,118 @@ def test_launcher_rotates_output_without_a_shell(
     assert observed["stdout"] == subprocess.PIPE and observed["stderr"] == subprocess.STDOUT
     assert path.exists() and path.with_suffix(".log.1").exists()
     assert all(p.stat().st_size <= 80 for p in tmp_path.glob("worker.log*"))
+
+
+def test_guard_recovers_on_five_second_clock(tmp_path: Path, clock: FakeClock) -> None:
+    launcher = Launcher()
+    blocked = True
+    checks = 0
+
+    def guard() -> None:
+        nonlocal checks
+        checks += 1
+        if blocked:
+            raise click.ClickException("approve")
+
+    pool = Pool(
+        tmp_path / "db",
+        tmp_path,
+        1,
+        launcher=launcher,
+        guard=guard,
+        ready=lambda: True,
+        clock=lambda: clock().timestamp(),
+    )
+    pool.tick()
+    pool.slots[0].deaths = 5
+    pool.slots[0].stopped = True
+    for _ in range(10):
+        pool.tick()
+    assert checks == 1 and list(pool.messages) == ["approve"]
+    clock.advance(5)
+    pool.tick()
+    assert checks == 2 and not launcher.calls
+    blocked = False
+    clock.advance(5)
+    pool.tick()
+    assert not pool.blocked and len(launcher.calls) == 1
+    assert pool.slots[0].deaths == 0 and not pool.slots[0].stopped
+    assert list(pool.messages) == ["approve", "Background workers started again."]
+
+
+def test_model_wait_and_config_change_retry(tmp_path: Path, clock: FakeClock) -> None:
+    launcher = Launcher()
+    ready = False
+    checks = 0
+
+    def readiness() -> bool:
+        nonlocal checks
+        checks += 1
+        return ready
+
+    pool = Pool(
+        tmp_path / "db",
+        tmp_path,
+        1,
+        launcher=launcher,
+        guard=lambda: None,
+        ready=readiness,
+        clock=lambda: clock().timestamp(),
+    )
+    pool.tick()
+    pool.tick()
+    assert checks == 1 and not launcher.calls and len(pool.messages) == 1
+    clock.advance(10)
+    pool.tick()
+    assert checks == 2 and pool.slots[0].deaths == 0
+    ready = True
+    (tmp_path / "config.json").write_text("{}")
+    pool.tick()
+    assert len(launcher.calls) == 1
+    launcher.processes[0].code = 1
+    pool.slots[0].deaths = 4
+    pool.tick()
+    assert pool.slots[0].stopped
+    (tmp_path / "config.json").write_text('{"language": "en"}')
+    pool.tick()
+    assert len(launcher.calls) == 2 and pool.slots[0].deaths == 0
+
+
+def test_readiness_uses_fresh_config(tmp_path: Path) -> None:
+    from desman.config import ConfigManager
+    from helpers import make_config
+
+    launcher = Launcher()
+    pool = Pool(tmp_path / "db", tmp_path, 1, launcher=launcher, guard=lambda: None)
+    pool.tick()
+    assert not launcher.calls
+    ConfigManager(tmp_path / "config.json").save(
+        make_config(configured=True, api_keys={"GROQ_API_KEY": "test-key"})
+    )
+    pool.tick()
+    assert len(launcher.calls) == 1
+
+
+def test_model_loss_on_exit_does_not_count_as_death(tmp_path: Path, clock: FakeClock) -> None:
+    ready = True
+    launcher = Launcher()
+    pool = Pool(
+        tmp_path / "db",
+        tmp_path,
+        1,
+        launcher=launcher,
+        guard=lambda: None,
+        ready=lambda: ready,
+        clock=lambda: clock().timestamp(),
+    )
+    pool.tick()
+    ready = False
+    launcher.processes[0].code = 1
+    pool.tick()
+    pool.tick()
+    assert pool.slots[0].deaths == 0 and not pool.slots[0].stopped
+    assert len(launcher.calls) == 1 and len(pool.messages) == 1
+    ready = True
+    clock.advance(10)
+    pool.tick()
+    assert len(launcher.calls) == 2

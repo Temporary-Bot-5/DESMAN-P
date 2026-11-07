@@ -1075,6 +1075,8 @@ class Chat:
 
     def worker_notice(self, text: str, *, blocked: bool = False) -> None:
         """Keep worker diagnostics in General Terminal and coalesce the guard notice."""
+        if not blocked:
+            self._told_blocked = None
         if text == self._told_blocked:
             return
         self._terminal_output(lambda: ui.warn(text))
@@ -1086,7 +1088,7 @@ class Chat:
         current, temporary = self.session_id, self.temporary
         rows = self.sessions.conn.execute(
             "SELECT DISTINCT s.id, s.temporary FROM sessions s JOIN tasks t ON t.session_id = s.id "
-            "WHERE s.deleted_at IS NULL AND s.terminal = 0"
+            "WHERE s.deleted_at IS NULL AND s.temporary = 0 AND s.terminal = 0"
         ).fetchall()
         try:
             for row in rows:
@@ -1094,7 +1096,8 @@ class Chat:
                 settled = [
                     task
                     for task in pending
-                    if task_report(self.store, task).status is not TaskStatus.ACTIVE
+                    if (report := task_report(self.store, task)).status is not TaskStatus.ACTIVE
+                    or _paused_until(report) is not None
                 ]
                 if not settled:
                     continue

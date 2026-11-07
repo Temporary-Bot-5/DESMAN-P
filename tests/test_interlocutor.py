@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -500,3 +500,68 @@ def test_command_optional_text_before_confirmation(
         assert "declined" in messages[2].text
     else:
         assert "declined" in messages[1].text
+
+
+def test_background_provider_pause_then_final_once(fake: FakeLLM) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor, SubtaskStatus
+
+    fake.on(RETELL, '{"text": "Outcome."}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        sid = sessions.add(None, Role.USER, "go").session_id
+        page = Chat(sessions, background_tasks=True)
+        task = page.store.create_task(
+            TaskSpec(
+                goal="goal", subtasks=[SubtaskSpec(description="step", acceptance_criteria="ok")]
+            ),
+            session_id=sid,
+        )
+        claimed = page.store.claim("worker")
+        assert claimed is not None
+        page.store.record_failure(
+            claimed.id,
+            SubtaskStatus.RUNNING,
+            Actor.EXECUTOR,
+            FailureKind.LIMIT,
+            lease=claimed.lease_token,
+            paused_until=db.to_iso(datetime.now(UTC) + timedelta(hours=1)),
+        )
+        page.background_outcomes()
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 1
+        page.store.cancel_task(task, "cancelled")
+        page.background_outcomes()
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("erased", [False, True])
+def test_background_never_retells_temporary_session(fake: FakeLLM, erased: bool) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+
+    fake.on(RETELL, '{"text": "Private outcome."}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        sid = sessions.add(None, Role.USER, "private", temporary=True).session_id
+        page = Chat(sessions, background_tasks=True)
+        task = page.store.create_task(
+            TaskSpec(
+                goal="private", subtasks=[SubtaskSpec(description="step", acceptance_criteria="ok")]
+            ),
+            session_id=sid,
+        )
+        if erased:
+            sessions.erase(sid)
+        page.store.cancel_task(task, "cancelled")
+        before = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        page.background_outcomes()
+        assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == before
+        assert not calls(fake, RETELL)
+    finally:
+        conn.close()

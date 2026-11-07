@@ -18,6 +18,8 @@ MESSAGES: dict[str, Forms] = {
     "Waits for you": "入力待ち",
     "Stopped; the reply that came later was dropped": "停止しました。後から届いた回答は破棄されました",
     "The chat turn failed ({error}).": "チャットターンに失敗しました（{error}）。",
+    "Background workers started again.": "バックグラウンドワーカーが再起動しました。",
+    "Background workers wait for a model: add a key or a local model in Settings.": "バックグラウンドワーカーはモデルを待っています。設定でキーまたはローカルモデルを追加してください。",
     "Background workers (1–8); applies on the next page start.": "バックグラウンドワーカー（1～8）。次回のページ起動時に適用。",
     "Background workers (next page start)": "バックグラウンドワーカー（次回のページ起動時）",
     "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.": (
