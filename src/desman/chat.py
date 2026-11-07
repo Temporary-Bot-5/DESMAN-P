@@ -51,6 +51,7 @@ from desman import (
     commands,
     compaction,
     config_cli,
+    i18n,
     messenger_cli,
     modules_cli,
     providers,
@@ -617,8 +618,12 @@ class Chat:
             return
         if line.strip() == "help" and self.in_terminal:
             # The listing needs no saved settings: shown even when config.json is broken.
+            from desman.cli import cli
+
             entry = commands.find("help")
             assert entry is not None
+            i18n.translate_commands(cli)  # a language switched meanwhile shows in the listing
+            before = self._saved_config()
             entry.handler(
                 commands.Context(
                     self.store,
@@ -630,6 +635,7 @@ class Chat:
                 ),
                 commands.NoArgs(),
             )
+            self._journal(entry, commands.NoArgs(), True, before, typed=True)
             return
         config = self._config()
         if config is None:
@@ -1240,6 +1246,10 @@ class Chat:
             self._back()
         elif name == "/help":
             self._help()
+            entry = commands.find("help")
+            assert entry is not None
+            before = self._saved_config()  # kept like any typed command, even with a broken config
+            self._journal(entry, commands.NoArgs(), True, before, typed=True)
         elif name == "/new":
             self._new()
         elif name == "/temporary":

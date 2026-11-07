@@ -478,6 +478,9 @@ def _gui(ctx: Context, args: NoArgs) -> Outcome:
 def print_help(*, shell: bool = False, terminal: bool = False, temporary: bool = False) -> None:
     """One listing for shell, chat and General Terminal."""
     from desman.chat import _commands
+    from desman.cli import cli
+
+    i18n.translate_commands(cli)  # a language switched meanwhile shows in the listing
 
     table = ui.table("", "")
     table.show_header = False

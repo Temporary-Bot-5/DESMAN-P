@@ -494,3 +494,23 @@ def test_terminal_help_lists_commands_with_a_broken_config(
     chat.run()
     events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
     assert any("clear the screen" in text and "init-db" in text for text in events)
+
+
+def test_terminal_help_is_journaled_and_follows_the_language(sessions: Sessions) -> None:
+    from desman import i18n
+
+    chat = Chat(sessions)
+    lines = iter(["/terminal", "/help", "/exit"])
+    chat.read = lambda: next(lines, None)
+    try:
+        i18n.set_language("ru")
+        chat.run()
+    finally:
+        i18n.set_language("en")
+    events = [m.text for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT]
+    listing = next(text for text in events if "init-db" in text)
+    assert "Create the database or apply pending migrations." not in listing
+    rows = sessions.conn.execute(
+        "SELECT details_json FROM operator_log WHERE action = 'operator_command'"
+    ).fetchall()
+    assert any(json.loads(r[0])["command"] == "help" and json.loads(r[0])["typed"] for r in rows)
