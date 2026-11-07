@@ -198,7 +198,11 @@ def test_decisions_are_typed_version_checked(
             )
         )
         assert store.list_subtasks(task)[0].status == SubtaskStatus.NEEDS_HUMAN
-        assert "changed since version" in str(app.front.events)
+        assert "changed since version" in "\n".join(
+            m.text for m in chat.sessions.messages(chat.sessions.terminal())
+        )
+        assert not chat.in_terminal
+        assert not app.front.events
         chat._action(
             ui.ACTIONS.validate_python(
                 {

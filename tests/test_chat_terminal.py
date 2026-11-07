@@ -415,6 +415,27 @@ def test_plain_cyrillic_terminal_text_is_not_model_input(
     assert not llm.calls
 
 
+@pytest.mark.parametrize("temporary", [False, True])
+def test_panel_decision_keeps_chat_and_output_unread(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, temporary: bool
+) -> None:
+    chat = Chat(sessions, temporary=temporary)
+    normal = sessions.add(None, Role.USER, "hello", temporary=temporary).session_id
+    chat.session_id = normal
+    monkeypatch.setattr(chat, "_dispatch_action", lambda action: ui.ok("decision saved"))
+    front = WebFront()
+    with ui.use(front):
+        ui.session(normal, temporary)
+        chat._action(
+            ui.DecideAction(type="decide", ref="task/1", version=1, decision="accept", note="")
+        )
+    assert chat.session_id == normal and chat.temporary == temporary
+    assert chat._terminal_seen == 0 and front.terminal_seq == 0
+    assert not front.events
+    assert sessions.messages(sessions.terminal())[-1].text.strip() == "✓ decision saved"
+    assert [m.text for m in sessions.messages(normal)] == ["hello"]
+
+
 def test_terminal_result_json_never_shows_an_escaped_key() -> None:
     """A key with a quote or backslash is cut before json.dumps escapes it (Devin, PR #97)."""
     from desman import chat as chat_module

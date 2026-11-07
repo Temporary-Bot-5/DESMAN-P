@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This model: {calls} calls · {tokens} tokens": "Bu model: {calls} çağrı · {tokens} token",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "Bu görevdeki rol toplamları: {calls} çağrı · {tokens} token",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "Bu sohbetteki rol toplamları: {calls} çağrı · {tokens} token",
+    "This role does not read choices here: choose it for the role everywhere.": "Bu rol buradaki seçimleri okumaz: rol için her yerde seçin.",
+    "Chat": "Sohbet",
+    "Change": "Değiştir",
+    "Only here": "Yalnızca burada",
+    "For the role everywhere": "Rol için her yerde",
+    "Apply": "Uygula",
+    "Scope": "Kapsam",
+    "Automatic": "Otomatik",
+    "Executor (text)": "Yürütücü (metin)",
+    "Executor (code)": "Yürütücü (kod)",
+    "Executor (analysis)": "Yürütücü (analiz)",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Yalnızca burada model veya anahtar seçin. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "--task ve --session seçeneklerinden tam birini seçin.",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "Yalnızca buradaki seçimleri temizleyin. Roller: planner, reviewer, decomposer, text, code, analysis, interlocutor.",

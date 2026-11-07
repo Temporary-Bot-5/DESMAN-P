@@ -178,6 +178,21 @@ def resolve_key(config: Config, selector: str) -> str | None:
     )
 
 
+def resolved_key(
+    config: Config, role: str, model: str | None, fingerprint: str | None
+) -> str | None:
+    """Validate a page's public key identity without interpreting CLI selectors."""
+    if fingerprint is None:
+        return None
+    if not any(
+        k["fingerprint"] == fingerprint
+        and (model is None or k["provider"] == model.split("/", 1)[0])
+        for k in key_choices(config)
+    ):
+        raise click.ClickException(t("Invalid module choice."))
+    return fingerprint
+
+
 def role_rows(config: Config) -> list[dict[str, Any]]:
     """Safe role data shared by the CLI, wizard and settings page."""
     keys = key_choices(config)
@@ -214,9 +229,10 @@ class TuningChange:
     models: dict[str, str] = field(default_factory=dict)
     keys: dict[str, str] = field(default_factory=dict)
     reset: bool = False
+    fingerprints: dict[str, str | None] = field(default_factory=dict)
 
     def empty(self) -> bool:
-        return not (self.limits or self.models or self.keys or self.reset)
+        return not (self.limits or self.models or self.keys or self.fingerprints or self.reset)
 
     def applied(self, current: Tuning, config: Config | None = None) -> Tuning:
         data = Tuning().model_dump() if self.reset else current.model_dump()
@@ -238,6 +254,10 @@ class TuningChange:
             if config is None:
                 raise ValueError("key choices require config")
             data["keys"][role] = resolve_key(config, selector)
+        for role, fingerprint in self.fingerprints.items():
+            if config is None:
+                raise ValueError("key choices require config")
+            data["keys"][role] = resolved_key(config, role, data["models"][role], fingerprint)
         try:
             return Tuning.model_validate(data)
         except ValueError as e:

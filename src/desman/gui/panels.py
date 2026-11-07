@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from desman import providers
-from desman.config import ConfigError, open_config
-from desman.core import calls, db
+from desman import modules_cli, providers, tuning_cli
+from desman.config import Config, ConfigError, open_config
+from desman.core import calls, choices, db
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.sessions import Sessions
 from desman.core.store import Store
 from desman.gui.front import WebFront
+from desman.i18n import t
 from desman.live import Progress, key_labels
+from desman.llm import router
 
 
 def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
@@ -27,6 +30,13 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 "terminal": {"id": None, "unread": 0},
             }
             if kind == "sessions"
+            else {
+                "modules": [],
+                "roles": [],
+                "roles_by_scope": choices.ROLES_BY_SCOPE,
+                "interlocutor": None,
+            }
+            if kind == "modules"
             else {"tasks": []}
         )
     try:
@@ -72,6 +82,29 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                         for s in Sessions(conn).recent(limit=-1)
                     ],
                 }
+            config = config or Config()
+            if kind == "modules":
+                module_rows = modules_cli.modules_data(conn, config)
+                for row in module_rows:
+                    row["goal"] = conn.execute(
+                        "SELECT goal FROM tasks WHERE id = ?", (row["task_id"],)
+                    ).fetchone()[0]
+                    decorate(conn, config, row, "task", row["task_id"])
+                with front.condition:
+                    current = front.current
+                session = conn.execute(
+                    "SELECT id FROM sessions WHERE id = ? AND terminal = 0 AND deleted_at IS NULL",
+                    (current,),
+                ).fetchone()
+                chat = interlocutor(conn, config, session["id"] if session else None)
+                result = {
+                    "modules": module_rows,
+                    "roles": tuning_cli.role_rows(config),
+                    "roles_by_scope": choices.ROLES_BY_SCOPE,
+                    "interlocutor": chat,
+                }
+                # Redact every string, including user-controlled labels and stored model names.
+                return redact_snapshot(result, redact)
             store = Store(conn)
             waiting = {item.subtask_id: item for item in inbox(store)}
             labels = key_labels(config) if config else {}
@@ -104,6 +137,9 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 # Reuse the live view's interpretation of the latest module's state.
                 progress = Progress(store, report.id, config) if config else None
                 by_id = {s.id: s for s in report.subtasks}
+                cards = modules_cli.modules_data(conn, config, report.id)
+                for card in cards:
+                    decorate(conn, config, card, "task", report.id)
                 tasks.append(
                     {
                         "id": report.id,
@@ -115,6 +151,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                         "created_at": report.created_at,
                         "needs_human": any(s.id in waiting for s in report.subtasks),
                         "subtasks": subtasks,
+                        "cards": cards,
                         "modules": [
                             {
                                 "role": m.role.value if m.role else "",
@@ -133,6 +170,103 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                         ],
                     }
                 )
-            return {"tasks": tasks}
+            return redact_snapshot({"tasks": tasks}, redact)
     finally:
         conn.close()
+
+
+def decorate(
+    conn: sqlite3.Connection,
+    config: Config,
+    row: dict[str, Any],
+    scope: choices.Scope,
+    identity: str,
+) -> None:
+    if scope == "task":
+        report = task_report(Store(conn), identity)
+        if any(
+            sub.status.value == "needs_human"
+            and (row["role"] not in ("text", "code", "analysis") or sub.kind.value == row["role"])
+            for sub in report.subtasks
+        ):
+            row["state"] = t("Needs human")
+    own = choices.get(conn, scope, identity, row["role"])
+    row.update(
+        icon="module",
+        scope=scope,
+        scope_id=identity,
+        choice_model=own.model,
+        choice_key=own.key,
+        state_style="good"
+        if row["state"] == t("working")
+        else "warn"
+        if row["state"] in (t("waiting for a limit"), t("Needs human"))
+        else "bad"
+        if row["state"] == t("quota used up")
+        else "muted",
+    )
+
+
+def interlocutor(conn: sqlite3.Connection, config: Config, identity: str | None) -> dict[str, Any]:
+    own = choices.get(conn, "session", identity, "interlocutor") if identity else choices.Choice()
+    cfg = choices.effective(config, "interlocutor", own)
+    try:
+        lineup = router.lineup(cfg, calls.Role.INTERLOCUTOR)
+    except router.NoProvider:
+        lineup = []
+    first = lineup[0] if lineup else None
+    fingerprint = router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
+    key = next(
+        (
+            k
+            for k in tuning_cli.key_choices(config)
+            if k["fingerprint"] == fingerprint and first and k["provider"] == first.provider.id
+        ),
+        None,
+    )
+    usage = conn.execute(
+        "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens "
+        "FROM model_calls WHERE session_id = ? AND role = 'interlocutor'",
+        (identity,),
+    ).fetchone()
+    model_usage = conn.execute(
+        "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens "
+        "FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+        "AND provider = ? AND model = ?",
+        (identity, first.provider.id if first else None, first.model if first else None),
+    ).fetchone()
+    return {
+        "role": "interlocutor",
+        "icon": "module",
+        "scope": "session",
+        "scope_id": identity,
+        "model": first.label if first else None,
+        "provider": first.provider.id if first else None,
+        "key_label": key["label"] if key else "auto",
+        "key_fingerprint": fingerprint if key else None,
+        "choice_model": own.model,
+        "choice_key": own.key,
+        "source": "chat"
+        if own != choices.Choice()
+        else "role"
+        if config.tuning.models.interlocutor or config.tuning.keys.interlocutor
+        else "auto",
+        "model_calls": model_usage["calls"],
+        "model_tokens": model_usage["tokens"],
+        "calls": usage["calls"],
+        "tokens": usage["tokens"],
+        "state": t("idle"),
+    }
+
+
+def redact_snapshot(data: dict[str, Any], redact: Callable[[str], str]) -> dict[str, Any]:
+    def clean(value: Any) -> Any:
+        if isinstance(value, str):
+            return redact(value)
+        if isinstance(value, dict):
+            return {k: clean(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        return value
+
+    return {k: clean(v) for k, v in data.items()}

@@ -429,9 +429,35 @@ class DecideAction(Action):
         return self
 
 
+# Config-independent for the registry; tested against core.choices.ROLES_BY_SCOPE.
+MODULE_ROLES_BY_SCOPE: dict[str, tuple[str, ...]] = {
+    "task": ("reviewer", "decomposer", "text", "code", "analysis"),
+    "session": ("interlocutor",),
+}
+
+
+class ModuleAction(Action):
+    type: Literal["module"]
+    role: Literal["planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"]
+    scope: Literal["task", "session", "role"]
+    scope_id: str | None = Field(min_length=1, max_length=128)
+    model: str | None = Field(pattern=r"^[a-z0-9_-]+/\S+$", max_length=200)
+    """`provider/model` (config.ModelLabel's shape: ui imports no config, the registry uses ui)."""
+    key: str | None = Field(pattern=r"^[0-9a-f]{12}$")
+
+    @model_validator(mode="after")
+    def valid_scope(self) -> ModuleAction:
+        if (self.scope == "role") != (self.scope_id is None):
+            raise ValueError("scope id required only for task/session")
+        if self.scope != "role" and self.role not in MODULE_ROLES_BY_SCOPE[self.scope]:
+            raise ValueError("role does not read choices in this scope")
+        return self
+
+
 ACTIONS = TypeAdapter(
     Annotated[
-        SessionAction | NewSessionAction | SimpleAction | DecideAction, Field(discriminator="type")
+        SessionAction | NewSessionAction | SimpleAction | DecideAction | ModuleAction,
+        Field(discriminator="type"),
     ]
 )
 

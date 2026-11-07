@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "This model: {calls} calls · {tokens} tokens": "此模型: {calls} 次调用 · {tokens} 令牌",
+    "Role totals in this task: {calls} calls · {tokens} tokens": "此任务中角色总计: {calls} 次调用 · {tokens} 令牌",
+    "Role totals in this chat: {calls} calls · {tokens} tokens": "此聊天中角色总计: {calls} 次调用 · {tokens} 令牌",
+    "This role does not read choices here: choose it for the role everywhere.": "此角色不会读取此处的选择：请为该角色在所有位置选择。",
+    "Chat": "聊天",
+    "Change": "更改",
+    "Only here": "仅此处",
+    "For the role everywhere": "此角色的所有位置",
+    "Apply": "应用",
+    "Scope": "范围",
+    "Automatic": "自动",
+    "Executor (text)": "执行器（文本）",
+    "Executor (code)": "执行器（代码）",
+    "Executor (analysis)": "执行器（分析）",
     "Choose a model or key only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "仅在此处选择模型或密钥。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",
     "Choose exactly one of --task and --session.": "请只选择 --task 或 --session 其中之一。",
     "Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor.": "清除此处的选择。角色：planner, reviewer, decomposer, text, code, analysis, interlocutor.",

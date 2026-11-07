@@ -36,9 +36,30 @@ SECURITY = {
 def strings() -> dict[str, str]:
     return {
         "lang": language(),
+        "change": t("Change"),
+        "only_here": t("Only here"),
+        "scope_unavailable": t(
+            "This role does not read choices here: choose it for the role everywhere."
+        ),
+        "everywhere": t("For the role everywhere"),
+        "apply": t("Apply"),
+        "scope": t("Scope"),
+        "auto": t("Automatic"),
+        "model": t("Model"),
+        "key": t("Key"),
+        "source_task": t("Task"),
+        "source_chat": t("Chat"),
+        "source_role": t("Role"),
+        "source_auto": t("Automatic"),
+        "role_text": t("Executor (text)"),
+        "role_code": t("Executor (code)"),
+        "role_analysis": t("Executor (analysis)"),
         "terminal_input": t("Type a command here"),
         "pinned": t("Pinned"),
         "modules": t("Modules"),
+        "model_usage": t("This model: {calls} calls · {tokens} tokens"),
+        "role_usage_task": t("Role totals in this task: {calls} calls · {tokens} tokens"),
+        "role_usage_chat": t("Role totals in this chat: {calls} calls · {tokens} tokens"),
         "calls": t("Calls"),
         "tokens": t("Tokens"),
         "status_pending": t("Pending"),
@@ -179,6 +200,8 @@ class Server:
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
             }
+            for name in ("logo", "banner", "module"):
+                assets[f"/img/{name}.png"] = (f"img/{name}.png", "image/png")
             if url.path in assets:
                 name, content_type = assets[url.path]
                 return Response(
@@ -186,7 +209,7 @@ class Server:
                     files("desman.gui").joinpath("static", name).read_bytes(),
                     {"Content-Type": content_type},
                 )
-            if url.path in {"/sessions", "/tasks"}:
+            if url.path in {"/sessions", "/tasks", "/modules"}:
                 try:
                     return self._json(snapshot(self.database, url.path[1:], self.front))
                 except sqlite3.Error:
