@@ -50,9 +50,9 @@ def task(conn: sqlite3.Connection, kind: Kind = Kind.CODE) -> str:
 
 def test_upgrade_35_and_choice_constraints(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "old.db")
-    assert db.migrate(conn, db.MIGRATIONS[:-1]) == 35
+    assert db.migrate(conn, db.MIGRATIONS[:35]) == 35
     identity = task(conn)
-    assert db.migrate(conn) == 1
+    assert db.migrate(conn) == db.SCHEMA_VERSION - 35
     db.verify_schema(conn)
     choices.set_choice(conn, "task", identity, "code", choices.Choice(model="groq/test"))
     assert db.migrate(conn) == 0

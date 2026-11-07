@@ -216,7 +216,7 @@ aside { height: 100%; position: static; }
 .unread { margin-left: .5rem; border-radius: 1rem; padding: .1rem .5rem; background: #25434a; }
 
 /* All module placements share one card and editor. Pixel sizes are integer multiples. */
-.banner { width: 185px; height: 35px; image-rendering: pixelated; vertical-align: middle; }
+.banner { width: 215px; height: 35px; image-rendering: pixelated; vertical-align: middle; }
 .module-card { box-sizing: border-box; position: relative; width: 100%; max-width: 380px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: .5rem; border: 1px solid #507080; border-radius: .4rem; padding: .5rem; margin: .5rem 0; font-size: .72rem; }
 .module-card > img { width: 68px; height: 68px; image-rendering: pixelated; flex: none; }
 .module-info { padding-right: 1.3rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -330,3 +330,20 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 .setting-description { display: block; font-size: 11px; color: #8c9da5; white-space: nowrap; margin-top: 3px; }
 #settings-form .role-head { color: #8c9da5; padding-bottom: 6px; }
 #settings-form button.primary { background: #00bdcb; border-color: #00bdcb; color: #071316; }
+
+.picker { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.picker > span { color: var(--muted, #888); font-size: .8rem; }
+.picker > button { overflow-wrap: anywhere; text-align: left; min-height: 32px; }
+.picker-panel { position: fixed; z-index: 35; top: 100%; left: 0; width: max(100%, 240px); max-width: min(450px, 80vw); padding: 8px; background: #161b22; border: 1px solid #47505e; border-radius: 6px; box-shadow: 0 8px 24px #0008; }
+.picker-panel[hidden] { display: none; }
+.picker-panel input { width: 100%; margin-bottom: 6px; }
+.picker-panel [role=listbox] { max-height: 260px; overflow-y: auto; }
+.picker-panel [role=option] { display: flex; flex-direction: column; width: 100%; text-align: left; border: 0; white-space: normal; }
+.picker-panel [role=option].selected, .picker-panel [role=option]:hover { background: #25313f; }
+.picker-panel [aria-disabled=true] { opacity: .6; cursor: default; }
+.picker-panel small { color: #a3aab5; }
+.picker-group { display: block; padding: 8px 4px 3px; font-size: .8rem; color: #00eeff; }
+#settings-form .role-row { grid-template-columns: 90px repeat(3, minmax(0, 1fr)); }
+@media (max-width: 650px) {
+  #settings-form .role-row { grid-template-columns: 1fr; }
+}

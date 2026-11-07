@@ -61,6 +61,135 @@ function button(parent, label, action) {
   return b;
 }
 
+// One searchable picker for models, providers, keys, scopes and settings fields.
+let openPicker = null;
+let pickerSerial = 0;
+function picker(parent, label, options = [], current = "") {
+  const root = text("div", "", parent); root.className = "picker"; root.dataset.picker = "true";
+  const title = text("span", label, root); title.id = `picker-label-${++pickerSerial}`;
+  const trigger = button(root, "", () => root.open ? close() : show());
+  trigger.setAttribute("role", "combobox"); trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-labelledby", title.id); trigger.setAttribute("aria-expanded", "false");
+  const panel = text("div", "", root); panel.className = "picker-panel"; panel.hidden = true;
+  const search = document.createElement("input"); search.type = "search"; search.placeholder = words.search;
+  search.setAttribute("aria-label", words.search); search.setAttribute("role", "combobox"); search.setAttribute("aria-autocomplete", "list");
+  panel.append(search);
+  const list = text("div", "", panel); list.id = `picker-list-${pickerSerial}`; list.setAttribute("role", "listbox");
+  list.setAttribute("aria-labelledby", title.id);
+  for (const input of [trigger, search]) input.setAttribute("aria-controls", list.id);
+  let value = current, all = options, matches = [], index = -1;
+  function active() {
+    [...list.querySelectorAll("[role=option]")].forEach((node, i) => {
+      node.classList.toggle("selected", i === index);
+      if (i === index) { search.setAttribute("aria-activedescendant", node.id); node.scrollIntoView?.({block: "nearest"}); }
+    });
+    if (index < 0) search.removeAttribute("aria-activedescendant");
+  }
+  function choose(option) {
+    if (option.disabled) return;
+    root.value = option.value;
+    close(); trigger.focus({preventScroll: true});
+    root.dispatchEvent(new Event("change", {bubbles: true}));
+  }
+  function render() {
+    const q = search.value.toLocaleLowerCase();
+    matches = all.filter(o => `${o.label} ${o.hint || ""}`.toLocaleLowerCase().includes(q));
+    list.replaceChildren(); let group;
+    for (const [i, option] of matches.entries()) {
+      if (option.group && option.group !== group) { text("strong", option.group, list).className = "picker-group"; group = option.group; }
+      const node = button(list, "", () => choose(option)); node.id = `${list.id}-${i}`;
+      node.setAttribute("role", "option"); node.setAttribute("aria-selected", String(value === option.value));
+      node.setAttribute("aria-disabled", String(!!option.disabled)); node.tabIndex = -1;
+      text("span", option.label, node);
+      if (option.hint) text("small", option.hint, node);
+    }
+    index = -1; active();
+  }
+  function close() {
+    panel.hidden = true; root.open = false;
+    trigger.setAttribute("aria-expanded", "false"); search.setAttribute("aria-expanded", "false");
+    if (openPicker === root) openPicker = null;
+  }
+  function show() {
+    openPicker?.close(); openPicker = root; root.open = true;
+    panel.hidden = false; search.value = "";
+    trigger.setAttribute("aria-expanded", "true"); search.setAttribute("aria-expanded", "true");
+    render(); position(); search.focus(); root.onsearch?.("");
+  }
+  function keys(e) {
+    if (["ArrowDown", "ArrowUp"].includes(e.key)) {
+      e.preventDefault(); if (!root.open) show();
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      for (let n = 0; n < matches.length; n++) {
+        index = (index + delta + matches.length) % matches.length;
+        if (!matches[index].disabled) break;
+      }
+      active();
+    } else if (e.key === "Enter" && root.open) {
+      e.preventDefault(); if (index >= 0) choose(matches[index]);
+    } else if (e.key === "Escape" && root.open) {
+      e.preventDefault(); e.stopPropagation(); close(); trigger.focus();
+    } else if (e.key === "Tab") close();
+  }
+  trigger.addEventListener("keydown", keys); search.addEventListener("keydown", keys);
+  search.addEventListener("change", e => e.stopPropagation());
+  search.addEventListener("input", () => { render(); root.onsearch?.(search.value); });
+  Object.defineProperty(root, "value", {get: () => value, set: next => {
+    value = next ?? ""; trigger.textContent = all.find(o => o.value === value)?.label || value || words.auto;
+  }});
+  root.setOptions = next => { all = next; root.value = value; if (root.open) render(); };
+  function position() {
+    if (!trigger.getBoundingClientRect) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(Math.max(rect.width, 280), innerWidth - 16);
+    panel.style.width = `${width}px`;
+    panel.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
+    const below = innerHeight - rect.bottom;
+    panel.style.top = below >= 200 ? `${rect.bottom + 4}px` : "auto";
+    panel.style.bottom = below >= 200 ? "auto" : `${innerHeight - rect.top + 4}px`;
+  }
+  root.position = position;
+  root.close = close; root.checkValidity = () => true; root.value = current;
+  return root;
+}
+document.addEventListener("pointerdown", e => { if (openPicker && !openPicker.contains(e.target)) openPicker.close(); });
+document.addEventListener("scroll", () => openPicker?.position(), true);
+globalThis.addEventListener?.("resize", () => openPicker?.position());
+function preserveEditor(root) {
+  return !!root.querySelector('.module-editor:not([hidden])') ||
+    !!(openPicker && root.contains(openPicker)) ||
+    !!document.activeElement?.closest?.('.picker') && root.contains(document.activeElement);
+}
+
+// Provider → its models → its keys. Values sent to Python remain model/fingerprint.
+function rolePickers(parent, role, chosen, fingerprint) {
+  const providers = role.providers || [];
+  const provider = picker(parent, words.provider, [{value: "", label: words.auto}, ...providers.map(p => ({value: p.id, label: p.name}))], "");
+  const model = picker(parent, words.model);
+  const key = picker(parent, words.key);
+  function fillKeys(preferred = "") {
+    const p = providers.find(p => p.id === provider.value);
+    const keys = p ? p.keys : role.candidate_keys;
+    key.setOptions([{value: "", label: words.auto}, ...keys.map(k => ({value: k.fingerprint, label: k.label, group: p ? null : k.provider}))]);
+    key.value = keys.some(k => k.fingerprint === preferred) ? preferred : "";
+    key.hidden = provider.value === "ollama";
+  }
+  function fillModels(preferred = "", preferredKey = "") {
+    const p = providers.find(p => p.id === provider.value);
+    const models = p?.models || [];
+    model.setOptions(p ? models.map(m => ({value: m, label: m.slice(m.indexOf("/") + 1)})) : [{value: "", label: words.auto}]);
+    model.value = models.includes(preferred) ? preferred : models[0] || "";
+    fillKeys(preferredKey);
+  }
+  function set(modelValue, keyValue) {
+    provider.value = modelValue ? modelValue.split("/", 1)[0] : "";
+    fillModels(modelValue || "", keyValue || "");
+  }
+  provider.onchange = () => fillModels(); model.onchange = () => fillKeys(key.value);
+  set(chosen, fingerprint);
+  return {provider, model, key, set};
+}
+
 async function post(path, body) {
   return fetch(path, {
     method: "POST",
@@ -267,7 +396,7 @@ async function poll() {
       if (data.events.length && !data.ended) {
         try {
           const labels = await fetch("/strings.json");
-          if (labels.ok) { words = await labels.json(); setupPanels(); }
+          if (labels.ok) { await applyStrings(await labels.json()); }
         } catch {}
         $("stop").textContent = words.stop;
       }
@@ -349,6 +478,18 @@ async function act(action) {
   } finally { sending = false; }
 }
 
+async function applyStrings(next) {
+  const changed = words.lang !== next.lang;
+  words = next;
+  setupPanels();
+  if (!changed) return;
+  showModules();
+  for (const label of document.querySelectorAll("[data-module-role]")) {
+    label.textContent = words[`role_${label.dataset.moduleRole}`] || label.textContent;
+  }
+  if (!$("settings-window").hidden) await refreshSettings(true, true);
+}
+
 function setupPanels() {
   document.documentElement.lang = words.lang;
   $("panel-switch").replaceChildren();
@@ -366,7 +507,7 @@ function setupPanels() {
   $("session-tools").replaceChildren();
   actionButton($("session-tools"), words.new_chat, {type: "new_session", temporary: false});
   actionButton($("session-tools"), words.temporary_chat, {type: "new_session", temporary: true});
-  const terminal = actionButton($("session-tools"), "General_Terminal", {type: "terminal"});
+  const terminal = actionButton($("session-tools"), words.terminal, {type: "terminal"});
   terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
@@ -404,10 +545,10 @@ function iconAction(parent, icon, label, value) {
 
 function showSessions(data) {
   terminalOpen = !!data.terminal && !!data.terminal.id && data.current === data.terminal.id;
-  $("session-title").textContent = terminalOpen ? "General_Terminal" : "";
+  $("session-title").textContent = terminalOpen ? words.terminal : "";
   const terminal = $("terminal-button");
   if (terminal) {
-    terminal.textContent = "General_Terminal";
+    terminal.textContent = words.terminal;
     if (data.terminal && data.terminal.unread) {
       text("span", String(data.terminal.unread), terminal).className = "unread";
     }
@@ -445,6 +586,7 @@ function showTasks(data) {
   const focused = active && active.dataset.ref;
   const selection = focused ? [active.selectionStart, active.selectionEnd] : null;
   const root = $("tasks");
+  if (preserveEditor(root)) return;
   root.replaceChildren();
   for (const task of data.tasks) {
     const card = text("article", "", root);
@@ -532,7 +674,7 @@ function moduleCard(parent, m, placement = "modules") {
   card.append(portrait);
   const info = text("div", "", card);
   info.className = "module-info";
-  text("strong", words[`role_${m.role}`] || m.label, info);
+  text("strong", words[`role_${m.role}`] || m.label, info).dataset.moduleRole = m.role;
   text("small", m.model || words.auto, info);
   text("small", `${words.key}: ${m.key_label && m.key_label !== "auto" ? m.key_label : words.auto}`, info);
   const usage = text("div", "", info);
@@ -561,60 +703,23 @@ function moduleCard(parent, m, placement = "modules") {
   editor.hidden = true;
   const role = moduleSnapshot.roles.find(r => r.role === m.role);
   if (!role) return card;
-  function select(label) {
-    const wrapper = text("label", label, editor);
-    return wrapper.appendChild(document.createElement("select"));
-  }
-  function option(select, value, label) {
-    const o = document.createElement("option");
-    o.value = value || "";
-    o.textContent = label;
-    select.append(o);
-    return o;
-  }
-  const model = select(words.model);
-  const key = select(words.key);
-  const scope = select(words.scope);
   const allowedHere = (moduleSnapshot.roles_by_scope?.[m.scope] || []).includes(m.role);
-  option(scope, m.scope, words.only_here).disabled = !m.scope_id || !allowedHere;
-  if (!allowedHere) {
-    scope.disabled = true;
-    scope.title = words.scope_unavailable;
-  }
-  option(scope, "role", words.everywhere);
-  scope.value = m.scope_id && allowedHere ? m.scope : "role";
-  function keys(preferred) {
-    key.replaceChildren();
-    option(key, "", words.auto);
-    const provider = model.value.split("/", 1)[0];
-    const groups = new Map();
-    for (const k of role.candidate_keys.filter(k => !provider || k.provider === provider)) {
-      if (!groups.has(k.provider)) {
-        const group = document.createElement("optgroup");
-        group.label = k.provider;
-        key.append(group);
-        groups.set(k.provider, group);
-      }
-      option(groups.get(k.provider), k.fingerprint, k.label);
-    }
-    key.value = [...key.options].some(o => o.value === preferred) ? preferred : "";
-  }
+  const scope = picker(editor, words.scope, [
+    {value: m.scope, label: words.only_here, disabled: !allowedHere, hint: allowedHere ? "" : words.scope_unavailable},
+    {value: "role", label: words.everywhere}
+  ], allowedHere ? m.scope : "role");
+  const choices = rolePickers(editor, role, null, null);
+  const {model, key} = choices;
   function defaults() {
     const global = scope.value === "role";
-    const chosen = global ? role.model : m.choice_model;
-    model.replaceChildren();
-    option(model, "", words.auto);
-    for (const candidate of new Set([...role.candidate_models, ...(chosen ? [chosen] : [])])) {
-      option(model, candidate, candidate);
-    }
-    model.value = chosen || "";
-    keys((global ? role.key_fingerprint : m.choice_key) || "");
+    choices.set(global ? role.model : m.choice_model, global ? role.key_fingerprint : m.choice_key);
   }
   scope.onchange = defaults;
-  model.onchange = () => keys(key.value);
   defaults();
   actionButton(editor, words.apply, () => {
     moduleEditors.delete(identity);
+    editor.hidden = true;
+    change.hidden = false;
     return {type: "module", role: m.role, scope: scope.value,
       scope_id: scope.value === "role" ? null : m.scope_id,
       model: model.value || null, key: key.value || null};
@@ -629,6 +734,7 @@ function moduleCard(parent, m, placement = "modules") {
 
 function showModules() {
   const root = $("modules");
+  if (!preserveEditor(root)) {
   root.replaceChildren();
   const groups = new Map();
   for (const m of moduleSnapshot.modules) {
@@ -639,6 +745,7 @@ function showModules() {
     }
     moduleCard(groups.get(m.task_id), m);
   }
+  }
   $("chat-module").hidden = terminalOpen || !moduleSnapshot.interlocutor;
   $("chat-module-title").textContent = words.role_interlocutor;
   $("chat-module-title").onclick = e => {
@@ -646,15 +753,18 @@ function showModules() {
     const collapsed = $("chat-module").classList.toggle("collapsed");
     $("chat-module-title").setAttribute("aria-expanded", String(!collapsed));
   };
+  if (!preserveEditor($("chat-module-card"))) {
   $("chat-module-card").replaceChildren();
   if (!terminalOpen && moduleSnapshot.interlocutor) {
     moduleCard($("chat-module-card"), moduleSnapshot.interlocutor, "chat");
+  }
   }
   updateActions();
 }
 
 // Settings are local UI state; authority stays with the chat's open line.
 let settingsData = null;
+let settingsRedraw = false;
 let settingsSection = "general";
 let settingsPending = null;
 let settingsTimer = null;
@@ -671,7 +781,7 @@ function closeSettings() {
   settingsFocus?.focus({preventScroll: true});
 }
 
-async function refreshSettings(redraw = false) {
+async function refreshSettings(redraw = false, languageChanged = false) {
   try {
     const response = await fetch("/settings");
     if (!response.ok) throw new Error();
@@ -690,13 +800,20 @@ async function refreshSettings(redraw = false) {
       $("settings-result").textContent = settingsReceipt?.isConnected ? "" : result.message;
       $("settings-result").className = result.ok ? "good" : "bad";
       updateActions();
-      redraw = !settingsReceipt?.isConnected;
+      redraw ||= !settingsReceipt?.isConnected;
       if (result.ok) {
+        $("settings-form").querySelector("[data-local-models]")?.reload?.();
         const labels = await fetch("/strings.json");
-        if (labels.ok) { words = await labels.json(); setupPanels(); }
+        if (labels.ok) { await applyStrings(await labels.json()); }
       }
     }
-    if (redraw) drawSettings();
+    settingsRedraw ||= redraw;
+    if (settingsRedraw && (languageChanged || !preserveEditor($("settings-form")))) {
+      settingsRedraw = false;
+      const focused = $("settings-window").contains(document.activeElement);
+      drawSettings();
+      if (languageChanged && focused) $("settings-nav").querySelector('[aria-current="true"]')?.focus({preventScroll: true});
+    }
   } catch { $("settings-result").textContent = words.invalid; }
 }
 
@@ -715,17 +832,7 @@ function openSettings() {
 }
 
 function settingSelect(parent, label, options, current) {
-  const row = text("label", "", parent);
-  row.className = "setting-row";
-  text("span", label, row);
-  const select = document.createElement("select");
-  for (const o of options) {
-    const option = text("option", o.label, select);
-    option.value = o.value;
-  }
-  select.value = current ?? "auto";
-  row.append(select);
-  return select;
+  return picker(parent, label, options, current ?? "auto");
 }
 
 function settingInput(parent, label, value, type = "text") {
@@ -741,7 +848,7 @@ function settingInput(parent, label, value, type = "text") {
 }
 
 function settingAuto(parent, change, controls = null) {
-  controls ||= [...parent.querySelectorAll("input, select, textarea")].filter(c => !c.dataset.autosave);
+  controls ||= [...parent.querySelectorAll("[data-picker], input:not(.picker input), select, textarea")].filter(c => !c.dataset.autosave);
   const receipt = text("small", "", controls.at(-1)?.parentElement || parent);
   receipt.className = "setting-receipt";
   let previous = JSON.stringify(change());
@@ -761,7 +868,7 @@ function settingAuto(parent, change, controls = null) {
   };
   for (const control of controls) {
     control.dataset.autosave = "true";
-    if (control.tagName === "SELECT" || control.type === "checkbox") control.addEventListener("change", save);
+    if (control.dataset.picker || control.tagName === "SELECT" || control.type === "checkbox") control.addEventListener("change", save);
     else {
       control.addEventListener("blur", save);
       control.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); } });
@@ -837,33 +944,11 @@ function drawSettings() {
     root.append(others);
   } else if (settingsSection === "roles") {
     const head = text("div", "", root); head.className = "role-row role-head";
-    for (const label of [words.settings_roles, words.model, words.key]) text("small", label, head);
+    for (const label of [words.settings_roles, words.provider, words.model, words.key]) text("small", label, head);
     for (const role of d.roles) {
       const card = text("section", "", root); card.className = "role-row"; text("strong", role.label, card);
-      const candidates = [...new Set([...role.candidate_models, ...(role.model ? [role.model] : [])])];
-      const model = settingSelect(card, words.model, [{value: "auto", label: words.auto}, ...candidates.map(m => ({value: m, label: m}))], role.model);
-      const key = settingSelect(card, words.key, [], "auto");
-      const fill = () => {
-        const previous = key.value || role.key_fingerprint || "auto";
-        key.replaceChildren();
-        const provider = model.value === "auto" ? "" : model.value.split("/")[0];
-        const choices = role.candidate_keys.filter(k => !provider || k.provider === provider || k.fingerprint === previous);
-        const auto = text("option", words.auto, key); auto.value = "auto";
-        const groups = new Map();
-        for (const k of choices) {
-          if (!groups.has(k.provider)) {
-            const group = document.createElement("optgroup"); group.label = k.provider;
-            key.append(group); groups.set(k.provider, group);
-          }
-          const o = text("option", k.label, groups.get(k.provider)); o.value = k.fingerprint;
-        }
-        if (role.key_fingerprint && !choices.some(k => k.fingerprint === role.key_fingerprint)) {
-          const o = text("option", role.key_label, key); o.value = role.key_fingerprint;
-        }
-        key.value = [...key.options].some(k => k.value === previous) ? previous : "auto";
-      };
-      fill(); model.addEventListener("change", fill);
-      settingAuto(card, () => ({section: "roles", role: role.role, model: model.value === "auto" ? null : model.value, key: key.value === "auto" ? null : key.value}));
+      const {provider, model, key} = rolePickers(card, role, role.model, role.key_fingerprint);
+      settingAuto(card, () => ({section: "roles", role: role.role, model: model.value || null, key: key.value || null}), [provider, model, key]);
     }
   } else if (settingsSection === "permissions") {
     for (const p of d.permissions) {
@@ -896,12 +981,34 @@ function drawSettings() {
       reset.title = words.auto; reset.setAttribute("aria-label", words.auto);
     }
   } else if (settingsSection === "models") {
-    for (const p of d.providers.filter(p => ["ollama", "llamacpp"].includes(p.id))) {
-      text("p", `${p.name}: ${p.settings.map(s => `${s.label}: ${s.value}`).join(" · ")}`, root);
+    const p = d.providers.find(p => p.id === "ollama");
+    const state = text("p", `Ollama · ${p?.settings.find(s => s.name === "OLLAMA_HOST")?.value || ""}`, root);
+    const notes = text("small", "", root);
+    const model = picker(root, words.model); model.dataset.localModels = "true";
+    model.reload = () => load("");
+    let choices = [], timer, request = 0;
+    async function load(q) {
+      const id = ++request;
+      try {
+        const response = await fetch(`/local-models?q=${encodeURIComponent(q)}`);
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (id !== request || !model.isConnected) return;
+        choices = data.options;
+        model.setOptions(choices.map(o => ({...o, hint: `${o.selected ? "✓ · " : ""}${o.hint}`})));
+        model.value ||= data.selected;
+        state.textContent = `Ollama · ${data.host} · ${data.reachable ? words.status_ready : words.off}`;
+        notes.textContent = data.notes.join(" · ");
+      } catch { if (id === request) notes.textContent = words.local_unreachable; }
     }
-    const model = settingInput(root, words.model, ""); model.maxLength = 200;
-    const server = settingSelect(root, words.provider, ["ollama", "llamacpp"].map(v => ({value: v, label: v})), "ollama");
-    for (const op of ["show", "add"]) settingSave(root, () => ({section: "models", operation: op, model: model.value, server: server.value}), op === "add" ? words.download : words[op]);
+    model.onsearch = q => { clearTimeout(timer); timer = setTimeout(() => load(q), 300); };
+    model.onchange = () => {
+      const option = choices.find(o => o.value === model.value);
+      if (!option || !lineOpen || sending || settingsPending) return;
+      const id = crypto.randomUUID(); settingsPending = id; settingsReceipt = null;
+      act({type: "settings", id, change: {section: "models", operation: option.downloaded ? "use" : "add", model: option.value, server: "ollama"}});
+    };
+    load("");
   } else if (settingsSection === "network") {
     const status = text("div", "desman-global", root); status.className = "provider-heading";
     text("small", d.network.enabled ? words.status_active : words.off, status).className = "setting-badge";

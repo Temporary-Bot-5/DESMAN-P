@@ -415,7 +415,7 @@ def test_the_chat_says_tasks_are_blocked_and_runs_none(fake: FakeLLM, here: Pack
     result = chat("write me a haiku")
     # The failed conversation turn explains its refusal; the startup notice stays in the console.
     assert result.output.count("Protected files changed without your approval") == 1
-    assert "1 new in General_Terminal (/terminal)" in result.output
+    assert "1 new in General Terminal (/terminal)" in result.output
     assert (
         "Type `protected show` to see the change and `protected approve` to approve it."
         not in result.output

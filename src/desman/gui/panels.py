@@ -81,8 +81,11 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 with front.condition:
                     current, temporary = front.current, front.temporary
                     seen = front.terminal_seq
-                terminal = conn.execute("SELECT id FROM sessions WHERE terminal = 1").fetchone()
+                terminal = conn.execute(
+                    "SELECT id, cleared_seq FROM sessions WHERE terminal = 1"
+                ).fetchone()
                 terminal_id = terminal["id"] if terminal else None
+                seen = max(seen, terminal["cleared_seq"] if terminal else 0)
                 unread = (
                     conn.execute(
                         "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' AND seq > ?",
@@ -116,11 +119,17 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                     decorate(conn, config, row, "task", row["task_id"])
                 with front.condition:
                     current = front.current
+                    pending = front.pending_choice
                 session = conn.execute(
                     "SELECT id FROM sessions WHERE id = ? AND terminal = 0 AND deleted_at IS NULL",
                     (current,),
                 ).fetchone()
-                chat = interlocutor(conn, config, session["id"] if session else None)
+                chat = interlocutor(
+                    conn,
+                    config,
+                    session["id"] if session else None,
+                    choices.Choice.model_validate(pending) if pending and current is None else None,
+                )
                 result = {
                     "modules": module_rows,
                     "roles": tuning_cli.role_rows(config),
@@ -231,8 +240,14 @@ def decorate(
     )
 
 
-def interlocutor(conn: sqlite3.Connection, config: Config, identity: str | None) -> dict[str, Any]:
+def interlocutor(
+    conn: sqlite3.Connection,
+    config: Config,
+    identity: str | None,
+    pending: choices.Choice | None = None,
+) -> dict[str, Any]:
     own = choices.get(conn, "session", identity, "interlocutor") if identity else choices.Choice()
+    own = pending or own
     cfg = choices.effective(config, "interlocutor", own)
     try:
         lineup = router.lineup(cfg, calls.Role.INTERLOCUTOR)

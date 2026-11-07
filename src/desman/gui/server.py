@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from pydantic import ValidationError
 
 from desman import ui
-from desman.config import ConfigError
+from desman.config import ConfigError, open_config
 from desman.core import db
 from desman.gui.front import WebFront
 from desman.gui.panels import snapshot
@@ -37,6 +37,10 @@ SECURITY = {
 def strings() -> dict[str, str]:
     return {
         "lang": language(),
+        "terminal": t("General Terminal"),
+        "search": t("Search"),
+        "downloaded": t("Downloaded"),
+        "local_unreachable": t("Ollama cannot be reached right now."),
         "settings_general": t("General"),
         "settings_keys": t("Keys"),
         "settings_roles": t("Role models"),
@@ -63,7 +67,7 @@ def strings() -> dict[str, str]:
         "check": t("Check"),
         "forget": t("Forget"),
         "reset": t("Reset"),
-        "provider": t("provider"),
+        "provider": t("Provider"),
         "show": t("Show"),
         "add": t("Add"),
         "approve": t("Approve"),
@@ -253,6 +257,20 @@ class Server:
                 try:
                     return self._json(snapshot(self.database, url.path[1:], self.front))
                 except (sqlite3.Error, ConfigError, OSError):
+                    return Response(503)
+            if url.path == "/local-models":
+                from desman.gui.front import redact_keys
+                from desman.gui.panels import redact_snapshot
+                from desman.gui.settings import local_search
+
+                try:
+                    q = query.get("q", [""])[0]
+                    if len(q) > 200:
+                        return Response(400)
+                    return self._json(
+                        redact_snapshot(local_search(open_config().load(), q), redact_keys)
+                    )
+                except (ConfigError, OSError):
                     return Response(503)
             if url.path == "/strings.json":
                 return self._json(strings())

@@ -43,6 +43,24 @@ def no_internet(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_real_ollama(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Ollama discovery uses mocks only, including on loopback; isolate its cache too."""
+    from desman import local_models
+
+    local_models._tags_cache.clear()
+    original = httpx.HTTPTransport.handle_request
+
+    def guarded(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            raise httpx.ConnectError("no real Ollama in tests", request=request)
+        return original(self, request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
+    yield
+    local_models._tags_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def english() -> Iterator[None]:
     """Every test starts and ends in English (the wizard and the CLI switch the language)."""
     i18n.set_language("en")

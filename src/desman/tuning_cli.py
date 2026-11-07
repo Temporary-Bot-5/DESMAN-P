@@ -16,7 +16,7 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import providers, runs, ui
+from desman import local_models, providers, runs, ui
 from desman.config import TUNING_LIMITS, Config, ConfigManager, ModelChoices, Tuning
 from desman.config_cli import json_option, load_config
 from desman.i18n import t
@@ -203,18 +203,38 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
         "interlocutor": t("Interlocutor"),
         **{kind: f"{t('Executor')} ({kind})" for kind in ("text", "code", "analysis")},
     }
+    ollama = providers.find("ollama")
+    installed = local_models.installed(config)[0]
     out = []
     for role in ROLES:
         fingerprint = getattr(config.tuning.keys, role)
         found = next((k for k in keys if k["fingerprint"] == fingerprint), None)
+        candidates = router.candidates(config, role)
+        available: list[dict[str, Any]] = []
+        for provider in (*providers.CLOUD, ollama):
+            provider_keys = [dict(k) for k in keys if k["provider"] == provider.id]
+            if not provider_keys and not (
+                provider.id == "ollama" and (provider.is_ready(config) or installed)
+            ):
+                continue
+            models = [m for m in candidates if m.startswith(provider.id + "/")]
+            if provider.id == "ollama":
+                models = list(dict.fromkeys([*models, *("ollama/" + m.name for m in installed)]))
+            available.append(
+                {"id": provider.id, "name": provider.name, "models": models, "keys": provider_keys}
+            )
+        candidates = list(
+            dict.fromkeys([*candidates, *(m for p in available for m in p["models"])])
+        )
         out.append(
             {
                 "role": role,
+                "providers": available,
                 "label": role_labels[role],
                 "model": getattr(config.tuning.models, role),
                 "key_fingerprint": fingerprint,
                 "key_label": found["label"] if found else t("missing") if fingerprint else AUTO,
-                "candidate_models": router.candidates(config, role),
+                "candidate_models": candidates,
                 "candidate_keys": [dict(k) for k in keys],
             }
         )

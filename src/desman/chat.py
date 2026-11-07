@@ -62,7 +62,7 @@ from desman import (
 )
 from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
-from desman.core import calls, db, operator
+from desman.core import calls, choices, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.policy import Access
 from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
@@ -124,8 +124,8 @@ KEPT_ONLY = ("/sessions", "/rename", "/compact", "/delete", "/pin")
 
 def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]:
     every = {
-        "/terminal": t("open General_Terminal"),
-        "/back": t("return from General_Terminal to the previous chat"),
+        "/terminal": t("open General Terminal"),
+        "/back": t("return from General Terminal to the previous chat"),
         "/help": t("the chat's commands"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
@@ -140,7 +140,12 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
     if terminal:
-        return {name: what for name, what in every.items() if name in TERMINAL_COMMANDS}
+        every["clear"] = t("clear the General Terminal screen (messages are kept)")
+        return {
+            name: what
+            for name, what in every.items()
+            if name in TERMINAL_COMMANDS or name == "clear"
+        }
     if temporary:
         every["/new"] = t("start a normal session (this temporary chat is erased)")
     return {name: what for name, what in every.items() if not (temporary and name in KEPT_ONLY)}
@@ -164,6 +169,7 @@ class Chat:
         self._terminal_id = sessions.terminal()
         self._previous: tuple[str | None, bool] | None = None
         self._terminal_seen = 0
+        self._pending_choice: choices.Choice | None = None
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
         self.read = read or (
@@ -253,7 +259,7 @@ class Chat:
         self.models, self._models_for = None, None
         ui.reset()
         ui.session(self.session_id, False)
-        ui.note(t("→ General_Terminal"))
+        ui.note(t("→ General Terminal"))
         self._show_last()
         self._seen_terminal()
 
@@ -293,11 +299,14 @@ class Chat:
         config = self._saved_config()
         if line is not None:
             self.sessions.add(self._terminal_id, Role.USER, providers.redact_keys(line, config)[0])
-        with ui.recording(
-            show=self.in_terminal,
-            redact=lambda text: providers.redact_keys(text, config)[0],
-            keep_inputs=keep_inputs,
-        ) as rec:
+        with (
+            ui.panel_output(not self.in_terminal),
+            ui.recording(
+                show=self.in_terminal,
+                redact=lambda text: providers.redact_keys(text, config)[0],
+                keep_inputs=keep_inputs,
+            ) as rec,
+        ):
             try:
                 return operation()
             finally:
@@ -327,10 +336,11 @@ class Chat:
                 self._seen_terminal()
             else:
                 count = self.sessions.conn.execute(
-                    "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' AND seq > ?",
-                    (self._terminal_id, self._terminal_seen),
+                    "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' "
+                    "AND seq > ? AND seq > (SELECT cleared_seq FROM sessions WHERE id = ?)",
+                    (self._terminal_id, self._terminal_seen, self._terminal_id),
                 ).fetchone()[0]
-                ui.note(t("{n} new in General_Terminal (/terminal)", n=count))
+                ui.note(t("{n} new in General Terminal (/terminal)", n=count))
 
     def _erase(self) -> None:
         """A temporary chat's session, erased: when it ends or a new one starts."""
@@ -350,6 +360,8 @@ class Chat:
                     "add PROVIDER`."
                 )
             )
+        if config is not None and self.session_id is None and self._pending_choice is not None:
+            config = choices.effective(config, "interlocutor", self._pending_choice)
         models = None if config is None else self._models(config)
         if config is None or models is None:
             self.session_id = self._add_user(text)
@@ -396,7 +408,13 @@ class Chat:
 
     def _add_user(self, text: str) -> str:
         """The person's message, kept in the session (a new one with the first message)."""
-        added = self.sessions.add(self.session_id, Role.USER, text, temporary=self.temporary)
+        pending = self._pending_choice if self.session_id is None else None
+        added = self.sessions.add(
+            self.session_id, Role.USER, text, temporary=self.temporary, initial_choice=pending
+        )
+        if pending is not None:
+            self._pending_choice = None
+            ui.pending_module(None)
         return added.session_id
 
     def _config(self) -> Config | None:
@@ -568,6 +586,14 @@ class Chat:
 
     def _typed(self, line: str) -> None:
         """A person's explicit command line never becomes a model turn or a user message."""
+        if line.strip() == "clear":
+            self.sessions.clear_terminal()
+            if self.in_terminal:
+                ui.clear_screen()
+                self._seen_terminal()
+            return
+        if line.strip() == "help" and self.in_terminal:
+            self._help()
         config = self._config()
         if config is None:
             return
@@ -576,7 +602,7 @@ class Chat:
         if self.in_terminal and word and word not in known:
             ui.error(
                 t(
-                    "“{word}” is not a command. General_Terminal takes only DESMAN's commands "
+                    "“{word}” is not a command. General Terminal takes only DESMAN's commands "
                     "(`help` lists them); to talk, go back to a chat with /back.",
                     word=providers.redact_keys(word, config)[0],
                 )
@@ -1128,7 +1154,7 @@ class Chat:
 
     def _show_last(self) -> None:
         assert self.session_id is not None
-        for message in self.sessions.messages(
+        for message in self.sessions.screen(
             self.session_id, last=max(SHOWN_ON_RETURN, ui.transcript_limit())
         ):
             if (
@@ -1146,7 +1172,7 @@ class Chat:
         """Run a chat command; False when it ends the chat."""
         name = line.split()[0].lower()
         if self.in_terminal and name not in TERMINAL_COMMANDS:
-            ui.error(t("{name} is not available in General_Terminal", name=name))
+            ui.error(t("{name} is not available in General Terminal", name=name))
             return True
         if self.temporary and name in KEPT_ONLY:
             ui.error(t("{name} is not available in a temporary chat", name=name))
@@ -1200,13 +1226,8 @@ class Chat:
             self._terminal_output(lambda: self._settings_action(action), keep_inputs=True)
             return
         if isinstance(action, ui.ModuleAction):
-            # Validate the originating chat before recording the change.
-            if action.scope == "session" and (
-                action.scope_id != self.session_id or self.in_terminal
-            ):
-                ui.error(t("Invalid module choice."))
-                return
-            self._terminal_output(lambda: self._module_action(action))
+            # The chat validates its originating scope inside the terminal recording.
+            self._terminal_output(lambda: self._module_action(action), keep_inputs=True)
             return
         if isinstance(action, ui.SimpleAction) and action.type == "terminal":
             self._terminal_open()
@@ -1266,7 +1287,7 @@ class Chat:
     def _apply_settings_action(self, action: ui.SettingsAction, notices: ui.Recording) -> None:
         """Human fields use catalog bodies and the same redacted operator journal."""
         from desman.gui.settings import command, role_change
-        from desman.settings_actions import Forget, ProviderSetting, Roles
+        from desman.settings_actions import Forget, Models, ProviderSetting, Roles
 
         before = self._saved_config()
         message, ok = "", True
@@ -1277,6 +1298,22 @@ class Chat:
                 if not config.personalize:
                     raise ValueError("personalisation off")
                 self.profile.forget(change.note, Author.PERSON, session_id=self.session_id)
+            elif isinstance(change, Models) and change.operation == "use":
+                from desman import local_models
+
+                if change.server != "ollama":
+                    raise ValueError("page uses Ollama only")
+                with open_config().edit() as edited:
+                    local_models.select_installed(edited, change.model)
+                entry = commands.find("models add")
+                assert entry is not None
+                self._journal(
+                    entry,
+                    commands.ModelAddArgs(model=change.model, server="ollama"),
+                    True,
+                    before,
+                    typed=True,
+                )
             elif isinstance(change, Roles):
                 old, new, edited = tuning_cli.set_tuning(open_config(), role_change(change, config))
                 tuning_cli.print_change(old, new, edited)
@@ -1362,6 +1399,10 @@ class Chat:
         if config is None:
             return
         try:
+            if action.scope == "session" and (
+                action.scope_id != self.session_id or self.in_terminal
+            ):
+                raise ValueError("not the current chat")
             row = next(r for r in tuning_cli.role_rows(config) if r["role"] == action.role)
             if action.model is not None and action.model not in row["candidate_models"]:
                 raise ValueError("unavailable model")
@@ -1378,6 +1419,10 @@ class Chat:
                 for name, about in commands.config_changes(before, edited):
                     operator.record(self.store.conn, name, about, session_id=self.session_id)
                 lines = tuning_cli.lines(old, new, edited)
+            elif action.scope == "session" and action.scope_id is None:
+                self._pending_choice = choices.Choice(model=action.model, key=action.key)
+                ui.pending_module(self._pending_choice.model_dump())
+                lines = []
             else:
                 assert action.scope_id is not None
                 old_choice, new_choice = modules_cli.set_module(
@@ -1457,7 +1502,12 @@ class Chat:
             if previous[1] and previous[0] is not None:
                 self.sessions.erase(previous[0])
 
+    def _drop_pending(self) -> None:
+        self._pending_choice = None
+        ui.pending_module(None)
+
     def _new(self, temporary: bool = False) -> None:
+        self._drop_pending()
         self._leave_terminal()
         if self.session_id is None and self.temporary == temporary:
             ui.reset()
@@ -1747,6 +1797,7 @@ class Chat:
         self._leave_terminal()
         self._erase()
         self.temporary = False
+        self._drop_pending()
         self.session_id = selected.id
         self.models, self._models_for = None, None
         ui.reset()
