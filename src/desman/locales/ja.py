@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "起動パスが無効です。",
+    "Report a problem": "問題を報告",
+    "Describe the problem:": "問題を説明してください：",
+    "Create a shortcut to the page without starting it.": "ページを起動せずにショートカットを作成します。",
+    "Shortcut created: {path}": "ショートカットを作成しました：{path}",
+    "Could not create shortcut: {error}": "ショートカットを作成できませんでした：{error}",
+    "Shortcuts are not supported on this system yet.": "このシステムのショートカットはまだサポートされていません。",
+    "The installed desman script was not found.": "インストール済みの desman スクリプトが見つかりません。",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "端末で desman gui を実行してページを開きます。desman gui --shortcut でショートカットを作成します。",
     "Conversation": "会話",
     "Download": "ダウンロード",
     "Role models": "役割別モデル",

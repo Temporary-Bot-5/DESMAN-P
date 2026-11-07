@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "실행 경로가 잘못되었습니다.",
+    "Report a problem": "문제 신고",
+    "Describe the problem:": "문제를 설명하세요:",
+    "Create a shortcut to the page without starting it.": "페이지를 시작하지 않고 바로 가기를 만듭니다.",
+    "Shortcut created: {path}": "바로 가기 생성됨: {path}",
+    "Could not create shortcut: {error}": "바로 가기를 만들 수 없습니다: {error}",
+    "Shortcuts are not supported on this system yet.": "이 시스템은 아직 바로 가기를 지원하지 않습니다.",
+    "The installed desman script was not found.": "설치된 desman 스크립트를 찾을 수 없습니다.",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "터미널에서 desman gui로 페이지를 여세요. desman gui --shortcut은 바로 가기를 만듭니다.",
     "Conversation": "대화",
     "Download": "다운로드",
     "Role models": "역할별 모델",

@@ -363,6 +363,7 @@ function setupPanels() {
   const terminal = actionButton($("session-tools"), "General_Terminal", {type: "terminal"});
   terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
+  actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
   button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
   $("topbar").replaceChildren();

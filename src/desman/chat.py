@@ -1187,6 +1187,9 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
+        if isinstance(action, ui.SimpleAction) and action.type == "report_problem":
+            self._terminal_output(self._report_problem, keep_inputs=True)
+            return
         if isinstance(action, ui.SettingsAction):
             self._terminal_output(lambda: self._settings_action(action), keep_inputs=True)
             return
@@ -1210,6 +1213,39 @@ class Chat:
             self._terminal_output(lambda: self._dispatch_action(action))
         else:
             self._dispatch_action(action)
+
+    def _report_problem(self) -> None:
+        description = ui.text(t("Describe the problem:")).strip()
+        if not description:
+            return
+        config = self._config()
+        if config is None:
+            return
+        entry = commands.find("global report")
+        assert entry is not None
+        before = self._saved_config()
+        try:
+            args = commands.parse(entry, {"text": description}, config)
+            context = commands.Context(
+                self.store,
+                open_config(),
+                start_task=lambda *_: None,
+                resume_task=lambda _: None,
+                session_id=lambda: self.session_id,
+            )
+            proposal = entry.handler(context, args)
+            assert isinstance(proposal, commands.Proposal)
+            if self._confirmed(proposal, in_prompt=True):
+                made = proposal.apply()
+            else:
+                made = commands.Outcome(None, done=False)
+                ui.note(t("Nothing changed."))
+            self._journal(entry, args, made.done, before, typed=True)
+        except (ui.Cancelled, click.Abort):
+            ui.note(t("Nothing changed."))
+        except (commands.BadArgs, click.ClickException) as e:
+            message = e.format_message() if isinstance(e, click.ClickException) else str(e)
+            ui.error(providers.redact_keys(message, config)[0])
 
     def _settings_action(self, action: ui.SettingsAction) -> None:
         """Human fields use catalog bodies and the same redacted operator journal."""

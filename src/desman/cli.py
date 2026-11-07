@@ -174,8 +174,15 @@ def cli(ctx: click.Context, resume: bool, temporary: bool) -> None:
     is_flag=True,
     help="A temporary chat: nothing said is kept, it is erased when you leave.",
 )
-def gui(port: int, no_browser: bool, resume: bool, temporary: bool) -> None:
+@click.option("--shortcut", is_flag=True, help="Create a shortcut to the page without starting it.")
+def gui(port: int, no_browser: bool, resume: bool, temporary: bool, shortcut: bool) -> None:
     """Open the chat as a local web page."""
+    if shortcut:
+        from desman.gui.shortcuts import create
+
+        for path in create():
+            ui.ok(t("Shortcut created: {path}", path=str(path)))
+        return
     if resume and temporary:
         raise click.UsageError(t("A temporary chat starts afresh: -c and -t do not go together."))
     from desman.gui.app import run

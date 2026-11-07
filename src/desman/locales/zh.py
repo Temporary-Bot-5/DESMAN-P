@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Invalid launcher path.": "启动路径无效。",
+    "Report a problem": "报告问题",
+    "Describe the problem:": "请描述问题：",
+    "Create a shortcut to the page without starting it.": "创建页面快捷方式而不启动页面。",
+    "Shortcut created: {path}": "已创建快捷方式：{path}",
+    "Could not create shortcut: {error}": "无法创建快捷方式：{error}",
+    "Shortcuts are not supported on this system yet.": "此系统暂不支持快捷方式。",
+    "The installed desman script was not found.": "未找到已安装的 desman 脚本。",
+    "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut.": "在终端中使用 desman gui 打开页面；desman gui --shortcut 创建快捷方式。",
     "Conversation": "对话",
     "Download": "下载",
     "Role models": "角色模型",
