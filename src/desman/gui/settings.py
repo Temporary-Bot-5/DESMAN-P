@@ -144,25 +144,6 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
             if number is None:
                 raise click.ClickException(t("Please check your answer and try again."))
             args["number"] = number
-    elif isinstance(change, Roles):
-        row = next(r for r in tuning_cli.role_rows(config) if r["role"] == change.role)
-        if change.model is not None and change.model not in [
-            *row["candidate_models"],
-            row["model"],
-        ]:
-            raise click.ClickException(t("Invalid module choice."))
-        selected = next((k for k in row["candidate_keys"] if k["fingerprint"] == change.key), None)
-        # An unavailable saved key may be kept; changing the model must not silently clear it.
-        if change.key is not None and selected is None:
-            if change.key != row["key_fingerprint"]:
-                raise click.ClickException(t("Invalid module choice."))
-            keys = {}
-        else:
-            provider = (change.model or next(iter(row["candidate_models"]), "")).split("/", 1)[0]
-            if selected and selected["provider"] != provider:
-                raise click.ClickException(t("Invalid module choice."))
-            keys = {change.role: selected["selector"] if selected else "auto"}
-        name, args = "tuning", {"models": {change.role: change.model or "auto"}, "keys": keys}
     elif isinstance(change, Permission):
         name, args = "permissions", {"grant" if change.on else "revoke": [change.name]}
     elif isinstance(change, Personalize):
@@ -192,3 +173,28 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
     entry = commands.find(name)
     assert entry is not None
     return entry, commands.parse(entry, args, config)
+
+
+def role_change(change: Roles, config: Config) -> tuning_cli.TuningChange:
+    """Keep page key identities separate from label-sensitive CLI selectors."""
+    fingerprints: dict[str, str | None]
+    row = next(r for r in tuning_cli.role_rows(config) if r["role"] == change.role)
+    if change.model is not None and change.model not in [
+        *row["candidate_models"],
+        row["model"],
+    ]:
+        raise click.ClickException(t("Invalid module choice."))
+    selected = next((k for k in row["candidate_keys"] if k["fingerprint"] == change.key), None)
+    # An unavailable saved key may be kept; changing the model must not silently clear it.
+    if change.key is not None and selected is None:
+        if change.key != row["key_fingerprint"]:
+            raise click.ClickException(t("Invalid module choice."))
+        fingerprints = {}
+    else:
+        provider = (change.model or next(iter(row["candidate_models"]), "")).split("/", 1)[0]
+        if selected and selected["provider"] != provider:
+            raise click.ClickException(t("Invalid module choice."))
+        fingerprints = {change.role: change.key}
+    return tuning_cli.TuningChange(
+        models={change.role: change.model or "auto"}, fingerprints=fingerprints
+    )

@@ -495,3 +495,64 @@ assert.equal(sent.at(-1).change.language, 'ru');
         encoding="utf-8",
     )
     subprocess.run([node, str(script)], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("section", ["roles", "keys"])
+def test_settings_key_fingerprint_ignores_index_like_label(settings_app: Any, section: str) -> None:
+    app, store = settings_app
+    first, labelled = "gsk_" + "a" * 48, "gsk_" + "b" * 48
+    config = make_config(
+        api_keys={
+            "GROQ_API_KEY": [
+                {"value": first, "label": "first"},
+                {"value": labelled, "label": "#1"},
+            ]
+        }
+    )
+    open_config().save(config)
+    chat = Chat(Sessions(store.conn))
+    if section == "roles":
+        model = tuning_cli.role_rows(config)[0]["candidate_models"][0]
+        change = {"section": section, "role": "planner", "model": model, "key": key_id(first)}
+    else:
+        change = {
+            "section": section,
+            "operation": "remove",
+            "provider": "groq",
+            "key": key_id(first),
+        }
+    with ui.use(app.front):
+        chat._action(action(change))
+    assert snapshot(app)["result"]["ok"]
+    saved = open_config().load()
+    if section == "roles":
+        assert saved.tuning.keys.planner == key_id(first)
+    else:
+        assert [k.value for k in saved.keys("GROQ_API_KEY")] == [labelled]
+
+
+@pytest.mark.parametrize("key", ["unknown", "other-provider"])
+def test_settings_role_refuses_invalid_fingerprint(settings_app: Any, key: str) -> None:
+    app, store = settings_app
+    secret = "gsk_" + "a" * 48
+    other = "other-secret"
+    config = make_config(api_keys={"GROQ_API_KEY": secret, "OPENROUTER_API_KEY": other})
+    open_config().save(config)
+    model = next(
+        m for m in tuning_cli.role_rows(config)[0]["candidate_models"] if m.startswith("groq/")
+    )
+    before = open_config().config_path.read_bytes()
+    with ui.use(app.front):
+        Chat(Sessions(store.conn))._action(
+            action(
+                {
+                    "section": "roles",
+                    "role": "planner",
+                    "model": model,
+                    "key": key_id(other) if key == "other-provider" else "0" * 12,
+                }
+            )
+        )
+    assert not snapshot(app)["result"]["ok"]
+    assert open_config().config_path.read_bytes() == before
+    assert not store.conn.execute("SELECT * FROM operator_log").fetchall()

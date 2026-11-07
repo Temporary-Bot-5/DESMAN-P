@@ -1219,8 +1219,8 @@ class Chat:
 
     def _settings_action(self, action: ui.SettingsAction) -> None:
         """Human fields use catalog bodies and the same redacted operator journal."""
-        from desman.gui.settings import command
-        from desman.settings_actions import Forget, ProviderSetting
+        from desman.gui.settings import command, role_change
+        from desman.settings_actions import Forget, ProviderSetting, Roles
 
         before = self._saved_config()
         message, ok = "", True
@@ -1231,6 +1231,19 @@ class Chat:
                 if not config.personalize:
                     raise ValueError("personalisation off")
                 self.profile.forget(change.note, Author.PERSON, session_id=self.session_id)
+            elif isinstance(change, Roles):
+                old, new, edited = tuning_cli.set_tuning(open_config(), role_change(change, config))
+                for line in tuning_cli.lines(old, new, edited):
+                    ui.ok(line)
+                entry = commands.find("tuning")
+                assert entry is not None
+                self._journal(
+                    entry,
+                    commands.TuningArgs(models={change.role: change.model or "auto"}, keys=None),
+                    True,
+                    before,
+                    typed=True,
+                )
             elif isinstance(change, ProviderSetting):
                 from desman import wizard
 
