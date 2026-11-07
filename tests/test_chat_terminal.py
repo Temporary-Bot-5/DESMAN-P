@@ -413,3 +413,18 @@ def test_plain_cyrillic_terminal_text_is_not_model_input(
     assert "“привет” is not a command." in text
     assert "`help`" in text and "/back" in text
     assert not llm.calls
+
+
+def test_terminal_result_json_never_shows_an_escaped_key() -> None:
+    """A key with a quote or backslash is cut before json.dumps escapes it (Devin, PR #97)."""
+    from desman import chat as chat_module
+    from desman.config import ApiKey, Config
+
+    key = 'gsk_quote"and\\slash_0123456789abcdef'
+    config = Config(api_keys={"GROQ_API_KEY": [ApiKey(value=key)]})
+    shown = json.dumps(
+        chat_module._redacted({"answer": f"the key is {key}", key: [key]}, config),
+        ensure_ascii=False,
+    )
+    assert key not in shown
+    assert json.dumps(key)[1:-1] not in shown
