@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers wait: config.json does not load ({error}).": "バックグラウンドワーカーは待機中です: config.json を読み込めません ({error})。",
     "Background workers started again.": "バックグラウンドワーカーが再起動しました。",
     "Background workers wait for a model: add a key or a local model in Settings.": "バックグラウンドワーカーはモデルを待っています。設定でキーまたはローカルモデルを追加してください。",
     "Background workers (1–8); applies on the next page start.": "バックグラウンドワーカー（1～8）。次回のページ起動時に適用。",

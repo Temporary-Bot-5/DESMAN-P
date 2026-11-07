@@ -123,7 +123,8 @@ class Pool:
         self.ready = ready or self._ready
         self.model_due = 0.0
         self.model_ready = False
-        self.waiting_model = False
+        self.waiting_model: str | None = None
+        self.waiting_reason: str | None = None
         self.end = threading.Event()
         self.thread: threading.Thread | None = None
 
@@ -139,7 +140,15 @@ class Pool:
             return True
         try:
             router.lineup(ConfigManager(self.config_path).load(), calls.Role.EXECUTOR)
-        except (router.NoProvider, ConfigError):
+        except router.NoProvider:
+            self.waiting_reason = t(
+                "Background workers wait for a model: add a key or a local model in Settings."
+            )
+            return False
+        except ConfigError as e:  # a file that does not load is broken, never "unconfigured"
+            self.waiting_reason = t(
+                "Background workers wait: config.json does not load ({error}).", error=str(e)
+            )
             return False
         return True
 
@@ -183,15 +192,14 @@ class Pool:
             for slot in self.slots:
                 if slot.process is not None and slot.process.poll() is not None:
                     slot.process, slot.due = None, 0
-            if not self.waiting_model:
-                self.messages.append(
-                    t(
-                        "Background workers wait for a model: add a key or a local model in Settings."
-                    )
-                )
-            self.waiting_model = True
+            reason = self.waiting_reason or t(
+                "Background workers wait for a model: add a key or a local model in Settings."
+            )
+            if self.waiting_model != reason:  # once per distinct reason
+                self.messages.append(reason)
+            self.waiting_model = reason
             return
-        self.waiting_model = False
+        self.waiting_model = None
         for index, slot in enumerate(self.slots, 1):
             if slot.stopped:
                 continue

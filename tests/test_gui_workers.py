@@ -504,3 +504,24 @@ def test_model_loss_on_exit_does_not_count_as_death(tmp_path: Path, clock: FakeC
     clock.advance(10)
     pool.tick()
     assert len(launcher.calls) == 2
+
+
+def test_a_broken_config_is_named_not_reported_as_a_missing_model(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    (tmp_path / "config.json").write_text("{not json", encoding="utf-8")
+    launcher = Launcher()
+    pool = Pool(
+        tmp_path / "db",
+        tmp_path,
+        1,
+        launcher=launcher,
+        guard=lambda: None,
+        clock=lambda: clock().timestamp(),
+    )
+    pool.tick()
+    pool.tick()
+    assert launcher.calls == []
+    assert len(pool.messages) == 1
+    assert "config.json does not load" in pool.messages[0]
+    assert "add a key" not in pool.messages[0]

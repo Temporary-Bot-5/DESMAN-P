@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers wait: config.json does not load ({error}).": "Los procesos en segundo plano esperan: config.json no se carga ({error}).",
     "Background workers started again.": "Los procesos en segundo plano se han reiniciado.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Los procesos en segundo plano esperan un modelo: añade una clave o un modelo local en Ajustes.",
     "Background workers (1–8); applies on the next page start.": "Procesos en segundo plano (1–8); se aplica al reiniciar la página.",

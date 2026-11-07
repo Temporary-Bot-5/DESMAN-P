@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers wait: config.json does not load ({error}).": "Arka plan işçileri bekliyor: config.json yüklenemiyor ({error}).",
     "Background workers started again.": "Arka plan çalışanları yeniden başlatıldı.",
     "Background workers wait for a model: add a key or a local model in Settings.": "Arka plan çalışanları bir model bekliyor: Ayarlar bölümünde bir anahtar veya yerel model ekleyin.",
     "Background workers (1–8); applies on the next page start.": "Arka plan çalışanları (1–8); sayfanın sonraki açılışında uygulanır.",

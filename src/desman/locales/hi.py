@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Background workers wait: config.json does not load ({error}).": "पृष्ठभूमि वर्कर प्रतीक्षा में हैं: config.json लोड नहीं होती ({error})।",
     "Background workers started again.": "पृष्ठभूमि वर्कर फिर से शुरू हो गए।",
     "Background workers wait for a model: add a key or a local model in Settings.": "पृष्ठभूमि वर्कर मॉडल की प्रतीक्षा में हैं: सेटिंग्स में कुंजी या स्थानीय मॉडल जोड़ें।",
     "Background workers (1–8); applies on the next page start.": "पृष्ठभूमि वर्कर (1–8); पेज अगली बार शुरू होने पर लागू होगा।",
