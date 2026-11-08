@@ -1758,7 +1758,10 @@ class Chat:
         if not isinstance(llm, router.Fallback):
             return
         call = llm.last_call
-        if not call.answered or not any(item.model == llm.label for item in call.skipped):
+        # `skipped` holds only the models asked before the one that answered: any at all means
+        # the first one asked (spread or not) did not answer. `llm.label` may already name the
+        # answering model (T.2m-c), so it cannot tell.
+        if not call.answered or not call.skipped:
             return
         reasons = {
             "memory": t("model may not fit in memory"),
@@ -1813,7 +1816,22 @@ class Chat:
             lineup = router.lineup(config, calls.Role.INTERLOCUTOR)
         except router.NoProvider:
             lineup = []
+        latest = self.store.conn.execute(
+            "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+            "AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+            (self.session_id,),
+        ).fetchone()
+        if latest:
+            actual = f"{latest['provider']}/{latest['model']}"
+            lineup.sort(key=lambda c: c.label != actual)
         labels = [c.label for c in lineup]
+        if latest:
+            labels = [actual, *(label for label in labels if label != actual)]
+        elif (
+            router.preferred(config, calls.Role.INTERLOCUTOR) is None
+            and router.preferred_key(config, calls.Role.INTERLOCUTOR) is None
+        ):
+            labels = [t("Automatic"), *labels]
         model_line = t("Model: {model}", model=labels[0] if labels else t("missing"))
         if len(labels) > 1:
             rest = ", ".join(labels[1:4])

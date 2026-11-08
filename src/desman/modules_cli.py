@@ -10,7 +10,7 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import actions, live, tuning_cli, ui
+from desman import actions, live, providers, tuning_cli, ui
 from desman.config import Config
 from desman.config_cli import json_option, load_config
 from desman.core import calls, choices, db
@@ -171,7 +171,25 @@ def modules_data(
                 lineup = router.lineup(cfg, call_role, kind=kind)
             except router.NoProvider:
                 lineup = []
+            latest_call = conn.execute(
+                "SELECT c.provider, c.model FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
+                "WHERE c.task_id = ? AND c.role = ? AND c.error_kind IS NULL "
+                "AND (? IS NULL OR COALESCE(s.kind, 'text') = ?) ORDER BY c.seq DESC LIMIT 1",
+                (
+                    identity,
+                    call_role.value,
+                    kind.value if kind else None,
+                    kind.value if kind else None,
+                ),
+            ).fetchone()
             first = lineup[0] if lineup else None
+            if latest_call:
+                first = router.Choice(providers.find(latest_call["provider"]), latest_call["model"])
+            elif (
+                router.preferred(cfg, call_role, kind) is None
+                and router.preferred_key(cfg, call_role, kind) is None
+            ):
+                first = None
             fingerprint = router.preferred_key(cfg, call_role, kind)
             applicable = next(
                 (

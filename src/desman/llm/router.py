@@ -23,15 +23,17 @@ to the next key when one is refused or limited).
 from __future__ import annotations
 
 import random
+import sqlite3
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
 from desman import providers
 from desman.config import Config
+from desman.core import calls, db
 from desman.core.calls import Role
 from desman.core.models import Kind
 from desman.core.retry import FailureKind
@@ -180,6 +182,74 @@ def lineup(
         # first, as ranked), the others stay behind it for a fallback.
         choices.sort(key=lambda c: c.provider.id != source)
     return choices
+
+
+def spread_tier(choices: Sequence[Choice], role: Role, kind: Kind | None = None) -> list[Choice]:
+    """First model per provider in the leading equally suitable run."""
+    need = catalog.need(role, kind)
+
+    def rank(c: Choice) -> tuple[bool, bool, bool]:
+        return c.provider.local, need not in c.spec.strengths, not c.spec.strict_json
+
+    tier: list[Choice] = []
+    for choice in choices:
+        if rank(choice) != rank(choices[0]):
+            break
+        if not choice.provider.paid and all(c.provider.id != choice.provider.id for c in tier):
+            tier.append(choice)
+    return tier
+
+
+def capacity_order(
+    conn: sqlite3.Connection,
+    config: Config,
+    tier: Sequence[Choice],
+    clock: Callable[[], datetime],
+) -> Callable[[list[Choice]], list[Choice]]:
+    """One indexed statement reads recent usage and limiter blocks for the tier."""
+
+    def order(choices: list[Choice]) -> list[Choice]:
+        if len(tier) < 2:
+            return choices
+        now = clock()
+        values = ",".join("(?, ?, ?)" for _ in tier)
+        args: list[object] = [v for c in tier for v in (c.provider.id, c.model, c.label)]
+        rows = conn.execute(
+            f"WITH candidates(provider, model, scope) AS (VALUES {values}) "
+            "SELECT c.scope, b.blocked_until, "
+            "(SELECT COUNT(*) FROM model_calls m WHERE m.provider = c.provider "
+            "AND m.model = c.model AND m.at >= ?) AS used, "
+            "(SELECT m.error_kind IS NOT NULL AND m.error_kind != 'quality' "
+            "FROM model_calls m WHERE m.provider = c.provider AND m.model = c.model "
+            "AND m.at >= ? ORDER BY m.at DESC, m.seq DESC LIMIT 1) AS failed "
+            "FROM candidates c LEFT JOIN rate_buckets b ON b.scope = c.scope",
+            (*args, db.to_iso(now - timedelta(minutes=10)), db.to_iso(now - timedelta(hours=1))),
+        ).fetchall()
+        usage = {r["scope"]: r for r in rows}
+
+        def score(c: Choice) -> tuple[bool, bool, float]:
+            row = usage[c.label]
+            blocked = row["blocked_until"]
+            keys = max(1, len(config.keys(c.provider.key_env or "")))
+            return (
+                bool(blocked and db.parse_iso(blocked) > now),
+                bool(row["failed"]),
+                row["used"] / (c.spec.rpm * keys),
+            )
+
+        head = sorted(tier, key=score)
+        return [*head, *(c for c in choices if c not in tier)]
+
+    return order
+
+
+def call_scope() -> tuple[str, str] | None:
+    purpose = calls.purpose()
+    if purpose.task_id is not None:
+        return "task", purpose.task_id
+    if purpose.session_id is not None:
+        return "session", purpose.session_id
+    return None
 
 
 def _key_provider(config: Config, fingerprint: str | None) -> str | None:
@@ -341,10 +411,23 @@ class Fallback:
     passing one, else the first model's.
     """
 
-    def __init__(self, members: Sequence[tuple[LLM, Choice | None]]) -> None:
+    def __init__(
+        self,
+        members: Sequence[tuple[LLM, Choice | None]],
+        *,
+        order: Callable[[list[Choice]], list[Choice]] | None = None,
+        sticky: bool = True,
+        on_used: Callable[[str], None] | None = None,
+        label_for: Callable[[], str | None] | None = None,
+    ) -> None:
         if not members:
             raise ValueError("a lineup needs at least one model")
         self.members = list(members)
+        self.order = order
+        self.sticky = sticky
+        self.on_used = on_used
+        self.label_for = label_for
+        self._scopes: dict[tuple[str, str], list[Choice]] = {}
         first, choice = self.members[0]
         self.name = first.name
         self.label = first.name if choice is None else choice.label
@@ -352,6 +435,14 @@ class Fallback:
         self._call = LastCall()
         self._unfit: set[str] = set()
         """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
+
+    @property
+    def label(self) -> str:
+        return (self.label_for() if self.label_for is not None else None) or self._label
+
+    @label.setter
+    def label(self, value: str) -> None:
+        self._label = value
 
     @property
     def last_call(self) -> LastCall:
@@ -365,13 +456,20 @@ class Fallback:
         self._call = LastCall()
         skipped: list[SkippedModel] = []
         need = estimated_tokens(request)
+        scope = call_scope()
+        ordered_members = self.members
+        if self.order is not None:
+            held = self._scopes.get(scope) if scope is not None and self.sticky else None
+            choices = self.choices
+            choices = self.order(choices) if held is None else held
+            ordered_members = [m for c in choices for m in self.members if m[1] == c]
         fit = [
             (llm, choice)
-            for llm, choice in self.members
+            for llm, choice in ordered_members
             if (choice is None or not among(choice.label, request.avoid))
             and (choice.label if choice is not None else llm.name) not in self._unfit
         ]
-        fit = fit or self.members
+        fit = fit or ordered_members
         # An uncatalogued cloud model has a conservative guessed context, not a measured
         # limit. Give the person's choice a chance instead of skipping it on that guess.
         large = [
@@ -396,7 +494,16 @@ class Fallback:
                     )
                 )
         errors: list[ProviderError] = []
+        failed_over = False
         for i, (llm, choice) in enumerate(members):
+            label = llm.name if choice is None else choice.label
+            if self.on_used is not None:
+                self.on_used(label)
+            if self.order is not None and scope is not None and self.sticky and not failed_over:
+                self._scopes.pop(scope, None)
+                self._scopes[scope] = sorted(choices, key=lambda c: c.label != label)
+                if len(self._scopes) > 256:
+                    self._scopes.pop(next(iter(self._scopes)))
             try:
                 reply = llm.complete(request)
             except ProviderError as e:
@@ -431,6 +538,9 @@ class Fallback:
                     self._unfit.add(label)
                     unfit_seen(label)  # kept in the task's history: later runs avoid it too
                     continue
+                failed_over = True
+                if scope is not None:
+                    self._scopes.pop(scope, None)
                 errors.append(e)
                 if e.slow:
                     break
@@ -438,7 +548,7 @@ class Fallback:
             self._last = (reply, llm)
             ahead = [
                 c.label if c else m.name
-                for m, c in self.members[: self.members.index((llm, choice))]
+                for m, c in ordered_members[: ordered_members.index((llm, choice))]
             ]
             ordered = tuple(item for label in ahead for item in skipped if item.model == label)
             self._call = LastCall(f"{reply.provider}/{reply.model}", ordered)
