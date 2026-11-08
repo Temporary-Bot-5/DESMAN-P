@@ -348,7 +348,19 @@ def interlocutor(
         if any((source, c.label) not in removed for source in router.sources(cfg, c))
     ]
     first = lineup[0] if lineup else None
-    fingerprint = router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
+    latest = conn.execute(
+        "SELECT provider, model, key_id FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+        "AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+        (identity,),
+    ).fetchone()
+    if latest:
+        first = router.Choice(providers.find(latest["provider"]), latest["model"])
+    elif (
+        router.preferred(cfg, calls.Role.INTERLOCUTOR) is None
+        and router.preferred_key(cfg, calls.Role.INTERLOCUTOR) is None
+    ):
+        first = None
+    fingerprint = latest["key_id"] if latest else router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
     if first:
         sources = [
             source for source in router.sources(cfg, first) if (source, first.label) not in removed
@@ -373,10 +385,6 @@ def interlocutor(
         "FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
         "AND provider = ? AND model = ?",
         (identity, first.provider.id if first else None, first.model if first else None),
-    ).fetchone()
-    latest = conn.execute(
-        "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
-        (identity,),
     ).fetchone()
     source = modules_cli.module_source(
         config,

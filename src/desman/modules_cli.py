@@ -187,8 +187,28 @@ def modules_data(
                 for c in lineup
                 if any((source, c.label) not in removed for source in router.sources(cfg, c))
             ]
+            latest_call = conn.execute(
+                "SELECT c.provider, c.model, c.key_id FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
+                "WHERE c.task_id = ? AND c.role = ? AND c.error_kind IS NULL "
+                "AND (? IS NULL OR COALESCE(s.kind, 'text') = ?) ORDER BY c.seq DESC LIMIT 1",
+                (
+                    identity,
+                    call_role.value,
+                    kind.value if kind else None,
+                    kind.value if kind else None,
+                ),
+            ).fetchone()
             first = lineup[0] if lineup else None
-            fingerprint = router.preferred_key(cfg, call_role, kind)
+            if latest_call:
+                first = router.Choice(providers.find(latest_call["provider"]), latest_call["model"])
+            elif (
+                router.preferred(cfg, call_role, kind) is None
+                and router.preferred_key(cfg, call_role, kind) is None
+            ):
+                first = None
+            fingerprint = (
+                latest_call["key_id"] if latest_call else router.preferred_key(cfg, call_role, kind)
+            )
             if first:
                 sources = [
                     source
@@ -373,6 +393,47 @@ def hold_scope(
     return "all", ""
 
 
+def assigned_module(
+    conn: sqlite3.Connection, config: Config, row: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve Auto's provisional assignment for holds/cards, leaving its public label Auto."""
+    if row["model"] is not None:
+        return row
+    identity, role = row["task_id"], row["role"]
+    network = Store(conn).find_task(identity)["origin"] == "network"
+    cfg = choices.effective(config, role, choices.get(conn, "task", identity, role))
+    kind = Kind(role) if role in {k.value for k in Kind} else None
+    try:
+        lineup = router.lineup(cfg, calls.Role.EXECUTOR if kind else calls.Role(role), kind=kind)
+    except router.NoProvider:
+        return row
+    removed = {
+        (h.source, h.model)
+        for h in holds.active(conn, "network" if network else "task", "" if network else identity)
+        if h.state == "removed"
+    }
+    for choice in lineup:
+        if network and choice.provider.id not in config.network.donated:
+            continue
+        sources = [
+            source
+            for source in router.sources(cfg, choice)
+            if (source, choice.label) not in removed
+        ]
+        if sources:
+            preferred = router.preferred_key(
+                cfg, calls.Role.EXECUTOR if kind else calls.Role(role), kind
+            )
+            source = preferred if preferred in sources else sources[0]
+            return {
+                **row,
+                "model": choice.label,
+                "provider": choice.provider.id,
+                "key_fingerprint": None if choice.provider.local else source,
+            }
+    return row
+
+
 def hold_change(conn: sqlite3.Connection, config: Config, operation: str, hold: holds.Hold) -> None:
     """The sole page/CLI/catalog body; affected work is computed by code, not supplied by a model."""
     if operation == "stop":
@@ -380,6 +441,7 @@ def hold_change(conn: sqlite3.Connection, config: Config, operation: str, hold: 
         if hold.scope in {"all", "task"}:
             rows = modules_data(conn, config, hold.scope_id if hold.scope == "task" else None)
             for row in rows:
+                row = assigned_module(conn, config, row)
                 if row["model"] == hold.model and module_source(config, row) == hold.source:
                     tasks.add(row["task_id"])
             for identity in {row["task_id"] for row in rows}:

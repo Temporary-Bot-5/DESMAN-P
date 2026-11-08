@@ -860,14 +860,25 @@ def section(title: str) -> None:
         _front.section(title)
 
 
+def notice_text(level: str, text: str) -> Text:
+    """Build the notice shared by the page and its durable recording."""
+    if level == "ok":
+        return Text("✓ ", style="good") + Text(text)
+    if level == "note":
+        return Text(text, style="muted")
+    if level == "warn":
+        return Text("! " + text, style="warn")
+    return Text("✗ " + text, style="bad")
+
+
 def note(text: str) -> None:
-    _record(Text(text))
+    _record(notice_text("note", text))
     with _ui_writes():
         _front.note(text)
 
 
 def ok(text: str) -> None:
-    _record(Text("✓ " + text))
+    _record(notice_text("ok", text))
     with _ui_writes():
         _front.ok(text)
 
@@ -875,13 +886,13 @@ def ok(text: str) -> None:
 def warn(text: str, *, stderr: bool = False) -> None:
     for rec in _recordings.get():
         rec.warnings.append(rec.redact(text))
-    _record(Text("! " + text))
+    _record(notice_text("warn", text))
     with _ui_writes():
         _front.warn(text, stderr=stderr)
 
 
 def error(text: str) -> None:
-    _record(Text("✗ " + text))
+    _record(notice_text("error", text))
     with _ui_writes():
         _front.error(text)
 

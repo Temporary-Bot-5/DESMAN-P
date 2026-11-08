@@ -413,7 +413,7 @@ class Runners:
                             self.condition.notify_all()
                             self.condition.wait(timeout=1)
                         if runner.wait_reason != str(exc):
-                            sink.note(str(exc))
+                            sink.note(exc.display())
                         runner.wait_reason = str(exc)
                     except Stopped as stopped:
                         if not stopped.recorded:

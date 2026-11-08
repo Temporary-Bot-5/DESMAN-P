@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -14,7 +16,7 @@ from conftest import FakeClock
 from desman import modules_cli, runs, ui
 from desman.config import Config
 from desman.core import calls, db, holds, operator
-from desman.core.models import SubtaskSpec, TaskSpec
+from desman.core.models import Kind, SubtaskSpec, TaskSpec
 from desman.core.sessions import Role, Sessions
 from desman.core.store import Store
 from desman.gui.module_view import cards
@@ -37,9 +39,9 @@ def task(store: Store, goal: str = "work") -> str:
     )
 
 
-def test_upgrade_42(tmp_path: Path) -> None:
+def test_upgrade_43(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "old.db")
-    db.migrate(conn, db.MIGRATIONS[:42])
+    db.migrate(conn, db.MIGRATIONS[:43])
     identity = task(Store(conn))
     assert db.migrate(conn) == 1
     db.verify_schema(conn)
@@ -449,4 +451,177 @@ def test_continue_preserves_manual_repause_in_same_millisecond(clock: FakeClock)
     assert store.find_task(identity)["paused_at"] == first_stamp
     holds.continue_(conn, hold, clock=clock)
     assert store.find_task(identity)["paused_at"] == first_stamp
+    conn.close()
+
+
+def test_call_reads_holds_once_and_never_refreshes_local_metadata(
+    clock: FakeClock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from desman import local_models
+    from desman.core import choices
+    from desman.llm import limiter
+
+    conn = db.open_db(":memory:")
+    cfg = make_config(settings={"OLLAMA_MODEL": "llama3.2"})
+    monkeypatch.setattr(local_models, "prepare_ollama_context", lambda *_: (8192, False))
+    monkeypatch.setattr(local_models, "ollama_context", lambda *_: (8192, False))
+    monkeypatch.setattr(limiter, "lock_dir", lambda: tmp_path / "locks")
+    monkeypatch.setattr(limiter, "machine_load", lambda: 0.0)
+    models = runs.models(
+        cfg,
+        conn,
+        cache=False,
+        clock=clock,
+        sleep=clock.sleep,
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(
+                    200,
+                    json={
+                        "message": {"content": "ok"},
+                        "model": json.loads(r.content)["model"],
+                        "done": True,
+                    },
+                )
+            )
+        ),
+    )
+
+    def unexpected(*args: object) -> None:
+        pytest.fail("local metadata was requested during a call")
+
+    monkeypatch.setattr(local_models, "ollama_context", unexpected)
+    identity = task(Store(conn))
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+    with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=identity)):
+        for name in (None, "ollama/another-model", None):
+            choices.set_choice(conn, "task", identity, "text", choices.Choice(model=name))
+            statements.clear()
+            models.executor(Kind.TEXT)[0].complete(REQUEST)
+            assert len([s for s in statements if "SELECT * FROM module_holds" in s]) == 1
+    conn.close()
+
+
+def test_module_waiting_stores_english_but_displays_translation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runs, "t", lambda *a, **kw: "translated waiting reason")
+    error = runs.ModuleWaiting("text")
+    assert str(error) == "no module left for text"
+    assert error.display() == "translated waiting reason"
+
+
+@pytest.mark.parametrize("target", ["task", "module"])
+@pytest.mark.parametrize("approved", [False, True])
+def test_page_remove_uses_server_confirmation_window(
+    target: str, approved: bool, clock: FakeClock
+) -> None:
+    import threading
+
+    from desman.chat import Chat
+    from desman.config import Donation, Network, open_config
+    from desman.gui.front import WebFront
+    from test_gui import next_prompt
+
+    cfg = make_config(
+        settings={"OLLAMA_MODEL": "llama3.2"},
+        network=Network(
+            enabled=True, donated={"ollama": Donation(calls_per_day=100, tokens_per_day=100_000)}
+        ),
+    )
+    open_config().save(cfg)
+    conn = db.open_db(":memory:")
+    chat = Chat(Sessions(conn, clock=clock))
+    identity = task(chat.store)
+    payload = (
+        {"type": "task_control", "operation": "remove", "id": identity}
+        if target == "task"
+        else {
+            "type": "module_hold",
+            "operation": "remove",
+            "source": "ollama",
+            "model": "ollama/llama3.2",
+            "scope": "network",
+            "scope_id": "",
+        }
+    )
+    front = WebFront()
+    errors: list[BaseException] = []
+
+    def answer() -> None:
+        try:
+            prompt = next_prompt(front)
+            assert prompt["kind"] == "confirm"
+            if target == "module":
+                assert "DESMAN-Global suspends" in str(prompt)
+            assert not front.answer({"id": -1, "value": True})
+            assert front.answer({"id": prompt["id"], "value": approved})
+        except BaseException as exc:
+            errors.append(exc)
+            front.stop()
+
+    assert not holds.listed(conn)
+    assert chat.store.find_task(identity)["hidden_at"] is None
+    worker = threading.Thread(target=answer, daemon=True)
+    worker.start()
+    with ui.use(front):
+        chat._action(ui.ACTIONS.validate_python(payload))
+    worker.join(timeout=5)
+    assert not worker.is_alive() and not errors
+    if target == "module":
+        assert bool(holds.listed(conn)) == approved
+    else:
+        assert bool(chat.store.find_task(identity)["hidden_at"]) == approved
+    conn.close()
+
+
+def test_holds_filter_spread_tier_and_other_excludes_actual(
+    clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from test_routing import GOOGLE, GROQ, MISTRAL, ok
+
+    conn = db.open_db(":memory:")
+    cfg = make_config(
+        api_keys={"GROQ_API_KEY": GROQ, "GOOGLE_API_KEY": GOOGLE, "MISTRAL_API_KEY": MISTRAL}
+    )
+    identity = task(Store(conn))
+    tiers: list[list[str]] = []
+    original = router.capacity_order
+
+    def capacity(
+        conn: sqlite3.Connection,
+        config: Config,
+        tier: Sequence[router.Choice],
+        clock: Callable[[], datetime],
+    ) -> Callable[[list[router.Choice]], list[router.Choice]]:
+        tiers.append([c.label for c in tier])
+        return original(conn, config, tier, clock)
+
+    monkeypatch.setattr(router, "capacity_order", capacity)
+    models = runs.models(
+        cfg,
+        conn,
+        clock=clock,
+        sleep=clock.sleep,
+        cache=False,
+        client=httpx.Client(
+            transport=httpx.MockTransport(lambda r: ok("ok", json.loads(r.content)["model"]))
+        ),
+    )
+    with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=identity)):
+        first = models.llm.complete(REQUEST)
+        held_model = f"{first.provider}/{first.model}"
+        secret = {"groq": GROQ, "google": GOOGLE, "mistral": MISTRAL}[first.provider]
+        holds.remove(
+            conn,
+            holds.Hold(source=key_id(secret), model=held_model, scope="task", scope_id=identity),
+        )
+        tiers.clear()
+        replacement = models.llm.complete(REQUEST)
+        assert tiers and all(held_model not in tier for tier in tiers)
+        assert f"{replacement.provider}/{replacement.model}" != held_model
+        assert models.other is not None
+        alternate = models.other.complete(REQUEST)
+        assert (alternate.provider, alternate.model) != (replacement.provider, replacement.model)
     conn.close()

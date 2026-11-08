@@ -141,11 +141,11 @@ def test_live_precedence_other_lineup_and_cross_connection(
         assert models.first(role) is not None
         if other:
             assert isinstance(other, router.Fallback)
-            assert scoped not in [c.label for c in other.choices]
-            assert isinstance(llm, router.Fallback)
-            assert [c.label for c in other.choices] == [
-                c.label for c in router.other_lineup(llm.choices)
-            ]
+            # Alternatives now resolve at call time against the model actually used.
+            reply = other.complete(REQUEST)
+            assert f"{reply.provider}/{reply.model}" != scoped
+            alternate = seen.pop()
+            assert alternate[0] != scoped.split("/", 1)[1]
         # Clearing just model inherits the role model, while retaining the scoped key.
         modules_cli.set_module(editor, cfg, "task", identity, field, model="auto")
         llm.complete(REQUEST)

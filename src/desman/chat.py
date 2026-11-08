@@ -280,7 +280,7 @@ class Chat:
                                 self.sessions.register_turn(waiting_seq)
                         added = True
                         if reason != str(exc):
-                            ui.note(str(exc))
+                            ui.note(exc.display())
                             reason = str(exc)
                         self.sleep(1)
         finally:
@@ -336,6 +336,18 @@ class Chat:
         else:
             self._greet()
 
+    @staticmethod
+    def _stored_style(styled: str, text: str, *configs: Config | None) -> str | None:
+        """Keep ANSI only when its decoded text matches the redacted stored text."""
+        for config in configs:
+            styled = providers.redact_keys(styled, config)[0]
+        plain = Text.from_ansi(styled).plain
+        for config in configs:
+            plain = providers.redact_keys(plain, config)[0]
+        if plain != Text.from_ansi(styled).plain or plain != text:
+            return None
+        return styled
+
     def _terminal_output(
         self, operation: Callable[[], Any], line: str | None = None, *, keep_inputs: bool = False
     ) -> Any:
@@ -361,9 +373,7 @@ class Chat:
                         Role.DESMAN,
                         text,
                         kind=Kind.EVENT,
-                        styled=providers.redact_keys(
-                            providers.redact_keys(rec.styled, config)[0], self._saved_config()
-                        )[0],
+                        styled=self._stored_style(rec.styled, text, config, self._saved_config()),
                     )
                 if self.in_terminal:
                     self._seen_terminal()
@@ -394,7 +404,7 @@ class Chat:
                 Role.DESMAN,
                 text,
                 kind=Kind.EVENT,
-                styled=providers.redact_keys(rec.styled, self._saved_config())[0],
+                styled=self._stored_style(rec.styled, text, self._saved_config()),
             )
             if self.in_terminal:
                 self._seen_terminal()
@@ -1814,7 +1824,10 @@ class Chat:
         if not isinstance(llm, router.Fallback):
             return
         call = llm.last_call
-        if not call.answered or not any(item.model == llm.label for item in call.skipped):
+        # `skipped` holds only the models asked before the one that answered: any at all means
+        # the first one asked (spread or not) did not answer. `llm.label` may already name the
+        # answering model (T.2m-c), so it cannot tell.
+        if not call.answered or not call.skipped:
             return
         reasons = {
             "memory": t("model may not fit in memory"),
@@ -1869,7 +1882,22 @@ class Chat:
             lineup = router.lineup(config, calls.Role.INTERLOCUTOR)
         except router.NoProvider:
             lineup = []
+        latest = self.store.conn.execute(
+            "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+            "AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+            (self.session_id,),
+        ).fetchone()
+        if latest:
+            actual = f"{latest['provider']}/{latest['model']}"
+            lineup.sort(key=lambda c: c.label != actual)
         labels = [c.label for c in lineup]
+        if latest:
+            labels = [actual, *(label for label in labels if label != actual)]
+        elif (
+            router.preferred(config, calls.Role.INTERLOCUTOR) is None
+            and router.preferred_key(config, calls.Role.INTERLOCUTOR) is None
+        ):
+            labels = [t("Automatic"), *labels]
         model_line = t("Model: {model}", model=labels[0] if labels else t("missing"))
         if len(labels) > 1:
             rest = ", ".join(labels[1:4])

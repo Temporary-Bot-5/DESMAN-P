@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 import sqlite3
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -129,33 +129,18 @@ def models(
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
+    used: dict[tuple[calls.Role, Kind | None, tuple[str, str] | None], str] = {}
 
-    def member(choice: router.Choice, first: str | None, *, apply_holds: bool = True) -> LLM:
+    def member(
+        choice: router.Choice, first: str | None, *, held: Set[tuple[str, str]] = frozenset()
+    ) -> LLM:
         # Share key state between roles with the same model and effective key order.
         keys = config.keys(choice.provider.key_env or "")
         applicable = first if any(key_id(k.value) == first for k in keys) else None
         # Identical orders share refusal/limit state, including an explicit default key.
         if keys and applicable == key_id(keys[0].value):
             applicable = None
-        purpose = calls.purpose()
-        scope: holds.Scope = (
-            "network"
-            if only is not None
-            else "session"
-            if purpose.role == calls.Role.INTERLOCUTOR
-            else "task"
-        )
-        scope_id = (
-            ""
-            if only is not None
-            else (purpose.session_id if scope == "session" else purpose.task_id) or ""
-        )
-        keys = [
-            k
-            for k in keys
-            if not apply_holds
-            or not holds.blocked(conn, key_id(k.value), choice.label, scope, scope_id)
-        ]
+        keys = [k for k in keys if (key_id(k.value), choice.label) not in held]
         cfg = config.model_copy(
             update={
                 "api_keys": {
@@ -192,15 +177,91 @@ def models(
         kind: Kind | None = None,
         current: Config = config,
         *,
-        apply_holds: bool = True,
+        other: bool = False,
+        held: Set[tuple[str, str]] = frozenset(),
     ) -> router.Fallback:
         first = router.preferred_key(current, role, kind)
-        return router.Fallback([(member(c, first, apply_holds=apply_holds), c) for c in choices])
+        automatic = (
+            provider is None
+            and model is None
+            and router.preferred(current, role, kind) is None
+            and router.preferred_key(current, role, kind) is None
+        )
+        capacity = (
+            router.capacity_order(
+                conn, current, router.spread_tier(choices, role, kind), buckets.clock
+            )
+            if automatic
+            else None
+        )
+
+        def order(available: list[router.Choice]) -> list[router.Choice]:
+            actual = used.get((role, kind, router.call_scope()))
+            if other:
+                if actual is None:
+                    alternatives = router.other_lineup(available)
+                    if not alternatives:
+                        raise ModuleWaiting(router.tuning_field(role, kind) or role.value)
+                    return alternatives
+                main = next((c for c in available if c.label == actual), None)
+                rest = [c for c in available if c.label != actual]
+                if main is not None:
+                    rest.sort(key=lambda c: c.provider.id == main.provider.id)
+                if not rest:
+                    raise ModuleWaiting(router.tuning_field(role, kind) or role.value)
+                return rest
+            return capacity(available) if capacity else available
+
+        def remember(label: str) -> None:
+            identity = (role, kind, router.call_scope())
+            used.pop(identity, None)
+            used[identity] = label
+            if len(used) > 256:
+                used.pop(next(iter(used)))
+
+        def actual_label() -> str | None:
+            if other:
+                try:
+                    alternatives = order(choices)
+                except ModuleWaiting:
+                    return None
+                return alternatives[0].label if alternatives else None
+            return used.get((role, kind, router.call_scope()))
+
+        result = router.Fallback(
+            [(member(c, first, held=held), c) for c in choices],
+            order=order if other or capacity else None,
+            sticky=not other,
+            on_used=None if other else remember,
+            label_for=actual_label,
+        )
+        if other:
+            alternatives = router.other_lineup(choices)
+            if alternatives:
+                result.label = alternatives[0].label
+        return result
+
+    local_choices = {
+        (p.id, p.model(config)): router._choice(config, p, p.model(config))
+        for p in providers.ready(config)
+        if p.local
+    }
+    lineups: dict[tuple[calls.Role, Kind | None, str | None, str | None], list[router.Choice]] = {}
 
     def lineup(
         role: calls.Role, kind: Kind | None = None, current: Config = config
     ) -> list[router.Choice]:
-        choices = router.lineup(current, role, provider, model, kind=kind)
+        identity = (
+            role,
+            kind,
+            router.preferred(current, role, kind),
+            router.preferred_key(current, role, kind),
+        )
+        if identity not in lineups:
+            lineups[identity] = router.lineup(
+                current, role, provider, model, kind=kind, local_choices=local_choices
+            )
+        choices = lineups[identity]
         if only is not None:
             choices = [c for c in choices if c.provider.id in only]
             if not choices:
@@ -212,7 +273,7 @@ def models(
         selected = router.other_lineup(own) if other else own
         if other and (model is not None or not selected):
             return None
-        default = chain(selected, role, kind, apply_holds=False)
+        default = chain(own, role, kind, other=other)
         field = router.tuning_field(role, kind)
         chains: dict[tuple[str, ...], router.Fallback] = {}
 
@@ -245,7 +306,11 @@ def models(
                 if any((source, c.label) not in removed for source in router.sources(cfg, c))
             ]
             # A stopped interlocutor queues instead of silently answering through a replacement.
-            if role == calls.Role.INTERLOCUTOR and own:
+            if (
+                role == calls.Role.INTERLOCUTOR
+                and own
+                and any(h.state == "stopped" for h in current_holds)
+            ):
                 first = own[0]
                 preferred = router.preferred_key(cfg, role, kind)
                 sources = [
@@ -277,8 +342,13 @@ def models(
                     for h in current_holds
                 ):
                     raise ModuleWaiting(field or role.value)
-            own = router.filter_holds(cfg, own, conn, scope, identity)
-            selected = (router.other_lineup(own) or own) if other else own
+            held = {(h.source, h.model) for h in current_holds}
+            own = [
+                c
+                for c in own
+                if any((source, c.label) not in held for source in router.sources(cfg, c))
+            ]
+            selected = own
             if not selected:
                 raise ModuleWaiting(field or role.value)
             signature = (
@@ -287,15 +357,13 @@ def models(
                     c.label
                     + ":"
                     + ",".join(
-                        source
-                        for source in router.sources(cfg, c)
-                        if not holds.blocked(conn, source, c.label, scope, identity)
+                        source for source in router.sources(cfg, c) if (source, c.label) not in held
                     )
                     for c in selected
                 ),
             )
             if signature not in chains:
-                chains[signature] = chain(selected, role, kind, cfg)
+                chains[signature] = chain(selected, role, kind, cfg, other=other, held=held)
             return chains[signature]
 
         return Scoped(current, default)
@@ -328,7 +396,11 @@ class ModuleWaiting(RateLimited):
 
     def __init__(self, role: str) -> None:
         super().__init__("modules", retry_after=30)
-        self.args = (t("no module left for {role}", role=role),)
+        self.role = role
+        self.args = (f"no module left for {role}",)
+
+    def display(self) -> str:
+        return t("no module left for {role}", role=self.role)
 
 
 class Scoped(router.Fallback):

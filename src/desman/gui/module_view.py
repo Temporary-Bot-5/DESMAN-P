@@ -77,6 +77,7 @@ def cards(
         return found[identity]
 
     for row in rows:
+        row = modules_cli.assigned_module(conn, config, row)
         task = conn.execute(
             "SELECT goal, origin FROM tasks WHERE id=?", (row["task_id"],)
         ).fetchone()
@@ -121,9 +122,25 @@ def cards(
             for c in lineup
             if any((source, c.label) not in removed for source in router.sources(cfg, c))
         ]
+        latest = conn.execute(
+            "SELECT provider, model, key_id FROM model_calls WHERE session_id=? "
+            "AND role='interlocutor' AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+            (session["id"],),
+        ).fetchone()
+        if (
+            latest
+            and (latest["key_id"] or latest["provider"], f"{latest['provider']}/{latest['model']}")
+            not in removed
+        ):
+            actual = router.Choice(providers.find(latest["provider"]), latest["model"])
+            lineup = [actual, *(c for c in lineup if c.label != actual.label)]
         if lineup:
             first = lineup[0]
-            preferred = router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
+            preferred = (
+                latest["key_id"]
+                if latest and first.label == f"{latest['provider']}/{latest['model']}"
+                else router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
+            )
             sources = [
                 source
                 for source in router.sources(cfg, first)

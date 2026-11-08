@@ -314,7 +314,8 @@ def test_card_usage_distinguishes_model_from_role(module_app: Any) -> None:
         calls.recorder(store.conn)(call(model="fallback", prompt_tokens=20, completion_tokens=3))
     row = next(r for r in modules_cli.modules_data(store.conn, config, task) if r["role"] == "text")
     assert (row["calls"], row["tokens"]) == (2, 35)
-    assert (row["model_calls"], row["model_tokens"]) == (1, 12)
+    assert row["model"] == "groq/fallback"
+    assert (row["model_calls"], row["model_tokens"]) == (1, 23)
 
     sessions = Sessions(store.conn)
     session = sessions.add(None, Role.USER, "hello").session_id
@@ -327,7 +328,8 @@ def test_card_usage_distinguishes_model_from_role(module_app: Any) -> None:
         calls.recorder(store.conn)(call(model="fallback", prompt_tokens=20, completion_tokens=3))
     card = json.loads(app.handle("GET", "/modules", headers(app)).body)["interlocutor"]
     assert (card["calls"], card["tokens"]) == (2, 35)
-    assert (card["model_calls"], card["model_tokens"]) == (1, 12)
+    assert card["model"] == "groq/fallback"
+    assert (card["model_calls"], card["model_tokens"]) == (1, 23)
 
 
 @pytest.mark.parametrize("fingerprint", [key_id("unconfigured"), key_id("other-provider")])
