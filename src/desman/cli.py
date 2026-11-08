@@ -503,6 +503,26 @@ def worker(
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)
         network = node.Node(store.conn, manager.load, work=crew is not None)
+        network_config = config
+
+        def network_poll(*, idle: bool = False) -> node.Event | None:
+            nonlocal network_config
+            try:
+                current = manager.load()
+            except ConfigError:
+                return _keep_in_touch(network, as_json, idle=idle)
+            if current != network_config:
+                coordinator.network = runs.network_crew(
+                    store,
+                    current,
+                    manager.load,
+                    given=models if source.fake is not None else None,
+                    cache=not no_cache,
+                )
+                network.work = coordinator.network is not None
+                network_config = current
+            return _keep_in_touch(network, as_json, idle=idle)
+
         if not as_json:
             ui.note(t("Worker {owner} started. Ctrl+C stops it.", owner=coordinator.owner))
             _tell_waiting(watch)  # what already waits, then what comes to
@@ -512,19 +532,19 @@ def worker(
         def ticked(result: WorkResult) -> None:
             if progress is not None:
                 progress(result)
-            _keep_in_touch(network, as_json)
+            network_poll()
 
         def called() -> None:
-            _keep_in_touch(network, as_json)
+            network_poll()
 
         def idle() -> bool:
             if progress is not None:
                 progress(None)
-            event = _keep_in_touch(network, as_json, idle=True)
+            event = network_poll(idle=True)
             return event is not None and event.change is node.Change.WORK_TAKEN
 
         try:
-            _keep_in_touch(network, as_json)
+            network_poll()
             # Between a step's model calls too: a job's lease at the registry is extended (and
             # its heartbeat sent) while one execution asks a slow model several times.
             with calls.watching(called):

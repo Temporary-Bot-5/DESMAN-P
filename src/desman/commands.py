@@ -368,6 +368,14 @@ ModuleRole = Literal[
 ]
 
 
+class ModuleHoldArgs(Args):
+    source: str = Field(pattern=r"^(?:[0-9a-f]{12}|ollama|llamacpp)$")
+    model: str = Field(pattern=r"^[a-z0-9_-]+/\S+$", max_length=200)
+    task: Ref | None = None
+    chat: Ref | None = None
+    network: bool = False
+
+
 class ModulesShowArgs(Args):
     task: Ref | None = None
 
@@ -787,9 +795,60 @@ def _behaviour(ctx: Context, args: BehaviourArgs) -> Outcome | Proposal:
     return Proposal([t("How the interlocutor talks to you:")] + lines, apply)
 
 
+def _module_hold(ctx: Context, args: ModuleHoldArgs, operation: str) -> Proposal:
+    from desman.core.holds import Hold
+
+    try:
+        scope, identity = modules_cli.hold_scope(ctx.store.conn, args.task, args.chat, args.network)
+    except ValueError:
+        raise click.ClickException(t("Invalid module hold.")) from None
+    hold = Hold(source=args.source, model=args.model, scope=scope, scope_id=identity)
+
+    def apply() -> Outcome:
+        modules_cli.hold_change(ctx.store.conn, ctx.config(), operation, hold)
+        ui.ok(t("Module hold updated."))
+        return Outcome({"operation": operation, **hold.model_dump()})
+
+    return Proposal(
+        [
+            t(
+                "{operation}: {model}",
+                operation={
+                    "stop": t("Stop"),
+                    "continue": t("Continue"),
+                    "remove": t("Remove"),
+                    "restore": t("Restore"),
+                }[operation],
+                model=hold.model,
+            )
+        ],
+        apply,
+        question=modules_cli.hold_question(ctx.store.conn, ctx.config(), hold)
+        if operation == "remove"
+        else None,
+    )
+
+
+def _module_stop(ctx: Context, args: ModuleHoldArgs) -> Proposal:
+    return _module_hold(ctx, args, "stop")
+
+
+def _module_continue(ctx: Context, args: ModuleHoldArgs) -> Proposal:
+    return _module_hold(ctx, args, "continue")
+
+
+def _module_remove(ctx: Context, args: ModuleHoldArgs) -> Proposal:
+    return _module_hold(ctx, args, "remove")
+
+
+def _module_restore(ctx: Context, args: ModuleHoldArgs) -> Proposal:
+    return _module_hold(ctx, args, "restore")
+
+
 def _modules_show(ctx: Context, args: ModulesShowArgs) -> Outcome:
     data = modules_cli.modules_data(ctx.store.conn, ctx.config(), args.task)
     modules_cli.print_modules(data)
+    modules_cli.print_holds(ctx.store.conn)
     return Outcome(data)
 
 
@@ -1777,6 +1836,34 @@ CATALOG: tuple[Entry, ...] = (
         BehaviourArgs,
         _behaviour_kind,
         _behaviour,
+    ),
+    Entry(
+        "modules stop",
+        "Stop a source/model module for all work, one task/chat or the network. The person confirms.",
+        ModuleHoldArgs,
+        Kind.CHANGE,
+        _module_stop,
+    ),
+    Entry(
+        "modules continue",
+        "Continue a source/model module for all work, one task/chat or the network. The person confirms.",
+        ModuleHoldArgs,
+        Kind.CHANGE,
+        _module_continue,
+    ),
+    Entry(
+        "modules remove",
+        "Remove a source/model module for all work, one task/chat or the network. The person confirms.",
+        ModuleHoldArgs,
+        Kind.CHANGE,
+        _module_remove,
+    ),
+    Entry(
+        "modules restore",
+        "Restore a source/model module for all work, one task/chat or the network. The person confirms.",
+        ModuleHoldArgs,
+        Kind.CHANGE,
+        _module_restore,
     ),
     Entry(
         "modules show",

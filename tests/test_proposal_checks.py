@@ -14,7 +14,7 @@ from click.testing import CliRunner
 
 from conftest import FakeClock
 from desman import bench, evaluation, improve
-from desman.config import Config, Network, Tuning
+from desman.config import Config, Donation, Network, Tuning
 from desman.core import db
 from desman.net import checks, jobs, node, protocol, sign
 from desman.registry import admin, store, work
@@ -503,7 +503,14 @@ def test_node_end_to_end(
     key_path = tmp_path / "checker.key"
     sign.create_node_key(key_path)
     conn = db.open_db(tmp_path / "checker.db")
-    config = Config(network=Network(enabled=True, registry=REGISTRY))
+    config = Config(
+        settings={"OLLAMA_MODEL": "llama3.2"},
+        network=Network(
+            enabled=True,
+            registry=REGISTRY,
+            donated={"ollama": Donation(calls_per_day=100, tokens_per_day=100_000)},
+        ),
+    )
     requests: list[str] = []
     blocked = scenario == "retry"
 
@@ -664,7 +671,7 @@ def test_check_contract_rejects_inconsistent_results(
         protocol.Claim.model_validate({"unknown": True})
 
 
-@pytest.mark.parametrize("change", ["off", "moved", "refused"])
+@pytest.mark.parametrize("change", ["off", "moved", "refused", "suspended"])
 def test_waiting_signed_checks_close_without_new_claims(
     tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -680,10 +687,12 @@ def test_waiting_signed_checks_close_without_new_claims(
     conn = db.open_db(tmp_path / "node.db")
     checks.keep(conn, REGISTRY, lent, signed, clock())
     config = Config(
+        settings={"OLLAMA_MODEL": "llama3.2"},
         network=Network(
+            donated={"ollama": Donation(calls_per_day=100, tokens_per_day=100_000)},
             enabled=change != "off",
             registry=REGISTRY if change != "moved" else "https://other.test",
-        )
+        ),
     )
     machine = node.Node(conn, lambda: config, key_path=tmp_path / "node.key", clock=clock)
     machine.next_at = clock() + timedelta(hours=1)
@@ -698,6 +707,12 @@ def test_waiting_signed_checks_close_without_new_claims(
         machine.registry = REGISTRY
         machine.registered = True
         machine._trust = sign.Trust(key.public, clock=clock)
+    if change == "suspended":
+        from desman.core import holds
+
+        holds.stop(
+            conn, holds.Hold(source="ollama", model="ollama/llama3.2", scope="network"), clock=clock
+        )
     machine.poll()
     assert checks.pending(conn) == []
     assert conn.execute("SELECT state FROM network_checks").fetchone()[0] == "lost"
@@ -768,7 +783,14 @@ def test_pending_check_still_extends_held_job(
 
     key = sign.create_node_key(tmp_path / "node.key")
     conn = db.open_db(tmp_path / "node.db")
-    config = Config(network=Network(enabled=True, registry=REGISTRY))
+    config = Config(
+        settings={"OLLAMA_MODEL": "llama3.2"},
+        network=Network(
+            enabled=True,
+            registry=REGISTRY,
+            donated={"ollama": Donation(calls_per_day=100, tokens_per_day=100_000)},
+        ),
+    )
     machine = node.Node(conn, lambda: config, key_path=tmp_path / "node.key", clock=clock)
     machine.registry = REGISTRY
     machine.registered = True

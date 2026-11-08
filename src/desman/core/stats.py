@@ -196,14 +196,15 @@ def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:
 
 def _strategies(conn: sqlite3.Connection, w: _Window) -> list[StrategyUse]:
     """Each attempt_started opens an attempt; the next verdict on that subtask closes it. An
-    attempt with no verdict (failed, interrupted, still running) was not accepted."""
+    attempt with no verdict (failed, interrupted, still running) was not accepted.
+    A strategy_fallback reclassifies the open attempt without rewriting its start."""
     where, args = w.where("ts", "task_id")
     started: Counter[str] = Counter()
     accepted: Counter[str] = Counter()
     open_: dict[str, str] = {}  # subtask id -> strategy of its attempt waiting for a verdict
     for subtask_id, action, details_json in conn.execute(
         f"""SELECT subtask_id, action, details_json FROM audit_log
-            WHERE action IN ('attempt_started', 'verdict') AND {where} ORDER BY seq""",
+            WHERE action IN ('attempt_started', 'strategy_fallback', 'verdict') AND {where} ORDER BY seq""",
         args,
     ):
         details = json.loads(details_json)
@@ -211,12 +212,22 @@ def _strategies(conn: sqlite3.Connection, w: _Window) -> list[StrategyUse]:
             strategy = str(details.get("strategy", Strategy.FIRST.value))
             started[strategy] += 1
             open_[subtask_id] = strategy
+        elif action == "strategy_fallback":
+            previous = open_.get(subtask_id)
+            target = details.get("to")
+            if previous is not None and previous == details.get("from") and isinstance(target, str):
+                started[previous] -= 1
+                started[target] += 1
+                open_[subtask_id] = target
         elif subtask_id in open_:
             strategy = open_.pop(subtask_id)
             if details.get("verdict") == "accept":
                 accepted[strategy] += 1
     order = [s.value for s in Strategy]
-    names = sorted(started, key=lambda s: (order.index(s) if s in order else len(order), s))
+    names = sorted(
+        (s for s in started if started[s]),
+        key=lambda s: (order.index(s) if s in order else len(order), s),
+    )
     return [StrategyUse(s, started[s], accepted[s]) for s in names]
 
 

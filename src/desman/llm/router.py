@@ -33,7 +33,7 @@ import httpx
 
 from desman import providers
 from desman.config import Config
-from desman.core import calls, db
+from desman.core import calls, db, holds
 from desman.core.calls import Role
 from desman.core.models import Kind
 from desman.core.retry import FailureKind
@@ -127,6 +127,8 @@ class Choice:
     known: catalog.Model | None = field(default=None, compare=False)
     """What is known of a local model (its context, from the settings); None: the catalog's."""
 
+    memory_risk: bool = field(default=False, compare=False)
+
     @property
     def spec(self) -> catalog.Model:
         return self.known or catalog.model(self.provider, self.model)
@@ -144,9 +146,30 @@ def lineup(
     model: str | None = None,
     *,
     kind: Kind | None = None,
+    conn: sqlite3.Connection | None = None,
+    scope: holds.Scope = "all",
+    scope_id: str = "",
+    local_choices: dict[tuple[str, str], Choice] | None = None,
 ) -> list[Choice]:
     """The models `role` asks, best first; the executor's for a subtask of `kind`. Raises
     `NoProvider` (with what to do about it)."""
+
+    def choice(p: Provider, name: str) -> Choice:
+        if not p.local or local_choices is None:
+            return _choice(config, p, name)
+        identity = (p.id, name)
+        if identity not in local_choices:
+            # Models owns the measured metadata snapshot. A newly scoped model uses its
+            # configured context until the next Models instance, without contacting a server.
+            local_choices[identity] = Choice(
+                p,
+                name,
+                catalog.local_model(
+                    name, p.context(config) or (16384 if p.id == "ollama" else None)
+                ),
+            )
+        return local_choices[identity]
+
     chosen = preferred(config, role, kind)
     selected: Provider | None = None
     if chosen is not None and provider is None and model is None:
@@ -158,13 +181,13 @@ def lineup(
             pass
     first = selected if selected is not None else choose(config, provider)
     if model is not None:
-        return [_choice(config, first, model)]
+        return filter_holds(config, [choice(first, model)], conn, scope, scope_id)
     pool = [first] if provider is not None else _free(config)
     need = catalog.need(role, kind)
     ranked = [
         (p.local, need not in c.spec.strengths, not c.spec.strict_json, place, order, c)
         for place, p in enumerate(pool)
-        for order, c in enumerate(_choices(config, p))
+        for order, c in enumerate([choice(p, p.model(config))] if p.local else _choices(config, p))
     ]
     choices = [row[-1] for row in sorted(ranked, key=lambda row: row[:5])]
     if chosen is not None and provider is None and all(c.label != chosen for c in choices):
@@ -174,14 +197,35 @@ def lineup(
         except providers.UnknownProvider:
             selected = None
         if selected is not None and (selected.id == "ollama" or _ready(config, selected)):
-            choices.append(_choice(config, selected, model_id))
+            choices.append(choice(selected, model_id))
     if chosen is not None:  # the person's choice goes first, if it is among them
         choices.sort(key=lambda c: c.label != chosen)
     elif provider is None and (source := _key_provider(config, preferred_key(config, role, kind))):
         # Auto model with a chosen key: that key's provider is asked first (its best models
         # first, as ranked), the others stay behind it for a fallback.
         choices.sort(key=lambda c: c.provider.id != source)
-    return choices
+    return filter_holds(config, choices, conn, scope, scope_id)
+
+
+def sources(config: Config, choice: Choice) -> list[str]:
+    if choice.provider.local:
+        return [choice.provider.id]
+    return [key_id(k.value) for k in config.keys(choice.provider.key_env or "")]
+
+
+def filter_holds(
+    config: Config,
+    choices: list[Choice],
+    conn: sqlite3.Connection | None,
+    scope: holds.Scope = "all",
+    scope_id: str = "",
+) -> list[Choice]:
+    if conn is None:
+        return choices
+    held = {(h.source, h.model) for h in holds.active(conn, scope, scope_id)}
+    return [
+        c for c in choices if any((source, c.label) not in held for source in sources(config, c))
+    ]
 
 
 def spread_tier(choices: Sequence[Choice], role: Role, kind: Kind | None = None) -> list[Choice]:
@@ -310,6 +354,11 @@ def _local_context(config: Config, p: Provider, model: str) -> int | None:
 
 
 def _choice(config: Config, p: Provider, model: str) -> Choice:
+    if p.id == "ollama":
+        from desman.local_models import ollama_context
+
+        context, risk = ollama_context(config, model)
+        return Choice(p, model, catalog.local_model(model, context), risk)
     if p.local:
         return Choice(p, model, catalog.local_model(model, _local_context(config, p, model)))
     return Choice(p, model)
@@ -352,7 +401,9 @@ def connect(
         send_temperature=chosen.send_temperature,
         max_tokens=chosen.max_tokens,
         paid=chosen.paid,
-        context=_local_context(config, chosen, choice.model),
+        context=choice.known.context
+        if choice.known
+        else _local_context(config, chosen, choice.model),
     )
 
     if chosen.id == "ollama":
@@ -361,7 +412,9 @@ def connect(
         connected.prepare_context = lambda model: prepare_ollama_context(
             config, model, connected.client
         )
-        connected.memory_risk = ollama_context(config, choice.model)[1]
+        connected.memory_risk = (
+            choice.memory_risk if choice.known else ollama_context(config, choice.model)[1]
+        )
     return connected
 
 

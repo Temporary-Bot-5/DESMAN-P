@@ -369,3 +369,7 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 
 #transcript-shell { flex: 1; min-height: 0; position: relative; }
 #transcript-shell #messages { height: 100%; }
+
+.module-controls { display: flex; gap: .2rem; align-items: start; }
+.module-controls .module-change { position: static; }
+.module-controls button { padding: .15rem .35rem; font-size: .85rem; }

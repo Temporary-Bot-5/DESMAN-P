@@ -13,12 +13,13 @@ from rich.text import Text
 from desman import actions, live, providers, tuning_cli, ui
 from desman.config import Config
 from desman.config_cli import json_option, load_config
-from desman.core import calls, choices, db
+from desman.core import calls, choices, db, holds
 from desman.core.models import Kind
 from desman.core.report import task_report
 from desman.core.store import Store
 from desman.i18n import t
 from desman.llm import router
+from desman.llm.openai_compat import key_id
 
 
 def scope_id(
@@ -129,6 +130,7 @@ def modules_data(
     role_labels = {r["role"]: r["label"] for r in tuning_cli.role_rows(config)}
     for identity in ids:
         report = task_report(store, identity)
+        network = store.find_task(identity)["origin"] == "network"
         modules = calls.modules(conn, identity)
         roles = {s.kind.value for s in report.subtasks}
         # Executors and review are assigned by the stored graph. Planning/decomposition
@@ -163,7 +165,7 @@ def modules_data(
         for role in tuning_cli.ROLES:
             if role not in roles or role == "interlocutor":
                 continue
-            own = choices.get(conn, "task", identity, role)
+            own = choices.Choice() if network else choices.get(conn, "task", identity, role)
             cfg = choices.effective(config, role, own)
             kind = Kind(role) if role in ("text", "code", "analysis") else None
             call_role = calls.Role.EXECUTOR if kind else calls.Role(role)
@@ -171,8 +173,22 @@ def modules_data(
                 lineup = router.lineup(cfg, call_role, kind=kind)
             except router.NoProvider:
                 lineup = []
+            if network:
+                lineup = [c for c in lineup if c.provider.id in config.network.donated]
+            removed = {
+                (h.source, h.model)
+                for h in holds.active(
+                    conn, "network" if network else "task", "" if network else identity
+                )
+                if h.state == "removed"
+            }
+            lineup = [
+                c
+                for c in lineup
+                if any((source, c.label) not in removed for source in router.sources(cfg, c))
+            ]
             latest_call = conn.execute(
-                "SELECT c.provider, c.model FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
+                "SELECT c.provider, c.model, c.key_id FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
                 "WHERE c.task_id = ? AND c.role = ? AND c.error_kind IS NULL "
                 "AND (? IS NULL OR COALESCE(s.kind, 'text') = ?) ORDER BY c.seq DESC LIMIT 1",
                 (
@@ -183,14 +199,33 @@ def modules_data(
                 ),
             ).fetchone()
             first = lineup[0] if lineup else None
+            if latest_call and (
+                (
+                    latest_call["key_id"] or latest_call["provider"],
+                    f"{latest_call['provider']}/{latest_call['model']}",
+                )
+                in removed
+            ):
+                latest_call = None
             if latest_call:
                 first = router.Choice(providers.find(latest_call["provider"]), latest_call["model"])
             elif (
-                router.preferred(cfg, call_role, kind) is None
+                not removed
+                and router.preferred(cfg, call_role, kind) is None
                 and router.preferred_key(cfg, call_role, kind) is None
             ):
                 first = None
-            fingerprint = router.preferred_key(cfg, call_role, kind)
+            fingerprint = (
+                latest_call["key_id"] if latest_call else router.preferred_key(cfg, call_role, kind)
+            )
+            if first:
+                sources = [
+                    source
+                    for source in router.sources(cfg, first)
+                    if (source, first.label) not in removed
+                ]
+                if fingerprint not in sources:
+                    fingerprint = next(iter(sources), None)
             applicable = next(
                 (
                     k
@@ -277,7 +312,7 @@ def print_modules(rows: list[dict[str, Any]], as_json: bool = False) -> None:
 
 
 @click.group("modules", invoke_without_command=True)
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @json_option
 @click.pass_context
 def modules(ctx: click.Context, task: str | None, as_json: bool) -> None:
@@ -290,10 +325,19 @@ def show_modules(task: str | None, as_json: bool) -> None:
     config = load_config().load()
     with closing(db.open_db()) as conn:
         print_modules(modules_data(conn, config, task), as_json)
+        if not as_json:
+            print_holds(conn)
+
+
+def print_holds(conn: sqlite3.Connection) -> None:
+    for hold in holds.listed(conn):
+        ui.note(
+            f"{hold.source} · {hold.model} · {hold.scope} {hold.scope_id} · {t('stopped') if hold.state == 'stopped' else t('removed')}"
+        )
 
 
 @modules.command("show")
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @json_option
 def show(task: str | None, as_json: bool) -> None:
     """Show the modules of active tasks, or one task."""
@@ -302,9 +346,9 @@ def show(task: str | None, as_json: bool) -> None:
 
 @modules.command("set")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES))
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @click.option(
-    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+    "--session", metavar="ID", help=t("One chat (its id as /sessions shows it): the interlocutor.")
 )
 @click.option(
     "--model", metavar="PROVIDER/MODEL|auto", help="The model asked first; auto: the role's."
@@ -330,9 +374,9 @@ def set_command(
 
 @modules.command("clear")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES), required=False)
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @click.option(
-    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+    "--session", metavar="ID", help=t("One chat (its id as /sessions shows it): the interlocutor.")
 )
 def clear_command(role: str | None, task: str | None, session: str | None) -> None:
     """Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor."""
@@ -341,3 +385,159 @@ def clear_command(role: str | None, task: str | None, session: str | None) -> No
         check_role(scope, role)
         choices.clear(conn, scope, identity, role)
     ui.ok(t("Module choices cleared."))
+
+
+def hold_scope(
+    conn: sqlite3.Connection,
+    task: str | None = None,
+    chat: str | None = None,
+    network: bool = False,
+) -> tuple[holds.Scope, str]:
+    if sum((task is not None, chat is not None, network)) > 1:
+        raise ValueError("choose one hold scope")
+    if network:
+        return "network", ""
+    if task is not None or chat is not None:
+        return scope_id(conn, task, chat)
+    return "all", ""
+
+
+def assigned_module(
+    conn: sqlite3.Connection, config: Config, row: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve Auto's provisional assignment for holds/cards, leaving its public label Auto."""
+    if row["model"] is not None:
+        return row
+    identity, role = row["task_id"], row["role"]
+    network = Store(conn).find_task(identity)["origin"] == "network"
+    cfg = choices.effective(config, role, choices.get(conn, "task", identity, role))
+    kind = Kind(role) if role in {k.value for k in Kind} else None
+    try:
+        lineup = router.lineup(cfg, calls.Role.EXECUTOR if kind else calls.Role(role), kind=kind)
+    except router.NoProvider:
+        return row
+    removed = {
+        (h.source, h.model)
+        for h in holds.active(conn, "network" if network else "task", "" if network else identity)
+        if h.state == "removed"
+    }
+    for choice in lineup:
+        if network and choice.provider.id not in config.network.donated:
+            continue
+        sources = [
+            source
+            for source in router.sources(cfg, choice)
+            if (source, choice.label) not in removed
+        ]
+        if sources:
+            preferred = router.preferred_key(
+                cfg, calls.Role.EXECUTOR if kind else calls.Role(role), kind
+            )
+            source = preferred if preferred in sources else sources[0]
+            return {
+                **row,
+                "model": choice.label,
+                "provider": choice.provider.id,
+                "key_fingerprint": None if choice.provider.local else source,
+            }
+    return row
+
+
+def hold_change(conn: sqlite3.Connection, config: Config, operation: str, hold: holds.Hold) -> None:
+    """The sole page/CLI/catalog body; affected work is computed by code, not supplied by a model."""
+    if operation == "stop":
+        tasks = set()
+        if hold.scope in {"all", "task"}:
+            rows = modules_data(conn, config, hold.scope_id if hold.scope == "task" else None)
+            for row in rows:
+                row = assigned_module(conn, config, row)
+                if row["model"] == hold.model and module_source(config, row) == hold.source:
+                    tasks.add(row["task_id"])
+            for identity in {row["task_id"] for row in rows}:
+                modules = calls.modules(conn, identity)
+                for module in modules:
+                    if module.subtask_id is None:
+                        continue
+                    subtask = Store(conn).get_subtask(module.subtask_id)
+                    if subtask.status.value not in {
+                        "ready",
+                        "running",
+                        "review",
+                        "paused",
+                        "needs_human",
+                    }:
+                        continue
+                    latest = max(m.last_seq for m in modules if m.subtask_id == module.subtask_id)
+                    if (
+                        module.last_seq == latest
+                        and (module.key_id or module.provider) == hold.source
+                        and f"{module.provider}/{module.model}" == hold.model
+                    ):
+                        tasks.add(identity)
+        holds.stop(conn, hold, tasks)
+    elif operation == "continue":
+        holds.continue_(conn, hold)
+    elif operation == "remove":
+        holds.remove(conn, hold)
+    elif operation == "restore":
+        holds.restore(conn, hold)
+    else:
+        raise ValueError("unknown module hold operation")
+
+
+def module_source(config: Config, row: dict[str, Any]) -> str:
+    if row.get("provider") in {"ollama", "llamacpp"}:
+        return str(row["provider"])
+    if row.get("key_fingerprint"):
+        return str(row["key_fingerprint"])
+    provider = next((p for p in providers.PROVIDERS if p.id == row.get("provider")), None)
+    keys = config.keys(provider.key_env or "") if provider else []
+    return key_id(keys[0].value) if keys else ""
+
+
+def hold_question(conn: sqlite3.Connection, config: Config, hold: holds.Hold) -> str:
+    from desman.net.node import active_capabilities
+
+    if hold.scope in {"all", "network"} and config.network.enabled:
+        lent = active_capabilities(config, conn)
+        if lent and all(
+            (c.key or c.provider) == hold.source and f"{c.provider}/{c.model}" == hold.model
+            for c in lent
+        ):
+            return t("Remove this module? If it is the last lent module, DESMAN-Global suspends.")
+    return t("Remove this module?")
+
+
+def _hold_command(
+    operation: str, source: str, model: str, task: str | None, chat: str | None, network: bool
+) -> None:
+    config = load_config().load()
+    with closing(db.open_db()) as conn:
+        try:
+            scope, identity = hold_scope(conn, task, chat, network)
+            hold_change(
+                conn,
+                config,
+                operation,
+                holds.Hold(source=source, model=model, scope=scope, scope_id=identity),
+            )
+        except ValueError:
+            raise click.ClickException(t("Invalid module hold.")) from None
+    ui.ok(t("Module hold updated."))
+
+
+def _register_hold_command(operation: str) -> None:
+    @modules.command(operation, help=t("Stop, continue, remove or restore a module."))
+    @click.argument("source")
+    @click.argument("model")
+    @click.option("--task", metavar="REF", help=t("One task (its reference)."))
+    @click.option(
+        "--chat", metavar="ID", help=t("One chat (its id as /sessions shows it): the interlocutor.")
+    )
+    @click.option("--network", is_flag=True, help=t("Modules lent to DESMAN-Global."))
+    def command(source: str, model: str, task: str | None, chat: str | None, network: bool) -> None:
+        _hold_command(operation, source, model, task, chat, network)
+
+
+for _operation in ("stop", "continue", "remove", "restore"):
+    _register_hold_command(_operation)

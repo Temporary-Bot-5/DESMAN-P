@@ -711,6 +711,21 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     CREATE INDEX ix_model_calls_provider_model_at ON model_calls (provider, model, at);
     """,
+    # 44: operator module holds, independent of provider configuration.
+    """
+    CREATE TABLE module_holds (
+        source TEXT NOT NULL,
+        model TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('all', 'task', 'session', 'network')),
+        scope_id TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL CHECK (state IN ('stopped', 'removed')),
+        at TEXT NOT NULL,
+        paused_tasks_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(paused_tasks_json)),
+        PRIMARY KEY (source, model, scope, scope_id),
+        CHECK ((scope IN ('all', 'network') AND scope_id = '') OR
+               (scope IN ('task', 'session') AND scope_id != ''))
+    );
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

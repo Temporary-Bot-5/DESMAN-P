@@ -43,7 +43,7 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "Work becomes a durable task: a planner makes up to 8 subtasks by default, tagged text/code/analysis; a template is used if planning fails. Executors work, reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page starts its own worker pool: task requests return after planning, queued cards wait for workers, and results are retold once in their own chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. Task status is derived from subtasks. `desman list` shows visible tasks; `desman list --subtasks` includes subtasks; `desman list --all` includes hidden tasks. `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned tasks. Nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. List marks pinned/paused tasks. Rows show short titles; details and audit keep full descriptions.",
+        "Work becomes a durable task: a planner makes up to 8 subtasks by default, tagged text/code/analysis; a template is used if planning fails. Executors work, reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page starts its own worker pool: task requests return after planning, queued cards wait for workers, and results are retold once in their own chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. Task status is derived from subtasks. `desman list` shows visible tasks; `desman list --subtasks` includes subtasks; `desman list --all` includes hidden tasks. `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. Held alternatives: rephrase fallback is audited; stats count rephrase. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned tasks. Nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. List marks pinned/paused tasks. Rows show short titles; details and audit keep full descriptions.",
     ),
     Topic(
         "files",
@@ -101,6 +101,24 @@ TOPICS: Final = (
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
         "model or logs. Inspect with `desman keys list`, `desman keys check` (no tokens) "
         "and `desman usage`.",
+    ),
+    Topic(
+        "modules",
+        "module cards, stopping, removal and restoration",
+        "Modules lists source/model pairs for local tasks and recent chats, including interlocutors, "
+        "and a separate DESMAN-Global section with lent modules; shared modules have a card in each. Each card shows short work titles. "
+        "Stop pauses unfinished tasks served by that module; chat turns queue. Continue resumes only "
+        "tasks paused by that stop once all overlapping stops are lifted. Removed modules are skipped, including explicit preferences; "
+        "the next model answers, or work waits without spending attempts when no module remains. "
+        "Removed modules can be restored in Settings → Roles or the collapsed Removed group. "
+        "Use `desman modules stop SOURCE MODEL`, `desman modules continue SOURCE MODEL`, "
+        "`desman modules remove SOURCE MODEL`, `desman modules restore SOURCE MODEL`: default all "
+        "work, optionally --task REF, --chat ID or --network. SOURCE is a key fingerprint, ollama "
+        "or llamacpp; MODEL is provider/model. CLI is immediate; chat proposals need confirmation. "
+        "Page Stop is immediate; Remove asks first. A task's Stop pauses it; its Remove cancels and "
+        "hides it, retaining history. Removing a network module preserves donation and consent; "
+        "no active lent module suspends registry contacts until one becomes available again. "
+        "The JSON shape of `desman modules` remains the task/role list; the page aggregates modules.",
     ),
     Topic(
         "localmodels",

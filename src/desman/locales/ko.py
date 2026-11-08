@@ -10,6 +10,23 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Remove this module?": "이 모듈을 제거할까요?",
+    "Remove this task?": "이 작업을 제거할까요?",
+    "Remove this module? If it is the last lent module, DESMAN-Global suspends.": "이 모듈을 제거할까요? 마지막으로 빌려준 모듈이면 DESMAN-Global이 일시 중단됩니다.",
+    "Module hold updated.": "모듈 제한을 업데이트했습니다.",
+    "{operation}: {model}": "{operation}: {model}",
+    "stopped": "중지됨",
+    "removed": "제거됨",
+    "Remove": "제거",
+    "Restore": "복원",
+    "Removed modules": "제거된 모듈",
+    "For DESMAN-Global": "DESMAN-Global용",
+    "For your tasks and chats": "내 작업 및 채팅용",
+    "DESMAN-Global suspended: no module": "DESMAN-Global 일시 중단: 모듈 없음",
+    "Invalid module hold.": "잘못된 모듈 제한입니다.",
+    "no module left for {role}": "{role}에 사용 가능한 모듈이 없습니다",
+    "Stop, continue, remove or restore a module.": "모듈을 중지, 계속, 제거 또는 복원합니다.",
+    "Modules lent to DESMAN-Global.": "DESMAN-Global에 빌려준 모듈.",
     "Usage": "사용량",
     "To the bottom": "맨 아래로",
     "Earlier messages hidden by /clear (the model still sees them).": "/clear로 이전 메시지가 숨겨졌습니다(모델은 계속 볼 수 있습니다).",

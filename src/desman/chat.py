@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from functools import partial
@@ -170,6 +171,7 @@ class Chat:
         resume: bool = False,
         temporary: bool = False,
         background_tasks: bool = False,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if resume and temporary:
             raise ValueError("a temporary chat never continues a session")
@@ -178,6 +180,7 @@ class Chat:
         self._outcome_audit: int | None = None
         self.background_tasks = background_tasks
         self.sessions = sessions
+        self.sleep = sleep
         self.temporary = temporary
         """Nothing said is kept (C.11): the session is erased when the chat ends; no profile
         notes, no summaries, no cached replies."""
@@ -256,7 +259,30 @@ class Chat:
                 if command.startswith("!") or self.in_terminal:
                     self._terminal_command(line)
                     continue
-                run_turn(self.session_id, line, context=self)
+                added = False
+                waiting_seq: int | None = None
+                reason: str | None = None
+                while True:
+                    try:
+                        run_turn(self.session_id, line, context=self, added=added)
+                        if waiting_seq is not None:
+                            self.sessions.settle_turn(waiting_seq)
+                        break
+                    except runs.ModuleWaiting as exc:
+                        if self.session_id is not None and not added:
+                            users = [
+                                m
+                                for m in self.sessions.messages(self.session_id)
+                                if m.role is Role.USER
+                            ]
+                            if users:
+                                waiting_seq = users[-1].seq
+                                self.sessions.register_turn(waiting_seq)
+                        added = True
+                        if reason != str(exc):
+                            ui.note(exc.display())
+                            reason = str(exc)
+                        self.sleep(1)
         finally:
             if self._http is not None:
                 self._http.close()
@@ -437,6 +463,8 @@ class Chat:
         try:
             with self._for(calls.Role.INTERLOCUTOR):
                 turn = interlocutor.turn(history)
+        except runs.ModuleWaiting:
+            raise
         except ProviderError as e:
             ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
             return
@@ -1439,6 +1467,44 @@ class Chat:
         if isinstance(action, ui.SimpleAction) and action.type == "usage":
             self._terminal_open()
             self._terminal_output(lambda: self._typed("usage"), "/usage", keep_inputs=True)
+            return
+        if isinstance(action, ui.ModuleHoldAction):
+
+            def hold_action() -> None:
+                from desman.core.holds import Hold
+
+                config = self._config()
+                if config is None:
+                    return
+                hold = Hold(
+                    source=action.source,
+                    model=action.model,
+                    scope=action.scope,
+                    scope_id=action.scope_id,
+                )
+                if action.operation == "remove" and not ui.confirm(
+                    modules_cli.hold_question(self.store.conn, config, hold)
+                    + "\n"
+                    + hold.model
+                    + " · "
+                    + hold.source,
+                    default=False,
+                ):
+                    return
+                modules_cli.hold_change(self.store.conn, config, action.operation, hold)
+
+            self._terminal_output(hold_action, keep_inputs=True)
+            return
+        if isinstance(action, ui.TaskControlAction) and action.operation == "remove":
+
+            def remove_task() -> None:
+                if ui.confirm(
+                    t("Remove this task?") + "\n" + self.store.find_task(action.id)["goal"],
+                    default=False,
+                ):
+                    self.store.remove_task(action.id)
+
+            self._terminal_output(remove_task, keep_inputs=True)
             return
         if isinstance(action, ui.TaskControlAction):
             command = (

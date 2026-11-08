@@ -11,14 +11,16 @@ from typing import Any
 
 from desman import modules_cli, providers, tuning_cli
 from desman.config import Config, ConfigError, open_config
-from desman.core import calls, choices, db
+from desman.core import calls, choices, db, holds
 from desman.core.report import inbox, short_description, task_report, task_summaries
 from desman.core.sessions import Sessions
 from desman.core.store import Store
+from desman.gui import module_view
 from desman.gui.front import WebFront
 from desman.i18n import t
 from desman.live import Progress, key_labels
 from desman.llm import router
+from desman.net.node import active_capabilities
 
 
 def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
@@ -126,11 +128,6 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
             config = config or Config()
             if kind == "modules":
                 module_rows = modules_cli.modules_data(conn, config)
-                for row in module_rows:
-                    row["goal"] = conn.execute(
-                        "SELECT goal FROM tasks WHERE id = ?", (row["task_id"],)
-                    ).fetchone()[0]
-                    decorate(conn, config, row, "task", row["task_id"])
                 with front.condition:
                     current = front.current
                     pending = front.pending_choice
@@ -144,8 +141,34 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                     session["id"] if session else None,
                     choices.Choice.model_validate(pending) if pending and current is None else None,
                 )
+                grouped = module_view.cards(conn, config, module_rows)
+                if front.runners is not None:
+                    for card in grouped:
+                        if card.get("hold_state") in {"stopped", "removed"}:
+                            continue
+                        statuses = [
+                            front.runners.status(w["id"])
+                            for w in card["work"]
+                            if w["kind"] == "chat"
+                        ]
+                        if any(status["state"] == "answering" for status in statuses):
+                            card["state"] = t("working")
+                        elif any(status.get("reason") for status in statuses):
+                            card["state"] = next(
+                                status["reason"] for status in statuses if status.get("reason")
+                            )
+                    status = front.runners.status(current or "")
+                    if not chat.get("hold_state"):
+                        if status.get("reason"):
+                            chat["state"] = status["reason"]
+                        elif status["state"] == "answering":
+                            chat["state"] = t("working")
                 result = {
-                    "modules": module_rows,
+                    "modules": grouped,
+                    "removed": module_view.removed_cards(conn, grouped),
+                    "network_visible": config.network.enabled or bool(config.network.donated),
+                    "network_suspended": config.network.enabled
+                    and not active_capabilities(config, conn),
                     "roles": tuning_cli.role_rows(config),
                     "roles_by_scope": choices.ROLES_BY_SCOPE,
                     "interlocutor": chat,
@@ -270,6 +293,17 @@ def decorate(
     ).fetchone()
     row["last_model"] = f"{latest['provider']}/{latest['model']}" if latest else None
     own = choices.get(conn, scope, identity, row["role"])
+    row["module_source"] = modules_cli.module_source(config, row)
+    matching = [
+        h
+        for h in holds.active(conn, scope, identity)
+        if h.source == row["module_source"] and h.model == row["model"]
+    ]
+    if matching:
+        row["hold_state"] = matching[0].state
+        row["hold_scope"] = matching[0].scope
+        row["hold_scope_id"] = matching[0].scope_id
+        row["state"] = t("stopped") if matching[0].state == "stopped" else t("removed")
     row.update(
         icon="module",
         scope=scope,
@@ -299,20 +333,46 @@ def interlocutor(
         lineup = router.lineup(cfg, calls.Role.INTERLOCUTOR)
     except router.NoProvider:
         lineup = []
+    created = conn.execute("SELECT created_at FROM sessions WHERE id=?", (identity,)).fetchone()
+    removed = {
+        (h.source, h.model)
+        for h in holds.active(conn, "session", identity or "")
+        if h.state == "removed"
+        or h.state == "stopped"
+        and created is not None
+        and created[0] > h.at
+    }
+    lineup = [
+        c
+        for c in lineup
+        if any((source, c.label) not in removed for source in router.sources(cfg, c))
+    ]
     first = lineup[0] if lineup else None
     latest = conn.execute(
-        "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+        "SELECT provider, model, key_id FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
         "AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
         (identity,),
     ).fetchone()
+    if latest and (
+        (latest["key_id"] or latest["provider"], f"{latest['provider']}/{latest['model']}")
+        in removed
+    ):
+        latest = None
     if latest:
         first = router.Choice(providers.find(latest["provider"]), latest["model"])
     elif (
-        router.preferred(cfg, calls.Role.INTERLOCUTOR) is None
+        not removed
+        and router.preferred(cfg, calls.Role.INTERLOCUTOR) is None
         and router.preferred_key(cfg, calls.Role.INTERLOCUTOR) is None
     ):
         first = None
-    fingerprint = router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
+    fingerprint = latest["key_id"] if latest else router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
+    if first:
+        sources = [
+            source for source in router.sources(cfg, first) if (source, first.label) not in removed
+        ]
+        if fingerprint not in sources:
+            fingerprint = next(iter(sources), None)
     key = next(
         (
             k
@@ -332,7 +392,32 @@ def interlocutor(
         "AND provider = ? AND model = ?",
         (identity, first.provider.id if first else None, first.model if first else None),
     ).fetchone()
+    source = modules_cli.module_source(
+        config,
+        {
+            "provider": first.provider.id if first else None,
+            "key_fingerprint": fingerprint if key else None,
+        },
+    )
+    held = next(
+        (
+            h
+            for h in holds.active(conn, "session", identity or "")
+            if h.source == source and first and h.model == first.label
+        ),
+        None,
+    )
     return {
+        "hold_state": held.state if held else None,
+        "hold_scope": held.scope if held else None,
+        "hold_scope_id": held.scope_id if held else None,
+        "module_source": modules_cli.module_source(
+            config,
+            {
+                "provider": first.provider.id if first else None,
+                "key_fingerprint": fingerprint if key else None,
+            },
+        ),
         "last_model": f"{latest[0]}/{latest[1]}" if latest else None,
         "role": "interlocutor",
         "icon": "module",
@@ -353,7 +438,7 @@ def interlocutor(
         "model_tokens": model_usage["tokens"],
         "calls": usage["calls"],
         "tokens": usage["tokens"],
-        "state": t("idle"),
+        "state": t("stopped") if held and held.state == "stopped" else t("idle"),
     }
 
 

@@ -350,13 +350,19 @@ class Store:
             )
             return True
 
+    def remove_task(self, task_id: str) -> None:
+        """Cancel and hide work atomically, retaining artifacts and audit history."""
+        with db.transaction(self.conn):
+            self.cancel_task(task_id, "removed by operator")
+            self.hide_task(task_id)
+
     def cancel_task(self, task_id: str, reason: str) -> list[Subtask]:
         """Operator stops a whole task: every subtask not finished yet becomes CANCELLED.
 
         A running executor finds out at its next heartbeat or submit (its lease is gone).
         """
         cancelled: list[Subtask] = []
-        with db.transaction(self.conn):
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
             ids = [
                 r[0]
                 for r in self.conn.execute(

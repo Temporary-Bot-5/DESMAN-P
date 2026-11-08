@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 import sqlite3
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -20,23 +20,24 @@ import httpx
 from desman import net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config, Tuning
-from desman.core import calls, protected
+from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS
-from desman.core.coordinator import Coordinator, Crew, Labels
+from desman.core.coordinator import Coordinator, Crew, Executor, Labels, Outcome, Work
 from desman.core.effects import evidence
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
-from desman.core.retry import RetryPolicy, strategy_for
+from desman.core.retry import RetryPolicy, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
+from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
 from desman.llm import hub, router
-from desman.llm.base import LLM, Completion, Request
+from desman.llm.base import LLM, Completion, RateLimited, Request
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
@@ -125,24 +126,33 @@ def models(
     leaves no other model for retries. `only`: the models of these providers alone (the ones
     lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
     `router.NoProvider`."""
-    clients: dict[tuple[str, str | None], LLM] = {}
+    clients: dict[tuple[str, str | None, tuple[str, ...]], LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
     used: dict[tuple[calls.Role, Kind | None, tuple[str, str] | None], str] = {}
 
-    def member(choice: router.Choice, first: str | None) -> LLM:
+    def member(
+        choice: router.Choice, first: str | None, *, held: Set[tuple[str, str]] = frozenset()
+    ) -> LLM:
         # Share key state between roles with the same model and effective key order.
         keys = config.keys(choice.provider.key_env or "")
         applicable = first if any(key_id(k.value) == first for k in keys) else None
         # Identical orders share refusal/limit state, including an explicit default key.
         if keys and applicable == key_id(keys[0].value):
             applicable = None
-        identity = (choice.label, applicable)
+        keys = [k for k in keys if (key_id(k.value), choice.label) not in held]
+        cfg = config.model_copy(
+            update={
+                "api_keys": {
+                    **config.api_keys,
+                    **({choice.provider.key_env: keys} if choice.provider.key_env else {}),
+                }
+            }
+        )
+        identity = (choice.label, applicable, tuple(key_id(k.value) for k in keys))
         if identity not in clients:
-            api = router.connect(
-                config, choice, first_key=applicable, on_call=recorder, client=client
-            )
+            api = router.connect(cfg, choice, first_key=applicable, on_call=recorder, client=client)
             timeouts.append(api.timeout)
             paced: LLM
             server = None
@@ -169,6 +179,7 @@ def models(
         current: Config = config,
         *,
         other: bool = False,
+        held: Set[tuple[str, str]] = frozenset(),
     ) -> router.Fallback:
         first = router.preferred_key(current, role, kind)
         automatic = (
@@ -189,12 +200,13 @@ def models(
             actual = used.get((role, kind, router.call_scope()))
             if other:
                 if actual is None:
-                    return router.other_lineup(available)
+                    alternatives = router.other_lineup(available)
+                    return alternatives or available
                 main = next((c for c in available if c.label == actual), None)
                 rest = [c for c in available if c.label != actual]
                 if main is not None:
                     rest.sort(key=lambda c: c.provider.id == main.provider.id)
-                return rest
+                return rest or available
             return capacity(available) if capacity else available
 
         def remember(label: str) -> None:
@@ -206,12 +218,15 @@ def models(
 
         def actual_label() -> str | None:
             if other:
-                alternatives = order(choices)
+                try:
+                    alternatives = order(choices)
+                except ModuleWaiting:
+                    return None
                 return alternatives[0].label if alternatives else None
             return used.get((role, kind, router.call_scope()))
 
         result = router.Fallback(
-            [(member(c, first), c) for c in choices],
+            [(member(c, first, held=held), c) for c in choices],
             order=order if other or capacity else None,
             sticky=not other,
             on_used=None if other else remember,
@@ -223,10 +238,27 @@ def models(
                 result.label = alternatives[0].label
         return result
 
+    local_choices = {
+        (p.id, p.model(config)): router._choice(config, p, p.model(config))
+        for p in providers.ready(config)
+        if p.local
+    }
+    lineups: dict[tuple[calls.Role, Kind | None, str | None, str | None], list[router.Choice]] = {}
+
     def lineup(
         role: calls.Role, kind: Kind | None = None, current: Config = config
     ) -> list[router.Choice]:
-        choices = router.lineup(current, role, provider, model, kind=kind)
+        identity = (
+            role,
+            kind,
+            router.preferred(current, role, kind),
+            router.preferred_key(current, role, kind),
+        )
+        if identity not in lineups:
+            lineups[identity] = router.lineup(
+                current, role, provider, model, kind=kind, local_choices=local_choices
+            )
+        choices = lineups[identity]
         if only is not None:
             choices = [c for c in choices if c.provider.id in only]
             if not choices:
@@ -239,28 +271,99 @@ def models(
         if other and (model is not None or not selected):
             return None
         default = chain(own, role, kind, other=other)
-        # Network chains never read the person's scoped choices.
-        if only is not None:
-            return default
         field = router.tuning_field(role, kind)
-        chains: dict[module_choices.Choice, router.Fallback] = {}
+        chains: dict[tuple[str, ...], router.Fallback] = {}
 
         def current() -> router.Fallback:
             purpose = calls.purpose()
-            scope: module_choices.Scope = "session" if role == calls.Role.INTERLOCUTOR else "task"
-            identity = purpose.session_id if scope == "session" else purpose.task_id
-            if identity is None or field is None:
-                return default
-            choice = module_choices.get(conn, scope, identity, field)
-            if choice == module_choices.Choice():
-                return default
-            if choice not in chains:
-                cfg = module_choices.effective(config, field, choice)
-                own = lineup(role, kind, cfg)
-                chains[choice] = chain(own, role, kind, cfg, other=other)
-            return chains[choice]
+            scope: holds.Scope = (
+                "network"
+                if only is not None
+                else "session"
+                if role == calls.Role.INTERLOCUTOR
+                else "task"
+            )
+            identity = (
+                ""
+                if only is not None
+                else (purpose.session_id if scope == "session" else purpose.task_id) or ""
+            )
+            cfg = config
+            if only is None and identity and field:
+                own_choice = module_choices.get(
+                    conn, "session" if scope == "session" else "task", identity, field
+                )
+                cfg = module_choices.effective(config, field, own_choice)
+            own = lineup(role, kind, cfg)
+            current_holds = holds.active(conn, scope, identity)
+            removed = {(h.source, h.model) for h in current_holds if h.state == "removed"}
+            own = [
+                c
+                for c in own
+                if any((source, c.label) not in removed for source in router.sources(cfg, c))
+            ]
+            # A stopped interlocutor queues instead of silently answering through a replacement.
+            if (
+                role == calls.Role.INTERLOCUTOR
+                and own
+                and any(h.state == "stopped" for h in current_holds)
+            ):
+                first = own[0]
+                preferred = router.preferred_key(cfg, role, kind)
+                sources = [
+                    source
+                    for source in router.sources(cfg, first)
+                    if (source, first.label) not in removed
+                ]
+                source = preferred if preferred in sources else next(iter(sources), "")
+                session = conn.execute(
+                    "SELECT created_at FROM sessions WHERE id=?", (identity,)
+                ).fetchone()
+                latest = conn.execute(
+                    "SELECT provider, model, key_id FROM model_calls WHERE session_id=? "
+                    "AND role='interlocutor' AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+                    (identity,),
+                ).fetchone()
+                serving = {(source, first.label)}
+                if latest is not None:
+                    serving.add(
+                        (
+                            latest["key_id"] or latest["provider"],
+                            f"{latest['provider']}/{latest['model']}",
+                        )
+                    )
+                if any(
+                    h.state == "stopped"
+                    and (h.source, h.model) in serving
+                    and (h.scope == "session" or session is not None and session[0] <= h.at)
+                    for h in current_holds
+                ):
+                    raise ModuleWaiting(field or role.value)
+            held = {(h.source, h.model) for h in current_holds}
+            own = [
+                c
+                for c in own
+                if any((source, c.label) not in held for source in router.sources(cfg, c))
+            ]
+            selected = own
+            if not selected:
+                raise ModuleWaiting(field or role.value)
+            signature = (
+                router.preferred_key(cfg, role, kind) or "",
+                *(
+                    c.label
+                    + ":"
+                    + ",".join(
+                        source for source in router.sources(cfg, c) if (source, c.label) not in held
+                    )
+                    for c in selected
+                ),
+            )
+            if signature not in chains:
+                chains[signature] = chain(selected, role, kind, cfg, other=other, held=held)
+            return chains[signature]
 
-        return Scoped(current)
+        return Scoped(current, default)
 
     main_roles: dict[calls.Role, LLM] = {}
     for role in calls.Role:
@@ -285,11 +388,23 @@ def models(
     )
 
 
+class ModuleWaiting(RateLimited):
+    """A human hold is a LIMIT wait: it never spends a task attempt."""
+
+    def __init__(self, role: str) -> None:
+        super().__init__("modules", retry_after=30)
+        self.role = role
+        self.args = (f"no module left for {role}",)
+
+    def display(self) -> str:
+        return t("no module left for {role}", role=self.role)
+
+
 class Scoped(router.Fallback):
     """Resolve a task/session preference at every call, retaining acceptance on its chain."""
 
-    def __init__(self, current: Callable[[], router.Fallback]) -> None:
-        super().__init__(current().members)
+    def __init__(self, current: Callable[[], router.Fallback], default: router.Fallback) -> None:
+        super().__init__(default.members)
         self.current = current
         self.last: router.Fallback | None = None
 
@@ -497,6 +612,25 @@ def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Co
     return _coordinator(store, models, access=None, tools=Registry(), tuning=tuning)
 
 
+def _executor(models: Models, store: Store) -> Executor:
+    def execute(work: Work) -> Outcome:
+        main, other = models.executor(work.subtask.kind)
+        if work.context.strategy is Strategy.OTHER_MODEL and other is not None:
+            # Holds may remove the alternate after the retry strategy was selected.
+            available = getattr(other, "choices", None)
+            if available is not None and len(available) <= 1:
+                store.note(
+                    work.subtask.id,
+                    Actor.EXECUTOR,
+                    "strategy_fallback",
+                    {"from": "other_model", "to": "rephrase", "reason": "no other module"},
+                )
+                other = None  # The executor already rephrases when no alternate exists.
+        return llm_executor(main, other)(work)
+
+    return execute
+
+
 def _coordinator(
     store: Store,
     models: Models,
@@ -515,7 +649,7 @@ def _coordinator(
     # delays taking over the work of a run that died elsewhere).
     return Coordinator(
         store,
-        llm_executor(models.llm, models.other, by_kind=models.kinds),
+        _executor(models, store),
         llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
         owner=current_owner(),
         lease_seconds=max(lease_seconds, models.step_seconds),

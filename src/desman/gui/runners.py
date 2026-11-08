@@ -141,6 +141,7 @@ class Runner:
     thread: Thread | None = None
     front: SessionFront | None = None
     erase: bool = False
+    wait_reason: str | None = None
 
 
 class SessionFront(WebFront):
@@ -308,7 +309,12 @@ class Runners:
                 else 0
             )
             return {
-                "state": "pending" if pending else "queued" if waiting else "answering",
+                "state": "pending"
+                if pending
+                else "queued"
+                if waiting or runner.wait_reason
+                else "answering",
+                "reason": runner.wait_reason,
                 "queued": len(runner.queue) + int(waiting and runner.current is not None),
                 "ahead": ahead,
             }
@@ -396,6 +402,19 @@ class Runners:
                                         # A turn that ended without an error is answered, even
                                         # when it wrote no reply (a command with no result).
                                         sessions.settle_turn(work.user_seq)
+                                        runner.wait_reason = None
+                    except runs.ModuleWaiting as exc:
+                        with self.condition:
+                            runner.queue.appendleft(work)
+                            self.tickets.append(work)
+                            if work.slot:
+                                self.active -= 1
+                                work.slot = False
+                            self.condition.notify_all()
+                            self.condition.wait(timeout=1)
+                        if runner.wait_reason != str(exc):
+                            sink.note(exc.display())
+                        runner.wait_reason = str(exc)
                     except Stopped as stopped:
                         if not stopped.recorded:
                             sessions.add(

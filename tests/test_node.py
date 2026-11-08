@@ -576,7 +576,10 @@ def test_the_network_never_stops_the_workers_own_work(tmp_path: Path) -> None:
         make_config(
             language="en",
             configured=True,
-            network=Network(enabled=True, registry="https://registry.example.org"),
+            settings=OLLAMA,
+            network=Network(
+                enabled=True, registry="https://registry.example.org", donated={"ollama": LENT}
+            ),
         )
     )
     path = tmp_path / "desman.db"
@@ -870,3 +873,24 @@ def test_release_notice_survives_job_claim(
     assert found.poll() is None
     clock.advance(protocol.HEARTBEAT_SECONDS)
     assert found.poll() is None
+
+
+def test_module_hold_suspends_and_resumes_once(
+    make_node: Callable[..., Node], conn: sqlite3.Connection, world: World, settings: Settings
+) -> None:
+    from desman.core import holds
+
+    n = make_node()
+    h = holds.Hold(source="ollama", model="ollama/llama3.2", scope="network")
+    holds.stop(conn, h)
+    assert n.poll(idle=True) is None
+    assert n.poll(idle=True) is None
+    assert n.suspended and world.requests == []
+    assert actions(conn).count("suspended") == 1
+    assert settings.config.network.enabled and settings.config.network.donated
+    holds.continue_(conn, h)
+    n.poll(idle=True)
+    assert not n.suspended and world.requests
+    n.poll(idle=True)
+    assert actions(conn).count("resumed") == 1
+    n.close()
