@@ -140,6 +140,8 @@ def strings() -> dict[str, str]:
         "temporary_chat": t("Temporary chat"),
         "delete_chats": t("Delete all chats"),
         "settings": t("Settings"),
+        "usage": t("Usage"),
+        "to_bottom": t("To the bottom"),
         "messenger": t("Messenger"),
         "report_problem": t("Report a problem"),
         "sessions": t("Chats"),

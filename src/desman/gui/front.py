@@ -243,7 +243,12 @@ class WebFront(ui.Front):
                             if hidden
                             else []
                         )
-                        + [self._redact_html(self.render(_render(m))) for m in messages],
+                        + [
+                            self._redact_html(
+                                self.render(Text.from_ansi(m.styled) if m.styled else _render(m))
+                            )
+                            for m in messages
+                        ],
                     )
                 result["transcript"] = self._transcript_cache[1]
                 result["session_id"] = self.current

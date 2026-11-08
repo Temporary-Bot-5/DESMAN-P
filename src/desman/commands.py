@@ -234,7 +234,9 @@ class DecisionArgs(Args):
 class FailArgs(Args):
     if_version: int | None = Field(None, ge=0)
     subtask: Ref
-    note: Note = Field(description="why it failed (required)")
+    note: Annotated[str, Field(max_length=2000)] | None = Field(
+        None, description="optional reason why it failed"
+    )
 
 
 class CancelArgs(Args):
@@ -1427,7 +1429,7 @@ def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 _DECISIONS = {
     "retry": (SubtaskStatus.READY, "operator_retry", "retry requested by operator"),
     "accept": (SubtaskStatus.DONE, "operator_accept", "accepted by operator"),
-    "fail": (SubtaskStatus.FAILED, "operator_fail", ""),
+    "fail": (SubtaskStatus.FAILED, "operator_fail", "failed by operator"),
 }
 """As the CLI's `retry`, `accept` and `fail` make them: target, audit action, default reason."""
 

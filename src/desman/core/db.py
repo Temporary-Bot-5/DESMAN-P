@@ -703,6 +703,10 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     ALTER TABLE chat_turns ADD COLUMN task_id TEXT REFERENCES tasks(id);
     """,
+    # 42: styled terminal output; plain text remains the model/history contract.
+    """
+    ALTER TABLE messages ADD COLUMN styled TEXT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

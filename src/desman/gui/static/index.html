@@ -17,7 +17,10 @@
       <details id="chat-module" open><summary id="chat-module-title"></summary><div id="chat-module-card"></div></details>
       <div id="status" role="status"></div>
       <!-- Transcript events and transient progress have separate lifetimes. -->
-      <div id="messages" aria-live="polite"></div>
+      <div id="transcript-shell">
+        <div id="messages" aria-live="polite"></div>
+        <button id="to-bottom" type="button" hidden>↓</button>
+      </div>
       <form id="pending"></form>
       <div id="live"></div>
       <button id="stop" hidden></button>

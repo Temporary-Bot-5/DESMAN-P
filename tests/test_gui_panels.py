@@ -64,7 +64,6 @@ def test_action_validation_and_line_gate(panel_app: tuple[Server, Store]) -> Non
         {"type": "settings", "extra": 1},
         {"type": "new_session", "temporary": "false"},
         {"type": "decide", "ref": "a/1", "version": True, "decision": "accept", "note": ""},
-        {"type": "decide", "ref": "a/1", "version": 1, "decision": "fail", "note": " "},
     ]
     for bad in bad_actions:
         assert send(bad) == 400
@@ -378,3 +377,38 @@ def test_output_and_live_redact_html_keys(panel_app: tuple[Server, Store], wrapp
         assert key not in unescape(output)
         assert escape(key) not in output
         assert providers.REDACTED in output
+
+
+def test_scroll_to_bottom_browser_threshold(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed for the browser event regression")
+    source = Path("src/desman/gui/static/app.js").read_text(encoding="utf-8")
+    helper = source[
+        source.index("function nearTranscriptBottom()") : source.index("function setupPanels()")
+    ]
+    setup = source[
+        source.index('  $("to-bottom").title') : source.index("  document.documentElement.lang")
+    ]
+    script = tmp_path / "bottom.cjs"
+    script.write_text(
+        'const assert = require("node:assert/strict");\n'
+        'const words = {to_bottom: "To the bottom"};\n'
+        "const transcript = {scrollTop: 0, clientHeight: 200, scrollHeight: 1000, scrollTo(v) {this.last = v;}};\n"
+        "const control = {setAttribute(k,v) {this[k] = v;}};\n"
+        'const $ = id => id === "messages" ? transcript : control;\n'
+        + helper
+        + setup
+        + """
+assert.equal(control.hidden, false);
+assert.equal(control['aria-label'], words.to_bottom);
+control.onclick(); assert.deepEqual(transcript.last, {top: 1000, behavior: 'smooth'});
+transcript.scrollTop = 680; transcript.onscroll(); assert.equal(control.hidden, true);
+transcript.scrollTop = 679; transcript.onscroll(); assert.equal(control.hidden, false);
+""",
+        encoding="utf-8",
+    )
+    subprocess.run([node, str(script)], check=True, capture_output=True, text=True)

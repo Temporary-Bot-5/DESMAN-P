@@ -224,6 +224,9 @@ def test_command_output_and_input_redact_configured_key(
             chat._terminal_command("!list " + secret)
     texts = "\n".join(m.text for m in sessions.messages(sessions.terminal()))
     assert secret not in texts and secret[:30] not in texts and "[" in texts
+    styled = "\n".join(m.styled or "" for m in sessions.messages(sessions.terminal()))
+    assert secret not in styled and secret[:30] not in styled
+    assert "[" in styled
 
 
 def test_page_terminal_snapshot_unread_and_open_clears(tmp_path: Path) -> None:
@@ -514,3 +517,43 @@ def test_terminal_help_is_journaled_and_follows_the_language(sessions: Sessions)
         "SELECT details_json FROM operator_log WHERE action = 'operator_command'"
     ).fetchall()
     assert any(json.loads(r[0])["command"] == "help" and json.loads(r[0])["typed"] for r in rows)
+
+
+def test_usage_action_opens_terminal_and_echoes_command(sessions: Sessions) -> None:
+    chat = Chat(sessions)
+    normal = sessions.add(None, Role.USER, "hello").session_id
+    chat.session_id = normal
+    chat._action(ui.SimpleAction(type="usage"))
+    assert chat.in_terminal
+    messages = sessions.messages(sessions.terminal())
+    assert messages[-2].role is Role.USER and messages[-2].text == "/usage"
+    assert messages[-1].kind is Kind.EVENT
+    assert messages[-1].text.strip()
+    assert len(sessions.messages(normal)) == 1
+
+
+def test_terminal_style_survives_reload(sessions: Sessions) -> None:
+    from rich.text import Text
+
+    chat = Chat(sessions)
+    chat._terminal_output(lambda: ui.out(Text("success", style="good")))
+    [message] = sessions.messages(sessions.terminal())
+    assert message.text.strip() == "success"
+    assert message.styled is not None and "\x1b[" in message.styled
+    assert "#00ff99" in WebFront.render(Text.from_ansi(message.styled))
+    from desman.core.sessions import History
+    from desman.interlocutor import Interlocutor
+
+    request = Interlocutor(FakeLLM(), "en").build_request(History(summary=None, messages=[message]))
+    assert "success" in request.prompt and "\\u001b" not in request.prompt
+
+
+@pytest.mark.parametrize("note", ["", " "])
+def test_empty_fail_action_and_catalog(note: str) -> None:
+    from desman.commands import FailArgs
+
+    action = ui.DecideAction(type="decide", ref="abc/0", version=1, decision="fail", note=note)
+    assert (
+        FailArgs.model_validate({"subtask": action.ref, "note": action.note}).note == note.strip()
+    )
+    assert FailArgs.model_validate({"subtask": action.ref}).note is None

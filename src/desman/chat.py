@@ -330,7 +330,15 @@ class Chat:
                 text = providers.redact_keys(rec.text, config)[0]
                 text = providers.redact_keys(text, self._saved_config())[0]
                 if text.strip():
-                    self.sessions.add(self._terminal_id, Role.DESMAN, text, kind=Kind.EVENT)
+                    self.sessions.add(
+                        self._terminal_id,
+                        Role.DESMAN,
+                        text,
+                        kind=Kind.EVENT,
+                        styled=providers.redact_keys(
+                            providers.redact_keys(rec.styled, config)[0], self._saved_config()
+                        )[0],
+                    )
                 if self.in_terminal:
                     self._seen_terminal()
 
@@ -355,7 +363,13 @@ class Chat:
             self._tell_blocked()
         if rec.text.strip():
             text = providers.redact_keys(rec.text, self._saved_config())[0]
-            self.sessions.add(self._terminal_id, Role.DESMAN, text, kind=Kind.EVENT)
+            self.sessions.add(
+                self._terminal_id,
+                Role.DESMAN,
+                text,
+                kind=Kind.EVENT,
+                styled=providers.redact_keys(rec.styled, self._saved_config())[0],
+            )
             if self.in_terminal:
                 self._seen_terminal()
             else:
@@ -636,12 +650,7 @@ class Chat:
             ui.note(t("Nothing changed."))
             self._result(
                 t("{command}: the person declined.", command=command),
-                {
-                    "language_switch_declined": True,
-                    "instruction": "Do not propose another language switch in this session.",
-                }
-                if entry.name == "language"
-                else None,
+                None,
                 config,
             )
         elif made.data is not None or typed:
@@ -1417,6 +1426,10 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
+        if isinstance(action, ui.SimpleAction) and action.type == "usage":
+            self._terminal_open()
+            self._terminal_output(lambda: self._typed("usage"), "/usage", keep_inputs=True)
+            return
         if isinstance(action, ui.TaskControlAction):
             command = (
                 f"resume {action.id}"

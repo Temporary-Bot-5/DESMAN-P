@@ -131,7 +131,6 @@ def test_accept_unblocks_the_next_step(store: Store) -> None:
 
 def test_fail_blocks_dependents_and_retry_revives_them(store: Store) -> None:
     task_id, _ = escalated(store, chain("fetch", "analyse", "report"))
-    assert desman("fail", f"{task_id[:8]}/0").exit_code != 0  # --note is required
     failed = desman("fail", f"{task_id[:8]}/0", "--note", "source is gone")
     assert failed.exit_code == 0, failed.output
     assert "Task is failed." in failed.output
@@ -237,12 +236,12 @@ def test_inbox_refs_stay_unique_when_ids_share_a_prefix(store: Store) -> None:
         assert result.exit_code == 0, result.output
 
 
-@pytest.mark.parametrize("note", ["", "   "])
-def test_fail_needs_a_real_reason(store: Store, note: str) -> None:
+@pytest.mark.parametrize("note", [None, "", "   "])
+def test_fail_blank_reason_uses_default(store: Store, note: str | None) -> None:
     task_id, sub_id = escalated(store, chain("fetch"))
-    result = desman("fail", f"{task_id[:8]}/0", "--note", note)
-    assert result.exit_code == 2 and "say why it failed" in result.output
-    assert store.get_subtask(sub_id).status is S.NEEDS_HUMAN
+    result = desman("fail", f"{task_id[:8]}/0", *([] if note is None else ["--note", note]))
+    assert result.exit_code == 0, result.output
+    assert store.get_subtask(sub_id).status is S.FAILED
 
 
 def test_blank_retry_note_falls_back_to_the_default(store: Store) -> None:
@@ -288,3 +287,13 @@ def test_cancel_reports_a_race_instead_of_crashing(
     result = desman("cancel", task_id[:8])
     assert result.exit_code == 1 and "changed meanwhile, try again" in result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_actions_fail_without_reason(store: Store) -> None:
+    from desman import actions
+
+    task_id, sub_id = escalated(store, chain("fetch"))
+    pending = actions.prepare_decision(store, f"{task_id[:8]}/0", S.FAILED, None)
+    actions.apply_decision(store, pending, "", "operator_fail")
+    assert store.get_subtask(sub_id).status is S.FAILED
+    assert history(store.conn, task_id)[-1].details["reason"] == "failed by operator"

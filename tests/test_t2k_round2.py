@@ -1,4 +1,4 @@
-"""Owner regressions: removal, adaptive context, exact inspection and language proposals."""
+"""Owner regressions: removal, adaptive context, exact inspection and message language."""
 
 from __future__ import annotations
 
@@ -228,23 +228,18 @@ def test_context_exact_text_alias_and_redaction(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_language_proposal_decline_is_in_next_fake_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeLLM().on(
-        "Chat turn",
-        '{"type":"command","name":"language","args":{"code":"en"}}',
-        '{"type":"reply","text":"Hello again"}',
-    )
+def test_latest_message_language_rule_in_fake_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeLLM().on("Chat turn", '{"type":"reply","text":"Hello"}')
     monkeypatch.setattr(runs, "models", lambda *_a, **_kw: runs.Models(fake, None))
     open_config().save(make_config(language="ru", configured=True))
-    result = CliRunner().invoke(cli, [], input="Hello in English\nn\nContinue in English\n/exit\n")
+    result = CliRunner().invoke(cli, [], input="Hello\n/exit\n")
     assert result.exit_code == 0, result.output
     assert open_config().load().language == "ru"
-    assert len(fake.calls) == 2
-    assert "language_switch_declined" in fake.calls[1].prompt
-    assert "do not propose a language switch again" in fake.calls[1].messages[0].content
-    conn = db.open_db()
-    assert len([e for e in operator.entries(conn) if e.action == "operator_declined"]) == 1
-    conn.close()
+    prompt = fake.calls[0].messages[0].content
+    assert "Always answer in the language of the person’s latest message" in prompt
+    assert "person explicitly asks" in prompt
+    assert "switch DESMAN" not in prompt
+    assert "declined a language" not in prompt
 
 
 def test_memory_warning_survives_wrappers_and_ollama_still_runs(
