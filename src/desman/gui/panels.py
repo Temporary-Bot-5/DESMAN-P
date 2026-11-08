@@ -300,6 +300,18 @@ def interlocutor(
     except router.NoProvider:
         lineup = []
     first = lineup[0] if lineup else None
+    latest = conn.execute(
+        "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
+        "AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+        (identity,),
+    ).fetchone()
+    if latest:
+        first = router.Choice(providers.find(latest["provider"]), latest["model"])
+    elif (
+        router.preferred(cfg, calls.Role.INTERLOCUTOR) is None
+        and router.preferred_key(cfg, calls.Role.INTERLOCUTOR) is None
+    ):
+        first = None
     fingerprint = router.preferred_key(cfg, calls.Role.INTERLOCUTOR)
     key = next(
         (
@@ -319,10 +331,6 @@ def interlocutor(
         "FROM model_calls WHERE session_id = ? AND role = 'interlocutor' "
         "AND provider = ? AND model = ?",
         (identity, first.provider.id if first else None, first.model if first else None),
-    ).fetchone()
-    latest = conn.execute(
-        "SELECT provider, model FROM model_calls WHERE session_id = ? AND role = 'interlocutor' AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
-        (identity,),
     ).fetchone()
     return {
         "last_model": f"{latest[0]}/{latest[1]}" if latest else None,

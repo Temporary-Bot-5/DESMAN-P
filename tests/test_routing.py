@@ -423,6 +423,7 @@ def run_models(
     conn: sqlite3.Connection, clock: FakeClock, handler: Handler, **kw: Any
 ) -> runs.Models:
     config = make_config(api_keys={"GROQ_API_KEY": GROQ, "OPENROUTER_API_KEY": OPENROUTER})
+    config.tuning.models.text = "groq/openai/gpt-oss-20b"
     return runs.models(
         config,
         conn,

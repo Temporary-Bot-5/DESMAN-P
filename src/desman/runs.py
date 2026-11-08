@@ -129,6 +129,7 @@ def models(
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
+    used: dict[tuple[calls.Role, Kind | None, tuple[str, str] | None], str] = {}
 
     def member(choice: router.Choice, first: str | None) -> LLM:
         # Share key state between roles with the same model and effective key order.
@@ -166,9 +167,61 @@ def models(
         role: calls.Role = calls.Role.EXECUTOR,
         kind: Kind | None = None,
         current: Config = config,
+        *,
+        other: bool = False,
     ) -> router.Fallback:
         first = router.preferred_key(current, role, kind)
-        return router.Fallback([(member(c, first), c) for c in choices])
+        automatic = (
+            provider is None
+            and model is None
+            and router.preferred(current, role, kind) is None
+            and router.preferred_key(current, role, kind) is None
+        )
+        capacity = (
+            router.capacity_order(
+                conn, current, router.spread_tier(choices, role, kind), buckets.clock
+            )
+            if automatic
+            else None
+        )
+
+        def order(available: list[router.Choice]) -> list[router.Choice]:
+            actual = used.get((role, kind, router.call_scope()))
+            if other:
+                if actual is None:
+                    return router.other_lineup(available)
+                main = next((c for c in available if c.label == actual), None)
+                rest = [c for c in available if c.label != actual]
+                if main is not None:
+                    rest.sort(key=lambda c: c.provider.id == main.provider.id)
+                return rest
+            return capacity(available) if capacity else available
+
+        def remember(label: str) -> None:
+            identity = (role, kind, router.call_scope())
+            used.pop(identity, None)
+            used[identity] = label
+            if len(used) > 256:
+                used.pop(next(iter(used)))
+
+        def actual_label() -> str | None:
+            if other:
+                alternatives = order(choices)
+                return alternatives[0].label if alternatives else None
+            return used.get((role, kind, router.call_scope()))
+
+        result = router.Fallback(
+            [(member(c, first), c) for c in choices],
+            order=order if other or capacity else None,
+            sticky=not other,
+            on_used=None if other else remember,
+            label_for=actual_label,
+        )
+        if other:
+            alternatives = router.other_lineup(choices)
+            if alternatives:
+                result.label = alternatives[0].label
+        return result
 
     def lineup(
         role: calls.Role, kind: Kind | None = None, current: Config = config
@@ -185,7 +238,7 @@ def models(
         selected = router.other_lineup(own) if other else own
         if other and (model is not None or not selected):
             return None
-        default = chain(selected, role, kind)
+        default = chain(own, role, kind, other=other)
         # Network chains never read the person's scoped choices.
         if only is not None:
             return default
@@ -204,8 +257,7 @@ def models(
             if choice not in chains:
                 cfg = module_choices.effective(config, field, choice)
                 own = lineup(role, kind, cfg)
-                selected = router.other_lineup(own) if other else own
-                chains[choice] = chain(selected, role, kind, cfg)
+                chains[choice] = chain(own, role, kind, cfg, other=other)
             return chains[choice]
 
         return Scoped(current)

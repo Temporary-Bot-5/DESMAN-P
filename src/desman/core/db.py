@@ -707,6 +707,10 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     ALTER TABLE messages ADD COLUMN styled TEXT;
     """,
+    # 43: call-time load spreading across equally suitable free providers.
+    """
+    CREATE INDEX ix_model_calls_provider_model_at ON model_calls (provider, model, at);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)
