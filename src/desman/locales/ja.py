@@ -10,6 +10,23 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Remove this module?": "このモジュールを削除しますか？",
+    "Remove this task?": "このタスクを削除しますか？",
+    "Remove this module? If it is the last lent module, DESMAN-Global suspends.": "このモジュールを削除しますか？最後の貸出モジュールの場合、DESMAN-Global は一時停止します。",
+    "Module hold updated.": "モジュールの制限を更新しました。",
+    "{operation}: {model}": "{operation}: {model}",
+    "stopped": "停止中",
+    "removed": "削除済み",
+    "Remove": "削除",
+    "Restore": "復元",
+    "Removed modules": "削除済みモジュール",
+    "For DESMAN-Global": "DESMAN-Global 用",
+    "For your tasks and chats": "タスクとチャット用",
+    "DESMAN-Global suspended: no module": "DESMAN-Global 一時停止中：モジュールなし",
+    "Invalid module hold.": "モジュールの制限が無効です。",
+    "no module left for {role}": "{role} に利用可能なモジュールがありません",
+    "Stop, continue, remove or restore a module.": "モジュールを停止、続行、削除、復元します。",
+    "Modules lent to DESMAN-Global.": "DESMAN-Global に貸し出すモジュール。",
     "Usage": "使用状況",
     "To the bottom": "一番下へ",
     "Earlier messages hidden by /clear (the model still sees them).": "/clear で以前のメッセージを非表示にしました（モデルには引き続き見えます）。",

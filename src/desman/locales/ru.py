@@ -15,6 +15,23 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Remove this module?": "Убрать этот модуль?",
+    "Remove this task?": "Убрать эту задачу?",
+    "Remove this module? If it is the last lent module, DESMAN-Global suspends.": "Убрать этот модуль? Если это последний предоставленный модуль, DESMAN-Global приостановится.",
+    "Module hold updated.": "Блокировка модуля обновлена.",
+    "{operation}: {model}": "{operation}: {model}",
+    "stopped": "остановлен",
+    "removed": "убран",
+    "Remove": "Убрать",
+    "Restore": "Восстановить",
+    "Removed modules": "Убранные модули",
+    "For DESMAN-Global": "Для DESMAN-Global",
+    "For your tasks and chats": "Для ваших задач и чатов",
+    "DESMAN-Global suspended: no module": "DESMAN-Global приостановлен: нет модуля",
+    "Invalid module hold.": "Некорректная блокировка модуля.",
+    "no module left for {role}": "не осталось модулей для {role}",
+    "Stop, continue, remove or restore a module.": "Остановить, продолжить, убрать или восстановить модуль.",
+    "Modules lent to DESMAN-Global.": "Модули, предоставленные DESMAN-Global.",
     "Usage": "Расход",
     "To the bottom": "В самый низ",
     "Earlier messages hidden by /clear (the model still sees them).": "Предыдущие сообщения скрыты командой /clear (модель по-прежнему их видит).",

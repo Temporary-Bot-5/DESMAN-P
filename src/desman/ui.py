@@ -450,7 +450,7 @@ class SessionAction(Action):
 
 class TaskControlAction(Action):
     type: Literal["task_control"]
-    operation: Literal["pin", "unpin", "resume", "pause", "hide"]
+    operation: Literal["pin", "unpin", "resume", "pause", "hide", "remove"]
     id: str = Field(min_length=1, max_length=128)
 
 
@@ -492,6 +492,21 @@ MODULE_ROLES_BY_SCOPE: dict[str, tuple[str, ...]] = {
 }
 
 
+class ModuleHoldAction(Action):
+    type: Literal["module_hold"]
+    operation: Literal["stop", "continue", "remove", "restore"]
+    source: str = Field(pattern=r"^(?:[0-9a-f]{12}|ollama|llamacpp)$")
+    model: str = Field(pattern=r"^[a-z0-9_-]+/\S+$", max_length=200)
+    scope: Literal["all", "task", "session", "network"]
+    scope_id: str = Field(default="", max_length=128)
+
+    @model_validator(mode="after")
+    def valid_scope(self) -> ModuleHoldAction:
+        if bool(self.scope_id) != (self.scope in {"task", "session"}):
+            raise ValueError("invalid hold scope id")
+        return self
+
+
 class ModuleAction(Action):
     type: Literal["module"]
     role: Literal["planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"]
@@ -520,6 +535,7 @@ ACTIONS = TypeAdapter(
         | SimpleAction
         | DecideAction
         | ModuleAction
+        | ModuleHoldAction
         | SettingsAction,
         Field(discriminator="type"),
     ]

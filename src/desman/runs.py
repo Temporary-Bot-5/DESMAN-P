@@ -20,7 +20,7 @@ import httpx
 from desman import net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config, Tuning
-from desman.core import calls, protected
+from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS
 from desman.core.coordinator import Coordinator, Crew, Labels
@@ -36,7 +36,7 @@ from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
 from desman.llm import hub, router
-from desman.llm.base import LLM, Completion, Request
+from desman.llm.base import LLM, Completion, RateLimited, Request
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
@@ -125,23 +125,48 @@ def models(
     leaves no other model for retries. `only`: the models of these providers alone (the ones
     lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
     `router.NoProvider`."""
-    clients: dict[tuple[str, str | None], LLM] = {}
+    clients: dict[tuple[str, str | None, tuple[str, ...]], LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
 
-    def member(choice: router.Choice, first: str | None) -> LLM:
+    def member(choice: router.Choice, first: str | None, *, apply_holds: bool = True) -> LLM:
         # Share key state between roles with the same model and effective key order.
         keys = config.keys(choice.provider.key_env or "")
         applicable = first if any(key_id(k.value) == first for k in keys) else None
         # Identical orders share refusal/limit state, including an explicit default key.
         if keys and applicable == key_id(keys[0].value):
             applicable = None
-        identity = (choice.label, applicable)
+        purpose = calls.purpose()
+        scope: holds.Scope = (
+            "network"
+            if only is not None
+            else "session"
+            if purpose.role == calls.Role.INTERLOCUTOR
+            else "task"
+        )
+        scope_id = (
+            ""
+            if only is not None
+            else (purpose.session_id if scope == "session" else purpose.task_id) or ""
+        )
+        keys = [
+            k
+            for k in keys
+            if not apply_holds
+            or not holds.blocked(conn, key_id(k.value), choice.label, scope, scope_id)
+        ]
+        cfg = config.model_copy(
+            update={
+                "api_keys": {
+                    **config.api_keys,
+                    **({choice.provider.key_env: keys} if choice.provider.key_env else {}),
+                }
+            }
+        )
+        identity = (choice.label, applicable, tuple(key_id(k.value) for k in keys))
         if identity not in clients:
-            api = router.connect(
-                config, choice, first_key=applicable, on_call=recorder, client=client
-            )
+            api = router.connect(cfg, choice, first_key=applicable, on_call=recorder, client=client)
             timeouts.append(api.timeout)
             paced: LLM
             server = None
@@ -166,9 +191,11 @@ def models(
         role: calls.Role = calls.Role.EXECUTOR,
         kind: Kind | None = None,
         current: Config = config,
+        *,
+        apply_holds: bool = True,
     ) -> router.Fallback:
         first = router.preferred_key(current, role, kind)
-        return router.Fallback([(member(c, first), c) for c in choices])
+        return router.Fallback([(member(c, first, apply_holds=apply_holds), c) for c in choices])
 
     def lineup(
         role: calls.Role, kind: Kind | None = None, current: Config = config
@@ -185,30 +212,93 @@ def models(
         selected = router.other_lineup(own) if other else own
         if other and (model is not None or not selected):
             return None
-        default = chain(selected, role, kind)
-        # Network chains never read the person's scoped choices.
-        if only is not None:
-            return default
+        default = chain(selected, role, kind, apply_holds=False)
         field = router.tuning_field(role, kind)
-        chains: dict[module_choices.Choice, router.Fallback] = {}
+        chains: dict[tuple[str, ...], router.Fallback] = {}
 
         def current() -> router.Fallback:
             purpose = calls.purpose()
-            scope: module_choices.Scope = "session" if role == calls.Role.INTERLOCUTOR else "task"
-            identity = purpose.session_id if scope == "session" else purpose.task_id
-            if identity is None or field is None:
-                return default
-            choice = module_choices.get(conn, scope, identity, field)
-            if choice == module_choices.Choice():
-                return default
-            if choice not in chains:
-                cfg = module_choices.effective(config, field, choice)
-                own = lineup(role, kind, cfg)
-                selected = router.other_lineup(own) if other else own
-                chains[choice] = chain(selected, role, kind, cfg)
-            return chains[choice]
+            scope: holds.Scope = (
+                "network"
+                if only is not None
+                else "session"
+                if role == calls.Role.INTERLOCUTOR
+                else "task"
+            )
+            identity = (
+                ""
+                if only is not None
+                else (purpose.session_id if scope == "session" else purpose.task_id) or ""
+            )
+            cfg = config
+            if only is None and identity and field:
+                own_choice = module_choices.get(
+                    conn, "session" if scope == "session" else "task", identity, field
+                )
+                cfg = module_choices.effective(config, field, own_choice)
+            own = lineup(role, kind, cfg)
+            current_holds = holds.active(conn, scope, identity)
+            removed = {(h.source, h.model) for h in current_holds if h.state == "removed"}
+            own = [
+                c
+                for c in own
+                if any((source, c.label) not in removed for source in router.sources(cfg, c))
+            ]
+            # A stopped interlocutor queues instead of silently answering through a replacement.
+            if role == calls.Role.INTERLOCUTOR and own:
+                first = own[0]
+                preferred = router.preferred_key(cfg, role, kind)
+                sources = [
+                    source
+                    for source in router.sources(cfg, first)
+                    if (source, first.label) not in removed
+                ]
+                source = preferred if preferred in sources else next(iter(sources), "")
+                session = conn.execute(
+                    "SELECT created_at FROM sessions WHERE id=?", (identity,)
+                ).fetchone()
+                latest = conn.execute(
+                    "SELECT provider, model, key_id FROM model_calls WHERE session_id=? "
+                    "AND role='interlocutor' AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
+                    (identity,),
+                ).fetchone()
+                serving = {(source, first.label)}
+                if latest is not None:
+                    serving.add(
+                        (
+                            latest["key_id"] or latest["provider"],
+                            f"{latest['provider']}/{latest['model']}",
+                        )
+                    )
+                if any(
+                    h.state == "stopped"
+                    and (h.source, h.model) in serving
+                    and (h.scope == "session" or session is not None and session[0] <= h.at)
+                    for h in current_holds
+                ):
+                    raise ModuleWaiting(field or role.value)
+            own = router.filter_holds(cfg, own, conn, scope, identity)
+            selected = (router.other_lineup(own) or own) if other else own
+            if not selected:
+                raise ModuleWaiting(field or role.value)
+            signature = (
+                router.preferred_key(cfg, role, kind) or "",
+                *(
+                    c.label
+                    + ":"
+                    + ",".join(
+                        source
+                        for source in router.sources(cfg, c)
+                        if not holds.blocked(conn, source, c.label, scope, identity)
+                    )
+                    for c in selected
+                ),
+            )
+            if signature not in chains:
+                chains[signature] = chain(selected, role, kind, cfg)
+            return chains[signature]
 
-        return Scoped(current)
+        return Scoped(current, default)
 
     main_roles: dict[calls.Role, LLM] = {}
     for role in calls.Role:
@@ -233,11 +323,19 @@ def models(
     )
 
 
+class ModuleWaiting(RateLimited):
+    """A human hold is a LIMIT wait: it never spends a task attempt."""
+
+    def __init__(self, role: str) -> None:
+        super().__init__("modules", retry_after=30)
+        self.args = (t("no module left for {role}", role=role),)
+
+
 class Scoped(router.Fallback):
     """Resolve a task/session preference at every call, retaining acceptance on its chain."""
 
-    def __init__(self, current: Callable[[], router.Fallback]) -> None:
-        super().__init__(current().members)
+    def __init__(self, current: Callable[[], router.Fallback], default: router.Fallback) -> None:
+        super().__init__(default.members)
         self.current = current
         self.last: router.Fallback | None = None
 

@@ -78,8 +78,10 @@ def test_module_snapshot_and_session_usage(module_app: Any) -> None:
         check(json.loads(response.body))
     data = json.loads(app.handle("GET", "/modules", headers(app)).body)
     assert data["roles_by_scope"] == {k: list(v) for k, v in choices.ROLES_BY_SCOPE.items()}
-    assert data["modules"][0]["task_id"] == task
-    assert {r["role"] for r in data["modules"]} == {"text", "reviewer"}
+    work = [w for m in data["modules"] for w in m["work"]]
+    assert any(w["id"] == task and w["kind"] == "task" for w in work)
+    assert {w["role"] for w in work} >= {"text", "reviewer", "interlocutor"}
+    assert all("goal" not in m for m in data["modules"])
     card = data["interlocutor"]
     assert card["source"] == "chat" and card["scope_id"] == session
     assert card["calls"] == 1 and card["tokens"] > 0
@@ -201,7 +203,9 @@ def test_module_action_uses_bodies_and_console(
         polled["interlocutor"]
         if scope == "session"
         else next(
-            row for row in polled["modules"] if row["task_id"] == task and row["role"] == role
+            row
+            for row in polled["modules"]
+            if any(w["id"] == task and w["role"] == role for w in row["work"])
         )
     )
     assert updated["model"] == model and updated["key_fingerprint"] == key_id(secret)

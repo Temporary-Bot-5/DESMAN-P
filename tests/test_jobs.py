@@ -389,16 +389,28 @@ def test_a_lease_lost_drops_the_job(
     assert "work_dropped" in [action for action, _ in a.log()]
 
 
+@pytest.mark.parametrize("operation", ["off", "stop", "remove"])
 def test_off_drops_what_is_held_without_a_word(
     machine: Callable[[str, FakeLLM], Machine],
     add_job: Callable[..., str],
     world: World,
+    clock: FakeClock,
+    operation: str,
 ) -> None:
     add_job()
     a = machine("a", doer())
     a.poll()
     task_id = a.held()[0]["task_id"]
-    a.settings.config.network.enabled = False
+    if operation == "off":
+        a.settings.config.network.enabled = False
+    else:
+        from desman.core import holds
+
+        hold = holds.Hold(source="ollama", model="ollama/llama3.2", scope="network")
+        if operation == "stop":
+            holds.stop(a.conn, hold, clock=clock)
+        else:
+            holds.remove(a.conn, hold, clock=clock)
     sent = len(world.requests)
     a.poll(idle=False)
     assert len(world.requests) == sent

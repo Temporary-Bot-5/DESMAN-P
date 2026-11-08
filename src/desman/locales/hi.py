@@ -10,6 +10,23 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Remove this module?": "यह मॉड्यूल हटाएँ?",
+    "Remove this task?": "यह कार्य हटाएँ?",
+    "Remove this module? If it is the last lent module, DESMAN-Global suspends.": "यह मॉड्यूल हटाएँ? यदि यह अंतिम उधार दिया गया मॉड्यूल है, तो DESMAN-Global रुक जाएगा।",
+    "Module hold updated.": "मॉड्यूल प्रतिबंध अपडेट किया गया।",
+    "{operation}: {model}": "{operation}: {model}",
+    "stopped": "रुका हुआ",
+    "removed": "हटाया गया",
+    "Remove": "हटाएँ",
+    "Restore": "बहाल करें",
+    "Removed modules": "हटाए गए मॉड्यूल",
+    "For DESMAN-Global": "DESMAN-Global के लिए",
+    "For your tasks and chats": "आपके कार्यों और चैट के लिए",
+    "DESMAN-Global suspended: no module": "DESMAN-Global रुका हुआ: कोई मॉड्यूल नहीं",
+    "Invalid module hold.": "अमान्य मॉड्यूल प्रतिबंध।",
+    "no module left for {role}": "{role} के लिए कोई मॉड्यूल नहीं बचा",
+    "Stop, continue, remove or restore a module.": "मॉड्यूल रोकें, जारी रखें, हटाएँ या बहाल करें।",
+    "Modules lent to DESMAN-Global.": "DESMAN-Global को उधार दिए गए मॉड्यूल।",
     "Usage": "उपयोग",
     "To the bottom": "सबसे नीचे",
     "Earlier messages hidden by /clear (the model still sees them).": "/clear से पुराने संदेश छिपे हैं (मॉडल अभी भी उन्हें देखता है)।",

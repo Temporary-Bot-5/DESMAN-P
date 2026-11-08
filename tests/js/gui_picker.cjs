@@ -86,7 +86,7 @@ const moduleData = {scope:'task',scope_id:'t',role:'executor',choice_model:'groq
 const task = {id:'t',goal:'Work',status:'running',done:0,total:1,subtasks:[{seq:1,ref:'t/1',description:'Step',status:'running',version:1}],cards:[moduleData]};
 showTasks({tasks:[task]});
 let moduleNode = tasks.querySelectorAll('*').find(n => n.className === 'module-card');
-moduleNode.children.find(n => n.className === 'module-change').dispatchEvent({type:'click'});
+moduleNode.querySelectorAll('*').find(n => n.className === 'module-change').dispatchEvent({type:'click'});
 const editor = tasks.querySelector('.module-editor:not([hidden])');
 const modelPicker = editor.children[2];
 assert.equal(modelPicker.value, 'groq/custom-label'); // "Only here" uses the same preservation.

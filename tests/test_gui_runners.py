@@ -831,3 +831,32 @@ def test_a_turn_that_ends_without_a_reply_is_settled(
     user = next(m for m in page.sessions.messages(session) if m.role is Role.USER)
     assert page.sessions.turn_settled(user.seq)
     assert page.sessions.pending_turns() == []
+
+
+def test_module_wait_keeps_receipt_queued_without_blocking_other_chats(
+    page: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = page.runners._execute
+    continued = Event()
+
+    def execute(chat: Any, runner: Any, work: Any) -> None:
+        if work.text == "held" and not continued.is_set():
+            raise runs.ModuleWaiting("interlocutor")
+        original(chat, runner, work)
+
+    monkeypatch.setattr(page.runners, "_execute", execute)
+    a = page.send("held")
+    page.wait(lambda: page.runners.status(a).get("reason") == "no module left for interlocutor")
+    [message] = [m for m in page.sessions.messages(a) if m.role is Role.USER]
+    assert not page.sessions.turn_settled(message.seq)
+    page.new()
+    b = page.send("other")
+    page.done(b)
+    assert page.answers(b) == ["reply:other"]
+    assert not page.answers(a)
+    continued.set()
+    with page.runners.condition:
+        page.runners.condition.notify_all()
+    page.done(a)
+    assert page.answers(a) == ["reply:held"]
+    assert page.sessions.turn_settled(message.seq)

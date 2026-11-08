@@ -10,6 +10,23 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Remove this module?": "Bu modül kaldırılsın mı?",
+    "Remove this task?": "Bu görev kaldırılsın mı?",
+    "Remove this module? If it is the last lent module, DESMAN-Global suspends.": "Bu modül kaldırılsın mı? Ödünç verilen son modülse DESMAN-Global askıya alınır.",
+    "Module hold updated.": "Modül kısıtlaması güncellendi.",
+    "{operation}: {model}": "{operation}: {model}",
+    "stopped": "durduruldu",
+    "removed": "kaldırıldı",
+    "Remove": "Kaldır",
+    "Restore": "Geri yükle",
+    "Removed modules": "Kaldırılan modüller",
+    "For DESMAN-Global": "DESMAN-Global için",
+    "For your tasks and chats": "Görevleriniz ve sohbetleriniz için",
+    "DESMAN-Global suspended: no module": "DESMAN-Global askıda: modül yok",
+    "Invalid module hold.": "Geçersiz modül kısıtlaması.",
+    "no module left for {role}": "{role} için modül kalmadı",
+    "Stop, continue, remove or restore a module.": "Bir modülü durdurun, sürdürün, kaldırın veya geri yükleyin.",
+    "Modules lent to DESMAN-Global.": "DESMAN-Global’e ödünç verilen modüller.",
     "Usage": "Kullanım",
     "To the bottom": "En alta",
     "Earlier messages hidden by /clear (the model still sees them).": "Önceki mesajlar /clear ile gizlendi (model hâlâ onları görüyor).",

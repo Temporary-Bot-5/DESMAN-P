@@ -61,7 +61,7 @@ from pydantic import BaseModel, ValidationError
 
 from desman import evaluation, net, providers
 from desman.config import Config, ConfigError
-from desman.core import netlog
+from desman.core import db, holds, netlog
 from desman.core.store import Store
 from desman.core.workspace import workspace_root_for
 from desman.llm.openai_compat import key_id
@@ -163,6 +163,14 @@ def capabilities(config: Config) -> list[protocol.Capability]:
         except ValidationError:
             continue  # a model name the protocol cannot carry: not lent
     return found[: protocol.MAX_CAPABILITIES]
+
+
+def active_capabilities(config: Config, conn: sqlite3.Connection) -> list[protocol.Capability]:
+    return [
+        c
+        for c in capabilities(config)
+        if not holds.blocked(conn, c.key or c.provider, f"{c.provider}/{c.model}", "network")
+    ]
 
 
 def _target(registry: str, path: str) -> str:
@@ -371,6 +379,7 @@ class Node:
         self._journaled: set[tuple[str, str]] = set()
         self._no_key: str | None = None
         self._pending_release: Event | None = None
+        self.suspended = False
 
     def close(self) -> None:
         if self._client is not None:
@@ -386,6 +395,29 @@ class Node:
         if self.revoked:
             return None
         try:
+            config = self._config()
+            suspended = config.network.enabled and not active_capabilities(config, self.conn)
+            if config.network.enabled:
+                with db.transaction(self.conn):
+                    previous = self.conn.execute(
+                        "SELECT action FROM network_log WHERE action IN ('suspended','resumed') ORDER BY seq DESC LIMIT 1"
+                    ).fetchone()
+                    was_suspended = previous is not None and previous[0] == "suspended"
+                    if suspended != was_suspended:
+                        netlog.write(
+                            self.conn,
+                            "suspended" if suspended else "resumed",
+                            {"reason": "no module" if suspended else "module available"},
+                        )
+            if suspended != self.suspended:
+                self.suspended = suspended
+                self.next_at = None
+            if suspended:
+                for job in jobs.holding(self.conn):
+                    self._drop(job, "abandoned", "no module left")
+                for check in checks.pending(self.conn):
+                    checks.close(self.conn, check.lease, "lost")
+                return None
             event = None
             if self.next_at is None or now >= self.next_at:
                 event = self._poll(now)
@@ -398,6 +430,8 @@ class Node:
                 event = self._pending_release
                 self._pending_release = None
             return event
+        except ConfigError:
+            return None
         except sqlite3.OperationalError:
             # The journal is busy (another worker holds the database too long): the worker's
             # own work matters more; look again later.
@@ -469,7 +503,7 @@ class Node:
     def _contact(
         self, config: Config, address: str, key: sign.NodeKey, now: datetime
     ) -> Event | None:
-        lent = capabilities(config)
+        lent = active_capabilities(config, self.conn)
         client = self._http()
         deadline = time.monotonic() + TIMEOUT
         first = not self.registered
@@ -830,7 +864,7 @@ class Node:
         deadline: float,
     ) -> Event | None:
         self.claim_at = now + CLAIM_EVERY
-        lent = capabilities(config)
+        lent = active_capabilities(config, self.conn)
         job_work = bool(self.work) and any(
             jobs.quota_left(self.conn, config, c.provider, now) for c in lent
         )

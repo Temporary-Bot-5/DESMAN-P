@@ -102,6 +102,24 @@ TOPICS: Final = (
         "and `desman usage`.",
     ),
     Topic(
+        "modules",
+        "module cards, stopping, removal and restoration",
+        "Modules lists source/model pairs for local tasks and recent chats, including interlocutors, "
+        "and a separate DESMAN-Global section with lent modules. Each card shows short work titles. "
+        "Stop pauses unfinished tasks served by that module; chat turns queue. Continue resumes only "
+        "tasks paused by that stop. Removed modules are skipped, including explicit preferences; "
+        "the next model answers, or work waits without spending attempts when no module remains. "
+        "Removed modules can be restored in Settings → Roles or the collapsed Removed group. "
+        "Use `desman modules stop SOURCE MODEL`, `desman modules continue SOURCE MODEL`, "
+        "`desman modules remove SOURCE MODEL`, `desman modules restore SOURCE MODEL`: default all "
+        "work, optionally --task REF, --chat ID or --network. SOURCE is a key fingerprint, ollama "
+        "or llamacpp; MODEL is provider/model. CLI is immediate; chat proposals need confirmation. "
+        "Page Stop is immediate; Remove asks first. A task's Stop pauses it; its Remove cancels and "
+        "hides it, retaining history. Removing a network module preserves donation and consent; "
+        "no active lent module suspends registry contacts until one becomes available again. "
+        "The JSON shape of `desman modules` remains the task/role list; the page aggregates modules.",
+    ),
+    Topic(
         "localmodels",
         "Ollama models: downloads, removal and memory",
         "Auto uses configured local models last; chosen Ollama models go first, with fallback if removed. "

@@ -10,6 +10,23 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Remove this module?": "移除此模块？",
+    "Remove this task?": "移除此任务？",
+    "Remove this module? If it is the last lent module, DESMAN-Global suspends.": "移除此模块？如果这是最后一个借出的模块，DESMAN-Global 将暂停。",
+    "Module hold updated.": "模块限制已更新。",
+    "{operation}: {model}": "{operation}：{model}",
+    "stopped": "已停止",
+    "removed": "已移除",
+    "Remove": "移除",
+    "Restore": "恢复",
+    "Removed modules": "已移除的模块",
+    "For DESMAN-Global": "用于 DESMAN-Global",
+    "For your tasks and chats": "用于您的任务和聊天",
+    "DESMAN-Global suspended: no module": "DESMAN-Global 已暂停：没有模块",
+    "Invalid module hold.": "模块限制无效。",
+    "no module left for {role}": "{role} 已无可用模块",
+    "Stop, continue, remove or restore a module.": "停止、继续、移除或恢复模块。",
+    "Modules lent to DESMAN-Global.": "借给 DESMAN-Global 的模块。",
     "Usage": "用量",
     "To the bottom": "到底部",
     "Earlier messages hidden by /clear (the model still sees them).": "较早的消息已被 /clear 隐藏（模型仍可看到）。",

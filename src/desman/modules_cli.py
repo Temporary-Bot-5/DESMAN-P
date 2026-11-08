@@ -10,15 +10,16 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import actions, live, tuning_cli, ui
+from desman import actions, live, providers, tuning_cli, ui
 from desman.config import Config
 from desman.config_cli import json_option, load_config
-from desman.core import calls, choices, db
+from desman.core import calls, choices, db, holds
 from desman.core.models import Kind
 from desman.core.report import task_report
 from desman.core.store import Store
 from desman.i18n import t
 from desman.llm import router
+from desman.llm.openai_compat import key_id
 
 
 def scope_id(
@@ -129,6 +130,7 @@ def modules_data(
     role_labels = {r["role"]: r["label"] for r in tuning_cli.role_rows(config)}
     for identity in ids:
         report = task_report(store, identity)
+        network = store.find_task(identity)["origin"] == "network"
         modules = calls.modules(conn, identity)
         roles = {s.kind.value for s in report.subtasks}
         # Executors and review are assigned by the stored graph. Planning/decomposition
@@ -163,7 +165,7 @@ def modules_data(
         for role in tuning_cli.ROLES:
             if role not in roles or role == "interlocutor":
                 continue
-            own = choices.get(conn, "task", identity, role)
+            own = choices.Choice() if network else choices.get(conn, "task", identity, role)
             cfg = choices.effective(config, role, own)
             kind = Kind(role) if role in ("text", "code", "analysis") else None
             call_role = calls.Role.EXECUTOR if kind else calls.Role(role)
@@ -171,8 +173,30 @@ def modules_data(
                 lineup = router.lineup(cfg, call_role, kind=kind)
             except router.NoProvider:
                 lineup = []
+            if network:
+                lineup = [c for c in lineup if c.provider.id in config.network.donated]
+            removed = {
+                (h.source, h.model)
+                for h in holds.active(
+                    conn, "network" if network else "task", "" if network else identity
+                )
+                if h.state == "removed"
+            }
+            lineup = [
+                c
+                for c in lineup
+                if any((source, c.label) not in removed for source in router.sources(cfg, c))
+            ]
             first = lineup[0] if lineup else None
             fingerprint = router.preferred_key(cfg, call_role, kind)
+            if first:
+                sources = [
+                    source
+                    for source in router.sources(cfg, first)
+                    if (source, first.label) not in removed
+                ]
+                if fingerprint not in sources:
+                    fingerprint = next(iter(sources), None)
             applicable = next(
                 (
                     k
@@ -272,6 +296,15 @@ def show_modules(task: str | None, as_json: bool) -> None:
     config = load_config().load()
     with closing(db.open_db()) as conn:
         print_modules(modules_data(conn, config, task), as_json)
+        if not as_json:
+            print_holds(conn)
+
+
+def print_holds(conn: sqlite3.Connection) -> None:
+    for hold in holds.listed(conn):
+        ui.note(
+            f"{hold.source} · {hold.model} · {hold.scope} {hold.scope_id} · {t('stopped') if hold.state == 'stopped' else t('removed')}"
+        )
 
 
 @modules.command("show")
@@ -323,3 +356,117 @@ def clear_command(role: str | None, task: str | None, session: str | None) -> No
         check_role(scope, role)
         choices.clear(conn, scope, identity, role)
     ui.ok(t("Module choices cleared."))
+
+
+def hold_scope(
+    conn: sqlite3.Connection,
+    task: str | None = None,
+    chat: str | None = None,
+    network: bool = False,
+) -> tuple[holds.Scope, str]:
+    if sum((task is not None, chat is not None, network)) > 1:
+        raise ValueError("choose one hold scope")
+    if network:
+        return "network", ""
+    if task is not None or chat is not None:
+        return scope_id(conn, task, chat)
+    return "all", ""
+
+
+def hold_change(conn: sqlite3.Connection, config: Config, operation: str, hold: holds.Hold) -> None:
+    """The sole page/CLI/catalog body; affected work is computed by code, not supplied by a model."""
+    if operation == "stop":
+        tasks = set()
+        if hold.scope in {"all", "task"}:
+            rows = modules_data(conn, config, hold.scope_id if hold.scope == "task" else None)
+            for row in rows:
+                if row["model"] == hold.model and module_source(config, row) == hold.source:
+                    tasks.add(row["task_id"])
+            for identity in {row["task_id"] for row in rows}:
+                modules = calls.modules(conn, identity)
+                for module in modules:
+                    if module.subtask_id is None:
+                        continue
+                    subtask = Store(conn).get_subtask(module.subtask_id)
+                    if subtask.status.value not in {
+                        "ready",
+                        "running",
+                        "review",
+                        "paused",
+                        "needs_human",
+                    }:
+                        continue
+                    latest = max(m.last_seq for m in modules if m.subtask_id == module.subtask_id)
+                    if (
+                        module.last_seq == latest
+                        and (module.key_id or module.provider) == hold.source
+                        and f"{module.provider}/{module.model}" == hold.model
+                    ):
+                        tasks.add(identity)
+        holds.stop(conn, hold, tasks)
+    elif operation == "continue":
+        holds.continue_(conn, hold)
+    elif operation == "remove":
+        holds.remove(conn, hold)
+    elif operation == "restore":
+        holds.restore(conn, hold)
+    else:
+        raise ValueError("unknown module hold operation")
+
+
+def module_source(config: Config, row: dict[str, Any]) -> str:
+    if row.get("provider") in {"ollama", "llamacpp"}:
+        return str(row["provider"])
+    if row.get("key_fingerprint"):
+        return str(row["key_fingerprint"])
+    provider = next((p for p in providers.PROVIDERS if p.id == row.get("provider")), None)
+    keys = config.keys(provider.key_env or "") if provider else []
+    return key_id(keys[0].value) if keys else ""
+
+
+def hold_question(conn: sqlite3.Connection, config: Config, hold: holds.Hold) -> str:
+    from desman.net.node import active_capabilities
+
+    if hold.scope in {"all", "network"} and config.network.enabled:
+        lent = active_capabilities(config, conn)
+        if lent and all(
+            (c.key or c.provider) == hold.source and f"{c.provider}/{c.model}" == hold.model
+            for c in lent
+        ):
+            return t("Remove this module? If it is the last lent module, DESMAN-Global suspends.")
+    return t("Remove this module?")
+
+
+def _hold_command(
+    operation: str, source: str, model: str, task: str | None, chat: str | None, network: bool
+) -> None:
+    config = load_config().load()
+    with closing(db.open_db()) as conn:
+        try:
+            scope, identity = hold_scope(conn, task, chat, network)
+            hold_change(
+                conn,
+                config,
+                operation,
+                holds.Hold(source=source, model=model, scope=scope, scope_id=identity),
+            )
+        except ValueError:
+            raise click.ClickException(t("Invalid module hold.")) from None
+    ui.ok(t("Module hold updated."))
+
+
+def _register_hold_command(operation: str) -> None:
+    @modules.command(operation, help="Stop, continue, remove or restore a module.")
+    @click.argument("source")
+    @click.argument("model")
+    @click.option("--task", metavar="REF", help="One task (its reference).")
+    @click.option(
+        "--chat", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+    )
+    @click.option("--network", is_flag=True, help="Modules lent to DESMAN-Global.")
+    def command(source: str, model: str, task: str | None, chat: str | None, network: bool) -> None:
+        _hold_command(operation, source, model, task, chat, network)
+
+
+for _operation in ("stop", "continue", "remove", "restore"):
+    _register_hold_command(_operation)

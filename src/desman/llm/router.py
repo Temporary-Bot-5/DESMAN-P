@@ -23,6 +23,7 @@ to the next key when one is refused or limited).
 from __future__ import annotations
 
 import random
+import sqlite3
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ import httpx
 
 from desman import providers
 from desman.config import Config
+from desman.core import holds
 from desman.core.calls import Role
 from desman.core.models import Kind
 from desman.core.retry import FailureKind
@@ -142,6 +144,9 @@ def lineup(
     model: str | None = None,
     *,
     kind: Kind | None = None,
+    conn: sqlite3.Connection | None = None,
+    scope: holds.Scope = "all",
+    scope_id: str = "",
 ) -> list[Choice]:
     """The models `role` asks, best first; the executor's for a subtask of `kind`. Raises
     `NoProvider` (with what to do about it)."""
@@ -156,7 +161,7 @@ def lineup(
             pass
     first = selected if selected is not None else choose(config, provider)
     if model is not None:
-        return [_choice(config, first, model)]
+        return filter_holds(config, [_choice(config, first, model)], conn, scope, scope_id)
     pool = [first] if provider is not None else _free(config)
     need = catalog.need(role, kind)
     ranked = [
@@ -179,7 +184,28 @@ def lineup(
         # Auto model with a chosen key: that key's provider is asked first (its best models
         # first, as ranked), the others stay behind it for a fallback.
         choices.sort(key=lambda c: c.provider.id != source)
-    return choices
+    return filter_holds(config, choices, conn, scope, scope_id)
+
+
+def sources(config: Config, choice: Choice) -> list[str]:
+    if choice.provider.local:
+        return [choice.provider.id]
+    return [key_id(k.value) for k in config.keys(choice.provider.key_env or "")]
+
+
+def filter_holds(
+    config: Config,
+    choices: list[Choice],
+    conn: sqlite3.Connection | None,
+    scope: holds.Scope = "all",
+    scope_id: str = "",
+) -> list[Choice]:
+    if conn is None:
+        return choices
+    held = {(h.source, h.model) for h in holds.active(conn, scope, scope_id)}
+    return [
+        c for c in choices if any((source, c.label) not in held for source in sources(config, c))
+    ]
 
 
 def _key_provider(config: Config, fingerprint: str | None) -> str | None:

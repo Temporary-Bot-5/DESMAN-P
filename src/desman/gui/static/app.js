@@ -480,7 +480,7 @@ async function poll() {
       }
       let live = data.session_live || data.live || "";
       if (data.turn?.state === "queued") {
-        $("live").textContent = words.waiting_module.replace("{n}", data.turn.ahead);
+        $("live").textContent = data.turn.reason || words.waiting_module.replace("{n}", data.turn.ahead);
       } else rich($("live"), live);
       showPrompt(data.pending || null, true);
       showPrompt(data.prompt);
@@ -708,6 +708,9 @@ function showTasks(data) {
     const pin = iconAction(titleRow, "⌖", task.pinned ? words.unpin : words.pin, {type: "task_control", operation: task.pinned ? "unpin" : "pin", id: task.id});
     pin.title = task.pinned ? words.unpin : words.pin;
     pin.setAttribute("aria-pressed", String(!!task.pinned));
+    iconAction(titleRow, task.paused_at ? "▶" : "⏸", task.paused_at ? words.continue_task : words.stop,
+      {type: "task_control", operation: task.paused_at ? "resume" : "pause", id: task.id});
+    iconAction(titleRow, "✕", words.remove, {type: "task_control", operation: "remove", id: task.id});
     if (task.queued) text("span", words.worker_queue, card).className = "status-chip";
     if (task.paused_at) {
       text("span", words.paused, card).className = "status-chip";
@@ -786,8 +789,8 @@ function moduleCard(parent, m, placement = "modules") {
   card.append(portrait);
   const info = text("div", "", card);
   info.className = "module-info";
-  text("strong", words[`role_${m.role}`] || m.label, info).dataset.moduleRole = m.role;
-  text("small", m.model || words.auto, info);
+  text("strong", m.model || words.auto, info).dataset.moduleRole = m.role;
+  text("small", m.provider || words.auto, info);
   text("small", `${words.key}: ${m.key_label && m.key_label !== "auto" ? m.key_label : words.auto}`, info);
   const usage = text("div", "", info);
   usage.className = "module-usage";
@@ -798,7 +801,23 @@ function moduleCard(parent, m, placement = "modules") {
   usage.title = (m.scope === "session" ? words.role_usage_chat : words.role_usage_task)
     .replace("{calls}", m.calls).replace("{tokens}", m.tokens);
   if (m.state) text("small", m.state, info).className = `module-state ${m.state_style || "muted"}`;
-  const change = button(card, "✎", () => {
+  for (const work of m.work || []) text("small", `${work.title} · ${words[`role_${work.role}`] || work.role}`, info);
+  const controls = text("div", "", card); controls.className = "module-controls";
+  const source = m.module_source;
+  if (source && m.model) {
+    const action = operation => ({type: "module_hold", operation, source, model: m.model,
+      scope: operation === "continue" && m.hold_scope ? m.hold_scope : placement === "modules" && !m.hold_state ? (m.section === "network" ? "network" : "all") : m.scope,
+      scope_id: operation === "continue" && m.hold_scope ? m.hold_scope_id : placement === "modules" && !m.hold_state ? "" : m.scope_id || ""});
+    if (m.hold_state === "removed") {
+      iconAction(controls, "↶", words.restore, action("restore"));
+    } else {
+      iconAction(controls, m.hold_state === "stopped" ? "▶" : "⏸",
+        m.hold_state === "stopped" ? words.continue_task : words.stop,
+        action(m.hold_state === "stopped" ? "continue" : "stop"));
+      iconAction(controls, "✕", words.remove, action("remove"));
+    }
+  }
+  const change = button(controls, "✎", () => {
     moduleEditors.set(identity, editor);
     editor.hidden = false;
     change.hidden = true;
@@ -852,14 +871,17 @@ function showModules() {
   const root = $("modules");
   if (!preserveEditor(root)) {
   root.replaceChildren();
-  const groups = new Map();
-  for (const m of moduleSnapshot.modules) {
-    if (!groups.has(m.task_id)) {
-      const group = text("section", "", root);
-      text("h3", `${m.task_ref} · ${m.goal}`, group);
-      groups.set(m.task_id, group);
-    }
-    moduleCard(groups.get(m.task_id), m);
+  for (const section of ["network", "local"]) {
+    if (section === "network" && !moduleSnapshot.network_visible) continue;
+    const group = text("section", "", root);
+    text("h3", section === "network" ? words.for_global : words.for_tasks_chats, group);
+    if (section === "network" && moduleSnapshot.network_suspended) text("p", words.global_suspended, group);
+    for (const m of moduleSnapshot.modules.filter(m => m.section === section && m.hold_state !== "removed")) moduleCard(group, m);
+  }
+  const removed = moduleSnapshot.removed || [];
+  if (removed.length) {
+    const group = text("details", "", root); text("summary", words.removed_modules, group);
+    for (const m of removed) moduleCard(group, m);
   }
   }
   $("chat-module").hidden = terminalOpen || !moduleSnapshot.interlocutor;
@@ -1059,6 +1081,11 @@ function drawSettings() {
     }
     root.append(others);
   } else if (settingsSection === "roles") {
+    const removed = moduleSnapshot.removed || [];
+    if (removed.length) {
+      text("h3", words.removed_modules, root);
+      for (const m of removed) moduleCard(root, m);
+    }
     const head = text("div", "", root); head.className = "role-row role-head";
     for (const label of [words.settings_roles, words.source, words.model]) text("small", label, head);
     for (const role of d.roles) {
