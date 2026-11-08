@@ -243,7 +243,18 @@ class WebFront(ui.Front):
                             if hidden
                             else []
                         )
-                        + [self._redact_html(self.render(_render(m))) for m in messages],
+                        + [
+                            self._redact_html(
+                                self.render(
+                                    styled
+                                    if m.styled
+                                    and (styled := Text.from_ansi(m.styled)).plain == m.text
+                                    and self.redact(styled.plain) == styled.plain
+                                    else _render(m)
+                                )
+                            )
+                            for m in messages
+                        ],
                     )
                 result["transcript"] = self._transcript_cache[1]
                 result["session_id"] = self.current
@@ -314,19 +325,19 @@ class WebFront(ui.Front):
 
     def ok(self, text: str) -> None:
         """Publish a success message using the shared theme."""
-        self.emit("out", level="ok", html=self.render(Text("✓ ", style="good") + Text(text)))
+        self.emit("out", level="ok", html=self.render(ui.notice_text("ok", text)))
 
     def note(self, text: str) -> None:
         """Publish a muted note using the shared theme."""
-        self.emit("out", level="note", html=self.render(Text(text, style="muted")))
+        self.emit("out", level="note", html=self.render(ui.notice_text("note", text)))
 
     def warn(self, text: str, *, stderr: bool = False) -> None:
         """Publish a warning in the browser regardless of terminal stream."""
-        self.emit("out", level="warn", html=self.render(Text("! " + text, style="warn")))
+        self.emit("out", level="warn", html=self.render(ui.notice_text("warn", text)))
 
     def error(self, text: str) -> None:
         """Publish an error using the shared theme."""
-        self.emit("out", level="error", html=self.render(Text("✗ " + text, style="bad")))
+        self.emit("out", level="error", html=self.render(ui.notice_text("error", text)))
 
     def interactive(self) -> bool:
         """Enable human input because the browser provides prompt windows."""

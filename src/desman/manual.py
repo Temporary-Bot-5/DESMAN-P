@@ -76,7 +76,7 @@ TOPICS: Final = (
         "DESMAN never gives up by itself: when the attempts run out the subtask waits for the "
         "person (needs_human). `desman inbox` lists what waits, with the reason, and in a terminal or the chat lets the person pick a subtask and decide; `desman inbox --list` only lists. The person "
         "decides: `desman retry SUBTASK` sends it back to work with fresh attempts (a note becomes a "
-        "hint to the next attempt), `desman accept SUBTASK` takes it as it is, `desman fail SUBTASK --note TEXT` gives "
+        "hint to the next attempt), `desman accept SUBTASK` takes it as it is, `desman fail SUBTASK` (optional --note) gives "
         "up on it (what depends on it is blocked), `desman cancel TASK` stops the whole task. A "
         "failed subtask can still be sent back with retry. The chat tells when something "
         "comes to wait; asked there, each decision is confirmed by the person in a window.",
@@ -176,7 +176,7 @@ TOPICS: Final = (
     Topic(
         "gui",
         "browser page, chat and task panels, buttons and keyboard completion",
-        "The page shares the terminal chat, commands and confirmation windows. Source and Model are the only two module dropdowns. Source offers Auto, each configured provider key (masked), and configured or discovered Ollama. Cloud model lists are fetched only when a source is selected or the picker opens; known catalog models are marked and come first. Failed discovery shows catalog models with a note; saved missing models remain selectable. Paid keys require explicit selection. Ollama lists installed models and supports Hugging Face GGUF search/download with confirmation. A checkbox applies the choice to every chat/task; otherwise it is local where that role allows it. New chats retain pending choices until their first message. Editors survive polling. Cards show the last successful answering model when different. Modules inherit their task's pin. Settings and module edits keep the chat open, with output in General Terminal. `/clear` clears only this chat's screen; model history remains; the page keeps earlier messages hidden with a notice. Chat and General Terminal use the same /COMMAND catalog and `/help`; !COMMAND remains an alias. Tab cycles commands from the first match, Shift+Tab goes back, Enter runs the line and Esc closes suggestions. General Terminal has no model. `/context` there explains this.",
+        "The page shares the terminal chat, commands and confirmation windows. Source and Model are the only two module dropdowns. Source offers Auto, each configured provider key (masked), and configured or discovered Ollama. Cloud model lists are fetched only when a source is selected or the picker opens; known catalog models are marked and come first. Failed discovery shows catalog models with a note; saved missing models remain selectable. Paid keys require explicit selection. Ollama lists installed models and supports Hugging Face GGUF search/download with confirmation. A checkbox applies the choice to every chat/task; otherwise it is local where that role allows it. New chats retain pending choices until their first message. Editors survive polling. Cards show the last successful answering model when different. Modules inherit their task's pin. Settings and module edits keep the chat open, with output in General Terminal. `/clear` clears only this chat's screen; model history remains; the page keeps earlier messages hidden with a notice. Chat and General Terminal use the same /COMMAND catalog and `/help`; !COMMAND remains an alias. Tab cycles commands from the first match, Shift+Tab goes back, Enter runs the line and Esc closes suggestions. General Terminal keeps command colours after reload. Usage opens it and runs /usage. A down-arrow button returns a scrolled transcript to the bottom. General Terminal has no model. `/context` there explains this.",
     ),
     Topic(
         "profile",
@@ -196,7 +196,7 @@ TOPICS: Final = (
     Topic(
         "language",
         "the chat language and confirmed language changes",
-        "Configure the language with `desman language CODE`. Replies follow the person’s language; when it differs from configuration, a language command proposes switching, with an explanation in the person’s language before the confirmation window. Declining stops further switch proposals in that session. Settings keep their configured language until confirmation.",
+        "Configure the language with `desman language CODE`. Replies always follow the latest message’s language, using the configured interface language only when unclear. The language command is proposed only when the person explicitly asks to change the interface language.",
     ),
     Topic(
         "data",

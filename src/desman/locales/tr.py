@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Usage": "Kullanım",
+    "To the bottom": "En alta",
     "Earlier messages hidden by /clear (the model still sees them).": "Önceki mesajlar /clear ile gizlendi (model hâlâ onları görüyor).",
     "Stopped": "Durduruldu",
     "Concurrent page chat turns (1–8).": "Sayfada eşzamanlı sohbet turları (1–8).",
@@ -422,7 +424,6 @@ MESSAGES: dict[str, Forms] = {
     "{n} task: {statuses}.": ("{n} görev: {statuses}.",),
     "{n} subtask waits for your decision:": ("{n} alt görev kararınızı bekliyor:",),
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Karar verin: desman retry|accept|fail <ref> [--note METİN]",
-    "say why it failed": "neden başarısız olduğunu yazın",
     "it changed meanwhile, try again: {error}": "bu arada değişti, tekrar deneyin: {error}",
     "Task {id}: {n} subtask cancelled, task is {status}": (
         "Görev {id}: {n} alt görev iptal edildi, görev durumu {status}",

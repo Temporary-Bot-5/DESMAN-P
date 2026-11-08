@@ -467,7 +467,7 @@ async function poll() {
         $("stop").textContent = words.stop;
       }
       const transcript = $("messages");
-      const nearBottom = transcript.scrollTop + transcript.clientHeight >= transcript.scrollHeight - 120;
+      const nearBottom = nearTranscriptBottom();
       for (const e of data.events) {
         event(e);
         after = Math.max(after, e.seq);
@@ -487,6 +487,7 @@ async function poll() {
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
       if (data.events.length && nearBottom && !document.querySelector(".greeting")) transcript.scrollTop = transcript.scrollHeight;
+      updateBottomButton();
     } catch {
       $("status").textContent = words.offline;
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -565,7 +566,19 @@ async function applyStrings(next) {
   if (!$("settings-window").hidden) await refreshSettings(true, true);
 }
 
+function nearTranscriptBottom() {
+  const transcript = $("messages");
+  return transcript.scrollTop + transcript.clientHeight >= transcript.scrollHeight - 120;
+}
+function updateBottomButton() {
+  $("to-bottom").hidden = nearTranscriptBottom();
+}
 function setupPanels() {
+  $("to-bottom").title = words.to_bottom;
+  $("to-bottom").setAttribute("aria-label", words.to_bottom);
+  $("to-bottom").onclick = () => $("messages").scrollTo({top: $("messages").scrollHeight, behavior: "smooth"});
+  $("messages").onscroll = updateBottomButton;
+  updateBottomButton();
   document.documentElement.lang = words.lang;
   $("panel-switch").replaceChildren();
   for (const mode of ["tasks", "modules"]) {
@@ -592,6 +605,7 @@ function setupPanels() {
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
   button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
+  actionButton($("sidebar-bottom"), words.usage, {type: "usage"});
   $("topbar").replaceChildren();
   for (const [label, id] of [[words.sessions, "sidebar"], [words.tasks, "tasks-panel"]]) {
     const b = button($("topbar"), label, () => {
@@ -721,9 +735,6 @@ function showTasks(data) {
       decisions.className = "decisions";
       for (const decision of ["retry", "accept", "fail"]) {
         const b = actionButton(decisions, words[decision], () => {
-          if (decision === "fail" && !input.value.trim()) {
-            input.setCustomValidity(words.answer); input.reportValidity(); return null;
-          }
           input.setCustomValidity("");
           return {type: "decide", ref: sub.ref, version: sub.version, decision, note: input.value};
         });

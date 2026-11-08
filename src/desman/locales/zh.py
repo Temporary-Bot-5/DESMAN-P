@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Usage": "用量",
+    "To the bottom": "到底部",
     "Earlier messages hidden by /clear (the model still sees them).": "较早的消息已被 /clear 隐藏（模型仍可看到）。",
     "Stopped": "已停止",
     "Concurrent page chat turns (1–8).": "页面同时进行的聊天轮次（1–8）。",
@@ -422,7 +424,6 @@ MESSAGES: dict[str, Forms] = {
     "{n} task: {statuses}.": ("{n} 个任务：{statuses}。",),
     "{n} subtask waits for your decision:": ("{n} 个子任务等待你的决定：",),
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "做出决定：desman retry|accept|fail <ref> [--note 文本]",
-    "say why it failed": "请说明失败原因",
     "it changed meanwhile, try again: {error}": "期间发生了变化，请重试：{error}",
     "Task {id}: {n} subtask cancelled, task is {status}": (
         "任务 {id}：已取消 {n} 个子任务，任务状态为 {status}",

@@ -473,7 +473,7 @@ def test_background_retells_own_session_marks_other_unread_and_survives_restart(
 
 
 @pytest.mark.parametrize("repair", [False, True])
-@pytest.mark.parametrize("text", [None, "You wrote in English; shall I switch DESMAN to English?"])
+@pytest.mark.parametrize("text", [None, "Shall I change the interface language as requested?"])
 def test_command_optional_text_before_confirmation(
     fake: FakeLLM, repair: bool, text: str | None
 ) -> None:

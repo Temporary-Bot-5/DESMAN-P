@@ -614,3 +614,19 @@ def test_the_journal_is_append_only() -> None:
     with pytest.raises(sqlite3.IntegrityError, match="append-only"):
         conn.execute("DELETE FROM operator_log")
     conn.close()
+
+
+@pytest.mark.parametrize("note", [None, "", " "])
+def test_fail_without_reason_from_chat(fake: FakeLLM, note: str | None) -> None:
+    task_id, subtask_id = escalated_task()
+    args: dict[str, Any] = {"subtask": f"{task_id[:8]}/0"}
+    if note is not None:
+        args["note"] = note
+    fake.on(CHAT, asks("fail", **args))
+    chat("give up on this", "y")
+    store = Store(db.open_db())
+    try:
+        assert store.get_subtask(subtask_id).status is SubtaskStatus.FAILED
+        assert history(store.conn, task_id)[-1].details["reason"] == "failed by operator"
+    finally:
+        store.conn.close()

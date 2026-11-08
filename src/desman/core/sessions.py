@@ -55,6 +55,7 @@ class Message(BaseModel):
     role: Role
     kind: Kind
     text: str
+    styled: str | None = None
     task_id: str | None = None
     cancelled_at: str | None = None
     covers: int | None = None
@@ -210,6 +211,7 @@ class Sessions:
         initial_choice: choices.Choice | None = None,
         outcome_audit: int | None = None,
         settle: bool = False,
+        styled: str | None = None,
     ) -> Message:
         """Append a message; `session_id` None starts a new session with it, `temporary` one if
         asked (this process holds it). A summary says which messages it `covers`."""
@@ -243,6 +245,8 @@ class Sessions:
                 "text": text,
                 "task_id": task_id,
             }
+            if styled is not None:
+                columns["styled"] = styled
             if outcome_audit is not None:
                 columns["outcome_audit"] = outcome_audit
             if covers is not None:  # the column is newer than the other ones (migration 14)
@@ -262,6 +266,7 @@ class Sessions:
             role=role,
             kind=kind,
             text=text,
+            styled=styled,
             task_id=task_id,
             covers=covers,
         )

@@ -224,6 +224,9 @@ def test_command_output_and_input_redact_configured_key(
             chat._terminal_command("!list " + secret)
     texts = "\n".join(m.text for m in sessions.messages(sessions.terminal()))
     assert secret not in texts and secret[:30] not in texts and "[" in texts
+    styled = "\n".join(m.styled or "" for m in sessions.messages(sessions.terminal()))
+    assert secret not in styled and secret[:30] not in styled
+    assert "[" in styled
 
 
 def test_page_terminal_snapshot_unread_and_open_clears(tmp_path: Path) -> None:
@@ -514,3 +517,131 @@ def test_terminal_help_is_journaled_and_follows_the_language(sessions: Sessions)
         "SELECT details_json FROM operator_log WHERE action = 'operator_command'"
     ).fetchall()
     assert any(json.loads(r[0])["command"] == "help" and json.loads(r[0])["typed"] for r in rows)
+
+
+def test_usage_action_opens_terminal_and_echoes_command(sessions: Sessions) -> None:
+    chat = Chat(sessions)
+    normal = sessions.add(None, Role.USER, "hello").session_id
+    chat.session_id = normal
+    chat._action(ui.SimpleAction(type="usage"))
+    assert chat.in_terminal
+    messages = sessions.messages(sessions.terminal())
+    assert messages[-2].role is Role.USER and messages[-2].text == "/usage"
+    assert messages[-1].kind is Kind.EVENT
+    assert messages[-1].text.strip()
+    assert len(sessions.messages(normal)) == 1
+
+
+def test_terminal_style_survives_reload(sessions: Sessions) -> None:
+    from rich.text import Text
+
+    chat = Chat(sessions)
+    chat._terminal_output(lambda: ui.out(Text("success", style="good")))
+    [message] = sessions.messages(sessions.terminal())
+    assert message.text.strip() == "success"
+    assert message.styled is not None and "\x1b[" in message.styled
+    assert "#00ff99" in WebFront.render(Text.from_ansi(message.styled))
+    from desman.core.sessions import History
+    from desman.interlocutor import Interlocutor
+
+    request = Interlocutor(FakeLLM(), "en").build_request(History(summary=None, messages=[message]))
+    assert "success" in request.prompt and "\\u001b" not in request.prompt
+
+
+@pytest.mark.parametrize("note", ["", " "])
+def test_empty_fail_action_and_catalog(note: str) -> None:
+    from desman.commands import FailArgs
+
+    action = ui.DecideAction(type="decide", ref="abc/0", version=1, decision="fail", note=note)
+    assert (
+        FailArgs.model_validate({"subtask": action.ref, "note": action.note}).note == note.strip()
+    )
+    assert FailArgs.model_validate({"subtask": action.ref}).note is None
+
+
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize("notices", [False, True])
+def test_split_key_never_survives_styled_storage(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, raw: bool, notices: bool
+) -> None:
+    from rich.text import Text
+
+    from desman.config import ApiKey
+
+    secret = "split-configured-secret"
+    config = open_config().load()
+    config.api_keys["groq"] = [ApiKey(value=secret)]
+    open_config().save(config)
+    chat = Chat(sessions)
+
+    def output() -> None:
+        if raw:
+            click.echo(secret[:8] + "\x1b[31m" + secret[8:] + "\x1b[0m", color=True)
+        else:
+            text = Text(secret)
+            text.stylize("red", 8, 15)
+            ui.out(text)
+
+    if notices:
+        monkeypatch.setattr(chat, "_tell_waiting", output)
+        monkeypatch.setattr(chat, "_tell_blocked", lambda: None)
+        chat._notices()
+    else:
+        chat._terminal_output(output)
+    [message] = sessions.messages(sessions.terminal())
+    assert secret not in message.text
+    assert secret not in Text.from_ansi(message.styled or "").plain
+    if raw:
+        assert message.styled is None
+
+
+def test_old_split_key_falls_back_in_page_transcript(tmp_path: Path) -> None:
+    from html import unescape
+
+    from rich.text import Text
+
+    from desman.config import ApiKey
+    from desman.gui.runners import Runners
+
+    secret = "old-split-configured-secret"
+    config = Config(language="en", configured=True)
+    config.api_keys["groq"] = [ApiKey(value=secret)]
+    open_config().save(config)
+    path = tmp_path / "state.db"
+    conn = db.open_db(path)
+    try:
+        sessions = Sessions(conn)
+        terminal = sessions.terminal()
+        sessions.add(
+            terminal,
+            Role.DESMAN,
+            "[redacted]\n",
+            Kind.EVENT,
+            styled=secret[:8] + "\x1b[31m" + secret[8:] + "\x1b[0m\n",
+        )
+        front = WebFront()
+        front.runners = Runners(path, front)
+        front.database = path
+        front.current = terminal
+        front.session_changed(terminal)
+        html = "".join(front.poll(0, timeout=0)["transcript"])
+        assert secret not in Text.from_markup(unescape(html)).plain
+        assert secret[8:] not in unescape(html)
+        assert "[redacted]" in html
+    finally:
+        conn.close()
+
+
+def test_notice_recording_matches_page_colours() -> None:
+    from rich.text import Text
+
+    front = WebFront()
+    with ui.use(front), ui.recording() as rec:
+        ui.ok("done")
+        ui.warn("careful")
+        ui.error("failed")
+        ui.note("aside")
+    assert rec.text == "✓ done\n! careful\n✗ failed\naside\n"
+    restored = WebFront.render(Text.from_ansi(rec.styled))
+    for event in front.events:
+        assert event["html"] in restored

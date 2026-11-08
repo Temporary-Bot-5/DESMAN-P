@@ -1130,12 +1130,12 @@ def accept(
 
 @cli.command()
 @click.argument("subtask")
-@click.option("--note", required=True, help="Why it failed (recorded in the audit log).")
+@click.option("--note", help="Why it failed (recorded in the audit log).")
 @if_version_option
 @db_option
 @json_option
 def fail(
-    subtask: str, note: str, if_version: int | None, db_path: Path | None, as_json: bool
+    subtask: str, note: str | None, if_version: int | None, db_path: Path | None, as_json: bool
 ) -> None:
     """Give up on SUBTASK: it becomes failed and everything depending on it is blocked.
 
@@ -1143,11 +1143,8 @@ def fail(
 
     SUBTASK is "<task>/<number>" as `desman status` and `inbox` show it, or its id.
     """
-    if not note.strip():
-        raise click.BadParameter(t("say why it failed"), param_hint="--note")
-    _decide(
-        subtask, SubtaskStatus.FAILED, note.strip(), "operator_fail", if_version, db_path, as_json
-    )
+    reason = (note or "").strip() or "failed by operator"
+    _decide(subtask, SubtaskStatus.FAILED, reason, "operator_fail", if_version, db_path, as_json)
 
 
 @cli.command()

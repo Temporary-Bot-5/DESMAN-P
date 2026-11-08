@@ -799,3 +799,23 @@ def test_g8_upgrade_preserves_applications(tmp_path: Path) -> None:
             conn.execute("INSERT INTO applications (action) VALUES ('applied')")
     finally:
         conn.close()
+
+
+def test_v41_upgrade_preserves_plain_messages_and_adds_style(tmp_path: Path) -> None:
+    path = tmp_path / "v41.db"
+    old = _db_at_version(path, 41)
+    old.execute("INSERT INTO sessions (id, created_at) VALUES ('chat', '2026-11-08')")
+    old.execute(
+        "INSERT INTO messages (session_id, at, role, kind, text) VALUES ('chat', '2026-11-08', 'desman', 'event', 'old output')"
+    )
+    old.close()
+    conn = db.open_db(path)
+    try:
+        [message] = Sessions(conn).messages("chat")
+        assert message.text == "old output" and message.styled is None
+        added = Sessions(conn).add(
+            "chat", Role.DESMAN, "new output", styled="\x1b[31mnew output\x1b[0m"
+        )
+        assert Sessions(conn).messages("chat")[-1].styled == added.styled
+    finally:
+        conn.close()

@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Usage": "Utilisation",
+    "To the bottom": "Tout en bas",
     "Earlier messages hidden by /clear (the model still sees them).": "Messages précédents masqués par /clear (le modèle les voit toujours).",
     "Stopped": "Arrêté",
     "Concurrent page chat turns (1–8).": "Tours de discussion simultanés sur la page (1–8).",
@@ -436,7 +438,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} sous-tâches attendent votre décision :",
     ),
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Décidez avec : desman retry|accept|fail <ref> [--note TEXTE]",
-    "say why it failed": "dites pourquoi cela a échoué",
     "it changed meanwhile, try again: {error}": "cela a changé entre-temps, réessayez : {error}",
     "Task {id}: {n} subtask cancelled, task is {status}": (
         "Tâche {id} : {n} sous-tâche annulée, la tâche est {status}",

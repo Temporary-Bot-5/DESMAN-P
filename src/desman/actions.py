@@ -328,9 +328,6 @@ def choose_inbox(store: Store, session_id: str | None = None) -> dict[str, Any]:
                 note = ui.text(t("Optional guidance for the next attempt"))
             elif action == "fail":
                 note = ui.text(t("Why did it fail?"))
-                if not note.strip():
-                    ui.error(t("say why it failed"))
-                    continue
             try:
                 config = open_config().load()
             except ConfigError:
@@ -346,7 +343,12 @@ def choose_inbox(store: Store, session_id: str | None = None) -> dict[str, Any]:
                 decision = apply_decision(
                     store,
                     pending,
-                    note.strip() or f"{action} requested by operator",
+                    note.strip()
+                    or (
+                        "failed by operator"
+                        if action == "fail"
+                        else f"{action} requested by operator"
+                    ),
                     f"operator_{action}",
                 )
             except click.ClickException as e:
@@ -449,6 +451,8 @@ def prepare_decision(
 
 
 def apply_decision(store: Store, pending: Pending, note: str, action: str) -> Decision:
+    if action == "operator_fail":
+        note = note.strip() or "failed by operator"
     sub = pending.sub
     try:
         # Not just "still in that status": unchanged since we looked (a retry that

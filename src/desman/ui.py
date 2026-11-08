@@ -461,7 +461,13 @@ class NewSessionAction(Action):
 
 class SimpleAction(Action):
     type: Literal[
-        "delete_all", "messenger", "terminal", "report_problem", "hide_finished", "pause_tasks"
+        "delete_all",
+        "messenger",
+        "terminal",
+        "usage",
+        "report_problem",
+        "hide_finished",
+        "pause_tasks",
     ]
 
 
@@ -471,12 +477,6 @@ class DecideAction(Action):
     version: int = Field(ge=0)
     decision: Literal["retry", "accept", "fail"]
     note: str = Field(max_length=20000)
-
-    @model_validator(mode="after")
-    def required_note(self) -> DecideAction:
-        if self.decision == "fail" and not self.note.strip():
-            raise ValueError("fail needs a note")
-        return self
 
 
 class SettingsAction(Action):
@@ -699,6 +699,10 @@ class Recording:
     warnings: list[str] = field(default_factory=list)
 
     @property
+    def styled(self) -> str:
+        return self.buffer.getvalue()
+
+    @property
     def text(self) -> str:
         return Text.from_ansi(self.buffer.getvalue()).plain
 
@@ -717,7 +721,14 @@ class _RecordingConsole(Console):
     """Redact Rich text before layout can wrap a key across lines or table borders."""
 
     def __init__(self, recording: Recording) -> None:
-        super().__init__(file=recording.buffer, width=100, color_system=None, theme=THEME)
+        super().__init__(
+            file=recording.buffer,
+            width=100,
+            color_system="truecolor",
+            force_terminal=True,
+            no_color=False,
+            theme=THEME,
+        )
         self.recording = recording
 
     def render(
@@ -772,7 +783,7 @@ class _QuietOutput:
 def recording(
     *, show: bool = True, redact: Callable[[str], str] | None = None, keep_inputs: bool = False
 ) -> Iterator[Recording]:
-    """Tee output into colourless text, optionally keeping notices off the active front."""
+    """Record redacted ANSI output with a plain-text view, optionally hiding notices."""
     rec = Recording(io.StringIO(), redact or (lambda value: value))
     token = _recordings.set((*_recordings.get(), rec))
     previous = _active_front.get()
@@ -833,14 +844,25 @@ def section(title: str) -> None:
         _front.section(title)
 
 
+def notice_text(level: str, text: str) -> Text:
+    """Build the notice shared by the page and its durable recording."""
+    if level == "ok":
+        return Text("✓ ", style="good") + Text(text)
+    if level == "note":
+        return Text(text, style="muted")
+    if level == "warn":
+        return Text("! " + text, style="warn")
+    return Text("✗ " + text, style="bad")
+
+
 def note(text: str) -> None:
-    _record(Text(text))
+    _record(notice_text("note", text))
     with _ui_writes():
         _front.note(text)
 
 
 def ok(text: str) -> None:
-    _record(Text("✓ " + text))
+    _record(notice_text("ok", text))
     with _ui_writes():
         _front.ok(text)
 
@@ -848,13 +870,13 @@ def ok(text: str) -> None:
 def warn(text: str, *, stderr: bool = False) -> None:
     for rec in _recordings.get():
         rec.warnings.append(rec.redact(text))
-    _record(Text("! " + text))
+    _record(notice_text("warn", text))
     with _ui_writes():
         _front.warn(text, stderr=stderr)
 
 
 def error(text: str) -> None:
-    _record(Text("✗ " + text))
+    _record(notice_text("error", text))
     with _ui_writes():
         _front.error(text)
 

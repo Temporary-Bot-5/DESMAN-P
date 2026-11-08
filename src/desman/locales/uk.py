@@ -15,6 +15,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Usage": "Використання",
+    "To the bottom": "До самого низу",
     "Earlier messages hidden by /clear (the model still sees them).": "Попередні повідомлення приховано командою /clear (модель досі їх бачить).",
     "Stopped": "Зупинено",
     "Concurrent page chat turns (1–8).": "Одночасні відповіді в чатах сторінки (1–8).",
@@ -447,7 +449,6 @@ MESSAGES: dict[str, Forms] = {
         "{n} підзадач чекають на ваше рішення:",
     ),
     "Decide with: desman retry|accept|fail <ref> [--note TEXT]": "Рішення: desman retry|accept|fail <ref> [--note ТЕКСТ]",
-    "say why it failed": "напишіть, чому не вдалося",
     "it changed meanwhile, try again: {error}": "за цей час щось змінилося, повторіть: {error}",
     "Task {id}: {n} subtask cancelled, task is {status}": (
         "Задача {id}: скасовано {n} підзадачу, статус задачі — {status}",
