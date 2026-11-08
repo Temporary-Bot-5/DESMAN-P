@@ -713,7 +713,26 @@ def test_existing_other_retry_rephrases_with_only_one_model(
             heartbeat=heartbeat,
             tools=Toolbox(Workspace(tmp_path, identity)),
         )
-        assert isinstance(runs._executor(models)(work), Success)
+        from desman.core import audit, stats
+        from desman.core.states import Actor
+
+        store.note(claimed.id, Actor.EXECUTOR, "attempt_started", {"strategy": "other_model"})
+        before = audit.history(conn, identity)
+        assert isinstance(runs._executor(models, store)(work), Success)
+        after = audit.history(conn, identity)
+        assert after[:-1] == before
+        fallback = after[-1]
+        assert fallback.action == "strategy_fallback"
+        assert fallback.details == {
+            "from": "other_model",
+            "to": "rephrase",
+            "reason": "no other module",
+        }
+        assert fallback.from_status is None and fallback.to_status is None
+        assert audit.check_history(conn, identity) == []
+        assert stats.collect(conn).strategies == [stats.StrategyUse("rephrase", 1, 0)]
+        store.note(claimed.id, Actor.REVIEWER, "verdict", {"verdict": "accept"})
+        assert stats.collect(conn).strategies == [stats.StrategyUse("rephrase", 1, 1)]
         assert requests[-1]["model"] == lineup[0].model
         assert requests[-1]["temperature"] == REPHRASE_TEMPERATURE
         assert requests[-1]["messages"][0]["content"].startswith(EXECUTOR_SYSTEM_REPHRASED)

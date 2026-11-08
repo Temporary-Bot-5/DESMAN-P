@@ -31,6 +31,7 @@ from desman.core.policy import Access, PolicyError, Role, default_policy, switch
 from desman.core.retry import RetryPolicy, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
+from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
@@ -611,13 +612,19 @@ def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Co
     return _coordinator(store, models, access=None, tools=Registry(), tuning=tuning)
 
 
-def _executor(models: Models) -> Executor:
+def _executor(models: Models, store: Store) -> Executor:
     def execute(work: Work) -> Outcome:
         main, other = models.executor(work.subtask.kind)
         if work.context.strategy is Strategy.OTHER_MODEL and other is not None:
             # Holds may remove the alternate after the retry strategy was selected.
             available = getattr(other, "choices", None)
             if available is not None and len(available) <= 1:
+                store.note(
+                    work.subtask.id,
+                    Actor.EXECUTOR,
+                    "strategy_fallback",
+                    {"from": "other_model", "to": "rephrase", "reason": "no other module"},
+                )
                 other = None  # The executor already rephrases when no alternate exists.
         return llm_executor(main, other)(work)
 
@@ -642,7 +649,7 @@ def _coordinator(
     # delays taking over the work of a run that died elsewhere).
     return Coordinator(
         store,
-        _executor(models),
+        _executor(models, store),
         llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
         owner=current_owner(),
         lease_seconds=max(lease_seconds, models.step_seconds),
