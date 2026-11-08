@@ -106,9 +106,9 @@ TOPICS: Final = (
         "modules",
         "module cards, stopping, removal and restoration",
         "Modules lists source/model pairs for local tasks and recent chats, including interlocutors, "
-        "and a separate DESMAN-Global section with lent modules. Each card shows short work titles. "
+        "and a separate DESMAN-Global section with lent modules; shared modules have a card in each. Each card shows short work titles. "
         "Stop pauses unfinished tasks served by that module; chat turns queue. Continue resumes only "
-        "tasks paused by that stop. Removed modules are skipped, including explicit preferences; "
+        "tasks paused by that stop once all overlapping stops are lifted. Removed modules are skipped, including explicit preferences; "
         "the next model answers, or work waits without spending attempts when no module remains. "
         "Removed modules can be restored in Settings → Roles or the collapsed Removed group. "
         "Use `desman modules stop SOURCE MODEL`, `desman modules continue SOURCE MODEL`, "

@@ -353,10 +353,16 @@ def interlocutor(
         "AND error_kind IS NULL ORDER BY seq DESC LIMIT 1",
         (identity,),
     ).fetchone()
+    if latest and (
+        (latest["key_id"] or latest["provider"], f"{latest['provider']}/{latest['model']}")
+        in removed
+    ):
+        latest = None
     if latest:
         first = router.Choice(providers.find(latest["provider"]), latest["model"])
     elif (
-        router.preferred(cfg, calls.Role.INTERLOCUTOR) is None
+        not removed
+        and router.preferred(cfg, calls.Role.INTERLOCUTOR) is None
         and router.preferred_key(cfg, calls.Role.INTERLOCUTOR) is None
     ):
         first = None

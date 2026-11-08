@@ -23,12 +23,12 @@ from desman.config import Config, Tuning
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS
-from desman.core.coordinator import Coordinator, Crew, Labels
+from desman.core.coordinator import Coordinator, Crew, Executor, Labels, Outcome, Work
 from desman.core.effects import evidence
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
-from desman.core.retry import RetryPolicy, strategy_for
+from desman.core.retry import RetryPolicy, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import SearXNG, Tavily, client, open_sources
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
@@ -200,16 +200,12 @@ def models(
             if other:
                 if actual is None:
                     alternatives = router.other_lineup(available)
-                    if not alternatives:
-                        raise ModuleWaiting(router.tuning_field(role, kind) or role.value)
-                    return alternatives
+                    return alternatives or available
                 main = next((c for c in available if c.label == actual), None)
                 rest = [c for c in available if c.label != actual]
                 if main is not None:
                     rest.sort(key=lambda c: c.provider.id == main.provider.id)
-                if not rest:
-                    raise ModuleWaiting(router.tuning_field(role, kind) or role.value)
-                return rest
+                return rest or available
             return capacity(available) if capacity else available
 
         def remember(label: str) -> None:
@@ -615,6 +611,19 @@ def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Co
     return _coordinator(store, models, access=None, tools=Registry(), tuning=tuning)
 
 
+def _executor(models: Models) -> Executor:
+    def execute(work: Work) -> Outcome:
+        main, other = models.executor(work.subtask.kind)
+        if work.context.strategy is Strategy.OTHER_MODEL and other is not None:
+            # Holds may remove the alternate after the retry strategy was selected.
+            available = getattr(other, "choices", None)
+            if available is not None and len(available) <= 1:
+                other = None  # The executor already rephrases when no alternate exists.
+        return llm_executor(main, other)(work)
+
+    return execute
+
+
 def _coordinator(
     store: Store,
     models: Models,
@@ -633,7 +642,7 @@ def _coordinator(
     # delays taking over the work of a run that died elsewhere).
     return Coordinator(
         store,
-        llm_executor(models.llm, models.other, by_kind=models.kinds),
+        _executor(models),
         llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
         owner=current_owner(),
         lease_seconds=max(lease_seconds, models.step_seconds),

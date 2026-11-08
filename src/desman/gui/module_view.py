@@ -1,4 +1,4 @@
-"""One safe card per source/model, with short work references (ADR 0008)."""
+"""One safe card per section/source/model, with short work references (ADR 0008)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,8 @@ def short_title(title: str) -> str:
 def cards(
     conn: sqlite3.Connection, config: Config, rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    found: dict[tuple[str, str], dict[str, Any]] = {}
+    found: dict[tuple[str, str, str], dict[str, Any]] = {}
+    current_holds = holds.listed(conn)
     keys = {
         key_id(k.value): k.label or f"#{i}"
         for p in providers.PROVIDERS
@@ -35,7 +36,7 @@ def cards(
     ) -> dict[str, Any] | None:
         if not source or not model:
             return None
-        identity = (source, model)
+        identity = (section, source, model)
         if identity not in found:
             usage = conn.execute(
                 "SELECT COUNT(*), COALESCE(SUM(prompt_tokens+completion_tokens),0) FROM model_calls "
@@ -71,9 +72,6 @@ def cards(
                 "choice_model": None,
                 "choice_key": None,
             }
-        if section == "network":
-            found[identity]["section"] = "network"
-            found[identity]["scope"] = "network"
         return found[identity]
 
     for row in rows:
@@ -174,6 +172,24 @@ def cards(
             card["state"] = t("quota used up")
         elif row["error_type"] == "RateLimited":
             card["state"] = t("waiting for a limit")
+        historically_removed = any(
+            h.state == "removed"
+            and h.source == (row["key_id"] or row["provider"])
+            and h.model == f"{row['provider']}/{row['model']}"
+            and (
+                h.scope == "all"
+                or h.scope == "network"
+                and section == "network"
+                or h.scope == "task"
+                and h.scope_id == row["task_id"]
+                or h.scope == "session"
+                and h.scope_id == row["session_id"]
+            )
+            for h in current_holds
+        )
+        # Keep recent usage, but do not reassign work to a removed historical module.
+        if historically_removed:
+            continue
         if row["task_id"] and row["status"] in {
             "pending",
             "ready",
@@ -212,7 +228,7 @@ def cards(
                 }
                 if chat_work not in card["work"]:
                     card["work"].append(chat_work)
-    for hold in holds.listed(conn):
+    for hold in current_holds:
         card = add(hold.source, hold.model, "network" if hold.scope == "network" else "local")
         if card:
             card.setdefault("holds", []).append(hold.model_dump(exclude={"paused_tasks"}))

@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -394,7 +395,7 @@ def test_page_stop_is_immediate_and_remove_requires_confirmation(
     conn.close()
 
 
-def test_lent_module_serving_local_work_has_one_card() -> None:
+def test_lent_module_serving_local_work_has_separate_scope_cards() -> None:
     from desman.config import Donation, Network
 
     conn = db.open_db(":memory:")
@@ -407,9 +408,18 @@ def test_lent_module_serving_local_work_has_one_card() -> None:
     identity = task(Store(conn))
     snapshot = cards(conn, cfg, modules_cli.modules_data(conn, cfg))
     matching = [card for card in snapshot if card["model"] == "ollama/llama3.2"]
-    assert len(matching) == 1
-    assert matching[0]["section"] == "network"
-    assert any(work["id"] == identity and work["kind"] == "task" for work in matching[0]["work"])
+    assert len(matching) == 2
+    local = next(card for card in matching if card["section"] == "local")
+    network = next(card for card in matching if card["section"] == "network")
+    assert local["scope"] == "all" and network["scope"] == "network"
+    assert any(work["id"] == identity and work["kind"] == "task" for work in local["work"])
+    assert not network["work"]
+    modules_cli.hold_change(
+        conn, cfg, "stop", holds.Hold(source="ollama", model="ollama/llama3.2", scope="network")
+    )
+    assert Store(conn).find_task(identity)["paused_at"] is None
+    modules_cli.hold_change(conn, cfg, "stop", holds.Hold(source="ollama", model="ollama/llama3.2"))
+    assert Store(conn).find_task(identity)["paused_at"]
     conn.close()
 
 
@@ -625,3 +635,181 @@ def test_holds_filter_spread_tier_and_other_excludes_actual(
         alternate = models.other.complete(REQUEST)
         assert (alternate.provider, alternate.model) != (replacement.provider, replacement.model)
     conn.close()
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("release", ["continue", "remove"])
+def test_overlapping_stops_share_pause_until_last_release(reverse: bool, release: str) -> None:
+    conn = db.open_db(":memory:")
+    store = Store(conn)
+    identity, manual = task(store), task(store)
+    store.pause_task(manual)
+    global_hold = holds.Hold(source=key_id(SECRET), model="groq/model")
+    scoped = global_hold.model_copy(update={"scope": "task", "scope_id": identity})
+    first, second = (scoped, global_hold) if reverse else (global_hold, scoped)
+    holds.stop(conn, first, [identity, manual])
+    holds.stop(conn, second, [identity, manual])
+    assert all(
+        identity in h.paused_tasks and manual not in h.paused_tasks for h in holds.listed(conn)
+    )
+    change = holds.continue_ if release == "continue" else holds.remove
+    change(conn, first)
+    assert store.find_task(identity)["paused_at"]
+    change(conn, second)
+    assert store.find_task(identity)["paused_at"] is None
+    assert store.find_task(manual)["paused_at"]
+    conn.close()
+
+
+@pytest.mark.parametrize("remember", [False, True])
+def test_existing_other_retry_rephrases_with_only_one_model(
+    clock: FakeClock, tmp_path: Path, remember: bool
+) -> None:
+    from desman.agents import EXECUTOR_SYSTEM_REPHRASED, REPHRASE_TEMPERATURE
+    from desman.core.context import build_context
+    from desman.core.coordinator import Success, Work
+    from desman.core.retry import Strategy
+    from desman.core.tools import Toolbox
+    from desman.core.workspace import Workspace
+
+    conn = db.open_db(":memory:")
+    cfg = config()
+    store = Store(conn, clock=clock)
+    identity = task(store)
+    requests = []
+
+    def send(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    models = runs.models(
+        cfg,
+        conn,
+        provider="groq",
+        cache=False,
+        clock=clock,
+        sleep=clock.sleep,
+        client=httpx.Client(transport=httpx.MockTransport(send)),
+    )
+    assert models.other is not None
+    lineup = router.lineup(cfg, calls.Role.EXECUTOR, provider="groq")
+    with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=identity)):
+        if remember:
+            models.llm.complete(REQUEST)  # Remember the actual model before the removal.
+        for choice in lineup[1:]:
+            holds.remove(conn, holds.Hold(source=key_id(SECRET), model=choice.label))
+        assert models.other.complete(REQUEST).model == lineup[0].model
+        claimed = store.claim("worker")
+        assert claimed is not None
+
+        def heartbeat(checkpoint: dict[str, Any] | None = None) -> None:
+            pass
+
+        work = Work(
+            subtask=claimed,
+            context=build_context(claimed, [], None).model_copy(
+                update={"strategy": Strategy.OTHER_MODEL}
+            ),
+            heartbeat=heartbeat,
+            tools=Toolbox(Workspace(tmp_path, identity)),
+        )
+        assert isinstance(runs._executor(models)(work), Success)
+        assert requests[-1]["model"] == lineup[0].model
+        assert requests[-1]["temperature"] == REPHRASE_TEMPERATURE
+        assert requests[-1]["messages"][0]["content"].startswith(EXECUTOR_SYSTEM_REPHRASED)
+        holds.remove(conn, holds.Hold(source=key_id(SECRET), model=lineup[0].label))
+        with pytest.raises(runs.ModuleWaiting):
+            models.other.complete(REQUEST)
+    conn.close()
+
+
+@pytest.mark.parametrize("scope", ["task", "session"])
+def test_removed_last_success_is_replaced_in_assignment(
+    scope: holds.Scope, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.gui import module_view
+    from desman.gui.panels import interlocutor
+    from test_live import call
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> FrozenDateTime:
+            return cls.fromtimestamp(clock().timestamp(), tz or UTC)
+
+    monkeypatch.setattr(module_view, "datetime", FrozenDateTime)
+    conn = db.open_db(":memory:")
+    cfg = config()
+    store = Store(conn, clock=clock)
+    identity = (
+        task(store)
+        if scope == "task"
+        else Sessions(conn, clock=clock).add(None, Role.USER, "hi").session_id
+    )
+    role = calls.Role.EXECUTOR if scope == "task" else calls.Role.INTERLOCUTOR
+    lineup = router.lineup(cfg, role)
+    subtask = store.list_subtasks(identity)[0].id if scope == "task" else None
+    purpose = (
+        calls.Purpose(role, task_id=identity, subtask_id=subtask)
+        if scope == "task"
+        else calls.Purpose(role, session_id=identity)
+    )
+    with calls.for_(purpose):
+        calls.recorder(conn)(call(provider="groq", model=lineup[0].model, key_id=key_id(SECRET)))
+    holds.remove(
+        conn,
+        holds.Hold(source=key_id(SECRET), model=lineup[0].label, scope=scope, scope_id=identity),
+    )
+    row = (
+        next(
+            r
+            for r in modules_cli.modules_data(conn, cfg)
+            if r["task_id"] == identity and r["role"] == "text"
+        )
+        if scope == "task"
+        else interlocutor(conn, cfg, identity)
+    )
+    assert row["model"] == lineup[1].label
+    snapshot = cards(conn, cfg, modules_cli.modules_data(conn, cfg))
+    assigned = [
+        card
+        for card in snapshot
+        if any(
+            w["id"] == identity and w["role"] == ("text" if scope == "task" else "interlocutor")
+            for w in card["work"]
+        )
+    ]
+    assert [card["model"] for card in assigned] == [lineup[1].label]
+    holds.remove(
+        conn,
+        holds.Hold(source=key_id(SECRET), model=lineup[1].label, scope=scope, scope_id=identity),
+    )
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    "language", ["ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"]
+)
+def test_hold_command_help_is_translated(language: str) -> None:
+    from click.testing import CliRunner
+
+    from desman import i18n
+    from desman.cli import cli
+    from desman.config import open_config
+
+    open_config().save(config().model_copy(update={"language": language}))
+    runner = CliRunner()
+    summary = "Stop, continue, remove or restore a module."
+    result = runner.invoke(cli, ["modules", "--help"])
+    assert result.exit_code == 0
+    assert " ".join(i18n.t(summary).split()) in " ".join(result.output.split())
+    for operation in ("stop", "continue", "remove", "restore"):
+        result = runner.invoke(cli, ["modules", operation, "--help"])
+        assert result.exit_code == 0
+        for text in (
+            summary,
+            "One task (its reference).",
+            "One chat (its id as /sessions shows it): the interlocutor.",
+            "Modules lent to DESMAN-Global.",
+        ):
+            assert i18n.t(text) != text
+            assert " ".join(i18n.t(text).split()) in " ".join(result.output.split())

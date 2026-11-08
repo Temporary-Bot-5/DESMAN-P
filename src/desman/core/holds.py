@@ -112,7 +112,10 @@ def _change(
                 (hold.source, hold.model, hold.scope, hold.scope_id),
             )
             for identity, stamp in existing.paused_tasks.items():
-                if _pause_token(conn, identity) == stamp:
+                if _pause_token(conn, identity) == stamp and not any(
+                    h.state == "stopped" and h.paused_tasks.get(identity) == stamp
+                    for h in listed(conn)
+                ):
                     store.resume_task(identity)
         else:
             state = "stopped" if operation == "stop" else "removed"
@@ -128,6 +131,13 @@ def _change(
                         token = _pause_token(conn, identity)
                         assert token is not None
                         paused[identity] = token
+                    elif row and row[0] is not None:
+                        token = _pause_token(conn, identity)
+                        if token is not None and any(
+                            h.state == "stopped" and h.paused_tasks.get(identity) == token
+                            for h in listed(conn)
+                        ):
+                            paused[identity] = token
             conn.execute(
                 "INSERT INTO module_holds VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source, model, scope, scope_id) "
                 "DO UPDATE SET state=excluded.state, at=excluded.at, paused_tasks_json=excluded.paused_tasks_json",
@@ -144,7 +154,10 @@ def _change(
             # Replacing a stop releases only its own pauses; removal allows fallback work.
             if state == "removed" and existing:
                 for identity, stamp in paused.items():
-                    if _pause_token(conn, identity) == stamp:
+                    if _pause_token(conn, identity) == stamp and not any(
+                        h.state == "stopped" and h.paused_tasks.get(identity) == stamp
+                        for h in listed(conn)
+                    ):
                         store.resume_task(identity)
                 conn.execute(
                     "UPDATE module_holds SET paused_tasks_json = '{}' WHERE source=? AND model=? AND scope=? AND scope_id=?",

@@ -199,10 +199,19 @@ def modules_data(
                 ),
             ).fetchone()
             first = lineup[0] if lineup else None
+            if latest_call and (
+                (
+                    latest_call["key_id"] or latest_call["provider"],
+                    f"{latest_call['provider']}/{latest_call['model']}",
+                )
+                in removed
+            ):
+                latest_call = None
             if latest_call:
                 first = router.Choice(providers.find(latest_call["provider"]), latest_call["model"])
             elif (
-                router.preferred(cfg, call_role, kind) is None
+                not removed
+                and router.preferred(cfg, call_role, kind) is None
                 and router.preferred_key(cfg, call_role, kind) is None
             ):
                 first = None
@@ -303,7 +312,7 @@ def print_modules(rows: list[dict[str, Any]], as_json: bool = False) -> None:
 
 
 @click.group("modules", invoke_without_command=True)
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @json_option
 @click.pass_context
 def modules(ctx: click.Context, task: str | None, as_json: bool) -> None:
@@ -328,7 +337,7 @@ def print_holds(conn: sqlite3.Connection) -> None:
 
 
 @modules.command("show")
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @json_option
 def show(task: str | None, as_json: bool) -> None:
     """Show the modules of active tasks, or one task."""
@@ -337,9 +346,9 @@ def show(task: str | None, as_json: bool) -> None:
 
 @modules.command("set")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES))
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @click.option(
-    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+    "--session", metavar="ID", help=t("One chat (its id as /sessions shows it): the interlocutor.")
 )
 @click.option(
     "--model", metavar="PROVIDER/MODEL|auto", help="The model asked first; auto: the role's."
@@ -365,9 +374,9 @@ def set_command(
 
 @modules.command("clear")
 @click.argument("role", type=click.Choice(tuning_cli.ROLES), required=False)
-@click.option("--task", metavar="REF", help="One task (its reference).")
+@click.option("--task", metavar="REF", help=t("One task (its reference)."))
 @click.option(
-    "--session", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+    "--session", metavar="ID", help=t("One chat (its id as /sessions shows it): the interlocutor.")
 )
 def clear_command(role: str | None, task: str | None, session: str | None) -> None:
     """Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor."""
@@ -518,14 +527,14 @@ def _hold_command(
 
 
 def _register_hold_command(operation: str) -> None:
-    @modules.command(operation, help="Stop, continue, remove or restore a module.")
+    @modules.command(operation, help=t("Stop, continue, remove or restore a module."))
     @click.argument("source")
     @click.argument("model")
-    @click.option("--task", metavar="REF", help="One task (its reference).")
+    @click.option("--task", metavar="REF", help=t("One task (its reference)."))
     @click.option(
-        "--chat", metavar="ID", help="One chat (its id as /sessions shows it): the interlocutor."
+        "--chat", metavar="ID", help=t("One chat (its id as /sessions shows it): the interlocutor.")
     )
-    @click.option("--network", is_flag=True, help="Modules lent to DESMAN-Global.")
+    @click.option("--network", is_flag=True, help=t("Modules lent to DESMAN-Global."))
     def command(source: str, model: str, task: str | None, chat: str | None, network: bool) -> None:
         _hold_command(operation, source, model, task, chat, network)
 
