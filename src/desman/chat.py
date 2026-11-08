@@ -310,6 +310,18 @@ class Chat:
         else:
             self._greet()
 
+    @staticmethod
+    def _stored_style(styled: str, text: str, *configs: Config | None) -> str | None:
+        """Keep ANSI only when its decoded text matches the redacted stored text."""
+        for config in configs:
+            styled = providers.redact_keys(styled, config)[0]
+        plain = Text.from_ansi(styled).plain
+        for config in configs:
+            plain = providers.redact_keys(plain, config)[0]
+        if plain != Text.from_ansi(styled).plain or plain != text:
+            return None
+        return styled
+
     def _terminal_output(
         self, operation: Callable[[], Any], line: str | None = None, *, keep_inputs: bool = False
     ) -> Any:
@@ -335,9 +347,7 @@ class Chat:
                         Role.DESMAN,
                         text,
                         kind=Kind.EVENT,
-                        styled=providers.redact_keys(
-                            providers.redact_keys(rec.styled, config)[0], self._saved_config()
-                        )[0],
+                        styled=self._stored_style(rec.styled, text, config, self._saved_config()),
                     )
                 if self.in_terminal:
                     self._seen_terminal()
@@ -368,7 +378,7 @@ class Chat:
                 Role.DESMAN,
                 text,
                 kind=Kind.EVENT,
-                styled=providers.redact_keys(rec.styled, self._saved_config())[0],
+                styled=self._stored_style(rec.styled, text, self._saved_config()),
             )
             if self.in_terminal:
                 self._seen_terminal()
