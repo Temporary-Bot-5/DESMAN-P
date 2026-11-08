@@ -440,3 +440,32 @@ def test_auto_model_with_a_chosen_key_asks_that_keys_provider_first() -> None:
     after = router.lineup(config, calls.Role.INTERLOCUTOR)
     assert after[0].provider.id == chosen
     assert {c.label for c in after} == {c.label for c in before}  # the rest stays for a fallback
+
+
+def test_fallback_note_survives_a_label_that_follows_the_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spreading (T.2m-c) makes `Fallback.label` name the model used last: still noted."""
+    from desman import runs
+
+    config = make_config(api_keys={"GROQ_API_KEY": "fallback-label-secret"})
+    open_config().save(config)
+    conn = db.open_db(tmp_path / "notes.db")
+    sessions = Sessions(conn)
+    chat = Chat(sessions)
+    provider = providers.find("groq")
+    first = FakeLLM(Rejected(status=404, message="gone"), name="limited")
+    second = FakeLLM('{"type":"reply","text":"hello"}', name="answering")
+    llm = router.Fallback(
+        [(first, router.Choice(provider, "first")), (second, router.Choice(provider, "second"))],
+        label_for=lambda: "groq/second",
+    )
+    monkeypatch.setattr(
+        chat, "_models", lambda _: runs.Models(second, None, roles={calls.Role.INTERLOCUTOR: llm})
+    )
+    with ui.use(WebFront()):
+        chat._message("hello")
+    assert chat.session_id
+    assert "Answered by answering/" in sessions.messages(chat.session_id)[-1].text
+    assert "groq/first" in sessions.messages(chat.session_id)[-1].text
+    conn.close()

@@ -1758,7 +1758,10 @@ class Chat:
         if not isinstance(llm, router.Fallback):
             return
         call = llm.last_call
-        if not call.answered or not any(item.model == llm.label for item in call.skipped):
+        # `skipped` holds only the models asked before the one that answered: any at all means
+        # the first one asked (spread or not) did not answer. `llm.label` may already name the
+        # answering model (T.2m-c), so it cannot tell.
+        if not call.answered or not call.skipped:
             return
         reasons = {
             "memory": t("model may not fit in memory"),
