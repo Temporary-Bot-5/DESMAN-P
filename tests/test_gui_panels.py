@@ -428,7 +428,8 @@ def test_stored_transcript_follows_new_output(tmp_path: Path) -> None:
     script = tmp_path / "follow.cjs"
     script.write_text(
         'const assert = require("node:assert/strict");\n'
-        "let after = 0, state = 0, transcriptVersion = null, ended = false, followOutput = false;\n"
+        "let after = 0, state = 0, transcriptVersion = null, ended = false;\n"
+        "let followUntil = 0, shownSession = null;\n"
         "const words = {};\n"
         "const node = () => ({textContent: '', hidden: false, replaceChildren() {}});\n"
         "const nodes = {status: node(), live: node(), stop: node(), prompt: node()};\n"
@@ -445,8 +446,8 @@ def test_stored_transcript_follows_new_output(tmp_path: Path) -> None:
         "const fetch = async () => ({ok: true, json: async () => replies.shift()});\n"
         + poll
         + """
-const reply = (version, rows, last = false) => ({events: [], state: 0, ended: last,
-  transcript: Array(rows).fill('<p>'), transcript_version: version});
+const reply = (version, rows, last = false, session = 's') => ({events: [], state: 0, ended: last,
+  transcript: Array(rows).fill('<p>'), transcript_version: version, session_id: session});
 (async () => {
   // At the bottom: a new stored line is scrolled into view.
   replies = [reply('v1', 9, true)];
@@ -457,10 +458,17 @@ const reply = (version, rows, last = false) => ({events: [], state: 0, ended: la
   await poll();
   assert.equal(messages.scrollTop, 0);
   // Scrolled up but just sent a line: its output is shown.
-  ended = false; followOutput = true; replies = [reply('v3', 11, true)];
+  ended = false; messages.scrollTop = 0; followUntil = Date.now() + 5000; replies = [reply('v3', 11, true)];
   await poll();
   assert.equal(messages.scrollTop, messages.scrollHeight);
-  assert.equal(followOutput, false);
+  // Long after the line: an update leaves the reader where they are.
+  ended = false; messages.scrollTop = 0; followUntil = Date.now() - 1; replies = [reply('v4', 12, true)];
+  await poll();
+  assert.equal(messages.scrollTop, 0);
+  // Another chat opens at its latest message even when the last one was scrolled up.
+  ended = false; messages.scrollTop = 0; replies = [reply('v5', 3, true, 'other')];
+  await poll();
+  assert.equal(messages.scrollTop, messages.scrollHeight);
 })().catch(e => { console.error(e); process.exit(1); });
 """,
         encoding="utf-8",

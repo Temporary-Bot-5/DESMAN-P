@@ -11,8 +11,11 @@ let ended = false;
 let sending = false;
 let lineOpen = false;
 let terminalOpen = false;
-// The person just sent a line: the next output is shown even if they had scrolled up.
-let followOutput = false;
+// The person just sent a line: its output is shown even if they had scrolled up. Set before
+// the answer is posted (its output may come back first) and kept only for a few seconds.
+let followUntil = 0;
+const FOLLOW_MS = 5000;
+let shownSession = null;
 const expanded = new Set();
 
 function text(tag, value, parent) {
@@ -263,9 +266,9 @@ async function answer(p, value, cancel = false) {
   sending = true;
   try {
     const body = cancel ? {id: p.id, cancel: true} : {id: p.id, value};
+    if (!cancel && p.kind === "line") followUntil = Date.now() + FOLLOW_MS;
     const response = await post("/answer", body);
-    if (!response.ok) throw new Error();
-    if (!cancel) followOutput = true;
+    if (!response.ok) { followUntil = 0; throw new Error(); }
     if (pendingId === p.id) {
       $("pending").replaceChildren();
       pendingId = null;
@@ -493,9 +496,12 @@ async function poll() {
       showPrompt(data.prompt);
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
-      if ((data.events.length || replaced) && (nearBottom || followOutput) && !document.querySelector(".greeting")) {
+      // Another chat opened: start at its latest message, wherever the last one was read.
+      const opened = replaced && data.session_id !== shownSession;
+      if (replaced) shownSession = data.session_id;
+      const follow = Date.now() < followUntil;
+      if ((opened || ((data.events.length || replaced) && (nearBottom || follow))) && !document.querySelector(".greeting")) {
         transcript.scrollTop = transcript.scrollHeight;
-        followOutput = false;
       }
       updateBottomButton();
     } catch {
