@@ -412,3 +412,57 @@ transcript.scrollTop = 679; transcript.onscroll(); assert.equal(control.hidden, 
         encoding="utf-8",
     )
     subprocess.run([node, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_stored_transcript_follows_new_output(tmp_path: Path) -> None:
+    """General Terminal's output comes back as a whole stored transcript, not as events."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed for the browser event regression")
+    source = Path("src/desman/gui/static/app.js").read_text(encoding="utf-8")
+    start = source.index("async function poll()")
+    poll = source[start : source.index("\n}\n", start) + 3]
+    script = tmp_path / "follow.cjs"
+    script.write_text(
+        'const assert = require("node:assert/strict");\n'
+        "let after = 0, state = 0, transcriptVersion = null, ended = false, followOutput = false;\n"
+        "const words = {};\n"
+        "const node = () => ({textContent: '', hidden: false, replaceChildren() {}});\n"
+        "const nodes = {status: node(), live: node(), stop: node(), prompt: node()};\n"
+        "const messages = {scrollTop: 800, clientHeight: 200, scrollHeight: 1000, rows: 0,\n"
+        "  replaceChildren() { this.rows = 0; }, append() { this.rows++; this.scrollHeight += 100; }};\n"
+        "const $ = id => id === 'messages' ? messages : nodes[id];\n"
+        "const text = (tag, value, parent) => { parent.append(); return {}; };\n"
+        "const rich = () => {}, showPrompt = () => {}, updateBottomButton = () => {}, event = () => {};\n"
+        "const document = {querySelector: () => null};\n"
+        "let replies = [];\n"
+        "const nearTranscriptBottom = () =>\n"
+        "  messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 120;\n"
+        "const setTimeout = () => { throw new Error('poll failed'); };\n"
+        "const fetch = async () => ({ok: true, json: async () => replies.shift()});\n"
+        + poll
+        + """
+const reply = (version, rows, last = false) => ({events: [], state: 0, ended: last,
+  transcript: Array(rows).fill('<p>'), transcript_version: version});
+(async () => {
+  // At the bottom: a new stored line is scrolled into view.
+  replies = [reply('v1', 9, true)];
+  await poll();
+  assert.equal(messages.scrollTop, messages.scrollHeight);
+  // Scrolled up: left where the person is reading.
+  ended = false; messages.scrollTop = 0; replies = [reply('v2', 10, true)];
+  await poll();
+  assert.equal(messages.scrollTop, 0);
+  // Scrolled up but just sent a line: its output is shown.
+  ended = false; followOutput = true; replies = [reply('v3', 11, true)];
+  await poll();
+  assert.equal(messages.scrollTop, messages.scrollHeight);
+  assert.equal(followOutput, false);
+})().catch(e => { console.error(e); process.exit(1); });
+""",
+        encoding="utf-8",
+    )
+    subprocess.run([node, str(script)], check=True, capture_output=True, text=True)

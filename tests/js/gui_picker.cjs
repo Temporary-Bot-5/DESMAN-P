@@ -3,11 +3,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 class Element {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attrs = {}; this.listeners = {}; this.hidden = false; this.value = ''; this.detaches = 0; this.className = ''; this.classList = {toggle() {}}; }
+  // A node leaving the page loses its scroll, as in a browser.
+  unscroll() { this.scrollTop = 0; for (const c of this.children) c.unscroll(); }
   append(child) {
-    if (child.parentElement) { child.parentElement.children = child.parentElement.children.filter(c => c !== child); child.detaches++; }
+    if (child.parentElement) { child.parentElement.children = child.parentElement.children.filter(c => c !== child); child.detaches++; child.unscroll(); }
     this.children.push(child); child.parentElement = this;
   }
-  replaceChildren() { for (const child of this.children) { child.detaches++; child.parentElement = null; } this.children = []; }
+  replaceChildren() { for (const child of this.children) { child.detaches++; child.parentElement = null; child.unscroll(); } this.children = []; }
   setAttribute(k, v) { this.attrs[k] = v; }
   removeAttribute(k) { delete this.attrs[k]; }
   addEventListener(k, v) { (this.listeners[k] ||= []).push(v); }
@@ -21,6 +23,7 @@ class Element {
     const all = this.children.flatMap(c => [c, ...c.querySelectorAll('*')]);
     if (selector === '*') return all;
     if (selector === '[role=option]') return all.filter(c => c.attrs.role === 'option');
+    if (selector === '[role=listbox]') return all.filter(c => c.attrs.role === 'listbox');
     if (selector === '.module-editor:not([hidden])') return all.filter(c => c.className === 'module-editor' && !c.hidden);
     if (selector === 'textarea') return all.filter(c => c.tagName === 'TEXTAREA');
     return [];
@@ -48,6 +51,13 @@ trigger.dispatchEvent({type:'click'}); input.value = 'another'; input.dispatchEv
 assert.equal(list.querySelectorAll('[role=option]').length, 1);
 key('ArrowDown'); key('Enter'); assert.equal(p.value, 'more');
 trigger.dispatchEvent({type:'click'}); key('Escape'); assert.equal(p.open, false);
+// Each word of a search on its own, in any order.
+const models = picker(new Element('section'), 'Model', [{value:'a', label:'Qwen/Qwen2.5-32B-Instruct-GGUF'}, {value:'b', label:'Qwen/Qwen2.5-7B-Instruct-GGUF'}, {value:'c', label:'meta/Llama-3-32B'}]);
+models.children[1].dispatchEvent({type:'click'});
+const modelSearch = models.children[2].children[0], modelList = models.children[2].children[1];
+modelSearch.value = '  32b   QWEN '; modelSearch.dispatchEvent({type:'input'});
+assert.deepEqual(modelList.querySelectorAll('[role=option]').map(n => n.children[0].textContent), ['Qwen/Qwen2.5-32B-Instruct-GGUF']);
+models.close();
 trigger.dispatchEvent({type:'click'}); document.listeners.pointerdown({target: new Element('div')}); assert.equal(p.open, false);
 const role = {providers:[
  {id:'groq',name:'Groq',models:['groq/one','groq/two'],keys:[{fingerprint:'a',label:'A'}]},
@@ -98,11 +108,13 @@ assert.equal(modelPicker.value, 'groq/custom-label'); // "Only here" uses the sa
 modelPicker.children[1].dispatchEvent({type:'click'});
 const search = modelPicker.children[2].children[0]; search.value = 'custom'; search.dispatchEvent({type:'input'});
 const draft = tasks.querySelector('textarea'); draft.value = 'unsent';
+const openList = modelPicker.children[2].children[1]; openList.scrollTop = 140;
 showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2}]}]});
 assert.equal(tasks.children[1].className, 'task waiting');
 assert.equal(tasks.children[1].children[0].children[0].children[2].textContent, '1/1');
 assert.equal(tasks.querySelector('.module-editor:not([hidden])'), editor);
 assert.equal(modelPicker.open, true); assert.equal(search.value, 'custom'); assert.equal(document.activeElement, search);
+assert.equal(openList.scrollTop, 140); // a poll does not send the open list back to its top
 assert.equal(tasks.querySelector('textarea').value, 'unsent');
 const decisions = tasks.querySelectorAll('*').find(n => n.className === 'decisions');
 assert.equal(decisions.children[0].listeners.click[0]().version, 2);

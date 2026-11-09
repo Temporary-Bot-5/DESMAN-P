@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Final
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -521,15 +522,26 @@ class SearchModel(BaseModel):
         )
 
 
+SEARCH_LIMIT: Final = 20
+# Several words: the hub is asked for the longest one, the rest are matched here.
+SEARCH_WIDE: Final = 100
+
+
 def search(query: str, client: httpx.Client, token: str | None = None) -> list[SearchModel]:
-    """Official GGUF repository search; no redirects carrying a token to another host."""
+    """Official GGUF repository search; no redirects carrying a token to another host.
+
+    The hub matches its search text as one piece of a model's id, so "Qwen 32b" would find
+    nothing; each word is matched on its own, in any order, ignoring case.
+    """
+    terms = query.lower().split()
+    asked = max(terms, key=len) if terms else ""
     response = client.get(
         HUB + "/api/models",
         params={
-            "search": query,
+            "search": asked,
             "filter": "gguf",
             "sort": "downloads",
-            "limit": 20,
+            "limit": SEARCH_WIDE if len(terms) > 1 else SEARCH_LIMIT,
             "pipeline_tag": "text-generation",
             "expand[]": ["gguf", "downloads", "pipeline_tag"],
         },
@@ -538,4 +550,7 @@ def search(query: str, client: httpx.Client, token: str | None = None) -> list[S
         follow_redirects=False,
     )
     response.raise_for_status()
-    return TypeAdapter(list[SearchModel]).validate_python(response.json())
+    found = TypeAdapter(list[SearchModel]).validate_python(response.json())
+    if len(terms) < 2:
+        return found
+    return [m for m in found if all(term in m.id.lower() for term in terms)][:SEARCH_LIMIT]

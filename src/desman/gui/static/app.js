@@ -11,6 +11,8 @@ let ended = false;
 let sending = false;
 let lineOpen = false;
 let terminalOpen = false;
+// The person just sent a line: the next output is shown even if they had scrolled up.
+let followOutput = false;
 const expanded = new Set();
 
 function text(tag, value, parent) {
@@ -94,8 +96,9 @@ function picker(parent, label, options = [], current = "") {
     root.dispatchEvent(new Event("change", {bubbles: true}));
   }
   function render() {
-    const q = search.value.toLocaleLowerCase();
-    matches = all.filter(o => `${o.label} ${o.hint || ""}`.toLocaleLowerCase().includes(q));
+    // Every word of the query, in any order: "qwen 32b" finds "Qwen2.5-32B-Instruct".
+    const terms = search.value.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    matches = all.filter(o => { const t = `${o.label} ${o.hint || ""}`.toLocaleLowerCase(); return terms.every(w => t.includes(w)); });
     list.replaceChildren(); let group;
     for (const [i, option] of matches.entries()) {
       if (option.group && option.group !== group) { text("strong", option.group, list).className = "picker-group"; group = option.group; }
@@ -262,6 +265,7 @@ async function answer(p, value, cancel = false) {
     const body = cancel ? {id: p.id, cancel: true} : {id: p.id, value};
     const response = await post("/answer", body);
     if (!response.ok) throw new Error();
+    if (!cancel) followOutput = true;
     if (pendingId === p.id) {
       $("pending").replaceChildren();
       pendingId = null;
@@ -473,7 +477,10 @@ async function poll() {
         after = Math.max(after, e.seq);
       }
       state = data.state;
+      // A stored chat (General Terminal included) comes back as a whole new transcript.
+      let replaced = false;
       if (data.transcript && data.transcript_version !== transcriptVersion) {
+        replaced = true;
         transcriptVersion = data.transcript_version;
         transcript.replaceChildren();
         for (const html of data.transcript) rich(text("div", "", transcript), html);
@@ -486,7 +493,10 @@ async function poll() {
       showPrompt(data.prompt);
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
-      if (data.events.length && nearBottom && !document.querySelector(".greeting")) transcript.scrollTop = transcript.scrollHeight;
+      if ((data.events.length || replaced) && (nearBottom || followOutput) && !document.querySelector(".greeting")) {
+        transcript.scrollTop = transcript.scrollHeight;
+        followOutput = false;
+      }
       updateBottomButton();
     } catch {
       $("status").textContent = words.offline;
@@ -685,6 +695,8 @@ function showTasks(data) {
   const selection = focused ? [active.selectionStart, active.selectionEnd] : null;
   const root = $("tasks");
   // moduleCard reattaches open editors from moduleEditors; redraw the live task state.
+  // A list leaves the page for a moment and loses its scroll: put it back afterwards.
+  const scrolled = [...root.querySelectorAll("[role=listbox]")].map(n => [n, n.scrollTop]);
   root.replaceChildren();
   let section;
   for (const task of [...data.tasks].sort((a, b) => Number(b.pinned) - Number(a.pinned))) {
@@ -750,6 +762,7 @@ function showTasks(data) {
 
   }
   updateActions();
+  for (const [list, top] of scrolled) if (top && root.contains(list)) list.scrollTop = top;
   if (openPicker && root.contains(openPicker)) openPicker.position();
   if (active && root.contains(active) && !focused) active.focus({preventScroll: true});
   if (focused) {
