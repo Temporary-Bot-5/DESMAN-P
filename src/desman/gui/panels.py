@@ -309,6 +309,7 @@ def decorate(
     row["provider_name"] = providers.find(row["provider"]).name if row.get("provider") else None
     row["key_label"] = module_view.key_labels(config).get(row.get("key_fingerprint") or "", "auto")
     row["module_source"] = modules_cli.module_source(config, row)
+    row["module_id"] = module_view.module_id(row["module_source"], row.get("model"))
     matching = [
         h
         for h in holds.active(conn, scope, identity)

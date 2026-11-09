@@ -290,10 +290,14 @@ def test_cards_include_provider_and_filter_finished_work(page: Any) -> None:
     active = cards(chat.store.conn, cfg, rows)
     assert any(w["id"] == identity for c in active for w in c["work"])
     assert all(c["provider_name"] == providers.find(c["provider"]).name for c in active)
+    worked = {c["module_id"] for c in active if any(w["id"] == identity for w in c["work"])}
+    assert worked and all(isinstance(m, str) and len(m) == 6 for m in worked)
     chat.store.cancel_task(identity, "finished")
-    assert not any(
-        w["id"] == identity for c in cards(chat.store.conn, cfg, rows) for w in c["work"]
-    )
+    after = cards(chat.store.conn, cfg, rows)
+    assert not any(w["id"] == identity for c in after for w in c["work"])
+    # A module with nothing left to do is gone (owner, 2026-11-09), not listed as idle.
+    assert all(c["work"] or c["section"] == "network" or c.get("hold_state") for c in after)
+    assert not worked & {c["module_id"] for c in after}
 
 
 def test_page_shutdown_is_not_swallowed(page: Any) -> None:

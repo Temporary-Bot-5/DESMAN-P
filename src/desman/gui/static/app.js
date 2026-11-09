@@ -612,6 +612,10 @@ function setupPanels() {
     });
     control.setAttribute("aria-pressed", String(panelMode === mode));
   }
+  const search = $("panel-search");
+  search.placeholder = words.search; search.setAttribute("aria-label", words.search);
+  search.oninput = filterPanels;
+  filterPanels();
   $("panel-footer").replaceChildren();
   actionButton($("panel-footer"), panelMode === "tasks" ? words.delete_tasks : words.stop_modules,
     {type: panelMode === "tasks" ? "hide_finished" : "pause_tasks"});
@@ -718,6 +722,7 @@ function showTasks(data) {
     if (heading !== section) { text("h2", heading, root); section = heading; }
     const card = text("article", "", root);
     card.className = `task ${task.needs_human ? "waiting" : task.status}`;
+    card.dataset.search = `${task.ref} ${task.goal}`;
     const titleRow = text("div", "", card);
     titleRow.className = "task-title-row";
     const toggle = button(titleRow, "", () => {
@@ -776,6 +781,7 @@ function showTasks(data) {
 
   }
   showWaiting(data);
+  filterPanels();
   updateActions();
   for (const [list, top] of scrolled) if (top && root.contains(list)) list.scrollTop = top;
   if (openPicker && root.contains(openPicker)) openPicker.position();
@@ -828,6 +834,19 @@ function showWaiting(data) {
   }
 }
 
+// The search over Tasks and Modules: every word, in any order, in what a card shows or names
+// (a task's ref, a module's #id and full model name).
+function filterPanels() {
+  const terms = ($("panel-search")?.value || "").toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matches = node => terms.every(w => `${node.textContent} ${node.dataset.search || ""} ${[...node.querySelectorAll("[data-search]")].map(n => n.dataset.search).join(" ")}`.toLocaleLowerCase().includes(w));
+  for (const card of $("tasks").querySelectorAll("article.task")) card.hidden = !matches(card);
+  for (const section of $("modules").querySelectorAll("section")) {
+    let shown = 0;
+    for (const card of section.querySelectorAll("article.module-card")) { card.hidden = !matches(card); if (!card.hidden) shown++; }
+    section.hidden = !shown && terms.length > 0;
+  }
+}
+
 let panelsLoading = false;
 async function refreshPanels() {
   if (document.visibilityState !== "visible" || panelsLoading || ended) return;
@@ -865,6 +884,8 @@ function moduleCard(parent, m, placement = "modules") {
   const roleLabel = text("span", roles.length > 1 ? `${roles[0]} +${roles.length - 1}` : roles[0], face);
   roleLabel.className = "module-role"; roleLabel.title = roles.join("\n");
   const info = text("div", "", box); info.className = "module-info";
+  if (m.module_id) text("small", `#${m.module_id}`, info).className = "module-id";
+  card.dataset.search = [m.module_id && `#${m.module_id}`, m.model, m.provider_name, m.key_label].filter(Boolean).join(" ");
   const name = text("strong", m.model ? m.model.split("/").at(-1) : words.auto, info);
   name.className = "module-model"; name.title = m.model || words.auto; name.dataset.moduleRole = m.role;
   const local = ["ollama", "llamacpp"].includes(m.provider);
@@ -958,6 +979,7 @@ function showModules() {
     for (const m of moduleSnapshot.modules.filter(m => m.section === section && m.hold_state !== "removed")) moduleCard(group, m);
   }
   }
+  filterPanels();
   $("chat-module").hidden = terminalOpen || !moduleSnapshot.interlocutor;
   $("chat-module-title").textContent = words.role_interlocutor;
   $("chat-module-title").onclick = e => {
