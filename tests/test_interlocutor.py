@@ -629,6 +629,40 @@ def test_a_step_waiting_is_told_in_its_chat_while_the_rest_goes_on(fake: FakeLLM
         assert escalate(page.store, task) == waiting
         page.background_outcomes()
         assert len(calls(fake, RETELL)) == 2
+        # The person's own Fail is a verdict, not a question: nothing is told again.
+        page.store.transition(waiting, SubtaskStatus.NEEDS_HUMAN, SubtaskStatus.FAILED, Actor.HUMAN)
+        assert not sessions.newly_waiting(asked, task)
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+    finally:
+        conn.close()
+
+
+def test_a_waiting_step_is_not_told_for_a_hidden_task_nor_by_the_terminal_chat(
+    fake: FakeLLM,
+) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from test_notices import escalate
+
+    fake.on(RETELL, '{"text": "waits"}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        asked = sessions.add(None, Role.USER, "do two things").session_id
+        steps = [SubtaskSpec(description=d, acceptance_criteria="ok") for d in ("a", "b")]
+        page = Chat(sessions, background_tasks=True)
+        hidden = page.store.create_task(TaskSpec(goal="g", subtasks=steps), session_id=asked)
+        escalate(page.store, hidden)
+        conn.execute("UPDATE tasks SET hidden_at = '2026-11-09T00:00:00Z' WHERE id = ?", (hidden,))
+        assert not sessions.newly_waiting(asked, hidden)
+        page.background_outcomes()
+        assert not calls(fake, RETELL)
+        shown = page.store.create_task(TaskSpec(goal="g", subtasks=steps), session_id=asked)
+        escalate(page.store, shown)
+        terminal = Chat(sessions)
+        terminal.session_id = asked
+        assert not terminal._to_tell(asked, shown)  # another terminal may still work it
+        assert page._to_tell(asked, shown)
     finally:
         conn.close()
 

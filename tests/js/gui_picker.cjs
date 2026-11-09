@@ -130,6 +130,15 @@ stepAnswer.value = 'use the other key';
 assert.deepEqual(stepDecisions.children[0].listeners.click[0](), {type:'decide', ref:'t/1', version:2, decision:'retry', note:'use the other key'});
 showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2,ref:'t/1',title:'Step'}]}]});
 assert.equal(waitingRoot.children.find(n => n.className === 'waiting-step').children.find(n => n.tagName === 'TEXTAREA').value, 'use the other key');
+// Focus in the field under the chat stays there when the Tasks panel redraws the same step.
+const chatAnswer = waitingRoot.children.find(n => n.className === 'waiting-step').children.find(n => n.tagName === 'TEXTAREA');
+chatAnswer.focus();
+showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2,ref:'t/1'}]}]});
+assert.equal(document.activeElement.parentElement.className, 'waiting-step');
+// A step the person failed is their verdict: no field under the chat.
+showTasks({tasks:[{...task,status:'failed',done:1,subtasks:[{...task.subtasks[0],status:'failed',version:3,ref:'t/1'}]}]});
+assert.equal(waitingRoot.hidden, true);
+document.activeElement = null;
 currentSession = 'other';
 showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2,ref:'t/1'}]}]});
 assert.equal(waitingRoot.hidden, true); // another chat does not show it

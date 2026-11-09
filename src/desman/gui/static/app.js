@@ -500,6 +500,11 @@ async function poll() {
       // Another chat opened: start at its latest message, wherever the last one was read.
       const opened = replaced && data.session_id !== shownSession;
       if (replaced) shownSession = data.session_id;
+      // Another chat: its own waiting steps at once, not the last chat's until the next poll.
+      if (opened && data.session_id && data.session_id !== currentSession && waitingData) {
+        currentSession = data.session_id;
+        showWaiting(waitingData);
+      }
       const follow = Date.now() < followUntil;
       if ((opened || ((data.events.length || replaced) && (nearBottom || follow))) && !document.querySelector(".greeting")) {
         transcript.scrollTop = transcript.scrollHeight;
@@ -698,10 +703,11 @@ function showSessions(data) {
 function showTasks(data) {
   // Preserve unsent answers and keyboard focus when a poll updates task state.
   const drafts = new Map([...$("tasks").querySelectorAll("textarea")].map(n => [n.dataset.ref, n.value]));
-  const active = document.activeElement;
-  const focused = active && active.dataset.ref;
-  const selection = focused ? [active.selectionStart, active.selectionEnd] : null;
   const root = $("tasks");
+  const active = document.activeElement;
+  // Only this panel's own field: the one under the chat has the same ref.
+  const focused = active && root.contains(active) && active.dataset.ref;
+  const selection = focused ? [active.selectionStart, active.selectionEnd] : null;
   // moduleCard reattaches open editors from moduleEditors; redraw the live task state.
   // A list leaves the page for a moment and loses its scroll: put it back afterwards.
   const scrolled = [...root.querySelectorAll("[role=listbox]")].map(n => [n, n.scrollTop]);
@@ -782,7 +788,9 @@ function showTasks(data) {
 
 // Under the chat: the steps of its own tasks that wait for the person, with the same answer
 // and decisions as the Tasks panel (a field rendered by code, never by the model).
+let waitingData = null;
 function showWaiting(data) {
+  waitingData = data;
   const root = $("waiting");
   const drafts = new Map([...root.querySelectorAll("textarea")].map(n => [n.dataset.ref, n.value]));
   const active = document.activeElement;
@@ -791,7 +799,7 @@ function showWaiting(data) {
   root.replaceChildren();
   const steps = terminalOpen || !currentSession ? [] : data.tasks
     .filter(task => task.session_id === currentSession)
-    .flatMap(task => task.subtasks.filter(sub => sub.version !== null).map(sub => [task, sub]));
+    .flatMap(task => task.subtasks.filter(sub => sub.version !== null && sub.status === "needs_human").map(sub => [task, sub]));
   root.hidden = !steps.length;
   if (!steps.length) return;
   text("h3", words.waits_for_you, root);
