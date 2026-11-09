@@ -2,8 +2,8 @@
 DESMAN works, so that it never has to make it up. G.7b describes independent fake proposal checks.
 
 Short texts for the model, in English like every prompt, one per topic. The interlocutor's
-prompt lists only the topics, a line each (small models have little context); it asks for one
-or two with a `lookup` turn, and gets their texts with the same message again
+prompt lists only the topics, a line each (small models have little context); the topics are
+nodes of the knowledge tree (`desman.knowledge`, ADR 0009), which a `lookup` turn opens
 (`desman.interlocutor`).
 
 The manual says only what DESMAN does now: never plans (those are in ROADMAP.md, written for
@@ -20,10 +20,7 @@ from dataclasses import dataclass
 from typing import Final
 
 TOPIC_CHARS: Final = 1600
-"""The longest a topic's text may be: two of them have to fit a small model's context."""
-
-MAX_LOOKUP: Final = 2
-"""The most topics one lookup may ask for."""
+"""The longest a topic's text may be: the few a lookup opens have to fit a small model's context."""
 
 
 @dataclass(frozen=True)

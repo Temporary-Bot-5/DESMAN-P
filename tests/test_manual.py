@@ -12,7 +12,7 @@ import click
 import pytest
 from click.testing import CliRunner, Result
 
-from desman import chat, commands, manual, runs
+from desman import chat, commands, knowledge, manual, runs
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
@@ -235,3 +235,21 @@ def test_a_command_group_and_a_section_with_one_more_lookup(fake: FakeLLM) -> No
     known = payload(third)["knowledge"]
     assert known[adr]["plan"] is True and "Commands/keys" in known  # kept, and the new one
     assert LAST in system(third)
+
+
+def test_a_section_with_a_preamble_opens_as_a_section_and_texts_are_bounded() -> None:
+    from desman.interlocutor import KNOWLEDGE_TOKENS, opened, resolve
+
+    assert resolve("DESMAN/Docs/ROADMAP/") == "DESMAN/Docs/ROADMAP/"  # its table of contents
+    assert resolve("DESMAN/Docs/ROADMAP") == "DESMAN/Docs/ROADMAP"  # its preamble node
+    assert resolve("desman/docs/adr/") == "DESMAN/Docs/ADR/"  # any case, sections too
+    assert resolve("commands/KEYS") == "Commands/keys" and resolve("Retries") == (
+        "DESMAN/Manual/retries"
+    )
+    assert resolve("nowhere/") is None
+    tree = knowledge.release_tree()
+    longest = sorted(tree, key=lambda n: len(n.text))[-3:]
+    found = opened([n.path for n in longest])
+    size = sum(len(json.dumps(v, ensure_ascii=False)) for v in found.values()) // 4
+    assert size <= KNOWLEDGE_TOKENS + 50
+    assert any(v["text"].endswith("[… cut]") for v in found.values())

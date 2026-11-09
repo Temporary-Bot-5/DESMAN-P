@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import cache
 from typing import Annotated, Any, Final, Literal
 
 from pydantic import (
@@ -296,36 +297,60 @@ class Lookup(Noting):
         return list(dict.fromkeys(p for p in paths if p is not None))
 
 
-def resolve(given: str) -> str | None:
-    """A path of the tree as a model may write it: a node's path, a section's (ending in "/"),
-    or just a manual topic's name. None when there is no such thing."""
+@cache
+def _paths() -> tuple[dict[str, str], dict[str, str]]:
+    """Every node's path and every section's, by their case-folded spelling."""
     tree = knowledge.release_tree()
-    path = given.strip().strip("`").rstrip("/")
-    if knowledge.find(tree, path) is not None:
-        return path
-    if knowledge.under(tree, path):
-        return path + "/"
-    topic = path.casefold()
-    if topic in manual.BY_NAME:
-        return f"DESMAN/Manual/{topic}"
-    folded = {n.path.casefold(): n.path for n in tree}
-    return folded.get(path.casefold())
+    nodes = {n.path.casefold(): n.path for n in tree}
+    sections: dict[str, str] = {}
+    for node in tree:
+        parts = node.path.split("/")
+        for depth in range(1, len(parts)):
+            section = "/".join(parts[:depth])
+            sections[section.casefold()] = section
+    return nodes, sections
 
 
-def opened(paths: list[str]) -> dict[str, Any]:
+def resolve(given: str) -> str | None:
+    """A path of the tree as a model may write it, in any case: a node's path, a section's
+    (ending in "/": a document's section, not its preamble node of the same name), or just a
+    manual topic's name. None when there is no such thing."""
+    nodes, sections = _paths()
+    written = given.strip().strip("`")
+    path = written.rstrip("/").casefold()
+    if written.endswith("/") and path in sections:
+        return sections[path] + "/"
+    if path in nodes:
+        return nodes[path]
+    if path in sections:
+        return sections[path] + "/"
+    if path in manual.BY_NAME:
+        return f"DESMAN/Manual/{path}"
+    return None
+
+
+KNOWLEDGE_TOKENS: Final = 3000
+"""The most the texts a turn reads may take, all lookups together: a longer one is cut."""
+
+
+def opened(paths: list[str], room: int = KNOWLEDGE_TOKENS) -> dict[str, Any]:
     """What a lookup gets: each node's text (and whether it is a plan), each section's table of
-    contents."""
+    contents; within `room` tokens, the rest of a text cut with a mark."""
     tree = knowledge.release_tree()
     found: dict[str, Any] = {}
     for path in paths:
         node = knowledge.find(tree, path)
-        if node is not None:
-            found[path] = {"text": node.text, "plan": node.plan}
-        else:
+        if node is None:
             found[path] = {"contents": knowledge.contents(tree, path.rstrip("/"))}
+        else:
+            chars = max(room, 0) * CHARS_PER_TOKEN
+            text = node.text if len(node.text) <= chars else node.text[:chars] + " [… cut]"
+            found[path] = {"text": text, "plan": node.plan}
+        room -= estimate_tokens(json.dumps(found[path], ensure_ascii=False))
     return found
 
 
+@cache
 def tree_contents() -> str:
     """What the interlocutor's prompt lists of the tree: every manual topic, and the documents
     by section (the commands are listed with their arguments elsewhere in the prompt)."""
@@ -384,10 +409,12 @@ class Interlocutor:
         answer: AnyTurn | None = None
         for round_ in (1, 2):  # a section opened in the first round may be followed by one more
             assert lookup is not None
-            texts = opened(lookup.nodes)
+            used = sum(estimate_tokens(json.dumps(v, ensure_ascii=False)) for v in found.values())
+            texts = opened([p for p in lookup.nodes if p not in found], KNOWLEDGE_TOKENS - used)
             found.update(texts)
             self.opened = list(found)
-            # The texts take the place of older messages: the request stays as large as the first.
+            # The texts take the place of older messages: the request stays about as large as
+            # the first (the texts are bounded by KNOWLEDGE_TOKENS; the latest message stays).
             budget -= sum(
                 estimate_tokens(json.dumps(v, ensure_ascii=False)) for v in texts.values()
             )

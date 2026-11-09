@@ -463,9 +463,11 @@ class Chat:
         assert self.session_id is not None
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
-            with self._for(calls.Role.INTERLOCUTOR):
-                turn = interlocutor.turn(history)
-            self._opened[self.session_id] = interlocutor.opened
+            try:
+                with self._for(calls.Role.INTERLOCUTOR):
+                    turn = interlocutor.turn(history)
+            finally:  # what this answer read, also when it failed
+                self._opened[self.session_id] = interlocutor.opened
         except runs.ModuleWaiting:
             raise
         except ProviderError as e:
