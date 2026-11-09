@@ -228,6 +228,8 @@ aside { height: 100%; position: static; }
 #chat-module-card { max-height: 30vh; opacity: 1; overflow-y: auto; transition: max-height .18s ease-out, opacity .18s ease-out; }
 #chat-module.collapsed #chat-module-card { max-height: 0; opacity: 0; overflow: hidden; }
 #panel-switch { display: flex; }
+#panel-search { width: 100%; margin: 6px 0; }
+.module-id { font-size: 11px; color: var(--muted, #8b98a5); font-family: ui-monospace, monospace; letter-spacing: .02em; }
 #panel-switch button { flex: 1; }
 #panel-switch [aria-pressed="true"] { border-color: #00eeff; }
 [hidden] { display: none !important; }

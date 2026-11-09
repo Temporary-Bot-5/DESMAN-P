@@ -24,6 +24,10 @@ class Element {
     if (selector === '*') return all;
     if (selector === '[role=option]') return all.filter(c => c.attrs.role === 'option');
     if (selector === '[role=listbox]') return all.filter(c => c.attrs.role === 'listbox');
+    if (selector === 'article.task') return all.filter(c => c.tagName === 'ARTICLE' && c.className.split(' ')[0] === 'task');
+    if (selector === 'article.module-card') return all.filter(c => c.tagName === 'ARTICLE' && c.className === 'module-card');
+    if (selector === 'section') return all.filter(c => c.tagName === 'SECTION');
+    if (selector === '[data-search]') return all.filter(c => c.dataset.search);
     if (selector === '.module-editor:not([hidden])') return all.filter(c => c.className === 'module-editor' && !c.hidden);
     if (selector === 'textarea') return all.filter(c => c.tagName === 'TEXTAREA');
     return [];
@@ -82,7 +86,8 @@ for (const saved of ['groq/custom-label', 'ollama/removed']) {
 }
 const tasks = new Element('section');
 const waitingRoot = new Element('section');
-global.$ = id => id === 'waiting' ? waitingRoot : (assert.equal(id, 'tasks'), tasks);
+const panelSearch = new Element('input'), modulesRoot = new Element('div');
+global.$ = id => ({waiting: waitingRoot, 'panel-search': panelSearch, modules: modulesRoot})[id] || (assert.equal(id, 'tasks'), tasks);
 global.currentSession = 's1'; global.terminalOpen = false;
 global.expanded = new Set(['t']);
 global.moduleEditors = new Map();
@@ -94,7 +99,7 @@ global.actionButton = (p, label, value) => button(p, label, () => typeof value =
 global.updateActions = () => {};
 vm.runInThisContext(source.slice(source.indexOf('function moduleCard('), source.indexOf('function showModules(')));
 vm.runInThisContext(source.slice(source.indexOf('function showTasks('), source.indexOf('let panelsLoading')));
-const moduleData = {scope:'task',scope_id:'t',role:'executor',choice_model:'groq/custom-label',choice_key:'a',model:'groq/openai/gpt-oss-20b', provider_name:'Groq', provider:'groq', key_label:'Key 1', module_source:'a'};
+const moduleData = {module_id:'a1b2c3',scope:'task',scope_id:'t',role:'executor',choice_model:'groq/custom-label',choice_key:'a',model:'groq/openai/gpt-oss-20b', provider_name:'Groq', provider:'groq', key_label:'Key 1', module_source:'a'};
 const task = {id:'t',session_id:'s1',goal:'Work',status:'running',done:0,total:1,subtasks:[{seq:1,ref:'t/1',description:'Step',status:'running',version:1}],cards:[moduleData]};
 showTasks({tasks:[task]});
 let moduleNode = tasks.querySelectorAll('*').find(n => n.className === 'module-card');
@@ -103,6 +108,17 @@ assert.deepEqual(controls.map(n => n.textContent), ['Change', 'Pause', 'Replace'
 assert.ok(controls.every(n => n.tagName === 'BUTTON'));
 assert.ok(moduleNode.querySelectorAll('*').some(n => n.textContent === 'gpt-oss-20b' && n.title === moduleData.model));
 assert.ok(moduleNode.querySelectorAll('*').some(n => n.textContent === 'Groq · Key 1'));
+assert.ok(moduleNode.querySelectorAll('*').some(n => n.className === 'module-id' && n.textContent === '#a1b2c3'));
+// The panel search: every word in any order, over what a card shows and names (#id, ref).
+panelSearch.value = 'A1B2C3 work'; filterPanels();
+assert.equal(tasks.querySelectorAll('article.task')[0].hidden, false);
+panelSearch.value = 'work nothing-like-this'; filterPanels();
+assert.equal(tasks.querySelectorAll('article.task')[0].hidden, true);
+assert.equal(tasks.children.find(n => n.tagName === 'H2').hidden, true); // its heading too
+panelSearch.value = 'Change'; filterPanels(); // a button's label is not what a card names
+assert.equal(tasks.querySelectorAll('article.task')[0].hidden, true);
+panelSearch.value = ''; filterPanels();
+assert.equal(tasks.querySelectorAll('article.task')[0].hidden, false);
 controls[0].dispatchEvent({type:'click'});
 const editor = tasks.querySelector('.module-editor:not([hidden])');
 const modelPicker = editor.children[2];

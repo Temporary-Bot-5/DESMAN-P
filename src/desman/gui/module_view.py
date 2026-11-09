@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -19,6 +20,14 @@ from desman.net.node import capabilities
 def short_title(title: str) -> str:
     title = " ".join(title.split())
     return title if len(title) <= 30 else title[:30].rstrip() + "…"
+
+
+def module_id(source: str | None, model: str | None) -> str | None:
+    """A module's short name: the same source (key fingerprint or local server) and model give
+    the same id in every card and on every page load. A fingerprint is no secret."""
+    if not source or not model:
+        return None
+    return hashlib.sha256(f"{source}\0{model}".encode()).hexdigest()[:6]
 
 
 def key_labels(config: Config) -> dict[str, str]:
@@ -59,6 +68,7 @@ def cards(
                 (*model.split("/", 1), source, source),
             ).fetchone()
             found[identity] = {
+                "module_id": module_id(source, model),
                 "module_source": source,
                 "model": model,
                 "provider": model.split("/", 1)[0],
@@ -171,8 +181,12 @@ def cards(
                         "role": "interlocutor",
                     }
                 )
+    # A module is listed while it has work: a live task, a chat, a model lent to desman-global,
+    # or a stop the person may lift. One whose tasks are done or failed is gone.
+    kept: set[tuple[str, str, str]] = set()
     for cap in capabilities(config):
-        add(cap.key or cap.provider, f"{cap.provider}/{cap.model}", "network")
+        if add(cap.key or cap.provider, f"{cap.provider}/{cap.model}", "network"):
+            kept.add(("network", cap.key or cap.provider, f"{cap.provider}/{cap.model}"))
     hour = db.to_iso(datetime.now(UTC) - timedelta(hours=1))
     for row in conn.execute(
         "SELECT c.*, t.goal, t.origin, s.kind, s.status FROM model_calls c "
@@ -250,9 +264,14 @@ def cards(
                 if chat_work not in card["work"]:
                     card["work"].append(chat_work)
     for hold in current_holds:
-        card = add(hold.source, hold.model, "network" if hold.scope == "network" else "local")
+        section = "network" if hold.scope == "network" else "local"
+        card = add(hold.source, hold.model, section)
         if card:
             card.setdefault("holds", []).append(hold.model_dump(exclude={"paused_tasks"}))
+            # Stopped everywhere: kept so it can be continued. A stop on one task or chat
+            # shows on that card; its module is not kept here once that work is over.
+            if hold.state == "stopped" and hold.scope in {"all", "network"}:
+                kept.add((section, hold.source, hold.model))
         if hold.scope in {"all", "network"}:
             for card in found.values():
                 if card["module_source"] != hold.source or card["model"] != hold.model:
@@ -263,4 +282,8 @@ def cards(
                 card["hold_state"] = hold.state
                 card["scope"] = hold.scope
                 card["scope_id"] = hold.scope_id
-    return list(found.values())
+    return [
+        card
+        for identity, card in found.items()
+        if card["work"] or identity in kept or card.get("hold_state") == "stopped"
+    ]
