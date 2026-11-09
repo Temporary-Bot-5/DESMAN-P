@@ -658,7 +658,11 @@ MESSAGES: dict[str, Forms] = {
         "{ref} görevi başladı: {title} ({n} alt görev).",
     ),
     "Task {ref} is done.": "{ref} görevi tamamlandı.",
-    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], then desman resume {ref}.": "Terminalde karar verin: desman retry|accept|fail <ref> [--note METİN], ardından desman resume {ref}.",
+    "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "Sohbetin altındaki alanda yanıtlayın ya da orada «Bu yanıtla yeniden dene», «Olduğu gibi kabul et» veya «Başarısız olarak işaretle» seçin.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "Burada karar verin: /retry, /accept veya /fail <ref> [--note METİN], sonra /resume {ref}.",
+    "Task {ref}: step {steps} waits for you; the rest goes on.": (
+        "Görev {ref}: {steps} adımı sizi bekliyor; geri kalanı sürüyor.",
+    ),
     "The model did not answer ({error}). Your message is kept.": "Model yanıt vermedi ({error}). Mesajınız kaydedildi.",
     "The model's answer made no sense, even when asked again. Your message is kept: write again or put it differently.": "Yeniden sorulduğunda bile modelin yanıtı anlamsızdı. Mesajınız kaydedildi: tekrar yazın ya da başka şekilde söyleyin.",
     "Task {ref} stopped. `desman resume {ref}` continues it.": "{ref} görevi durduruldu. `desman resume {ref}` onu sürdürür.",

@@ -648,7 +648,11 @@ MESSAGES: dict[str, Forms] = {
     "leave the chat (Ctrl+D does too)": "离开聊天（也可按 Ctrl+D）",
     "Task {ref} started: {title} ({n} subtask).": ("任务 {ref} 已开始：{title}（{n} 个子任务）。",),
     "Task {ref} is done.": "任务 {ref} 已完成。",
-    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], then desman resume {ref}.": "请在终端中决定：desman retry|accept|fail <ref> [--note 文本]，然后运行 desman resume {ref}。",
+    "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "请在聊天下方的输入框中回答，或在那里选择“使用此回答重试”、“按原样接受”或“标记失败”。",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "在这里决定：/retry、/accept 或 /fail <ref> [--note 文本]，然后 /resume {ref}。",
+    "Task {ref}: step {steps} waits for you; the rest goes on.": (
+        "任务 {ref}：步骤 {steps} 在等您；其余部分继续进行。",
+    ),
     "The model did not answer ({error}). Your message is kept.": "模型没有回答（{error}）。你的消息已保存。",
     "The model's answer made no sense, even when asked again. Your message is kept: write again or put it differently.": "即使再次询问，模型的回答仍然没有意义。你的消息已保存：请再写一次或换个说法。",
     "Task {ref} stopped. `desman resume {ref}` continues it.": "任务 {ref} 已停止。`desman resume {ref}` 可以继续。",

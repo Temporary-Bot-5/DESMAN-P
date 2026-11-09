@@ -78,8 +78,10 @@ TOPICS: Final = (
         "decides: `desman retry SUBTASK` sends it back to work with fresh attempts (a note becomes a "
         "hint to the next attempt), `desman accept SUBTASK` takes it as it is, `desman fail SUBTASK` (optional --note) gives "
         "up on it (what depends on it is blocked), `desman cancel TASK` stops the whole task. A "
-        "failed subtask can still be sent back with retry. The chat tells when something "
-        "comes to wait; asked there, each decision is confirmed by the person in a window.",
+        "failed subtask can still be sent back with retry. A step of a chat's task that comes "
+        "to wait is told in that chat at once, even while the rest runs; the page shows a field "
+        "under that chat (answer, Retry, Accept, Fail); an answer in words becomes retry with it "
+        "as the note. Asked in the chat, each decision is confirmed in a window.",
     ),
     Topic(
         "providers",

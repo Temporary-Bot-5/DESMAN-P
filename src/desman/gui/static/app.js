@@ -16,6 +16,7 @@ let terminalOpen = false;
 let followUntil = 0;
 const FOLLOW_MS = 5000;
 let shownSession = null;
+let currentSession = null;
 const expanded = new Set();
 
 function text(tag, value, parent) {
@@ -653,6 +654,7 @@ function iconAction(parent, icon, label, value) {
 }
 
 function showSessions(data) {
+  currentSession = data.current || null;
   terminalOpen = !!data.terminal && !!data.terminal.id && data.current === data.terminal.id;
   $("session-title").textContent = terminalOpen ? words.terminal : "";
   const terminal = $("terminal-button");
@@ -767,6 +769,7 @@ function showTasks(data) {
     for (const m of modules) moduleCard(card, m, "task");
 
   }
+  showWaiting(data);
   updateActions();
   for (const [list, top] of scrolled) if (top && root.contains(list)) list.scrollTop = top;
   if (openPicker && root.contains(openPicker)) openPicker.position();
@@ -774,6 +777,46 @@ function showTasks(data) {
   if (focused) {
     const input = [...root.querySelectorAll("textarea")].find(n => n.dataset.ref === focused);
     if (input) { input.focus({preventScroll: true}); input.setSelectionRange(...selection); }
+  }
+}
+
+// Under the chat: the steps of its own tasks that wait for the person, with the same answer
+// and decisions as the Tasks panel (a field rendered by code, never by the model).
+function showWaiting(data) {
+  const root = $("waiting");
+  const drafts = new Map([...root.querySelectorAll("textarea")].map(n => [n.dataset.ref, n.value]));
+  const active = document.activeElement;
+  const focused = active && root.contains(active) && active.dataset.ref;
+  const selection = focused ? [active.selectionStart, active.selectionEnd] : null;
+  root.replaceChildren();
+  const steps = terminalOpen || !currentSession ? [] : data.tasks
+    .filter(task => task.session_id === currentSession)
+    .flatMap(task => task.subtasks.filter(sub => sub.version !== null).map(sub => [task, sub]));
+  root.hidden = !steps.length;
+  if (!steps.length) return;
+  text("h3", words.waits_for_you, root);
+  for (const [task, sub] of steps) {
+    const item = text("article", "", root);
+    item.className = "waiting-step";
+    const heading = text("strong", `${sub.ref} · ${sub.title}`, item);
+    heading.title = `${task.goal}\n${sub.description}`;
+    if (sub.reason) text("p", sub.reason, item);
+    const input = document.createElement("textarea");
+    input.rows = 2;
+    input.maxLength = 20000;
+    input.placeholder = words.answer;
+    input.setAttribute("aria-label", words.answer);
+    input.dataset.ref = sub.ref;
+    input.value = drafts.get(sub.ref) || "";
+    item.append(input);
+    const decisions = text("div", "", item);
+    decisions.className = "decisions";
+    for (const decision of ["retry", "accept", "fail"]) {
+      const b = actionButton(decisions, words[decision],
+        () => ({type: "decide", ref: sub.ref, version: sub.version, decision, note: input.value}));
+      if (decision === "fail") b.className = "danger";
+    }
+    if (focused === sub.ref) { input.focus({preventScroll: true}); input.setSelectionRange(...selection); }
   }
 }
 

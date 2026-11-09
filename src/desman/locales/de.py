@@ -685,7 +685,12 @@ MESSAGES: dict[str, Forms] = {
         "Aufgabe {ref} gestartet: {title} ({n} Teilaufgaben).",
     ),
     "Task {ref} is done.": "Aufgabe {ref} ist erledigt.",
-    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], then desman resume {ref}.": "Entscheide im Terminal: desman retry|accept|fail <ref> [--note TEXT], danach desman resume {ref}.",
+    "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "Antworte im Feld unter dem Chat oder wähle dort „Mit dieser Antwort erneut versuchen“, „So akzeptieren“ oder „Als fehlgeschlagen markieren“.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "Entscheide hier: /retry, /accept oder /fail <ref> [--note TEXT], dann /resume {ref}.",
+    "Task {ref}: step {steps} waits for you; the rest goes on.": (
+        "Aufgabe {ref}: Schritt {steps} wartet auf dich; der Rest läuft weiter.",
+        "Aufgabe {ref}: Schritte {steps} warten auf dich; der Rest läuft weiter.",
+    ),
     "The model did not answer ({error}). Your message is kept.": "Das Modell hat nicht geantwortet ({error}). Deine Nachricht ist gespeichert.",
     "The model's answer made no sense, even when asked again. Your message is kept: write again or put it differently.": "Die Antwort des Modells ergab keinen Sinn, auch nicht auf Nachfrage. Deine Nachricht ist gespeichert: Schreib noch einmal oder formuliere es anders.",
     "Task {ref} stopped. `desman resume {ref}` continues it.": "Aufgabe {ref} angehalten. `desman resume {ref}` setzt sie fort.",

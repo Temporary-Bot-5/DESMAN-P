@@ -685,7 +685,12 @@ MESSAGES: dict[str, Forms] = {
         "कार्य {ref} शुरू हुआ: {title} ({n} उप-कार्य)।",
     ),
     "Task {ref} is done.": "कार्य {ref} पूरा हुआ।",
-    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], then desman resume {ref}.": "टर्मिनल में तय करें: desman retry|accept|fail <ref> [--note पाठ], फिर desman resume {ref}।",
+    "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "चैट के नीचे वाले क्षेत्र में उत्तर दें, या वहीं «इस उत्तर के साथ फिर कोशिश करें», «जैसा है स्वीकार करें» या «विफल चिह्नित करें» चुनें।",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "यहीं तय करें: /retry, /accept या /fail <ref> [--note पाठ], फिर /resume {ref}।",
+    "Task {ref}: step {steps} waits for you; the rest goes on.": (
+        "कार्य {ref}: चरण {steps} आपकी प्रतीक्षा कर रहा है; बाकी काम चलता रहेगा।",
+        "कार्य {ref}: चरण {steps} आपकी प्रतीक्षा कर रहे हैं; बाकी काम चलता रहेगा।",
+    ),
     "The model did not answer ({error}). Your message is kept.": "मॉडल ने जवाब नहीं दिया ({error})। आपका संदेश सहेजा गया है।",
     "The model's answer made no sense, even when asked again. Your message is kept: write again or put it differently.": "दोबारा पूछने पर भी मॉडल का जवाब बेमतलब था। आपका संदेश सहेजा गया है: फिर से लिखें या दूसरे ढंग से कहें।",
     "Task {ref} stopped. `desman resume {ref}` continues it.": "कार्य {ref} रोका गया। `desman resume {ref}` इसे जारी रखता है।",

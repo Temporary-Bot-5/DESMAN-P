@@ -202,7 +202,9 @@ def test_what_waits_for_the_operator_is_shown_with_its_decisions(fake: FakeLLM) 
     result = chat("find cheap flights to Lisbon")
     assert "waits for you" in result.output
     assert "needs_human" in result.output and "Which dates? None were given." in result.output
-    assert "desman retry|accept|fail" in result.output and "desman resume" in result.output
+    assert (
+        "Decide here: /retry, /accept or /fail" in result.output and "then /resume" in result.output
+    )
     assert "subtask waits for your decision" not in result.output  # retold: not again as a notice
     outcome = payload(calls(fake, RETELL)[0])
     assert outcome["status"] == "needs_human" and outcome["result"] is None
@@ -565,3 +567,74 @@ def test_background_never_retells_temporary_session(fake: FakeLLM, erased: bool)
         assert not calls(fake, RETELL)
     finally:
         conn.close()
+
+
+def test_a_step_waiting_is_told_in_its_chat_while_the_rest_goes_on(fake: FakeLLM) -> None:
+    from desman import ui
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.states import Actor, SubtaskStatus
+    from desman.gui.front import WebFront
+    from desman.gui.panels import snapshot
+    from test_notices import escalate
+
+    fake.on(RETELL, '{"text": "Step 1 needs a key; answer here or choose."}', repeat_last=True)
+    conn = db.open_db()
+    try:
+        sessions = Sessions(conn)
+        asked = sessions.add(None, Role.USER, "do two things").session_id
+        other = sessions.add(None, Role.USER, "something else").session_id
+        page = Chat(sessions, background_tasks=True)
+        page.session_id = asked
+        task = page.store.create_task(
+            TaskSpec(
+                goal="two things",
+                subtasks=[
+                    SubtaskSpec(description="first", acceptance_criteria="ok"),
+                    SubtaskSpec(description="second", acceptance_criteria="ok"),
+                ],
+            ),
+            session_id=asked,
+        )
+        waiting = escalate(page.store, task)
+        assert page.store.task_status(task).value == "active"  # the second step can still run
+        front = WebFront()
+        front.session(asked, False)
+        with ui.use(front):
+            page.background_outcomes()
+        [request] = calls(fake, RETELL)
+        told = json.loads(request.messages[-1].content.split("\n", 1)[1])
+        assert told["status"] == "active"
+        [item] = told["waiting_for_the_person"]
+        ref = item["ref"]
+        assert ref == f"{page.store.short_id(task)}/0" and item["reason"].startswith("401 bad key")
+        html = "".join(e.get("html", "") for e in front.events)
+        assert f"step {ref} waits for you; the rest goes on." in html
+        assert "Answer in the field below the chat" in html
+        assert not sessions.changed_tasks(other)
+        # Told once: the rest of the task moving on does not tell it again.
+        page.background_outcomes()
+        claimed = page.store.claim("w", task_id=task)
+        assert claimed is not None and claimed.id != waiting
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 1
+        # The page shows the step under the chat it was asked in.
+        panel = snapshot(db.default_db_path(), "tasks", front)
+        [shown] = [t for t in panel["tasks"] if t["id"] == task]
+        assert shown["session_id"] == asked
+        assert [s["ref"] for s in shown["subtasks"] if s["version"] is not None] == [ref]
+        # Sent back and escalated again: a new situation, told again.
+        page.store.transition(waiting, SubtaskStatus.NEEDS_HUMAN, SubtaskStatus.READY, Actor.HUMAN)
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 1  # back to work: nothing to tell yet
+        assert escalate(page.store, task) == waiting
+        page.background_outcomes()
+        assert len(calls(fake, RETELL)) == 2
+    finally:
+        conn.close()
+
+
+def test_the_chat_turns_an_answer_to_a_waiting_step_into_retry() -> None:
+    from desman.interlocutor import INTERLOCUTOR_SYSTEM, RETELL_SYSTEM
+
+    assert "that is the command retry with that subtask and their answer" in INTERLOCUTOR_SYSTEM
+    assert "or choose Retry, Accept or Fail" in RETELL_SYSTEM

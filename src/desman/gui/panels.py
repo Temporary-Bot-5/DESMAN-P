@@ -182,7 +182,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
             ids.update(item.task_id for item in waiting.values())
             placeholders = ", ".join("?" for _ in ids)
             rows = conn.execute(
-                f"SELECT id FROM tasks WHERE id IN ({placeholders}) "
+                f"SELECT id, session_id FROM tasks WHERE id IN ({placeholders}) "
                 "AND hidden_at IS NULL ORDER BY pinned DESC, created_at DESC, rowid DESC",
                 tuple(ids),
             )
@@ -222,6 +222,8 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 tasks.append(
                     {
                         "id": report.id,
+                        # The chat it was asked in shows what waits for the person, too.
+                        "session_id": row["session_id"],
                         "pinned": report.pinned,
                         "paused_at": report.paused_at,
                         "ref": short,

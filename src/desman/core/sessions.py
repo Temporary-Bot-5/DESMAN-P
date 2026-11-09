@@ -342,6 +342,23 @@ class Sessions:
         ).fetchall()
         return [r["id"] for r in rows]
 
+    def newly_waiting(self, session_id: str, task_id: str) -> bool:
+        """A subtask of the task came to wait for the person (needs_human, or failed for good)
+        after the chat last retold the task: told now, while the rest of the task goes on."""
+        row = self.conn.execute(
+            """
+            SELECT 1 FROM subtasks s
+            WHERE s.task_id = ? AND s.status IN ('needs_human', 'failed')
+              AND (SELECT MAX(a.seq) FROM audit_log a WHERE a.subtask_id = s.id
+                   AND a.to_status IS NOT NULL)
+                  > COALESCE((SELECT MAX(m.outcome_audit) FROM messages m
+                              WHERE m.session_id = ? AND m.task_id = s.task_id), 0)
+            LIMIT 1
+            """,
+            (task_id, session_id),
+        ).fetchone()
+        return row is not None
+
     def rename(self, session_id: str, title: str | None) -> None:
         """Name a session; None (or blank) gives it back its opening as the name."""
         title = " ".join((title or "").split())[:TITLE_CHARS] or None
