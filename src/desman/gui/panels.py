@@ -165,7 +165,6 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                             chat["state"] = t("working")
                 result = {
                     "modules": grouped,
-                    "removed": module_view.removed_cards(conn, grouped),
                     "network_visible": config.network.enabled or bool(config.network.donated),
                     "network_suspended": config.network.enabled
                     and not active_capabilities(config, conn),
@@ -273,6 +272,18 @@ def decorate(
 ) -> None:
     if scope == "task":
         report = task_report(Store(conn), identity)
+        row["work"] = (
+            [
+                {
+                    "kind": "task",
+                    "id": identity,
+                    "title": module_view.short_title(report.goal),
+                    "role": row["role"],
+                }
+            ]
+            if report.status.value in {"active", "needs_human"}
+            else []
+        )
         if any(
             sub.status.value == "needs_human"
             and (row["role"] not in ("text", "code", "analysis") or sub.kind.value == row["role"])
@@ -293,6 +304,8 @@ def decorate(
     ).fetchone()
     row["last_model"] = f"{latest['provider']}/{latest['model']}" if latest else None
     own = choices.get(conn, scope, identity, row["role"])
+    row["provider_name"] = providers.find(row["provider"]).name if row.get("provider") else None
+    row["key_label"] = module_view.key_labels(config).get(row.get("key_fingerprint") or "", "auto")
     row["module_source"] = modules_cli.module_source(config, row)
     matching = [
         h
@@ -407,6 +420,14 @@ def interlocutor(
         ),
         None,
     )
+    session = (
+        conn.execute(
+            "SELECT COALESCE(title, (SELECT text FROM messages WHERE session_id=s.id ORDER BY seq LIMIT 1)) AS name FROM sessions s WHERE id=?",
+            (identity,),
+        ).fetchone()
+        if identity
+        else None
+    )
     return {
         "hold_state": held.state if held else None,
         "hold_scope": held.scope if held else None,
@@ -425,7 +446,18 @@ def interlocutor(
         "scope_id": identity,
         "model": first.label if first else None,
         "provider": first.provider.id if first else None,
-        "key_label": key["label"] if key else "auto",
+        "provider_name": first.provider.name if first else None,
+        "work": [
+            {
+                "kind": "chat",
+                "id": identity,
+                "title": module_view.short_title(session["name"] or identity[:8]),
+                "role": "interlocutor",
+            }
+        ]
+        if identity and session
+        else [],
+        "key_label": module_view.key_labels(config).get(fingerprint or "", "auto"),
         "key_fingerprint": fingerprint if key else None,
         "choice_model": own.model,
         "choice_key": own.key,

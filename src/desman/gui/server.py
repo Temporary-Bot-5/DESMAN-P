@@ -16,6 +16,7 @@ from pathlib import Path
 from socket import socket
 from urllib.parse import parse_qs, urlsplit
 
+import click
 from pydantic import ValidationError
 
 from desman import ui
@@ -36,6 +37,36 @@ SECURITY = {
 
 def strings() -> dict[str, str]:
     return {
+        "pause": t("Pause"),
+        "resume": t("Resume"),
+        "replace": t("Replace"),
+        "chats_label": t("Chats: {names}"),
+        "tasks_label": t("Tasks: {names}"),
+        "none": t("none"),
+        "usage_window": t("Window"),
+        "all_time": t("All time"),
+        "no_calls": t("No model calls yet."),
+        "no_calls_since": t("No model calls in the last {since}."),
+        "usage_provider": t("provider"),
+        "usage_calls": t("calls"),
+        "usage_failed": t("failed"),
+        "usage_limited": t("limited"),
+        "tokens_in": t("tokens in"),
+        "tokens_out": t("tokens out"),
+        "last_call": t("last call"),
+        "usage_limit": t("limit"),
+        "usage_left": t("left"),
+        "resets_in": t("resets in"),
+        "reported_limits": t("Limits reported with the latest call"),
+        "older_limits": t(
+            "Grey rows come from an earlier call: later calls with that key sent no limits."
+        ),
+        "removed_keys_note": t(
+            '"removed": calls in this period went through a key that is no longer in the config (deleted or replaced). The characters in brackets start its fingerprint.'
+        ),
+        "zero_limit": t(
+            "{key}: the limit is 0, so this account has no access to the API yet (a free plan may need activating on the provider's site). DESMAN sets such a key aside and tries the provider's other keys."
+        ),
         "lang": language(),
         "terminal": t("General Terminal"),
         "search": t("Search"),
@@ -278,6 +309,22 @@ class Server:
             if url.path in {"/sessions", "/tasks", "/modules", "/settings"}:
                 try:
                     return self._json(snapshot(self.database, url.path[1:], self.front))
+                except (sqlite3.Error, ConfigError, OSError):
+                    return Response(503)
+            if url.path == "/usage":
+                from desman.config_cli import parse_window, usage_since, usage_view
+                from desman.gui.front import redact_keys
+                from desman.gui.panels import redact_snapshot
+
+                try:
+                    since = parse_qs(url.query, keep_blank_values=True).get("since", ["24h"])[0]
+                    window = parse_window(since)
+                    result = usage_view(
+                        open_config().load(), usage_since(since, self.database), window
+                    )
+                    return self._json(redact_snapshot(result, redact_keys))
+                except (click.BadParameter, ValueError, OverflowError):
+                    return Response(400)
                 except (sqlite3.Error, ConfigError, OSError):
                     return Response(503)
             if url.path == "/source-models":

@@ -519,17 +519,14 @@ def test_terminal_help_is_journaled_and_follows_the_language(sessions: Sessions)
     assert any(json.loads(r[0])["command"] == "help" and json.loads(r[0])["typed"] for r in rows)
 
 
-def test_usage_action_opens_terminal_and_echoes_command(sessions: Sessions) -> None:
+def test_usage_remains_a_terminal_command(sessions: Sessions) -> None:
     chat = Chat(sessions)
-    normal = sessions.add(None, Role.USER, "hello").session_id
-    chat.session_id = normal
-    chat._action(ui.SimpleAction(type="usage"))
+    chat._terminal_command("/usage")
     assert chat.in_terminal
     messages = sessions.messages(sessions.terminal())
     assert messages[-2].role is Role.USER and messages[-2].text == "/usage"
     assert messages[-1].kind is Kind.EVENT
     assert messages[-1].text.strip()
-    assert len(sessions.messages(normal)) == 1
 
 
 def test_terminal_style_survives_reload(sessions: Sessions) -> None:

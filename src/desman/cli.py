@@ -487,9 +487,16 @@ def worker(
     interrupted = False
     try:
         runs.guard(store)  # before any model is asked
-        models = _attach(source, store, cache=not no_cache, as_json=as_json)
         manager = load_config()
         config = manager.load()
+        network_config = config
+        models = _attach(
+            source,
+            store,
+            cache=not no_cache,
+            as_json=as_json,
+            read_tuning=lambda: network_config.tuning,
+        )
         crew = runs.network_crew(
             store,
             config,
@@ -542,6 +549,17 @@ def worker(
                 progress(None)
             event = network_poll(idle=True)
             return event is not None and event.change is node.Change.WORK_TAKEN
+
+        guard_step = coordinator.gate
+
+        def before_step() -> None:
+            if guard_step is not None:
+                guard_step()
+            # Refresh role choices before claiming resumed work, including the first call
+            # after an operator's Pause → Change → Resume between polling intervals.
+            network_poll()
+
+        coordinator.gate = before_step
 
         try:
             network_poll()
@@ -880,7 +898,14 @@ def _provider(
     return _Source(provider=provider_name, model=model)
 
 
-def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> runs.Models:
+def _attach(
+    source: _Source,
+    store: Store,
+    *,
+    cache: bool,
+    as_json: bool,
+    read_tuning: Callable[[], Tuning] | None = None,
+) -> runs.Models:
     """The run's models (`runs.models`: a lineup per role), said to the operator. The fake is
     not wrapped: its scripts test the retry policy and count every call."""
     if source.fake is not None:
@@ -888,7 +913,12 @@ def _attach(source: _Source, store: Store, *, cache: bool, as_json: bool) -> run
     config = load_config().load()
     try:
         models = runs.models(
-            config, store.conn, provider=source.provider, model=source.model, cache=cache
+            config,
+            store.conn,
+            provider=source.provider,
+            model=source.model,
+            cache=cache,
+            read_tuning=read_tuning,
         )
     except router.NoProvider as e:
         raise click.ClickException(str(e)) from e

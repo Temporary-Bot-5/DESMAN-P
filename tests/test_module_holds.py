@@ -354,7 +354,7 @@ def test_global_stop_queues_existing_chat_but_new_chat_uses_another_module(
     conn.close()
 
 
-def test_page_stop_is_immediate_and_remove_requires_confirmation(
+def test_page_cloud_module_buttons_are_immediate(
     clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from desman.chat import Chat
@@ -367,11 +367,10 @@ def test_page_stop_is_immediate_and_remove_requires_confirmation(
     identity = task(chat.store)
     model = router.lineup(cfg, calls.Role.EXECUTOR)[0].label
     confirmations = []
-    answer = False
 
     def confirm(question: str, *, default: bool = False) -> bool:
         confirmations.append(question)
-        return answer
+        return False
 
     monkeypatch.setattr(ui, "confirm", confirm)
     payload = {
@@ -386,12 +385,9 @@ def test_page_stop_is_immediate_and_remove_requires_confirmation(
     assert not confirmations and chat.store.find_task(identity)["paused_at"]
     chat._action(ui.ACTIONS.validate_python(payload | {"operation": "continue"}))
     assert not confirmations and chat.store.find_task(identity)["paused_at"] is None
+    # A cloud module is replaced at once too (owner, 2026-11-09): only local ones ask.
     chat._action(ui.ACTIONS.validate_python(payload | {"operation": "remove"}))
-    assert len(confirmations) == 1 and not holds.listed(conn)
-    assert model in confirmations[0]
-    answer = True
-    chat._action(ui.ACTIONS.validate_python(payload | {"operation": "remove"}))
-    assert holds.listed(conn)[0].state == "removed"
+    assert not confirmations and holds.listed(conn)[0].state == "removed"
     conn.close()
 
 
@@ -522,7 +518,7 @@ def test_module_waiting_stores_english_but_displays_translation(
     assert error.display() == "translated waiting reason"
 
 
-@pytest.mark.parametrize("target", ["task", "module"])
+@pytest.mark.parametrize("target", ["module"])
 @pytest.mark.parametrize("approved", [False, True])
 def test_page_remove_uses_server_confirmation_window(
     target: str, approved: bool, clock: FakeClock

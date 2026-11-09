@@ -604,8 +604,8 @@ function setupPanels() {
   actionButton($("sidebar-bottom"), words.delete_chats, {type: "delete_all"});
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
+  button($("sidebar-bottom"), words.usage, openUsage);
   button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
-  actionButton($("sidebar-bottom"), words.usage, {type: "usage"});
   $("topbar").replaceChildren();
   for (const [label, id] of [[words.sessions, "sidebar"], [words.tasks, "tasks-panel"]]) {
     const b = button($("topbar"), label, () => {
@@ -780,56 +780,67 @@ let moduleSnapshot = {modules: [], roles: [], interlocutor: null};
 const moduleEditors = new Map();
 
 function moduleCard(parent, m, placement = "modules") {
-  const identity = `${placement}:${m.scope}:${m.scope_id}:${m.role}`;
+  const identity = `${placement}:${m.scope}:${m.scope_id}:${m.role}${placement === "modules" ? `:${m.section}:${m.module_source}:${m.model}` : ""}`;
   const card = text("article", "", parent);
   card.className = "module-card";
+  const stopped = m.hold_state === "stopped";
+  card.classList.toggle("module-stopped", stopped);
+  // Main rectangle: portrait and role | model and key | Change, Pause, Replace.
+  const box = text("div", "", card); box.className = "module-box";
+  const face = text("div", "", box); face.className = "module-face";
   const portrait = document.createElement("img");
-  portrait.src = `/img/${m.icon || "module"}.png`;
-  portrait.alt = "";
-  card.append(portrait);
-  const info = text("div", "", card);
-  info.className = "module-info";
-  text("strong", m.model || words.auto, info).dataset.moduleRole = m.role;
-  text("small", m.provider || words.auto, info);
-  text("small", `${words.key}: ${m.key_label && m.key_label !== "auto" ? m.key_label : words.auto}`, info);
-  const usage = text("div", "", info);
-  usage.className = "module-usage";
-  if (m.pinned) text("span", "⌖", usage).title = words.pinned;
-  if (m.last_model && m.last_model !== m.model) text("small", `${words.answered_by} ${m.last_model}`, info);
-  text("span", words[`source_${m.source}`], usage).className = "status-chip";
-  text("small", words.model_usage.replace("{calls}", m.model_calls).replace("{tokens}", m.model_tokens), usage);
+  portrait.src = `/img/${m.icon || "module"}.png`; portrait.alt = ""; face.append(portrait);
+  const served = [...new Set((m.work || []).map(w => w.role))];
+  const roles = (served.length ? served : [m.role]).map(r => words[`role_${r}`] || r);
+  const roleLabel = text("span", roles.length > 1 ? `${roles[0]} +${roles.length - 1}` : roles[0], face);
+  roleLabel.className = "module-role"; roleLabel.title = roles.join("\n");
+  const info = text("div", "", box); info.className = "module-info";
+  const name = text("strong", m.model ? m.model.split("/").at(-1) : words.auto, info);
+  name.className = "module-model"; name.title = m.model || words.auto; name.dataset.moduleRole = m.role;
+  const local = ["ollama", "llamacpp"].includes(m.provider);
+  const keyLine = text("span", [m.provider_name || m.provider || words.auto,
+    local ? null : (m.key_label && m.key_label !== "auto" ? m.key_label : words.auto)].filter(Boolean).join(" · "), info);
+  keyLine.className = "module-key"; keyLine.title = keyLine.textContent;
+  if (stopped) text("span", m.state, info).className = "module-state";
+  const controls = text("div", "", box); controls.className = "module-controls";
+  const change = button(controls, words.change, () => {
+    moduleEditors.set(identity, editor); editor.hidden = false;
+  });
+  change.className = "module-control"; change.dataset.action = "true";
+  const source = m.module_source;
+  const action = operation => ({type: "module_hold", operation, source, model: m.model,
+    scope: operation === "continue" && m.hold_scope ? m.hold_scope : placement === "modules" && !m.hold_state ? (m.section === "network" ? "network" : "all") : m.scope,
+    scope_id: operation === "continue" && m.hold_scope ? m.hold_scope_id : placement === "modules" && !m.hold_state ? "" : m.scope_id || ""});
+  for (const [label, operation] of [[stopped ? words.resume : words.pause, stopped ? "continue" : "stop"], [words.replace, "remove"]]) {
+    const control = actionButton(controls, label, action(operation));
+    control.className = "module-control";
+    if (operation === "continue") control.dataset.resume = "true";
+    if (!source || !m.model) { control.disabled = true; delete control.dataset.action; }
+  }
+  // Below the rectangle: usage, then the chats and live tasks this module serves.
+  const facts = text("dl", "", card); facts.className = "module-facts";
+  function fact(template, value, title = value) {
+    const at = template.indexOf("{");
+    const label = at > 0 && template.endsWith("}") ? template.slice(0, at).trim().replace(/:$/, "") : "";
+    if (label) {
+      text("dt", label, facts);
+      const dd = text("dd", value, facts); dd.title = title; return dd;
+    }
+    const dd = text("dd", template.replace(/\{\w+\}/, value), facts); dd.className = "wide"; dd.title = title; return dd;
+  }
+  const number = n => Number(n || 0).toLocaleString(words.lang || undefined);
+  const usage = text("dd", words.model_usage.replace("{calls}", number(m.model_calls)).replace("{tokens}", number(m.model_tokens)), facts);
+  usage.className = "module-usage wide";
   usage.title = (m.scope === "session" ? words.role_usage_chat : words.role_usage_task)
     .replace("{calls}", m.calls).replace("{tokens}", m.tokens);
-  if (m.state) text("small", m.state, info).className = `module-state ${m.state_style || "muted"}`;
-  for (const work of m.work || []) text("small", `${work.title} · ${words[`role_${work.role}`] || work.role}`, info);
-  const controls = text("div", "", card); controls.className = "module-controls";
-  const source = m.module_source;
-  if (source && m.model) {
-    const action = operation => ({type: "module_hold", operation, source, model: m.model,
-      scope: operation === "continue" && m.hold_scope ? m.hold_scope : placement === "modules" && !m.hold_state ? (m.section === "network" ? "network" : "all") : m.scope,
-      scope_id: operation === "continue" && m.hold_scope ? m.hold_scope_id : placement === "modules" && !m.hold_state ? "" : m.scope_id || ""});
-    if (m.hold_state === "removed") {
-      iconAction(controls, "↶", words.restore, action("restore"));
-    } else {
-      iconAction(controls, m.hold_state === "stopped" ? "▶" : "⏸",
-        m.hold_state === "stopped" ? words.continue_task : words.stop,
-        action(m.hold_state === "stopped" ? "continue" : "stop"));
-      iconAction(controls, "✕", words.remove, action("remove"));
-    }
+  for (const [kind, label] of [["chat", words.chats_label], ["task", words.tasks_label]]) {
+    const names = [...new Set((m.work || []).filter(w => kind === "chat" ? w.kind === "chat" : ["task", "network job"].includes(w.kind)).map(w => w.title))];
+    const value = fact(label, names.join(" · ") || words.none, names.join("\n"));
+    if (!names.length) value.className = [value.className, "none"].filter(Boolean).join(" ");
   }
-  const change = button(controls, "✎", () => {
-    moduleEditors.set(identity, editor);
-    editor.hidden = false;
-    change.hidden = true;
-  });
-  change.className = "module-change";
-  change.dataset.action = "true";
-  change.dataset.label = words.change;
-  change.setAttribute("aria-label", words.change);
   const editor = moduleEditors.get(identity) || text("div", "", card);
   if (moduleEditors.has(identity)) {
     card.append(editor);
-    change.hidden = true;
     return card;
   }
   editor.className = "module-editor";
@@ -854,7 +865,6 @@ function moduleCard(parent, m, placement = "modules") {
   actionButton(editor, words.apply, () => {
     moduleEditors.delete(identity);
     editor.hidden = true;
-    change.hidden = false;
     return {type: "module", role: m.role, scope: scope.value,
       scope_id: scope.value === "role" ? null : m.scope_id,
       model: model.requestValue || null, key: key.value || null};
@@ -862,7 +872,6 @@ function moduleCard(parent, m, placement = "modules") {
   button(editor, words.cancel, () => {
     moduleEditors.delete(identity);
     editor.hidden = true;
-    change.hidden = false;
   });
   return card;
 }
@@ -877,11 +886,6 @@ function showModules() {
     text("h3", section === "network" ? words.for_global : words.for_tasks_chats, group);
     if (section === "network" && moduleSnapshot.network_suspended) text("p", words.global_suspended, group);
     for (const m of moduleSnapshot.modules.filter(m => m.section === section && m.hold_state !== "removed")) moduleCard(group, m);
-  }
-  const removed = moduleSnapshot.removed || [];
-  if (removed.length) {
-    const group = text("details", "", root); text("summary", words.removed_modules, group);
-    for (const m of removed) moduleCard(group, m);
   }
   }
   $("chat-module").hidden = terminalOpen || !moduleSnapshot.interlocutor;
@@ -1081,11 +1085,6 @@ function drawSettings() {
     }
     root.append(others);
   } else if (settingsSection === "roles") {
-    const removed = moduleSnapshot.removed || [];
-    if (removed.length) {
-      text("h3", words.removed_modules, root);
-      for (const m of removed) moduleCard(root, m);
-    }
     const head = text("div", "", root); head.className = "role-row role-head";
     for (const label of [words.settings_roles, words.source, words.model]) text("small", label, head);
     for (const role of d.roles) {
@@ -1189,6 +1188,99 @@ document.addEventListener("keydown", e => {
   if (e.key === "Tab") {
     const controls = [...$("settings-dialog").querySelectorAll("button, input, select, textarea, a[href]")].filter(n => !n.disabled && n.getClientRects().length);
     const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+
+let usageFocus = null;
+let usageRequest = 0;
+function closeUsage() {
+  usageRequest++;
+  $("usage-window").hidden = true;
+  document.body.classList.remove("settings-open");
+  usageFocus?.focus({preventScroll: true});
+}
+function openUsage() {
+  usageFocus = document.activeElement;
+  $("usage-window").hidden = false;
+  document.body.classList.add("settings-open");
+  $("usage-heading").textContent = words.usage;
+  $("usage-close").setAttribute("aria-label", words.close);
+  const root = $("usage-form"); root.replaceChildren();
+  // The window is a segmented control: one press re-reads the call log for that period.
+  const selector = text("div", "", root); selector.className = "usage-window";
+  selector.setAttribute("role", "radiogroup"); selector.setAttribute("aria-label", words.usage_window);
+  const content = text("div", "", root);
+  for (const value of ["24h", "7d", "30d", "all"]) {
+    const option = text("button", value === "all" ? words.all_time : value, selector);
+    option.type = "button"; option.value = value; option.setAttribute("role", "radio");
+    option.onclick = () => {
+      for (const o of selector.children) o.setAttribute("aria-checked", String(o === option));
+      refreshUsage(value, content);
+    };
+    option.setAttribute("aria-checked", String(value === "24h"));
+  }
+  refreshUsage("24h", content);
+  $("usage-close").focus();
+}
+async function refreshUsage(since, root) {
+  const request = ++usageRequest;
+  try {
+    const response = await fetch(`/usage?since=${encodeURIComponent(since)}`);
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    if (request !== usageRequest) return;
+    root.replaceChildren();
+    if (!data.rows.length) {
+      text("p", since === "all" ? words.no_calls : words.no_calls_since.replace("{since}", since), root).className = "usage-empty"; return;
+    }
+    const number = n => Number(n || 0).toLocaleString(words.lang || undefined);
+    const totals = text("div", "", root); totals.className = "usage-totals";
+    for (const [label, field] of [["usage_calls", "calls"], ["tokens_in", "tokens_in"], ["tokens_out", "tokens_out"]]) {
+      const tile = text("div", "", totals);
+      text("strong", number(data.rows.reduce((sum, r) => sum + (r[field] || 0), 0)), tile);
+      text("span", words[label], tile);
+    }
+    // Cells: [value, class]; a provider is named once, on the first row of its keys.
+    function table(headers, numeric, rows) {
+      const scroll = text("div", "", root); scroll.className = "table-scroll";
+      const table = text("table", "", scroll), head = text("tr", "", text("thead", "", table));
+      headers.forEach((h, i) => { text("th", words[h], head).className = numeric.includes(i) ? "num" : ""; });
+      const body = text("tbody", "", table);
+      let provider = null;
+      for (const [cells, style] of rows) {
+        const row = text("tr", "", body);
+        const first = cells[0][0] !== provider; provider = cells[0][0];
+        row.className = [style, first ? "group-start" : ""].filter(Boolean).join(" ");
+        cells.forEach(([value, cls], i) => {
+          const cell = text("td", i === 0 && !first ? "" : String(value ?? ""), row);
+          cell.className = [numeric.includes(i) ? "num" : "", cls || ""].filter(Boolean).join(" ");
+        });
+      }
+    }
+    table(["usage_provider", "key", "usage_calls", "usage_failed", "usage_limited", "tokens_in", "tokens_out", "last_call"], [2, 3, 4, 5, 6],
+      data.rows.map(r => [[[r.provider, "provider"], [r.key, "key"], [number(r.calls)], [number(r.failed), r.failed ? "bad" : "muted"],
+        [number(r.limited), r.limited ? "warn" : "muted"], [number(r.tokens_in)], [number(r.tokens_out)],
+        [(r.last_call || "—").slice(0, 16).replace("T", " "), "muted"]], r.calls ? "" : "idle"]));
+    if (data.removed) text("p", words.removed_keys_note, root).className = "usage-note";
+    if (data.limits.length) {
+      text("h2", words.reported_limits, root);
+      table(["usage_provider", "key", "usage_limit", "usage_left", "resets_in"], [3, 4],
+        data.limits.map(r => [[[r.provider, "provider"], [r.key, "key"], [r.name], [r.left], [r.reset, "muted"]],
+          !r.limits_current ? "older" : r.exhausted_for_good ? "bad" : ""]));
+      if (data.limits.some(r => !r.limits_current)) text("p", words.older_limits, root).className = "usage-note";
+      for (const who of new Set(data.limits.filter(r => r.exhausted_for_good).map(r => `${r.provider} ${r.key}`))) text("p", words.zero_limit.replace("{key}", who), root).className = "usage-note bad";
+    }
+  } catch { if (request === usageRequest) root.textContent = words.invalid; }
+}
+$("usage-close").addEventListener("click", closeUsage);
+document.addEventListener("keydown", e => {
+  if ($("usage-window").hidden) return;
+  if (e.key === "Escape") { e.preventDefault(); closeUsage(); }
+  if (e.key === "Tab") {
+    const controls = [...$("usage-dialog").querySelectorAll("button")].filter(n => !n.disabled && n.getClientRects().length);
+    const first = controls[0], last = controls.at(-1);
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }

@@ -782,6 +782,62 @@ def _key_names(config: Config) -> dict[str, str]:
     return names
 
 
+def usage_view(
+    config: Config, rows: list[calls.KeyUsage], window: timedelta | None
+) -> dict[str, Any]:
+    """Safe page data using the terminal's key ordering and limit interpretation."""
+    lines = _usage_lines(config, rows)
+    limits = []
+    for provider, label, row in lines:
+        if row is None or not row.limits:
+            continue
+        found, other = calls.limits(row.limits)
+        for limit in found:
+            limits.append(
+                {
+                    "provider": provider,
+                    "key": label,
+                    "name": limit.name,
+                    "left": f"{limit.remaining or '?'} / {limit.limit or '?'}",
+                    "reset": limit.reset or "",
+                    "limits_current": row.limits_current,
+                    "exhausted_for_good": limit.exhausted_for_good and row.limits_current,
+                }
+            )
+        for name, value in other.items():
+            limits.append(
+                {
+                    "provider": provider,
+                    "key": label,
+                    "name": name,
+                    "left": value,
+                    "reset": "",
+                    "limits_current": row.limits_current,
+                    "exhausted_for_good": False,
+                }
+            )
+    return {
+        "all_time": window is None,
+        "rows": [
+            {
+                "provider": provider,
+                "key": label,
+                "calls": row.calls if row else 0,
+                "failed": row.failed if row else 0,
+                "limited": row.limited if row else 0,
+                "tokens_in": row.prompt_tokens if row else 0,
+                "tokens_out": row.completion_tokens if row else 0,
+                "last_call": row.last_at if row else None,
+            }
+            for provider, label, row in lines
+        ],
+        "limits": limits,
+        "removed": any(
+            row is not None and row.key_id not in _key_names(config) for _, _, row in lines
+        ),
+    }
+
+
 def print_usage(
     config: Config, rows: list[calls.KeyUsage], window: timedelta | None, since: str
 ) -> None:
