@@ -52,6 +52,7 @@ from desman.messenger_cli import register_commands
 from desman.models_cli import models
 from desman.modules_cli import modules
 from desman.net import node
+from desman.nodes_cli import nodes_group
 from desman.planner import Planned, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
@@ -210,6 +211,7 @@ cli.add_command(tuning)
 cli.add_command(modules)
 cli.add_command(models)
 cli.add_command(protected_group, name="protected")
+cli.add_command(nodes_group, name="nodes")
 cli.add_command(proposals_group, name="proposals")
 register_commands(global_group)
 cli.add_command(global_group, name="global")
@@ -382,7 +384,12 @@ def run(
             assert goal is not None
             by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
             planned = _plan(
-                models.for_(calls.Role.PLANNER), goal, level, by_model=by_model, as_json=as_json
+                models.for_(calls.Role.PLANNER),
+                goal,
+                level,
+                by_model=by_model,
+                as_json=as_json,
+                tree=runs.task_tree(store.conn, _config_or_default().personalize),
             )
             spec = planned.spec
         elif level is not None:
@@ -753,7 +760,15 @@ def list_tasks(
     actions.print_summaries(summaries, subtasks=subtasks)
 
 
-def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json: bool) -> Planned:
+def _plan(
+    llm: LLM,
+    goal: str,
+    priority: int | None,
+    *,
+    by_model: bool,
+    as_json: bool,
+    tree: tuple[knowledge.Node, ...] | None = None,
+) -> Planned:
     level = Priority.NORMAL if priority is None else priority
     tuning = _tuning()
     if not by_model:
@@ -768,7 +783,7 @@ def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json:
                 goal,
                 level,
                 limit=runs.tuned(tuning, "max_subtasks"),
-                tree=knowledge.task_tree(),
+                tree=knowledge.task_tree() if tree is None else tree,
             )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
@@ -1360,6 +1375,7 @@ def continued(
             pending,
             limit=runs.tuned(config.tuning, "max_subtasks"),
             by=by,
+            tree=runs.task_tree(store.conn, config.personalize),
         )
     if error is not None:
         ui.warn(

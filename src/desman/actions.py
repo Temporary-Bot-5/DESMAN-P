@@ -710,7 +710,13 @@ def prepare_continuation(
 
 
 def continue_task(
-    store: Store, llm: Any, pending: Continuation, *, limit: int | None, by: str
+    store: Store,
+    llm: Any,
+    pending: Continuation,
+    *,
+    limit: int | None,
+    by: str,
+    tree: tuple[knowledge.Node, ...] | None = None,
 ) -> tuple[list[str], str | None]:
     """Plan the new subtasks with the model (the template if it fails) and add them to the
     task. `by`: who asked ("person" or "proposal"). Returns the new ids and why the model's
@@ -727,7 +733,7 @@ def continue_task(
         redo=pending.redo.seq if pending.redo else None,
         priority=task["priority"],
         limit=limit,
-        tree=knowledge.task_tree(),
+        tree=knowledge.task_tree() if tree is None else tree,
     )
     last = subtasks[-1].id
     basis = [last] + ([pending.redo.id] if pending.redo and pending.redo.id != last else [])

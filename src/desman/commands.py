@@ -46,6 +46,7 @@ from desman import (
     models_cli,
     modules_cli,
     net,
+    nodes_cli,
     proposals_cli,
     protected_cli,
     providers,
@@ -63,7 +64,7 @@ from desman.config import (
     RegistryUrl,
     Tuning,
 )
-from desman.core import choices, db, proposals
+from desman.core import choices, db, nodes, proposals
 from desman.core.report import inbox, task_report, task_summaries
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
@@ -123,6 +124,9 @@ class Context:
     """The chat's session now: for the operator's journal."""
 
     in_terminal: bool = False
+    node_author: nodes.Author = nodes.Author.PERSON
+    """Who wrote a personal node's text: the person, the interlocutor (whose call the person
+    confirms) or a task's retelling (then the text is marked untrusted)."""
     continue_task: Callable[[actions.Continuation], None] | None = None
     """Plan what a continuation adds and add it to the task (ADR 0010), then run it further:
     the chat's, with its models. None where nothing can be planned."""
@@ -471,6 +475,30 @@ class ProtectedShowArgs(Args):
 
 class ProtectedApproveArgs(Args):
     note: Note | None = Field(None, description="why, in the person's words")
+
+
+NodePath = Annotated[str, StringConstraints(min_length=1, max_length=200)]
+NodeAbout = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+NodeText = Annotated[str, StringConstraints(min_length=1, max_length=6000)]
+
+
+class NodePathArgs(Args):
+    path: NodePath = Field(description="a node's path, e.g. Projects/Site/Brief")
+
+
+class NodeAddArgs(Args):
+    path: NodePath = Field(
+        description="sections and name joined by /, not under DESMAN/ or Commands/"
+    )
+    about: NodeAbout = Field(description="one line: what the node is for, to choose it by")
+    text: NodeText
+
+
+class NodeChangeArgs(Args):
+    path: NodePath
+    to: NodePath | None = Field(None, description="a new path")
+    about: NodeAbout | None = None
+    text: NodeText | None = None
 
 
 class ProposalsListArgs(Args):
@@ -1594,6 +1622,81 @@ def _init_db(ctx: Context, args: NoArgs) -> Proposal:
     return Proposal(lines, apply)
 
 
+# ── The person's nodes of the knowledge tree (K.4) ───────────────────────────
+
+
+def _nodes_list(ctx: Context, args: NoArgs) -> Outcome:
+    conn = ctx.store.conn
+    nodes_cli.print_list(conn, ctx.config())
+    return Outcome({"nodes": nodes_cli.rows(conn), "personalize": ctx.config().personalize})
+
+
+def _nodes_show(ctx: Context, args: NodePathArgs) -> Outcome:
+    node = nodes_cli.lookup(ctx.store.conn, args.path)
+    if node is None:
+        raise click.ClickException(t("There is no such node (`desman nodes` lists yours)."))
+    nodes_cli.print_node(node)
+    return Outcome(nodes_cli.node_json(node))
+
+
+def _nodes_add(ctx: Context, args: NodeAddArgs) -> Proposal:
+    """The window of a new node (one a task's retelling proposes is marked untrusted)."""
+    author = ctx.node_author
+    untrusted = author is nodes.Author.TASK
+    nodes_cli.ready(ctx.config())
+    conn = ctx.store.conn
+    path, about, text = nodes_cli.checked_add(conn, args.path, args.about, args.text)
+
+    def apply() -> Outcome:
+        node = nodes_cli.add(
+            conn, path, about, text, author, untrusted=untrusted, session_id=ctx.session_id()
+        )
+        return Outcome({"added": node.path})
+
+    return Proposal(nodes_cli.add_lines(path, about, text, untrusted=untrusted), apply)
+
+
+def _nodes_change(ctx: Context, args: NodeChangeArgs) -> Outcome | Proposal:
+    author = ctx.node_author
+    untrusted = author is nodes.Author.TASK
+    nodes_cli.ready(ctx.config())
+    conn = ctx.store.conn
+    was, to, about, text = nodes_cli.checked_change(conn, args.path, args.to, args.about, args.text)
+    lines = nodes_cli.change_lines(was, to, about, text)
+    if len(lines) == 1:  # the same as it is
+        ui.note(t("Nothing changed."))
+        return Outcome({"changed": False, "path": was.path})
+    if untrusted and text is not None:
+        lines.append(t("  from a task's result: models will read it as data"))
+
+    def apply() -> Outcome:
+        node = nodes_cli.change(
+            conn,
+            was.path,
+            author,
+            to=to,
+            about=about,
+            text=text,
+            untrusted=untrusted,
+            session_id=ctx.session_id(),
+        )
+        return Outcome({"changed": True, "path": node.path})
+
+    return Proposal(lines, apply)
+
+
+def _nodes_remove(ctx: Context, args: NodePathArgs) -> Proposal:
+    author = ctx.node_author
+    conn = ctx.store.conn
+    was = nodes_cli.existing(conn, args.path)
+
+    def apply() -> Outcome:
+        path = nodes_cli.remove(conn, was.path, author, session_id=ctx.session_id())
+        return Outcome({"removed": path})
+
+    return Proposal([t("Remove your node {path} from the knowledge tree.", path=was.path)], apply)
+
+
 # ── Keys and the configuration ───────────────────────────────────────────────
 
 
@@ -1959,6 +2062,47 @@ CATALOG: tuple[Entry, ...] = (
         TuningArgs,
         _tuning_kind,
         _tuning,
+    ),
+    Entry(
+        "nodes list",
+        "List the person's own nodes of the knowledge tree (path, description, size).",
+        NoArgs,
+        Kind.READ,
+        _nodes_list,
+        aliases=("nodes",),
+    ),
+    Entry(
+        "nodes show",
+        "Show the person a node's text: one of theirs or one that comes with DESMAN.",
+        NodePathArgs,
+        Kind.READ,
+        _nodes_show,
+        private=("path",),
+    ),
+    Entry(
+        "nodes add",
+        "Add a node to the person's knowledge tree (needs personalisation on); the person "
+        "confirms the exact node.",
+        NodeAddArgs,
+        Kind.CHANGE,
+        _nodes_add,
+        private=("path", "about", "text"),
+    ),
+    Entry(
+        "nodes change",
+        "Move, describe or rewrite one of the person's nodes; the person confirms.",
+        NodeChangeArgs,
+        Kind.CHANGE,
+        _nodes_change,
+        private=("path", "to", "about", "text"),
+    ),
+    Entry(
+        "nodes remove",
+        "Erase one of the person's nodes; the person confirms.",
+        NodePathArgs,
+        Kind.CHANGE,
+        _nodes_remove,
+        private=("path",),
     ),
     Entry(
         "protected show",

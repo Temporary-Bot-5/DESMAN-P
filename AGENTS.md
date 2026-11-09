@@ -92,6 +92,9 @@ src/desman/
 │                  #   functions the chat's catalog calls too
 ├── models_cli.py  # `models show|add MODEL`: a Hugging Face GGUF model for a local server
 ├── protected_cli.py # `protected show [--diff]|approve [--note]`: bodies shared with the chat
+├── nodes_cli.py   # `nodes [list]|show PATH|add PATH|change PATH|remove PATH` (K.4): the person's
+│                  #   own knowledge-tree nodes; add/change need personalisation on; bodies
+│                  #   shared with the chat (an agent's proposal → the window) and the page
 ├── improve.py     # Improvement Analyst (5.4): an ordinary task without tools reads failures,
 │                  #   names TARGETS (planner prompts in plain constants; never a protected file)
 │                  #   with new texts, code builds the diff; or SETTINGS (`Config.tuning`),
@@ -194,6 +197,9 @@ src/desman/
     │              #   fingerprint, never a secret; append-only
     ├── operator.py # operator_log: what the person did outside tasks (chat commands confirmed
     │              #   or declined, keys by fingerprint, permissions); append-only
+    ├── nodes.py   # The person's nodes of the knowledge tree (K.4): path, about, text ≤6000,
+    │              #   author (person | interlocutor | task → untrusted); changed and erased in
+    │              #   place, each change in operator_log by node number; ≤100 nodes
     ├── profile.py # User's profile (C.7): short notes for the interlocutor (≤20, ≤200 chars),
     │              #   changed and erased in place (personal data); each change in operator_log
     │              #   by note number, never the text; `Config.personalize` off → unseen, unkept

@@ -424,3 +424,7 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 #usage-form .usage-empty { color: #8c9da5; padding: 24px 0; text-align: center; }
 @media (max-width: 650px) { .usage-totals strong { font-size: 16px; } #usage-form { padding: 4px 12px 12px; } }
 
+
+/* The person's nodes of the knowledge tree (K.4): path, what it is for, Remove. */
+.setting-node { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; margin: 0.35rem 0; }
+.setting-node small { color: var(--muted, #888); flex: 1 1 12rem; }
