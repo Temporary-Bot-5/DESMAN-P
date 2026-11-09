@@ -9,6 +9,7 @@ from typing import Any
 from desman import modules_cli, providers
 from desman.config import Config
 from desman.core import calls, choices, db, holds
+from desman.core.store import Store
 from desman.i18n import t
 from desman.llm import router
 from desman.llm.openai_compat import key_id
@@ -20,16 +21,30 @@ def short_title(title: str) -> str:
     return title if len(title) <= 30 else title[:30].rstrip() + "…"
 
 
+def key_labels(config: Config) -> dict[str, str]:
+    """Short configured labels for page cards; no masked-value suffix."""
+    return {
+        key_id(k.value): k.label or f"#{i}"
+        for p in providers.PROVIDERS
+        for i, k in enumerate(config.keys(p.key_env or ""), 1)
+    }
+
+
 def cards(
     conn: sqlite3.Connection, config: Config, rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     found: dict[tuple[str, str, str], dict[str, Any]] = {}
     current_holds = holds.listed(conn)
-    keys = {
-        key_id(k.value): k.label or f"#{i}"
-        for p in providers.PROVIDERS
-        for i, k in enumerate(config.keys(p.key_env or ""), 1)
-    }
+    keys = key_labels(config)
+    task_states: dict[str, bool] = {}
+
+    def active_task(identity: str) -> bool:
+        if identity not in task_states:
+            task_states[identity] = Store(conn).task_status(identity).value in {
+                "active",
+                "needs_human",
+            }
+        return task_states[identity]
 
     def add(
         source: str, model: str | None, section: str, role: str = "text"
@@ -47,6 +62,7 @@ def cards(
                 "module_source": source,
                 "model": model,
                 "provider": model.split("/", 1)[0],
+                "provider_name": providers.find(model.split("/", 1)[0]).name,
                 "key_fingerprint": source if source not in {"ollama", "llamacpp"} else None,
                 "key_label": keys.get(source)
                 or (
@@ -86,7 +102,7 @@ def cards(
             "network" if network else "local",
             row["role"],
         )
-        if card:
+        if card and active_task(row["task_id"]):
             card["work"].append(
                 {
                     "kind": "network job" if network else "task",
@@ -190,14 +206,19 @@ def cards(
         # Keep recent usage, but do not reassign work to a removed historical module.
         if historically_removed:
             continue
-        if row["task_id"] and row["status"] in {
-            "pending",
-            "ready",
-            "running",
-            "review",
-            "needs_human",
-            "paused",
-        }:
+        if (
+            row["task_id"]
+            and active_task(row["task_id"])
+            and row["status"]
+            in {
+                "pending",
+                "ready",
+                "running",
+                "review",
+                "needs_human",
+                "paused",
+            }
+        ):
             role = row["kind"] if row["role"] == "executor" else row["role"]
             work = {
                 "kind": "network job" if section == "network" else "task",
@@ -243,27 +264,3 @@ def cards(
                 card["scope"] = hold.scope
                 card["scope_id"] = hold.scope_id
     return list(found.values())
-
-
-def removed_cards(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Scoped removals remain restorable even when that module serves other work."""
-    result = []
-    for hold in holds.listed(conn):
-        if hold.state != "removed":
-            continue
-        card = next(
-            (r for r in rows if r["module_source"] == hold.source and r["model"] == hold.model),
-            None,
-        )
-        if card:
-            result.append(
-                {
-                    **card,
-                    "scope": hold.scope,
-                    "scope_id": hold.scope_id,
-                    "hold_state": "removed",
-                    "state": t("removed"),
-                    "work": [],
-                }
-            )
-    return result

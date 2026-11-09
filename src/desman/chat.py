@@ -1464,10 +1464,13 @@ class Chat:
         return True
 
     def _action(self, action: ui.Action) -> None:
-        if isinstance(action, ui.SimpleAction) and action.type == "usage":
-            self._terminal_open()
-            self._terminal_output(lambda: self._typed("usage"), "/usage", keep_inputs=True)
-            return
+        try:
+            self._page_action(action)
+        except (ui.Cancelled, click.Abort):
+            if getattr(ui._front, "ended", False):
+                raise
+
+    def _page_action(self, action: ui.Action) -> None:
         if isinstance(action, ui.ModuleHoldAction):
 
             def hold_action() -> None:
@@ -1482,29 +1485,18 @@ class Chat:
                     scope=action.scope,
                     scope_id=action.scope_id,
                 )
-                if action.operation == "remove" and not ui.confirm(
-                    modules_cli.hold_question(self.store.conn, config, hold)
-                    + "\n"
-                    + hold.model
-                    + " · "
-                    + hold.source,
-                    default=False,
-                ):
+                question = modules_cli.page_hold_question(
+                    self.store.conn, config, action.operation, hold
+                )
+                if question is not None and not ui.confirm(question, default=False):
                     return
                 modules_cli.hold_change(self.store.conn, config, action.operation, hold)
 
             self._terminal_output(hold_action, keep_inputs=True)
             return
         if isinstance(action, ui.TaskControlAction) and action.operation == "remove":
-
-            def remove_task() -> None:
-                if ui.confirm(
-                    t("Remove this task?") + "\n" + self.store.find_task(action.id)["goal"],
-                    default=False,
-                ):
-                    self.store.remove_task(action.id)
-
-            self._terminal_output(remove_task, keep_inputs=True)
+            # The page's ✕ hides the task at once: its history is kept (owner, 2026-11-09).
+            self._terminal_output(lambda: self.store.remove_task(action.id), keep_inputs=True)
             return
         if isinstance(action, ui.TaskControlAction):
             command = (
@@ -1631,6 +1623,7 @@ class Chat:
                 )
             elif isinstance(change, Roles):
                 old, new, edited = tuning_cli.set_tuning(open_config(), role_change(change, config))
+                modules_cli.restore_choice(self.store.conn, edited, change.model, change.key)
                 tuning_cli.print_change(old, new, edited)
                 entry = commands.find("tuning")
                 assert entry is not None
@@ -1740,6 +1733,11 @@ class Chat:
             ):
                 raise ValueError("unavailable model")
             tuning_cli.resolved_key(config, action.role, action.model, action.key)
+            question = modules_cli.page_choice_question(
+                config, saved.model or row["model"], action.model
+            )
+            if question is not None and not ui.confirm(question, default=False):
+                return
             if action.scope == "role":
                 old, new, edited = tuning_cli.set_tuning(
                     open_config(),
@@ -1768,6 +1766,14 @@ class Chat:
                     fingerprints={action.role: action.key},
                 )
                 lines = modules_cli.change_lines(action.role, old_choice, new_choice, config)
+            modules_cli.restore_choice(
+                self.store.conn,
+                config,
+                action.model,
+                action.key,
+                "all" if action.scope == "role" else action.scope,
+                action.scope_id or "",
+            )
             for line in lines:
                 ui.ok(line)
         except (ValueError, click.ClickException):

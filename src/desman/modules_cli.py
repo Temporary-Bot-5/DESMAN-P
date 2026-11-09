@@ -443,6 +443,22 @@ def assigned_module(
     return row
 
 
+def restore_choice(
+    conn: sqlite3.Connection,
+    config: Config,
+    model: str | None,
+    key: str | None,
+    scope: holds.Scope = "all",
+    scope_id: str = "",
+) -> None:
+    """An explicit human model choice restores matching replaced sources, never stops."""
+    if model is None:
+        return
+    for hold in holds.active(conn, scope, scope_id):
+        if hold.state == "removed" and hold.model == model and (key is None or hold.source == key):
+            hold_change(conn, config, "restore", hold)
+
+
 def hold_change(conn: sqlite3.Connection, config: Config, operation: str, hold: holds.Hold) -> None:
     """The sole page/CLI/catalog body; affected work is computed by code, not supplied by a model."""
     if operation == "stop":
@@ -495,17 +511,105 @@ def module_source(config: Config, row: dict[str, Any]) -> str:
     return key_id(keys[0].value) if keys else ""
 
 
-def hold_question(conn: sqlite3.Connection, config: Config, hold: holds.Hold) -> str:
+def _last_lent(conn: sqlite3.Connection, config: Config, hold: holds.Hold) -> bool:
+    """Holding this module leaves DESMAN-Global with nothing lent (it suspends)."""
     from desman.net.node import active_capabilities
 
-    if hold.scope in {"all", "network"} and config.network.enabled:
-        lent = active_capabilities(config, conn)
-        if lent and all(
-            (c.key or c.provider) == hold.source and f"{c.provider}/{c.model}" == hold.model
-            for c in lent
-        ):
-            return t("Remove this module? If it is the last lent module, DESMAN-Global suspends.")
-    return t("Remove this module?")
+    if hold.scope not in {"all", "network"} or not config.network.enabled:
+        return False
+    lent = active_capabilities(config, conn)
+    return bool(lent) and all(
+        (c.key or c.provider) == hold.source and f"{c.provider}/{c.model}" == hold.model
+        for c in lent
+    )
+
+
+def hold_question(
+    conn: sqlite3.Connection, config: Config, hold: holds.Hold, *, page: bool = False
+) -> str:
+    if _last_lent(conn, config, hold):
+        return (
+            t("Replace this module? If it is the last lent module, DESMAN-Global suspends.")
+            if page
+            else t("Remove this module? If it is the last lent module, DESMAN-Global suspends.")
+        )
+    return t("Replace this module?") if page else t("Remove this module?")
+
+
+LOCAL_SOURCES = frozenset({"ollama", "llamacpp"})
+
+
+def is_local(model: str | None) -> bool:
+    """A model label served on this computer (Ollama, llama.cpp)."""
+    return bool(model) and str(model).split("/", 1)[0] in LOCAL_SOURCES
+
+
+def _cloud_note(config: Config) -> str | None:
+    if any(not p.local for p in providers.ready(config)):
+        return t(
+            "Its work may move to a cloud model: task and chat text would then leave this computer."
+        )
+    return None
+
+
+def _local_size(config: Config, model: str) -> str:
+    """Size and free memory from what is already known: no network, no discovery."""
+    from desman import local_models
+    from desman.llm import hub
+
+    provider, name = model.split("/", 1)
+    size = None
+    if provider == "ollama":
+        installed, _ = local_models.cached_installed(config)
+        size = next((m.size for m in installed if m.name == name and m.size), None)
+    free = hub.memory().total
+    return t(
+        "It runs on this computer. Size: {size}; free memory: {free}.",
+        size=hub.size_text(size) if size else t("unknown"),
+        free=hub.size_text(free) if free else t("unknown"),
+    )
+
+
+def page_hold_question(
+    conn: sqlite3.Connection, config: Config, operation: str, hold: holds.Hold
+) -> str | None:
+    """The page's window for a module button, or None to act at once: a cloud module acts at
+    once (owner, 2026-11-09); a local one always asks, and so does replacing the last lent one."""
+    label = f"{hold.model} · {hold.source}"
+    if hold.source not in LOCAL_SOURCES:
+        if operation == "remove" and _last_lent(conn, config, hold):
+            return hold_question(conn, config, hold, page=True) + "\n" + label
+        return None
+    if operation == "stop":
+        return t("Pause this local module?") + "\n" + label
+    if operation == "continue":
+        return t("Resume this local module?") + "\n" + label
+    lines = [hold_question(conn, config, hold, page=True), label]
+    note = _cloud_note(config)
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+def page_choice_question(config: Config, old: str | None, new: str | None) -> str | None:
+    """The window for Change, or None to apply at once: only a change that involves a local
+    model asks — picking one (its size against free memory) or leaving one for the cloud."""
+    if is_local(new):
+        assert new is not None
+        return t("Use the local model {model}?", model=new) + "\n" + _local_size(config, new)
+    if is_local(old) and old != new:
+        note = (
+            _cloud_note(config)
+            if new is None
+            else t(
+                "Its work moves to the cloud model {model}: task and chat text will leave this computer.",
+                model=new,
+            )
+        )
+        return "\n".join(
+            [t("Stop using the local model {model}?", model=old), *([note] if note else [])]
+        )
+    return None
 
 
 def _hold_command(

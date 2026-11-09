@@ -464,7 +464,6 @@ class SimpleAction(Action):
         "delete_all",
         "messenger",
         "terminal",
-        "usage",
         "report_problem",
         "hide_finished",
         "pause_tasks",

@@ -119,13 +119,15 @@ def models(
     sleep: Callable[[float], None] | None = None,
     only: Collection[str] | None = None,
     wrap: Callable[[LLM, router.Choice], LLM] | None = None,
+    read_tuning: Callable[[], Tuning] | None = None,
 ) -> Models:
     """A lineup of models per role (`router.lineup`), each model paced by the rate limiter in
     the database, quick blips retried, calls logged and accepted replies kept there. `provider`
     and `model` narrow the choice like `desman run --provider/--model`; only a pinned `model`
     leaves no other model for retries. `only`: the models of these providers alone (the ones
     lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
-    `router.NoProvider`."""
+    `router.NoProvider`. `read_tuning` supplies the worker’s in-memory tuning snapshot,
+    refreshed at its existing config checks without I/O during routing."""
     clients: dict[tuple[str, str | None, tuple[str, ...]], LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
@@ -289,11 +291,13 @@ def models(
                 else (purpose.session_id if scope == "session" else purpose.task_id) or ""
             )
             cfg = config
+            if only is None and read_tuning is not None:
+                cfg = config.model_copy(update={"tuning": read_tuning()})
             if only is None and identity and field:
                 own_choice = module_choices.get(
                     conn, "session" if scope == "session" else "task", identity, field
                 )
-                cfg = module_choices.effective(config, field, own_choice)
+                cfg = module_choices.effective(cfg, field, own_choice)
             own = lineup(role, kind, cfg)
             current_holds = holds.active(conn, scope, identity)
             removed = {(h.source, h.model) for h in current_holds if h.state == "removed"}
