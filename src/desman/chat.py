@@ -1733,9 +1733,15 @@ class Chat:
             ):
                 raise ValueError("unavailable model")
             tuning_cli.resolved_key(config, action.role, action.model, action.key)
-            question = modules_cli.page_choice_question(
-                config, saved.model or row["model"], action.model
-            )
+            current = saved.model or row["model"]
+            if current in (None, "auto"):  # Auto: the model it picks now (may be a local one)
+                now = (
+                    config
+                    if action.scope == "role"
+                    else choices.effective(config, action.role, saved)
+                )
+                current = next(iter(router.candidates(now, action.role)), None)
+            question = modules_cli.page_choice_question(config, current, action.model)
             if question is not None and not ui.confirm(question, default=False):
                 return
             if action.scope == "role":

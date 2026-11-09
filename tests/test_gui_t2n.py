@@ -326,3 +326,31 @@ def test_usage_window_javascript() -> None:
         text=True,
         encoding="utf-8",
     )
+
+
+def test_change_from_auto_running_a_local_model_asks(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, chat, cfg, identity = page
+    cloud = router.lineup(cfg, calls.Role.EXECUTOR)[0].label
+    asked: list[str] = []
+
+    def decline(question: str, default: bool = False) -> bool:
+        asked.append(question)
+        return False
+
+    monkeypatch.setattr(ui, "confirm", decline)
+    # Auto picks a local model first: leaving it for the cloud asks (Devin, PR #110).
+    monkeypatch.setattr(router, "candidates", lambda *_: [LOCAL, cloud])
+    chat._action(
+        ui.ModuleAction(
+            type="module",
+            role="text",
+            scope="task",
+            scope_id=identity,
+            model=cloud,
+            key=key_id(SECRET),
+        )
+    )
+    assert len(asked) == 1 and LOCAL in asked[0] and "leave this computer" in asked[0]
+    assert choices.get(chat.store.conn, "task", identity, "text").model is None
