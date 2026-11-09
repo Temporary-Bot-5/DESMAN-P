@@ -342,6 +342,30 @@ class Sessions:
         ).fetchall()
         return [r["id"] for r in rows]
 
+    def newly_waiting(self, session_id: str, task_id: str) -> bool:
+        """A subtask of the task came to wait for the person's decision (needs_human; a step
+        the person failed is their own verdict, not a question) after the chat last retold the
+        task: told now, while the rest goes on. The watermark is `changed_tasks`' own. A task
+        the person removed from the page (hidden) or one lent by desman-global is not told."""
+        row = self.conn.execute(
+            """
+            SELECT 1 FROM subtasks s JOIN tasks t ON t.id = s.task_id
+            WHERE s.task_id = ? AND s.status = 'needs_human'
+              AND t.hidden_at IS NULL AND t.origin = 'local'
+              AND (SELECT MAX(a.seq) FROM audit_log a WHERE a.subtask_id = s.id
+                   AND a.to_status IS NOT NULL)
+                  > COALESCE((SELECT MAX(m.outcome_audit) FROM messages m
+                              WHERE m.session_id = ? AND m.task_id = t.id),
+                    (SELECT MAX(a.seq) FROM audit_log a WHERE a.task_id = t.id
+                     AND a.ts <= COALESCE((SELECT MAX(m.at) FROM messages m
+                         WHERE m.session_id = ? AND m.task_id = t.id
+                         AND m.role = 'interlocutor'), '')), 0)
+            LIMIT 1
+            """,
+            (task_id, session_id, session_id),
+        ).fetchone()
+        return row is not None
+
     def rename(self, session_id: str, title: str | None) -> None:
         """Name a session; None (or blank) gives it back its opening as the name."""
         title = " ".join((title or "").split())[:TITLE_CHARS] or None

@@ -654,7 +654,11 @@ MESSAGES: dict[str, Forms] = {
     "leave the chat (Ctrl+D does too)": "채팅 나가기 (Ctrl+D도 가능)",
     "Task {ref} started: {title} ({n} subtask).": ("작업 {ref} 시작: {title} (하위 작업 {n}개).",),
     "Task {ref} is done.": "작업 {ref}이(가) 완료되었습니다.",
-    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], then desman resume {ref}.": "터미널에서 결정하세요: desman retry|accept|fail <ref> [--note 텍스트], 그다음 desman resume {ref}.",
+    "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "채팅 아래 칸에 답하거나, 거기서 「이 답변으로 재시도」, 「그대로 수락」, 「실패로 표시」 중 하나를 고르세요.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "여기서 결정하세요: /retry, /accept 또는 /fail <ref> [--note 텍스트], 그다음 /resume {ref}.",
+    "Task {ref}: step {steps} waits for you; the rest goes on.": (
+        "작업 {ref}: 단계 {steps}이(가) 당신을 기다립니다. 나머지는 계속 진행됩니다.",
+    ),
     "The model did not answer ({error}). Your message is kept.": "모델이 응답하지 않았습니다({error}). 메시지는 저장되어 있습니다.",
     "The model's answer made no sense, even when asked again. Your message is kept: write again or put it differently.": "다시 물어봐도 모델의 답이 말이 되지 않았습니다. 메시지는 저장되어 있습니다: 다시 쓰거나 다르게 표현해 보세요.",
     "Task {ref} stopped. `desman resume {ref}` continues it.": "작업 {ref}이(가) 중지되었습니다. `desman resume {ref}`로 이어서 할 수 있습니다.",

@@ -656,7 +656,11 @@ MESSAGES: dict[str, Forms] = {
         "タスク {ref} を開始しました：{title}（サブタスク {n} 件）。",
     ),
     "Task {ref} is done.": "タスク {ref} が完了しました。",
-    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], then desman resume {ref}.": "ターミナルで決めてください：desman retry|accept|fail <ref> [--note テキスト]、その後 desman resume {ref}。",
+    "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "チャットの下の欄で回答するか、そこで「この回答で再試行」「そのまま承認」「失敗として記録」を選んでください。",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "ここで決めてください：/retry、/accept または /fail <ref> [--note テキスト]、その後 /resume {ref}。",
+    "Task {ref}: step {steps} waits for you; the rest goes on.": (
+        "タスク {ref}：ステップ {steps} があなたを待っています。残りは進行中です。",
+    ),
     "The model did not answer ({error}). Your message is kept.": "モデルが応答しませんでした（{error}）。メッセージは保存されています。",
     "The model's answer made no sense, even when asked again. Your message is kept: write again or put it differently.": "聞き直してもモデルの答えは意味をなしませんでした。メッセージは保存されています：もう一度書くか、言い方を変えてください。",
     "Task {ref} stopped. `desman resume {ref}` continues it.": "タスク {ref} を停止しました。`desman resume {ref}` で再開できます。",

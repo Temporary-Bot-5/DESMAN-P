@@ -81,7 +81,9 @@ for (const saved of ['groq/custom-label', 'ollama/removed']) {
   choices.model.close();
 }
 const tasks = new Element('section');
-global.$ = id => {assert.equal(id, 'tasks'); return tasks;};
+const waitingRoot = new Element('section');
+global.$ = id => id === 'waiting' ? waitingRoot : (assert.equal(id, 'tasks'), tasks);
+global.currentSession = 's1'; global.terminalOpen = false;
 global.expanded = new Set(['t']);
 global.moduleEditors = new Map();
 global.moduleSnapshot = {roles:[role], roles_by_scope:{task:['executor']}};
@@ -93,7 +95,7 @@ global.updateActions = () => {};
 vm.runInThisContext(source.slice(source.indexOf('function moduleCard('), source.indexOf('function showModules(')));
 vm.runInThisContext(source.slice(source.indexOf('function showTasks('), source.indexOf('let panelsLoading')));
 const moduleData = {scope:'task',scope_id:'t',role:'executor',choice_model:'groq/custom-label',choice_key:'a',model:'groq/openai/gpt-oss-20b', provider_name:'Groq', provider:'groq', key_label:'Key 1', module_source:'a'};
-const task = {id:'t',goal:'Work',status:'running',done:0,total:1,subtasks:[{seq:1,ref:'t/1',description:'Step',status:'running',version:1}],cards:[moduleData]};
+const task = {id:'t',session_id:'s1',goal:'Work',status:'running',done:0,total:1,subtasks:[{seq:1,ref:'t/1',description:'Step',status:'running',version:1}],cards:[moduleData]};
 showTasks({tasks:[task]});
 let moduleNode = tasks.querySelectorAll('*').find(n => n.className === 'module-card');
 const controls = moduleNode.querySelectorAll('*').filter(n => n.className === 'module-control');
@@ -119,6 +121,28 @@ assert.equal(tasks.querySelector('textarea').value, 'unsent');
 const decisions = tasks.querySelectorAll('*').find(n => n.className === 'decisions');
 assert.equal(decisions.children[0].listeners.click[0]().version, 2);
 assert.ok(tasks.querySelectorAll('*').some(n => n.className === 'status-chip' && n.textContent === words.status_needs_human));
+// The chat the task was asked in shows the waiting step under it, with the same decisions.
+assert.equal(waitingRoot.hidden, false);
+const step = waitingRoot.children.find(n => n.className === 'waiting-step');
+const stepDecisions = step.children.find(n => n.className === 'decisions');
+const stepAnswer = step.children.find(n => n.tagName === 'TEXTAREA');
+stepAnswer.value = 'use the other key';
+assert.deepEqual(stepDecisions.children[0].listeners.click[0](), {type:'decide', ref:'t/1', version:2, decision:'retry', note:'use the other key'});
+showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2,ref:'t/1',title:'Step'}]}]});
+assert.equal(waitingRoot.children.find(n => n.className === 'waiting-step').children.find(n => n.tagName === 'TEXTAREA').value, 'use the other key');
+// Focus in the field under the chat stays there when the Tasks panel redraws the same step.
+const chatAnswer = waitingRoot.children.find(n => n.className === 'waiting-step').children.find(n => n.tagName === 'TEXTAREA');
+chatAnswer.focus();
+showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2,ref:'t/1'}]}]});
+assert.equal(document.activeElement.parentElement.className, 'waiting-step');
+// A step the person failed is their verdict: no field under the chat.
+showTasks({tasks:[{...task,status:'failed',done:1,subtasks:[{...task.subtasks[0],status:'failed',version:3,ref:'t/1'}]}]});
+assert.equal(waitingRoot.hidden, true);
+document.activeElement = null;
+currentSession = 'other';
+showTasks({tasks:[{...task,status:'needs_human',needs_human:true,done:1,subtasks:[{...task.subtasks[0],status:'needs_human',version:2,ref:'t/1'}]}]});
+assert.equal(waitingRoot.hidden, true); // another chat does not show it
+currentSession = 's1';
 modelPicker.close(); document.activeElement = null;
 expanded.clear();
 showTasks({tasks:[{...task,id:'normal',pinned:false}, {...task,id:'pinned',pinned:true}, {...task,id:'normal2',pinned:false}]});

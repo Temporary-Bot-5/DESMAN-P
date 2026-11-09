@@ -1143,12 +1143,7 @@ class Chat:
         try:
             for row in rows:
                 pending = self.sessions.changed_tasks(row["id"])
-                settled = [
-                    task
-                    for task in pending
-                    if (report := task_report(self.store, task)).status is not TaskStatus.ACTIVE
-                    or _paused_until(report) is not None
-                ]
+                settled = [task for task in pending if self._to_tell(row["id"], task)]
                 if not settled:
                     continue
                 if enqueue is not None:
@@ -1186,10 +1181,20 @@ class Chat:
         if self.session_id is None:
             return
         for task_id in self.sessions.changed_tasks(self.session_id):
-            report = task_report(self.store, task_id)
-            if report.status is TaskStatus.ACTIVE and _paused_until(report) is None:
+            if not self._to_tell(self.session_id, task_id):
                 continue  # still moving (another terminal), or stopped: told when it settles
             self._outcome(task_id, self.store.short_id(task_id), interlocutor)
+
+    def _to_tell(self, session_id: str, task_id: str) -> bool:
+        """A changed task is retold once it has settled (done, failed, waiting as a whole, paused
+        by a limit), and as soon as one of its subtasks waits for the person, even while the
+        rest goes on: the person can answer it in the chat where they asked. Only on the page,
+        whose workers go on after a decision; the terminal chat leaves a task that is still
+        moving (another terminal works it) until it settles."""
+        report = task_report(self.store, task_id)
+        if report.status is not TaskStatus.ACTIVE or _paused_until(report) is not None:
+            return True
+        return self.background_tasks and self.sessions.newly_waiting(session_id, task_id)
 
     def _outcome(self, task_id: str, ref: str, interlocutor: Interlocutor) -> None:
         previous = self._outcome_audit
@@ -1207,10 +1212,22 @@ class Chat:
         paused_until = _paused_until(report)
         waiting = [item for item in inbox(self.store) if item.task_id == task_id]
         self.waiting.told(waiting)  # shown below: not again as a notice
+        asking = [i for i in waiting if i.status is SubtaskStatus.NEEDS_HUMAN]
         if report.status is TaskStatus.DONE:
             self._event(t("Task {ref} is done.", ref=ref), task_id)
         elif report.status is TaskStatus.NEEDS_HUMAN:
             self._event(t("Task {ref} waits for you.", ref=ref), task_id)
+        elif asking and report.status is TaskStatus.ACTIVE and paused_until is None:
+            self._event(
+                tn(
+                    len(asking),
+                    "Task {ref}: step {steps} waits for you; the rest goes on.",
+                    "Task {ref}: steps {steps} wait for you; the rest goes on.",
+                    ref=ref,
+                    steps=", ".join(i.ref for i in asking),
+                ),
+                task_id,
+            )
         elif paused_until is not None:
             self._event(
                 t(
@@ -1230,11 +1247,13 @@ class Chat:
             )
             if item.reason:
                 ui.out(Text(f"    {_shorten(item.reason, 110)}", style="muted"))
-        if waiting:
+        if asking and self.background_tasks:  # the page's workers go on after a decision
+            ui.note(t("Answer in the field below the chat, or choose Retry, Accept or Fail there."))
+        elif waiting:
             ui.note(
                 t(
-                    "Decide in the terminal: desman retry|accept|fail <ref> [--note TEXT], "
-                    "then desman resume {ref}.",
+                    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], "
+                    "then /resume {ref}.",
                     ref=ref,
                 )
             )
@@ -1248,7 +1267,12 @@ class Chat:
             "status": report.status.value,
             "result": None if result is None else excerpt(result),
             "waiting_for_the_person": [
-                {"subtask": i.description, "status": i.status.value, "reason": i.reason}
+                {
+                    "ref": i.ref,
+                    "subtask": i.description,
+                    "status": i.status.value,
+                    "reason": i.reason,
+                }
                 for i in waiting
             ],
         }
