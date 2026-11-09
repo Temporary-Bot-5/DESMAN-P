@@ -429,6 +429,29 @@ def test_hf_search_missing_metadata() -> None:
     assert rows[1].metadata.context_length == 8192 and rows[1].downloads == 0
 
 
+def test_hf_search_matches_each_word() -> None:
+    asked: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        asked.append(request)
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "Qwen/Qwen2.5-32B-Instruct-GGUF"},
+                {"id": "Qwen/Qwen2.5-7B-Instruct-GGUF"},
+                {"id": "someone/QwQ-32B-GGUF"},
+            ],
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        rows = hub.search("  32b Qwen ", client)
+        assert [row.id for row in rows] == ["Qwen/Qwen2.5-32B-Instruct-GGUF"]
+        assert asked[0].url.params["search"] == "qwen"
+        assert asked[0].url.params["limit"] == str(hub.SEARCH_WIDE)
+        assert len(hub.search("qwen", client)) == 3  # one word: the hub's own match
+        assert asked[1].url.params["limit"] == str(hub.SEARCH_LIMIT)
+
+
 def test_provider_label_capitalised_in_every_catalog() -> None:
     from importlib import import_module
 
