@@ -143,6 +143,10 @@ src/desman/
 ├── manual.py      # The interlocutor's manual (C.10): a short English text per topic of what
 │                  #   DESMAN does now (never plans); its prompt lists only the topics. A test
 │                  #   checks the commands it names and the size of each topic
+├── knowledge.py   # The knowledge tree (ADR 0009, K.1): release nodes built at run time from
+│                  #   the catalog (Commands/GROUP), the manual and the repository's docs split by
+│                  #   `##` (PROJECT_PLAN, ROADMAP, ADRs marked `plan`); contents() = the table a
+│                  #   model chooses from, within its budget; texts never in it
 ├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
 │                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
 │                  #   message that `covers` them; failed → they fall out of view, with a note
