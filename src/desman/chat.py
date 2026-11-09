@@ -637,7 +637,11 @@ class Chat:
         command = commands.shown(entry, args)
         kind = entry.kind_of(args)
         before = self._saved_config()
-        if entry.name in ("run", "resume", "worker", "proposals analyze") and models is None:
+        if (
+            entry.name
+            in ("run", "resume", "worker", "proposals analyze", "task extend", "task redo")
+            and models is None
+        ):
             ui.error(t("DESMAN needs configuring before this command can use models."))
             return
 
@@ -654,6 +658,24 @@ class Chat:
             assert models is not None
             self._resume(task_id, config, models, interlocutor)
 
+        def continue_task(pending: actions.Continuation) -> None:
+            from desman.cli import continued  # the CLI imports the chat
+
+            assert models is not None
+            ui.note(t("Planning…"))
+            ref, count = continued(self.store, pending, models, config)
+            self._event(
+                tn(
+                    count,
+                    "Task {ref} continues: {n} new subtask.",
+                    "Task {ref} continues: {n} new subtasks.",
+                    ref=ref,
+                ),
+                pending.task_id,
+            )
+            if not self.background_tasks:  # the page's workers take it from here
+                resume_task(pending.task_id)
+
         context = commands.Context(
             self.store,
             open_config(),
@@ -661,6 +683,7 @@ class Chat:
             resume_task=resume_task,
             session_id=lambda: self.session_id,
             in_terminal=self.in_terminal,
+            continue_task=continue_task,
         )
         try:
             made = entry.handler(context, args)

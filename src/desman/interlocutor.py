@@ -102,7 +102,9 @@ INTERLOCUTOR_SYSTEM = (
     f"{MAX_FILES_FROM}); the workers then get copies of its files. Give "
     '"runs_code": true when the work must run code or a command and tell what came of it '
     "(testing a program, a crash test, measuring): it is then done only if it really ran. "
-    "Work is always a task turn, never a command: the person asked for it already;\n"
+    "Work is always a task turn, never a command: the person asked for it already. Only "
+    "more work on a task DESMAN already named (add to it, or redo one of its done steps) is "
+    "the command task extend or task redo, so the new work starts from its results;\n"
     '{"type": "command", "name": "...", "args": {...}} when the person wants DESMAN itself to '
     "do something or show something: its settings, API keys, permissions, language, the list "
     "and state of tasks, decisions on them. The name and arguments come from this list "

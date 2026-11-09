@@ -220,6 +220,68 @@ def plan(
     return Planned(reply.spec(goal, priority), "llm")
 
 
+# ── Continuing a task (ADR 0010) ─────────────────────────────────────────────
+
+CONTINUE = "Continue task"
+"""Prompt heading: fake scripts route on it."""
+
+CONTINUE_RULES = (
+    " This task was already worked on: its goal and its subtasks so far are below. Plan only "
+    "the new subtasks that do what is asked now. The new subtasks that depend on no other new "
+    "one are given the results of the task's last subtask (its result so far) and, when a step "
+    "is to be redone, of that step. The last new subtask must produce the complete result of "
+    "the whole goal, what was done before included, changed as asked."
+)
+
+
+def continuation(
+    llm: LLM,
+    goal: str,
+    subtasks: list[tuple[int, str, str]],
+    ask: str,
+    *,
+    redo: int | None = None,
+    priority: int = Priority.NORMAL,
+    limit: int | None = None,
+) -> Planned:
+    """New subtasks for a task that was worked on (ADR 0010): `subtasks` are its (seq,
+    description, status), `ask` what to add or why a step is redone (`redo`: that step's seq).
+    The template, if the model fails: one subtask doing what is asked on the result so far."""
+    limit = limit or MAX_SUBTASKS
+    asked = {
+        "goal": goal,
+        "subtasks": [{"seq": n, "description": d, "status": st} for n, d, st in subtasks],
+        ("redo_step" if redo is not None else "add"): (
+            {"seq": redo, "why": ask} if redo is not None else ask
+        ),
+    }
+    request = Request(
+        messages=[
+            Message(role="system", content=planner_system(limit) + CONTINUE_RULES),
+            Message(role="user", content=f"{CONTINUE}:\n{json.dumps(asked, ensure_ascii=False)}"),
+        ]
+    )
+    template = TaskSpec(
+        goal=goal,
+        priority=priority,
+        subtasks=[
+            SubtaskSpec(
+                description=(f"Redo step {redo} of this work: {ask}" if redo is not None else ask)
+                + f"\nStart from the results you are given and produce the complete result of: "
+                f"{goal}",
+                acceptance_criteria=TEMPLATE_CRITERIA,
+            )
+        ],
+    )
+    try:
+        reply = complete_json(llm, request, plan_schema(limit), heading=CONTINUE)
+    except StructuredOutputError as e:
+        return Planned(template, "template", f"{type(e).__name__}: {e.problem}")
+    except ProviderError as e:
+        return Planned(template, "template", f"{type(e).__name__}: {e}")
+    return Planned(reply.spec(goal, priority), "llm")
+
+
 # ── Splitting a subtask (ROADMAP 2.9b) ───────────────────────────────────────
 
 SPLIT = "Split subtask"
