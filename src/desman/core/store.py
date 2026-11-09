@@ -812,6 +812,80 @@ class Store:
             self._promote_ready()
         return [self.get_subtask(part_id) for part_id in ids]
 
+    def extend(
+        self,
+        task_id: str,
+        parts: list[SubtaskSpec],
+        basis: list[str],
+        actor: Actor = Actor.HUMAN,
+        details: dict[str, Any] | None = None,
+    ) -> list[str]:
+        """Continue a task (ADR 0010): append `parts` after its last subtask, atomically, with
+        the same graph checks as a task. A part that depends on no other part depends on the
+        `basis` (the task's subtasks whose results the new work starts from), so it gets their
+        results as usual. The last part becomes the task's final result. Nothing that was done
+        changes. Returns the new subtasks' ids, in order."""
+        TaskSpec(goal="continue", subtasks=parts)  # the same graph checks as a task
+        with db.transaction(self.conn):
+            task = self.conn.execute(
+                "SELECT priority, origin FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if task is None:
+                raise NotFoundError(f"no task {task_id}")
+            if task["origin"] != Origin.LOCAL.value:
+                raise ValueError("a job lent by desman-global is not continued here")
+            if self.task_status(task_id) is TaskStatus.CANCELLED:
+                raise ValueError(f"task {task_id} was cancelled")
+            for subtask_id in basis:
+                based = self.get_subtask(subtask_id)
+                if based.task_id != task_id:
+                    raise ValueError(f"subtask {subtask_id} is not of task {task_id}")
+                if based.status is not S.DONE:  # the new work could never start
+                    raise ValueError(f"subtask {subtask_id} is not done")
+            first_seq = (
+                1
+                + self.conn.execute(
+                    "SELECT MAX(seq) FROM subtasks WHERE task_id = ?", (task_id,)
+                ).fetchone()[0]
+            )
+            ids = [_new_id() for _ in parts]
+            now = self._now()
+            for offset, (part_id, part) in enumerate(zip(ids, parts, strict=True)):
+                self.conn.execute(
+                    """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
+                                             inputs_json, priority, kind, runs_code,
+                                             created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        part_id,
+                        task_id,
+                        first_seq + offset,
+                        part.description,
+                        part.acceptance_criteria,
+                        json.dumps(part.inputs, ensure_ascii=False),
+                        task["priority"] if part.priority is None else part.priority,
+                        part.kind.value,
+                        int(part.runs_code),
+                        now,
+                        now,
+                    ),
+                )
+                deps = [ids[i] for i in part.depends_on] or list(basis)
+                self.conn.executemany(
+                    "INSERT INTO subtask_deps (subtask_id, depends_on) VALUES (?, ?)",
+                    [(part_id, dep) for dep in dict.fromkeys(deps)],
+                )
+            # The task has work again: a hidden one is shown (only finished work is hidden).
+            self.conn.execute("UPDATE tasks SET hidden_at = NULL WHERE id = ?", (task_id,))
+            self._audit(
+                actor,
+                "task_extended",
+                task_id=task_id,
+                details={**(details or {}), "subtasks": ids, "basis": basis},
+            )
+            self._promote_ready()
+        return ids
+
     def parts(self, subtask_id: str) -> list[str]:
         """Ids of the parts a subtask was split into, in order (empty if it was not split)."""
         rows = self.conn.execute(

@@ -76,10 +76,23 @@ def check_history(conn: sqlite3.Connection, task_id: str) -> list[str]:
         problems.append("no task_created entry")
     recorded = created.details.get("subtasks") if created else None
     if isinstance(recorded, list):  # ids; entries written before 1.9 hold only a count
-        # Parts of a split subtask are created by its "decomposed" entry (ROADMAP 2.9b).
-        recorded = recorded + [
-            part for e in entries if e.action == "decomposed" for part in e.details.get("parts", [])
-        ]
+        # Parts of a split subtask are created by its "decomposed" entry (ROADMAP 2.9b), the
+        # subtasks a continuation added by its "task_extended" entry (ADR 0010).
+        recorded = (
+            recorded
+            + [
+                part
+                for e in entries
+                if e.action == "decomposed"
+                for part in e.details.get("parts", [])
+            ]
+            + [
+                sub
+                for e in entries
+                if e.action == "task_extended"
+                for sub in e.details.get("subtasks", [])
+            ]
+        )
         for subtask_id in sorted(current.keys() - set(recorded)):
             problems.append(f"subtask {subtask_id} was never recorded as created")
         for subtask_id in sorted(set(recorded) - current.keys()):

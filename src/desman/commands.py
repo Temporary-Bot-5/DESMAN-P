@@ -123,6 +123,9 @@ class Context:
     """The chat's session now: for the operator's journal."""
 
     in_terminal: bool = False
+    continue_task: Callable[[actions.Continuation], None] | None = None
+    """Plan what a continuation adds and add it to the task (ADR 0010), then run it further:
+    the chat's, with its models. None where nothing can be planned."""
 
     def config(self) -> Config:
         try:
@@ -207,6 +210,16 @@ class TaskArgs(Args):
 class TaskPauseArgs(Args):
     task: Ref | None = None
     all: bool = False
+
+
+class TaskExtendArgs(Args):
+    task: Ref = Field(description="task id or a unique prefix of it")
+    goal: Note = Field(description="what to add to the task's work, in the person's words")
+
+
+class TaskRedoArgs(Args):
+    subtask: Ref = Field(description='the done step, "<task>/<number>" as status shows it')
+    note: Note = Field(description="why and how to redo it, in the person's words")
 
 
 class TaskHideArgs(Args):
@@ -525,6 +538,36 @@ def print_help(*, shell: bool = False, terminal: bool = False, temporary: bool =
 def _help(ctx: Context, args: NoArgs) -> Outcome:
     print_help(terminal=ctx.in_terminal)
     return Outcome({"commands": [e.name for e in CATALOG]})
+
+
+def _continue(ctx: Context, task: str | None, ask: str, redo: str | None) -> Proposal:
+    """`task extend` / `task redo` (ADR 0010): shown in the window, planned only after yes."""
+    pending = actions.prepare_continuation(ctx.store, task, ask, redo)
+    if ctx.continue_task is None:
+        raise click.ClickException(
+            t("DESMAN needs configuring before this command can use models.")
+        )
+    ref = ctx.store.short_id(pending.task_id)
+    goal = actions.one_line(ctx.store.find_task(pending.task_id)["goal"], 120)
+    lines = [f"{ref} — {goal}"]
+    if pending.redo is not None:
+        lines.append(
+            t(
+                "Redo step {seq}: {step}",
+                seq=pending.redo.seq,
+                step=actions.one_line(pending.redo.description, 100),
+            )
+        )
+        lines.append(t("Why: {note}", note=actions.one_line(pending.ask, 300)))
+    else:
+        lines.append(t("Add: {goal}", goal=actions.one_line(pending.ask, 300)))
+    run = ctx.continue_task
+
+    def apply() -> Outcome:
+        run(pending)
+        return Outcome(None)
+
+    return Proposal(lines, apply)
 
 
 def _short_help(entry: Entry) -> str:
@@ -1718,6 +1761,23 @@ CATALOG: tuple[Entry, ...] = (
         TaskHideArgs,
         Kind.CHANGE,
         lambda c, a: _task_control(c, a, "hide"),
+    ),
+    Entry(
+        "task extend",
+        "Continue a task that was worked on: add new subtasks doing what the person asks, "
+        "starting from the task's result so far; its result becomes the new one. The person "
+        "confirms.",
+        TaskExtendArgs,
+        Kind.CHANGE,
+        lambda c, a: _continue(c, a.task, a.goal, None),
+    ),
+    Entry(
+        "task redo",
+        "Do a done step of a task again, as the person says why: new subtasks start from that "
+        "step's and the task's results and give the task a new result. The person confirms.",
+        TaskRedoArgs,
+        Kind.CHANGE,
+        lambda c, a: _continue(c, None, a.note, a.subtask),
     ),
     Entry("help", "List DESMAN's commands for the person.", NoArgs, Kind.READ, _help),
     Entry("status", "Show a task and its subtasks.", TaskArgs, Kind.READ, _status),

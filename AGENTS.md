@@ -178,6 +178,7 @@ src/desman/
                    #        heartbeat/checkpoint, preempt (critical work takes over, 4.4),
                    #        recover_expired, resume_due, sweep,
                    #        submit, task_status, cancel_task, failure propagation
+                   #        extend (ADR 0010: a continuation appends subtasks after the done ones)
     ├── context.py # What an executor sees: inputs, checkpoint, accepted dependency results
                    #   fitted to a token budget, feedback on the previous attempt
     ├── sessions.py # Chat sessions and messages (append-only: role, text, kind

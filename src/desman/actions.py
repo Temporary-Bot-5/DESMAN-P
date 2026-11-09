@@ -656,3 +656,96 @@ def task_change(
     except ValueError as e:
         raise click.ClickException(t("Cannot change this task: {error}", error=str(e))) from e
     return {"task": task_id, "operation": operation, "changed": changed}
+
+
+# ── Continuing a task (ADR 0010) ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Continuation:
+    """What `task extend` / `task redo` will do, checked before the person is asked."""
+
+    task_id: str
+    ask: str
+    redo: Subtask | None = None
+
+
+def prepare_continuation(
+    store: Store, task: str | None, ask: str, redo: str | None
+) -> Continuation:
+    """The task to continue and how; problems are the person's to read (ClickException)."""
+    ask = " ".join(ask.split())
+    if not ask:
+        raise click.ClickException(t("Say what to add or why the step is redone."))
+    sub = None
+    if redo is not None:
+        try:
+            sub = store.find_subtask(redo)
+        except LookupError as e:
+            raise click.ClickException(str(e)) from e
+        if sub.status is not SubtaskStatus.DONE or sub.parent_id is not None:
+            raise click.ClickException(
+                t("Only a done step is redone; {ref} is {status}.", ref=redo, status=sub.status)
+            )
+        task_id = sub.task_id
+    else:
+        task_id = find_task(store, task or "")
+    row = store.find_task(task_id)
+    if row["origin"] != "local":
+        raise click.ClickException(t("A job lent by desman-global is not continued here."))
+    if store.task_status(task_id) is TaskStatus.CANCELLED:
+        raise click.ClickException(t("A cancelled task is not continued."))
+    last = [s for s in store.list_subtasks(task_id) if s.parent_id is None][-1]
+    if last.status is not SubtaskStatus.DONE:  # new work starts from the result
+        raise click.ClickException(
+            t(
+                "Task {ref} is continued once its result is done; decide what waits for you "
+                "first (retry, accept or fail).",
+                ref=store.short_id(task_id),
+            )
+        )
+    return Continuation(task_id, ask, sub)
+
+
+def continue_task(
+    store: Store, llm: Any, pending: Continuation, *, limit: int | None, by: str
+) -> tuple[list[str], str | None]:
+    """Plan the new subtasks with the model (the template if it fails) and add them to the
+    task. `by`: who asked ("person" or "proposal"). Returns the new ids and why the model's
+    plan was not used, if it was not."""
+    from desman.planner import continuation, must_run
+
+    task = store.find_task(pending.task_id)
+    subtasks = [s for s in store.list_subtasks(pending.task_id) if s.parent_id is None]
+    planned = continuation(
+        llm,
+        task["goal"],
+        [(s.seq, s.description, s.status.value) for s in subtasks],
+        pending.ask,
+        redo=pending.redo.seq if pending.redo else None,
+        priority=task["priority"],
+        limit=limit,
+    )
+    last = subtasks[-1].id
+    basis = [last] + ([pending.redo.id] if pending.redo and pending.redo.id != last else [])
+    # A result that had to rest on a real run still has to (`planner.must_run`).
+    spec = must_run(planned.spec) if subtasks[-1].runs_code else planned.spec
+    try:
+        ids = store.extend(
+            pending.task_id,
+            spec.subtasks,
+            basis,
+            details={
+                **planned.details(),
+                "by": by,
+                ("redo" if pending.redo else "add"): pending.redo.id
+                if pending.redo
+                else pending.ask,
+                **({"why": pending.ask} if pending.redo else {}),
+            },
+        )
+    except (ValueError, LookupError) as e:  # cancelled or changed while it was planned
+        raise click.ClickException(
+            t("Task {ref} was not continued: {error}", ref=store.short_id(pending.task_id), error=e)
+        ) from e
+    return ids, planned.error

@@ -1280,6 +1280,74 @@ def task_hide(task: str | None, finished: bool, db_path: Path | None) -> None:
     _task_control("hide", task, db_path)
 
 
+@task_group.command("extend")
+@click.argument("task")
+@click.argument("goal")
+@db_option
+def task_extend(task: str, goal: str, db_path: Path | None) -> None:
+    """Continue TASK: plan and add new subtasks doing GOAL on its result so far."""
+    _continue(task, goal, None, db_path)
+
+
+@task_group.command("redo")
+@click.argument("subtask")
+@click.argument("note")
+@db_option
+def task_redo(subtask: str, note: str, db_path: Path | None) -> None:
+    """Do a done SUBTASK again, as NOTE says: new subtasks give its task a new result."""
+    _continue(None, note, subtask, db_path)
+
+
+def _continue(task: str | None, ask: str, redo: str | None, db_path: Path | None) -> None:
+    store = open_existing(db_path)
+    try:
+        pending = actions.prepare_continuation(store, task, ask, redo)
+        runs.guard(store)  # before any model is asked
+        config = load_config().load()
+        try:
+            models = runs.models(config, store.conn)
+        except router.NoProvider as e:
+            raise click.ClickException(str(e)) from e
+        ref, count = continued(store, pending, models, config)
+        ui.note(
+            tn(
+                count,
+                "Task {ref} continues: {n} new subtask. `desman resume {ref}` works on it.",
+                "Task {ref} continues: {n} new subtasks. `desman resume {ref}` works on them.",
+                ref=ref,
+            )
+        )
+    finally:
+        store.conn.close()
+
+
+def continued(
+    store: Store,
+    pending: actions.Continuation,
+    models: runs.Models,
+    config: Config,
+    by: str = "person",
+) -> tuple[str, int]:
+    """Plan and add a continuation (ADR 0010); the task's ref and how many subtasks it got.
+    Shared by the CLI and the chat."""
+    with calls.for_(calls.Purpose(calls.Role.PLANNER, task_id=pending.task_id)):
+        ids, error = actions.continue_task(
+            store,
+            models.for_(calls.Role.PLANNER),
+            pending,
+            limit=runs.tuned(config.tuning, "max_subtasks"),
+            by=by,
+        )
+    if error is not None:
+        ui.warn(
+            t(
+                "The model did not make a plan, so the goal is the only subtask: {error}",
+                error=error,
+            )
+        )
+    return store.short_id(pending.task_id), len(ids)
+
+
 def _task_control(operation: str, task: str | None, db_path: Path | None) -> None:
     store = open_existing(db_path)
     try:
