@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Final, Literal
 
@@ -48,10 +49,6 @@ class Node:
     plan: bool = False
     """It describes intentions (PROJECT_PLAN, ROADMAP, ADRs), not what DESMAN does now."""
 
-    @property
-    def section(self) -> str:
-        return self.path.rsplit("/", 1)[0] if "/" in self.path else ""
-
 
 def _one_line(text: str, limit: int = ABOUT_CHARS) -> str:
     line = " ".join(text.split())
@@ -59,7 +56,8 @@ def _one_line(text: str, limit: int = ABOUT_CHARS) -> str:
 
 
 def _parts(text: str, limit: int = NODE_CHARS) -> list[str]:
-    """Split a text at paragraph (then line, then hard) boundaries into pieces ≤ `limit`."""
+    """Split a text at paragraph (then line, then hard) boundaries into pieces ≤ `limit`. Only
+    blank lines around a piece are dropped: indentation (code, nested lists) is kept."""
     pieces: list[str] = []
     current = ""
     for block in re.split(r"(\n\s*\n)", text):
@@ -75,9 +73,20 @@ def _parts(text: str, limit: int = NODE_CHARS) -> list[str]:
             pieces.append(current)
             current = ""
         current += block
-    if current.strip():
-        pieces.append(current)
-    return [p.strip() for p in pieces if p.strip()]
+    pieces.append(current)
+    return [p.strip("\n").rstrip() for p in pieces if p.strip()]
+
+
+def _numbered(path: str, about: str, texts: list[str], plan: bool = False) -> list[Node]:
+    """One node per text; several get "(part N of M)", so every path names one node."""
+    if len(texts) == 1:
+        return [Node(path, _one_line(about), texts[0], plan=plan)]
+    return [
+        Node(
+            f"{path} (part {n} of {len(texts)})", _one_line(f"{about} (part {n})"), text, plan=plan
+        )
+        for n, text in enumerate(texts, 1)
+    ]
 
 
 def command_nodes() -> list[Node]:
@@ -90,9 +99,11 @@ def command_nodes() -> list[Node]:
         groups.setdefault(group, []).append(line)
         names.setdefault(group, []).append(entry.name)
     return [
-        Node(f"Commands/{group}", _one_line("commands: " + ", ".join(names[group])), text)
+        node
         for group, lines in groups.items()
-        for text in _parts("\n".join(lines))
+        for node in _numbered(
+            f"Commands/{group}", "commands: " + ", ".join(names[group]), _parts("\n".join(lines))
+        )
     ]
 
 
@@ -127,7 +138,45 @@ def _name(path: Path, root: Path) -> str:
 
 
 def _title(line: str) -> str:
-    return line.lstrip("#").strip().replace("/", "∕")
+    """A heading as a path's part: plain characters, never "/" (it separates sections)."""
+    return line.lstrip("#").strip().replace("/", "-")
+
+
+def _sections(text: str) -> tuple[str, list[tuple[str | None, str]]]:
+    """The document's title and its sections by `##` heading (the preamble's is None). A
+    heading inside a fenced code block is code, not a heading."""
+    title = ""
+    heading: str | None = None
+    sections: list[tuple[str | None, str]] = []
+    current: list[str] = []
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and line.startswith("# ") and not title:
+            title = _title(line)
+        elif not fenced and line.startswith("## "):
+            sections.append((heading, "\n".join(current)))
+            heading, current = _title(line), [line]
+            continue
+        current.append(line)
+    sections.append((heading, "\n".join(current)))
+    return title, sections
+
+
+def _first_sentence(body: str) -> str:
+    """The section's first line of prose: not a heading, not inside or opening a code block."""
+    fenced = False
+    for line in body.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced or line.startswith("#"):
+            continue
+        plain = re.sub(r"[*_`>|]", "", line).strip(" -")
+        if plain:
+            return plain
+    return ""
 
 
 def doc_nodes(root: Path | None = None) -> list[Node]:
@@ -136,55 +185,31 @@ def doc_nodes(root: Path | None = None) -> list[Node]:
         return []
     nodes: list[Node] = []
     for path in _documents(root):
-        relative = path.relative_to(root).as_posix()
-        plan = relative.startswith(PLANS)
+        plan = path.relative_to(root).as_posix().startswith(PLANS)
         base = f"DESMAN/Docs/{_name(path, root)}"
-        text = path.read_text(encoding="utf-8")
-        heading = None
-        title = ""
-        sections: list[tuple[str | None, str]] = []
-        current: list[str] = []
-        for line in text.splitlines():
-            if line.startswith("# ") and not title:
-                title = _title(line)
-            if line.startswith("## "):
-                sections.append((heading, "\n".join(current)))
-                heading, current = _title(line), [line]
-            else:
-                current.append(line)
-        sections.append((heading, "\n".join(current)))
+        title, sections = _sections(path.read_text(encoding="utf-8"))
+        seen: dict[str, int] = {}
         for heading, body in sections:
             if not body.strip():
                 continue
             node_path = base if heading is None else f"{base}/{heading}"
-            parts = _parts(body)
-            first = next(
-                (
-                    plain
-                    for line in body.splitlines()
-                    if not line.startswith("#")
-                    and (plain := re.sub(r"[*_`>|]", "", line).strip(" -"))
-                ),
-                "",
-            )
-            for n, part in enumerate(parts, 1):
-                # The path names the document and the heading; the description says what it is.
-                about = (first or f"{title}: {heading}") if heading else title or _name(path, root)
-                suffix = f" ({n}/{len(parts)})" if len(parts) > 1 else ""
-                nodes.append(
-                    Node(
-                        node_path + suffix.replace("/", "∕"),
-                        _one_line(about + suffix),
-                        part,
-                        plan=plan,
-                    )
-                )
+            seen[node_path] = seen.get(node_path, 0) + 1
+            if seen[node_path] > 1:  # the same heading twice in one document
+                node_path += f" ({seen[node_path]})"
+            # The path names the document and the heading; the description says what it is.
+            if heading is None:
+                about = title or _name(path, root)
+            else:
+                about = _first_sentence(body) or f"{title}: {heading}"
+            nodes += _numbered(node_path, about, _parts(body), plan)
     return nodes
 
 
-def release_tree() -> list[Node]:
-    """Everything that comes with DESMAN, in a fixed order: commands, manual, documents."""
-    return [*command_nodes(), *manual_nodes(), *doc_nodes()]
+@cache
+def release_tree() -> tuple[Node, ...]:
+    """Everything that comes with DESMAN, in a fixed order: commands, manual, documents. Built
+    once per process: it changes only with the code (git)."""
+    return (*command_nodes(), *manual_nodes(), *doc_nodes())
 
 
 def find(nodes: Iterable[Node], path: str) -> Node | None:
@@ -192,65 +217,75 @@ def find(nodes: Iterable[Node], path: str) -> Node | None:
 
 
 def under(nodes: Iterable[Node], section: str) -> list[Node]:
-    prefix = section.rstrip("/") + "/"
-    return [n for n in nodes if n.path.startswith(prefix)]
+    """The section's own node (a document's preamble), if any, and everything below it."""
+    section = section.rstrip("/")
+    return [n for n in nodes if n.path == section or n.path.startswith(section + "/")]
 
 
 def _tokens(text: str) -> int:
     return len(text) // CHARS_PER_TOKEN
 
 
-def _line(node: Node) -> str:
-    return f"- {node.path}{' [plan]' if node.plan else ''}: {node.about}"
+Entry = Node | tuple[str, int]
+"""A line of the table of contents: a node, or a section with how many nodes it holds."""
 
 
 def contents(
-    nodes: list[Node], section: str | None = None, budget_tokens: int = CONTENTS_TOKENS
+    nodes: Iterable[Node], section: str | None = None, budget_tokens: int = CONTENTS_TOKENS
 ) -> str:
     """The table of contents a model chooses from: every node of `section` (all of them when
-    None) with its description, while that fits the budget. Otherwise the subsections, each with
-    how many nodes it holds, to be opened one at a time; never the texts."""
+    None) with its description, while that fits the budget. Otherwise the most detailed
+    listing that fits, deeper subsections shown with how many nodes they hold, to be opened one
+    at a time; failing that, paths alone, as many as fit. Never the texts."""
     shown = under(nodes, section) if section else list(nodes)
-    whole = "\n".join(_line(n) for n in shown)
+    whole = _render(shown)
     if _tokens(whole) <= budget_tokens:
         return whole
     first = section.rstrip("/").count("/") + 2 if section else 1
     deepest = max(n.path.count("/") for n in shown) + 1 if shown else first
-    listing = _collapsed(shown, first)
-    for depth in range(first + 1, deepest):  # the most detailed listing that still fits
+    entries = _collapsed(shown, first)
+    for depth in range(first + 1, deepest):
         deeper = _collapsed(shown, depth)
-        if _tokens(deeper) > budget_tokens:
+        if _tokens(_render(deeper)) > budget_tokens:
             break
-        listing = deeper
+        entries = deeper
+    listing = _render(entries)
     if _tokens(listing) <= budget_tokens:
         return listing
-    # Only nodes and no deeper sections, still too many: their paths alone, then as many as fit.
-    bare = [
-        line.split(": ", 1)[0] if not line.endswith("nodes)") else line
-        for line in listing.split("\n")
-    ]
     kept: list[str] = []
-    for n, line in enumerate(bare):
+    lines = _render(entries, about=False).split("\n")
+    for n, line in enumerate(lines):
         if _tokens("\n".join([*kept, line])) > budget_tokens - 10:
-            kept.append(f"- … and {len(bare) - n} more")
+            kept.append(f"- … and {len(lines) - n} more")
             break
         kept.append(line)
     return "\n".join(kept)
 
 
-def _collapsed(shown: list[Node], depth: int) -> str:
-    """Nodes up to `depth` parts listed as themselves; deeper ones as their section, counted."""
-    lines: list[str] = []
+def _collapsed(shown: list[Node], depth: int) -> list[Entry]:
+    """Nodes up to `depth` parts as themselves; deeper ones as their section, counted."""
+    entries: list[Entry] = []
     counts: dict[str, int] = {}
     for node in shown:
         parts = node.path.split("/")
-        if len(parts) <= depth:  # a node right in the section is listed as itself
-            lines.append(_line(node))
+        if len(parts) <= depth:
+            entries.append(node)
             continue
         group = "/".join(parts[:depth])
         if group not in counts:
-            lines.append(group)
+            entries.append((group, 0))
         counts[group] = counts.get(group, 0) + 1
-    return "\n".join(
-        f"- {line}/ ({counts[line]} nodes)" if line in counts else line for line in lines
-    )
+    return [e if isinstance(e, Node) else (e[0], counts[e[0]]) for e in entries]
+
+
+def _render(entries: Iterable[Entry], about: bool = True) -> str:
+    lines = []
+    for entry in entries:
+        if isinstance(entry, Node):
+            mark = " [plan]" if entry.plan else ""
+            lines.append(
+                f"- {entry.path}{mark}: {entry.about}" if about else f"- {entry.path}{mark}"
+            )
+        else:
+            lines.append(f"- {entry[0]}/ ({entry[1]} nodes)")
+    return "\n".join(lines)

@@ -13,7 +13,7 @@ from desman.knowledge import Node
 
 @pytest.fixture(scope="module")
 def tree() -> list[Node]:
-    return knowledge.release_tree()
+    return list(knowledge.release_tree())
 
 
 def test_every_node_fits_and_is_named_once(tree: list[Node]) -> None:
@@ -78,7 +78,7 @@ def test_a_long_section_is_split_into_numbered_parts(tmp_path: Path) -> None:
     (tmp_path / "ROADMAP.md").write_text("# R\n", encoding="utf-8")
     parts = [n for n in knowledge.doc_nodes(tmp_path) if "Long" in n.path]
     assert len(parts) > 1 and all(len(n.text) <= knowledge.NODE_CHARS for n in parts)
-    assert parts[0].path.endswith(f"(1∕{len(parts)})") and not parts[0].plan
+    assert parts[0].path.endswith(f"(part 1 of {len(parts)})") and not parts[0].plan
     assert all(f"paragraph {i} " in "".join(n.text for n in parts) for i in range(20))
 
 
@@ -102,3 +102,40 @@ def test_contents_fit_their_budget_and_never_show_texts(tree: list[Node]) -> Non
     many = [Node(f"B/n{i}", "about " * 10, "t") for i in range(50)]
     cut = knowledge.contents(many, "B", budget_tokens=100).splitlines()
     assert cut[0] == "- B/n0" and cut[-1].startswith("- … and ")  # paths alone, then cut
+
+
+def test_code_blocks_headings_and_repeated_sections(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "ROADMAP.md").write_text("# R\n", encoding="utf-8")
+    (tmp_path / "docs" / "how.md").write_text(
+        "# How\n\nIntro.\n\n## Run / stop\n\n```bash\n## not a heading\n    indented\n```\n"
+        "Then it runs.\n\n## Notes\n\nOne.\n\n## Notes\n\nTwo.\n",
+        encoding="utf-8",
+    )
+    nodes = [n for n in knowledge.doc_nodes(tmp_path) if "/how" in n.path]
+    assert [n.path for n in nodes] == [
+        "DESMAN/Docs/how",
+        "DESMAN/Docs/how/Run - stop",
+        "DESMAN/Docs/how/Notes",
+        "DESMAN/Docs/how/Notes (2)",
+    ]
+    run = nodes[1]
+    assert "## not a heading\n    indented" in run.text  # code kept whole, indentation too
+    assert run.about == "Then it runs."  # prose, not the code block's language
+    # Opening the document's section offers its preamble too.
+    assert knowledge.contents(nodes, "DESMAN/Docs/how").startswith("- DESMAN/Docs/how: How")
+
+
+def test_a_long_command_group_gets_numbered_parts() -> None:
+    nodes = knowledge._numbered("Commands/global", "commands: many", ["a", "b"])
+    assert [n.path for n in nodes] == [
+        "Commands/global (part 1 of 2)",
+        "Commands/global (part 2 of 2)",
+    ]
+
+
+def test_bare_paths_are_real_paths() -> None:
+    many = [Node(f"B/Phase {i}: start", "about " * 10, "t") for i in range(50)]
+    lines = knowledge.contents(many, "B", budget_tokens=100).splitlines()
+    assert lines[0] == "- B/Phase 0: start"  # a ": " in the path is kept
+    assert all(knowledge.find(many, line[2:]) for line in lines[:-1])
