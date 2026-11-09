@@ -71,7 +71,7 @@ from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
-from desman.core.states import SubtaskStatus, TaskStatus
+from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.core.workspace import PathEscapeError, workspace_root_for
 from desman.i18n import t, tn
@@ -206,6 +206,8 @@ class Chat:
         one (`desman -c`); /sessions continues any."""
         self.waiting = InboxWatch(self.store)
         """What waits for the person's decision: told at the start, then as it comes (5.1)."""
+        self._proposing = False
+        """A continuation DESMAN proposed is in its window (journaled as such once accepted)."""
         self._opened: dict[str, list[str]] = {}
         """Per session, the knowledge tree's paths the last answer read (`/context`)."""
         self._gave_up: dict[str, int] = {}
@@ -664,7 +666,8 @@ class Chat:
             assert models is not None
             runs.guard(self.store)  # before any model is asked
             ui.note(t("Planning…"))
-            ref, count = continued(self.store, pending, models, config)
+            by = "proposal" if self._proposing else "person"
+            ref, count = continued(self.store, pending, models, config, by)
             self._event(
                 tn(
                     count,
@@ -1355,6 +1358,34 @@ class Chat:
                 self._say(retold, task_id)
                 self._fallback_note(interlocutor, task_id)
         self._files(task_id, ref, root)
+        if report.status is TaskStatus.DONE and interlocutor.proposal:
+            self._propose_continuation(task_id, ref, interlocutor.proposal, interlocutor)
+
+    def _propose_continuation(
+        self, task_id: str, ref: str, ask: str, interlocutor: Interlocutor
+    ) -> None:
+        """DESMAN's own proposal to continue a done task (ADR 0010): the `task extend` window,
+        once per task (a declined one is not proposed again); only the person's yes plans it."""
+        if self.store.conn.execute(
+            "SELECT 1 FROM audit_log WHERE task_id = ? AND action = 'continuation_proposed'",
+            (task_id,),
+        ).fetchone():
+            return
+        last = [s for s in self.store.list_subtasks(task_id) if s.parent_id is None][-1]
+        self.store.note(last.id, Actor.SCHEDULER, "continuation_proposed", {"ask": ask})
+        config = self._config()
+        if config is None:
+            return
+        self._proposing = True
+        try:
+            self._command(
+                Command(type="command", name="task extend", args={"task": ref, "goal": ask}),
+                config,
+                self._models(config, command=True),
+                interlocutor,
+            )
+        finally:
+            self._proposing = False
 
     def _files(self, task_id: str, ref: str, root: Path) -> None:
         """Where the task's files are, told by code (the interlocutor sees it as an event)."""
