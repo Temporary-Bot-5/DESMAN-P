@@ -114,6 +114,9 @@ panelSearch.value = 'A1B2C3 work'; filterPanels();
 assert.equal(tasks.querySelectorAll('article.task')[0].hidden, false);
 panelSearch.value = 'work nothing-like-this'; filterPanels();
 assert.equal(tasks.querySelectorAll('article.task')[0].hidden, true);
+assert.equal(tasks.children.find(n => n.tagName === 'H2').hidden, true); // its heading too
+panelSearch.value = 'Change'; filterPanels(); // a button's label is not what a card names
+assert.equal(tasks.querySelectorAll('article.task')[0].hidden, true);
 panelSearch.value = ''; filterPanels();
 assert.equal(tasks.querySelectorAll('article.task')[0].hidden, false);
 controls[0].dispatchEvent({type:'click'});

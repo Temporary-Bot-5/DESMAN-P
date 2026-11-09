@@ -722,7 +722,7 @@ function showTasks(data) {
     if (heading !== section) { text("h2", heading, root); section = heading; }
     const card = text("article", "", root);
     card.className = `task ${task.needs_human ? "waiting" : task.status}`;
-    card.dataset.search = `${task.ref} ${task.goal}`;
+    card.dataset.search = [task.ref, task.goal, ...task.subtasks.map(s => s.title || "")].join(" ");
     const titleRow = text("div", "", card);
     titleRow.className = "task-title-row";
     const toggle = button(titleRow, "", () => {
@@ -834,12 +834,21 @@ function showWaiting(data) {
   }
 }
 
-// The search over Tasks and Modules: every word, in any order, in what a card shows or names
-// (a task's ref, a module's #id and full model name).
+// The search over Tasks and Modules: every word, in any order, in what a card names (built
+// when it is drawn: a task's ref, goal and steps; a module's #id, model, source and work), never
+// in the hidden editor's lists or the buttons' labels.
 function filterPanels() {
   const terms = ($("panel-search")?.value || "").toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  const matches = node => terms.every(w => `${node.textContent} ${node.dataset.search || ""} ${[...node.querySelectorAll("[data-search]")].map(n => n.dataset.search).join(" ")}`.toLocaleLowerCase().includes(w));
-  for (const card of $("tasks").querySelectorAll("article.task")) card.hidden = !matches(card);
+  const matches = node => terms.every(w => [node, ...node.querySelectorAll("[data-search]")]
+    .map(n => n.dataset.search || "").join(" ").toLocaleLowerCase().includes(w));
+  let heading = null, shown = 0;
+  const closeGroup = () => { if (heading) heading.hidden = !shown && terms.length > 0; };
+  for (const node of $("tasks").children) {
+    if (node.tagName === "H2") { closeGroup(); heading = node; shown = 0; continue; }
+    if (node.tagName !== "ARTICLE") continue;
+    node.hidden = !matches(node); if (!node.hidden) shown++;
+  }
+  closeGroup();
   for (const section of $("modules").querySelectorAll("section")) {
     let shown = 0;
     for (const card of section.querySelectorAll("article.module-card")) { card.hidden = !matches(card); if (!card.hidden) shown++; }
@@ -885,7 +894,8 @@ function moduleCard(parent, m, placement = "modules") {
   roleLabel.className = "module-role"; roleLabel.title = roles.join("\n");
   const info = text("div", "", box); info.className = "module-info";
   if (m.module_id) text("small", `#${m.module_id}`, info).className = "module-id";
-  card.dataset.search = [m.module_id && `#${m.module_id}`, m.model, m.provider_name, m.key_label].filter(Boolean).join(" ");
+  card.dataset.search = [m.module_id && `#${m.module_id}`, m.model, m.provider_name, m.key_label,
+    ...(m.work || []).map(w => w.title)].filter(Boolean).join(" ");
   const name = text("strong", m.model ? m.model.split("/").at(-1) : words.auto, info);
   name.className = "module-model"; name.title = m.model || words.auto; name.dataset.moduleRole = m.role;
   const local = ["ollama", "llamacpp"].includes(m.provider);

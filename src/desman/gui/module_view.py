@@ -268,7 +268,9 @@ def cards(
         card = add(hold.source, hold.model, section)
         if card:
             card.setdefault("holds", []).append(hold.model_dump(exclude={"paused_tasks"}))
-            if hold.state == "stopped":
+            # Stopped everywhere: kept so it can be continued. A stop on one task or chat
+            # shows on that card; its module is not kept here once that work is over.
+            if hold.state == "stopped" and hold.scope in {"all", "network"}:
                 kept.add((section, hold.source, hold.model))
         if hold.scope in {"all", "network"}:
             for card in found.values():
