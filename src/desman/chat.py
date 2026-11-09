@@ -1733,15 +1733,26 @@ class Chat:
             ):
                 raise ValueError("unavailable model")
             tuning_cli.resolved_key(config, action.role, action.model, action.key)
+
+            def picks(choice: choices.Choice) -> str | None:
+                """The model this scope asks first with `choice` (Auto included)."""
+                if choice.model == "auto":
+                    choice = choices.Choice(model=None, key=choice.key)
+                if action.scope == "role":
+                    tuned = config.tuning.model_copy(deep=True)
+                    setattr(tuned.models, action.role, choice.model)
+                    setattr(tuned.keys, action.role, choice.key)
+                    now = config.model_copy(update={"tuning": tuned})
+                else:
+                    now = choices.effective(config, action.role, choice)
+                return next(iter(router.candidates(now, action.role)), None)
+
+            # Auto may run a local model now or after the change: compare what is picked.
             current = saved.model or row["model"]
-            if current in (None, "auto"):  # Auto: the model it picks now (may be a local one)
-                now = (
-                    config
-                    if action.scope == "role"
-                    else choices.effective(config, action.role, saved)
-                )
-                current = next(iter(router.candidates(now, action.role)), None)
-            question = modules_cli.page_choice_question(config, current, action.model)
+            if current in (None, "auto"):
+                current = picks(saved)
+            after = action.model or picks(choices.Choice(model=None, key=action.key))
+            question = modules_cli.page_choice_question(config, current, after)
             if question is not None and not ui.confirm(question, default=False):
                 return
             if action.scope == "role":

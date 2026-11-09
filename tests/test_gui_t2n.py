@@ -247,7 +247,7 @@ def test_change_asks_only_when_a_local_model_is_involved(page: Any) -> None:
     assert leaving is not None and cloud in leaving and "leave this computer" in leaving
     to_auto = modules_cli.page_choice_question(cfg, LOCAL, None)
     assert to_auto is not None and "leave this computer" in to_auto
-    assert modules_cli.page_choice_question(cfg, LOCAL, LOCAL) is not None
+    assert modules_cli.page_choice_question(cfg, LOCAL, LOCAL) is None
 
 
 @pytest.mark.parametrize("scope", ["task", "role"])
@@ -354,3 +354,17 @@ def test_change_from_auto_running_a_local_model_asks(
     )
     assert len(asked) == 1 and LOCAL in asked[0] and "leave this computer" in asked[0]
     assert choices.get(chat.store.conn, "task", identity, "text").model is None
+
+
+def test_auto_key_change_keeping_the_local_model_does_not_ask(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, chat, cfg, identity = page
+    monkeypatch.setattr(ui, "confirm", no_window)
+    # Auto picks the same local model before and after: only the key changes (Devin, PR #110).
+    monkeypatch.setattr(router, "candidates", lambda *_: [LOCAL])
+    chat._action(
+        ui.ModuleAction(
+            type="module", role="text", scope="task", scope_id=identity, model=None, key=None
+        )
+    )

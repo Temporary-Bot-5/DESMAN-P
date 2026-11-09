@@ -594,10 +594,12 @@ def page_hold_question(
 def page_choice_question(config: Config, old: str | None, new: str | None) -> str | None:
     """The window for Change, or None to apply at once: only a change that involves a local
     model asks — picking one (its size against free memory) or leaving one for the cloud."""
+    if old == new:  # the same model stays first (e.g. only its key changed)
+        return None
     if is_local(new):
         assert new is not None
         return t("Use the local model {model}?", model=new) + "\n" + _local_size(config, new)
-    if is_local(old) and old != new:
+    if is_local(old):
         note = (
             _cloud_note(config)
             if new is None
