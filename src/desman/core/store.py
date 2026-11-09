@@ -1635,9 +1635,12 @@ class Store:
 
     def continuation_proposed(self, task_id: str) -> bool:
         """DESMAN already proposed to continue this task: it is not proposed again."""
+        return self.proposed(task_id, "continuation_proposed")
+
+    def proposed(self, task_id: str, action: str) -> bool:
+        """The task's audit has a note `action` (a proposal made once per task)."""
         row = self.conn.execute(
-            "SELECT 1 FROM audit_log WHERE task_id = ? AND action = 'continuation_proposed'",
-            (task_id,),
+            "SELECT 1 FROM audit_log WHERE task_id = ? AND action = ?", (task_id, action)
         ).fetchone()
         return row is not None
 

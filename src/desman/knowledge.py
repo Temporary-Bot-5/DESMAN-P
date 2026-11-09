@@ -12,6 +12,11 @@ run time; nothing of it is stored, and only people change it, through git:
   them as plans, never as what DESMAN does. Without a repository checkout (an installed package)
   there are no Docs nodes.
 
+K.4 adds the person's own nodes (`core.nodes`, stored in the database): `personal()` reads them
+as nodes of origin `person`, and `tree()` / `for_tasks()` put them after the release part. They
+are given only while the person agreed to personalisation, and never to a temporary chat or a
+desman-global job.
+
 Texts are prompts' material: English where the source is (the manual, the catalog), the docs as
 they are written. Tokens are estimated as characters / 4, as everywhere else.
 """
@@ -19,18 +24,20 @@ they are written. Tokens are estimated as characters / 4, as everywhere else.
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Final, Literal
 
+from desman.core import nodes as personal_store
 from desman.core.context import Knowledge, KnowledgeText
 
-NODE_CHARS: Final = 6000
+NODE_CHARS: Final = personal_store.TEXT_CHARS
 """The longest a node's text may be (~1.5k tokens): longer sections are split into parts."""
 
-ABOUT_CHARS: Final = 100
+ABOUT_CHARS: Final = personal_store.ABOUT_CHARS
 """A node's description is one line for choosing, at most this long."""
 
 CONTENTS_TOKENS: Final = 800
@@ -50,6 +57,8 @@ class Node:
     origin: Origin = "release"
     plan: bool = False
     """It describes intentions (PROJECT_PLAN, ROADMAP, ADRs), not what DESMAN does now."""
+    untrusted: bool = False
+    """A personal node whose text came from a task's result: data, never instructions."""
 
 
 def _one_line(text: str, limit: int = ABOUT_CHARS) -> str:
@@ -220,6 +229,25 @@ def task_tree() -> tuple[Node, ...]:
     return tuple(n for n in release_tree() if not n.path.startswith("Commands/"))
 
 
+def personal(conn: sqlite3.Connection) -> tuple[Node, ...]:
+    """The person's own nodes (K.4), as the tree holds them. The caller decides whether they
+    may be seen (`Config.personalize`, not a temporary chat)."""
+    return tuple(
+        Node(n.path, n.about, n.text, origin="person", untrusted=n.untrusted)
+        for n in personal_store.PersonalNodes(conn).nodes()
+    )
+
+
+def tree(own: Iterable[Node] = ()) -> tuple[Node, ...]:
+    """The whole tree the chat chooses from: the release part, then the person's nodes."""
+    return (*release_tree(), *own)
+
+
+def for_tasks(own: Iterable[Node] = ()) -> tuple[Node, ...]:
+    """The tree tasks are given: `task_tree()`, then the person's nodes."""
+    return (*task_tree(), *own)
+
+
 def resolve(nodes: Iterable[Node], given: str) -> str | None:
     """A path of the tree as a model may write it, in any case: a node's path, a section's
     (ending in "/": a document's section, not its preamble node of the same name), or just a
@@ -263,12 +291,12 @@ def read(nodes: Iterable[Node], given: str) -> KnowledgeText | None:
     node = find(nodes, path)
     if node is None:
         return KnowledgeText(path=path, text=contents(nodes, path.rstrip("/")))
-    return KnowledgeText(path=node.path, text=node.text, plan=node.plan)
+    return KnowledgeText(path=node.path, text=node.text, plan=node.plan, untrusted=node.untrusted)
 
 
 def reader(tree: Callable[[], Iterable[Node]] = task_tree) -> Knowledge:
     """Looks paths up in `tree`, asked at every lookup (the release part is built once per
-    process; K.4's personal nodes will have to be read fresh by the function given here)."""
+    process; the person's nodes are read fresh by the function given here: `runs`)."""
     return lambda path: read(tree(), path)
 
 
@@ -342,7 +370,7 @@ def _render(entries: Iterable[Entry], about: bool = True) -> str:
     lines = []
     for entry in entries:
         if isinstance(entry, Node):
-            mark = " [plan]" if entry.plan else ""
+            mark = " [plan]" if entry.plan else " [untrusted]" if entry.untrusted else ""
             lines.append(
                 f"- {entry.path}{mark}: {entry.about}" if about else f"- {entry.path}{mark}"
             )

@@ -40,7 +40,7 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "Work becomes a durable task: a planner makes up to 8 subtasks by default, tagged text/code/analysis; a template is used if planning fails. Executors work, reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page starts its own worker pool: task requests return after planning, queued cards wait for workers, and results are retold once in their own chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. Task status comes from subtasks. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 nodes of DESMAN's docs (status lists them).",
+        "Work becomes a durable task: a planner makes up to 8 subtasks by default, tagged text/code/analysis; a template is used if planning fails. Executors work, reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page starts its own worker pool: task requests return after planning, queued cards wait for workers, and results are retold once in their own chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. Task status comes from subtasks. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 knowledge-tree nodes (status lists them).",
     ),
     Topic(
         "files",
@@ -213,6 +213,24 @@ TOPICS: Final = (
         "sees, changes and erases them in `/profile`, and turning it off hides them. Notes "
         "never hold secrets, never allow anything and never confirm a change. The journal "
         "records that a note changed, never its text.",
+    ),
+    Topic(
+        "nodes",
+        "the person's own nodes of the knowledge tree: projects, preferences, kept results",
+        "Besides DESMAN's own docs, the knowledge tree may hold the person's nodes: a path "
+        "(Projects/Site/Brief), one line of what it is for, and a text (up to 6000 "
+        "characters). Models see the paths and descriptions and read only the texts they "
+        "choose: the interlocutor to answer, the planner for a task's subtasks (an executor "
+        "may read one with a tool). They exist only with personalisation on (`desman "
+        "personalize`); turned off, the nodes stay unused until removed. A temporary chat "
+        "never proposes one, and neither it nor the plans of its tasks see them. `desman nodes` lists them, `desman nodes show PATH` "
+        "shows any node's text, `desman nodes add PATH --about TEXT --text TEXT`, `desman "
+        "nodes change PATH` (--to, --about, --text) and `desman nodes remove PATH` edit them; "
+        "the page has them in Settings, Personalisation. The interlocutor may propose a "
+        "change with any answer, and a done task's retelling may propose keeping part of its "
+        "result; nothing is kept before the person confirms it in a window. A node kept from "
+        "a task's result is marked: models read it as data, not instructions. Nodes are "
+        "changed and erased in place; the journal records which node changed, never its text.",
     ),
     Topic(
         "language",

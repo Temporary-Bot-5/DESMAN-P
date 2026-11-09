@@ -732,6 +732,21 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE subtasks ADD COLUMN knowledge_json TEXT NOT NULL DEFAULT '[]'
         CHECK (json_valid(knowledge_json) AND json_type(knowledge_json) = 'array');
     """,
+    # 46: the person's own nodes of the knowledge tree (ADR 0009, K.4). Personal data, like
+    # profile_notes: changed and erased in place; who changed which node is kept in operator_log
+    # (by number, never the path or text)
+    """
+    CREATE TABLE personal_nodes (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        path        TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK (length(path) BETWEEN 1 AND 200),
+        about       TEXT NOT NULL CHECK (length(about) BETWEEN 1 AND 100),
+        text        TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 6000),
+        author      TEXT NOT NULL CHECK (author IN ('person', 'interlocutor', 'task')),
+        untrusted   INTEGER NOT NULL DEFAULT 0 CHECK (untrusted IN (0, 1)),
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    ) STRICT;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

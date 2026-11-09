@@ -13,6 +13,7 @@ import httpx
 from desman import commands, global_cli, i18n, protected_cli, providers, runs, tuning_cli, wizard
 from desman.config import TUNING_BOUNDS, Config, Tuning
 from desman.core import protected
+from desman.core.nodes import PersonalNodes
 from desman.core.profile import Profile
 from desman.gui.front import WebFront
 from desman.i18n import t
@@ -24,6 +25,7 @@ from desman.settings_actions import (
     Limits,
     Models,
     Network,
+    Node,
     Permission,
     Personalize,
     Protected,
@@ -93,6 +95,13 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             "notes": [{"id": n.id, "text": n.text} for n in Profile(conn).notes()]
             if conn is not None and config.personalize
             else [],
+            # The person's own nodes (K.4): shown whatever the setting, they are the person's.
+            "nodes": [
+                {"path": n.path, "about": n.about, "untrusted": n.untrusted}
+                for n in PersonalNodes(conn).nodes()
+            ]
+            if conn is not None
+            else [],
         },
         "behaviour": {
             "values": config.behaviour.model_dump(),
@@ -153,6 +162,10 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
         name, args = "personalize", {"on": change.on}
     elif isinstance(change, Behaviour):
         name, args = "behaviour", change.model_dump(exclude={"section"})
+    elif isinstance(change, Node):
+        name, args = f"nodes {change.operation}", {"path": change.path}
+        if change.operation == "add":
+            args.update(about=change.about, text=change.text)
     elif isinstance(change, Limits):
         name, args = "tuning", {change.name: change.value}
     elif isinstance(change, Models):

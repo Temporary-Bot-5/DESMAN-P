@@ -44,7 +44,7 @@ from typing import Any
 
 import click
 import httpx
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from rich.text import Text
 
 from desman import (
@@ -67,6 +67,7 @@ from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, choices, db, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
+from desman.core.nodes import Author as NodeAuthor
 from desman.core.policy import Access
 from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report
@@ -77,12 +78,15 @@ from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.core.workspace import PathEscapeError, workspace_root_for
 from desman.i18n import t, tn
 from desman.interlocutor import (
+    AddNode,
     AddNote,
+    ChangeNode,
     ChangeNote,
     Clarify,
     Command,
     Interlocutor,
     NewTask,
+    NodeEdit,
     ProfileEdit,
     Reply,
     excerpt,
@@ -452,7 +456,11 @@ class Chat:
         personal = config.personalize and not self.temporary  # a temporary chat notes nothing
         notes = self.profile.notes() if personal else None
         interlocutor = Interlocutor(
-            models.for_(calls.Role.INTERLOCUTOR), config.language, notes, config.behaviour
+            models.for_(calls.Role.INTERLOCUTOR),
+            config.language,
+            notes,
+            config.behaviour,
+            self._own_nodes(config),
         )
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
         if self.session_id is not None and not self.temporary:  # nothing kept, nothing summarised
@@ -494,11 +502,58 @@ class Chat:
             self._say(turn.question)
             self._fallback_note(interlocutor)
         elif isinstance(turn, NewTask):
+            if personal and turn.node is not None:  # asked now, not after the whole task
+                self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
+                turn = turn.model_copy(update={"node": None})
             self._task(turn, config, models, interlocutor)
         else:
             if turn.text is not None:
                 self._say(turn.text, settle=False)
             self._command(turn, config, models, interlocutor)
+        if personal and turn.node is not None:  # off: never told how, never taken
+            self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
+
+    def _own_nodes(self, config: Config) -> tuple[knowledge.Node, ...] | None:
+        """The person's nodes the interlocutor is given (K.4): none with personalisation off or
+        in a temporary chat (which never writes one either)."""
+        if not config.personalize or self.temporary:
+            return None
+        return knowledge.personal(self.store.conn)
+
+    def _propose_node(
+        self,
+        edit: NodeEdit,
+        config: Config,
+        models: runs.Models | None,
+        interlocutor: Interlocutor | None,
+        author: NodeAuthor,
+    ) -> None:
+        """A change of the person's nodes an agent proposed: the `nodes` command's window,
+        worded by code; only the person's yes applies it. From a task it is marked untrusted.
+        Not when personalisation went off meanwhile (a command of the same turn)."""
+        now = self._config()
+        if now is None or self._own_nodes(now) is None:
+            return
+        args: dict[str, JsonValue]
+        if isinstance(edit, AddNode):
+            name, args = "nodes add", {"path": edit.add, "about": edit.about, "text": edit.text}
+        elif isinstance(edit, ChangeNode):
+            given = {"to": edit.to, "about": edit.about, "text": edit.text}
+            args = {"path": edit.change, **{k: v for k, v in given.items() if v is not None}}
+            name = "nodes change"
+        else:
+            name, args = "nodes remove", {"path": edit.remove}
+        if author is NodeAuthor.TASK:
+            ui.note(t("DESMAN proposes to keep this from the task's result:"))
+        else:
+            ui.note(t("DESMAN proposes a change of your knowledge tree:"))
+        self._command(
+            Command(type="command", name=name, args=args),
+            config,
+            models,
+            interlocutor,
+            node_author=author,
+        )
 
     def _add_user(self, text: str) -> str:
         """The person's message, kept in the session (a new one with the first message)."""
@@ -614,6 +669,7 @@ class Chat:
         *,
         typed: bool = False,
         typed_entry: commands.Entry | None = None,
+        node_author: NodeAuthor | None = None,
     ) -> None:
         """The command the interlocutor asked for, through the catalog; never as it was
         written. Model-requested changes need the person's answer in a code-built window; typed commands keep confirmations and previews required by the CLI."""
@@ -669,7 +725,14 @@ class Chat:
             ui.note(t("Planning…"))
             # Read once: whatever runs after this (the new work itself) is not the proposal.
             by, self._proposing = ("proposal" if self._proposing else "person"), False
-            ref, count = continued(self.store, pending, models, config, by)
+            ref, count = continued(
+                self.store,
+                pending,
+                models,
+                config,
+                by,
+                personal=config.personalize and not self.temporary,
+            )
             self._event(
                 tn(
                     count,
@@ -690,6 +753,8 @@ class Chat:
             session_id=lambda: self.session_id,
             in_terminal=self.in_terminal,
             continue_task=continue_task,
+            temporary=self.temporary,
+            node_author=node_author or (NodeAuthor.PERSON if typed else NodeAuthor.INTERLOCUTOR),
         )
         try:
             made = entry.handler(context, args)
@@ -796,6 +861,7 @@ class Chat:
                     config.language,
                     self.profile.notes() if config.personalize and not self.temporary else None,
                     config.behaviour,
+                    self._own_nodes(config),
                 )
         self._command(
             Command(type="command", name=entry.name, args=args.model_dump(mode="json")),
@@ -998,7 +1064,8 @@ class Chat:
                 models.for_(calls.Role.PLANNER),
                 goal,
                 limit=runs.tuned(config.tuning, "max_subtasks"),
-                tree=knowledge.task_tree(),
+                # A temporary chat's work is given no personal node, as it is told no note.
+                tree=runs.task_tree(self.store.conn, config.personalize and not self.temporary),
             )
         if planned.error is not None:
             ui.warn(
@@ -1202,6 +1269,7 @@ class Chat:
                         config.language,
                         self.profile.notes() if config.personalize and not self.temporary else None,
                         config.behaviour,
+                        self._own_nodes(config),
                     )
                     for task in settled:
                         self._outcome(task, self.store.short_id(task), speaker)
@@ -1298,6 +1366,7 @@ class Chat:
         root = workspace_root_for(self.store.conn)
         files = task_files.for_retelling(root, task_id)
         proposal: str | None = None
+        remember: AddNode | ChangeNode | None = None
         outcome = {
             "goal": report.goal,
             "status": report.status.value,
@@ -1362,7 +1431,10 @@ class Chat:
                 self._say(retold, task_id)
                 self._fallback_note(interlocutor, task_id)
                 proposal = interlocutor.proposal  # only from a retelling that was shown
+                remember = interlocutor.remember
         self._files(task_id, ref, root)
+        if report.status is TaskStatus.DONE and remember is not None:
+            self._remember(task_id, remember, interlocutor)
         if report.status is TaskStatus.DONE and proposal:
             self._propose_continuation(task_id, ref, proposal, interlocutor)
 
@@ -1393,6 +1465,23 @@ class Chat:
             )
         finally:
             self._proposing = False
+
+    def _remember(
+        self, task_id: str, edit: AddNode | ChangeNode, interlocutor: Interlocutor
+    ) -> None:
+        """What a done task's retelling proposed to keep as one of the person's nodes: the
+        window, marked untrusted, once per task (a declined one is not proposed again). Only
+        while personalisation is on, never in a temporary chat."""
+        config = self._config()
+        if config is None or self._own_nodes(config) is None:
+            return
+        if self.store.proposed(task_id, "node_proposed"):
+            return
+        self.store.note_task(task_id, Actor.SCHEDULER, "node_proposed", {})
+        self._outcome_audit = None  # what follows is not this task's retelling
+        self._propose_node(
+            edit, config, self._models(config, command=True), interlocutor, NodeAuthor.TASK
+        )
 
     def _files(self, task_id: str, ref: str, root: Path) -> None:
         """Where the task's files are, told by code (the interlocutor sees it as an event)."""
@@ -2033,7 +2122,9 @@ class Chat:
             else History(summary=None, messages=[])
         )
         notes = self.profile.notes() if config.personalize and not self.temporary else None
-        interlocutor = Interlocutor(_InspectionLLM(), config.language, notes, config.behaviour)
+        interlocutor = Interlocutor(
+            _InspectionLLM(), config.language, notes, config.behaviour, self._own_nodes(config)
+        )
         placeholder = Message(
             seq=0,
             session_id=self.session_id or "",

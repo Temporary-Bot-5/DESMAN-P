@@ -69,6 +69,22 @@ class Forget(Fields):
     note: int = Field(ge=1)
 
 
+class Node(Fields):
+    """One of the person's nodes of the knowledge tree (K.4), added or removed on the page."""
+
+    section: Literal["node"]
+    operation: Literal["add", "remove"]
+    path: str = Field(min_length=1, max_length=200)
+    about: str = Field(default="", max_length=100)
+    text: str = Field(default="", max_length=6000)
+
+    @model_validator(mode="after")
+    def complete(self) -> "Node":
+        if self.operation == "add" and not (self.about.strip() and self.text.strip()):
+            raise ValueError("a new node needs a description and a text")
+        return self
+
+
 class Behaviour(Fields):
     section: Literal["behaviour"]
     length: Literal["auto", "short", "detailed"] = "auto"
@@ -135,6 +151,7 @@ Setting = Annotated[
     | Permission
     | Personalize
     | Forget
+    | Node
     | Behaviour
     | Limits
     | Models

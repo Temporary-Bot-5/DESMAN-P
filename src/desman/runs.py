@@ -19,7 +19,7 @@ import httpx
 
 from desman import knowledge, net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
-from desman.config import Config, Tuning
+from desman.config import Config, ConfigError, Tuning, open_config
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
@@ -524,6 +524,20 @@ def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
     return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 
+def task_tree(conn: sqlite3.Connection, personalize: bool) -> tuple[knowledge.Node, ...]:
+    """The knowledge tree tasks choose from (K.3): the release part, and the person's nodes
+    (K.4) while they agreed to personalisation."""
+    return knowledge.for_tasks(knowledge.personal(conn) if personalize else ())
+
+
+def _personalize() -> bool:
+    """Whether the person agrees to personalisation now (no config that loads: no)."""
+    try:
+        return open_config().load().personalize
+    except ConfigError:
+        return False
+
+
 def coordinator(
     store: Store,
     models: Models,
@@ -536,7 +550,9 @@ def coordinator(
     network: Crew | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
-    tree = knowledge.reader()  # the person's own work only: never a job's (`network`)
+    # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
+    # only while personalisation is on (turned off mid-run: no longer given).
+    tree = knowledge.reader(lambda: task_tree(store.conn, _personalize()))
     return _coordinator(
         store,
         models,

@@ -1129,7 +1129,7 @@ function settingSave(parent, change, label = words.save) {
     $("settings-result").textContent = "";
     return {type: "settings", id, change: typeof change === "function" ? change() : change};
   });
-  if ([words.add_key, words.join, words.lend, words.download, words.approve].includes(label)) b.classList.add("primary");
+  if ([words.add_key, words.join, words.lend, words.download, words.approve, words.add_node].includes(label)) b.classList.add("primary");
   return b;
 }
 
@@ -1206,6 +1206,21 @@ function drawSettings() {
     for (const note of d.personalize.notes) {
       const row = text("div", note.text, root);
       settingSave(row, {section: "forget", note: note.id}, words.forget);
+    }
+    if (d.personalize.on || d.personalize.nodes.length) text("h3", words.your_nodes, root);
+    for (const node of d.personalize.nodes) {
+      const row = text("div", "", root);
+      row.className = "setting-node";
+      text("strong", node.path, row);
+      text("small", node.untrusted ? `${node.about} · ${words.from_task}` : node.about, row);
+      settingSave(row, {section: "node", operation: "remove", path: node.path}, words.remove);
+    }
+    if (d.personalize.on) {
+      const form = text("section", "", root);
+      const path = settingInput(form, words.node_path, ""); path.maxLength = 200;
+      const about = settingInput(form, words.node_about, ""); about.maxLength = 100;
+      const body = settingInput(form, words.node_text, "", "textarea"); body.maxLength = 6000;
+      settingSave(form, () => ({section: "node", operation: "add", path: path.value, about: about.value, text: body.value}), words.add_node);
     }
   } else if (settingsSection === "behaviour") {
     const values = {};
