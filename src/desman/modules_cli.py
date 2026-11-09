@@ -452,11 +452,25 @@ def restore_choice(
     scope_id: str = "",
 ) -> None:
     """An explicit human model choice restores matching replaced sources, never stops."""
+    for hold in restored_by_choice(conn, model, key, scope, scope_id):
+        hold_change(conn, config, "restore", hold)
+
+
+def restored_by_choice(
+    conn: sqlite3.Connection,
+    model: str | None,
+    key: str | None,
+    scope: holds.Scope = "all",
+    scope_id: str = "",
+) -> list[holds.Hold]:
+    """The Replace holds an explicit choice of `model` lifts (`restore_choice`)."""
     if model is None:
-        return
-    for hold in holds.active(conn, scope, scope_id):
-        if hold.state == "removed" and hold.model == model and (key is None or hold.source == key):
-            hold_change(conn, config, "restore", hold)
+        return []
+    return [
+        h
+        for h in holds.active(conn, scope, scope_id)
+        if h.state == "removed" and h.model == model and (key is None or h.source == key)
+    ]
 
 
 def hold_change(conn: sqlite3.Connection, config: Config, operation: str, hold: holds.Hold) -> None:
@@ -591,10 +605,13 @@ def page_hold_question(
     return "\n".join(lines)
 
 
-def page_choice_question(config: Config, old: str | None, new: str | None) -> str | None:
+def page_choice_question(
+    config: Config, old: str | None, new: str | None, *, restores: bool = False
+) -> str | None:
     """The window for Change, or None to apply at once: only a change that involves a local
-    model asks — picking one (its size against free memory) or leaving one for the cloud."""
-    if old == new:  # the same model stays first (e.g. only its key changed)
+    model asks — picking one (its size against free memory), bringing a replaced one back
+    (`restores`), or leaving one for the cloud."""
+    if old == new and not restores:  # the same model stays first (e.g. only its key changed)
         return None
     if is_local(new):
         assert new is not None

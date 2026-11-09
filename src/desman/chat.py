@@ -1752,7 +1752,16 @@ class Chat:
             if current in (None, "auto"):
                 current = picks(saved)
             after = action.model or picks(choices.Choice(model=None, key=action.key))
-            question = modules_cli.page_choice_question(config, current, after)
+            restores = bool(
+                modules_cli.restored_by_choice(
+                    self.store.conn,
+                    action.model,
+                    action.key,
+                    "all" if action.scope == "role" else action.scope,
+                    action.scope_id or "",
+                )
+            )
+            question = modules_cli.page_choice_question(config, current, after, restores=restores)
             if question is not None and not ui.confirm(question, default=False):
                 return
             if action.scope == "role":

@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import pytest
 
-from desman import modules_cli, providers, runs, ui
+from desman import modules_cli, providers, runs, tuning_cli, ui
 from desman.chat import Chat
 from desman.config import open_config
 from desman.core import calls, choices, db, holds
@@ -368,3 +368,30 @@ def test_auto_key_change_keeping_the_local_model_does_not_ask(
             type="module", role="text", scope="task", scope_id=identity, model=None, key=None
         )
     )
+
+
+def test_choosing_a_replaced_local_model_again_asks(
+    page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, chat, cfg, identity = page
+    modules_cli.hold_change(
+        chat.store.conn, cfg, "remove", holds.Hold(source="ollama", model=LOCAL)
+    )
+    asked: list[str] = []
+
+    def decline(question: str, default: bool = False) -> bool:
+        asked.append(question)
+        return False
+
+    monkeypatch.setattr(ui, "confirm", decline)
+    # Auto still lists it first, but it was replaced: choosing it brings it back (Devin, #110).
+    monkeypatch.setattr(router, "candidates", lambda *_: [LOCAL])
+    monkeypatch.setattr("desman.gui.settings.listed_choice", lambda *_: True)
+    monkeypatch.setattr(tuning_cli, "resolved_key", lambda *_: None)
+    chat._action(
+        ui.ModuleAction(
+            type="module", role="text", scope="task", scope_id=identity, model=LOCAL, key=None
+        )
+    )
+    assert len(asked) == 1 and LOCAL in asked[0]
+    assert [h.state for h in holds.listed(chat.store.conn)] == ["removed"]
