@@ -267,6 +267,7 @@ def test_desman_proposes_a_continuation_once(
     ConfigManager(default_config_path()).save(make_config(language="en", configured=True))
     result = CliRunner().invoke(cli, [], input=f"make me a site with a map\n{answer}\n")
     assert result.exit_code == 0, result.output
+    assert "DESMAN proposes to continue task" in result.output  # said by code, then
     assert "Add: add the map" in result.output  # the window, worded by code
     store = Store(db.open_db(), clock=clock)
     [task] = [r["id"] for r in store.conn.execute("SELECT id FROM tasks")]
@@ -280,3 +281,12 @@ def test_desman_proposes_a_continuation_once(
         assert json.loads(entry["details_json"])["by"] == "proposal"
         assert store.task_status(task) is TaskStatus.DONE and len(store.list_subtasks(task)) == 2
     store.conn.close()
+
+
+def test_a_proposal_never_spoils_the_retelling() -> None:
+    from desman.interlocutor import Retelling
+
+    assert Retelling.model_validate({"text": "done", "continue_with": ""}).continue_with is None
+    assert Retelling.model_validate({"text": "done", "continue_with": None}).continue_with is None
+    long = Retelling.model_validate({"text": "done", "continue_with": "x" * 500})
+    assert long.continue_with == "x" * 300

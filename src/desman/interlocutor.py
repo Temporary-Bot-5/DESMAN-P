@@ -386,6 +386,14 @@ class Retelling(BaseModel):
     """What to add or redo when a done task clearly falls short of its goal (ADR 0010): only
     proposed; the person confirms it in a window."""
 
+    @field_validator("continue_with", mode="before")
+    @classmethod
+    def _lenient(cls, value: Any) -> Any:
+        """An optional extra never spoils the retelling: empty means none, long is cut."""
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()[:300]
+
 
 class Interlocutor:
     def __init__(

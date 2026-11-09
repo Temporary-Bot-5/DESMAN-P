@@ -666,7 +666,8 @@ class Chat:
             assert models is not None
             runs.guard(self.store)  # before any model is asked
             ui.note(t("Planning…"))
-            by = "proposal" if self._proposing else "person"
+            # Read once: whatever runs after this (the new work itself) is not the proposal.
+            by, self._proposing = ("proposal" if self._proposing else "person"), False
             ref, count = continued(self.store, pending, models, config, by)
             self._event(
                 tn(
@@ -1294,6 +1295,7 @@ class Chat:
         result = self.store.final_result(task_id)
         root = workspace_root_for(self.store.conn)
         files = task_files.for_retelling(root, task_id)
+        proposal: str | None = None
         outcome = {
             "goal": report.goal,
             "status": report.status.value,
@@ -1357,31 +1359,34 @@ class Chat:
             else:
                 self._say(retold, task_id)
                 self._fallback_note(interlocutor, task_id)
+                proposal = interlocutor.proposal  # only from a retelling that was shown
         self._files(task_id, ref, root)
-        if report.status is TaskStatus.DONE and interlocutor.proposal:
-            self._propose_continuation(task_id, ref, interlocutor.proposal, interlocutor)
+        if report.status is TaskStatus.DONE and proposal:
+            self._propose_continuation(task_id, ref, proposal, interlocutor)
 
     def _propose_continuation(
         self, task_id: str, ref: str, ask: str, interlocutor: Interlocutor
     ) -> None:
         """DESMAN's own proposal to continue a done task (ADR 0010): the `task extend` window,
         once per task (a declined one is not proposed again); only the person's yes plans it."""
-        if self.store.conn.execute(
-            "SELECT 1 FROM audit_log WHERE task_id = ? AND action = 'continuation_proposed'",
-            (task_id,),
-        ).fetchone():
+        if self.store.continuation_proposed(task_id):
             return
-        last = [s for s in self.store.list_subtasks(task_id) if s.parent_id is None][-1]
-        self.store.note(last.id, Actor.SCHEDULER, "continuation_proposed", {"ask": ask})
         config = self._config()
         if config is None:
             return
+        models = self._models(config, command=True)
+        if models is None:  # the window could not open: not spent
+            return
+        ask = providers.redact_keys(ask, config)[0]
+        self.store.note_task(task_id, Actor.SCHEDULER, "continuation_proposed", {"ask": ask})
+        self._outcome_audit = None  # what follows is not this task's retelling
+        ui.note(t("DESMAN proposes to continue task {ref}:", ref=ref))
         self._proposing = True
         try:
             self._command(
                 Command(type="command", name="task extend", args={"task": ref, "goal": ask}),
                 config,
-                self._models(config, command=True),
+                models,
                 interlocutor,
             )
         finally:

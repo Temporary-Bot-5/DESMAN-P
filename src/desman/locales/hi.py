@@ -84,6 +84,7 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "अगली कॉल से पहले इन कार्यों का परिणाम जोड़ा जाएगा: {tasks}।",
     "Before the next call, older messages are summarised: the request will be shorter.": "अगली कॉल से पहले पुराने संदेशों का सारांश बनेगा: अनुरोध छोटा हो जाएगा।",
     "A cancelled task is not continued.": "रद्द किया गया कार्य आगे नहीं बढ़ाया जाता।",
+    "DESMAN proposes to continue task {ref}:": "DESMAN कार्य {ref} को जारी रखने का प्रस्ताव देता है:",
     "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "कार्य {ref} तभी आगे बढ़ता है जब उसका परिणाम पूरा हो; पहले तय करें कि आपके लिए क्या प्रतीक्षा में है (retry, accept या fail)।",
     "Task {ref} was not continued: {error}": "कार्य {ref} आगे नहीं बढ़ाया गया: {error}",
     "A job lent by desman-global is not continued here.": "desman-global द्वारा उधार दिया गया काम यहाँ आगे नहीं बढ़ाया जाता।",

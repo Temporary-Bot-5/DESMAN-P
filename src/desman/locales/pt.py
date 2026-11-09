@@ -84,6 +84,7 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "Antes da próxima chamada, será acrescentado o que aconteceu com estas tarefas: {tasks}.",
     "Before the next call, older messages are summarised: the request will be shorter.": "Antes da próxima chamada, as mensagens antigas serão resumidas: o pedido ficará mais curto.",
     "A cancelled task is not continued.": "Uma tarefa cancelada não é continuada.",
+    "DESMAN proposes to continue task {ref}:": "O DESMAN propõe continuar a tarefa {ref}:",
     "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "A tarefa {ref} continua quando o seu resultado estiver concluído; decida primeiro o que espera por você (retry, accept ou fail).",
     "Task {ref} was not continued: {error}": "A tarefa {ref} não foi continuada: {error}",
     "A job lent by desman-global is not continued here.": "Um trabalho emprestado pelo desman-global não é continuado aqui.",
