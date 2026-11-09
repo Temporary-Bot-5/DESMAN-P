@@ -109,6 +109,9 @@ class Store:
         session that asked for it. `also(conn, task_id)` runs in the same transaction (a
         record that belongs with the task); what it raises leaves nothing created. `origin`:
         a job from desman-global is `Origin.NETWORK` (`net.jobs`), fixed for good."""
+        if origin is not Origin.LOCAL and any(sub.knowledge for sub in spec.subtasks):
+            # The tree is the person's own DESMAN's (ADR 0009, decision 6).
+            raise ValueError("a job lent by desman-global is never given the knowledge tree")
         task_id = _new_id()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
@@ -133,8 +136,8 @@ class Store:
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
                                              inputs_json, priority, kind, runs_code,
-                                             created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             knowledge_json, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         subtask_id,
                         task_id,
@@ -145,6 +148,7 @@ class Store:
                         spec.priority if sub.priority is None else sub.priority,
                         sub.kind.value,
                         int(sub.runs_code),
+                        json.dumps(sub.knowledge, ensure_ascii=False),
                         now,
                         now,
                     ),
@@ -169,10 +173,26 @@ class Store:
                     "subtasks": ids,
                 },
             )
+            self._context_chosen(task_id, ids, spec.subtasks, actor)
             if also is not None:
                 also(self.conn, task_id)
             self._promote_ready()
         return task_id
+
+    def _context_chosen(
+        self, task_id: str, ids: list[str], subtasks: list[SubtaskSpec], actor: Actor
+    ) -> None:
+        """Record which nodes of the knowledge tree each new subtask is given (ADR 0009,
+        paths only): a miss stays visible to `status` and to a later analysis."""
+        for subtask_id, sub in zip(ids, subtasks, strict=True):
+            if sub.knowledge:
+                self._write_audit(
+                    actor,
+                    "context_chosen",
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    details={"paths": sub.knowledge},
+                )
 
     def find_task(self, prefix: str) -> sqlite3.Row:
         """The task whose id is `prefix` or starts with it (at least MIN_ID_PREFIX characters),
@@ -783,8 +803,8 @@ class Store:
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
                                              inputs_json, priority, kind, runs_code,
-                                             parent_id, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             knowledge_json, parent_id, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         part_id,
                         parent.task_id,
@@ -795,6 +815,8 @@ class Store:
                         parent.priority if part.priority is None else part.priority,
                         part.kind.value,
                         int(part.runs_code),
+                        # The parts are given what the subtask was: they do its work.
+                        json.dumps(parent.knowledge, ensure_ascii=False),
                         subtask_id,
                         now,
                         now,
@@ -809,6 +831,10 @@ class Store:
                 "INSERT INTO subtask_deps (subtask_id, depends_on) VALUES (?, ?)",
                 [(subtask_id, part_id) for part_id in ids],
             )
+            inherited_knowledge = [
+                part.model_copy(update={"knowledge": parent.knowledge}) for part in parts
+            ]
+            self._context_chosen(parent.task_id, ids, inherited_knowledge, Actor.EXECUTOR)
             self._promote_ready()
         return [self.get_subtask(part_id) for part_id in ids]
 
@@ -854,8 +880,8 @@ class Store:
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
                                              inputs_json, priority, kind, runs_code,
-                                             created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             knowledge_json, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         part_id,
                         task_id,
@@ -866,6 +892,7 @@ class Store:
                         task["priority"] if part.priority is None else part.priority,
                         part.kind.value,
                         int(part.runs_code),
+                        json.dumps(part.knowledge, ensure_ascii=False),
                         now,
                         now,
                     ),
@@ -883,6 +910,7 @@ class Store:
                 task_id=task_id,
                 details={**(details or {}), "subtasks": ids, "basis": basis},
             )
+            self._context_chosen(task_id, ids, parts, actor)
             self._promote_ready()
         return ids
 

@@ -146,7 +146,10 @@ src/desman/
 ├── knowledge.py   # The knowledge tree (ADR 0009, K.1): release nodes built at run time from
 │                  #   the catalog (Commands/GROUP), the manual and the repository's docs split by
 │                  #   `##` (PROJECT_PLAN, ROADMAP, ADRs marked `plan`); contents() = the table a
-│                  #   model chooses from, within its budget; texts never in it
+│                  #   model chooses from, within its budget; texts never in it. K.3: the
+│                  #   planner names ≤3 nodes of task_tree() (no Commands/) per subtask
+│                  #   (`SubtaskSpec.knowledge`, audit `context_chosen`), the executor gets
+│                  #   their texts in its budget (never a desman-global job), `read_node` tool
 ├── compaction.py  # A history over the interlocutor's budget: older messages summarised by an
 │                  #   ordinary task without tools (`runs.summarizer`), kept as a `summary`
 │                  #   message that `covers` them; failed → they fall out of view, with a note

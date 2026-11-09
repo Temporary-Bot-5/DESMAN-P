@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -21,10 +22,18 @@ def task(store: Store) -> str:
     )
 
 
+def old_task(conn: sqlite3.Connection) -> str:
+    """A task as an older DESMAN stored it (today's Store writes columns it lacked)."""
+    conn.execute(
+        "INSERT INTO tasks (id, goal, priority, created_at) VALUES ('old', 'goal', 50, 'now')"
+    )
+    return "old"
+
+
 def test_upgrade_previous_schema() -> None:
     conn = db.connect(":memory:")
-    db.migrate(conn, db.MIGRATIONS[:-1])
-    task(Store(conn))
+    db.migrate(conn, db.MIGRATIONS[:37])  # before 38: pins, hidden, pauses
+    old_task(conn)
     db.migrate(conn)
     row = conn.execute("SELECT pinned, hidden_at, paused_at FROM tasks").fetchone()
     assert tuple(row) == (0, None, None)

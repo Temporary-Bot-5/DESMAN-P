@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from enum import IntEnum, StrEnum
-from typing import Any, Self
+from typing import Any, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -53,6 +53,10 @@ class Kind(StrEnum):
     """Reasoning over given material: comparing, judging, working something out."""
 
 
+MAX_KNOWLEDGE: Final = 3
+"""Nodes of the knowledge tree one subtask is given: its context is small (ADR 0009)."""
+
+
 class SubtaskSpec(BaseModel):
     description: str = Field(min_length=1)
     acceptance_criteria: str = Field(min_length=1)
@@ -65,6 +69,9 @@ class SubtaskSpec(BaseModel):
     runs_code: bool = False
     """It must run code and report what it printed: only an execution that called `run_command`
     hands in a result (the coordinator checks), and without that tool it waits for the person."""
+    knowledge: list[str] = Field(default_factory=list, max_length=MAX_KNOWLEDGE)
+    """Paths of the knowledge tree (ADR 0009) whose texts its executor is given, as the planner
+    chose them; checked against the tree by whoever chose them, looked up when it runs."""
 
 
 class TaskSpec(BaseModel):
@@ -128,6 +135,7 @@ class Subtask(BaseModel):
     """When it joined the queue it is in (READY or REVIEW); the scheduler ages it from then."""
     kind: Kind = Kind.TEXT
     runs_code: bool = False
+    knowledge: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -154,4 +162,5 @@ class Subtask(BaseModel):
             queued_at=row["queued_at"],
             kind=Kind(row["kind"]),
             runs_code=bool(row["runs_code"]),
+            knowledge=json.loads(row["knowledge_json"]),
         )

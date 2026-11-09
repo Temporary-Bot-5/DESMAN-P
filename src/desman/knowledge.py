@@ -19,11 +19,13 @@ they are written. Tokens are estimated as characters / 4, as everywhere else.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Final, Literal
+
+from desman.core.context import Knowledge, KnowledgeText
 
 NODE_CHARS: Final = 6000
 """The longest a node's text may be (~1.5k tokens): longer sections are split into parts."""
@@ -210,6 +212,64 @@ def release_tree() -> tuple[Node, ...]:
     """Everything that comes with DESMAN, in a fixed order: commands, manual, documents. Built
     once per process: it changes only with the code (git)."""
     return (*command_nodes(), *manual_nodes(), *doc_nodes())
+
+
+@cache
+def task_tree() -> tuple[Node, ...]:
+    """What tasks may be given (K.3): the tree without `Commands/`, which only the chat runs."""
+    return tuple(n for n in release_tree() if not n.path.startswith("Commands/"))
+
+
+def resolve(nodes: Iterable[Node], given: str) -> str | None:
+    """A path of the tree as a model may write it, in any case: a node's path, a section's
+    (ending in "/": a document's section, not its preamble node of the same name), or just a
+    manual topic's name. None when there is no such thing."""
+    paths, sections = _index(tuple(nodes))
+    written = given.strip().strip("`")
+    path = written.rstrip("/").casefold()
+    if written.endswith("/") and path in sections:
+        return sections[path] + "/"
+    if path in paths:
+        return paths[path]
+    if path in sections:
+        return sections[path] + "/"
+    return paths.get(f"DESMAN/Manual/{path}".casefold())
+
+
+@lru_cache(maxsize=8)
+def _index(nodes: tuple[Node, ...]) -> tuple[dict[str, str], dict[str, str]]:
+    """Every node's path and every section's, by their case-folded spelling (per tree: the
+    release and task trees are built once)."""
+    paths: dict[str, str] = {}
+    sections: dict[str, str] = {}
+    for node in nodes:
+        paths[node.path.casefold()] = node.path
+        parts = node.path.split("/")
+        for depth in range(1, len(parts)):
+            section = "/".join(parts[:depth])
+            sections[section.casefold()] = section
+    return paths, sections
+
+
+def read(nodes: Iterable[Node], given: str) -> KnowledgeText | None:
+    """What a model reading `given` gets: a node's text, or a section's table of contents
+    ("" or "/": the whole tree's). None when there is no such node or section."""
+    nodes = tuple(nodes)
+    if not given.strip().strip("/"):
+        return KnowledgeText(path="/", text=contents(nodes))
+    path = resolve(nodes, given)
+    if path is None:
+        return None
+    node = find(nodes, path)
+    if node is None:
+        return KnowledgeText(path=path, text=contents(nodes, path.rstrip("/")))
+    return KnowledgeText(path=node.path, text=node.text, plan=node.plan)
+
+
+def reader(tree: Callable[[], Iterable[Node]] = task_tree) -> Knowledge:
+    """Looks paths up in `tree`, asked at every lookup (the release part is built once per
+    process; K.4's personal nodes will have to be read fresh by the function given here)."""
+    return lambda path: read(tree(), path)
 
 
 def find(nodes: Iterable[Node], path: str) -> Node | None:

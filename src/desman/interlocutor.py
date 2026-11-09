@@ -53,7 +53,7 @@ from pydantic import (
     field_validator,
 )
 
-from desman import knowledge, manual
+from desman import knowledge
 from desman.commands import for_model
 from desman.config import Behaviour
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -303,36 +303,9 @@ class Lookup(Noting):
         return list(dict.fromkeys(p for p in paths if p is not None))
 
 
-@cache
-def _paths() -> tuple[dict[str, str], dict[str, str]]:
-    """Every node's path and every section's, by their case-folded spelling."""
-    tree = knowledge.release_tree()
-    nodes = {n.path.casefold(): n.path for n in tree}
-    sections: dict[str, str] = {}
-    for node in tree:
-        parts = node.path.split("/")
-        for depth in range(1, len(parts)):
-            section = "/".join(parts[:depth])
-            sections[section.casefold()] = section
-    return nodes, sections
-
-
 def resolve(given: str) -> str | None:
-    """A path of the tree as a model may write it, in any case: a node's path, a section's
-    (ending in "/": a document's section, not its preamble node of the same name), or just a
-    manual topic's name. None when there is no such thing."""
-    nodes, sections = _paths()
-    written = given.strip().strip("`")
-    path = written.rstrip("/").casefold()
-    if written.endswith("/") and path in sections:
-        return sections[path] + "/"
-    if path in nodes:
-        return nodes[path]
-    if path in sections:
-        return sections[path] + "/"
-    if path in manual.BY_NAME:
-        return f"DESMAN/Manual/{path}"
-    return None
+    """A path of the release tree as a model may write it (`knowledge.resolve`)."""
+    return knowledge.resolve(knowledge.release_tree(), given)
 
 
 KNOWLEDGE_TOKENS: Final = 3000

@@ -280,7 +280,7 @@ def test_run_command_needs_the_human_switch(ws: Workspace) -> None:
 
 def test_run_command_needs_a_working_sandbox(ws: Workspace) -> None:
     toolbox, entries = box(ws, missing(), Permission.SHELL)
-    assert names(toolbox) == ["read_file", "write_file", "list_files"]
+    assert names(toolbox) == ["read_file", "write_file", "list_files", "read_node"]
     result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
     assert not result.ok and "cannot run here" in (result.error or "")
     [(action, details)] = entries

@@ -441,6 +441,8 @@ MESSAGES: dict[str, Forms] = {
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": "Sağlayıcı sınırı nedeniyle {until} zamanına kadar duraklatıldı. Devam etmek için: desman resume {ref}",
     "after {deps}": "{deps} sonrasında",
     "attempts q{quality}/t{transient}": "denemeler q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}: bilgi ağacında böyle bir düğüm yok: {nodes}",
+    "knowledge: {paths}": "bilgi: {paths}",
     "held by {owner} until {until}": "{until} zamanına kadar {owner} tarafından tutuluyor",
     "paused until {until}": "{until} zamanına kadar duraklatıldı",
     "Nothing is waiting for you.": "Kararınızı bekleyen bir şey yok.",

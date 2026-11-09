@@ -17,12 +17,12 @@ from datetime import UTC, datetime
 import click
 import httpx
 
-from desman import net, providers, ui
+from desman import knowledge, net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config, Tuning
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
-from desman.core.context import DEFAULT_BUDGET_TOKENS
+from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
 from desman.core.coordinator import Coordinator, Crew, Executor, Labels, Outcome, Work
 from desman.core.effects import evidence
 from desman.core.models import Kind, Subtask, TaskSpec
@@ -536,6 +536,7 @@ def coordinator(
     network: Crew | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
+    tree = knowledge.reader()  # the person's own work only: never a job's (`network`)
     return _coordinator(
         store,
         models,
@@ -544,7 +545,9 @@ def coordinator(
             web=web(config, store, http),
             # Without the person's token: see `core.tools.suggest_model_tool`.
             models=lambda ref: hub.inspect(ref, http),
+            knowledge=tree,
         ),
+        knowledge=tree,
         lease_seconds=lease_seconds,
         watch=watch,
         tuning=config.tuning,
@@ -645,6 +648,7 @@ def _coordinator(
     watch: Callable[[], None] | None = None,
     tuning: Tuning | None = None,
     network: Crew | None = None,
+    knowledge: Knowledge | None = None,
 ) -> Coordinator:
     tuning = tuning or Tuning()
     guard(store)
@@ -654,7 +658,10 @@ def _coordinator(
     return Coordinator(
         store,
         _executor(models, store),
-        llm_reviewer(models.for_(calls.Role.REVIEWER), evidence=functools.partial(evidence, store)),
+        llm_reviewer(
+            models.for_(calls.Role.REVIEWER),
+            evidence=functools.partial(evidence, store, knowledge=knowledge),
+        ),
         owner=current_owner(),
         lease_seconds=max(lease_seconds, models.step_seconds),
         review_seconds=max(DEFAULT_REVIEW_SECONDS, models.step_seconds),
@@ -669,4 +676,5 @@ def _coordinator(
         watch=watch,
         gate=functools.partial(guard, store),  # a running worker stops at a later change too
         network=network,
+        knowledge=knowledge,
     )

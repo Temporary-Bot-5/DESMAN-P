@@ -17,7 +17,7 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, actions, i18n, proposals_cli, providers, runs, ui
+from desman import __version__, actions, i18n, knowledge, proposals_cli, providers, runs, ui
 from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
 from desman.config import Config, ConfigError, Tuning, open_config
@@ -763,7 +763,13 @@ def _plan(llm: LLM, goal: str, priority: int | None, *, by_model: bool, as_json:
         sys.stdout.flush()
     try:
         with calls.for_(calls.Purpose(calls.Role.PLANNER)):  # before the task exists
-            planned = plan(llm, goal, level, limit=runs.tuned(tuning, "max_subtasks"))
+            planned = plan(
+                llm,
+                goal,
+                level,
+                limit=runs.tuned(tuning, "max_subtasks"),
+                tree=knowledge.task_tree(),
+            )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
     if planned.error is not None and not as_json:
@@ -791,11 +797,28 @@ def _config_or_default() -> Config:
 
 def _load_spec(spec_path: Path) -> TaskSpec:
     try:
-        return TaskSpec.model_validate_json(spec_path.read_text(encoding="utf-8"))
+        spec = TaskSpec.model_validate_json(spec_path.read_text(encoding="utf-8"))
     except (ValidationError, UnicodeDecodeError) as e:
         raise click.ClickException(
             t("{path}: not a valid task spec:\n{error}", path=spec_path, error=e)
         ) from e
+    # Knowledge paths as the tree spells them, like a plan's (`planner.Plan.known`).
+    tree = knowledge.task_tree()
+    subtasks = []
+    for sub in spec.subtasks:
+        paths = [(given, knowledge.resolve(tree, given)) for given in sub.knowledge]
+        unknown = [given for given, path in paths if path is None or not given.strip("/ ")]
+        if unknown:
+            raise click.ClickException(
+                t(
+                    "{path}: no such node of the knowledge tree: {nodes}",
+                    path=spec_path,
+                    nodes=", ".join(unknown),
+                )
+            )
+        resolved = [path for _, path in paths if path is not None]
+        subtasks.append(sub.model_copy(update={"knowledge": list(dict.fromkeys(resolved))}))
+    return spec.model_copy(update={"subtasks": subtasks})
 
 
 @dataclass(frozen=True)

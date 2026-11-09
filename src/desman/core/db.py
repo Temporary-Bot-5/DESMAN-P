@@ -726,6 +726,12 @@ MIGRATIONS: Final[tuple[str, ...]] = (
                (scope IN ('task', 'session') AND scope_id != ''))
     );
     """,
+    # 45: the knowledge tree's paths a subtask's executor is given (ADR 0009, K.3): chosen by
+    # the planner, a JSON list of paths. Subtasks made before were given none
+    """
+    ALTER TABLE subtasks ADD COLUMN knowledge_json TEXT NOT NULL DEFAULT '[]'
+        CHECK (json_valid(knowledge_json) AND json_type(knowledge_json) = 'array');
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

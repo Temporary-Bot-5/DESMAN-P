@@ -453,6 +453,8 @@ MESSAGES: dict[str, Forms] = {
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": "Pausado por um limite do provedor até {until}. Para continuar: desman resume {ref}",
     "after {deps}": "depois de {deps}",
     "attempts q{quality}/t{transient}": "tentativas q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}: não existe esse nó na árvore de conhecimento: {nodes}",
+    "knowledge: {paths}": "conhecimento: {paths}",
     "held by {owner} until {until}": "com {owner} até {until}",
     "paused until {until}": "pausada até {until}",
     "Nothing is waiting for you.": "Nada aguarda sua decisão.",

@@ -12,9 +12,10 @@
 # search engine (a Tavily key or a SearXNG server).
 # suggest_model asks Hugging Face what a model is (network_access too) and only records a
 # suggestion for the person: nothing is downloaded, the config is not changed.
+# read_node reads the knowledge tree (ADR 0009): DESMAN's documentation, read only.
 tools = [
     "read_file", "write_file", "list_files", "run_command", "web_search", "web_fetch",
-    "suggest_model",
+    "suggest_model", "read_node",
 ]
 
 # The planner and the reviewer use no tools yet.
@@ -27,7 +28,7 @@ tools = []
 # Jobs from desman-global (ADR 0004, decision 6): someone else's task, run on this machine with
 # the models the person lent. Files in the job's own workspace, and run_command in the sandbox
 # (still only with the human's shell_execution switch). No web, no suggest_model; nothing of the
-# person's (chat, profile, sessions) is a tool at all.
+# person's (chat, profile, sessions, the knowledge tree) is a tool at all.
 [roles.network_executor]
 tools = ["read_file", "write_file", "list_files", "run_command"]
 
