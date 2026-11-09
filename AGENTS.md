@@ -139,7 +139,7 @@ src/desman/
 │                  #   "Chat turn", "Retell task". Talks as `Config.behaviour` says (always);
 │                  #   with `Config.personalize` it also sees the profile and any turn may edit
 │                  #   it (`profile`: add | change | forget, ≤3), the chat applies and shows them
-│                  #   A `lookup` turn first (≤2 topics of `manual`) → asked again with their texts
+│                  #   A `lookup` turn first (≤3 nodes of the knowledge tree; a section → one more) → asked again with their texts
 ├── manual.py      # The interlocutor's manual (C.10): a short English text per topic of what
 │                  #   DESMAN does now (never plans); its prompt lists only the topics. A test
 │                  #   checks the commands it names and the size of each topic

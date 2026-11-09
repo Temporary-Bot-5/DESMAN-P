@@ -40,7 +40,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Annotated, Any, Literal
+from functools import cache
+from typing import Annotated, Any, Final, Literal
 
 from pydantic import (
     BaseModel,
@@ -52,7 +53,7 @@ from pydantic import (
     field_validator,
 )
 
-from desman import manual
+from desman import knowledge, manual
 from desman.commands import for_model
 from desman.config import Behaviour
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -62,7 +63,9 @@ from desman.i18n import CATALOGS
 from desman.llm import base
 from desman.llm.base import LLM, Request
 from desman.llm.structured import complete_json
-from desman.manual import MAX_LOOKUP
+
+MAX_LOOKUP: Final = 3
+"""The most nodes of the knowledge tree one lookup may open (ADR 0009)."""
 
 CHAT = "Chat turn"
 RETELL = "Retell task"
@@ -103,7 +106,8 @@ INTERLOCUTOR_SYSTEM = (
     '{"type": "command", "name": "...", "args": {...}} when the person wants DESMAN itself to '
     "do something or show something: its settings, API keys, permissions, language, the list "
     "and state of tasks, decisions on them. The name and arguments come from this list "
-    '(an argument with "?" may be left out):\n'
+    '(an argument with "?" may be left out; what a command does is in its node Commands/GROUP, '
+    "GROUP being its first word):\n"
     "{commands}\n"
     "Commands may include optional text: one or two sentences in the person’s language, "
     "said before the confirmation window. "
@@ -162,19 +166,25 @@ PROFILE = (
 )
 
 LOOKUP = (
-    "A question about how DESMAN works, or what it can do and how, is answered from its "
-    "manual, never from a guess. Its topics:\n"
+    "A question about how DESMAN works, what it can do and how, or what a command does, is "
+    "answered from its knowledge tree, never from a guess. Its table of contents (a path "
+    'ending in "/" is a section holding more nodes; [plan] marks plans and decisions, not what '
+    "DESMAN does now):\n"
     "{topics}\n"
-    'To read one or two of them first, take the turn {"type": "lookup", "topics": ["name"]} '
-    f"(at most {MAX_LOOKUP} names); you then get the same conversation again with their texts. "
+    "- Commands/GROUP: what each command of a group does, with its arguments\n"
+    'To read nodes first, take the turn {"type": "lookup", "nodes": ["path"]} '
+    f"(at most {MAX_LOOKUP} paths); you then get the same conversation again with their texts "
+    "(a section: its table of contents, and one more lookup). "
 )
 
 LOOKED_UP = (
-    'The manual\'s topics you asked for are in "manual": answer from them now, in your own '
-    "plain words; another lookup is not possible in this turn. Edits of the profile you "
-    'gave with the lookup, if any, are in "profile_edits_given": they will be made, never '
-    "repeat them. "
+    'The nodes you asked for are in "knowledge": answer from them now, in your own plain '
+    'words; a node with "plan": true is told as a plan or a decision, never as what DESMAN '
+    "does. {again}Edits of the profile you gave with the lookup, if any, are in "
+    '"profile_edits_given": they will be made, never repeat them. '
 )
+AGAIN = "You opened a section: you may take one more lookup for its nodes. "
+LAST = "Another lookup is not possible in this turn. "
 
 RETELL_SYSTEM = (
     "You are the interlocutor of DESMAN. A task the person asked for has stopped, or one of "
@@ -268,22 +278,89 @@ AnyTurn = Annotated[Reply | Clarify | NewTask | Command, Field(discriminator="ty
 
 
 class Lookup(Noting):
-    """A turn that asks for topics of the manual before answering (C.10). Never the turn the
-    chat acts on: the interlocutor asks again with their texts."""
+    """A turn that opens nodes of the knowledge tree before answering (C.10, ADR 0009). Never
+    the turn the chat acts on: the interlocutor asks again with their texts."""
 
     type: Literal["lookup"]
-    topics: list[str] = Field(min_length=1, max_length=MAX_LOOKUP)
+    nodes: list[str] = Field(min_length=1, max_length=MAX_LOOKUP)
 
-    @field_validator("topics")
+    @field_validator("nodes")
     @classmethod
-    def _known(cls, topics: list[str]) -> list[str]:
-        names = [topic.strip().casefold() for topic in topics]
-        unknown = [name for name in names if name not in manual.BY_NAME]
+    def _known(cls, nodes: list[str]) -> list[str]:
+        paths = [resolve(path) for path in nodes]
+        unknown = [given for given, path in zip(nodes, paths, strict=True) if path is None]
         if unknown:
             raise ValueError(
-                f"no such topic: {', '.join(unknown)}; topics: {', '.join(manual.BY_NAME)}"
+                f"no such node or section: {', '.join(unknown)}; copy a path of the table of "
+                "contents (a section ends in /, a command group is Commands/GROUP)"
             )
-        return list(dict.fromkeys(names))
+        return list(dict.fromkeys(p for p in paths if p is not None))
+
+
+@cache
+def _paths() -> tuple[dict[str, str], dict[str, str]]:
+    """Every node's path and every section's, by their case-folded spelling."""
+    tree = knowledge.release_tree()
+    nodes = {n.path.casefold(): n.path for n in tree}
+    sections: dict[str, str] = {}
+    for node in tree:
+        parts = node.path.split("/")
+        for depth in range(1, len(parts)):
+            section = "/".join(parts[:depth])
+            sections[section.casefold()] = section
+    return nodes, sections
+
+
+def resolve(given: str) -> str | None:
+    """A path of the tree as a model may write it, in any case: a node's path, a section's
+    (ending in "/": a document's section, not its preamble node of the same name), or just a
+    manual topic's name. None when there is no such thing."""
+    nodes, sections = _paths()
+    written = given.strip().strip("`")
+    path = written.rstrip("/").casefold()
+    if written.endswith("/") and path in sections:
+        return sections[path] + "/"
+    if path in nodes:
+        return nodes[path]
+    if path in sections:
+        return sections[path] + "/"
+    if path in manual.BY_NAME:
+        return f"DESMAN/Manual/{path}"
+    return None
+
+
+KNOWLEDGE_TOKENS: Final = 3000
+"""The most the texts a turn reads may take, all lookups together: a longer one is cut."""
+
+
+def opened(paths: list[str], room: int = KNOWLEDGE_TOKENS) -> dict[str, Any]:
+    """What a lookup gets: each node's text (and whether it is a plan), each section's table of
+    contents; within `room` tokens, the rest of a text cut with a mark."""
+    tree = knowledge.release_tree()
+    found: dict[str, Any] = {}
+    for path in paths:
+        node = knowledge.find(tree, path)
+        if node is None:
+            found[path] = {"contents": knowledge.contents(tree, path.rstrip("/"))}
+        else:
+            chars = max(room, 0) * CHARS_PER_TOKEN
+            text = node.text if len(node.text) <= chars else node.text[:chars] + " [… cut]"
+            found[path] = {"text": text, "plan": node.plan}
+        room -= estimate_tokens(json.dumps(found[path], ensure_ascii=False))
+    return found
+
+
+@cache
+def tree_contents() -> str:
+    """What the interlocutor's prompt lists of the tree: every manual topic, and the documents
+    by section (the commands are listed with their arguments elsewhere in the prompt)."""
+    tree = knowledge.release_tree()
+    docs = knowledge.contents(tree, "DESMAN/Docs", budget_tokens=DOCS_TOKENS)
+    return "\n".join(filter(None, [knowledge.contents(tree, "DESMAN/Manual"), docs]))
+
+
+DOCS_TOKENS: Final = 250
+"""The documents' part of the interlocutor's table of contents."""
 
 
 class Turn(RootModel[AnyTurn]):
@@ -313,6 +390,8 @@ class Interlocutor:
         """The notes about the person; None: personalisation is off, nothing about it is said."""
         self.behaviour = behaviour or Behaviour()
         """How the person set it to talk: it holds whether or not there are notes."""
+        self.opened: list[str] = []
+        """The knowledge tree's paths the last turn read (shown by /context)."""
 
     def turn(self, history: History) -> AnyTurn:
         """The turn answering the last message of `history`. Provider errors and
@@ -320,19 +399,45 @@ class Interlocutor:
         request = self.build_request(history)
         payload = json.loads(request.messages[1].content.split(":\n", 1)[1])
         budget = HISTORY_TOKENS - (estimate_tokens(history.summary.text) if history.summary else 0)
+        self.opened = []
         first = complete_json(self.llm, request, FirstTurn, heading=CHAT).root
         if not isinstance(first, Lookup):
             return first
-        texts = {name: manual.BY_NAME[name].text for name in first.topics}
-        # The texts take the place of older messages: the request stays as large as the first.
-        budget -= sum(estimate_tokens(text) for text in texts.values())
-        payload["conversation"] = [said(m) for m in fit(history.messages, budget)]
-        payload["manual"] = texts
+        found: dict[str, Any] = {}
         given = first.profile if self.profile is not None else []
-        if given:
-            payload["profile_edits_given"] = [e.model_dump() for e in given]
-        request = self._request(INTERLOCUTOR_SYSTEM, CHAT, payload, looked_up=True)
-        answer = complete_json(self.llm, request, Turn, heading=CHAT).root
+        lookup: Lookup | None = first
+        answer: AnyTurn | None = None
+        for round_ in (1, 2):  # a section opened in the first round may be followed by one more
+            assert lookup is not None
+            used = sum(estimate_tokens(json.dumps(v, ensure_ascii=False)) for v in found.values())
+            texts = opened([p for p in lookup.nodes if p not in found], KNOWLEDGE_TOKENS - used)
+            found.update(texts)
+            self.opened = list(found)
+            # The texts take the place of older messages: the request stays about as large as
+            # the first (the texts are bounded by KNOWLEDGE_TOKENS; the latest message stays).
+            budget -= sum(
+                estimate_tokens(json.dumps(v, ensure_ascii=False)) for v in texts.values()
+            )
+            payload["conversation"] = [said(m) for m in fit(history.messages, budget)]
+            payload["knowledge"] = found
+            if given:
+                payload["profile_edits_given"] = [e.model_dump() for e in given]
+            again = round_ == 1 and any(p.endswith("/") for p in lookup.nodes)
+            request = self._request(INTERLOCUTOR_SYSTEM, CHAT, payload, looked_up=True, again=again)
+            if not again:
+                answer = complete_json(self.llm, request, Turn, heading=CHAT).root
+                break
+            reply = complete_json(self.llm, request, FirstTurn, heading=CHAT).root
+            if not isinstance(reply, Lookup):
+                answer = reply
+                break
+            lookup = reply
+            given = (
+                given + [e for e in reply.profile if e not in given]
+                if self.profile is not None
+                else []
+            )
+        assert answer is not None
         if not given:
             return answer
         edits = given + [e for e in answer.profile if e not in given]  # what the lookup noted
@@ -364,13 +469,20 @@ class Interlocutor:
         return told
 
     def _request(
-        self, system: str, heading: str, payload: dict[str, Any], *, looked_up: bool = False
+        self,
+        system: str,
+        heading: str,
+        payload: dict[str, Any],
+        *,
+        looked_up: bool = False,
+        again: bool = False,
     ) -> Request:
         body = json.dumps(payload, ensure_ascii=False, indent=2)
         content = (
-            system.replace("{commands}", for_model())
+            system.replace("{commands}", for_model(about=False))
             .replace("{manual}", LOOKED_UP if looked_up else LOOKUP)
-            .replace("{topics}", manual.contents())
+            .replace("{again}", AGAIN if again else LAST)
+            .replace("{topics}", tree_contents())
             .replace("{honesty}", HONESTY)
             .replace("{behaviour}", BEHAVIOUR)
             .replace("{profile}", "" if self.profile is None else PROFILE)

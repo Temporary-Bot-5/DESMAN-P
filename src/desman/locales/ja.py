@@ -82,6 +82,7 @@ MESSAGES: dict[str, Forms] = {
     "Delete all tasks": "すべてのタスクを削除",
     "Before the next call, what became of these tasks is added: {tasks}.": "次の呼び出しの前に、これらのタスクの結果が追加されます: {tasks}。",
     "Before the next call, older messages are summarised: the request will be shorter.": "次の呼び出しの前に、古いメッセージが要約されます。リクエストは短くなります。",
+    "The last answer also read: {nodes}.": "直前の回答は次も読みました：{nodes}。",
     "General Terminal talks to no model.": "共通ターミナルはモデルに問い合わせません。",
     "Hide finished TASK, or all finished unpinned tasks.": "完了したタスク、または固定されていない完了タスクをすべて非表示にします。",
     "Hide finished unpinned tasks.": "固定されていない完了タスクを非表示にします。",

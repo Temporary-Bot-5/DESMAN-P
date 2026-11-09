@@ -2,8 +2,8 @@
 DESMAN works, so that it never has to make it up. G.7b describes independent fake proposal checks.
 
 Short texts for the model, in English like every prompt, one per topic. The interlocutor's
-prompt lists only the topics, a line each (small models have little context); it asks for one
-or two with a `lookup` turn, and gets their texts with the same message again
+prompt lists only the topics, a line each (small models have little context); the topics are
+nodes of the knowledge tree (`desman.knowledge`, ADR 0009), which a `lookup` turn opens
 (`desman.interlocutor`).
 
 The manual says only what DESMAN does now: never plans (those are in ROADMAP.md, written for
@@ -20,10 +20,7 @@ from dataclasses import dataclass
 from typing import Final
 
 TOPIC_CHARS: Final = 1600
-"""The longest a topic's text may be: two of them have to fit a small model's context."""
-
-MAX_LOOKUP: Final = 2
-"""The most topics one lookup may ask for."""
+"""The longest a topic's text may be: the few a lookup opens have to fit a small model's context."""
 
 
 @dataclass(frozen=True)
@@ -194,7 +191,7 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
+        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
     ),
     Topic(
         "gui",

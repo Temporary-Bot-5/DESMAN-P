@@ -2287,14 +2287,15 @@ def shown(entry: Entry, args: Args) -> str:
     return entry.name + (" " + json.dumps(given, ensure_ascii=False) if given else "")
 
 
-def for_model() -> str:
-    """The catalog as the interlocutor's prompt lists it."""
+def for_model(about: bool = True) -> str:
+    """The catalog as a model reads it: each command with its arguments and, unless `about` is
+    False (the interlocutor's prompt, ADR 0009), what it does: that is in the knowledge tree."""
     lines = []
     for entry in CATALOG:
         # A command without arguments shows none: an empty "{}" ended up in replies.
         signature = _signature(entry.args)
         shown = entry.name if signature == "{}" else f"{entry.name} {signature}"
-        lines.append(f"- {shown}: {entry.about}")
+        lines.append(f"- {shown}: {entry.about}" if about else f"- {shown}")
     return "\n".join(lines)
 
 
