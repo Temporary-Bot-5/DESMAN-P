@@ -1597,6 +1597,22 @@ class Store:
         with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
             self._audit(actor, action, subtask=self.get_subtask(subtask_id), details=details)
 
+    def note_task(
+        self, task_id: str, actor: Actor, action: str, details: dict[str, Any] | None = None
+    ) -> None:
+        """Record something that happened to a whole task without changing it (e.g. DESMAN
+        proposed to continue it, ADR 0010)."""
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
+            self._audit(actor, action, task_id=task_id, details=details)
+
+    def continuation_proposed(self, task_id: str) -> bool:
+        """DESMAN already proposed to continue this task: it is not proposed again."""
+        row = self.conn.execute(
+            "SELECT 1 FROM audit_log WHERE task_id = ? AND action = 'continuation_proposed'",
+            (task_id,),
+        ).fetchone()
+        return row is not None
+
     def _audit(
         self,
         actor: Actor,

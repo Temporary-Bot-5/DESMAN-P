@@ -71,7 +71,7 @@ from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
-from desman.core.states import SubtaskStatus, TaskStatus
+from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.core.workspace import PathEscapeError, workspace_root_for
 from desman.i18n import t, tn
@@ -206,6 +206,8 @@ class Chat:
         one (`desman -c`); /sessions continues any."""
         self.waiting = InboxWatch(self.store)
         """What waits for the person's decision: told at the start, then as it comes (5.1)."""
+        self._proposing = False
+        """A continuation DESMAN proposed is in its window (journaled as such once accepted)."""
         self._opened: dict[str, list[str]] = {}
         """Per session, the knowledge tree's paths the last answer read (`/context`)."""
         self._gave_up: dict[str, int] = {}
@@ -664,7 +666,9 @@ class Chat:
             assert models is not None
             runs.guard(self.store)  # before any model is asked
             ui.note(t("Planning…"))
-            ref, count = continued(self.store, pending, models, config)
+            # Read once: whatever runs after this (the new work itself) is not the proposal.
+            by, self._proposing = ("proposal" if self._proposing else "person"), False
+            ref, count = continued(self.store, pending, models, config, by)
             self._event(
                 tn(
                     count,
@@ -1291,6 +1295,7 @@ class Chat:
         result = self.store.final_result(task_id)
         root = workspace_root_for(self.store.conn)
         files = task_files.for_retelling(root, task_id)
+        proposal: str | None = None
         outcome = {
             "goal": report.goal,
             "status": report.status.value,
@@ -1354,7 +1359,38 @@ class Chat:
             else:
                 self._say(retold, task_id)
                 self._fallback_note(interlocutor, task_id)
+                proposal = interlocutor.proposal  # only from a retelling that was shown
         self._files(task_id, ref, root)
+        if report.status is TaskStatus.DONE and proposal:
+            self._propose_continuation(task_id, ref, proposal, interlocutor)
+
+    def _propose_continuation(
+        self, task_id: str, ref: str, ask: str, interlocutor: Interlocutor
+    ) -> None:
+        """DESMAN's own proposal to continue a done task (ADR 0010): the `task extend` window,
+        once per task (a declined one is not proposed again); only the person's yes plans it."""
+        if self.store.continuation_proposed(task_id):
+            return
+        config = self._config()
+        if config is None:
+            return
+        models = self._models(config, command=True)
+        if models is None:  # the window could not open: not spent
+            return
+        ask = providers.redact_keys(ask, config)[0]
+        self.store.note_task(task_id, Actor.SCHEDULER, "continuation_proposed", {"ask": ask})
+        self._outcome_audit = None  # what follows is not this task's retelling
+        ui.note(t("DESMAN proposes to continue task {ref}:", ref=ref))
+        self._proposing = True
+        try:
+            self._command(
+                Command(type="command", name="task extend", args={"task": ref, "goal": ask}),
+                config,
+                models,
+                interlocutor,
+            )
+        finally:
+            self._proposing = False
 
     def _files(self, task_id: str, ref: str, root: Path) -> None:
         """Where the task's files are, told by code (the interlocutor sees it as an event)."""

@@ -241,3 +241,52 @@ def test_a_result_that_had_to_run_keeps_having_to(store: Store, clock: FakeClock
         store, FakeLLM().on(CONTINUE, plan_of("test it")), pending, limit=None, by="person"
     )
     assert store.get_subtask(ids[-1]).runs_code
+
+
+@pytest.mark.parametrize("answer", ["y", "n"])
+def test_desman_proposes_a_continuation_once(
+    clock: FakeClock, monkeypatch: pytest.MonkeyPatch, answer: str
+) -> None:
+    from desman import runs
+    from desman.config import ConfigManager, default_config_path
+    from desman.core import db
+    from helpers import make_config
+
+    task_turn = {"type": "task", "title": "Site", "goal": "a site with a map"}
+    short = {"text": "The site is ready, but it has no map.", "continue_with": "add the map"}
+    llm = (
+        FakeLLM()
+        .on("Chat turn", json.dumps(task_turn))
+        .on("Plan task", plan_of("make the site"))
+        .on(CONTINUE, plan_of("add the map"))
+        .on("Execute subtask", '{"site": "ok"}', repeat_last=True)
+        .on("Review subtask", '{"verdict": "accept"}', repeat_last=True)
+        .on("Retell task", json.dumps(short), json.dumps(short), repeat_last=True)
+    )
+    monkeypatch.setattr(runs, "models", lambda config, conn, **_: runs.Models(llm, None))
+    ConfigManager(default_config_path()).save(make_config(language="en", configured=True))
+    result = CliRunner().invoke(cli, [], input=f"make me a site with a map\n{answer}\n")
+    assert result.exit_code == 0, result.output
+    assert "DESMAN proposes to continue task" in result.output  # said by code, then
+    assert "Add: add the map" in result.output  # the window, worded by code
+    store = Store(db.open_db(), clock=clock)
+    [task] = [r["id"] for r in store.conn.execute("SELECT id FROM tasks")]
+    proposed = [e for e in store.audit_log(task) if e["action"] == "continuation_proposed"]
+    assert len(proposed) == 1  # once, even though the second retelling proposed it again
+    extended = [e for e in store.audit_log(task) if e["action"] == "task_extended"]
+    if answer == "n":
+        assert not extended and len(store.list_subtasks(task)) == 1
+    else:
+        [entry] = extended
+        assert json.loads(entry["details_json"])["by"] == "proposal"
+        assert store.task_status(task) is TaskStatus.DONE and len(store.list_subtasks(task)) == 2
+    store.conn.close()
+
+
+def test_a_proposal_never_spoils_the_retelling() -> None:
+    from desman.interlocutor import Retelling
+
+    assert Retelling.model_validate({"text": "done", "continue_with": ""}).continue_with is None
+    assert Retelling.model_validate({"text": "done", "continue_with": None}).continue_with is None
+    long = Retelling.model_validate({"text": "done", "continue_with": "x" * 500})
+    assert long.continue_with == "x" * 300

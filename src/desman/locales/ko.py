@@ -83,6 +83,7 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "다음 호출 전에 이 작업들의 결과가 추가됩니다: {tasks}.",
     "Before the next call, older messages are summarised: the request will be shorter.": "다음 호출 전에 이전 메시지가 요약됩니다: 요청이 짧아집니다.",
     "A cancelled task is not continued.": "취소된 작업은 이어서 하지 않습니다.",
+    "DESMAN proposes to continue task {ref}:": "DESMAN이 작업 {ref}을(를) 이어서 하자고 제안합니다:",
     "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "작업 {ref}은(는) 결과가 완료된 뒤에 이어집니다. 먼저 기다리는 일을 결정하세요(retry, accept 또는 fail).",
     "Task {ref} was not continued: {error}": "작업 {ref}을(를) 이어서 하지 못했습니다: {error}",
     "A job lent by desman-global is not continued here.": "desman-global에서 빌린 일은 여기서 이어서 하지 않습니다.",
