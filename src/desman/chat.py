@@ -206,6 +206,8 @@ class Chat:
         one (`desman -c`); /sessions continues any."""
         self.waiting = InboxWatch(self.store)
         """What waits for the person's decision: told at the start, then as it comes (5.1)."""
+        self._opened: dict[str, list[str]] = {}
+        """Per session, the knowledge tree's paths the last answer read (`/context`)."""
         self._gave_up: dict[str, int] = {}
         """Per session, the last message when a summary failed: until as much again is said,
         the older messages just fall out of the model's view."""
@@ -463,6 +465,7 @@ class Chat:
         try:
             with self._for(calls.Role.INTERLOCUTOR):
                 turn = interlocutor.turn(history)
+            self._opened[self.session_id] = interlocutor.opened
         except runs.ModuleWaiting:
             raise
         except ProviderError as e:
@@ -1989,6 +1992,8 @@ class Chat:
             ),
         ]
         lines.extend(self._context_changes(history))
+        if read := self._opened.get(self.session_id or ""):
+            lines.append(t("The last answer also read: {nodes}.", nodes=", ".join(read)))
         for message in request.messages:
             lines.extend(["", str(message.role), message.content])
         ui.out(ui.ContextText(providers.redact_keys("\n".join(lines), config)[0]))

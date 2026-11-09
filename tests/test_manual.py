@@ -18,7 +18,7 @@ from desman.config import ConfigManager, default_config_path
 from desman.core import db
 from desman.core.profile import Profile
 from desman.core.sessions import Role, Sessions
-from desman.interlocutor import CHAT, LOOKED_UP, LOOKUP, Interlocutor
+from desman.interlocutor import AGAIN, CHAT, LAST, LOOKED_UP, LOOKUP, Interlocutor, tree_contents
 from desman.llm.base import Request
 from desman.llm.fake import FakeLLM
 from helpers import make_config
@@ -129,22 +129,27 @@ def test_the_prompt_lists_the_topics_not_their_texts(fake: FakeLLM) -> None:
     fake.on(CHAT, REPLY)
     talk("hi")
     (request,) = turns(fake)
-    assert manual.contents() in system(request)
+    assert tree_contents() in system(request)
     assert LOOKUP.split("{topics}")[0] in system(request)
     assert manual.BY_NAME["retries"].text not in request.prompt + system(request)
+    # The commands with their arguments, but what each does only in its node (ADR 0009).
+    entry = commands.find("keys add")
+    assert entry is not None and entry.about not in system(request)
+    assert "- keys add {" in system(request)
 
 
 def test_a_lookup_asks_again_with_the_topics_texts(fake: FakeLLM) -> None:
-    fake.on(CHAT, '{"type": "lookup", "topics": ["retries", " Tasks"]}', REPLY)
+    fake.on(CHAT, '{"type": "lookup", "nodes": ["retries", " DESMAN/Manual/tasks"]}', REPLY)
     result = talk("what happens when a task keeps failing?")
     first, second = turns(fake)
-    assert "manual" not in payload(first)
-    assert payload(second)["manual"] == {
-        "retries": manual.BY_NAME["retries"].text,
-        "tasks": manual.BY_NAME["tasks"].text,
+    assert "knowledge" not in payload(first)
+    assert payload(second)["knowledge"] == {
+        "DESMAN/Manual/retries": {"text": manual.BY_NAME["retries"].text, "plan": False},
+        "DESMAN/Manual/tasks": {"text": manual.BY_NAME["tasks"].text, "plan": False},
     }
     assert payload(second)["conversation"] == payload(first)["conversation"]
-    assert LOOKED_UP in system(second) and manual.contents() not in system(second)
+    assert LOOKED_UP.split("{again}")[0] in system(second)
+    assert tree_contents() not in system(second) and LAST in system(second)
     assert "A subtask that runs out of attempts waits for you." in result.output
     assert said() == [  # the lookup itself is not part of the conversation
         (Role.USER, "what happens when a task keeps failing?"),
@@ -155,23 +160,23 @@ def test_a_lookup_asks_again_with_the_topics_texts(fake: FakeLLM) -> None:
 @pytest.mark.parametrize(
     "lookup",
     [
-        '{"type": "lookup", "topics": ["weather"]}',
-        '{"type": "lookup", "topics": []}',
-        '{"type": "lookup", "topics": ["tasks", "retries", "chat"]}',
+        '{"type": "lookup", "nodes": ["weather"]}',
+        '{"type": "lookup", "nodes": []}',
+        '{"type": "lookup", "nodes": ["tasks", "retries", "chat", "files"]}',
     ],
-    ids=["unknown topic", "no topic", "too many"],
+    ids=["unknown node", "no node", "too many"],
 )
 def test_a_bad_lookup_is_repaired_once(fake: FakeLLM, lookup: str) -> None:
-    fake.on(CHAT, lookup, '{"type": "lookup", "topics": ["chat"]}', REPLY)
+    fake.on(CHAT, lookup, '{"type": "lookup", "nodes": ["chat"]}', REPLY)
     talk("how do sessions work?")
     first, repair, second = turns(fake)
-    assert "topics" in repair.prompt  # the model was shown what was wrong
-    assert list(payload(second)["manual"]) == ["chat"]
+    assert "nodes" in repair.prompt  # the model was shown what was wrong
+    assert list(payload(second)["knowledge"]) == ["DESMAN/Manual/chat"]
 
 
 def test_after_a_lookup_another_one_is_refused(fake: FakeLLM) -> None:
-    again = '{"type": "lookup", "topics": ["chat"]}'
-    fake.on(CHAT, '{"type": "lookup", "topics": ["tasks"]}', again, again)
+    again = '{"type": "lookup", "nodes": ["chat"]}'
+    fake.on(CHAT, '{"type": "lookup", "nodes": ["tasks"]}', again, again)
     result = talk("tell me about tasks")
     assert len(turns(fake)) == 3  # the lookup, the turn with the texts, its one repair
     assert "made no sense" in result.output
@@ -182,7 +187,7 @@ def test_profile_edits_given_with_a_lookup_are_kept(fake: FakeLLM) -> None:
     config = make_config(language="en", configured=True)
     config.personalize = True
     ConfigManager(default_config_path()).save(config)
-    lookup = {"type": "lookup", "topics": ["profile"], "profile": [{"add": "Likes it short"}]}
+    lookup = {"type": "lookup", "nodes": ["profile"], "profile": [{"add": "Likes it short"}]}
     answer = {
         "type": "reply",
         "text": "I keep notes.",
@@ -203,9 +208,30 @@ def test_the_topics_texts_take_the_place_of_older_messages() -> None:
     for n in range(40):  # far more than the interlocutor's budget
         session = sessions.add(session, Role.USER, f"message {n} " + "word " * 80).session_id
     assert session is not None
-    llm = FakeLLM().on(CHAT, '{"type": "lookup", "topics": ["providers", "tasks"]}', REPLY)
+    llm = FakeLLM().on(CHAT, '{"type": "lookup", "nodes": ["providers", "tasks"]}', REPLY)
     Interlocutor(llm, "en").turn(sessions.history(session, last=100))
     first, second = turns(llm)
     assert len(second.prompt) <= len(first.prompt) + 400  # about as large as the first
     assert len(payload(second)["conversation"]) < len(payload(first)["conversation"])
     assert payload(second)["conversation"][-1] == payload(first)["conversation"][-1]
+
+
+def test_a_command_group_and_a_section_with_one_more_lookup(fake: FakeLLM) -> None:
+    adr = "DESMAN/Docs/ADR/0009-knowledge-tree/Decision"
+    fake.on(
+        CHAT,
+        '{"type": "lookup", "nodes": ["Commands/keys", "DESMAN/Docs/ADR/"]}',
+        json.dumps({"type": "lookup", "nodes": [adr]}),
+        REPLY,
+    )
+    result = talk("how will the knowledge tree work, and how do I add a key?", "/context")
+    first, second, third = turns(fake)
+    assert f"The last answer also read: Commands/keys, DESMAN/Docs/ADR/, {adr}." in result.output
+    found = payload(second)["knowledge"]
+    entry = commands.find("keys add")
+    assert entry is not None and entry.about in found["Commands/keys"]["text"]
+    assert "0009-knowledge-tree" in found["DESMAN/Docs/ADR/"]["contents"]
+    assert AGAIN in system(second)  # a section opened: one more lookup allowed
+    known = payload(third)["knowledge"]
+    assert known[adr]["plan"] is True and "Commands/keys" in known  # kept, and the new one
+    assert LAST in system(third)

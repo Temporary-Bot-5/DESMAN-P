@@ -82,6 +82,7 @@ MESSAGES: dict[str, Forms] = {
     "Delete all tasks": "모든 작업 삭제",
     "Before the next call, what became of these tasks is added: {tasks}.": "다음 호출 전에 이 작업들의 결과가 추가됩니다: {tasks}.",
     "Before the next call, older messages are summarised: the request will be shorter.": "다음 호출 전에 이전 메시지가 요약됩니다: 요청이 짧아집니다.",
+    "The last answer also read: {nodes}.": "마지막 답변은 다음도 읽었습니다: {nodes}.",
     "General Terminal talks to no model.": "일반 터미널은 모델과 대화하지 않습니다.",
     "Hide finished TASK, or all finished unpinned tasks.": "완료된 작업 또는 고정되지 않은 모든 완료 작업을 숨깁니다.",
     "Hide finished unpinned tasks.": "고정되지 않은 완료 작업을 숨깁니다.",

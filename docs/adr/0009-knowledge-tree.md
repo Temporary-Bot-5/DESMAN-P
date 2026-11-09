@@ -55,12 +55,12 @@ What the tree must not break:
    which costs one more call, never more than two levels.
 3. **The interlocutor.** Its prompt carries the table of contents instead of the topic list
    and the full catalog. Of the catalog's ~3.1k tokens, the descriptions are ~2.1k, the argument
-   schemas ~0.7k and the names ~0.2k (70 commands): the prompt keeps only the names, grouped
-   by section (`keys: list, add, remove, import, check`). Each command's description and
-   arguments move into its `Commands/…` node. The existing `lookup` turn becomes "open
-   nodes" (≤3) and costs the same one extra call as today, only when needed. A command turn with
-   wrong arguments is still validated by code and repaired once with the schema shown, so a
-   command whose schema was not looked up does not slip through.
+   schemas ~0.7k and the names ~0.2k (70 commands). The prompt keeps the names with their
+   argument schemas, so command turns still get their arguments right without an extra call;
+   the descriptions move into the `Commands/GROUP` nodes (K.2, measured: the system prompt went
+   from ~4.6k to ~2.8k tokens). A lookup opens up to 3 paths; opening a section (`…/`) shows
+   its table of contents and allows one more lookup, never more. Like today's `lookup`, it
+   costs one extra call, only when needed. `/context` names the paths the last answer read.
 4. **Tasks** pay no extra call: the planner already makes one. It sees the table of contents and
    names the nodes each subtask needs (`context: [paths]` in `PlannedSubtask`). The executor
    gets their texts in `core/context.py`, within the existing token budget and marked by origin.
@@ -85,13 +85,13 @@ What the tree must not break:
 
 ## Consequences
 
-- The interlocutor's prompt drops from ~4.7k to roughly 2k tokens (to be measured with
-  `/context` at each step). Small local models (the 4k context of llama.cpp, slow CPU Ollama,
-  noted in T.2l) get room for the conversation.
-- The chat makes a second call in the same cases as today's `lookup`. When the needed command
-  schema was not opened, it may now also need a repair call. Measured on the benchmark before and
-  after; if command turns get noticeably worse, the most used commands keep their schemas in the
-  prompt.
+- The interlocutor's system prompt dropped from ~4.6k to ~2.8k tokens (K.2). Small local
+  models (the 4k context of llama.cpp, slow CPU Ollama, noted in T.2l) get room for the
+  conversation.
+- The chat makes a second call in the same cases as before (a lookup), and a third only after
+  opening a section. Command turns are unchanged: the schemas stay in the prompt. The benchmark
+  (`bench.py`) runs tasks, not the chat, so K.2 is measured by `/context`; K.3 (tasks) is
+  measured on the benchmark.
 - Tasks gain the person's notes and DESMAN's docs without a new call; the planner's prompt
   grows by the table of contents (bounded by 2).
 - One new tool (`read_node`) and one new table (personal nodes, a new migration). The
