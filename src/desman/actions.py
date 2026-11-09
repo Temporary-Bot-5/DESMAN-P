@@ -16,7 +16,7 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import providers, ui
+from desman import knowledge, providers, ui
 from desman.config import ConfigError, open_config
 from desman.core import db, operator
 from desman.core.audit import AuditEntry, check_history, history
@@ -119,6 +119,8 @@ def print_report(report: TaskReport) -> None:
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
+        if sub.knowledge:
+            click.echo("      " + t("knowledge: {paths}", paths=", ".join(sub.knowledge)))
     for text in suggestion_lines(report.suggestions):
         click.echo(text)
 
@@ -725,6 +727,7 @@ def continue_task(
         redo=pending.redo.seq if pending.redo else None,
         priority=task["priority"],
         limit=limit,
+        tree=knowledge.task_tree(),
     )
     last = subtasks[-1].id
     basis = [last] + ([pending.redo.id] if pending.redo and pending.redo.id != last else [])

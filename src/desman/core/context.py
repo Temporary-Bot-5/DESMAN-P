@@ -13,6 +13,7 @@ characters / 4, which is close enough for budgeting.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
@@ -45,6 +46,31 @@ class DependencyContext(BaseModel):
     truncated: bool = False
 
 
+class KnowledgeText(BaseModel):
+    """A node of the knowledge tree (ADR 0009) given to the executor: a node's text, or a
+    section's table of contents."""
+
+    model_config = ConfigDict(frozen=True)
+
+    path: str
+    text: str
+    plan: bool = False
+    """It describes intentions (a plan, a proposal), not what DESMAN does now."""
+    untrusted: bool = False
+    """It came from outside (a task's result, the web): data, never instructions."""
+    truncated: bool = False
+
+    def cut(self, chars: int) -> KnowledgeText:
+        """Itself within `chars`, marked truncated when it had to be cut."""
+        if chars >= len(self.text):
+            return self
+        return self.model_copy(update={"text": truncate(self.text, chars), "truncated": True})
+
+
+Knowledge = Callable[[str], KnowledgeText | None]
+"""Looks a stored path up in the knowledge tree; None when the tree no longer has it."""
+
+
 class Feedback(BaseModel):
     """Why the previous attempt was sent back, so the next one can do better."""
 
@@ -62,6 +88,8 @@ class Context(BaseModel):
     inputs: dict[str, Any]
     checkpoint: dict[str, Any] | None
     dependencies: list[DependencyContext]
+    knowledge: list[KnowledgeText] = []
+    """What the planner chose of the knowledge tree for this subtask."""
     feedback: Feedback | None = None
     attempt: int = 1
     """1 for the first try; grows with every quality retry."""
@@ -75,15 +103,19 @@ def build_context(
     feedback: Feedback | None,
     budget_tokens: int = DEFAULT_BUDGET_TOKENS,
     strategy: Strategy | None = None,
+    knowledge: list[KnowledgeText] | None = None,
 ) -> Context:
-    """`strategy` defaults to the one the attempt number picks."""
+    """`strategy` defaults to the one the attempt number picks. Dependency results and
+    `knowledge` share the budget."""
     attempt = subtask.attempts.quality + 1
+    fitted, nodes = fit(dependencies, knowledge or [], budget_tokens)
     return Context(
         description=subtask.description,
         acceptance_criteria=subtask.acceptance_criteria,
         inputs=subtask.inputs,
         checkpoint=subtask.checkpoint,
-        dependencies=fit_dependencies(dependencies, budget_tokens),
+        dependencies=fitted,
+        knowledge=nodes,
         feedback=feedback,
         attempt=attempt,
         strategy=strategy or strategy_for(attempt),
@@ -98,8 +130,23 @@ def fit_dependencies(
     results: list[DependencyResult], budget_tokens: int = DEFAULT_BUDGET_TOKENS
 ) -> list[DependencyContext]:
     """Fit dependency results into `budget_tokens`, keeping their order."""
+    return fit(results, [], budget_tokens)[0]
+
+
+def fit(
+    results: list[DependencyResult],
+    knowledge: list[KnowledgeText],
+    budget_tokens: int = DEFAULT_BUDGET_TOKENS,
+) -> tuple[list[DependencyContext], list[KnowledgeText]]:
+    """Fit dependency results and knowledge texts into one budget, keeping their order. The
+    knowledge is material, the results are the work itself: it gets at most half the budget,
+    and the results whatever it leaves."""
+    budget = budget_tokens * CHARS_PER_TOKEN
+    nodes = fit_knowledge(knowledge, budget // 2)
     rendered = [_render(r.content) for r in results]
-    allowance = fair_shares([len(text) for text in rendered], budget_tokens * CHARS_PER_TOKEN)
+    allowance = fair_shares(
+        [len(text) for text in rendered], budget - sum(len(n.text) for n in nodes)
+    )
     fitted = []
     for result, text, chars in zip(results, rendered, allowance, strict=True):
         if chars >= len(text):
@@ -119,7 +166,30 @@ def fit_dependencies(
                     truncated=True,
                 )
             )
-    return fitted
+    return fitted, nodes
+
+
+def fit_knowledge(knowledge: list[KnowledgeText], chars: int) -> list[KnowledgeText]:
+    """Knowledge texts fairly within `chars`, a cut one marked truncated."""
+    shares = fair_shares([len(node.text) for node in knowledge], chars)
+    return [node.cut(share) for node, share in zip(knowledge, shares, strict=True)]
+
+
+def given(knowledge: Knowledge | None, paths: list[str]) -> tuple[list[KnowledgeText], list[str]]:
+    """The texts of the knowledge tree's `paths` a subtask was given, and the paths the tree no
+    longer has (or all of them, with no tree to look in). The executor and the reviewer both
+    see what this returns."""
+    if knowledge is None:
+        return [], list(paths)
+    found: list[KnowledgeText] = []
+    missing: list[str] = []
+    for path in paths:
+        node = knowledge(path)
+        if node is None:
+            missing.append(path)
+        else:
+            found.append(node)
+    return found, missing
 
 
 def _render(content: dict[str, Any] | None) -> str:

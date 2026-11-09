@@ -67,6 +67,7 @@ def test_the_shipped_policy_gives_tools_to_the_executor_only() -> None:
         "web_search",
         "web_fetch",
         "suggest_model",
+        "read_node",
     }
     assert policy.tools_for(Role.EXECUTOR) == executor
     assert policy.tools_for(Role.PLANNER) == policy.tools_for(Role.REVIEWER) == frozenset()

@@ -567,6 +567,8 @@ MESSAGES: dict[str, Forms] = {
     ),
     "after {deps}": "после {deps}",
     "attempts q{quality}/t{transient}": "попытки q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}: в дереве знаний нет такого узла: {nodes}",
+    "knowledge: {paths}": "знания: {paths}",
     "held by {owner} until {until}": "у {owner} до {until}",
     "paused until {until}": "пауза до {until}",
     "Nothing is waiting for you.": "Ничего не ждёт вашего решения.",

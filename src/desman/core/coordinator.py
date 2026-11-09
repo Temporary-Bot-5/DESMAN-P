@@ -46,7 +46,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from desman.core import calls, db
-from desman.core.context import DEFAULT_BUDGET_TOKENS, Context, build_context
+from desman.core.context import (
+    DEFAULT_BUDGET_TOKENS,
+    Context,
+    Knowledge,
+    KnowledgeText,
+    build_context,
+    given,
+)
 from desman.core.effects import Effects
 from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
@@ -236,8 +243,12 @@ class Coordinator:
         watch: Callable[[], None] | None = None,
         gate: Callable[[], None] | None = None,
         network: Crew | None = None,
+        knowledge: Knowledge | None = None,
     ) -> None:
         self.store = store
+        self.knowledge = knowledge
+        """Where the knowledge tree's paths a subtask was given are looked up (ADR 0009). None:
+        nobody is given any. A job from desman-global never is."""
         self.executor = executor
         self.reviewer = reviewer
         self.owner = owner
@@ -481,6 +492,7 @@ class Coordinator:
                 self.store.last_feedback(subtask.id),
                 self.context_budget_tokens,
                 strategy,
+                self._knowledge(subtask) if own else None,
             )
             self._started(subtask, context)
             work = Work(
@@ -609,6 +621,16 @@ class Coordinator:
             self._discard(subtask, "lease lost before the missing tool was recorded", events)
             return
         events.append(f"permanent {subtask.id} -> {moved.status}")
+
+    def _knowledge(self, subtask: Subtask) -> list[KnowledgeText]:
+        """The texts of the nodes the subtask was given. A path the tree no longer has is left
+        out and noted (`context_missing`): the executor can still look with `read_node`."""
+        if not subtask.knowledge:
+            return []
+        found, missing = given(self.knowledge, subtask.knowledge)
+        if missing:
+            self.store.note(subtask.id, Actor.EXECUTOR, "context_missing", {"paths": missing})
+        return found
 
     def _started(self, subtask: Subtask, context: Context) -> None:
         self.store.note(

@@ -441,6 +441,8 @@ MESSAGES: dict[str, Forms] = {
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": "공급자 한도 때문에 {until}까지 일시 중지되었습니다. 이어서 하려면: desman resume {ref}",
     "after {deps}": "{deps} 다음",
     "attempts q{quality}/t{transient}": "시도 q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}: 지식 트리에 그런 노드가 없습니다: {nodes}",
+    "knowledge: {paths}": "지식: {paths}",
     "held by {owner} until {until}": "{owner}이(가) {until}까지 보유",
     "paused until {until}": "{until}까지 일시 중지",
     "Nothing is waiting for you.": "결정을 기다리는 항목이 없습니다.",

@@ -464,6 +464,8 @@ MESSAGES: dict[str, Forms] = {
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": "Пауза через ліміт провайдера до {until}. Продовжити: desman resume {ref}",
     "after {deps}": "після {deps}",
     "attempts q{quality}/t{transient}": "спроби q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}: у дереві знань немає такого вузла: {nodes}",
+    "knowledge: {paths}": "знання: {paths}",
     "held by {owner} until {until}": "у {owner} до {until}",
     "paused until {until}": "пауза до {until}",
     "Nothing is waiting for you.": "Ніщо не чекає вашого рішення.",

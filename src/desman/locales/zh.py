@@ -441,6 +441,8 @@ MESSAGES: dict[str, Forms] = {
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": "因提供商限额暂停至 {until}。继续：desman resume {ref}",
     "after {deps}": "在 {deps} 之后",
     "attempts q{quality}/t{transient}": "尝试 q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}：知识树中没有这样的节点：{nodes}",
+    "knowledge: {paths}": "知识：{paths}",
     "held by {owner} until {until}": "由 {owner} 持有至 {until}",
     "paused until {until}": "暂停至 {until}",
     "Nothing is waiting for you.": "没有等待你决定的事项。",

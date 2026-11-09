@@ -40,11 +40,19 @@ def task(store: Store, goal: str = "work") -> str:
     )
 
 
+def old_task(conn: sqlite3.Connection) -> str:
+    """A task as an older DESMAN stored it (today's Store writes columns it lacked)."""
+    conn.execute(
+        "INSERT INTO tasks (id, goal, priority, created_at) VALUES ('old', 'goal', 50, 'now')"
+    )
+    return "old"
+
+
 def test_upgrade_43(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "old.db")
     db.migrate(conn, db.MIGRATIONS[:43])
-    identity = task(Store(conn))
-    assert db.migrate(conn) == 1
+    identity = old_task(conn)
+    assert db.migrate(conn) == db.SCHEMA_VERSION - 43
     db.verify_schema(conn)
     assert Store(conn).find_task(identity)
     assert holds.listed(conn) == []

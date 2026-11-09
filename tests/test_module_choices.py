@@ -48,10 +48,18 @@ def task(conn: sqlite3.Connection, kind: Kind = Kind.CODE) -> str:
     )
 
 
+def old_task(conn: sqlite3.Connection) -> str:
+    """A task as an older DESMAN stored it (today's Store writes columns it lacked)."""
+    conn.execute(
+        "INSERT INTO tasks (id, goal, priority, created_at) VALUES ('old', 'goal', 50, 'now')"
+    )
+    return "old"
+
+
 def test_upgrade_35_and_choice_constraints(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "old.db")
     assert db.migrate(conn, db.MIGRATIONS[:35]) == 35
-    identity = task(conn)
+    identity = old_task(conn)
     assert db.migrate(conn) == db.SCHEMA_VERSION - 35
     db.verify_schema(conn)
     choices.set_choice(conn, "task", identity, "code", choices.Choice(model="groq/test"))

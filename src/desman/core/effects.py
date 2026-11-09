@@ -39,7 +39,14 @@ from typing import Any, Final
 
 from pydantic import BaseModel
 
-from desman.core.context import CHARS_PER_TOKEN, fair_shares, truncate
+from desman.core.context import (
+    CHARS_PER_TOKEN,
+    Knowledge,
+    fair_shares,
+    fit_knowledge,
+    given,
+    truncate,
+)
 from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import Replayed, Tool, ToolResult
@@ -56,22 +63,34 @@ EVIDENCE_TOKENS: Final = 4000
 
 
 def evidence(
-    store: Store, subtask: Subtask, budget_tokens: int = EVIDENCE_TOKENS
+    store: Store,
+    subtask: Subtask,
+    budget_tokens: int = EVIDENCE_TOKENS,
+    *,
+    knowledge: Knowledge | None = None,
 ) -> dict[str, Any]:
     """What the result under review can rest on: the subtask's inputs, the accepted results of
-    its dependencies, and what the tools returned to the execution that handed it in (the
-    latest one ended: a rejected attempt's searches are not this result's). In call order,
-    fitted to `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so
-    a call shows its tool and its result."""
+    its dependencies, the knowledge tree's nodes it was given (looked up by `knowledge`), and
+    what the tools returned to the execution that handed it in (the latest one ended: a
+    rejected attempt's searches are not this result's). In call order, fitted to
+    `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
+    shows its tool and its result."""
     execution = store.executions(subtask.id) - 1
     rows = store.effects(subtask.id, execution) if execution >= 0 else []
     dependencies = store.dependency_results(subtask.id)
+    budget = budget_tokens * CHARS_PER_TOKEN
+    out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
+    # What the executor was given of the knowledge tree, within at most half the budget, as
+    # it got it (`context.fit`): the rest is for what the work itself rests on.
+    nodes = fit_knowledge(given(knowledge, subtask.knowledge)[0], budget // 2)
+    if nodes:
+        out["knowledge"] = [node.model_dump(exclude_defaults=True) for node in nodes]
+        budget -= sum(len(node.text) for node in nodes)
     items: list[tuple[str, Any]] = [("inputs", subtask.inputs)] if subtask.inputs else []
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
     texts = [_evidence_text(kind, item) for kind, item in items]
-    shares = fair_shares([len(text) for text in texts], budget_tokens * CHARS_PER_TOKEN)
-    out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
+    shares = fair_shares([len(text) for text in texts], budget)
     for (kind, item), text, chars in zip(items, texts, shares, strict=True):
         whole = chars >= len(text)
         content: Any = json.loads(text) if whole else truncate(text, chars)

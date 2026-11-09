@@ -86,6 +86,7 @@ def test_registry_refuses_duplicate_and_bad_names() -> None:
         "web_search",
         "web_fetch",
         "suggest_model",
+        "read_node",
     ]
     assert builtin_registry() is not registry  # registering is never global
 
@@ -106,7 +107,12 @@ def test_only_granted_tools_are_offered_and_run(ws: Workspace) -> None:
     policy = Policy(roles={Role.EXECUTOR: RolePolicy(tools=[*registry.names])})
     record = Recorder()
     box = Toolbox(ws, registry, access=Access(policy, Role.EXECUTOR), record=record)
-    assert [s["name"] for s in box.specs()] == ["read_file", "write_file", "list_files"]
+    assert [s["name"] for s in box.specs()] == [
+        "read_file",
+        "write_file",
+        "list_files",
+        "read_node",
+    ]
 
     refused = box.call(call("fetch"))
     assert not refused.ok and refused.error is not None and "network_access" in refused.error
@@ -271,7 +277,7 @@ def test_executor_writes_files_through_tool_calls(
 
     first, second, third = llm.calls
     offered = json.loads(first.prompt.split("\n", 1)[1])["tools"]
-    assert [t["name"] for t in offered] == ["read_file", "write_file", "list_files"]
+    assert [t["name"] for t in offered] == ["read_file", "write_file", "list_files", "read_node"]
     assert '"tool_calls"' in first.messages[0].content
     assert second.prompt.startswith(f"{TOOL_RESULTS}:\n")
     assert json.loads(second.prompt.split("\n", 1)[1]) == [

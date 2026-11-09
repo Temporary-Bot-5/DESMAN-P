@@ -53,6 +53,7 @@ from desman import (
     compaction,
     config_cli,
     i18n,
+    knowledge,
     messenger_cli,
     modules_cli,
     providers,
@@ -997,6 +998,7 @@ class Chat:
                 models.for_(calls.Role.PLANNER),
                 goal,
                 limit=runs.tuned(config.tuning, "max_subtasks"),
+                tree=knowledge.task_tree(),
             )
         if planned.error is not None:
             ui.warn(

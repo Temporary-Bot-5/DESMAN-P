@@ -441,6 +441,8 @@ MESSAGES: dict[str, Forms] = {
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": "プロバイダーの制限により {until} まで一時停止中。再開: desman resume {ref}",
     "after {deps}": "{deps} の後",
     "attempts q{quality}/t{transient}": "試行 q{quality}/t{transient}",
+    "{path}: no such node of the knowledge tree: {nodes}": "{path}: 知識ツリーにそのノードはありません: {nodes}",
+    "knowledge: {paths}": "知識: {paths}",
     "held by {owner} until {until}": "{owner} が {until} まで保持",
     "paused until {until}": "{until} まで一時停止",
     "Nothing is waiting for you.": "あなたの判断を待っているものはありません。",

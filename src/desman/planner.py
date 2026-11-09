@@ -23,13 +23,23 @@ from __future__ import annotations
 
 import functools
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, StringConstraints, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
+from desman import knowledge
 from desman.core.coordinator import Decomposer, Work
-from desman.core.models import Kind, Priority, SubtaskSpec, TaskSpec
+from desman.core.models import MAX_KNOWLEDGE, Kind, Priority, SubtaskSpec, TaskSpec
+from desman.knowledge import Node
 from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
 
@@ -76,6 +86,17 @@ PLANNER_RULES = (
 value the Improvement Analyst may propose to change (`improve.TARGETS`)."""
 
 
+KNOWLEDGE_RULES = (
+    " DESMAN keeps a knowledge tree: its own documentation and what it knows for the person. "
+    "Its table of contents is below (paths, never texts). When a subtask needs some of it, "
+    'add "context": [at most 3 paths copied from the table] to that subtask, and its executor '
+    'is given their texts. A path ending in "/" is a section: the executor is given its table '
+    "of contents and reads on from it. A node marked [plan] describes intentions, not what "
+    "DESMAN does now. Most goals need none: leave it out then.\nThe knowledge tree:\n"
+)
+"""Not a target of the Improvement Analyst: what a task may read is not its to widen."""
+
+
 def planner_system(limit: int = MAX_SUBTASKS) -> str:
     """The planner's instructions with its limit (`Tuning.max_subtasks`, or the default)."""
     return (
@@ -99,6 +120,21 @@ class PlannedSubtask(BaseModel):
     kind: Kind | None = None
     """None: the model did not say (text for a planned subtask, the subtask's kind for a part)."""
     runs_code: bool = False
+    context: list[str] = Field(default_factory=list)
+    """Paths of the knowledge tree it needs (ADR 0009); checked against the tree by `plan`."""
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def _lenient(cls, value: Any) -> list[str]:
+        """An optional hint never costs the plan a repair: null is none, one path a list of
+        it, and what is not a path is left out."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            return [v for v in value if isinstance(v, str)]
+        return []
 
 
 class Plan(BaseModel):
@@ -139,10 +175,28 @@ class Plan(BaseModel):
                     depends_on=sub.depends_on + unused if i == last else sub.depends_on,
                     kind=sub.kind or Kind.TEXT,
                     runs_code=sub.runs_code,
+                    knowledge=sub.context[:MAX_KNOWLEDGE],  # checked by `known`
                 )
                 for i, sub in enumerate(self.subtasks)
             ],
         )
+
+    def known(self, tree: Sequence[Node]) -> tuple[Self, list[str]]:
+        """The plan with each subtask's `context` as paths of `tree` (at most `MAX_KNOWLEDGE`,
+        each once), and the paths the model wrote that the tree does not have. A miss is not
+        worth a repair request: the executor can still look with `read_node`."""
+        unknown: list[str] = []
+        subtasks = []
+        for sub in self.subtasks:
+            found = []
+            for given in sub.context:
+                path = knowledge.resolve(tree, given)
+                if path is None:
+                    unknown.append(given[:100])
+                elif path not in found:
+                    found.append(path)
+            subtasks.append(sub.model_copy(update={"context": found[:MAX_KNOWLEDGE]}))
+        return self.model_copy(update={"subtasks": subtasks}), unknown
 
 
 @functools.cache
@@ -163,13 +217,34 @@ class Planned:
     source: Literal["llm", "template"]
     error: str | None = None
     """Why the model's plan was not used (None when it was, or nobody asked the model)."""
+    unknown_context: tuple[str, ...] = ()
+    """Paths the model named that the knowledge tree does not have (left out)."""
 
     def details(self) -> dict[str, Any]:
         """For the audit entry of the new task."""
         details: dict[str, Any] = {"plan": self.source}
         if self.error is not None:
             details["plan_error"] = self.error
+        if self.unknown_context:
+            details["context_unknown"] = list(self.unknown_context)
         return details
+
+
+def _system(rules: str, tree: Sequence[Node] | None) -> str:
+    """The planner's instructions, with the knowledge tree's table of contents when it has
+    any: without a tree a plan names no context."""
+    if not tree:
+        return rules
+    return rules + KNOWLEDGE_RULES + knowledge.contents(tree)
+
+
+def _planned(reply: Plan, goal: str, priority: int, tree: Sequence[Node] | None) -> Planned:
+    """The model's plan, its context checked against `tree`. Without one the model was told of
+    no tree: whatever it named anyway is dropped unrecorded."""
+    reply, unknown = reply.known(tree or ())
+    return Planned(
+        reply.spec(goal, priority), "llm", unknown_context=tuple(unknown if tree else ())
+    )
 
 
 def template_plan(goal: str, priority: int = Priority.NORMAL) -> TaskSpec:
@@ -197,14 +272,20 @@ def must_run(spec: TaskSpec) -> TaskSpec:
 
 
 def plan(
-    llm: LLM, goal: str, priority: int = Priority.NORMAL, *, limit: int | None = None
+    llm: LLM,
+    goal: str,
+    priority: int = Priority.NORMAL,
+    *,
+    limit: int | None = None,
+    tree: Sequence[Node] | None = None,
 ) -> Planned:
     """The model's plan for `goal`, or the template plan if the model fails. `limit`: the most
-    subtasks (default `MAX_SUBTASKS`)."""
+    subtasks (default `MAX_SUBTASKS`). `tree`: the knowledge tree it may give subtasks nodes
+    of (`knowledge.task_tree()`; None: none)."""
     limit = limit or MAX_SUBTASKS
     request = Request(
         messages=[
-            Message(role="system", content=planner_system(limit)),
+            Message(role="system", content=_system(planner_system(limit), tree)),
             Message(role="user", content=f"{PLAN}:\n{goal}"),
         ]
     )
@@ -217,7 +298,7 @@ def plan(
         )
     except ProviderError as e:
         return Planned(template_plan(goal, priority), "template", f"{type(e).__name__}: {e}")
-    return Planned(reply.spec(goal, priority), "llm")
+    return _planned(reply, goal, priority, tree)
 
 
 # ── Continuing a task (ADR 0010) ─────────────────────────────────────────────
@@ -243,10 +324,12 @@ def continuation(
     redo: int | None = None,
     priority: int = Priority.NORMAL,
     limit: int | None = None,
+    tree: Sequence[Node] | None = None,
 ) -> Planned:
     """New subtasks for a task that was worked on (ADR 0010): `subtasks` are its (seq,
     description, status), `ask` what to add or why a step is redone (`redo`: that step's seq).
-    The template, if the model fails: one subtask doing what is asked on the result so far."""
+    The template, if the model fails: one subtask doing what is asked on the result so far.
+    `tree`: as for `plan`."""
     limit = limit or MAX_SUBTASKS
     asked = {
         "goal": goal,
@@ -257,7 +340,7 @@ def continuation(
     }
     request = Request(
         messages=[
-            Message(role="system", content=planner_system(limit) + CONTINUE_RULES),
+            Message(role="system", content=_system(planner_system(limit) + CONTINUE_RULES, tree)),
             Message(role="user", content=f"{CONTINUE}:\n{json.dumps(asked, ensure_ascii=False)}"),
         ]
     )
@@ -279,7 +362,7 @@ def continuation(
         return Planned(template, "template", f"{type(e).__name__}: {e.problem}")
     except ProviderError as e:
         return Planned(template, "template", f"{type(e).__name__}: {e}")
-    return Planned(reply.spec(goal, priority), "llm")
+    return _planned(reply, goal, priority, tree)
 
 
 # ── Splitting a subtask (ROADMAP 2.9b) ───────────────────────────────────────
