@@ -502,6 +502,9 @@ class Chat:
             self._say(turn.question)
             self._fallback_note(interlocutor)
         elif isinstance(turn, NewTask):
+            if personal and turn.node is not None:  # asked now, not after the whole task
+                self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
+                turn = turn.model_copy(update={"node": None})
             self._task(turn, config, models, interlocutor)
         else:
             if turn.text is not None:
@@ -526,7 +529,11 @@ class Chat:
         author: NodeAuthor,
     ) -> None:
         """A change of the person's nodes an agent proposed: the `nodes` command's window,
-        worded by code; only the person's yes applies it. From a task it is marked untrusted."""
+        worded by code; only the person's yes applies it. From a task it is marked untrusted.
+        Not when personalisation went off meanwhile (a command of the same turn)."""
+        now = self._config()
+        if now is None or self._own_nodes(now) is None:
+            return
         args: dict[str, JsonValue]
         if isinstance(edit, AddNode):
             name, args = "nodes add", {"path": edit.add, "about": edit.about, "text": edit.text}
@@ -718,7 +725,14 @@ class Chat:
             ui.note(t("Planning…"))
             # Read once: whatever runs after this (the new work itself) is not the proposal.
             by, self._proposing = ("proposal" if self._proposing else "person"), False
-            ref, count = continued(self.store, pending, models, config, by)
+            ref, count = continued(
+                self.store,
+                pending,
+                models,
+                config,
+                by,
+                personal=config.personalize and not self.temporary,
+            )
             self._event(
                 tn(
                     count,
@@ -739,6 +753,7 @@ class Chat:
             session_id=lambda: self.session_id,
             in_terminal=self.in_terminal,
             continue_task=continue_task,
+            temporary=self.temporary,
             node_author=node_author or (NodeAuthor.PERSON if typed else NodeAuthor.INTERLOCUTOR),
         )
         try:
@@ -1418,10 +1433,10 @@ class Chat:
                 proposal = interlocutor.proposal  # only from a retelling that was shown
                 remember = interlocutor.remember
         self._files(task_id, ref, root)
+        if report.status is TaskStatus.DONE and remember is not None:
+            self._remember(task_id, remember, interlocutor)
         if report.status is TaskStatus.DONE and proposal:
             self._propose_continuation(task_id, ref, proposal, interlocutor)
-        if report.status is TaskStatus.DONE and remember is not None:
-            self._remember(remember, interlocutor)
 
     def _propose_continuation(
         self, task_id: str, ref: str, ask: str, interlocutor: Interlocutor
@@ -1451,12 +1466,18 @@ class Chat:
         finally:
             self._proposing = False
 
-    def _remember(self, edit: AddNode | ChangeNode, interlocutor: Interlocutor) -> None:
+    def _remember(
+        self, task_id: str, edit: AddNode | ChangeNode, interlocutor: Interlocutor
+    ) -> None:
         """What a done task's retelling proposed to keep as one of the person's nodes: the
-        window, marked untrusted. Only while personalisation is on, never in a temporary chat."""
+        window, marked untrusted, once per task (a declined one is not proposed again). Only
+        while personalisation is on, never in a temporary chat."""
         config = self._config()
         if config is None or self._own_nodes(config) is None:
             return
+        if self.store.proposed(task_id, "node_proposed"):
+            return
+        self.store.note_task(task_id, Actor.SCHEDULER, "node_proposed", {})
         self._outcome_audit = None  # what follows is not this task's retelling
         self._propose_node(
             edit, config, self._models(config, command=True), interlocutor, NodeAuthor.TASK

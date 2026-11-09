@@ -385,3 +385,52 @@ def test_the_page_adds_and_removes_nodes_through_the_catalog() -> None:
     assert entry.name == "nodes remove" and args.model_dump() == {"path": "Projects/Site"}
     with pytest.raises(ValueError):
         Node(section="node", operation="add", path="Projects/Site")
+
+
+# ── Review fixes ─────────────────────────────────────────────────────────────
+
+
+def test_a_model_reads_the_person_s_nodes_only_with_consent(fake: FakeLLM) -> None:
+    conn = db.open_db(db.default_db_path())
+    PersonalNodes(conn).add("Projects/Site", "The site", "Secret plans.", Author.PERSON)
+    conn.close()
+    show = json.dumps({"type": "command", "name": "nodes show", "args": {"path": "Projects/Site"}})
+    listing = json.dumps({"type": "command", "name": "nodes list", "args": {}})
+    fake.on(CHAT, show, listing, show, reply("Ok."))
+    save(make_config(language="en", configured=True, personalize=False))
+    off = chat("what are my plans?", "and my nodes?")
+    assert "Secret plans." not in off.output and "Personalisation is off" in off.output
+    temporary = chat("what are my plans?", args=("-t",))
+    assert "Secret plans." not in temporary.output
+    # The person may always read their own: a typed command.
+    assert "Secret plans." in chat("/nodes show Projects/Site").output
+
+
+def test_a_task_never_makes_a_node_trusted_and_an_agent_never_clears_the_mark(
+    store: PersonalNodes,
+) -> None:
+    mine = store.add("Personal/Style", "How I like things", "Plain.", Author.PERSON)
+    moved = store.change(mine.path, Author.TASK, about="Instruction-like line")
+    assert moved is not None and moved.untrusted
+    store.change(moved.path, Author.PERSON, text="Plain again.")
+    paper = store.add("Refs/Paper", "A paper", "From the web.", Author.TASK)
+    copied = store.change(paper.path, Author.INTERLOCUTOR, text="From the web, edited.")
+    assert copied is not None and copied.untrusted
+
+
+def test_a_spec_may_name_the_person_s_nodes(tmp_path: Path) -> None:
+    save(make_config(language="en", configured=True, personalize=True))
+    conn = db.open_db(db.default_db_path())
+    PersonalNodes(conn).add("Projects/Site", "The site", "Cats.", Author.PERSON)
+    conn.close()
+    from desman.cli import _load_spec
+
+    spec = {
+        "goal": "g",
+        "subtasks": [
+            {"description": "d", "acceptance_criteria": "a", "knowledge": ["projects/site"]}
+        ],
+    }
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    assert _load_spec(path).subtasks[0].knowledge == ["Projects/Site"]

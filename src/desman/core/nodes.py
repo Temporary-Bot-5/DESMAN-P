@@ -8,7 +8,9 @@ They are personal data, like the profile's notes (`core.profile`): they exist fo
 only while the person agreed to personalisation (`Config.personalize`); with it off they stay,
 unused, until the person removes them. The person writes them (`desman nodes`, the page); an
 agent (the interlocutor, or a task's retelling) only proposes a change, applied after the person
-confirms it in a window rendered by code. A temporary chat neither reads nor proposes one.
+confirms it in a window rendered by code. A temporary chat never proposes one, and neither its
+interlocutor nor the planning of its tasks sees them (an executor's `read_node` reads the tree
+as the person's settings say: it does not know which chat its task came from).
 
 Nodes are changed and erased in place. Every change is written to the operator's journal by
 the node's number and who made it, never its path or text, so the journal does not keep what was
@@ -184,7 +186,7 @@ class PersonalNodes:
     ) -> PersonalNode | None:
         """Move, describe or rewrite the node at `path` (what is given); None if there is no
         such node. A new text from a task keeps the untrusted mark; a text the person wrote
-        clears it."""
+        clears it; anything else keeps it, and a task's change of any part sets it."""
         new_path = None if new_path is None else normalized_path(new_path)
         about = None if about is None else normalized_about(about)
         text = None if text is None else normalized_text(text)
@@ -198,10 +200,12 @@ class PersonalNodes:
             now_path = new_path if new_path is not None else was.path
             now_about = about if about is not None else was.about
             now_text = text if text is not None else was.text
-            if text is not None and text != was.text:
-                mark = untrusted or author is Author.TASK
+            if untrusted or author is Author.TASK:
+                mark = True  # a task's path or description is no more trusted than its text
+            elif author is Author.PERSON and text is not None and text != was.text:
+                mark = False  # the person wrote it
             else:
-                mark = was.untrusted
+                mark = was.untrusted  # an agent's rewrite never launders a task's text
             if (now_path, now_about, now_text, mark) == (
                 was.path,
                 was.about,
@@ -222,7 +226,17 @@ class PersonalNodes:
                     was.id,
                 ),
             )
-            self._uncache([s for s in (was.text, was.about, was.path) if s])
+            self._uncache(
+                [
+                    old
+                    for old, new in (
+                        (was.text, now_text),
+                        (was.about, now_about),
+                        (was.path, now_path),
+                    )
+                    if old != new
+                ]
+            )
             self._journal("knowledge_node_changed", was.id, author, session_id)
         return self._by_id(was.id)
 

@@ -124,6 +124,8 @@ class Context:
     """The chat's session now: for the operator's journal."""
 
     in_terminal: bool = False
+    temporary: bool = False
+    """A temporary chat's call: it neither reads nor proposes the person's nodes."""
     node_author: nodes.Author = nodes.Author.PERSON
     """Who wrote a personal node's text: the person, the interlocutor (whose call the person
     confirms) or a task's retelling (then the text is marked untrusted)."""
@@ -1625,13 +1627,27 @@ def _init_db(ctx: Context, args: NoArgs) -> Proposal:
 # ── The person's nodes of the knowledge tree (K.4) ───────────────────────────
 
 
+def _nodes_readable(ctx: Context) -> None:
+    """A model reads the person's nodes only with personalisation on, never in a temporary
+    chat; the person (a typed command, the CLI) always may."""
+    if ctx.node_author is nodes.Author.PERSON:
+        return
+    if ctx.temporary or not ctx.config().personalize:
+        raise click.ClickException(
+            t("Personalisation is off: no model sees these nodes until you turn it on.")
+        )
+
+
 def _nodes_list(ctx: Context, args: NoArgs) -> Outcome:
+    _nodes_readable(ctx)
     conn = ctx.store.conn
     nodes_cli.print_list(conn, ctx.config())
     return Outcome({"nodes": nodes_cli.rows(conn), "personalize": ctx.config().personalize})
 
 
 def _nodes_show(ctx: Context, args: NodePathArgs) -> Outcome:
+    if args.path.split("/")[0].strip().casefold() not in ("desman", "commands"):
+        _nodes_readable(ctx)  # DESMAN's own nodes are no one's personal data
     node = nodes_cli.lookup(ctx.store.conn, args.path)
     if node is None:
         raise click.ClickException(t("There is no such node (`desman nodes` lists yours)."))
@@ -1666,7 +1682,7 @@ def _nodes_change(ctx: Context, args: NodeChangeArgs) -> Outcome | Proposal:
     if len(lines) == 1:  # the same as it is
         ui.note(t("Nothing changed."))
         return Outcome({"changed": False, "path": was.path})
-    if untrusted and text is not None:
+    if untrusted and text is not None and text != was.text:
         lines.append(t("  from a task's result: models will read it as data"))
 
     def apply() -> Outcome:
@@ -1687,6 +1703,8 @@ def _nodes_change(ctx: Context, args: NodeChangeArgs) -> Outcome | Proposal:
 
 def _nodes_remove(ctx: Context, args: NodePathArgs) -> Proposal:
     author = ctx.node_author
+    if author is not nodes.Author.PERSON:  # an agent proposes only while personalisation is on
+        nodes_cli.ready(ctx.config())
     conn = ctx.store.conn
     was = nodes_cli.existing(conn, args.path)
 

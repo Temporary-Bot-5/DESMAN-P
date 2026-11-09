@@ -367,7 +367,7 @@ def run(
         raise click.UsageError(t("--plan is for GOAL: a --spec is already a plan"))
     if goal is not None and not goal.strip():
         raise click.UsageError(t("GOAL is empty"))
-    spec = _load_spec(spec_path) if spec_path is not None else None
+    spec = _load_spec(spec_path, db_path) if spec_path is not None else None
     level = None if priority is None else int(Priority[priority.upper()])
     source = _provider(fake_script, provider_name, model, as_json)  # fail fast
     access = _executor_access(as_json)
@@ -810,7 +810,7 @@ def _config_or_default() -> Config:
         return Config()
 
 
-def _load_spec(spec_path: Path) -> TaskSpec:
+def _load_spec(spec_path: Path, db_path: Path | None = None) -> TaskSpec:
     try:
         spec = TaskSpec.model_validate_json(spec_path.read_text(encoding="utf-8"))
     except (ValidationError, UnicodeDecodeError) as e:
@@ -819,6 +819,15 @@ def _load_spec(spec_path: Path) -> TaskSpec:
         ) from e
     # Knowledge paths as the tree spells them, like a plan's (`planner.Plan.known`).
     tree = knowledge.task_tree()
+    if any(sub.knowledge for sub in spec.subtasks):  # the person's nodes too, when they may
+        try:
+            conn = db.open_db(db_path or db.default_db_path())
+        except (db.SchemaVersionError, db.SchemaMismatchError) as e:
+            raise click.ClickException(str(e)) from e
+        try:
+            tree = runs.task_tree(conn, _config_or_default().personalize)
+        finally:
+            conn.close()
     subtasks = []
     for sub in spec.subtasks:
         paths = [(given, knowledge.resolve(tree, given)) for given in sub.knowledge]
@@ -1365,6 +1374,8 @@ def continued(
     models: runs.Models,
     config: Config,
     by: str = "person",
+    *,
+    personal: bool | None = None,
 ) -> tuple[str, int]:
     """Plan and add a continuation (ADR 0010); the task's ref and how many subtasks it got.
     Shared by the CLI and the chat."""
@@ -1375,7 +1386,8 @@ def continued(
             pending,
             limit=runs.tuned(config.tuning, "max_subtasks"),
             by=by,
-            tree=runs.task_tree(store.conn, config.personalize),
+            # The person's nodes only with personalisation on, never for a temporary chat.
+            tree=runs.task_tree(store.conn, config.personalize if personal is None else personal),
         )
     if error is not None:
         ui.warn(

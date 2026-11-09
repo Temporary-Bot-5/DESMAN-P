@@ -223,7 +223,7 @@ TOPICS: Final = (
         "choose: the interlocutor to answer, the planner for a task's subtasks (an executor "
         "may read one with a tool). They exist only with personalisation on (`desman "
         "personalize`); turned off, the nodes stay unused until removed. A temporary chat "
-        "neither reads nor proposes one. `desman nodes` lists them, `desman nodes show PATH` "
+        "never proposes one, and neither it nor the plans of its tasks see them. `desman nodes` lists them, `desman nodes show PATH` "
         "shows any node's text, `desman nodes add PATH --about TEXT --text TEXT`, `desman "
         "nodes change PATH` (--to, --about, --text) and `desman nodes remove PATH` edit them; "
         "the page has them in Settings, Personalisation. The interlocutor may propose a "
