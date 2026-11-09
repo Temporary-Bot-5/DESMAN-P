@@ -84,6 +84,8 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "Avant le prochain appel, le résultat de ces tâches sera ajouté : {tasks}.",
     "Before the next call, older messages are summarised: the request will be shorter.": "Avant le prochain appel, les anciens messages seront résumés : la requête sera plus courte.",
     "A cancelled task is not continued.": "Une tâche annulée n’est pas poursuivie.",
+    "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "La tâche {ref} se poursuit une fois son résultat terminé ; décidez d’abord de ce qui vous attend (retry, accept ou fail).",
+    "Task {ref} was not continued: {error}": "La tâche {ref} n’a pas été poursuivie : {error}",
     "A job lent by desman-global is not continued here.": "Un travail prêté par desman-global n’est pas poursuivi ici.",
     "Add: {goal}": "Ajouter : {goal}",
     "Continue TASK: plan and add new subtasks doing GOAL on its result so far.": "Poursuivre TASK : planifier et ajouter de nouvelles sous-tâches qui font GOAL à partir de son résultat actuel.",

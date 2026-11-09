@@ -683,7 +683,7 @@ def prepare_continuation(
             sub = store.find_subtask(redo)
         except LookupError as e:
             raise click.ClickException(str(e)) from e
-        if sub.status is not SubtaskStatus.DONE:
+        if sub.status is not SubtaskStatus.DONE or sub.parent_id is not None:
             raise click.ClickException(
                 t("Only a done step is redone; {ref} is {status}.", ref=redo, status=sub.status)
             )
@@ -695,6 +695,15 @@ def prepare_continuation(
         raise click.ClickException(t("A job lent by desman-global is not continued here."))
     if store.task_status(task_id) is TaskStatus.CANCELLED:
         raise click.ClickException(t("A cancelled task is not continued."))
+    last = [s for s in store.list_subtasks(task_id) if s.parent_id is None][-1]
+    if last.status is not SubtaskStatus.DONE:  # new work starts from the result
+        raise click.ClickException(
+            t(
+                "Task {ref} is continued once its result is done; decide what waits for you "
+                "first (retry, accept or fail).",
+                ref=store.short_id(task_id),
+            )
+        )
     return Continuation(task_id, ask, sub)
 
 
@@ -704,7 +713,7 @@ def continue_task(
     """Plan the new subtasks with the model (the template if it fails) and add them to the
     task. `by`: who asked ("person" or "proposal"). Returns the new ids and why the model's
     plan was not used, if it was not."""
-    from desman.planner import continuation
+    from desman.planner import continuation, must_run
 
     task = store.find_task(pending.task_id)
     subtasks = [s for s in store.list_subtasks(pending.task_id) if s.parent_id is None]
@@ -719,15 +728,24 @@ def continue_task(
     )
     last = subtasks[-1].id
     basis = [last] + ([pending.redo.id] if pending.redo and pending.redo.id != last else [])
-    ids = store.extend(
-        pending.task_id,
-        planned.spec.subtasks,
-        basis,
-        details={
-            **planned.details(),
-            "by": by,
-            ("redo" if pending.redo else "add"): pending.redo.id if pending.redo else pending.ask,
-            **({"why": pending.ask} if pending.redo else {}),
-        },
-    )
+    # A result that had to rest on a real run still has to (`planner.must_run`).
+    spec = must_run(planned.spec) if subtasks[-1].runs_code else planned.spec
+    try:
+        ids = store.extend(
+            pending.task_id,
+            spec.subtasks,
+            basis,
+            details={
+                **planned.details(),
+                "by": by,
+                ("redo" if pending.redo else "add"): pending.redo.id
+                if pending.redo
+                else pending.ask,
+                **({"why": pending.ask} if pending.redo else {}),
+            },
+        )
+    except (ValueError, LookupError) as e:  # cancelled or changed while it was planned
+        raise click.ClickException(
+            t("Task {ref} was not continued: {error}", ref=store.short_id(pending.task_id), error=e)
+        ) from e
     return ids, planned.error

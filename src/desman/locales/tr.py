@@ -83,6 +83,8 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "Bir sonraki çağrıdan önce bu görevlerin sonucu eklenecek: {tasks}.",
     "Before the next call, older messages are summarised: the request will be shorter.": "Bir sonraki çağrıdan önce eski mesajlar özetlenecek: istek kısalacak.",
     "A cancelled task is not continued.": "İptal edilmiş görev sürdürülmez.",
+    "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "Görev {ref}, sonucu bittiğinde sürdürülür; önce sizi bekleyeni karara bağlayın (retry, accept veya fail).",
+    "Task {ref} was not continued: {error}": "Görev {ref} sürdürülmedi: {error}",
     "A job lent by desman-global is not continued here.": "desman-global'in ödünç verdiği iş burada sürdürülmez.",
     "Add: {goal}": "Ekle: {goal}",
     "Continue TASK: plan and add new subtasks doing GOAL on its result so far.": "TASK'ı sürdür: şimdiki sonucundan GOAL'ı yapan yeni alt görevler planla ve ekle.",

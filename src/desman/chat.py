@@ -662,6 +662,7 @@ class Chat:
             from desman.cli import continued  # the CLI imports the chat
 
             assert models is not None
+            runs.guard(self.store)  # before any model is asked
             ui.note(t("Planning…"))
             ref, count = continued(self.store, pending, models, config)
             self._event(

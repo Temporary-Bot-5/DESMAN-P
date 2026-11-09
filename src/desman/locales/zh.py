@@ -83,6 +83,8 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "下一次调用前，将加入这些任务的结果：{tasks}。",
     "Before the next call, older messages are summarised: the request will be shorter.": "下一次调用前，较早的消息将被总结：请求会更短。",
     "A cancelled task is not continued.": "已取消的任务不会继续。",
+    "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "任务 {ref} 在结果完成后才能继续；请先决定等待你处理的事项（retry、accept 或 fail）。",
+    "Task {ref} was not continued: {error}": "任务 {ref} 未继续：{error}",
     "A job lent by desman-global is not continued here.": "desman-global 借来的工作不在这里继续。",
     "Add: {goal}": "添加：{goal}",
     "Continue TASK: plan and add new subtasks doing GOAL on its result so far.": "继续 TASK：规划并添加在当前结果基础上完成 GOAL 的新子任务。",

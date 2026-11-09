@@ -83,6 +83,8 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "次の呼び出しの前に、これらのタスクの結果が追加されます: {tasks}。",
     "Before the next call, older messages are summarised: the request will be shorter.": "次の呼び出しの前に、古いメッセージが要約されます。リクエストは短くなります。",
     "A cancelled task is not continued.": "取り消したタスクは続行しません。",
+    "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "タスク {ref} は結果が完了してから続行します。まず待っている事項を決めてください（retry、accept または fail）。",
+    "Task {ref} was not continued: {error}": "タスク {ref} は続行されませんでした：{error}",
     "A job lent by desman-global is not continued here.": "desman-global から借りた仕事はここでは続行しません。",
     "Add: {goal}": "追加：{goal}",
     "Continue TASK: plan and add new subtasks doing GOAL on its result so far.": "TASK を続行：これまでの結果から GOAL を行う新しいサブタスクを計画して追加します。",

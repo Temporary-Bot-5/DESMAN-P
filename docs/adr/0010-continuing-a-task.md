@@ -51,9 +51,11 @@ What must hold:
 
 - No protected file changes; no new subtask status. One store entry point (`extend`), one
   planner function, two catalog commands, one optional field of the retelling.
-- Audit: `task_extended` (task-level note with the new subtask ids, the basis, who asked:
-  person or proposal accepted) through `Store.note()`; each new subtask's creation as for a
-  task.
+- Audit: `task_extended`, a task-level entry with the new subtask ids (which
+  `check_history` counts as created, as it counts a split's parts), the basis and who asked
+  (person, or a proposal accepted). Only a task whose result is done is continued: new work
+  starts from it; a waiting or failed result is decided first. A hidden task continued is shown
+  again. A task that had to run code keeps that for its new result.
 - The page's Tasks panel shows the new subtasks under the same task; its module cards follow.
 
 ## Split

@@ -200,3 +200,44 @@ def test_the_chat_continues_a_task_after_the_window(
     assert store.final_result(task) == {"site": "with a map"}
     assert "The site now has a map." in result.output
     store.conn.close()
+
+
+def test_only_a_done_result_is_continued_and_a_hidden_task_shows_again(
+    store: Store, clock: FakeClock
+) -> None:
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor
+
+    failing = store.create_task(
+        TaskSpec(goal="g", subtasks=[SubtaskSpec(description="s", acceptance_criteria="ok")])
+    )
+    claimed = store.claim("w", task_id=failing)
+    assert claimed is not None and claimed.lease_token is not None
+    store.record_failure(
+        claimed.id, S.RUNNING, Actor.EXECUTOR, FailureKind.PERMANENT, lease=claimed.lease_token
+    )
+    with pytest.raises(click.ClickException, match="once its result is done"):
+        actions.prepare_continuation(store, failing, "more", None)
+    with pytest.raises(ValueError, match="not done"):  # the store holds to it too
+        store.extend(
+            failing, [SubtaskSpec(description="x", acceptance_criteria="ok")], [claimed.id]
+        )
+    task = done_task(store, clock, steps=1)
+    assert store.hide_task(task) and store.find_task(task)["hidden_at"]
+    pending = actions.prepare_continuation(store, task, "more", None)
+    actions.continue_task(
+        store, FakeLLM().on(CONTINUE, plan_of("more")), pending, limit=None, by="person"
+    )
+    assert store.find_task(task)["hidden_at"] is None
+
+
+def test_a_result_that_had_to_run_keeps_having_to(store: Store, clock: FakeClock) -> None:
+    task = done_task(store, clock, steps=1)
+    last = store.list_subtasks(task)[0]
+    # As if it had been planned to run code (and ran): only the mark matters here.
+    store.conn.execute("UPDATE subtasks SET runs_code = 1 WHERE id = ?", (last.id,))
+    pending = actions.prepare_continuation(store, task, "test the new input too", None)
+    ids, _ = actions.continue_task(
+        store, FakeLLM().on(CONTINUE, plan_of("test it")), pending, limit=None, by="person"
+    )
+    assert store.get_subtask(ids[-1]).runs_code

@@ -1322,7 +1322,11 @@ def _continue(task: str | None, ask: str, redo: str | None, db_path: Path | None
 
 
 def continued(
-    store: Store, pending: actions.Continuation, models: runs.Models, config: Config
+    store: Store,
+    pending: actions.Continuation,
+    models: runs.Models,
+    config: Config,
+    by: str = "person",
 ) -> tuple[str, int]:
     """Plan and add a continuation (ADR 0010); the task's ref and how many subtasks it got.
     Shared by the CLI and the chat."""
@@ -1332,7 +1336,7 @@ def continued(
             models.for_(calls.Role.PLANNER),
             pending,
             limit=runs.tuned(config.tuning, "max_subtasks"),
-            by="person",
+            by=by,
         )
     if error is not None:
         ui.warn(

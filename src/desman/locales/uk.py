@@ -90,6 +90,8 @@ MESSAGES: dict[str, Forms] = {
     "Before the next call, what became of these tasks is added: {tasks}.": "Перед наступним викликом додасться, чим завершилися задачі: {tasks}.",
     "Before the next call, older messages are summarised: the request will be shorter.": "Перед наступним викликом старі повідомлення буде стиснуто в підсумок: запит стане коротшим.",
     "A cancelled task is not continued.": "Скасоване завдання не продовжується.",
+    "Task {ref} is continued once its result is done; decide what waits for you first (retry, accept or fail).": "Завдання {ref} продовжується, коли його результат готовий; спершу вирішіть, що чекає на вас (retry, accept або fail).",
+    "Task {ref} was not continued: {error}": "Завдання {ref} не продовжено: {error}",
     "A job lent by desman-global is not continued here.": "Завдання, позичене desman-global, тут не продовжується.",
     "Add: {goal}": "Додати: {goal}",
     "Continue TASK: plan and add new subtasks doing GOAL on its result so far.": "Продовжити TASK: спланувати й додати нові підзавдання, що виконують GOAL на основі поточного результату.",

@@ -837,8 +837,11 @@ class Store:
             if self.task_status(task_id) is TaskStatus.CANCELLED:
                 raise ValueError(f"task {task_id} was cancelled")
             for subtask_id in basis:
-                if self.get_subtask(subtask_id).task_id != task_id:
+                based = self.get_subtask(subtask_id)
+                if based.task_id != task_id:
                     raise ValueError(f"subtask {subtask_id} is not of task {task_id}")
+                if based.status is not S.DONE:  # the new work could never start
+                    raise ValueError(f"subtask {subtask_id} is not done")
             first_seq = (
                 1
                 + self.conn.execute(
@@ -872,6 +875,8 @@ class Store:
                     "INSERT INTO subtask_deps (subtask_id, depends_on) VALUES (?, ?)",
                     [(part_id, dep) for dep in dict.fromkeys(deps)],
                 )
+            # The task has work again: a hidden one is shown (only finished work is hidden).
+            self.conn.execute("UPDATE tasks SET hidden_at = NULL WHERE id = ?", (task_id,))
             self._audit(
                 actor,
                 "task_extended",
