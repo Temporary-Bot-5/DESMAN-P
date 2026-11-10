@@ -777,7 +777,7 @@ def test_release_poll(
     if mode == "operator":
         op = sign.NodeKey.generate()
         assigned = sign.assign(
-            root, op.public, set(sign.Scope), issued_at=clock(), lifetime=timedelta(days=7)
+            root, op.public, set(sign.DEFAULT_SCOPES), issued_at=clock(), lifetime=timedelta(days=7)
         )
         signed = envelope(op, "a" * 40, "b" * 40)
     # Fixtures use a deterministic clock; sign within that term.

@@ -231,7 +231,11 @@ def test_operator_cannot_sign_release(root: sign.NodeKey, clock: FakeClock) -> N
     operator = sign.NodeKey.generate()
     trust = sign.Trust(root.public, clock=clock)
     assigned = sign.assign(
-        root, operator.public, set(sign.Scope), issued_at=clock(), lifetime=timedelta(days=7)
+        root,
+        operator.public,
+        set(sign.DEFAULT_SCOPES),
+        issued_at=clock(),
+        lifetime=timedelta(days=7),
     )
     trust.receive(assigned.model_dump(mode="json"))
     body = protocol.Release(

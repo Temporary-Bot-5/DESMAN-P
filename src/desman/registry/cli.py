@@ -138,7 +138,7 @@ def _open(ctx: click.Context, root_key: Path | None) -> tuple[Any, sign.NodeKey]
     "scopes",
     multiple=True,
     type=click.Choice([s.value for s in sign.Scope]),
-    help="What the operator may sign; repeat for several (default: all).",
+    help="What the operator may sign; repeat for several (default: tasks and moderation).",
 )
 @click.option(
     "--days",
@@ -166,7 +166,7 @@ def assign(
                 if public_key is None
                 else admin.public_key(public_key)
             )
-            wanted = {sign.Scope(s) for s in scopes} or set(sign.Scope)
+            wanted = {sign.Scope(s) for s in scopes} or set(sign.DEFAULT_SCOPES)
             done = admin.assign(conn, root, operator, wanted, days=days, now=_now())
         finally:
             conn.close()

@@ -447,7 +447,7 @@ def test_an_expired_assignment_is_not_handed_out(
 ) -> None:
     operator = sign.NodeKey.generate()
     with store.connection(db_path) as conn:
-        admin.assign(conn, root, operator.public, set(sign.Scope), days=1, now=clock())
+        admin.assign(conn, root, operator.public, set(sign.DEFAULT_SCOPES), days=1, now=clock())
     clock.advance(timedelta(days=2).total_seconds())
     node = Node(registry, clock)
     node.register()
@@ -489,7 +489,9 @@ def test_what_a_node_would_refuse_is_never_kept(
             admin.revoke(conn, root, root.fingerprint, "", now=clock())
         admin.revoke(conn, root, operator.fingerprint, "", now=clock())
         with pytest.raises(admin.AdminError, match="refuse"):
-            admin.assign(conn, root, operator.public, set(sign.Scope), days=30, now=clock())
+            admin.assign(
+                conn, root, operator.public, set(sign.DEFAULT_SCOPES), days=30, now=clock()
+            )
         assert [s.record.kind for s in store.all_records(conn)] == ["revocation"]
         assert [e.action for e in store.entries(conn)] == ["revocation", "trust_list"]
 
@@ -582,6 +584,9 @@ def test_cli_assign_revoke_nodes_log(
     other = tmp_path / "other.pub"
     other.write_bytes(sign.public_pem(sign.NodeKey.generate().public))
     assert registry_cli("assign", str(other)).exit_code == 0
+    # `appoint` stands alone, and is not among the default scopes.
+    mixed = registry_cli("assign", str(other), "--scope", "appoint", "--scope", "tasks")
+    assert mixed.exit_code == 1 and "never assigned together" in mixed.output
 
     gone = sign.NodeKey.generate().fingerprint
     revoked = registry_cli("revoke", gone, "--reason", "abuse")
