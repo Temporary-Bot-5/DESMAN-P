@@ -1775,4 +1775,23 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "Завдання кластера триває від 1 до {days} "
+        "днів.",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "Робота "
+        "{id} "
+        "належить "
+        "завданню "
+        "кластера "
+        "{task}: "
+        "її "
+        "вирішує "
+        "кластер "
+        "(desman-registry "
+        "cluster "
+        "settle).",
+    }
+)
+
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)

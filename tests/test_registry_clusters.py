@@ -502,11 +502,13 @@ def test_a_job_that_runs_code_and_gives_up_goes_to_the_inbox(
     found = row(db_path, task)
     assert (found.status, found.reason) == ("operator", "job_given_up")
 
-    # The person sends it back: the job is lent again from the start.
+    # The person sends it back. Both members took it once (a node never takes a record
+    # twice): it is dropped and the cluster's operator plans it anew.
     with store.connection(db_path) as conn:
         again = clusters.settle(conn, task, "again", clock(), note="Try once more")
-        assert again.status == "waiting" and again.note == "Try once more"
-        assert work.job(conn, lent.record.id).status == "execute"  # type: ignore[union-attr]
+        assert again.status == "waiting" and again.note == "Try once more" and again.replan
+        dropped = work.job(conn, lent.record.id)
+    assert dropped is not None and (dropped.status, dropped.reason) == ("dropped", "no_member_left")
 
 
 # ── The role is a lease ──────────────────────────────────────────────────────
@@ -731,3 +733,120 @@ def test_cli_appointer_cluster_add_clusters_inbox_settle(
     assert registry_cli("cluster", "settle", task[:8], "drop").exit_code == 0
     assert json.loads(registry_cli("clusters", "--json").output)[0]["status"] == "dropped"
     assert registry_cli("cluster", "show", "ffffffff").exit_code == 1
+
+
+# ── Found in review ──────────────────────────────────────────────────────────
+
+
+def test_a_job_every_member_took_once_goes_back_to_the_operator(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    task, lead, a, b = formed(registry, db_path, operator, clock)
+    state = mine(lead)
+    first = plan(lead, state)
+    send(lead, first)
+    lent = job(lead, state, first.record.id, 0)
+    send(lead, lent)
+    given = say(a)
+    assert given is not None
+    hand_in(a, given, outcome="failed", output="")  # failed once: lent again
+    assert say(b) is not None  # b takes it and falls silent
+    clock.advance(work.LEASE.total_seconds() + 1)
+    heartbeat(lead, a, b)
+    with store.connection(db_path) as conn:
+        found = work.job(conn, lent.record.id)
+    assert found is not None and (found.status, found.reason) == ("operator", "no_member_left")
+    # The operator may split it: a new plan version is taken.
+    assert send(lead, plan(lead, mine(lead), version=2)).status_code == 200
+
+
+def test_a_task_its_old_operators_cannot_lead_does_not_hold_up_a_newer_one(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    old, lead, a, b = formed(registry, db_path, operator, clock)
+    say(lead, lead=False)  # the operator stops leading: lost, the task waits again
+    found = row(db_path, old)
+    assert (found.status, found.lost) == ("waiting", 1)
+    newer = add_task(db_path, operator, clock, goal="Another")
+    say(lead, lead=True)  # it may lead again, but not the task it was lost on
+    assert row(db_path, old).status == "waiting"
+    found = row(db_path, newer)
+    assert found.status == "running"
+    with store.connection(db_path) as conn:
+        current = clusters.newest(conn, found.cluster)
+    assert current is not None and current.operator == lead.fingerprint
+
+
+def test_job_settle_leaves_a_cluster_job_to_its_cluster(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    _, lead, _, _ = formed(registry, db_path, operator, clock)
+    state = mine(lead)
+    first = plan(lead, state)
+    send(lead, first)
+    lent = job(lead, state, first.record.id, 0)
+    send(lead, lent)
+    with store.connection(db_path) as conn, pytest.raises(admin.AdminError, match="cluster"):
+        admin.settle(conn, lent.record.id[:8], "drop", now=clock())
+
+
+def test_an_appointment_that_lapses_while_its_operator_polls_is_noticed(
+    registry: Registry,
+    registry_dir: Path,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    task, lead, a, b = formed(registry, db_path, operator, clock)
+    # The appointer key goes bad: the registry keeps answering and appoints nobody.
+    (registry_dir / store.APPOINTER_KEY).chmod(0o644)
+    fresh = Registry(db_path, clock=clock)
+    for n in (lead, a, b):
+        n.registry = fresh
+    for _ in range(7):
+        clock.advance(5 * 60)
+        heartbeat(lead, a, b)
+        mine(lead)
+    found = row(db_path, task)
+    assert found.lost == 1 and found.status == "waiting"
+    assert "operator_lost" in actions(db_path)
+
+
+def test_nodes_get_only_the_appointments_they_need(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    _, lead, a, b = formed(registry, db_path, operator, clock)
+    state = mine(lead)
+    first = plan(lead, state)
+    send(lead, first)
+    for _ in range(12):  # an hour of renewals
+        clock.advance(5 * 60)
+        heartbeat(lead, a, b)
+        state = mine(lead)
+    handed = [
+        r for r in lead.call("GET", protocol.TRUST).json()["records"]
+        if r["record"]["kind"] == "appointment"
+    ]  # fmt: skip
+    assert len(state["appointments"]) > 3
+    # The one the plan was signed under, and the newest.
+    assert [r["record"]["id"] for r in handed] == [
+        state["appointments"][0]["record"]["id"],
+        state["appointments"][-1]["record"]["id"],
+    ]

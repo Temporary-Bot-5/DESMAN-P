@@ -1728,4 +1728,26 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "क्लस्टर कार्य 1 से {days} दिन तक चलता है।",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "काम "
+        "{id} "
+        "क्लस्टर "
+        "कार्य "
+        "{task} "
+        "का "
+        "है: "
+        "इसे "
+        "उसका "
+        "क्लस्टर "
+        "तय "
+        "करता "
+        "है "
+        "(desman-registry "
+        "cluster "
+        "settle)।",
+    }
+)
+
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

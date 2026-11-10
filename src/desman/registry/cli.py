@@ -587,14 +587,8 @@ def inbox(ctx: click.Context, as_json: bool) -> None:
         waiting = [_ClusterView.of(conn, c) for c in clusters.cluster_tasks(conn, "operator")]
     finally:
         conn.close()
-    if as_json:
-        click.echo(
-            json.dumps(
-                [j.as_json() for j in found] + [c.row.as_json() for c in waiting],
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+    if as_json:  # jobs only, as before; cluster tasks: `clusters --status operator --json`
+        click.echo(json.dumps([j.as_json() for j in found], ensure_ascii=False, indent=2))
         return
     if not found and not waiting:
         ui.note(t("Nothing waits for the operator."))
@@ -1258,6 +1252,22 @@ def _cluster_reason(reason: str) -> str:
     }.get(reason, reason)
 
 
+class _Shared:
+    """What `why_waiting` needs, computed once for every row shown."""
+
+    def __init__(self, pool: list[store.Node] | None, believed: sign.Trust | None) -> None:
+        self.pool = pool
+        self.believed = believed
+
+    @classmethod
+    def of(
+        cls, conn: Any, rows: list[clusters.ClusterTaskRow], root: Any, now: datetime
+    ) -> _Shared:
+        if not any(r.status == "waiting" for r in rows):
+            return cls(None, None)
+        return cls(clusters.free_nodes(conn, now, clusters.ONLINE), store.trust(conn, root, now))
+
+
 class _ClusterView:
     """A cluster task with what `clusters` shows about it."""
 
@@ -1287,6 +1297,7 @@ class _ClusterView:
         appointer: sign.NodeKey | None = None,
         root: Any = None,
         now: datetime | None = None,
+        shared: _Shared | None = None,
     ) -> _ClusterView:
         current = clusters.newest(conn, row.cluster)
         plan = clusters.latest_plan(conn, row.cluster)
@@ -1295,7 +1306,16 @@ class _ClusterView:
         if row.status == "operator" and row.reason:
             why = _cluster_reason(row.reason)
         elif row.status == "waiting" and root is not None and now is not None:
-            code, free = clusters.why_waiting(conn, appointer, root, now, clusters.ONLINE, row)
+            code, free = clusters.why_waiting(
+                conn,
+                appointer,
+                root,
+                now,
+                clusters.ONLINE,
+                row,
+                pool=None if shared is None else shared.pool,
+                believed=None if shared is None else shared.believed,
+            )
             why = {
                 "no_appointer": t("no appointer key (appointer create)"),
                 "appointer_not_assigned": t("the appointer is not assigned the scope appoint"),
@@ -1356,10 +1376,9 @@ def clusters_command(ctx: click.Context, status: str | None, as_json: bool) -> N
     try:
         now = _now()
         clusters.tick(conn, appointed_by, root, now, clusters.ONLINE)
-        found = [
-            _ClusterView.of(conn, c, appointed_by, root, now)
-            for c in clusters.cluster_tasks(conn, status)
-        ]
+        rows = clusters.cluster_tasks(conn, status)
+        shared = _Shared.of(conn, rows, root, now)
+        found = [_ClusterView.of(conn, c, appointed_by, root, now, shared) for c in rows]
     finally:
         conn.close()
     if as_json:
@@ -1394,7 +1413,7 @@ def cluster() -> None:
     "--days",
     default=admin.JOB_DAYS,
     show_default=True,
-    type=click.IntRange(1, 90),
+    type=click.IntRange(1, admin.CLUSTER_DAYS),
     help="How long the cluster may take.",
 )
 @click.option(
@@ -1466,7 +1485,9 @@ def cluster_show(ctx: click.Context, task_id: str, as_json: bool) -> None:
         except admin.AdminError as e:
             raise _fail(e) from e
         assert found is not None
-        view = _ClusterView.of(conn, found, appointed_by, root, now)
+        view = _ClusterView.of(
+            conn, found, appointed_by, root, now, _Shared.of(conn, [found], root, now)
+        )
         plan = clusters.latest_plan(conn, found.cluster)
         jobs = work.jobs(conn, cluster=found.id)
         current = clusters.newest(conn, found.cluster)

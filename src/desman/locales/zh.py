@@ -1578,4 +1578,16 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "集群任务持续 1 到 {days} 天。",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "作业 "
+        "{id} "
+        "属于集群任务 "
+        "{task}:由其集群处理(desman-registry "
+        "cluster "
+        "settle)。",
+    }
+)
+
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

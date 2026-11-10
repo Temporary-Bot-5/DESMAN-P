@@ -211,14 +211,15 @@ def find(conn: sqlite3.Connection, prefix: str) -> list[str]:
 # ── State changes (each inside the caller's transaction) ────────────────────
 
 
-def _to_operator(
+def to_operator(
     conn: sqlite3.Connection, found: JobRow, reason: str, details: dict[str, Any]
 ) -> None:
+    """The job waits for its operator (the global one; a cluster job's: its cluster's)."""
     conn.execute("UPDATE jobs SET status = 'operator', reason = ? WHERE id = ?", (reason, found.id))
     store.log(conn, "job_to_operator", None, {"job": found.id, "reason": reason, **details})
 
 
-def _end_lease(
+def end_lease(
     conn: sqlite3.Connection,
     token: str,
     how: Literal["handed_in", "expired", "withdrawn"],
@@ -242,7 +243,7 @@ def expire(conn: sqlite3.Connection, now: datetime) -> None:
             (moment,),
         ).fetchall()
         for lease in lapsed:
-            _end_lease(conn, lease["token"], "expired", moment)
+            end_lease(conn, lease["token"], "expired", moment)
             store.log(
                 conn, "lease_expired", lease["node"], {"job": lease["job"], "stage": lease["stage"]}
             )
@@ -256,7 +257,7 @@ def expire(conn: sqlite3.Connection, now: datetime) -> None:
                 (found.id, found.status, found.round),
             ).fetchone()[0]
             if lost >= MAX_LOST:
-                _to_operator(conn, found, "leases_lost", {"stage": found.status, "lost": lost})
+                to_operator(conn, found, "leases_lost", {"stage": found.status, "lost": lost})
         stale = conn.execute(
             "SELECT * FROM jobs WHERE status IN ('execute', 'recheck') AND expires_at <= ?"
             " AND NOT EXISTS (SELECT 1 FROM leases WHERE leases.job = jobs.id"
@@ -537,7 +538,7 @@ def hand_in(
             )
         except sqlite3.IntegrityError as e:
             raise refuse(Reason.REPLAY, "this record was already handed in") from e
-        _end_lease(conn, given.lease, "handed_in", moment)
+        end_lease(conn, given.lease, "handed_in", moment)
         store.log(
             conn,
             "handed_in",
@@ -560,14 +561,14 @@ def _after(conn: sqlite3.Connection, found: JobRow, record_id: str, outcome: str
             (found.id, found.round),
         ).fetchone()[0]
         if failed >= MAX_FAILED:
-            _to_operator(conn, found, "failed", {"failed": failed})
+            to_operator(conn, found, "failed", {"failed": failed})
             return "operator"
         return "execute"
     if outcome == "accept":
         conn.execute("UPDATE jobs SET status = 'accepted' WHERE id = ?", (found.id,))
         store.log(conn, "job_accepted", None, {"job": found.id, "result": found.result})
         return "accepted"
-    _to_operator(conn, found, "disputed", {"verdict": record_id})
+    to_operator(conn, found, "disputed", {"verdict": record_id})
     return "operator"
 
 
@@ -577,7 +578,7 @@ def withdraw(conn: sqlite3.Connection, fingerprint: str, now: datetime) -> int:
         "SELECT token, job FROM leases WHERE node = ? AND ended IS NULL", (fingerprint,)
     ).fetchall()
     for row in rows:
-        _end_lease(conn, row["token"], "withdrawn", db.to_iso(now))
+        end_lease(conn, row["token"], "withdrawn", db.to_iso(now))
         store.log(conn, "lease_withdrawn", fingerprint, {"job": row["job"]})
     return len(rows) + checks.withdraw(conn, fingerprint, now)
 
@@ -658,7 +659,7 @@ def settle(conn: sqlite3.Connection, job_id: str, decision: Decision, now: datet
             for row in conn.execute(
                 "SELECT token FROM leases WHERE job = ? AND ended IS NULL", (found.id,)
             ).fetchall():
-                _end_lease(conn, row["token"], "withdrawn", moment)
+                end_lease(conn, row["token"], "withdrawn", moment)
             conn.execute("UPDATE jobs SET status = 'dropped' WHERE id = ?", (found.id,))
         store.log(
             conn,

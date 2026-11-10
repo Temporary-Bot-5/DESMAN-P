@@ -190,7 +190,10 @@ class Registry:
     def appointer(self) -> sign.NodeKey | None:
         """The key that signs appointments, once the person made it (`appointer create`)."""
         if self._appointer is None and self._appointer_path.exists():
-            self._appointer = sign.load_node_key(self._appointer_path)
+            try:
+                self._appointer = sign.load_node_key(self._appointer_path)
+            except (sign.KeyFileError, OSError):
+                return None  # appoints nobody; `desman-registry clusters` says why
         return self._appointer
 
     @property

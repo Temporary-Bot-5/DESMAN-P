@@ -89,8 +89,9 @@ APPOINTMENT_TERM: Final = timedelta(minutes=30)
 """The longest an appointment lasts: short terms take the place of revoking one."""
 MAX_MEMBERS: Final = 6
 """Members of a cluster besides its operator."""
-MAX_APPOINTMENTS: Final = 256
-"""Appointments kept per cluster (the oldest are forgotten first)."""
+MAX_APPOINTMENTS: Final = 4096
+"""Appointments kept per cluster (the oldest are forgotten first): more than a cluster renewing
+every quarter hour signs in the 30 days a cluster task may last."""
 SKEW: Final = timedelta(minutes=5)
 """How far ahead of our clock a record's `issued_at` may be."""
 

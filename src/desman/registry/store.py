@@ -30,6 +30,7 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -560,14 +561,37 @@ OPEN_CLUSTERS: Final = ("waiting", "running", "operator")
 
 
 def open_appointments(conn: sqlite3.Connection) -> list[sign.Signed]:
-    """Every appointment of a cluster whose task is not settled, oldest first."""
-    rows = conn.execute(
-        "SELECT a.signed_json FROM appointments a JOIN cluster_tasks c ON c.cluster = a.cluster"
-        f" WHERE c.status IN ({', '.join('?' * len(OPEN_CLUSTERS))})"
-        " ORDER BY a.issued_at, a.seq",
+    """The appointments a node needs for the clusters whose task is not settled, oldest first:
+    the newest of each, and each one some record of the cluster was issued under (a cluster
+    renews every quarter hour; most appointments vouch for no record)."""
+    tasks = conn.execute(
+        f"SELECT cluster FROM cluster_tasks WHERE status IN ({', '.join('?' * len(OPEN_CLUSTERS))})",
         OPEN_CLUSTERS,
     ).fetchall()
-    return [sign.Signed.model_validate_json(r["signed_json"]) for r in rows]
+    needed: list[tuple[datetime, int, sign.Signed]] = []
+    for task in tasks:
+        rows = conn.execute(
+            "SELECT seq, issued_at, signed_json FROM appointments WHERE cluster = ?"
+            " ORDER BY issued_at, seq",
+            (task["cluster"],),
+        ).fetchall()
+        if not rows:
+            continue
+        times = [db.parse_iso(r["issued_at"]) for r in rows]
+        chosen = {len(rows) - 1}
+        for kept in conn.execute(
+            "SELECT signed_json FROM cluster_records WHERE cluster = ?", (task["cluster"],)
+        ).fetchall():
+            issued = sign.Signed.model_validate_json(kept["signed_json"]).record.issued_at
+            under = bisect.bisect_right(times, issued) - 1
+            if under >= 0:
+                chosen.add(under)
+        for index in chosen:
+            row = rows[index]
+            needed.append(
+                (times[index], row["seq"], sign.Signed.model_validate_json(row["signed_json"]))
+            )
+    return [signed for _, _, signed in sorted(needed, key=lambda n: (n[0], n[1]))]
 
 
 def latest_trust_list(conn: sqlite3.Connection, now: datetime) -> sign.Signed | None:

@@ -1614,4 +1614,21 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "클러스터 작업 기간은 1~{days}일입니다.",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "작업 "
+        "{id}은(는) "
+        "클러스터 "
+        "작업 "
+        "{task}에 "
+        "속합니다: "
+        "그 "
+        "클러스터가 "
+        "결정합니다(desman-registry "
+        "cluster "
+        "settle).",
+    }
+)
+
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

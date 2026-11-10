@@ -1605,4 +1605,18 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "クラスタタスクの期間は 1〜{days} 日です。",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "ジョブ "
+        "{id} "
+        "はクラスタタスク "
+        "{task} "
+        "に属します: "
+        "そのクラスタが決定します(desman-registry "
+        "cluster "
+        "settle)。",
+    }
+)
+
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

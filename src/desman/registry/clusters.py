@@ -169,28 +169,32 @@ def find(conn: sqlite3.Connection, prefix: str) -> list[str]:
     return [r["id"] for r in rows]
 
 
+def _appointment(r: sqlite3.Row) -> AppointmentRow:
+    return AppointmentRow(
+        id=r["id"],
+        cluster=r["cluster"],
+        operator=r["operator"],
+        members=json.loads(r["members_json"]),
+        issued_at=db.parse_iso(r["issued_at"]),
+        expires_at=db.parse_iso(r["expires_at"]),
+        signed=sign.Signed.model_validate_json(r["signed_json"]),
+    )
+
+
 def appointments(conn: sqlite3.Connection, cluster: str) -> list[AppointmentRow]:
     """The cluster's appointments, oldest first."""
     rows = conn.execute(
         "SELECT * FROM appointments WHERE cluster = ? ORDER BY issued_at, seq", (cluster,)
     ).fetchall()
-    return [
-        AppointmentRow(
-            id=r["id"],
-            cluster=r["cluster"],
-            operator=r["operator"],
-            members=json.loads(r["members_json"]),
-            issued_at=db.parse_iso(r["issued_at"]),
-            expires_at=db.parse_iso(r["expires_at"]),
-            signed=sign.Signed.model_validate_json(r["signed_json"]),
-        )
-        for r in rows
-    ]
+    return [_appointment(r) for r in rows]
 
 
 def newest(conn: sqlite3.Connection, cluster: str) -> AppointmentRow | None:
-    found = appointments(conn, cluster)
-    return found[-1] if found else None
+    row = conn.execute(
+        "SELECT * FROM appointments WHERE cluster = ? ORDER BY issued_at DESC, seq DESC LIMIT 1",
+        (cluster,),
+    ).fetchone()
+    return None if row is None else _appointment(row)
 
 
 def records(conn: sqlite3.Connection, cluster: str, kind: sign.RecordKind) -> list[sign.Signed]:
@@ -282,12 +286,16 @@ def why_waiting(
     now: datetime,
     online: timedelta,
     task: ClusterTaskRow,
+    *,
+    pool: list[store.Node] | None = None,
+    believed: sign.Trust | None = None,
 ) -> tuple[Waiting, int]:
-    """Why a waiting cluster task has no cluster yet, and how many nodes are free."""
-    pool = free_nodes(conn, now, online)
+    """Why a waiting cluster task has no cluster yet, and how many nodes are free. `pool` and
+    `believed`, when given, are `free_nodes` and `store.trust` already computed for `now`."""
+    pool = free_nodes(conn, now, online) if pool is None else pool
     if appointer is None:
         return "no_appointer", len(pool)
-    believed = store.trust(conn, root, now)
+    believed = store.trust(conn, root, now) if believed is None else believed
     if not _appointer_stands(believed, appointer):
         return "appointer_not_assigned", len(pool)
     if believed.fresh() is not None:
@@ -368,10 +376,17 @@ def settle(
             version = 0 if plan is None else plan.body.version
             if found.reason == "result" and version >= protocol.MAX_PLAN_VERSIONS:
                 raise SettleError("no_versions")
+            replan = found.reason == "result"
             if found.reason == "job_given_up":
                 for job in work.jobs(conn, "operator", cluster=found.id):
                     if db.parse_iso(job.expires_at) <= now:
                         _drop_job(conn, job, "expired", moment)
+                        replan = True
+                    elif not _untried_members(conn, found, job):
+                        # Every member took it once (a node never takes a record twice): the
+                        # cluster's operator plans it anew.
+                        _drop_job(conn, job, "no_member_left", moment)
+                        replan = True
                     else:
                         conn.execute(
                             "UPDATE jobs SET status = 'execute', result = NULL, reason = NULL,"
@@ -381,7 +396,7 @@ def settle(
             conn.execute(
                 "UPDATE cluster_tasks SET status = 'waiting', reason = NULL, note = ?,"
                 " replan = ?, lost = 0 WHERE id = ?",
-                (note or None, int(found.reason == "result"), found.id),
+                (note or None, int(replan), found.id),
             )
         elif decision == "accept":
             conn.execute(
@@ -413,14 +428,23 @@ def settle(
     return settled
 
 
+def _untried_members(conn: sqlite3.Connection, found: ClusterTaskRow, job: work.JobRow) -> set[str]:
+    """Members of the cluster's newest appointment never lent this job (in any round)."""
+    current = newest(conn, found.cluster)
+    if current is None:
+        return set()
+    tried = {
+        r["node"]
+        for r in conn.execute("SELECT node FROM leases WHERE job = ?", (job.id,)).fetchall()
+    }
+    return set(current.members) - tried
+
+
 def _drop_job(conn: sqlite3.Connection, job: work.JobRow, why: str, moment: str) -> None:
     for row in conn.execute(
         "SELECT token FROM leases WHERE job = ? AND ended IS NULL", (job.id,)
     ).fetchall():
-        conn.execute(
-            "UPDATE leases SET ended = 'withdrawn', ended_at = ? WHERE token = ?",
-            (moment, row["token"]),
-        )
+        work.end_lease(conn, row["token"], "withdrawn", moment)
     conn.execute("UPDATE jobs SET status = 'dropped', reason = ? WHERE id = ?", (why, job.id))
     store.log(conn, "cluster_job_dropped", None, {"job": job.id, "why": why})
 
@@ -449,25 +473,31 @@ def tick(
     work.expire(conn, now)
     moment = db.to_iso(now)
     with db.transaction(conn):
-        for found in cluster_tasks(conn):
-            if found.status in ("waiting", "running") and found.expires_at <= moment:
-                conn.execute(
-                    "UPDATE cluster_tasks SET status = 'expired' WHERE id = ?", (found.id,)
-                )
-                store.log(conn, "cluster_expired", None, {"task": found.id})
+        for row in conn.execute(
+            "SELECT id FROM cluster_tasks WHERE status IN ('waiting', 'running')"
+            " AND expires_at <= ?",
+            (moment,),
+        ).fetchall():
+            conn.execute("UPDATE cluster_tasks SET status = 'expired' WHERE id = ?", (row["id"],))
+            store.log(conn, "cluster_expired", None, {"task": row["id"]})
         for found in cluster_tasks(conn, "running"):
             _supervise(conn, found, now, online)
-        if appointer is None or not cluster_tasks(conn, "waiting"):
+        waiting = cluster_tasks(conn, "waiting")
+        if appointer is None or not waiting:
             return
+        pool = free_nodes(conn, now, online)
+        if len(pool) < NEEDED:
+            return  # nothing to appoint (and no signature to check)
         believed = store.trust(conn, root, now)
         if not _appointer_stands(believed, appointer) or believed.fresh() is not None:
             return  # every node would refuse the appointment
-        pool = free_nodes(conn, now, online)
-        for found in cluster_tasks(conn, "waiting"):
+        for found in waiting:  # the oldest first
+            if len(pool) < NEEDED:
+                break
             excluded = work.cluster_operators(conn, found.id) if found.lost else set()
             leaders = [n for n in pool if _may_lead(believed, n, excluded)]
-            if not leaders or len(pool) < NEEDED:
-                break  # the oldest waits first; the next would find no more
+            if not leaders:
+                continue  # its former operators may still lead a newer one
             leader = leaders[0]
             members = [n.fingerprint for n in pool if n is not leader][: sign.MAX_MEMBERS]
             _appoint(conn, appointer, believed, found, leader.fingerprint, members, now, len(pool))
@@ -478,6 +508,13 @@ def tick(
 def _supervise(
     conn: sqlite3.Connection, found: ClusterTaskRow, now: datetime, online: timedelta
 ) -> None:
+    for job in work.jobs(conn, "execute", cluster=found.id):
+        held = conn.execute(
+            "SELECT 1 FROM leases WHERE job = ? AND ended IS NULL", (job.id,)
+        ).fetchone()
+        if held is None and not _untried_members(conn, found, job):
+            # Every member took it once and none may take it again: back to the operator.
+            work.to_operator(conn, job, "no_member_left", {})
     given_up = work.jobs(conn, "operator", cluster=found.id)
     if given_up:
         plan = latest_plan(conn, found.cluster)
@@ -502,6 +539,7 @@ def _supervise(
         or not leader.lead
         or seen is None
         or now - db.parse_iso(seen) >= TERM
+        or now >= current.expires_at  # polling, but not renewed (the appointer cannot sign)
     )
     if not gone:
         return

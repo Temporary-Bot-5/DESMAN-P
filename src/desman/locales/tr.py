@@ -1644,4 +1644,23 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "Bir küme görevi 1 ile {days} gün arası sürer.",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "İş "
+        "{id}, "
+        "{task} "
+        "küme "
+        "görevine "
+        "ait: "
+        "ona "
+        "kümesi "
+        "karar "
+        "verir "
+        "(desman-registry "
+        "cluster "
+        "settle).",
+    }
+)
+
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

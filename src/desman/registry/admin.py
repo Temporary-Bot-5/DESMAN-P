@@ -35,6 +35,9 @@ TRUST_DAYS: Final = 7
 """How long a trust list lasts unless the person says otherwise."""
 MAX_TRUST_DAYS: Final = 30
 """The longest a trust list may last: a hidden revocation is hidden at most this long."""
+CLUSTER_DAYS: Final = 30
+"""The longest a cluster task lasts: its appointments (renewed every quarter hour) stay
+within what a node keeps of one cluster (`sign.MAX_APPOINTMENTS`)."""
 REVOCATION_LIFETIME: Final = timedelta(days=3650)
 """A revocation is honoured past its term anyway; the term only has to be valid."""
 
@@ -282,6 +285,16 @@ def settle(
     conn: sqlite3.Connection, prefix: str, decision: work.Decision, *, now: datetime
 ) -> work.JobRow:
     job_id = find_job(conn, prefix)
+    found = work.job(conn, job_id)
+    if found is not None and found.cluster is not None:
+        raise AdminError(
+            t(
+                "Job {id} belongs to cluster task {task}: its cluster decides it"
+                " (desman-registry cluster settle).",
+                id=job_id[:8],
+                task=found.cluster[:8],
+            )
+        )
     work.expire(conn, now)  # decided on where the job is now, not where nodes last left it
     try:
         return work.settle(conn, job_id, decision, now)
@@ -356,6 +369,8 @@ def add_cluster_task(
 ) -> clusters.ClusterTaskRow:
     """Sign a goal as a `cluster_task` record and keep it, if a node would accept it; the
     registry forms its cluster when enough nodes are free."""
+    if not 1 <= days <= CLUSTER_DAYS:
+        raise AdminError(t("A cluster task lasts from 1 to {days} days.", days=CLUSTER_DAYS))
     root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
     lifetime = timedelta(days=days)
     assigned = store.trust(conn, root, now).operator(operator.fingerprint)
