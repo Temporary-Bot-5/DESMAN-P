@@ -28,7 +28,7 @@
 # desman-global (ADR 0004): the root of trust and the code that checks signatures by it,
 # records and requests alike.
 "net/root.pub" = "1212bec4b18e53e1025fd017bfe26f2a2416e5180cd262724e3a175594372a2d"
-"net/sign.py" = "c71c2a7e972678a228d419999fd031864fdceb09223ad0543a4d97fa4d6e8b07"
+"net/sign.py" = "b516442becb2e9db2a3a25cc5d3f6e6b9ed252228bcbbf44870069c06189dbf9"
 "net/request.py" = "c2e14185a19dcdcbe19fc2abf121ac9c85e2ca410f69e600d2e102dbfa7a88b6"
 # The scripted model every test of agents runs on.
 "llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"

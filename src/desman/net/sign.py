@@ -22,7 +22,10 @@ on the registry's server), names a node's key as the operator of one cluster for
 APPOINTMENT_TERM. That key signs only the records of its cluster (`CLUSTER_KINDS`: its plan,
 its jobs, its result), naming the appointment's cluster and cluster task, issued inside the
 term of the appointment current at that moment (the newest of its cluster issued no later):
-what a replaced operator signs afterwards is refused. Appointments fall with their appointer
+what a replaced operator signs afterwards is refused. An appointment past its term is still
+received (a successor, or a node that starts later, checks the records signed in it); the
+registry is the guard against a record dated back into an old term, as it takes cluster records
+only from the operator in force when they come. Appointments fall with their appointer
 (revoked, or no longer holding `appoint`); `appoint` is never assigned together with another
 scope. The registry takes cluster records only from the current operator during its term,
 and nodes get them only through the registry. Otherwise the root signs anything:
@@ -280,6 +283,9 @@ STATE: Final = frozenset(
     }
 )
 """Kinds handed out again on every poll: receiving one twice is not a replay."""
+
+_KEPT_PAST_TERM: Final = frozenset({RecordKind.REVOCATION, RecordKind.APPOINTMENT})
+"""Kinds received even past their term (`Trust.receive`)."""
 
 
 class Scope(StrEnum):
@@ -761,7 +767,10 @@ class Trust:
 
         if record.issued_at > now + SKEW:
             raise refuse(Reason.NOT_YET, f"issued at {record.issued_at.isoformat()}")
-        if record.kind is not RecordKind.REVOCATION and now >= record.expires_at:
+        # A revocation is honoured past its term. An appointment past its term is still kept:
+        # it gives authority only to records issued inside it, and the records its operator
+        # signed then (a cluster's plan and jobs) outlive it (ADR 0006).
+        if record.kind not in _KEPT_PAST_TERM and now >= record.expires_at:
             raise refuse(Reason.EXPIRED, f"expired at {record.expires_at.isoformat()}")
 
         if isinstance(body, Assignment):

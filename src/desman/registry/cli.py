@@ -4,7 +4,10 @@
 the database; `nodes` and `log` show what the registry knows and did. The operator's work
 (G.6): `job add` signs a job with the operator's key, `jobs`, `job show` and `inbox` show them,
 `job settle` decides one that waits for a person, `owner` says whose node is whose (a result is
-rechecked by another owner's node). `trust sign` signs the trust list with the root (G.6c):
+rechecked by another owner's node). Clusters (ADR 0006, T.4b): `appointer create` makes the key
+the registry appoints cluster operators with, `cluster add` signs a goal for a cluster, `clusters`
+and `cluster show` say where each is (and why one waits), `cluster settle` decides one in the
+inbox. `trust sign` signs the trust list with the root (G.6c):
 without one in its term nodes take no work, so sign it again before it ends (a timer). Non-interactive, like every subcommand. It reads no `config.json`: its directory is `--dir` (or
 $DESMAN_REGISTRY_DIR), its language $DESMAN_REGISTRY_LANGUAGE.
 """
@@ -27,7 +30,7 @@ from desman import i18n, ui
 from desman.core.models import Kind
 from desman.i18n import t
 from desman.net import protocol, sign
-from desman.registry import admin, checks, moderation, releases, server, store, work
+from desman.registry import admin, checks, clusters, moderation, releases, server, store, work
 from desman.stdio import configure_output
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
@@ -577,18 +580,31 @@ def inbox(ctx: click.Context, as_json: bool) -> None:
     """Jobs waiting for the operator's word (`job settle`)."""
     conn = _open_db(ctx)
     try:
-        work.expire(conn, _now())  # a job that lost its last lease belongs here already
-        found = work.jobs(conn, "operator")
+        now = _now()
+        clusters.tick(conn, _appointer(ctx), _root(), now, clusters.ONLINE)
+        # (a job that lost its last lease belongs here already: the tick swept the leases)
+        found = work.jobs(conn, "operator", cluster=None)  # a cluster's go to its operator
+        waiting = [_ClusterView.of(conn, c) for c in clusters.cluster_tasks(conn, "operator")]
     finally:
         conn.close()
     if as_json:
-        click.echo(json.dumps([j.as_json() for j in found], ensure_ascii=False, indent=2))
+        click.echo(
+            json.dumps(
+                [j.as_json() for j in found] + [c.row.as_json() for c in waiting],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return
-    if not found:
+    if not found and not waiting:
         ui.note(t("Nothing waits for the operator."))
         return
-    _jobs_table(found)
-    ui.note(t("Decide each with: desman-registry job settle JOB accept|again|drop"))
+    if found:
+        _jobs_table(found)
+        ui.note(t("Decide each with: desman-registry job settle JOB accept|again|drop"))
+    if waiting:
+        _clusters_table(waiting)
+        ui.note(t("Decide each with: desman-registry cluster settle TASK accept|again|drop"))
 
 
 @job.command("show")
@@ -1175,3 +1191,360 @@ def moderation_list(ctx: click.Context, as_json: bool) -> None:
                 Text(t("yes") if row.lifted else t("no")),
             )
         ui.out(table)
+
+
+# ── Clusters (ADR 0006, T.4b) ────────────────────────────────────────────────
+
+
+def _root() -> Any:
+    return sign.load_root(sign.ROOT_PUB)
+
+
+def _appointer(ctx: click.Context) -> sign.NodeKey | None:
+    try:
+        return admin.load_appointer(_dir(ctx) / store.APPOINTER_KEY)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+
+
+@cli.group()
+def appointer() -> None:
+    """The key the registry appoints cluster operators with, by itself (ADR 0006)."""
+
+
+@appointer.command("create")
+@click.pass_context
+def appointer_create(ctx: click.Context) -> None:
+    """Make the appointer key (once), then assign it with the root: --scope appoint."""
+    directory = _dir(ctx)
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        made = admin.appointer_create(directory / store.APPOINTER_KEY)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    if made.created:
+        ui.ok(t("Appointer key made: {key}", key=made.fingerprint[:16]))
+    else:
+        ui.note(t("The appointer key exists already: {key}", key=made.fingerprint[:16]))
+    ui.out(Text(made.public_key))
+    ui.note(
+        t(
+            "Assign it with the root so the registry may appoint: desman-registry assign {key}"
+            " --scope appoint",
+            key=made.public_key,
+        )
+    )
+
+
+_CLUSTER_STATUS: Final = ("waiting", "running", "operator", "accepted", "dropped", "expired")
+
+
+def _cluster_status(found: clusters.ClusterTaskRow) -> str:
+    return {
+        "waiting": t("waits for a cluster"),
+        "running": t("a cluster works on it"),
+        "operator": t("waits for the operator"),
+        "accepted": t("accepted"),
+        "dropped": t("dropped"),
+        "expired": t("expired"),
+    }[found.status]
+
+
+def _cluster_reason(reason: str) -> str:
+    return {
+        "result": t("its result came"),
+        "job_given_up": t("a job gave up"),
+        "operators_lost": t("its operators were lost"),
+    }.get(reason, reason)
+
+
+class _ClusterView:
+    """A cluster task with what `clusters` shows about it."""
+
+    def __init__(
+        self,
+        row: clusters.ClusterTaskRow,
+        operator: str | None,
+        members: int,
+        version: int,
+        accepted: int,
+        jobs: int,
+        why: str,
+    ) -> None:
+        self.row = row
+        self.operator = operator
+        self.members = members
+        self.version = version
+        self.accepted = accepted
+        self.jobs = jobs
+        self.why = why
+
+    @classmethod
+    def of(
+        cls,
+        conn: Any,
+        row: clusters.ClusterTaskRow,
+        appointer: sign.NodeKey | None = None,
+        root: Any = None,
+        now: datetime | None = None,
+    ) -> _ClusterView:
+        current = clusters.newest(conn, row.cluster)
+        plan = clusters.latest_plan(conn, row.cluster)
+        jobs = work.jobs(conn, cluster=row.id)
+        why = ""
+        if row.status == "operator" and row.reason:
+            why = _cluster_reason(row.reason)
+        elif row.status == "waiting" and root is not None and now is not None:
+            code, free = clusters.why_waiting(conn, appointer, root, now, clusters.ONLINE, row)
+            why = {
+                "no_appointer": t("no appointer key (appointer create)"),
+                "appointer_not_assigned": t("the appointer is not assigned the scope appoint"),
+                "trust_list": t("no fresh trust list (trust sign)"),
+                "no_leader": t("no free node may lead"),
+                "free": t(
+                    "{free} of {needed} free nodes", free=str(free), needed=str(clusters.NEEDED)
+                ),
+            }[code]
+        return cls(
+            row,
+            None if current is None else current.operator,
+            0 if current is None else len(current.members),
+            0 if plan is None else plan.body.version,
+            sum(1 for j in jobs if j.status == "accepted"),
+            len(jobs),
+            why,
+        )
+
+    def as_json(self) -> dict[str, Any]:
+        return self.row.as_json() | {
+            "operator": self.operator,
+            "members": self.members,
+            "plan_version": self.version,
+            "jobs": self.jobs,
+            "accepted": self.accepted,
+            "why": self.why,
+        }
+
+
+def _clusters_table(found: list[_ClusterView]) -> None:
+    table = ui.table(
+        t("Task"), t("Status"), t("Operator"), t("Members"), t("Plan"), t("Jobs"), t("Goal")
+    )
+    for v in found:
+        status = _cluster_status(v.row) + (f" ({v.why})" if v.why else "")
+        table.add_row(
+            v.row.id[:8],
+            status,
+            "—" if v.operator is None else v.operator[:16],
+            str(v.members),
+            str(v.version) if v.version else "—",
+            f"{v.accepted}/{v.jobs}",
+            Text(v.row.task.goal[:60]),
+        )
+    ui.out(table)
+
+
+@cli.command("clusters")
+@click.option("--status", type=click.Choice(_CLUSTER_STATUS), default=None, help="Only these.")
+@_json_option
+@click.pass_context
+def clusters_command(ctx: click.Context, status: str | None, as_json: bool) -> None:
+    """Cluster tasks: which cluster works on each, and why one still waits."""
+    appointed_by = _appointer(ctx)
+    root = _root()
+    conn = _open_db(ctx)
+    try:
+        now = _now()
+        clusters.tick(conn, appointed_by, root, now, clusters.ONLINE)
+        found = [
+            _ClusterView.of(conn, c, appointed_by, root, now)
+            for c in clusters.cluster_tasks(conn, status)
+        ]
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps([v.as_json() for v in found], ensure_ascii=False, indent=2))
+        return
+    if not found:
+        ui.note(t("No cluster tasks."))
+        return
+    _clusters_table(found)
+
+
+@cli.group()
+def cluster() -> None:
+    """A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006)."""
+
+
+@cluster.command("add")
+@click.option("--goal", required=True, help="What the cluster is to do (at most 4000 characters).")
+@click.option(
+    "--acceptance",
+    required=True,
+    help="How the result is judged (at most 2000 characters).",
+)
+@click.option(
+    "--input",
+    "inputs",
+    multiple=True,
+    metavar="NAME=TEXT",
+    help="Material the cluster works on; repeat for several.",
+)
+@click.option(
+    "--days",
+    default=admin.JOB_DAYS,
+    show_default=True,
+    type=click.IntRange(1, 90),
+    help="How long the cluster may take.",
+)
+@click.option(
+    "--operator-key",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="The operator's private key (default: operator.key in the registry's directory).",
+)
+@click.pass_context
+def cluster_add(
+    ctx: click.Context,
+    goal: str,
+    acceptance: str,
+    inputs: tuple[str, ...],
+    days: int,
+    operator_key: Path | None,
+) -> None:
+    """Sign a goal with the operator's key; a cluster is formed when enough nodes are free."""
+    given: dict[str, str] = {}
+    for item in inputs:
+        name, sep, text = item.partition("=")
+        if not sep or name in given:
+            raise click.BadParameter(
+                t("Expected NAME=TEXT, each name once: {value}", value=item[:80]),
+                param_hint="--input",
+            )
+        given[name] = text
+    try:
+        spec = protocol.ClusterTask(goal=goal, acceptance_criteria=acceptance, inputs=given)
+    except ValidationError as e:
+        raise click.ClickException(
+            t("The cluster task is not valid: {error}", error=f"{e.error_count()} problem(s)")
+        ) from e
+    directory = _dir(ctx)
+    try:
+        key = admin.load_operator_key(
+            directory / store.OPERATOR_KEY if operator_key is None else operator_key
+        )
+        conn = _open_db(ctx)
+        try:
+            added = admin.add_cluster_task(conn, key, spec, days=days, now=_now())
+        finally:
+            conn.close()
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(
+        t(
+            "Cluster task {id} added; it waits for free nodes until {date}.",
+            id=added.id[:8],
+            date=added.signed.record.expires_at.date().isoformat(),
+        )
+    )
+
+
+@cluster.command("show")
+@click.argument("task_id", metavar="TASK")
+@_json_option
+@click.pass_context
+def cluster_show(ctx: click.Context, task_id: str, as_json: bool) -> None:
+    """A cluster task: its cluster, its plan, its jobs and where each is."""
+    appointed_by = _appointer(ctx)
+    root = _root()
+    conn = _open_db(ctx)
+    try:
+        now = _now()
+        clusters.tick(conn, appointed_by, root, now, clusters.ONLINE)
+        try:
+            found = clusters.cluster_task(conn, admin.find_cluster(conn, task_id))
+        except admin.AdminError as e:
+            raise _fail(e) from e
+        assert found is not None
+        view = _ClusterView.of(conn, found, appointed_by, root, now)
+        plan = clusters.latest_plan(conn, found.cluster)
+        jobs = work.jobs(conn, cluster=found.id)
+        current = clusters.newest(conn, found.cluster)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(
+            json.dumps(
+                view.as_json()
+                | {
+                    "members_list": [] if current is None else current.members,
+                    "plan": None if plan is None else plan.body.model_dump(mode="json"),
+                    "job_list": [j.as_json() for j in jobs],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    spec = found.task
+    status = _cluster_status(found) + (f" ({view.why})" if view.why else "")
+    # Text, never markup: what nodes (and the operator) wrote is shown as it is.
+    lines = [
+        f"{t('Cluster task')} {found.id}",
+        f"{t('Cluster')}: {found.cluster}",
+        f"{t('Status')}: {status}",
+        f"{t('Goal')}: {spec.goal}",
+        f"{t('Acceptance criteria')}: {spec.acceptance_criteria}",
+        *(f"{t('Input')} {name}: {text[:200]}" for name, text in spec.inputs.items()),
+    ]
+    if current is not None:
+        lines.append(f"{t('Operator')}: {current.operator[:16]}")
+        lines.append(f"{t('Members')}: {', '.join(m[:16] for m in current.members)}")
+    if found.note:
+        lines.append(f"{t('Note')}: {found.note}")
+    for line in lines:
+        ui.out(Text(line))
+    if plan is None:
+        ui.note(t("No plan yet."))
+        return
+    ui.out(Text(f"{t('Plan')} {plan.body.version}:"))
+    for index, node in enumerate(plan.body.nodes):
+        after = f" ← {', '.join(str(d) for d in node.depends_on)}" if node.depends_on else ""
+        ui.out(Text(f"  {index}. {node.description[:100]}{after}"))
+    if jobs:
+        _jobs_table(jobs)
+
+
+@cluster.command("settle")
+@click.argument("task_id", metavar="TASK")
+@click.argument("decision", type=click.Choice(["accept", "again", "drop"]))
+@click.option("--note", default="", help="What to tell the cluster (with again).")
+@click.pass_context
+def cluster_settle(ctx: click.Context, task_id: str, decision: str, note: str) -> None:
+    """Decide a cluster task: accept its result, send it back, or drop it."""
+    chosen: clusters.Decision = (
+        "accept" if decision == "accept" else "again" if decision == "again" else "drop"
+    )
+    appointed_by = _appointer(ctx)
+    conn = _open_db(ctx)
+    try:
+        settled = admin.settle_cluster(
+            conn,
+            task_id,
+            chosen,
+            note=note,
+            now=_now(),
+            appointer=appointed_by,
+            online=clusters.ONLINE,
+        )
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    finally:
+        conn.close()
+    ui.ok(
+        t(
+            "Cluster task {id} is now: {status}",
+            id=settled.id[:8],
+            status=_cluster_status(settled),
+        )
+    )

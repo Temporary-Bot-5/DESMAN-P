@@ -1614,4 +1614,132 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "Une tâche de grappe : "
+        "sa grappe, son plan, "
+        "ses travaux et où en "
+        "est chacun.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "Un objectif pour "
+        "une grappe de "
+        "nœuds : DESMAN en "
+        "nomme l'opérateur "
+        "(ADR 0006).",
+        "Appointer key made: {key}": "Clé de nomination créée : {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "Attribuez-la "
+        "avec "
+        "la "
+        "racine "
+        "pour "
+        "que "
+        "le "
+        "registre "
+        "puisse "
+        "nommer "
+        ": "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "Grappe",
+        "Cluster task": "Tâche de grappe",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "Tâche de grappe {id} "
+        "ajoutée ; elle attend des "
+        "nœuds libres jusqu'au "
+        "{date}.",
+        "Cluster task {id} is now: {status}": "La tâche de grappe {id} est maintenant : {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "La tâche de grappe "
+        "{id} est {status} : "
+        "elle ne peut pas "
+        "être réglée par "
+        "{decision}.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "Tâches de grappe : "
+        "quelle grappe "
+        "travaille sur "
+        "chacune et pourquoi "
+        "l'une attend encore.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "Décider d'une tâche "
+        "de grappe : accepter "
+        "son résultat, la "
+        "renvoyer ou "
+        "l'abandonner.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "Décidez chacune "
+        "avec : "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "Objectif",
+        "How long the cluster may take.": "Combien de temps la grappe peut prendre.",
+        "Jobs": "Travaux",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "Créer la "
+        "clé de "
+        "nomination "
+        "(une fois), "
+        "puis "
+        "l'attribuer "
+        "avec la "
+        "racine : "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "Matériel sur lequel travaille la "
+        "grappe ; répétez pour plusieurs.",
+        "Members": "Membres",
+        "More than one cluster task starts with {id}; give more of it.": "Plusieurs tâches de grappe "
+        "commencent par {id} ; "
+        "donnez-en davantage.",
+        "No cluster task {id}.": "Aucune tâche de grappe {id}.",
+        "No cluster tasks.": "Aucune tâche de grappe.",
+        "No plan yet.": "Pas encore de plan.",
+        "Note": "Note",
+        "Only these.": "Seulement celles-ci.",
+        "Operator": "Opérateur",
+        "Plan": "Plan",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "Signer "
+        "un "
+        "objectif "
+        "avec "
+        "la "
+        "clé "
+        "de "
+        "l'opérateur "
+        "; "
+        "une "
+        "grappe "
+        "se "
+        "forme "
+        "quand "
+        "assez "
+        "de "
+        "nœuds "
+        "sont "
+        "libres.",
+        "The appointer key exists already: {key}": "La clé de nomination existe déjà : {key}",
+        "The cluster task is not valid: {error}": "La tâche de grappe n'est pas valide : {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "La clé avec "
+        "laquelle le "
+        "registre "
+        "nomme "
+        "lui-même les "
+        "opérateurs de "
+        "grappe (ADR "
+        "0006).",
+        "What the cluster is to do (at most 4000 characters).": "Ce que la grappe doit faire (4000 "
+        "caractères au plus).",
+        "What to tell the cluster (with again).": "Ce qu'il faut dire à la grappe (avec again).",
+        "a cluster works on it": "une grappe y travaille",
+        "a job gave up": "un travail a abandonné",
+        "its operators were lost": "ses opérateurs ont été perdus",
+        "its result came": "son résultat est arrivé",
+        "no appointer key (appointer create)": "pas de clé de nomination (appointer create)",
+        "no free node may lead": "aucun nœud libre ne peut diriger",
+        "no fresh trust list (trust sign)": "pas de liste de confiance récente (trust sign)",
+        "the appointer is not assigned the scope appoint": "la clé de nomination n'a pas la portée "
+        "appoint",
+        "waits for a cluster": "attend une grappe",
+        "{free} of {needed} free nodes": "{free} nœuds libres sur {needed}",
+    }
+)
+
 CATALOG = Catalog("Français", plural, MESSAGES, CLICK, forms=2)

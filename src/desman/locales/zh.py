@@ -1518,4 +1518,64 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "集群任务:它的集群、计划、作业以及每个作业的进度。",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "交给节点集群的目标:DESMAN "
+        "任命其操作员(ADR 0006)。",
+        "Appointer key made: {key}": "已创建任命密钥:{key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "用根密钥为其授权,注册中心才能任命:desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "集群",
+        "Cluster task": "集群任务",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "已添加集群任务 {id};它将等待空闲节点直到 "
+        "{date}。",
+        "Cluster task {id} is now: {status}": "集群任务 {id} 现在:{status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "集群任务 {id} 处于 "
+        "{status}:无法用 "
+        "{decision} 处理。",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "集群任务:哪个集群在处理每个任务,以及为什么有的还在等待。",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "处理集群任务:接受其结果、退回或放弃。",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "逐个处理:desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "目标",
+        "How long the cluster may take.": "集群可用的时间。",
+        "Jobs": "作业",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "创建任命密钥(一次),然后用根密钥授权:--scope "
+        "appoint。",
+        "Material the cluster works on; repeat for several.": "集群处理的材料;多个可重复。",
+        "Members": "成员",
+        "More than one cluster task starts with {id}; give more of it.": "有多个集群任务以 {id} 开头;请多给几位。",
+        "No cluster task {id}.": "没有集群任务 {id}。",
+        "No cluster tasks.": "没有集群任务。",
+        "No plan yet.": "还没有计划。",
+        "Note": "备注",
+        "Only these.": "仅这些。",
+        "Operator": "操作员",
+        "Plan": "计划",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "用操作员密钥签署目标;空闲节点足够时即组成集群。",
+        "The appointer key exists already: {key}": "任命密钥已存在:{key}",
+        "The cluster task is not valid: {error}": "集群任务无效:{error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "注册中心自行任命集群操作员所用的密钥(ADR "
+        "0006)。",
+        "What the cluster is to do (at most 4000 characters).": "集群要做什么(最多 4000 个字符)。",
+        "What to tell the cluster (with again).": "要告诉集群的话(与 again 一起)。",
+        "a cluster works on it": "有集群在处理",
+        "a job gave up": "有作业放弃了",
+        "its operators were lost": "它的操作员丢失了",
+        "its result came": "它的结果已到",
+        "no appointer key (appointer create)": "没有任命密钥(appointer create)",
+        "no free node may lead": "没有可担任领导的空闲节点",
+        "no fresh trust list (trust sign)": "没有新的信任列表(trust sign)",
+        "the appointer is not assigned the scope appoint": "任命密钥未获授 appoint 范围",
+        "waits for a cluster": "等待集群",
+        "{free} of {needed} free nodes": "空闲节点 {free}/{needed}",
+    }
+)
+
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

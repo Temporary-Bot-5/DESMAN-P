@@ -20,6 +20,14 @@ assigned, not revoked, in its term). A job past its record's term is `expired`.
 
 G.7b shares the lease limit and expiry sweep with independent proposal checks.
 
+**Cluster jobs** (ADR 0006, T.4b) are jobs too: a cluster operator's `cluster_job` record,
+kept by `registry/clusters.py` with its cluster task in `jobs.cluster`, lent by the same
+machinery with two differences. `execute` goes only to a member of the cluster's newest
+appointment. `recheck` goes to any node that is neither the node that executed it nor one that
+operated the cluster (the one rule of ADR 0006, decision 3: another device, no owner rule).
+A cluster job that gives up waits for the *cluster's* operator (`operator`), not the global one;
+`registry/clusters.py` decides when it goes further.
+
 Every step is journaled in `registry_log` in the transaction that makes it; the lease token is
 not (whoever reads the journal could not use it, but it is nobody's business either).
 """
@@ -81,10 +89,20 @@ class JobRow:
     round: int
     """Lent again from the start by the operator: a new round (counts start over)."""
     created_at: str
+    cluster: str | None = None
+    """The cluster task a cluster job belongs to; None for an ordinary job."""
 
     @property
     def job(self) -> protocol.Job:
+        if self.signed.record.kind is sign.RecordKind.CLUSTER_JOB:
+            return protocol.ClusterJob.model_validate(self.signed.record.body).job
         return protocol.Job.model_validate(self.signed.record.body)
+
+    @property
+    def cluster_job(self) -> protocol.ClusterJob | None:
+        if self.signed.record.kind is not sign.RecordKind.CLUSTER_JOB:
+            return None
+        return protocol.ClusterJob.model_validate(self.signed.record.body)
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -96,6 +114,7 @@ class JobRow:
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "task": self.job.model_dump(mode="json"),
+            "cluster": self.cluster,
         }
 
 
@@ -133,6 +152,7 @@ def _job(row: sqlite3.Row) -> JobRow:
         reason=row["reason"],
         round=row["round"],
         created_at=row["created_at"],
+        cluster=row["cluster"],
     )
 
 
@@ -141,13 +161,23 @@ def job(conn: sqlite3.Connection, id: str) -> JobRow | None:
     return None if row is None else _job(row)
 
 
-def jobs(conn: sqlite3.Connection, status: str | None = None) -> list[JobRow]:
-    if status is None:
-        rows = conn.execute("SELECT * FROM jobs ORDER BY created_at, id").fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE status = ? ORDER BY created_at, id", (status,)
-        ).fetchall()
+def jobs(
+    conn: sqlite3.Connection, status: str | None = None, *, cluster: str | None | bool = True
+) -> list[JobRow]:
+    """Jobs (in `status`, if given): every one (`cluster=True`), only ordinary ones (`None`),
+    or only those of one cluster task (its id)."""
+    where: list[str] = []
+    params: list[str] = []
+    if status is not None:
+        where.append("status = ?")
+        params.append(status)
+    if cluster is None:
+        where.append("cluster IS NULL")
+    elif isinstance(cluster, str):
+        where.append("cluster = ?")
+        params.append(cluster)
+    sql = "SELECT * FROM jobs" + (" WHERE " + " AND ".join(where) if where else "")
+    rows = conn.execute(sql + " ORDER BY created_at, id", params).fetchall()
     return [_job(r) for r in rows]
 
 
@@ -324,7 +354,10 @@ def claim(
             ).fetchone()
             if lent_before is not None:
                 continue
-            if found.status == "recheck":
+            if found.cluster is not None:
+                if not _cluster_lends_to(conn, found, caller):
+                    continue
+            elif found.status == "recheck":
                 owners = _owners_of_result(conn, found.result)
                 if owners is None or caller.owned_by in owners:
                     continue
@@ -332,6 +365,41 @@ def claim(
                 continue
             return _lend(conn, caller, found, now)
     return None
+
+
+def cluster_operators(conn: sqlite3.Connection, cluster_task: str) -> set[str]:
+    """Every node an appointment named as the operator of this cluster task's cluster."""
+    rows = conn.execute(
+        "SELECT a.operator FROM appointments a JOIN cluster_tasks c ON c.cluster = a.cluster"
+        " WHERE c.id = ?",
+        (cluster_task,),
+    ).fetchall()
+    return {r["operator"] for r in rows}
+
+
+def cluster_members(conn: sqlite3.Connection, cluster_task: str) -> set[str]:
+    """The members of the cluster's newest appointment (none before the first)."""
+    row = conn.execute(
+        "SELECT a.members_json FROM appointments a JOIN cluster_tasks c ON c.cluster = a.cluster"
+        " WHERE c.id = ? ORDER BY a.issued_at DESC, a.seq DESC LIMIT 1",
+        (cluster_task,),
+    ).fetchone()
+    return set() if row is None else set(json.loads(row["members_json"]))
+
+
+def _cluster_lends_to(conn: sqlite3.Connection, found: JobRow, caller: store.Node) -> bool:
+    """ADR 0006: a member executes; a node that neither executed it nor operated the cluster
+    rechecks; nothing is lent once the cluster task is settled."""
+    assert found.cluster is not None
+    row = conn.execute("SELECT status FROM cluster_tasks WHERE id = ?", (found.cluster,)).fetchone()
+    if row is None or row["status"] not in ("waiting", "running"):
+        return False
+    if found.status == "execute":
+        return caller.fingerprint in cluster_members(conn, found.cluster)
+    done_by = conn.execute("SELECT node FROM results WHERE id = ?", (found.result,)).fetchone()
+    if done_by is None or done_by["node"] == caller.fingerprint:
+        return False
+    return caller.fingerprint not in cluster_operators(conn, found.cluster) | {found.signer}
 
 
 def _lend(

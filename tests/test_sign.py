@@ -865,3 +865,21 @@ def test_appointments_fall_when_the_appointers_assignment_ends(
     clock.advance(60)
     assert trust.appointment(CLUSTER) is None
     assert refused(trust, plan(lead, clock)) is Reason.NOT_ALLOWED
+
+
+def test_a_node_that_starts_later_checks_records_of_a_past_appointment(
+    root: NodeKey, clock: FakeClock
+) -> None:
+    by = NodeKey.generate()
+    assigned = sign.assign(root, by.public, {Scope.APPOINT}, issued_at=clock(), lifetime=DAY)
+    lead = NodeKey.generate()
+    appointed = appoint(by, lead, clock)
+    early = plan(lead, clock)
+    clock.advance(sign.APPOINTMENT_TERM.total_seconds() + 60)
+    # A node that never saw the appointment in its term receives it now, as state.
+    later = Trust(root.public, clock=clock)
+    later.receive(assigned.model_dump(mode="json"))
+    later.receive(appointed.model_dump(mode="json"))
+    assert later.appointment(CLUSTER) is None  # not in force
+    later.receive(early.model_dump(mode="json"))  # signed inside its term
+    assert refused(later, plan(lead, clock)) is Reason.NOT_ALLOWED

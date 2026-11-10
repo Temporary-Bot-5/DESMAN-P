@@ -278,9 +278,13 @@ def test_migration_seven_preserves_submissions_and_checks(
         db.migrate(conn, store.MIGRATIONS[:6])
         with store.connection(db_path) as current:
             for table in ("nodes", "proposals", "proposal_leases", "proposal_checks"):
-                for row in current.execute(f"SELECT * FROM {table}"):
+                # Only the columns the old schema had (later migrations add more).
+                names = [c[1] for c in conn.execute(f"PRAGMA table_info({table})")]
+                columns = ", ".join(names)
+                for row in current.execute(f"SELECT {columns} FROM {table}"):
                     conn.execute(
-                        f"INSERT INTO {table} VALUES ({','.join('?' for _ in row)})", tuple(row)
+                        f"INSERT INTO {table} ({columns}) VALUES ({','.join('?' for _ in row)})",
+                        tuple(row),
                     )
         db.migrate(conn, store.MIGRATIONS)
         assert checks.results(conn, ready)[0]["outcome"] == "checked"

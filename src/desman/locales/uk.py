@@ -1667,4 +1667,112 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "Завдання кластера: "
+        "його кластер, план, "
+        "роботи й де кожна з "
+        "них.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "Мета для кластера "
+        "вузлів: DESMAN "
+        "призначає його "
+        "оператора (ADR "
+        "0006).",
+        "Appointer key made: {key}": "Ключ призначувача створено: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "Призначте "
+        "його "
+        "коренем, "
+        "щоб "
+        "реєстр "
+        "міг "
+        "призначати: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "Кластер",
+        "Cluster task": "Завдання кластера",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "Завдання кластера {id} "
+        "додано; воно чекає вільних "
+        "вузлів до {date}.",
+        "Cluster task {id} is now: {status}": "Завдання кластера {id} тепер: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "Завдання кластера "
+        "{id} у стані "
+        "{status}: рішення "
+        "{decision} до нього "
+        "не застосовне.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "Завдання кластерів: "
+        "який кластер працює "
+        "над кожним і чому "
+        "якесь ще чекає.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "Вирішити завдання "
+        "кластера: прийняти "
+        "результат, повернути "
+        "або зняти.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "Вирішіть кожне: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "Мета",
+        "How long the cluster may take.": "Скільки часу має кластер.",
+        "Jobs": "Роботи",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "Створити "
+        "ключ "
+        "призначувача "
+        "(один раз), "
+        "потім "
+        "призначити "
+        "його "
+        "коренем: "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "Матеріал, з яким працює кластер; "
+        "повторіть для кількох.",
+        "Members": "Учасники",
+        "More than one cluster task starts with {id}; give more of it.": "З {id} починається більше "
+        "ніж одне завдання кластера; "
+        "вкажіть більше символів.",
+        "No cluster task {id}.": "Немає завдання кластера {id}.",
+        "No cluster tasks.": "Завдань кластерів немає.",
+        "No plan yet.": "Плану ще немає.",
+        "Note": "Примітка",
+        "Only these.": "Лише ці.",
+        "Operator": "Оператор",
+        "Plan": "План",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "Підписати "
+        "мету "
+        "ключем "
+        "оператора; "
+        "кластер "
+        "збереться, "
+        "коли "
+        "звільниться "
+        "досить "
+        "вузлів.",
+        "The appointer key exists already: {key}": "Ключ призначувача вже є: {key}",
+        "The cluster task is not valid: {error}": "Завдання кластера неправильне: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "Ключ, яким "
+        "реєстр сам "
+        "призначає "
+        "операторів "
+        "кластерів "
+        "(ADR 0006).",
+        "What the cluster is to do (at most 4000 characters).": "Що має зробити кластер (не більше "
+        "4000 символів).",
+        "What to tell the cluster (with again).": "Що сказати кластеру (разом з again).",
+        "a cluster works on it": "над ним працює кластер",
+        "a job gave up": "робота здалася",
+        "its operators were lost": "його оператори зникли",
+        "its result came": "надійшов його результат",
+        "no appointer key (appointer create)": "немає ключа призначувача (appointer create)",
+        "no free node may lead": "жоден вільний вузол не може керувати",
+        "no fresh trust list (trust sign)": "немає свіжого списку довіри (trust sign)",
+        "the appointer is not assigned the scope appoint": "призначувачу не надано область appoint",
+        "waits for a cluster": "чекає кластера",
+        "{free} of {needed} free nodes": "вільних вузлів: {free} з {needed}",
+    }
+)
+
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)

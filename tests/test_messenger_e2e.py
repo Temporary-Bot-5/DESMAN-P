@@ -188,7 +188,7 @@ def test_legacy_upgrade(tmp_path: Path, clock: FakeClock) -> None:
     )
     conn.close()
     with store.open_registry(path) as conn:
-        assert db.schema_version(conn) == 12
+        assert db.schema_version(conn) == len(store.MIGRATIONS)
         assert conn.execute("SELECT text,sealed FROM messages").fetchone()["sealed"] is None
     registry = Registry(path, clock=clock)
     node = Node(registry, clock, b)

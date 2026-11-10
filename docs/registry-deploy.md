@@ -13,6 +13,7 @@ What the registry keeps, in its own directory (`~/.local/share/desman-registry`,
 | `registry.db` | SQLite: nodes, signed records, nonces, the journal |
 | `root.key` | The root's private key. **Readable by its owner only (0600). Keep an offline copy.** |
 | `operator.key` | The registry's own operator key, created by the first `assign` |
+| `appointer.key` | The key the registry appoints cluster operators with, by itself (`appointer create`; ADR 0006) |
 
 The registry reads no `config.json` and keeps no API key. Nodes send only their public key,
 what they lend (provider, model, fingerprint of the API key) and signatures.
@@ -199,6 +200,40 @@ is decided without you. `again` lends the job from the start.
 
 Until you say otherwise, every node counts as its own owner. Name your own machines with
 `owner`, or they will recheck each other's work.
+
+### Clusters (ADR 0006, T.4b)
+
+A **cluster task** is a goal larger than one job. The registry appoints a node to lead it — the
+cluster's operator plans it, lends its pieces to the cluster's members and hands in the final
+result — by itself, with a key of its own that may sign nothing but appointments:
+
+```bash
+desman-registry appointer create                       # once: makes appointer.key (0600)
+desman-registry assign APPOINTER_PUBLIC_KEY --scope appoint   # the root assigns it; appoint alone
+desman-registry cluster add --goal "What to achieve" --acceptance "How it is judged" \
+    [--input NAME=TEXT ...] [--days 7]
+desman-registry clusters [--status waiting]   # each cluster task, its cluster, why one waits
+desman-registry cluster show TASK             # its operator, members, plan and jobs
+desman-registry inbox                         # cluster tasks waiting for your word, too
+desman-registry cluster settle TASK accept|again|drop [--note "what to change"]
+```
+
+A cluster is formed when three nodes are free (taking part, heartbeat in the last 10 minutes,
+lending a module, taking jobs, in no other cluster) and one of them allows leading: the leader
+is the free node with the most results accepted on recheck, the others become members (at
+most six). There are no other thresholds. The one rule: a cluster job is rechecked by a node
+that neither executed it nor led the cluster (any free node, not only a member).
+
+An appointment lasts 30 minutes and is renewed while the operator polls. An operator silent
+for one term (or one that left, was revoked or stopped allowing it) is replaced by another free
+node that may lead; the successor continues from the records the registry keeps. The cluster
+task comes to the inbox when its result is in, when three operators were lost, or when a job
+gave up on the last plan version or on a piece that runs code. `again` sends a result back for
+a new plan version (with your note), lends a job that gave up from the start, or counts lost
+operators from zero; `drop` ends the cluster task and its jobs.
+
+`clusters` says why a task still waits: no `appointer.key`, the appointer not assigned
+`appoint`, no fresh trust list, no free node that may lead, or how many of three are free.
 
 ## 7. Backups and restoring
 

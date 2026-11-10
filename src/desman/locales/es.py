@@ -1617,4 +1617,126 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "Una tarea de clúster: "
+        "su clúster, su plan, "
+        "sus trabajos y dónde "
+        "está cada uno.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "Un objetivo para "
+        "un clúster de "
+        "nodos: DESMAN "
+        "nombra a su "
+        "operador (ADR "
+        "0006).",
+        "Appointer key made: {key}": "Clave de nombramiento creada: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "Asígnela "
+        "con "
+        "la "
+        "raíz "
+        "para "
+        "que "
+        "el "
+        "registro "
+        "pueda "
+        "nombrar: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "Clúster",
+        "Cluster task": "Tarea de clúster",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "Tarea de clúster {id} "
+        "añadida; espera nodos "
+        "libres hasta el {date}.",
+        "Cluster task {id} is now: {status}": "La tarea de clúster {id} ahora está: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "La tarea de clúster "
+        "{id} está {status}: "
+        "no puede resolverse "
+        "con {decision}.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "Tareas de clúster: "
+        "qué clúster trabaja "
+        "en cada una y por "
+        "qué alguna aún "
+        "espera.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "Decidir una tarea de "
+        "clúster: aceptar su "
+        "resultado, devolverla "
+        "o descartarla.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "Decida cada una "
+        "con: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "Objetivo",
+        "How long the cluster may take.": "Cuánto tiempo puede tardar el clúster.",
+        "Jobs": "Trabajos",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "Crear la "
+        "clave de "
+        "nombramiento "
+        "(una vez) y "
+        "asignarla "
+        "con la "
+        "raíz: "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "Material con el que trabaja el "
+        "clúster; repita para varios.",
+        "Members": "Miembros",
+        "More than one cluster task starts with {id}; give more of it.": "Más de una tarea de clúster "
+        "empieza por {id}; dé más "
+        "caracteres.",
+        "No cluster task {id}.": "No hay tarea de clúster {id}.",
+        "No cluster tasks.": "No hay tareas de clúster.",
+        "No plan yet.": "Aún no hay plan.",
+        "Note": "Nota",
+        "Only these.": "Solo estas.",
+        "Operator": "Operador",
+        "Plan": "Plan",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "Firmar "
+        "un "
+        "objetivo "
+        "con "
+        "la "
+        "clave "
+        "del "
+        "operador; "
+        "se "
+        "forma "
+        "un "
+        "clúster "
+        "cuando "
+        "hay "
+        "bastantes "
+        "nodos "
+        "libres.",
+        "The appointer key exists already: {key}": "La clave de nombramiento ya existe: {key}",
+        "The cluster task is not valid: {error}": "La tarea de clúster no es válida: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "La clave con "
+        "la que el "
+        "registro "
+        "nombra por sí "
+        "mismo a los "
+        "operadores de "
+        "clúster (ADR "
+        "0006).",
+        "What the cluster is to do (at most 4000 characters).": "Qué debe hacer el clúster (como "
+        "máximo 4000 caracteres).",
+        "What to tell the cluster (with again).": "Qué decirle al clúster (con again).",
+        "a cluster works on it": "un clúster trabaja en ella",
+        "a job gave up": "un trabajo se rindió",
+        "its operators were lost": "sus operadores se perdieron",
+        "its result came": "llegó su resultado",
+        "no appointer key (appointer create)": "no hay clave de nombramiento (appointer create)",
+        "no free node may lead": "ningún nodo libre puede dirigir",
+        "no fresh trust list (trust sign)": "no hay lista de confianza reciente (trust sign)",
+        "the appointer is not assigned the scope appoint": "la clave de nombramiento no tiene el "
+        "ámbito appoint",
+        "waits for a cluster": "espera un clúster",
+        "{free} of {needed} free nodes": "{free} de {needed} nodos libres",
+    }
+)
+
 CATALOG = Catalog("Español", plural, MESSAGES, CLICK, forms=2)

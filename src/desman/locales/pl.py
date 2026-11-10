@@ -1667,4 +1667,116 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "Zadanie klastra: jego "
+        "klaster, plan, prace i "
+        "gdzie jest każda z "
+        "nich.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "Cel dla klastra "
+        "węzłów: DESMAN "
+        "wyznacza jego "
+        "operatora (ADR "
+        "0006).",
+        "Appointer key made: {key}": "Utworzono klucz wyznaczający: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "Przypisz "
+        "go "
+        "kluczem "
+        "głównym, "
+        "aby "
+        "rejestr "
+        "mógł "
+        "wyznaczać: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "Klaster",
+        "Cluster task": "Zadanie klastra",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "Dodano zadanie klastra "
+        "{id}; czeka na wolne węzły "
+        "do {date}.",
+        "Cluster task {id} is now: {status}": "Zadanie klastra {id} jest teraz: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "Zadanie klastra {id} "
+        "jest w stanie "
+        "{status}: nie można "
+        "go rozstrzygnąć "
+        "przez {decision}.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "Zadania klastrów: "
+        "który klaster "
+        "pracuje nad każdym i "
+        "dlaczego któreś "
+        "jeszcze czeka.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "Rozstrzygnij zadanie "
+        "klastra: przyjmij "
+        "wynik, odeślij je lub "
+        "porzuć.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "Rozstrzygnij "
+        "każde przez: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "Cel",
+        "How long the cluster may take.": "Ile czasu ma klaster.",
+        "Jobs": "Prace",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "Utwórz "
+        "klucz "
+        "wyznaczający "
+        "(raz), "
+        "potem "
+        "przypisz go "
+        "kluczem "
+        "głównym: "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "Materiał, na którym pracuje klaster; "
+        "powtórz dla kilku.",
+        "Members": "Członkowie",
+        "More than one cluster task starts with {id}; give more of it.": "Od {id} zaczyna się więcej "
+        "niż jedno zadanie klastra; "
+        "podaj więcej znaków.",
+        "No cluster task {id}.": "Brak zadania klastra {id}.",
+        "No cluster tasks.": "Brak zadań klastrów.",
+        "No plan yet.": "Nie ma jeszcze planu.",
+        "Note": "Uwaga",
+        "Only these.": "Tylko te.",
+        "Operator": "Operator",
+        "Plan": "Plan",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "Podpisz "
+        "cel "
+        "kluczem "
+        "operatora; "
+        "klaster "
+        "powstanie, "
+        "gdy "
+        "będzie "
+        "dość "
+        "wolnych "
+        "węzłów.",
+        "The appointer key exists already: {key}": "Klucz wyznaczający już istnieje: {key}",
+        "The cluster task is not valid: {error}": "Zadanie klastra jest nieprawidłowe: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "Klucz, którym "
+        "rejestr sam "
+        "wyznacza "
+        "operatorów "
+        "klastrów (ADR "
+        "0006).",
+        "What the cluster is to do (at most 4000 characters).": "Co ma zrobić klaster (najwyżej 4000 "
+        "znaków).",
+        "What to tell the cluster (with again).": "Co przekazać klastrowi (razem z again).",
+        "a cluster works on it": "pracuje nad nim klaster",
+        "a job gave up": "praca się poddała",
+        "its operators were lost": "jego operatorzy przepadli",
+        "its result came": "nadszedł jego wynik",
+        "no appointer key (appointer create)": "brak klucza wyznaczającego (appointer create)",
+        "no free node may lead": "żaden wolny węzeł nie może kierować",
+        "no fresh trust list (trust sign)": "brak świeżej listy zaufania (trust sign)",
+        "the appointer is not assigned the scope appoint": "klucz wyznaczający nie ma zakresu appoint",
+        "waits for a cluster": "czeka na klaster",
+        "{free} of {needed} free nodes": "wolne węzły: {free} z {needed}",
+    }
+)
+
 CATALOG = Catalog("Polski", plural, MESSAGES, CLICK, forms=3)

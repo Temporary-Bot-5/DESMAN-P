@@ -357,7 +357,7 @@ CLI (`run/status/resume/list-tasks/audit/setup/config`). 15 тестов про�
     `appointment` (срок ≤ 30 мин), `cluster_plan`, `cluster_job`, `cluster_result`; второе звено
     в `sign.Trust` только для назначений; тела в `protocol`; `assign` не смешивает `appoint` с
     другими областями.
-  - [ ] **T.4b Реестр.** Ключ-назначатель (`desman-registry appointer create`), `cluster add`,
+  - [x] **T.4b Реестр.** Ключ-назначатель (`desman-registry appointer create`), `cluster add`,
     выбор оператора и участников, продление и замена назначения, задания кластера только
     участникам, перепроверка узлом не исполнителя и не оператора, `GET /clusters/mine`, `POST /clusters/{id}/records`, `desman-registry clusters`, инбокс.
   - [ ] **T.4c Узел.** `network.lead` и `Claim.lead`, `global lead on|off`, цикл оператора

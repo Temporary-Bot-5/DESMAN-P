@@ -1611,4 +1611,121 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "क्लस्टर कार्य: उसका "
+        "क्लस्टर, योजना, काम और "
+        "हर एक की स्थिति।",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "नोड्स के क्लस्टर "
+        "के लिए लक्ष्य: "
+        "DESMAN उसका "
+        "ऑपरेटर नियुक्त "
+        "करता है (ADR "
+        "0006)।",
+        "Appointer key made: {key}": "नियुक्ति कुंजी बनाई गई: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "इसे "
+        "रूट "
+        "से "
+        "सौंपें "
+        "ताकि "
+        "रजिस्ट्री "
+        "नियुक्त "
+        "कर "
+        "सके: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "क्लस्टर",
+        "Cluster task": "क्लस्टर कार्य",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "क्लस्टर कार्य {id} जोड़ा "
+        "गया; यह {date} तक खाली "
+        "नोड्स की प्रतीक्षा करेगा।",
+        "Cluster task {id} is now: {status}": "क्लस्टर कार्य {id} अब: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "क्लस्टर कार्य {id} "
+        "{status} है: इसे "
+        "{decision} से तय "
+        "नहीं किया जा सकता।",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "क्लस्टर कार्य: हर एक "
+        "पर कौन-सा क्लस्टर "
+        "काम कर रहा है और कोई "
+        "अब भी क्यों "
+        "प्रतीक्षा में है।",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "क्लस्टर कार्य तय "
+        "करें: परिणाम "
+        "स्वीकारें, वापस भेजें "
+        "या छोड़ दें।",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "हर एक इससे तय "
+        "करें: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "लक्ष्य",
+        "How long the cluster may take.": "क्लस्टर कितना समय ले सकता है।",
+        "Jobs": "काम",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "नियुक्ति "
+        "कुंजी बनाएँ "
+        "(एक बार), "
+        "फिर रूट से "
+        "सौंपें: "
+        "--scope "
+        "appoint।",
+        "Material the cluster works on; repeat for several.": "वह सामग्री जिस पर क्लस्टर काम करता है; "
+        "कई के लिए दोहराएँ।",
+        "Members": "सदस्य",
+        "More than one cluster task starts with {id}; give more of it.": "{id} से एक से अधिक क्लस्टर "
+        "कार्य शुरू होते हैं; और "
+        "अक्षर दें।",
+        "No cluster task {id}.": "कोई क्लस्टर कार्य {id} नहीं।",
+        "No cluster tasks.": "कोई क्लस्टर कार्य नहीं।",
+        "No plan yet.": "अभी कोई योजना नहीं।",
+        "Note": "टिप्पणी",
+        "Only these.": "केवल ये।",
+        "Operator": "ऑपरेटर",
+        "Plan": "योजना",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "ऑपरेटर "
+        "की "
+        "कुंजी "
+        "से "
+        "लक्ष्य "
+        "पर "
+        "हस्ताक्षर "
+        "करें; "
+        "पर्याप्त "
+        "नोड "
+        "खाली "
+        "होने "
+        "पर "
+        "क्लस्टर "
+        "बनता "
+        "है।",
+        "The appointer key exists already: {key}": "नियुक्ति कुंजी पहले से है: {key}",
+        "The cluster task is not valid: {error}": "क्लस्टर कार्य मान्य नहीं है: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "वह कुंजी "
+        "जिससे "
+        "रजिस्ट्री "
+        "स्वयं क्लस्टर "
+        "ऑपरेटर "
+        "नियुक्त करती "
+        "है (ADR "
+        "0006)।",
+        "What the cluster is to do (at most 4000 characters).": "क्लस्टर को क्या करना है (अधिकतम 4000 "
+        "अक्षर)।",
+        "What to tell the cluster (with again).": "क्लस्टर से क्या कहना है (again के साथ)।",
+        "a cluster works on it": "एक क्लस्टर इस पर काम कर रहा है",
+        "a job gave up": "एक काम ने हार मान ली",
+        "its operators were lost": "इसके ऑपरेटर खो गए",
+        "its result came": "इसका परिणाम आ गया",
+        "no appointer key (appointer create)": "नियुक्ति कुंजी नहीं (appointer create)",
+        "no free node may lead": "कोई खाली नोड नेतृत्व नहीं कर सकता",
+        "no fresh trust list (trust sign)": "कोई ताज़ा विश्वास सूची नहीं (trust sign)",
+        "the appointer is not assigned the scope appoint": "नियुक्ति कुंजी को appoint दायरा नहीं "
+        "सौंपा गया",
+        "waits for a cluster": "क्लस्टर की प्रतीक्षा में",
+        "{free} of {needed} free nodes": "{needed} में से {free} नोड खाली",
+    }
+)
+
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

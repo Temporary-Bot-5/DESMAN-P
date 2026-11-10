@@ -1910,4 +1910,111 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "Задача кластера: её "
+        "кластер, план, задания "
+        "и где каждое из них.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "Цель для кластера "
+        "узлов: DESMAN "
+        "назначает его "
+        "оператора (ADR "
+        "0006).",
+        "Appointer key made: {key}": "Ключ назначателя создан: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "Назначьте "
+        "его "
+        "корнем, "
+        "чтобы "
+        "реестр "
+        "мог "
+        "назначать: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "Кластер",
+        "Cluster task": "Задача кластера",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "Задача кластера {id} "
+        "добавлена; она ждёт "
+        "свободных узлов до {date}.",
+        "Cluster task {id} is now: {status}": "Задача кластера {id} теперь: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "Задача кластера {id} "
+        "в состоянии "
+        "{status}: решение "
+        "{decision} к ней "
+        "неприменимо.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "Задачи кластеров: "
+        "какой кластер "
+        "работает над каждой "
+        "и почему какая-то "
+        "ещё ждёт.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "Решить задачу "
+        "кластера: принять "
+        "результат, вернуть "
+        "или снять.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "Решите каждую: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "Цель",
+        "How long the cluster may take.": "Сколько времени есть у кластера.",
+        "Jobs": "Задания",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "Создать "
+        "ключ "
+        "назначателя "
+        "(один раз), "
+        "затем "
+        "назначить "
+        "его корнем: "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "Материал, с которым работает кластер; "
+        "повторите для нескольких.",
+        "Members": "Участники",
+        "More than one cluster task starts with {id}; give more of it.": "С {id} начинается больше "
+        "одной задачи кластера; "
+        "укажите больше символов.",
+        "No cluster task {id}.": "Нет задачи кластера {id}.",
+        "No cluster tasks.": "Задач кластеров нет.",
+        "No plan yet.": "Плана ещё нет.",
+        "Note": "Примечание",
+        "Only these.": "Только эти.",
+        "Operator": "Оператор",
+        "Plan": "План",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "Подписать "
+        "цель "
+        "ключом "
+        "оператора; "
+        "кластер "
+        "соберётся, "
+        "когда "
+        "освободится "
+        "достаточно "
+        "узлов.",
+        "The appointer key exists already: {key}": "Ключ назначателя уже есть: {key}",
+        "The cluster task is not valid: {error}": "Задача кластера неверна: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "Ключ, которым "
+        "реестр сам "
+        "назначает "
+        "операторов "
+        "кластеров "
+        "(ADR 0006).",
+        "What the cluster is to do (at most 4000 characters).": "Что должен сделать кластер (не "
+        "больше 4000 символов).",
+        "What to tell the cluster (with again).": "Что сказать кластеру (вместе с again).",
+        "a cluster works on it": "над ней работает кластер",
+        "a job gave up": "задание сдалось",
+        "its operators were lost": "её операторы пропали",
+        "its result came": "пришёл её результат",
+        "no appointer key (appointer create)": "нет ключа назначателя (appointer create)",
+        "no free node may lead": "ни один свободный узел не может руководить",
+        "no fresh trust list (trust sign)": "нет свежего списка доверия (trust sign)",
+        "the appointer is not assigned the scope appoint": "назначателю не дана область appoint",
+        "waits for a cluster": "ждёт кластера",
+        "{free} of {needed} free nodes": "свободных узлов: {free} из {needed}",
+    }
+)
+
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)
