@@ -1205,7 +1205,7 @@ function drawSettings() {
     settingAuto(root, () => ({section: "personalize", on: on.checked}));
     for (const note of d.personalize.notes) {
       const row = text("div", note.text, root);
-      settingSave(row, {section: "forget", note: note.id}, words.forget);
+      settingSave(row, {section: "forget", note: note.id, text: note.text}, words.forget);
     }
     if (d.personalize.on || d.personalize.nodes.length) text("h3", words.your_nodes, root);
     for (const node of d.personalize.nodes) {

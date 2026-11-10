@@ -17,7 +17,8 @@ from conftest import FakeClock
 from desman import providers, runs
 from desman.cli import cli
 from desman.config import Behaviour, Config, ConfigManager, default_config_path, upgrade
-from desman.core import db, operator
+from desman.core import db, nodes, operator
+from desman.core.nodes import PROFILE_PATH
 from desman.core.profile import MAX_NOTES, NOTE_CHARS, Author, Profile, ProfileFull
 from desman.core.sessions import History, Kind, Message, Role
 from desman.interlocutor import BEHAVIOUR, CHAT, PROFILE, RETELL, Interlocutor, Turn
@@ -57,10 +58,10 @@ def chat(*lines: str) -> Result:
     return result
 
 
-def stored() -> list[tuple[str, Author]]:
+def stored() -> list[str]:
     conn = db.open_db(db.default_db_path())
     try:
-        return [(n.text, n.author) for n in Profile(conn).notes()]
+        return [n.text for n in Profile(conn).notes()]
     finally:
         conn.close()
 
@@ -90,10 +91,10 @@ def reply(text: str, *edits: dict[str, Any]) -> str:
 
 def test_notes_are_added_changed_and_forgotten_with_a_journal(profile: Profile) -> None:
     note = profile.add("  Prefers   short answers ", Author.INTERLOCUTOR)
-    assert (note.text, note.author) == ("Prefers short answers", Author.INTERLOCUTOR)
+    assert (note.id, note.text) == (1, "Prefers short answers")
     assert profile.add("prefers SHORT answers", Author.PERSON) == note  # no twin
     changed = profile.change(note.id, "Prefers detailed answers", Author.PERSON)
-    assert changed is not None and changed.author is Author.PERSON
+    assert changed is not None and changed.text == "Prefers detailed answers"
     assert profile.change(note.id, "Prefers detailed answers", Author.PERSON) == changed
     assert profile.change(999, "anything", Author.PERSON) is None
     assert profile.forget(note.id, Author.INTERLOCUTOR) and not profile.forget(
@@ -127,19 +128,14 @@ def test_notes_are_short_and_few(profile: Profile) -> None:
         profile.add(f"note {n}", Author.PERSON)
     with pytest.raises(ProfileFull):
         profile.add("one more", Author.PERSON)
-    with pytest.raises(sqlite3.IntegrityError):  # the table says it too
+    with pytest.raises(sqlite3.IntegrityError):  # the node's table bounds the text too
         profile.conn.execute(
-            "UPDATE profile_notes SET text = ? WHERE id = 1", ("x" * (NOTE_CHARS + 1),)
+            "UPDATE personal_nodes SET text = ? WHERE path = ?", ("x" * 6001, PROFILE_PATH)
         )
 
 
-def test_the_author_check_matches_the_enum(profile: Profile) -> None:
-    sql = profile.conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'profile_notes'"
-    ).fetchone()[0]
-    match = re.search(r"author\s+TEXT NOT NULL CHECK \(author IN \(([^)]*)\)\)", sql)
-    assert match is not None
-    assert set(re.findall(r"'(\w+)'", match.group(1))) == {a.value for a in Author}
+def test_the_profile_s_authors_are_node_authors() -> None:
+    assert {a.value for a in Author} <= {a.value for a in nodes.Author}
 
 
 def test_v14_database_upgrades_to_the_profile(tmp_path: Path) -> None:
@@ -225,7 +221,7 @@ def test_the_interlocutor_keeps_notes_and_says_so(fake: FakeLLM) -> None:
 def test_a_key_never_lands_in_the_profile(fake: FakeLLM) -> None:
     fake.on(CHAT, reply("Ok.", {"add": f"Their key is {KEY}"}))
     chat("hello")
-    [(text, _)] = stored()
+    [text] = stored()
     assert KEY not in text and providers.REDACTED in text
 
 
@@ -256,14 +252,11 @@ def test_profile_lists_the_notes_and_the_person_edits_them(fake: FakeLLM) -> Non
     chat("I like jazz")
     # Menu with notes: 1 how it talks, 2 add, 3 change, 4 forget, 5 forget all, 6 off, 7 done.
     result = chat("/profile", "2", "Prefers formal address", "3", "1", "Likes jazz and blues", "")
-    assert "Likes jazz  (by the interlocutor)" in result.output
+    assert "• Likes jazz" in result.output
     assert "free providers may keep what they get" in result.output
-    assert stored() == [
-        ("Likes jazz and blues", Author.PERSON),
-        ("Prefers formal address", Author.PERSON),
-    ]
+    assert stored() == ["Likes jazz and blues", "Prefers formal address"]
     chat("/profile", "4", "2", "")
-    assert stored() == [("Likes jazz and blues", Author.PERSON)]
+    assert stored() == ["Likes jazz and blues"]
     chat("/profile", "5", "n", "")
     assert len(stored()) == 1
     cleared = chat("/profile", "5", "y", "")
@@ -280,7 +273,7 @@ def test_profile_refuses_keys_and_too_long_notes(fake: FakeLLM) -> None:
     # Without notes: 1 how it talks, 2 add, 3 off, 4 done.
     result = chat("/profile", "2", f"my key {KEY}", "2", "x" * (NOTE_CHARS + 1), "")
     assert "cut from the note" in result.output and "at most 200 characters" in result.output
-    [(text, _)] = stored()
+    [text] = stored()
     assert KEY not in text
 
 

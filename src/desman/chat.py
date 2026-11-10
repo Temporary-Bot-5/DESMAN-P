@@ -65,7 +65,7 @@ from desman import (
 )
 from desman.actions import suggestion_lines
 from desman.config import Config, ConfigError, open_config
-from desman.core import calls, choices, db, operator
+from desman.core import calls, choices, db, nodes, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.nodes import Author as NodeAuthor
 from desman.core.policy import Access
@@ -493,7 +493,7 @@ class Chat:
             )
             return
         if personal:  # off: the model was told nothing of it, and nothing is kept
-            self._note(turn.profile, config)
+            self._note(turn.profile, config, notes or [])
             interlocutor.profile = self.profile.notes()  # a task's retelling follows them
         if isinstance(turn, Reply):
             self._say(turn.text)
@@ -518,7 +518,8 @@ class Chat:
         in a temporary chat (which never writes one either)."""
         if not config.personalize or self.temporary:
             return None
-        return knowledge.personal(self.store.conn)
+        # The profile's notes it has with every message already (K.5): no lookup of them.
+        return tuple(n for n in knowledge.personal(self.store.conn) if not nodes.is_profile(n.path))
 
     def _propose_node(
         self,
@@ -631,10 +632,13 @@ class Chat:
         else:
             ui.out(_render(message))
 
-    def _note(self, edits: list[ProfileEdit], config: Config) -> None:
-        """The interlocutor's edits of the profile, each shown as it is made. One that does
-        not apply (no such note, no room) is left out: the model sees the notes next time."""
+    def _note(self, edits: list[ProfileEdit], config: Config, seen: list[Note]) -> None:
+        """The interlocutor's edits of the profile, each shown as it is made. Its numbers are
+        those of the notes it was shown (`seen`), whatever an earlier edit of the turn moved.
+        One that does not apply (no such note, no room) is left out: the model sees the notes
+        next time."""
         by = Author.INTERLOCUTOR
+        shown = {n.id: n.text for n in seen}
         for edit in edits:
             try:
                 if isinstance(edit, AddNote):
@@ -645,16 +649,21 @@ class Chat:
                     ui.note(t("Noted about you: {note}", note=note.text))
                 elif isinstance(edit, ChangeNote):
                     text = providers.redact_keys(edit.to, config)[0]
-                    was = self.profile.get(edit.change)
-                    changed = self.profile.change(edit.change, text, by, session_id=self.session_id)
-                    if was is not None and changed is not None and changed.text != was.text:
+                    old = shown.get(edit.change)
+                    if old is None:
+                        continue
+                    changed = self.profile.change(
+                        edit.change, text, by, was=old, session_id=self.session_id
+                    )
+                    if changed is not None and changed.text != old:
                         ui.note(t("Changed a note about you: {note}", note=changed.text))
+                        shown[edit.change] = changed.text
                 else:
-                    was = self.profile.get(edit.forget)
-                    if was is not None and self.profile.forget(
-                        edit.forget, by, session_id=self.session_id
+                    old = shown.get(edit.forget)
+                    if old is not None and self.profile.forget(
+                        edit.forget, by, was=old, session_id=self.session_id
                     ):
-                        ui.note(t("Forgot a note about you: {note}", note=was.text))
+                        ui.note(t("Forgot a note about you: {note}", note=old))
             except ValueError:  # ProfileFull, or a text the key cut made empty
                 continue
 
@@ -1784,7 +1793,9 @@ class Chat:
             if isinstance(change, Forget):
                 if not config.personalize:
                     raise ValueError("personalisation off")
-                self.profile.forget(change.note, Author.PERSON, session_id=self.session_id)
+                self.profile.forget(
+                    change.note, Author.PERSON, was=change.text, session_id=self.session_id
+                )
             elif isinstance(change, Models) and change.operation == "use":
                 from desman import local_models
 
@@ -2354,8 +2365,7 @@ class Chat:
             else:
                 ui.note(t("Personalisation is off: the interlocutor neither sees nor keeps notes."))
             for note in notes:
-                by = t("by you") if note.author is Author.PERSON else t("by the interlocutor")
-                ui.out(Text("  • " + note.text) + Text(f"  ({by})", style="muted"))
+                ui.out(Text("  • " + note.text))
             if not notes and config.personalize:
                 ui.out(Text("  " + t("No notes yet."), style="muted"))
             choices = [ui.Choice(label=t("change how it talks"), value="behaviour")]
@@ -2417,11 +2427,11 @@ class Chat:
                 [ui.Choice(label=_shorten(n.text, 70), value=n) for n in notes],
             )
             if chosen == "forget":
-                self.profile.forget(note.id, by, session_id=session)
+                self.profile.forget(note.id, by, was=note.text, session_id=session)
                 return
             text = self._note_text(t("The note"), note.text, config)
             if text:
-                self.profile.change(note.id, text, by, session_id=session)
+                self.profile.change(note.id, text, by, was=note.text, session_id=session)
 
     def _edit_config(self, change: Callable[[Config], None]) -> None:
         """Change the config under its lock (another command's key survives) and journal it."""

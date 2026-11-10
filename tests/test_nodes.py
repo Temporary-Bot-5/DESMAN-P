@@ -195,7 +195,7 @@ def test_a_changed_or_removed_node_leaves_the_response_cache(store: PersonalNode
 def test_the_previous_database_upgrades_to_personal_nodes(tmp_path: Path) -> None:
     path = tmp_path / "before.db"
     old = db.connect(path)
-    for v, script in enumerate(db.MIGRATIONS[:-1], start=1):
+    for v, script in enumerate(db.MIGRATIONS[:45], start=1):  # before personal_nodes (K.4)
         with db.transaction(old):
             for statement in db._split_sql(script):
                 old.execute(statement)

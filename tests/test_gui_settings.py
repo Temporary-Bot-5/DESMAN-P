@@ -107,7 +107,7 @@ VALID: list[dict[str, Any]] = [
     {"section": "roles", "role": "planner", "model": None, "key": None},
     {"section": "permissions", "name": "shell_execution", "on": True},
     {"section": "personalize", "on": True},
-    {"section": "forget", "note": 1},
+    {"section": "forget", "note": 1, "text": "private"},
     {"section": "behaviour", "tone": "formal"},
     {"section": "limits", "name": "max_parts", "value": 4},
     {"section": "models", "operation": "add", "model": "a/model"},
@@ -133,7 +133,8 @@ def test_settings_sections_forbid_extra(change: dict[str, Any]) -> None:
         {"section": "roles", "role": "analyst", "model": None, "key": None},
         {"section": "permissions", "name": "shell_execution", "on": "true"},
         {"section": "personalize", "on": 1},
-        {"section": "forget", "note": 0},
+        {"section": "forget", "note": 0, "text": "private"},
+        {"section": "forget", "note": 1},
         {"section": "behaviour", "tone": "loud"},
         {"section": "behaviour", "custom": "x" * 501},
         {"section": "limits", "name": "max_parts", "value": 7},
@@ -247,7 +248,7 @@ def test_settings_use_bodies_and_keep_chat(
         config.personalize = True
         open_config().save(config)
         note = chat.profile.add("private", Author.PERSON)
-        changes["forget"] = {"section": "forget", "note": note.id}
+        changes["forget"] = {"section": "forget", "note": note.id, "text": note.text}
     with ui.use(app.front):
         ui.session(session, False)
         chat._action(action(changes[section]))

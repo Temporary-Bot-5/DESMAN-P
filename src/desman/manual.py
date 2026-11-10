@@ -212,7 +212,9 @@ TOPICS: Final = (
         "interests, requests they make often. Every change is shown when made, the person "
         "sees, changes and erases them in `/profile`, and turning it off hides them. Notes "
         "never hold secrets, never allow anything and never confirm a change. The journal "
-        "records that a note changed, never its text.",
+        "records that a note changed, never its text. The notes are one node of the "
+        "knowledge tree, Personal/Profile (a note per line): `desman nodes` shows it, a task's "
+        "planner may give it to a subtask, and only the person edits it as a node.",
     ),
     Topic(
         "nodes",

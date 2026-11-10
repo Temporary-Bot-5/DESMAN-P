@@ -747,6 +747,29 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         updated_at  TEXT NOT NULL
     ) STRICT;
     """,
+    # 47: the profile's notes move into the knowledge tree (ADR 0009, K.5): one personal node,
+    # Personal/Profile, a note per line (core.nodes.PROFILE_PATH, PROFILE_ABOUT). A node the
+    # person kept at that path moves aside first; profile_notes goes
+    """
+    UPDATE personal_nodes
+       SET path = CASE
+           WHEN EXISTS (SELECT 1 FROM personal_nodes WHERE path = 'Personal/Profile (earlier)')
+           THEN 'Personal/Profile (earlier ' || id || ')'
+           ELSE 'Personal/Profile (earlier)' END
+     WHERE path = 'Personal/Profile';
+    INSERT INTO personal_nodes (path, about, text, author, untrusted, created_at, updated_at)
+    SELECT 'Personal/Profile',
+           'Notes about the person: how they like answers, their interests',
+           (SELECT group_concat('- ' || text, char(10)) OVER (
+                       ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+              FROM profile_notes LIMIT 1),
+           (SELECT author FROM profile_notes ORDER BY updated_at DESC, id DESC LIMIT 1),
+           0,
+           (SELECT min(created_at) FROM profile_notes),
+           (SELECT max(updated_at) FROM profile_notes)
+     WHERE EXISTS (SELECT 1 FROM profile_notes);
+    DROP TABLE profile_notes;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

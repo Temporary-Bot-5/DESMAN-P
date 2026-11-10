@@ -508,7 +508,8 @@ def personalize_consent() -> str:
     return t(
         "If you agree, the interlocutor studies how you talk with it, anything you write "
         "included, and keeps short notes about you (/profile in the chat shows and erases "
-        "them). The notes go to the model providers with every message."
+        "them). The notes go to the model providers with every message, and with the tasks "
+        "they help."
     )
 
 

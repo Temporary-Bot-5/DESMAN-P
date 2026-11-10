@@ -97,8 +97,12 @@ What the tree must not break:
 - One new tool (`read_node`) and one new table (personal nodes, a new migration). The
   `release` part needs no storage and cannot drift from the code: a test builds the tree and
   checks every command and every manual topic is in it.
-- The profile (C.7) stays as it is in the first steps. Moving its notes into `Personal/` is a
-  later step with its own upgrade.
+- The profile (C.7) kept its own table in the first steps. K.5 moved its notes into one node,
+  `Personal/Profile` (a note per line; migration 47 moves the old notes and drops the table).
+  The interlocutor still gets the notes with every message, so its table of contents leaves
+  the node out; the planner may choose it like any personal node. The interlocutor edits the
+  notes as before, without a window; the node itself only the person writes, moves or removes,
+  and only as notes (answer 3).
 
 ## Split (each one PR, measured with `/context`)
 
@@ -120,3 +124,6 @@ What the tree must not break:
    confirmation (decision 6).
 3. **desman-global:** the cluster's agents and the local agent are unrelated; the tree is the
    local agent's only (decision 6).
+3. **The profile (2026-11-10, K.5):** its notes become one node, `Personal/Profile`, always
+   shown to the interlocutor. Its notes are edited by the interlocutor without a window, as
+   before (an exception to decision 6, for this node only); every other node keeps the window.

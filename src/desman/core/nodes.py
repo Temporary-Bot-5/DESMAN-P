@@ -12,6 +12,10 @@ confirms it in a window rendered by code. A temporary chat never proposes one, a
 interlocutor nor the planning of its tasks sees them (an executor's `read_node` reads the tree
 as the person's settings say: it does not know which chat its task came from).
 
+One node is the profile's (K.5): `Personal/Profile` holds its notes, a note per line
+(`core.profile`). The interlocutor edits those notes without a window (owner, 2026-11-10); as a
+node only the person writes, moves or removes it, and only as notes (`check_profile`).
+
 Nodes are changed and erased in place. Every change is written to the operator's journal by
 the node's number and who made it, never its path or text, so the journal does not keep what was
 erased; a changed or erased text also leaves the response cache. A text that came from a task's
@@ -43,6 +47,13 @@ MAX_NODES: Final = 100
 """The most nodes the person keeps: their table of contents is in every prompt that chooses."""
 RELEASE_SECTIONS: Final = ("Commands", "DESMAN")
 """Top sections that come with DESMAN: a personal node never goes under them."""
+PROFILE_PATH: Final = "Personal/Profile"
+"""The node that holds the profile's notes (`core.profile`, K.5): one note per line."""
+PROFILE_ABOUT: Final = "Notes about the person: how they like answers, their interests"
+NOTE_CHARS: Final = 200
+"""The longest note of the profile."""
+MAX_NOTES: Final = 20
+"""The most notes the profile keeps: the interlocutor sees them all with every message."""
 
 
 class Author(StrEnum):
@@ -119,6 +130,71 @@ def normalized_text(text: str) -> str:
     return text
 
 
+def is_profile(path: str) -> bool:
+    """Whether `path` (as kept) is the profile's node."""
+    return path.casefold() == PROFILE_PATH.casefold()
+
+
+def profile_notes(text: str) -> list[str]:
+    """The notes the profile's node holds: each non-empty line (a leading "- " left out), one
+    line of blanks squeezed. NodeError when a note is too long or there are too many."""
+    notes = []
+    for line in text.splitlines():
+        note = " ".join(line.split())
+        if note.startswith(("- ", "* ", "• ")):
+            note = note[2:].strip()
+        elif note in ("-", "*", "•"):
+            note = ""
+        if not note:
+            continue
+        if len(note) > NOTE_CHARS:
+            raise NodeError(f"{PROFILE_PATH} holds notes of at most {NOTE_CHARS} characters each")
+        notes.append(note)
+    if len(notes) > MAX_NOTES:
+        raise NodeError(f"{PROFILE_PATH} holds at most {MAX_NOTES} notes, one per line")
+    return notes
+
+
+def profile_text(notes: list[str]) -> str:
+    """The profile node's text for `notes`."""
+    return "\n".join(f"- {note}" for note in notes)
+
+
+def check_profile(
+    path: str,
+    author: Author,
+    *,
+    text: str | None = None,
+    new_path: str | None = None,
+    untrusted: bool = False,
+) -> None:
+    """What may happen to the profile's node through the tree (K.5): only the person writes it
+    as a node (an agent edits its notes as the profile's edits, `core.profile`), it is never
+    moved away nor marked untrusted, and its text is notes. `path`, `new_path` as kept; `text`
+    the node's text after the change. NodeError otherwise."""
+    touched = is_profile(path) or (new_path is not None and is_profile(new_path))
+    if not touched:
+        return
+    if author is not Author.PERSON or untrusted:
+        raise NodeError(
+            f"{PROFILE_PATH} holds the profile's notes: only the person writes it as a node"
+        )
+    if is_profile(path) and new_path is not None and not is_profile(new_path):
+        raise NodeError(f"{PROFILE_PATH} holds the profile's notes: it stays where it is")
+    if text is not None and not profile_notes(text):
+        raise NodeError(f"{PROFILE_PATH} holds the profile's notes: at least one, one per line")
+
+
+def uncache(conn: sqlite3.Connection, texts: list[str]) -> None:
+    """Drop cached replies that hold any of `texts`, as written or escaped in JSON (a very
+    short one, like a path "X", is left: it would drop nearly every reply)."""
+    for text in texts:
+        if len(text) < 4:
+            continue
+        for form in {text, json.dumps(text)[1:-1], json.dumps(text, ensure_ascii=False)[1:-1]}:
+            conn.execute("DELETE FROM response_cache WHERE instr(text, ?) > 0", (form,))
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -154,6 +230,7 @@ class PersonalNodes:
         path is taken; `NodesFull` when there is no room."""
         path, about, text = normalized_path(path), normalized_about(about), normalized_text(text)
         untrusted = untrusted or author is Author.TASK
+        check_profile(path, author, text=text, untrusted=untrusted)
         with db.transaction(self.conn):
             if self._id(path) is not None:
                 raise NodeExists(f"there is a node {path} already")
@@ -206,6 +283,7 @@ class PersonalNodes:
                 mark = False  # the person wrote it
             else:
                 mark = was.untrusted  # an agent's rewrite never launders a task's text
+            check_profile(was.path, author, text=now_text, new_path=now_path, untrusted=mark)
             if (now_path, now_about, now_text, mark) == (
                 was.path,
                 was.about,
@@ -246,6 +324,7 @@ class PersonalNodes:
             was = self.get(path)
             if was is None:
                 return False
+            check_profile(was.path, author)
             self.conn.execute("DELETE FROM personal_nodes WHERE id = ?", (was.id,))
             self._uncache([was.text, was.about, was.path])
             self._journal("knowledge_node_removed", was.id, author, session_id)
@@ -263,13 +342,7 @@ class PersonalNodes:
         return None if row is None else _node(row)
 
     def _uncache(self, texts: list[str]) -> None:
-        """Drop cached replies that hold any of `texts`, as written or escaped in JSON (a very
-        short one, like a path "X", is left: it would drop nearly every reply)."""
-        for text in texts:
-            if len(text) < 4:
-                continue
-            for form in {text, json.dumps(text)[1:-1], json.dumps(text, ensure_ascii=False)[1:-1]}:
-                self.conn.execute("DELETE FROM response_cache WHERE instr(text, ?) > 0", (form,))
+        uncache(self.conn, texts)
 
     def _journal(self, action: str, node_id: int, author: Author, session_id: str | None) -> None:
         details = {"node": node_id, "by": author.value}

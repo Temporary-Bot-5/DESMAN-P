@@ -141,7 +141,15 @@ def change_lines(
     return lines
 
 
-def checked_add(conn: sqlite3.Connection, path: str, about: str, text: str) -> tuple[str, str, str]:
+def checked_add(
+    conn: sqlite3.Connection,
+    path: str,
+    about: str,
+    text: str,
+    author: Author = Author.PERSON,
+    *,
+    untrusted: bool = False,
+) -> tuple[str, str, str]:
     """The node as it would be kept, or the problem, before the window opens."""
     try:
         kept = (
@@ -149,6 +157,7 @@ def checked_add(conn: sqlite3.Connection, path: str, about: str, text: str) -> t
             nodes.normalized_about(about),
             nodes.normalized_text(text),
         )
+        nodes.check_profile(kept[0], author, text=kept[2], untrusted=untrusted)
     except NodeError as e:
         raise _problem(e) from e
     store = PersonalNodes(conn)
@@ -186,12 +195,25 @@ def existing(conn: sqlite3.Connection, path: str) -> PersonalNode:
     return node
 
 
+def removable(conn: sqlite3.Connection, path: str, author: Author) -> PersonalNode:
+    """The node `author` may remove (an agent never removes the profile's), or the problem."""
+    was = existing(conn, path)
+    try:
+        nodes.check_profile(was.path, author)
+    except NodeError as e:
+        raise _problem(e) from e
+    return was
+
+
 def checked_change(
     conn: sqlite3.Connection,
     path: str,
     to: str | None,
     about: str | None,
     text: str | None,
+    author: Author = Author.PERSON,
+    *,
+    untrusted: bool = False,
 ) -> tuple[PersonalNode, str | None, str | None, str | None]:
     was = existing(conn, path)
     if to is None and about is None and text is None:
@@ -200,6 +222,13 @@ def checked_change(
         to = None if to is None else nodes.normalized_path(to)
         about = None if about is None else nodes.normalized_about(about)
         text = None if text is None else nodes.normalized_text(text)
+        nodes.check_profile(
+            was.path,
+            author,
+            text=was.text if text is None else text,
+            new_path=was.path if to is None else to,
+            untrusted=untrusted,
+        )
     except NodeError as e:
         raise _problem(e) from e
     moved = to is not None and to.casefold() != was.path.casefold()
@@ -240,7 +269,7 @@ def change(
 def remove(
     conn: sqlite3.Connection, path: str, author: Author, *, session_id: str | None = None
 ) -> str:
-    was = existing(conn, path)
+    was = removable(conn, path, author)
     PersonalNodes(conn).remove(was.path, author, session_id=session_id)
     ui.ok(t("Removed the node {path}.", path=was.path))
     return was.path
