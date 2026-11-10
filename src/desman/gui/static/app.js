@@ -627,10 +627,10 @@ function setupPanels() {
   const terminal = actionButton($("session-tools"), words.terminal, {type: "terminal"});
   terminal.id = "terminal-button";
   $("sidebar-bottom").replaceChildren();
-  actionButton($("sidebar-bottom"), words.delete_chats, {type: "delete_all"});
+  actionButton($("sidebar-bottom"), `✕ ${words.delete_chats}`, {type: "delete_all"});
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
-  button($("sidebar-bottom"), words.usage, openUsage);
+  button($("sidebar-bottom"), `◔ ${words.usage}`, openUsage);
   button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
   $("topbar").replaceChildren();
   for (const [label, id] of [[words.sessions, "sidebar"], [words.tasks, "tasks-panel"]]) {
