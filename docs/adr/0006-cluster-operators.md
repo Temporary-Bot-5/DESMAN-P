@@ -62,33 +62,26 @@ machine; every step is journaled (`network_log` on the node, `registry_log` on t
   The root revokes the appointer like any operator, and every appointment it signed falls with
   it.
 
-### 3. The rules of appointment are written by people, in a protected file
+### 3. No thresholds: every result is reviewed on another device
 
-`src/desman/registry/clusters.toml` (protected, `protected.toml`; changed through git, never by
-an agent or the registry):
+The owner (2026-11-10): no thresholds of age, history or cluster size; what matters is that a
+result is never reviewed on the device that made it, so that a malicious node cannot go
+unnoticed. One node = one device (its node key, `net/sign.py`).
 
-```toml
-[node]                      # who may lead or join a cluster
-min_age_days = 1            # registered at least this long ago
-seen_within_minutes = 5     # heartbeat at least this recent
-min_accepted = 3            # results of its own accepted on recheck (operator only)
-max_rejected_share = 0.2    # rejected / (accepted + rejected) on recheck, last 30 days
-
-[cluster]
-min_members = 2             # besides the operator: "enough free modules"
-min_owners = 2              # among operator + members: a recheck needs another owner
-max_members = 6
-```
-
-- **Eligible** = active, takes jobs (`Claim.jobs`), heartbeat recent, old enough, not revoked,
-  not in another cluster, not past its share of rejections. To lead it must also allow it
-  (`Claim.lead`, decision 9) and have `min_accepted` accepted results.
-- **Enough free modules:** a cluster task waits until there are an eligible leader and
-  `min_members` other eligible nodes, of at least `min_owners` owners in all. Then the registry
-  appoints. The leader is the eligible node with the most accepted results (then the oldest);
-  members are taken in the same order up to `max_members`.
+- **Free** = active, takes jobs (`Claim.jobs`), heartbeat within the registry's usual window,
+  not revoked, not in another cluster. To lead it must also allow it (`Claim.lead`, decision 9).
+  These are the facts of being online, not trust thresholds; nothing in a file to tune.
+- **The one rule (in code, `registry/work.py`; a test holds it):** the recheck of a cluster job is
+  lent only to a node that is neither the node that executed it nor the cluster's operator. A
+  plan, a job's inputs and the final result are records of the operator, so the operator never
+  reviews; an executor never reviews its own result. A recheck may go to a member or to any free
+  node outside the cluster; it never waits for the cluster to have one.
+- **Enough free modules:** a free node that may lead and two other free nodes (one to execute,
+  another to recheck). Then the registry appoints. The leader is the free node with the most
+  results accepted on recheck (then the oldest); members are taken in the same order, at most
+  six (a constant).
 - Every appointment and the reason for the choice (counts, not content) go to `registry_log`.
-  `desman-registry clusters` shows what waits and why ("1 of 2 members eligible").
+  `desman-registry clusters` shows what waits and why ("2 of 3 free nodes").
 
 ### 4. Authority: one more link, narrower at each step
 
@@ -131,8 +124,8 @@ lender, with the same pull-only HTTPS, signed requests and leases as ADR 0004:
 - it hands in plans, jobs and the final result (`POST /clusters/{id}/records`);
 - a `cluster_job` is lent with `registry/work.py`'s machinery (lease and token, `execute` then
   `recheck`, `MAX_LOST`, `MAX_FAILED`), only to the cluster's members for `execute`. The recheck
-  goes to a node of another owner, preferably a member, otherwise any eligible node: a recheck
-  must never wait for the cluster to have one.
+  goes to a node other than its executor and the operator (decision 3), preferably a member,
+  otherwise any free node: a recheck must never wait for the cluster to have one.
 
 ### 6. What the operator does: plan, lend, supervise, finish
 
@@ -161,8 +154,8 @@ task, and count against the lent modules' daily quotas.
 
 - The appointment's term is the lease. While the operator polls (`GET /clusters/mine` counts as
   its heartbeat), the registry signs it a fresh appointment before the old one is past half its
-  term, with the current members (gone members replaced by eligible nodes).
-- An operator not seen for one term is replaced: the registry appoints another eligible leader
+  term, with the current members (gone members replaced by free nodes).
+- An operator not seen for one term is replaced: the registry appoints another free node that may lead
   (not the old one, for this task) for the same cluster. What the old one signs later is refused
   by the registry and by the nodes: its appointment is past its term or superseded (the newest
   appointment of a cluster is the only one that counts).
@@ -210,7 +203,7 @@ appointer revoked (all its clusters stop), an operator signing outside its clust
 
 ## Consequences
 
-- `net/sign.py`, `policy.toml` and `registry/clusters.toml` change or appear: protected files;
+- `net/sign.py` and `policy.toml` change: protected files;
   the owner approves them after each merge (`desman protected approve`).
 - The "at most one link below the root" rule of `sign.Trust` becomes "one link, plus
   appointments signed by an operator with `appoint`"; nothing else gains a second link.
