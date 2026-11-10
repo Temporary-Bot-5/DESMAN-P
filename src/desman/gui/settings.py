@@ -123,7 +123,9 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             for n, bounds in TUNING_BOUNDS.items()
         ],
         "network": {
-            **global_cli.status(config).as_json(),
+            **global_cli.status(config, conn=conn).as_json(),
+            "lead_label": t("Lead clusters"),
+            "cluster_text": global_cli.cluster_text(global_cli.status(config, conn=conn).cluster),
             "default_quota": global_cli.DEFAULT_DONATION.model_dump(),
         },
         "protected": protection,
@@ -174,6 +176,8 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
             args["server"] = change.server
     elif isinstance(change, Network):
         name, args = f"global {change.operation}", {}
+        if change.operation == "lead":
+            args["state"] = change.state
         if change.operation == "join":
             args["registry"] = change.registry
         if change.provider:

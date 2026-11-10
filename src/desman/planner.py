@@ -278,10 +278,12 @@ def plan(
     *,
     limit: int | None = None,
     tree: Sequence[Node] | None = None,
+    provider_fallback: bool = True,
 ) -> Planned:
     """The model's plan for `goal`, or the template plan if the model fails. `limit`: the most
     subtasks (default `MAX_SUBTASKS`). `tree`: the knowledge tree it may give subtasks nodes
-    of (`knowledge.task_tree()`; None: none)."""
+    of (`knowledge.task_tree()`; None: none). With `provider_fallback=False`, provider
+    failures propagate so a caller can defer planning until the provider recovers."""
     limit = limit or MAX_SUBTASKS
     request = Request(
         messages=[
@@ -297,6 +299,8 @@ def plan(
             template_plan(goal, priority), "template", f"{type(e).__name__}: {e.problem}"
         )
     except ProviderError as e:
+        if not provider_fallback:
+            raise
         return Planned(template_plan(goal, priority), "template", f"{type(e).__name__}: {e}")
     return _planned(reply, goal, priority, tree)
 
@@ -446,28 +450,52 @@ def decomposer(llm: LLM, *, limit: int | None = None) -> Decomposer:
     """Splits a subtask the model's way; None (the coordinator retries normally) when the reply
     stays unusable. Provider errors propagate: the coordinator pauses or retries as usual.
     `limit`: the most parts (default `MAX_PARTS`)."""
-    parts = limit or MAX_PARTS
 
     def split(work: Work) -> list[SubtaskSpec] | None:
         context = work.context
-        payload = {
-            "subtask": context.description,
-            "acceptance_criteria": context.acceptance_criteria,
-            "kind": work.subtask.kind.value,
-            "inputs": context.inputs,
-            "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
-        }
-        body = json.dumps(payload, ensure_ascii=False, indent=2)
-        request = Request(
-            messages=[
-                Message(role="system", content=splitter_system(parts)),
-                Message(role="user", content=f"{SPLIT}:\n{body}"),
-            ]
+        return split_task(
+            llm,
+            context.description,
+            context.acceptance_criteria,
+            work.subtask.kind,
+            context.inputs,
+            context.feedback.text if context.feedback else None,
+            limit=limit,
         )
-        try:
-            schema = split_schema(parts)
-            return complete_json(llm, request, schema, heading=SPLIT).parts(work.subtask.kind)
-        except StructuredOutputError:
-            return None
 
     return split
+
+
+def split_task(
+    llm: LLM,
+    description: str,
+    acceptance_criteria: str,
+    kind: Kind,
+    inputs: dict[str, Any],
+    feedback: str | None,
+    *,
+    limit: int | None = None,
+) -> list[SubtaskSpec] | None:
+    """The decomposer's model call, also for a cluster node without a local Work lease."""
+    payload = {
+        "subtask": description,
+        "acceptance_criteria": acceptance_criteria,
+        "kind": kind.value,
+        "inputs": inputs,
+        "feedback_on_previous_attempt": feedback,
+    }
+    request = Request(
+        messages=[
+            Message(role="system", content=splitter_system(limit or MAX_PARTS)),
+            Message(
+                role="user",
+                content=f"{SPLIT}:\n{json.dumps(payload, ensure_ascii=False, indent=2)}",
+            ),
+        ]
+    )
+    try:
+        return complete_json(llm, request, split_schema(limit or MAX_PARTS), heading=SPLIT).parts(
+            kind
+        )
+    except StructuredOutputError:
+        return None

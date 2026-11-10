@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -72,8 +73,25 @@ class Seen:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        self._inspecting = False
+
+    @contextmanager
+    def inspect(self) -> Iterator[None]:
+        """Verify a signed cluster snapshot without reserving its jobs as taken.
+
+        The same Trust still checks signatures, revocations and terms. Only its replay
+        reservation is omitted: an operator reading a job has not executed/rechecked it.
+        """
+        before = self._inspecting
+        self._inspecting = True
+        try:
+            yield
+        finally:
+            self._inspecting = before
 
     def add(self, id: str, expires_at: datetime, now: datetime) -> bool:
+        if self._inspecting:
+            return True
         with db.transaction(self.conn):
             self.conn.execute("DELETE FROM seen_records WHERE expires_at <= ?", (db.to_iso(now),))
             added = self.conn.execute(

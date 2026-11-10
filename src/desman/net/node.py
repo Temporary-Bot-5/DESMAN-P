@@ -64,8 +64,9 @@ from desman.config import Config, ConfigError
 from desman.core import db, holds, netlog
 from desman.core.store import Store
 from desman.core.workspace import workspace_root_for
+from desman.llm.base import LLM, ProviderError
 from desman.llm.openai_compat import key_id
-from desman.net import checks, jobs, protocol, request, sign, updates
+from desman.net import checks, cluster, jobs, protocol, request, sign, updates
 
 TIMEOUT: Final = 10.0
 RETRY_FIRST: Final = timedelta(seconds=30)
@@ -349,12 +350,16 @@ class Node:
         clock: Callable[[], datetime] = _utc_now,
         root: Path | None = None,
         work: bool = False,
+        cluster_model: LLM | None = None,
         workspaces: Path | None = None,
     ) -> None:
         self.conn = conn
+        self.cluster_model = cluster_model
+        self.cluster_at: datetime | None = None
         self.work = work
         """This worker can do jobs (a crew for the models lent): it asks for them."""
         self._store = Store(conn, clock)
+        self._seen = jobs.Seen(conn)
         self._workspaces = workspace_root_for(conn) if workspaces is None else workspaces
         self.claim_at: datetime | None = None
         """No asking for work before this."""
@@ -374,6 +379,7 @@ class Node:
         self.failures = 0
         self._sent: list[protocol.Capability] | None = None
         self._trust: sign.Trust | None = None
+        self._appointments: dict[str, sign.Signed] = {}
         self._stale: str | None = None
         """Why the trust list was not fresh when last asked (G.6c); None: it was."""
         self._journaled: set[tuple[str, str]] = set()
@@ -396,6 +402,9 @@ class Node:
             return None
         try:
             config = self._config()
+            current_role = cluster.role(self.conn, now)
+            if not config.network.lead and current_role and current_role["role"] == "operator":
+                cluster.left(self.conn, now)
             suspended = config.network.enabled and not active_capabilities(config, self.conn)
             if config.network.enabled:
                 with db.transaction(self.conn):
@@ -602,7 +611,7 @@ class Node:
         """Check each record against the root; True if this node's own key is revoked."""
         if self._trust is None:
             root = sign.load_root() if self._root is None else sign.load_root(self._root)
-            self._trust = sign.Trust(root, clock=self._clock, seen=jobs.Seen(self.conn))
+            self._trust = sign.Trust(root, clock=self._clock, seen=self._seen)
         for signed in state.records:
             record = signed.record
             try:
@@ -620,6 +629,8 @@ class Node:
                     },
                 )
                 continue
+            if record.kind is sign.RecordKind.APPOINTMENT:
+                self._appointments[record.id] = signed
             self._once(
                 (record.id, "received"),
                 "record_received",
@@ -630,6 +641,19 @@ class Node:
                     "signer": record.signer,
                 },
             )
+        latest = {
+            signed.record.id
+            for signed in state.records
+            if signed.record.kind is sign.RecordKind.APPOINTMENT
+        }
+        self._appointments = {
+            id: signed for id, signed in self._appointments.items() if id in latest
+        }
+        for signed in self._appointments.values():
+            body = sign.Appointment.model_validate(signed.record.body)
+            current = self._trust.appointment(body.cluster)
+            if current is not None and key.fingerprint in current.members:
+                cluster.joined(self.conn, current, "member", self._clock())
         return self._trust.is_revoked(key.fingerprint)
 
     def _once(self, mark: tuple[str, str], action: str, details: dict[str, Any]) -> None:
@@ -699,6 +723,7 @@ class Node:
     # ── Work (G.6b) ──────────────────────────────────────────────────────────
 
     def _jobs(self, now: datetime, idle: bool) -> Event | None:
+        self._clusters(now, idle)
         held = jobs.holding(self.conn)
         waiting = checks.pending(self.conn)
         if (
@@ -754,6 +779,168 @@ class Node:
             return self._failed(address, str(e), now)
         except _Problem as e:
             return self._refused(address, key, e.error, now)
+
+    def _clusters(self, now: datetime, idle: bool) -> None:
+        if self.cluster_at is not None and now < self.cluster_at:
+            return
+        config = self._config()
+        address = net.registry(config)
+        if (
+            address is None
+            or address != self.registry
+            or not self.registered
+            or not self.work
+            or not config.network.lead
+            or self.suspended
+            or self._trust is None
+            or self.failures
+            or not self._fresh(address)
+        ):
+            return
+        key = self._key(address)
+        if key is None:
+            return
+        self.cluster_at = now + cluster.CLUSTER_POLL
+        try:
+            state = _call(
+                self._http(),
+                key,
+                address,
+                "GET",
+                protocol.CLUSTERS_MINE,
+                None,
+                protocol.ClusterState,
+                now,
+                time.monotonic() + TIMEOUT,
+            )
+            with self._seen.inspect():
+                cluster.receive(state, self._trust)
+            for record in [
+                *state.appointments,
+                *([state.appointment] if state.appointment else []),
+            ]:
+                self._appointments[record.record.id] = record
+            if state.cluster is None:
+                cluster.left(self.conn, now)
+                return
+            appointment = self._trust.appointment(state.cluster)
+            if appointment is None:
+                return
+            if state.task is None or state.task.record.id != appointment.task:
+                raise sign.Refused(sign.Reason.NOT_ALLOWED, "snapshot names another task")
+            who = (
+                "operator"
+                if appointment.fingerprint == key.fingerprint
+                else "member"
+                if key.fingerprint in appointment.members
+                else "none"
+            )
+            if who == "none":
+                return
+            cluster.joined(self.conn, appointment, who, now)
+            if who != "operator" or not idle or self.cluster_model is None:
+                return
+
+            def send(kind: sign.RecordKind, body: BaseModel) -> sign.Signed | None:
+                moment = self._clock()
+                current = self._config()
+                term = self._trust.appointment(appointment.cluster) if self._trust else None
+                if (
+                    net.registry(current) != address
+                    or not current.network.lead
+                    or term is None
+                    or term.fingerprint != key.fingerprint
+                    or state.task is None
+                ):
+                    return None
+                expires = state.task.record.expires_at
+                # Authority is checked at issuance; records survive renewals/replacement.
+                if moment >= expires:
+                    return None
+                signed = sign.sign(
+                    key,
+                    kind,
+                    body.model_dump(mode="json"),
+                    issued_at=moment,
+                    lifetime=expires - moment,
+                    id=cluster.plan_id(body, state.note)
+                    if isinstance(body, protocol.ClusterPlan)
+                    else None,
+                )
+                try:
+                    received = _call(
+                        self._http(),
+                        key,
+                        address,
+                        "POST",
+                        protocol.CLUSTER_RECORDS,
+                        protocol.ClusterHandIn(record=signed),
+                        protocol.ClusterReceived,
+                        moment,
+                        time.monotonic() + TIMEOUT,
+                    )
+                    if (
+                        received.cluster != appointment.cluster
+                        or received.record != signed.record.id
+                        or received.kind != kind.value
+                    ):
+                        raise _Unreachable("bad_reply")
+                except _Problem as e:
+                    if e.error == sign.Reason.CONFLICT.value:
+                        return None
+                    raise
+                netlog.record(
+                    self.conn,
+                    kind.value,
+                    {
+                        "cluster": appointment.cluster,
+                        "task": appointment.task,
+                        "record": signed.record.id,
+                        "version": body.model_dump().get("version"),
+                        **(
+                            {"nodes": len(body.nodes)}
+                            if isinstance(body, protocol.ClusterPlan)
+                            else {}
+                        ),
+                    },
+                )
+                return signed
+
+            def stuck(why: str) -> None:
+                if (
+                    self.conn.execute(
+                        "SELECT 1 FROM network_log WHERE action='cluster_stuck' AND "
+                        "json_extract(details_json, '$.task')=? AND "
+                        "json_extract(details_json, '$.reason')=? LIMIT 1",
+                        (appointment.task, why),
+                    ).fetchone()
+                    is None
+                ):
+                    netlog.record(
+                        self.conn,
+                        "cluster_stuck",
+                        {"cluster": appointment.cluster, "task": appointment.task, "reason": why},
+                    )
+
+            cluster.supervise(state, self.cluster_model, send, stuck)
+        except ProviderError:
+            pass  # Quota/availability may change before the next cluster poll.
+        except (ValidationError, sign.KeyFileError):
+            self._once(
+                ("cluster", "malformed"),
+                "record_refused",
+                {"registry": address, "reason": sign.Reason.MALFORMED.value},
+            )
+        except sign.Refused as e:
+            self._once(
+                ("cluster", e.reason.value),
+                "record_refused",
+                {"registry": address, "reason": e.reason.value},
+            )
+        except _Unreachable as e:
+            self._failed(address, str(e), now)
+        except _Problem as e:
+            self._refused(address, key, e.error, now)
 
     def _fresh(self, address: str) -> bool:
         """The trust list is fresh (G.6c): without it no work is taken from any operator, as
@@ -877,7 +1064,9 @@ class Node:
             address,
             "POST",
             protocol.CLAIM,
-            protocol.Claim(jobs=job_work, proposals=proposal_checks),
+            protocol.Claim(
+                jobs=job_work, proposals=proposal_checks, lead=config.network.lead and job_work
+            ),
             protocol.Offer,
             now,
             deadline,
@@ -893,11 +1082,35 @@ class Node:
         task = work.task.record
         try:
             received = self._trust.receive(work.task.model_dump(mode="json"))
-            if received.kind is not sign.RecordKind.TASK:
+            cluster_id = None
+            if received.kind is sign.RecordKind.CLUSTER_JOB:
+                body = protocol.ClusterJob.model_validate(received.body)
+                cluster_id = body.cluster
+                appointment = self._trust.appointment(body.cluster)
+                operators = {
+                    sign.Appointment.model_validate(r.record.body).fingerprint
+                    for r in self._appointments.values()
+                    if r.record.body.get("cluster") == body.cluster
+                }
+                if work.stage == jobs.EXECUTE:
+                    allowed = (
+                        appointment is not None
+                        and key.fingerprint in appointment.members
+                        and key.fingerprint != appointment.fingerprint
+                    )
+                else:
+                    allowed = key.fingerprint not in operators
+                if not allowed:
+                    raise sign.Refused(sign.Reason.NOT_ALLOWED, "cluster role", id=task.id)
+                job = body.job
+            elif received.kind is sign.RecordKind.TASK:
+                job = protocol.Job.model_validate(received.body)
+            else:
                 raise sign.Refused(sign.Reason.MALFORMED, "not a task", id=task.id)
-            job = protocol.Job.model_validate(received.body)
             if work.stage == jobs.RECHECK:
                 _check_result(work, task.id, now)
+                if work.result is not None and work.result.record.signer == key.fingerprint:
+                    raise sign.Refused(sign.Reason.NOT_ALLOWED, "own result", id=task.id)
         except sign.Refused as e:
             netlog.record(
                 self.conn,
@@ -934,6 +1147,7 @@ class Node:
                 "signer": task.signer,
                 "stage": work.stage,
                 "task": task_id,
+                **({"cluster": cluster_id} if cluster_id else {}),
             },
         )
         return Event(Change.WORK_TAKEN, address, work.stage)

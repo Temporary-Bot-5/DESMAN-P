@@ -770,6 +770,18 @@ MIGRATIONS: Final[tuple[str, ...]] = (
      WHERE EXISTS (SELECT 1 FROM profile_notes);
     DROP TABLE profile_notes;
     """,
+    # 48: attribute the cluster operator's calls without rewriting earlier migrations.
+    """
+    DROP TRIGGER model_calls_no_update;
+    ALTER TABLE model_calls ADD COLUMN saved_role TEXT;
+    UPDATE model_calls SET saved_role = role;
+    ALTER TABLE model_calls DROP COLUMN role;
+    ALTER TABLE model_calls ADD COLUMN role TEXT CHECK (role IN ('planner', 'executor', 'reviewer', 'decomposer', 'interlocutor', 'network_planner'));
+    UPDATE model_calls SET role = saved_role;
+    ALTER TABLE model_calls DROP COLUMN saved_role;
+    CREATE TRIGGER model_calls_no_update BEFORE UPDATE ON model_calls
+        BEGIN SELECT RAISE(ABORT, 'model_calls is append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

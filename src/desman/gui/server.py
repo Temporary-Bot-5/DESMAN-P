@@ -174,6 +174,7 @@ def strings() -> dict[str, str]:
         "worker_queue": t("Queued: waiting for a free worker"),
         "status_active": t("Active"),
         "role_planner": t("Planner"),
+        "role_network_planner": t("Planner"),
         "role_executor": t("Executor"),
         "role_reviewer": t("Reviewer"),
         "role_decomposer": t("Decomposer"),

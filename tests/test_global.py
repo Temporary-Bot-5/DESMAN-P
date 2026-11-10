@@ -101,7 +101,7 @@ def test_a_schema_4_config_upgrades_to_desman_global_off() -> None:
     data["schema_version"] = 4
     del data["network"]
     config = Config.model_validate(upgrade(data))
-    assert config.schema_version == 8 and config.network == Network()
+    assert config.schema_version == 9 and config.network == Network()
     assert config.language == "ru"
 
 
@@ -159,7 +159,14 @@ def test_status_says_it_is_off() -> None:
     result = ok("global", "status")
     assert "nothing leaves this machine" in result.output
     out = json.loads(ok("global", "status", "--json").output)
-    assert out == {"enabled": False, "registry": None, "node": None, "donated": {}}
+    assert out == {
+        "enabled": False,
+        "registry": None,
+        "node": None,
+        "donated": {},
+        "lead": True,
+        "cluster": None,
+    }
     assert ok("global").output == result.output
     assert not node_key().exists()
 

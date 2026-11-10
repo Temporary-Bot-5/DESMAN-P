@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Lead clusters": "클러스터 주도",
+    "Leads cluster {cluster} (task {task}), {members} member": (
+        "클러스터 {cluster} 주도 (작업 {task}), 구성원 수: {members}",
+    ),
+    "Member of cluster {cluster}": "클러스터 {cluster}의 구성원",
+    "Allow this node to lead clusters with the modules lent.": "이 노드가 대여한 모듈로 클러스터를 주도하도록 허용합니다.",
     "Pause": "일시 정지",
     "Resume": "재개",
     "Replace": "교체",

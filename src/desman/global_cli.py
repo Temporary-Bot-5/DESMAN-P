@@ -45,7 +45,7 @@ from desman.core import report as task_reports
 from desman.core import stats as task_stats
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
-from desman.net import node, protocol, sign
+from desman.net import cluster, node, protocol, sign
 from desman.providers import Provider
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -77,10 +77,14 @@ class Status:
     node: str | None
     """The node key's fingerprint, if there is one."""
     donated: dict[str, Donation]
+    lead: bool = True
+    cluster: dict[str, Any] | None = None
 
     def as_json(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
+            "lead": self.lead,
+            "cluster": self.cluster,
             "registry": self.registry,
             "node": self.node,
             "donated": {name: d.model_dump() for name, d in self.donated.items()},
@@ -153,14 +157,42 @@ def usable_node_key(key_path: Path | None = None, *, create: bool = True) -> sig
         raise click.ClickException(t("The node's key cannot be used: {error}", error=e)) from e
 
 
-def status(config: Config, key_path: Path | None = None) -> Status:
+def status(
+    config: Config, key_path: Path | None = None, *, conn: sqlite3.Connection | None = None
+) -> Status:
     network = config.network
     return Status(
         enabled=network.enabled,
         registry=network.registry or net.DEFAULT_REGISTRY,
         node=node_fingerprint(key_path),
         donated=dict(network.donated),
+        lead=network.lead,
+        cluster=cluster.role(conn, _utc_now()) if conn is not None and network.enabled else None,
     )
+
+
+def set_lead(manager: ConfigManager, on: bool, *, conn: sqlite3.Connection | None = None) -> bool:
+    """The person's consent to lead, saved with its journal receipt."""
+    with _change(manager, conn) as (config, entries):
+        if config.network.lead != on:
+            config.network.lead = on
+            entries.append(("lead", {"on": on}))
+    return on
+
+
+def cluster_text(details: dict[str, Any] | None) -> str:
+    if details is None:
+        return ""
+    if details["role"] == "operator":
+        return tn(
+            details["members"],
+            "Leads cluster {cluster} (task {task}), {members} member",
+            "Leads cluster {cluster} (task {task}), {members} members",
+            cluster=details["cluster"],
+            task=details["task"],
+            members=details["members"],
+        )
+    return t("Member of cluster {cluster}", cluster=details["cluster"])
 
 
 def proposal_upload(
@@ -634,6 +666,9 @@ def print_status(found: Status) -> None:
     table.add_row(Text(t("taking part"), style="muted"), t("yes") if found.enabled else t("no"))
     table.add_row(Text(t("registry"), style="muted"), found.registry or t("not known yet"))
     table.add_row(Text(t("node key"), style="muted"), found.node or t("none yet"))
+    table.add_row(t("Lead clusters"), t("yes") if found.lead else t("off"))
+    if found.cluster:
+        table.add_row(cluster_text(found.cluster), "")
     for provider_id, donation in sorted(found.donated.items()):
         table.add_row(
             Text(t("lent: {name}", name=provider_name(provider_id)), style="muted"),
@@ -724,14 +759,16 @@ def print_lent(lent: Lent) -> None:
 def global_group(ctx: click.Context) -> None:
     """desman-global: whether this machine takes part, and what it lends."""
     if ctx.invoked_subcommand is None:
-        print_status(status(load_config().load()))
+        with journal(None) as conn:
+            print_status(status(load_config().load(), conn=conn))
 
 
 @global_group.command("status")
 @json_option
 def status_command(as_json: bool) -> None:
     """Whether this machine takes part in desman-global, its key, what it lends."""
-    found = status(load_config().load())
+    with journal(None) as conn:
+        found = status(load_config().load(), conn=conn)
     if as_json:
         click.echo(json.dumps(found.as_json(), ensure_ascii=False, indent=2))
     else:
@@ -779,6 +816,14 @@ def _lent_json(lent: Lent) -> str:
             "quota": None if lent.new is None else lent.new.model_dump(),
         }
     )
+
+
+@global_group.command("lead")
+@click.argument("state", type=click.Choice(["on", "off"]))
+def lead_command(state: str) -> None:
+    """Allow this node to lead clusters with the modules lent."""
+    set_lead(load_config(), state == "on")
+    ui.ok(t("Lead clusters") + ": " + (t("yes") if state == "on" else t("off")))
 
 
 @global_group.command("donate")

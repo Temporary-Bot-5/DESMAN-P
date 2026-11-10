@@ -1280,6 +1280,13 @@ function drawSettings() {
     text("small", d.network.enabled ? words.status_active : words.off, status).className = "setting-badge";
     const advanced = text("details", "", root); text("summary", words.advanced, advanced);
     const registry = settingInput(advanced, words.registry, d.network.registry || ""); registry.maxLength = 200;
+    const lead = document.createElement("input");
+    lead.type = "checkbox";
+    lead.checked = d.network.lead;
+    const leadRow = text("label", d.network.lead_label, status);
+    leadRow.append(lead);
+    settingAuto(leadRow, () => ({section: "network", operation: "lead", state: lead.checked ? "on" : "off"}), [lead]);
+    if (d.network.cluster_text) text("small", d.network.cluster_text, status);
     settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registry.value || null})}), d.network.enabled ? words.leave : words.join);
     for (const p of d.providers.filter(p => p.lendable)) {
       const card = text("section", "", root); card.className = "lending-row"; text("strong", p.name, card);

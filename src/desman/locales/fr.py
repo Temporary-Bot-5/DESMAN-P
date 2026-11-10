@@ -10,6 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Lead clusters": "Diriger des groupes",
+    "Leads cluster {cluster} (task {task}), {members} member": (
+        "Dirige le groupe {cluster} (tâche {task}), {members} membre",
+        "Dirige le groupe {cluster} (tâche {task}), {members} membres",
+    ),
+    "Member of cluster {cluster}": "Membre du groupe {cluster}",
+    "Allow this node to lead clusters with the modules lent.": "Autoriser ce nœud à diriger des groupes avec les modules prêtés.",
     "Pause": "Pause",
     "Resume": "Reprendre",
     "Replace": "Remplacer",

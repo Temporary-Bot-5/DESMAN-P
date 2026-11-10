@@ -51,6 +51,7 @@ class Role(StrEnum):
     REVIEWER = "reviewer"
     NETWORK_EXECUTOR = "network_executor"
     """The executor of a job from desman-global (ROADMAP G.6b): someone else's task, so less."""
+    NETWORK_PLANNER = "network_planner"
     NETWORK_REVIEWER = "network_reviewer"
 
 

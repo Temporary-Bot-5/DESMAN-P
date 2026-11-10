@@ -624,6 +624,7 @@ def network_crew(
         Access(policy, Role.NETWORK_EXECUTOR, lambda: switched_on(load().permissions.model_dump())),
         strategies=functools.partial(strategy_for, other_model=crew_models.other is not None),
         providers=crew_models.labels,
+        planner=crew_models.for_(calls.Role.NETWORK_PLANNER),
     )
 
 

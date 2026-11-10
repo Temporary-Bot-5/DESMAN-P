@@ -256,26 +256,26 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "desman-global is off until `desman global join` (use --registry URL if unknown). "
-        "Joining makes node.key, shows only its fingerprint, and lends nothing. "
-        "`desman global donate PROVIDER --calls N --tokens N` lends a local model or an "
-        "allowed free provider, never paid; keys stay here. `desman global quota PROVIDER` "
-        "shows/changes quotas; `desman global undonate PROVIDER` takes it back. "
-        "`desman global leave` withdraws everything and switches off; `desman global status` "
-        "shows state.\n"
-        "While `desman worker` runs, it registers and fetches revocations. Jobs need a fresh "
-        "root-signed trust list. An idle node works on one operator-signed job with lent "
-        "models (own folder, sandbox, no web), reviews a result or checks a proposal with an "
-        "isolated fake benchmark. Own tasks go first. Unreachable: retry later; revoked: stop.\n"
-        "`desman global submit-proposal N` previews a text proposal and benchmarks (no settings "
-        "or private evidence; keys block sending; 5/day); --confirm HASH sends that payload "
-        "to that registry. The chat asks in a window.\n"
-        "For bug reports and optional shared memory, see topic globalsend. "
-        "Root-signed operator releases arrive with the worker: `desman global update --show N` "
-        "inspects (omit N for newest); `desman global update --apply N` installs only by the "
-        "person, never automatically; `desman global update --revert` undoes the newest installed release, one at a time, if HEAD/schema "
-        "have not advanced. Restart workers/chats; approve protected changes and reinstall "
-        "changed dependencies. Chat changes require the confirmation window.",
+        "desman-global is off until `desman global join` (--registry URL if unknown). "
+        "Joining creates node.key; only its fingerprint is shown. "
+        "`desman global donate PROVIDER --calls N --tokens N` lends a local or allowed free "
+        "provider, never paid; keys stay here. `desman global quota PROVIDER` shows/changes "
+        "quotas; `desman global undonate PROVIDER` takes it back. "
+        "`desman global leave` withdraws everything; `desman global status` shows state. "
+        "`desman global lead STATE` (on/off, default on) allows an appointed node to plan "
+        "and supervise a cluster with lent modules and quotas. Off stops renewal; another "
+        "node takes over. Status shows its current role.\n"
+        "`desman worker` registers and fetches revocations. Jobs need a fresh root-signed "
+        "trust list. Idle nodes execute/review jobs with lent models (own folder, sandbox, "
+        "no web) or check proposals with an isolated fake benchmark. Own tasks go first. "
+        "Unreachable: retry later; revoked: stop.\n"
+        "`desman global submit-proposal N` previews texts and benchmarks, no settings/private "
+        "evidence (5/day); --confirm HASH sends that payload to that registry. Chat asks in a "
+        "window. For bug reports/shared memory, see globalsend.\n"
+        "Root-signed releases: `desman global update --show N` inspects (omit N for newest); "
+        "--apply N installs only by the person; --revert undoes the newest install if HEAD/schema "
+        "have not advanced. Restart workers/chats, approve protected changes and reinstall "
+        "changed dependencies. Chat changes require confirmation.",
     ),
     Topic(
         "globalsend",
