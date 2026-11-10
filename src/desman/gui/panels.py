@@ -435,13 +435,8 @@ def interlocutor(
         "hold_state": held.state if held else None,
         "hold_scope": held.scope if held else None,
         "hold_scope_id": held.scope_id if held else None,
-        "module_source": modules_cli.module_source(
-            config,
-            {
-                "provider": first.provider.id if first else None,
-                "key_fingerprint": fingerprint if key else None,
-            },
-        ),
+        "module_source": source,
+        "module_id": module_view.module_id(source, first.label if first else None),
         "last_model": f"{latest[0]}/{latest[1]}" if latest else None,
         "role": "interlocutor",
         "icon": "module",

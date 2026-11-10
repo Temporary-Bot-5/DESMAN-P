@@ -17,6 +17,7 @@ from desman.core import calls, choices, db
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.sessions import Role, Sessions
 from desman.core.store import Store
+from desman.gui import module_view
 from desman.gui.front import WebFront
 from desman.gui.server import Server, strings
 from desman.llm.openai_compat import key_id
@@ -87,6 +88,8 @@ def test_module_snapshot_and_session_usage(module_app: Any) -> None:
     assert card["calls"] == 1 and card["tokens"] > 0
     assert card["key_fingerprint"] == key_id(secret)
     assert card["icon"] == "module"
+    assert card["module_id"] == module_view.module_id(card["module_source"], card["model"])
+    assert card["module_id"] in {m["module_id"] for m in data["modules"]}
     assert data["roles"][0]["candidate_keys"][0]["fingerprint"] == key_id(secret)
     assert store.conn.total_changes == before
     app.front.session(None, False)
