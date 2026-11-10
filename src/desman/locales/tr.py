@@ -794,8 +794,6 @@ MESSAGES: dict[str, Forms] = {
     "That looked like an API key, so it was cut from the note.": "Bu bir API anahtarına benziyordu, bu yüzden nottan çıkarıldı.",
     "A note is at most {n} characters.": "Bir not en fazla {n} karakter olabilir.",
     "The interlocutor keeps these notes about you to talk the way you like. They go to the model providers with every message, and free providers may keep what they get.": "Muhatap, seninle sevdiğin şekilde konuşmak için bu notları tutar. Notlar her mesajla model sağlayıcılarına gider ve ücretsiz sağlayıcılar aldıklarını saklayabilir.",
-    "by you": "senin",
-    "by the interlocutor": "muhatabın",
     "What now?": "Şimdi ne yapalım?",
     "Forget every note?": "Tüm notlar silinsin mi?",
     "Noted about you: {note}": "Senin hakkında not edildi: {note}",

@@ -792,8 +792,6 @@ MESSAGES: dict[str, Forms] = {
     "That looked like an API key, so it was cut from the note.": "API キーのように見えたため、メモから削除しました。",
     "A note is at most {n} characters.": "メモは {n} 文字までです。",
     "The interlocutor keeps these notes about you to talk the way you like. They go to the model providers with every message, and free providers may keep what they get.": "対話役は、あなたの好みに合わせて話すためにこれらのメモを付けています。メモはメッセージごとにモデルのプロバイダーに送られ、無料のプロバイダーは受け取った内容を保存することがあります。",
-    "by you": "あなた",
-    "by the interlocutor": "対話役",
     "What now?": "次はどうしますか？",
     "Forget every note?": "すべてのメモを削除しますか？",
     "Noted about you: {note}": "あなたについて記録しました：{note}",

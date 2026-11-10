@@ -15,7 +15,8 @@ run time; nothing of it is stored, and only people change it, through git:
 K.4 adds the person's own nodes (`core.nodes`, stored in the database): `personal()` reads them
 as nodes of origin `person`, and `tree()` / `for_tasks()` put them after the release part. They
 are given only while the person agreed to personalisation, and never to a temporary chat or a
-desman-global job.
+desman-global job. K.5: one of them, `Personal/Profile`, holds the profile's notes; the chat's
+interlocutor gets those with every message, so its table of contents leaves that node out.
 
 Texts are prompts' material: English where the source is (the manual, the catalog), the docs as
 they are written. Tokens are estimated as characters / 4, as everywhere else.

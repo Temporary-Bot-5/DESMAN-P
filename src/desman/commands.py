@@ -1661,7 +1661,9 @@ def _nodes_add(ctx: Context, args: NodeAddArgs) -> Proposal:
     untrusted = author is nodes.Author.TASK
     nodes_cli.ready(ctx.config())
     conn = ctx.store.conn
-    path, about, text = nodes_cli.checked_add(conn, args.path, args.about, args.text)
+    path, about, text = nodes_cli.checked_add(
+        conn, args.path, args.about, args.text, author, untrusted=untrusted
+    )
 
     def apply() -> Outcome:
         node = nodes_cli.add(
@@ -1677,7 +1679,9 @@ def _nodes_change(ctx: Context, args: NodeChangeArgs) -> Outcome | Proposal:
     untrusted = author is nodes.Author.TASK
     nodes_cli.ready(ctx.config())
     conn = ctx.store.conn
-    was, to, about, text = nodes_cli.checked_change(conn, args.path, args.to, args.about, args.text)
+    was, to, about, text = nodes_cli.checked_change(
+        conn, args.path, args.to, args.about, args.text, author, untrusted=untrusted
+    )
     lines = nodes_cli.change_lines(was, to, about, text)
     if len(lines) == 1:  # the same as it is
         ui.note(t("Nothing changed."))
@@ -1706,7 +1710,7 @@ def _nodes_remove(ctx: Context, args: NodePathArgs) -> Proposal:
     if author is not nodes.Author.PERSON:  # an agent proposes only while personalisation is on
         nodes_cli.ready(ctx.config())
     conn = ctx.store.conn
-    was = nodes_cli.existing(conn, args.path)
+    was = nodes_cli.removable(conn, args.path, author)
 
     def apply() -> Outcome:
         path = nodes_cli.remove(conn, was.path, author, session_id=ctx.session_id())

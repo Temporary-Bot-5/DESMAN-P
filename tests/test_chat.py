@@ -458,7 +458,7 @@ def test_a_temporary_chat_keeps_no_profile_and_no_cached_reply(
     [request] = llm.calls
     assert '"profile"' not in request.prompt  # the model was told nothing of the notes
     conn = db.open_db(db.default_db_path())
-    assert conn.execute("SELECT COUNT(*) FROM profile_notes").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM personal_nodes").fetchone()[0] == 0
     conn.close()
 
 

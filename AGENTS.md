@@ -200,9 +200,12 @@ src/desman/
     ├── nodes.py   # The person's nodes of the knowledge tree (K.4): path, about, text ≤6000,
     │              #   author (person | interlocutor | task → untrusted); changed and erased in
     │              #   place, each change in operator_log by node number; ≤100 nodes
+    │              #   Personal/Profile holds the profile's notes: only the person writes it as a
+    │              #   node, and only as notes (`check_profile`)
     ├── profile.py # User's profile (C.7): short notes for the interlocutor (≤20, ≤200 chars),
     │              #   changed and erased in place (personal data); each change in operator_log
     │              #   by note number, never the text; `Config.personalize` off → unseen, unkept
+    │              #   K.5: the lines of the node Personal/Profile (number = line, `was` = text seen)
     ├── owner.py   # Lease owner "host:pid"; owner_is_gone() lets resume take a killed run's
                    #   leases at once (only when certain)
     ├── report.py  # TaskReport/SubtaskReport read models for status/list (one snapshot)

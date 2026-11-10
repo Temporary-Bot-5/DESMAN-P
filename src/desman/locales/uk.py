@@ -879,8 +879,6 @@ MESSAGES: dict[str, Forms] = {
     "That looked like an API key, so it was cut from the note.": "Це схоже на API-ключ, тому його вирізано із нотатки.",
     "A note is at most {n} characters.": "Нотатка — не довша за {n} символів.",
     "The interlocutor keeps these notes about you to talk the way you like. They go to the model providers with every message, and free providers may keep what they get.": "Співрозмовник веде ці нотатки про вас, щоб говорити так, як вам зручно. Вони йдуть провайдерам моделей з кожним повідомленням, а безкоштовні провайдери можуть зберігати те, що отримують.",
-    "by you": "ваша",
-    "by the interlocutor": "співрозмовника",
     "What now?": "Що далі?",
     "Forget every note?": "Стерти всі нотатки?",
     "Noted about you: {note}": "Помічено про вас: {note}",

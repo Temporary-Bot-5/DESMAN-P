@@ -67,6 +67,8 @@ class Personalize(Fields):
 class Forget(Fields):
     section: Literal["forget"]
     note: int = Field(ge=1)
+    text: str | None = Field(default=None, max_length=200)
+    """The note's text as the page showed it: its number is its line, which may have moved."""
 
 
 class Node(Fields):

@@ -790,8 +790,6 @@ MESSAGES: dict[str, Forms] = {
     "That looked like an API key, so it was cut from the note.": "API 키처럼 보여서 메모에서 잘라냈습니다.",
     "A note is at most {n} characters.": "메모는 최대 {n}자입니다.",
     "The interlocutor keeps these notes about you to talk the way you like. They go to the model providers with every message, and free providers may keep what they get.": "대화 상대는 당신이 좋아하는 방식으로 말하려고 이 메모를 적어 둡니다. 메모는 메시지마다 모델 제공자에게 전송되며, 무료 제공자는 받은 내용을 보관할 수 있습니다.",
-    "by you": "직접 작성",
-    "by the interlocutor": "대화 상대 작성",
     "What now?": "이제 무엇을 할까요?",
     "Forget every note?": "모든 메모를 지울까요?",
     "Noted about you: {note}": "당신에 대해 적어 두었습니다: {note}",

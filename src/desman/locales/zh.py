@@ -784,8 +784,6 @@ MESSAGES: dict[str, Forms] = {
     "That looked like an API key, so it was cut from the note.": "这看起来像 API 密钥，已从记录中删除。",
     "A note is at most {n} characters.": "一条记录最多 {n} 个字符。",
     "The interlocutor keeps these notes about you to talk the way you like. They go to the model providers with every message, and free providers may keep what they get.": "对话者记录这些关于你的信息，以便按你喜欢的方式交谈。每条消息都会把它们发给模型提供商，免费提供商可能会保留收到的内容。",
-    "by you": "由你",
-    "by the interlocutor": "由对话者",
     "What now?": "接下来做什么？",
     "Forget every note?": "删除所有记录？",
     "Noted about you: {note}": "已记下关于你的信息：{note}",

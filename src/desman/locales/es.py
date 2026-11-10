@@ -845,8 +845,6 @@ MESSAGES: dict[str, Forms] = {
     "That looked like an API key, so it was cut from the note.": "Eso parecía una clave API, así que se quitó de la nota.",
     "A note is at most {n} characters.": "Una nota tiene como máximo {n} caracteres.",
     "The interlocutor keeps these notes about you to talk the way you like. They go to the model providers with every message, and free providers may keep what they get.": "El interlocutor guarda estas notas sobre ti para hablar como te gusta. Van a los proveedores de modelos con cada mensaje, y los proveedores gratuitos pueden quedarse con lo que reciben.",
-    "by you": "tuya",
-    "by the interlocutor": "del interlocutor",
     "What now?": "¿Y ahora?",
     "Forget every note?": "¿Borrar todas las notas?",
     "Noted about you: {note}": "Anotado sobre ti: {note}",
