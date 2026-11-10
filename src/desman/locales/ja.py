@@ -839,7 +839,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "スタイル",
     "in your words": "あなたの言葉で",
     "Set up how the interlocutor talks to you?": "対話役のあなたへの話し方を設定しますか？",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "同意すると、対話役はあなたが書くすべてを含め、あなたとのやり取りを分析し、あなたについて短いメモを付けます（チャットの /profile で表示・削除できます）。メモはメッセージごとにモデルのプロバイダーに送られます。",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "同意すると、対話役はあなたが書くすべてを含め、あなたとのやり取りを分析し、あなたについて短いメモを付けます（チャットの /profile で表示・削除できます）。メモはメッセージごとに、また役立つタスクとともにモデルのプロバイダーに送られます。",
     "Do you want the agent to study your conversations and become more personal to you?": "エージェントがあなたとのやり取りを分析し、あなたに合わせてよりパーソナライズされることを望みますか？",
     "This holds whether or not it keeps notes about you.": "これはメモを付けるかどうかに関係なく有効です。",
     "Anything else about how it should talk ('-' for nothing)": "話し方について他に何かありますか（'-' でなし）",

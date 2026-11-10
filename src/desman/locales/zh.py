@@ -831,7 +831,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "风格",
     "in your words": "用你自己的话",
     "Set up how the interlocutor talks to you?": "设置对话者如何与你交谈？",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "如果你同意，对话者会分析你与它交流的方式，包括你写的所有内容，并记录关于你的简短信息（在聊天中用 /profile 查看和删除）。每条消息都会把这些记录发送给模型提供商。",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "如果你同意，对话者会分析你与它交流的方式，包括你写的所有内容，并记录关于你的简短信息（在聊天中用 /profile 查看和删除）。每条消息以及它们能帮上忙的任务都会把这些记录发送给模型提供商。",
     "Do you want the agent to study your conversations and become more personal to you?": "你希望智能体分析你与它的互动，并变得更适合你吗？",
     "This holds whether or not it keeps notes about you.": "无论它是否记录关于你的信息，这一设置都有效。",
     "Anything else about how it should talk ('-' for nothing)": "关于它该如何交谈，还有别的要求吗？（'-' 表示没有）",

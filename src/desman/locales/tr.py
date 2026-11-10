@@ -841,7 +841,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "tarz",
     "in your words": "kendi sözlerinle",
     "Set up how the interlocutor talks to you?": "Muhatabın seninle nasıl konuşacağını ayarlamak ister misin?",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "Kabul edersen muhatap, yazdığın her şey dahil onunla nasıl konuştuğunu inceler ve senin hakkında kısa notlar tutar (sohbette /profile bunları gösterir ve siler). Notlar her mesajla model sağlayıcılarına gider.",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "Kabul edersen muhatap, yazdığın her şey dahil onunla nasıl konuştuğunu inceler ve senin hakkında kısa notlar tutar (sohbette /profile bunları gösterir ve siler). Notlar her mesajla ve yardımcı oldukları görevlerle model sağlayıcılarına gider.",
     "Do you want the agent to study your conversations and become more personal to you?": "Ajanın seninle olan etkileşimini incelemesini ve sana göre daha kişisel hale gelmesini istiyor musun?",
     "This holds whether or not it keeps notes about you.": "Bu, senin hakkında not tutsa da tutmasa da geçerlidir.",
     "Anything else about how it should talk ('-' for nothing)": "Nasıl konuşması gerektiğine dair başka bir şey ('-': hiçbir şey)",

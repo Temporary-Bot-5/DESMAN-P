@@ -760,8 +760,9 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     INSERT INTO personal_nodes (path, about, text, author, untrusted, created_at, updated_at)
     SELECT 'Personal/Profile',
            'Notes about the person: how they like answers, their interests',
-           (SELECT group_concat('- ' || text, char(10))
-              FROM (SELECT text FROM profile_notes ORDER BY id)),
+           (SELECT group_concat('- ' || text, char(10)) OVER (
+                       ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+              FROM profile_notes LIMIT 1),
            (SELECT author FROM profile_notes ORDER BY updated_at DESC, id DESC LIMIT 1),
            0,
            (SELECT min(created_at) FROM profile_notes),

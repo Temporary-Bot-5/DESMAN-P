@@ -234,9 +234,15 @@ def personal(conn: sqlite3.Connection) -> tuple[Node, ...]:
     """The person's own nodes (K.4), as the tree holds them. The caller decides whether they
     may be seen (`Config.personalize`, not a temporary chat)."""
     return tuple(
-        Node(n.path, n.about, n.text, origin="person", untrusted=n.untrusted)
+        Node(n.path, n.about, n.text, origin="person", untrusted=n.untrusted or _learned(n))
         for n in personal_store.PersonalNodes(conn).nodes()
     )
+
+
+def _learned(node: personal_store.PersonalNode) -> bool:
+    """The profile's node as the interlocutor last wrote it: notes it drew from conversations
+    (which may quote a retold web page), so data for a task, never instructions (K.5)."""
+    return personal_store.is_profile(node.path) and node.author is not personal_store.Author.PERSON
 
 
 def tree(own: Iterable[Node] = ()) -> tuple[Node, ...]:

@@ -18,7 +18,7 @@ from desman.cli import cli
 from desman.config import Config, ConfigManager, default_config_path
 from desman.core import db, nodes, operator
 from desman.core.nodes import PROFILE_ABOUT, PROFILE_PATH, NodeError, PersonalNodes
-from desman.core.profile import Author, Profile
+from desman.core.profile import Author, Profile, ProfileFull
 from desman.interlocutor import CHAT
 from desman.llm.base import Request
 from desman.llm.fake import FakeLLM
@@ -271,3 +271,24 @@ def test_an_empty_profile_makes_no_node(tmp_path: Path) -> None:
         assert PersonalNodes(conn).nodes() == []
     finally:
         conn.close()
+
+
+# ── Review fixes ─────────────────────────────────────────────────────────────
+
+
+def test_notes_the_interlocutor_learned_are_data_for_tasks(conn: sqlite3.Connection) -> None:
+    Profile(conn).add("Likes tea", Author.INTERLOCUTOR)
+    [learned] = [n for n in runs.task_tree(conn, True) if n.path == PROFILE_PATH]
+    assert learned.untrusted  # what conversations taught it may quote a retold web page
+    PersonalNodes(conn).change(PROFILE_PATH, nodes.Author.PERSON, text="- Likes green tea")
+    [written] = [n for n in runs.task_tree(conn, True) if n.path == PROFILE_PATH]
+    assert not written.untrusted  # the person wrote it
+
+
+def test_the_first_note_needs_room_in_the_tree(conn: sqlite3.Connection) -> None:
+    store = PersonalNodes(conn)
+    for i in range(nodes.MAX_NODES):
+        store.add(f"Projects/P{i}", "A project", "Text.", nodes.Author.PERSON)
+    with pytest.raises(ProfileFull):
+        Profile(conn).add("Likes tea", Author.INTERLOCUTOR)
+    assert len(store.nodes()) == nodes.MAX_NODES

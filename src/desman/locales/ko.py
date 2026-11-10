@@ -837,7 +837,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "스타일",
     "in your words": "당신의 말로",
     "Set up how the interlocutor talks to you?": "대화 상대가 당신과 말하는 방식을 설정할까요?",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "동의하면 대화 상대는 당신이 쓰는 모든 것을 포함해 당신과의 대화 방식을 분석하고 당신에 대한 짧은 메모를 적어 둡니다 (채팅의 /profile에서 보고 지울 수 있습니다). 메모는 메시지마다 모델 제공자에게 전송됩니다.",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "동의하면 대화 상대는 당신이 쓰는 모든 것을 포함해 당신과의 대화 방식을 분석하고 당신에 대한 짧은 메모를 적어 둡니다 (채팅의 /profile에서 보고 지울 수 있습니다). 메모는 메시지마다, 그리고 도움이 되는 작업과 함께 모델 제공자에게 전송됩니다.",
     "Do you want the agent to study your conversations and become more personal to you?": "에이전트가 당신과의 상호작용을 분석해 당신에게 더 개인화되기를 원하시나요?",
     "This holds whether or not it keeps notes about you.": "이 설정은 메모를 적든 안 적든 적용됩니다.",
     "Anything else about how it should talk ('-' for nothing)": "말하는 방식에 대해 더 있나요 ('-'는 없음)",

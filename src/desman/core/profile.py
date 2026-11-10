@@ -112,7 +112,7 @@ class Profile:
                 raise ProfileFull(f"the profile has {MAX_NOTES} notes already")
             self._write([*texts, text], author)
             self._journal("profile_note_added", len(texts) + 1, author, session_id)
-        note = self.get(len(texts) + 1)
+            note = self.get(len(texts) + 1)  # read in the same transaction: lines may move
         assert note is not None
         return note
 
@@ -140,7 +140,7 @@ class Profile:
                 self._write(texts, author)
                 nodes.uncache(self.conn, [old])
                 self._journal("profile_note_changed", i + 1, author, session_id)
-        return self.get(i + 1)
+            return self.get(i + 1)
 
     def forget(
         self,
@@ -193,6 +193,9 @@ class Profile:
         now = db.to_iso(self.clock())
         text = nodes.profile_text(texts)
         if row is None:
+            count = self.conn.execute("SELECT COUNT(*) FROM personal_nodes").fetchone()[0]
+            if count >= nodes.MAX_NODES:  # the first note makes a node: the tree has a bound
+                raise ProfileFull(f"the knowledge tree has {nodes.MAX_NODES} nodes already")
             self.conn.execute(
                 "INSERT INTO personal_nodes "
                 "(path, about, text, author, untrusted, created_at, updated_at) "
@@ -217,8 +220,14 @@ def _parsed(text: str) -> list[str]:
     try:
         return nodes.profile_notes(text)
     except nodes.NodeError:
-        lines = [" ".join(line.split()).removeprefix("- ").strip() for line in text.splitlines()]
-        return [line[:NOTE_CHARS] for line in lines if line][:MAX_NOTES]
+        notes = []
+        for line in text.splitlines():
+            note = " ".join(line.split())
+            for mark in ("- ", "* ", "• "):
+                note = note.removeprefix(mark)
+            if note and note not in ("-", "*", "•"):
+                notes.append(note[:NOTE_CHARS])
+        return notes[:MAX_NOTES]
 
 
 def _index(texts: list[str], note_id: int, was: str | None) -> int | None:

@@ -926,7 +926,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "стиль",
     "in your words": "вашими словами",
     "Set up how the interlocutor talks to you?": "Налаштувати, як співрозмовник говорить з вами?",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "Якщо ви погодитеся, співрозмовник аналізуватиме, як ви з ним спілкуєтеся, включно з усім, що ви пишете, і вестиме короткі нотатки про вас (/profile у чаті показує і стирає їх). Нотатки йдуть провайдерам моделей з кожним повідомленням.",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "Якщо ви погодитеся, співрозмовник аналізуватиме, як ви з ним спілкуєтеся, включно з усім, що ви пишете, і вестиме короткі нотатки про вас (/profile у чаті показує і стирає їх). Нотатки йдуть провайдерам моделей з кожним повідомленням і з завданнями, яким вони допомагають.",
     "Do you want the agent to study your conversations and become more personal to you?": "Ви хочете, щоб агент аналізував вашу з ним взаємодію і ставав більш персоналізованим для вас?",
     "This holds whether or not it keeps notes about you.": "Це діє незалежно від того, чи веде він нотатки про вас.",
     "Anything else about how it should talk ('-' for nothing)": "Що ще важливо в тому, як йому говорити ('-' — нічого)",

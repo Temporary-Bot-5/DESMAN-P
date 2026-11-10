@@ -892,7 +892,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "Stil",
     "in your words": "in deinen Worten",
     "Set up how the interlocutor talks to you?": "Einstellen, wie der Gesprächspartner mit dir redet?",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "Wenn du zustimmst, analysiert der Gesprächspartner, wie du mit ihm redest, einschließlich allem, was du schreibst, und führt kurze Notizen über dich (/profile im Chat zeigt und löscht sie). Die Notizen gehen mit jeder Nachricht an die Modellanbieter.",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "Wenn du zustimmst, analysiert der Gesprächspartner, wie du mit ihm redest, einschließlich allem, was du schreibst, und führt kurze Notizen über dich (/profile im Chat zeigt und löscht sie). Die Notizen gehen mit jeder Nachricht und mit den Aufgaben, denen sie helfen, an die Modellanbieter.",
     "Do you want the agent to study your conversations and become more personal to you?": "Möchtest du, dass der Agent deine Gespräche mit ihm analysiert und sich stärker auf dich einstellt?",
     "This holds whether or not it keeps notes about you.": "Das gilt unabhängig davon, ob er Notizen über dich führt.",
     "Anything else about how it should talk ('-' for nothing)": "Sonst noch etwas dazu, wie er reden soll ('-' für nichts)",

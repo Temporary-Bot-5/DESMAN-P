@@ -889,7 +889,7 @@ MESSAGES: dict[str, Forms] = {
     "style": "शैली",
     "in your words": "आपके शब्दों में",
     "Set up how the interlocutor talks to you?": "वार्ताकार आपसे कैसे बात करे, यह सेट करें?",
-    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message.": "अगर आप सहमत हैं, तो वार्ताकार आपकी लिखी हर बात सहित यह विश्लेषण करेगा कि आप उससे कैसे बात करते हैं, और आपके बारे में छोटे नोट रखेगा (चैट में /profile उन्हें दिखाता और मिटाता है)। नोट हर संदेश के साथ मॉडल प्रदाताओं को जाते हैं।",
+    "If you agree, the interlocutor studies how you talk with it, anything you write included, and keeps short notes about you (/profile in the chat shows and erases them). The notes go to the model providers with every message, and with the tasks they help.": "अगर आप सहमत हैं, तो वार्ताकार आपकी लिखी हर बात सहित यह विश्लेषण करेगा कि आप उससे कैसे बात करते हैं, और आपके बारे में छोटे नोट रखेगा (चैट में /profile उन्हें दिखाता और मिटाता है)। नोट हर संदेश के साथ, और उन कार्यों के साथ जिनमें वे मदद करते हैं, मॉडल प्रदाताओं को जाते हैं।",
     "Do you want the agent to study your conversations and become more personal to you?": "क्या आप चाहते हैं कि एजेंट आपके साथ अपनी बातचीत का विश्लेषण करे और आपके लिए अधिक निजी बने?",
     "This holds whether or not it keeps notes about you.": "यह इस बात से स्वतंत्र है कि वह आपके बारे में नोट रखता है या नहीं।",
     "Anything else about how it should talk ('-' for nothing)": "उसे कैसे बात करनी चाहिए, इस बारे में कुछ और ('-' कुछ नहीं)",
