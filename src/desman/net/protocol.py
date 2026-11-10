@@ -41,6 +41,8 @@ EXTEND: Final = "/v1/work/extend"
 HAND_IN: Final = "/v1/work/hand-in"
 CHECK_HAND_IN: Final = "/v1/proposals/check"
 PROPOSALS: Final = "/v1/proposals"
+CLUSTERS_MINE: Final = "/v1/clusters/mine"
+CLUSTER_RECORDS: Final = "/v1/clusters/records"
 
 MAX_BODY: Final = 256 * 1024
 MAX_RESULT_BYTES: Final = 160 * 1024
@@ -305,6 +307,8 @@ class Claim(BaseModel):
 
     jobs: bool = True
     proposals: bool = False
+    lead: bool = False
+    """The node may be appointed to lead a cluster (`network.lead`, ADR 0006)."""
 
 
 class Work(BaseModel):
@@ -316,7 +320,8 @@ class Work(BaseModel):
     expires_at: datetime
     stage: Stage
     task: Signed
-    """The operator's `task` record, as the node checks it (`sign.Trust`)."""
+    """The operator's `task` record, or a cluster operator's `cluster_job` (ADR 0006), as the
+    node checks it (`sign.Trust`; a cluster job's appointment comes with the trust state)."""
     result: Signed | None = None
     """For `recheck`: the result to review, signed by the node that did the work."""
     result_key: PublicKeyText | None = None
@@ -562,6 +567,66 @@ class ClusterResult(BaseModel):
     result: RecordId
     """The accepted `result` record of the plan's last node."""
     summary: str = Field(default="", max_length=2000)
+
+
+ClusterRole = Literal["none", "operator", "member"]
+ClusterJobStatus = Literal["execute", "recheck", "accepted", "operator", "dropped", "expired"]
+
+
+class ClusterHandIn(BaseModel):
+    """A cluster operator hands in one record of its cluster (`CLUSTER_RECORDS`)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    record: Signed
+
+
+class ClusterReceived(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cluster: RecordId
+    record: RecordId
+    kind: str
+    status: str
+    """Where the cluster task is now."""
+
+
+class ClusterJobState(BaseModel):
+    """A job of the cluster as the registry holds it: what was lent, what came back."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    job: Signed
+    """The `cluster_job` record."""
+    status: ClusterJobStatus
+    reason: str | None = None
+    """Why it came back to the operator (`failed`, `leases_lost`, `disputed`)."""
+    result: Signed | None = None
+    """The result being rechecked, accepted or disputed."""
+    result_key: PublicKeyText | None = None
+    verdicts: list[Signed] = Field(default_factory=list)
+
+
+class ClusterState(BaseModel):
+    """The answer to `CLUSTERS_MINE`: the caller's cluster, if it has one. Its operator gets
+    everything it needs to continue from the records (a successor too, ADR 0006 decision 7);
+    a member only learns which cluster it is in."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: ClusterRole = "none"
+    cluster: RecordId | None = None
+    task: Signed | None = None
+    """The `cluster_task` record."""
+    appointment: Signed | None = None
+    """The appointment in force (a renewed one when the old is past half its term)."""
+    appointments: list[Signed] = Field(default_factory=list)
+    """Every appointment of the cluster, oldest first: the operator checks earlier records."""
+    plans: list[Signed] = Field(default_factory=list)
+    jobs: list[ClusterJobState] = Field(default_factory=list)
+    result: Signed | None = None
+    note: str | None = None
+    """What the global operator said when sending the cluster task back."""
 
 
 def submission_hash(submission: ProposalSubmission) -> str:

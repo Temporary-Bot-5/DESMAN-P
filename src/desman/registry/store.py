@@ -19,6 +19,10 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
   node is its own owner. A result is rechecked by a node of another owner.
 - `jobs`, `leases`, `results` (G.6): work an operator signed, lent to one node at a time (see
   `registry/work.py`), and what nodes handed in (append-only).
+- `cluster_tasks`, `appointments`, `cluster_records` (ADR 0006, T.4b): goals the global
+  operator signed for a cluster, the appointments the registry signed with its appointer key,
+  and the plans, jobs and results cluster operators handed in (`registry/clusters.py`).
+  `nodes.takes_jobs` and `nodes.lead` are what a node said in its last claim.
 - `registry_log`: the registry's journal (ADR 0004, decision 12) — registrations, changes of
   what is lent, departures, assignments, revocations, refused requests. Keys by fingerprint;
   nothing in it is secret. Append-only.
@@ -26,6 +30,7 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -48,6 +53,8 @@ DIR_ENV: Final = "DESMAN_REGISTRY_DIR"
 DB_NAME: Final = "registry.db"
 ROOT_KEY: Final = "root.key"
 OPERATOR_KEY: Final = "operator.key"
+APPOINTER_KEY: Final = "appointer.key"
+"""The key that signs appointments by itself (ADR 0006, decision 2)."""
 FRESH: Final = "`desman-registry serve`"
 
 _NOW_SQL: Final = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
@@ -359,6 +366,72 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     BEGIN SELECT RAISE(ABORT, 'messenger key is fixed'); END;
     ALTER TABLE messages ADD COLUMN sealed TEXT CHECK(sealed IS NULL OR json_valid(sealed));
     """,
+    # 13 — clusters (ADR 0006, T.4b): what a node said in its last claim, cluster tasks, the
+    # appointments the registry signed, the records cluster operators handed in; a cluster job
+    # is a job (lent the same way) that names its cluster task.
+    f"""
+    ALTER TABLE nodes ADD COLUMN takes_jobs INTEGER NOT NULL DEFAULT 0
+        CHECK (takes_jobs IN (0, 1));
+    ALTER TABLE nodes ADD COLUMN lead INTEGER NOT NULL DEFAULT 0 CHECK (lead IN (0, 1));
+
+    CREATE TABLE cluster_tasks (
+        id             TEXT PRIMARY KEY CHECK (length(id) = 32),
+        cluster        TEXT NOT NULL UNIQUE CHECK (length(cluster) = 32),
+        signer         TEXT NOT NULL CHECK (length(signer) = 64),
+        signed_json    TEXT NOT NULL CHECK (json_valid(signed_json)),
+        expires_at     TEXT NOT NULL,
+        status         TEXT NOT NULL CHECK (status IN
+                           ('waiting', 'running', 'operator', 'accepted', 'dropped', 'expired')),
+        reason         TEXT,
+        note           TEXT CHECK (note IS NULL OR length(note) <= 2000),
+        replan         INTEGER NOT NULL DEFAULT 0 CHECK (replan IN (0, 1)),
+        operator_seen  TEXT,
+        lost           INTEGER NOT NULL DEFAULT 0 CHECK (lost >= 0),
+        created_at     TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+    CREATE INDEX cluster_tasks_status ON cluster_tasks (status, created_at);
+    CREATE TRIGGER cluster_tasks_record_fixed
+        BEFORE UPDATE OF id, cluster, signer, signed_json, expires_at ON cluster_tasks
+        BEGIN SELECT RAISE(ABORT, 'a cluster task keeps its record'); END;
+    CREATE TRIGGER cluster_tasks_no_delete BEFORE DELETE ON cluster_tasks
+        BEGIN SELECT RAISE(ABORT, 'cluster tasks are never deleted'); END;
+
+    CREATE TABLE appointments (
+        seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+        id            TEXT NOT NULL UNIQUE CHECK (length(id) = 32),
+        cluster       TEXT NOT NULL REFERENCES cluster_tasks (cluster),
+        operator      TEXT NOT NULL CHECK (length(operator) = 64),
+        members_json  TEXT NOT NULL CHECK (json_valid(members_json)),
+        issued_at     TEXT NOT NULL,
+        expires_at    TEXT NOT NULL,
+        signed_json   TEXT NOT NULL CHECK (json_valid(signed_json))
+    ) STRICT;
+    CREATE INDEX appointments_cluster ON appointments (cluster, issued_at);
+    CREATE TRIGGER appointments_no_update BEFORE UPDATE ON appointments
+        BEGIN SELECT RAISE(ABORT, 'appointments are append-only'); END;
+    CREATE TRIGGER appointments_no_delete BEFORE DELETE ON appointments
+        BEGIN SELECT RAISE(ABORT, 'appointments are append-only'); END;
+
+    CREATE TABLE cluster_records (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT NOT NULL UNIQUE CHECK (length(id) = 32),
+        cluster      TEXT NOT NULL REFERENCES cluster_tasks (cluster),
+        kind         TEXT NOT NULL CHECK (kind IN
+                         ('cluster_plan', 'cluster_job', 'cluster_result')),
+        signer       TEXT NOT NULL CHECK (length(signer) = 64),
+        version      INTEGER NOT NULL CHECK (version >= 1),
+        signed_json  TEXT NOT NULL CHECK (json_valid(signed_json)),
+        received_at  TEXT NOT NULL DEFAULT {_NOW_SQL}
+    ) STRICT;
+    CREATE INDEX cluster_records_cluster ON cluster_records (cluster, kind, seq);
+    CREATE TRIGGER cluster_records_no_update BEFORE UPDATE ON cluster_records
+        BEGIN SELECT RAISE(ABORT, 'cluster records are append-only'); END;
+    CREATE TRIGGER cluster_records_no_delete BEFORE DELETE ON cluster_records
+        BEGIN SELECT RAISE(ABORT, 'cluster records are append-only'); END;
+
+    ALTER TABLE jobs ADD COLUMN cluster TEXT REFERENCES cluster_tasks (id);
+    CREATE INDEX jobs_cluster ON jobs (cluster) WHERE cluster IS NOT NULL;
+    """,
 )
 
 
@@ -477,9 +550,48 @@ def in_effect(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
 
 
 def handed_out(conn: sqlite3.Connection, now: datetime) -> list[sign.Signed]:
-    """The records in effect, then the newest trust list still in its term (if any)."""
+    """The records in effect, then the newest trust list still in its term (if any), then the
+    appointments of every cluster still at work (a node checks a cluster job by them)."""
     found = latest_trust_list(conn, now)
-    return in_effect(conn, now) + ([] if found is None else [found])
+    return in_effect(conn, now) + ([] if found is None else [found]) + open_appointments(conn)
+
+
+OPEN_CLUSTERS: Final = ("waiting", "running", "operator")
+"""A cluster task not settled: its cluster's records may still be lent and checked."""
+
+
+def open_appointments(conn: sqlite3.Connection) -> list[sign.Signed]:
+    """The appointments a node needs for the clusters whose task is not settled, oldest first:
+    the newest of each, and each one some record of the cluster was issued under (a cluster
+    renews every quarter hour; most appointments vouch for no record)."""
+    tasks = conn.execute(
+        f"SELECT cluster FROM cluster_tasks WHERE status IN ({', '.join('?' * len(OPEN_CLUSTERS))})",
+        OPEN_CLUSTERS,
+    ).fetchall()
+    needed: list[tuple[datetime, int, sign.Signed]] = []
+    for task in tasks:
+        rows = conn.execute(
+            "SELECT seq, issued_at, signed_json FROM appointments WHERE cluster = ?"
+            " ORDER BY issued_at, seq",
+            (task["cluster"],),
+        ).fetchall()
+        if not rows:
+            continue
+        times = [db.parse_iso(r["issued_at"]) for r in rows]
+        chosen = {len(rows) - 1}
+        for kept in conn.execute(
+            "SELECT signed_json FROM cluster_records WHERE cluster = ?", (task["cluster"],)
+        ).fetchall():
+            issued = sign.Signed.model_validate_json(kept["signed_json"]).record.issued_at
+            under = bisect.bisect_right(times, issued) - 1
+            if under >= 0:
+                chosen.add(under)
+        for index in chosen:
+            row = rows[index]
+            needed.append(
+                (times[index], row["seq"], sign.Signed.model_validate_json(row["signed_json"]))
+            )
+    return [signed for _, _, signed in sorted(needed, key=lambda n: (n[0], n[1]))]
 
 
 def latest_trust_list(conn: sqlite3.Connection, now: datetime) -> sign.Signed | None:
@@ -604,11 +716,12 @@ def _proposal_submission(row: sqlite3.Row) -> ProposalSubmission:
 
 
 def trust(conn: sqlite3.Connection, root: Ed25519PublicKey, now: datetime) -> sign.Trust:
-    """What a node would believe after receiving every record kept here and the newest trust
-    list (an assignment past its term is refused and counts for nothing, as on a node)."""
+    """What a node would believe after receiving every record kept here, the newest trust
+    list and the appointments of clusters at work (an assignment past its term is refused and
+    counts for nothing, as on a node)."""
     believed = sign.Trust(root, clock=lambda: now)
     found = latest_trust_list(conn, now)
-    for signed in all_records(conn) + ([] if found is None else [found]):
+    for signed in all_records(conn) + ([] if found is None else [found]) + open_appointments(conn):
         try:
             believed.receive(signed.model_dump(mode="json"))
         except sign.Refused:
@@ -661,6 +774,10 @@ class Node:
     last_seen: str
     revoked: bool
     owner: str | None = None
+    takes_jobs: bool = False
+    """What its last claim said (`protocol.Claim.jobs`)."""
+    lead: bool = False
+    """What its last claim said (`protocol.Claim.lead`): it may lead a cluster."""
 
     @property
     def owned_by(self) -> str:
@@ -675,6 +792,8 @@ class Node:
             "registered_at": self.registered_at,
             "last_seen": self.last_seen,
             "owner": self.owner,
+            "takes_jobs": self.takes_jobs,
+            "lead": self.lead,
         }
 
 
@@ -688,6 +807,8 @@ def _node(conn: sqlite3.Connection, row: sqlite3.Row) -> Node:
         last_seen=row["last_seen"],
         revoked=is_revoked(conn, row["fingerprint"]),
         owner=row["owner"],
+        takes_jobs=bool(row["takes_jobs"]),
+        lead=bool(row["lead"]),
     )
 
 

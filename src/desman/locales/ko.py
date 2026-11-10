@@ -1528,4 +1528,107 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "클러스터 작업: 그 클러스터, 계획, "
+        "작업들과 각각의 진행 상황.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "노드 클러스터에 주는 목표: "
+        "DESMAN이 운영자를 "
+        "임명합니다(ADR 0006).",
+        "Appointer key made: {key}": "임명 키를 만들었습니다: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "레지스트리가 "
+        "임명할 "
+        "수 "
+        "있도록 "
+        "루트로 "
+        "할당하세요: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "클러스터",
+        "Cluster task": "클러스터 작업",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "클러스터 작업 {id}을(를) 추가했습니다. "
+        "{date}까지 빈 노드를 기다립니다.",
+        "Cluster task {id} is now: {status}": "클러스터 작업 {id}의 상태: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "클러스터 작업 {id}은(는) "
+        "{status} 상태입니다: "
+        "{decision}(으)로 결정할 수 "
+        "없습니다.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "클러스터 작업: 어느 클러스터가 각 "
+        "작업을 맡고 있는지, 왜 기다리는 "
+        "작업이 있는지.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "클러스터 작업 결정: 결과를 "
+        "수락하거나, 돌려보내거나, 취소합니다.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "각각 다음으로 결정하세요: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "목표",
+        "How long the cluster may take.": "클러스터가 쓸 수 있는 기간.",
+        "Jobs": "작업",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "임명 키를 (한 번) "
+        "만든 뒤 루트로 "
+        "할당합니다: "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "클러스터가 다룰 자료. 여러 개면 반복하세요.",
+        "Members": "구성원",
+        "More than one cluster task starts with {id}; give more of it.": "{id}(으)로 시작하는 클러스터 작업이 둘 "
+        "이상입니다. 더 길게 입력하세요.",
+        "No cluster task {id}.": "클러스터 작업 {id}이(가) 없습니다.",
+        "No cluster tasks.": "클러스터 작업이 없습니다.",
+        "No plan yet.": "아직 계획이 없습니다.",
+        "Note": "메모",
+        "Only these.": "이것들만.",
+        "Operator": "운영자",
+        "Plan": "계획",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "운영자 "
+        "키로 "
+        "목표에 "
+        "서명합니다. "
+        "빈 "
+        "노드가 "
+        "충분하면 "
+        "클러스터가 "
+        "구성됩니다.",
+        "The appointer key exists already: {key}": "임명 키가 이미 있습니다: {key}",
+        "The cluster task is not valid: {error}": "클러스터 작업이 올바르지 않습니다: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "레지스트리가 클러스터 "
+        "운영자를 스스로 임명하는 "
+        "키(ADR 0006).",
+        "What the cluster is to do (at most 4000 characters).": "클러스터가 할 일(최대 4000자).",
+        "What to tell the cluster (with again).": "클러스터에 전할 말(again과 함께).",
+        "a cluster works on it": "클러스터가 작업 중",
+        "a job gave up": "작업이 포기했습니다",
+        "its operators were lost": "운영자들을 잃었습니다",
+        "its result came": "결과가 도착했습니다",
+        "no appointer key (appointer create)": "임명 키가 없습니다(appointer create)",
+        "no free node may lead": "이끌 수 있는 빈 노드가 없습니다",
+        "no fresh trust list (trust sign)": "새 신뢰 목록이 없습니다(trust sign)",
+        "the appointer is not assigned the scope appoint": "임명 키에 appoint 범위가 할당되지 않았습니다",
+        "waits for a cluster": "클러스터 대기 중",
+        "{free} of {needed} free nodes": "빈 노드 {free}/{needed}",
+    }
+)
+
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "클러스터 작업 기간은 1~{days}일입니다.",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "작업 "
+        "{id}은(는) "
+        "클러스터 "
+        "작업 "
+        "{task}에 "
+        "속합니다: "
+        "그 "
+        "클러스터가 "
+        "결정합니다(desman-registry "
+        "cluster "
+        "settle).",
+    }
+)
+
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

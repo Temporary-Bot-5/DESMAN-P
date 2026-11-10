@@ -1532,4 +1532,135 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "Bir küme görevi: "
+        "kümesi, planı, işleri "
+        "ve her birinin durumu.",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "Bir düğüm kümesi "
+        "için hedef: "
+        "DESMAN "
+        "operatörünü atar "
+        "(ADR 0006).",
+        "Appointer key made: {key}": "Atayıcı anahtarı oluşturuldu: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "Kayıt "
+        "defterinin "
+        "atama "
+        "yapabilmesi "
+        "için "
+        "kök "
+        "ile "
+        "atayın: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "Küme",
+        "Cluster task": "Küme görevi",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "Küme görevi {id} eklendi; "
+        "{date} tarihine kadar boş "
+        "düğüm bekliyor.",
+        "Cluster task {id} is now: {status}": "Küme görevi {id} artık: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "Küme görevi {id} "
+        "{status} durumunda: "
+        "{decision} ile "
+        "karara bağlanamaz.",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "Küme görevleri: her "
+        "biri üzerinde hangi "
+        "kümenin çalıştığı ve "
+        "birinin neden hâlâ "
+        "beklediği.",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "Bir küme görevine "
+        "karar verin: sonucunu "
+        "kabul edin, geri "
+        "gönderin veya "
+        "bırakın.",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "Her birine "
+        "şununla karar "
+        "verin: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "Hedef",
+        "How long the cluster may take.": "Kümenin ne kadar sürebileceği.",
+        "Jobs": "İşler",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "Atayıcı "
+        "anahtarını "
+        "(bir kez) "
+        "oluşturun, "
+        "sonra kök "
+        "ile atayın: "
+        "--scope "
+        "appoint.",
+        "Material the cluster works on; repeat for several.": "Kümenin üzerinde çalıştığı malzeme; "
+        "birden fazlası için tekrarlayın.",
+        "Members": "Üyeler",
+        "More than one cluster task starts with {id}; give more of it.": "{id} ile başlayan birden "
+        "fazla küme görevi var; daha "
+        "fazlasını verin.",
+        "No cluster task {id}.": "Küme görevi {id} yok.",
+        "No cluster tasks.": "Küme görevi yok.",
+        "No plan yet.": "Henüz plan yok.",
+        "Note": "Not",
+        "Only these.": "Yalnızca bunlar.",
+        "Operator": "Operatör",
+        "Plan": "Plan",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "Operatör "
+        "anahtarıyla "
+        "bir "
+        "hedef "
+        "imzalayın; "
+        "yeterince "
+        "boş "
+        "düğüm "
+        "olduğunda "
+        "küme "
+        "kurulur.",
+        "The appointer key exists already: {key}": "Atayıcı anahtarı zaten var: {key}",
+        "The cluster task is not valid: {error}": "Küme görevi geçersiz: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "Kayıt "
+        "defterinin "
+        "küme "
+        "operatörlerini "
+        "kendi başına "
+        "atadığı "
+        "anahtar (ADR "
+        "0006).",
+        "What the cluster is to do (at most 4000 characters).": "Kümenin ne yapacağı (en fazla 4000 "
+        "karakter).",
+        "What to tell the cluster (with again).": "Kümeye ne söyleneceği (again ile).",
+        "a cluster works on it": "bir küme üzerinde çalışıyor",
+        "a job gave up": "bir iş vazgeçti",
+        "its operators were lost": "operatörleri kayboldu",
+        "its result came": "sonucu geldi",
+        "no appointer key (appointer create)": "atayıcı anahtarı yok (appointer create)",
+        "no free node may lead": "hiçbir boş düğüm yönetemez",
+        "no fresh trust list (trust sign)": "güncel güven listesi yok (trust sign)",
+        "the appointer is not assigned the scope appoint": "atayıcıya appoint kapsamı atanmamış",
+        "waits for a cluster": "bir küme bekliyor",
+        "{free} of {needed} free nodes": "{needed} düğümden {free} tanesi boş",
+    }
+)
+
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "Bir küme görevi 1 ile {days} gün arası sürer.",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "İş "
+        "{id}, "
+        "{task} "
+        "küme "
+        "görevine "
+        "ait: "
+        "ona "
+        "kümesi "
+        "karar "
+        "verir "
+        "(desman-registry "
+        "cluster "
+        "settle).",
+    }
+)
+
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

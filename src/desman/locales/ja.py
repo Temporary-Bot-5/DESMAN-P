@@ -1534,4 +1534,89 @@ MESSAGES.update(
     }
 )
 
+MESSAGES.update(
+    {
+        "A cluster task: its cluster, its plan, its jobs and where each is.": "クラスタタスク: "
+        "そのクラスタ、計画、ジョブ、それぞれの状況。",
+        "A goal for a cluster of nodes: DESMAN appoints its operator (ADR 0006).": "ノードのクラスタに与える目標: "
+        "DESMAN "
+        "がそのオペレーターを任命します(ADR "
+        "0006)。",
+        "Appointer key made: {key}": "任命鍵を作成しました: {key}",
+        "Assign it with the root so the registry may appoint: desman-registry assign {key} --scope appoint": "レジストリが任命できるよう、ルートで割り当ててください: "
+        "desman-registry "
+        "assign "
+        "{key} "
+        "--scope "
+        "appoint",
+        "Cluster": "クラスタ",
+        "Cluster task": "クラスタタスク",
+        "Cluster task {id} added; it waits for free nodes until {date}.": "クラスタタスク {id} "
+        "を追加しました。{date} "
+        "まで空きノードを待ちます。",
+        "Cluster task {id} is now: {status}": "クラスタタスク {id} は現在: {status}",
+        "Cluster task {id} is {status}: it cannot be settled with {decision}.": "クラスタタスク {id} は "
+        "{status} です: "
+        "{decision} "
+        "では決定できません。",
+        "Cluster tasks: which cluster works on each, and why one still waits.": "クラスタタスク: "
+        "どのクラスタが各タスクに取り組んでいるか、なぜ待っているものがあるか。",
+        "Decide a cluster task: accept its result, send it back, or drop it.": "クラスタタスクを決定: "
+        "結果を受け入れる、差し戻す、または取り下げる。",
+        "Decide each with: desman-registry cluster settle TASK accept|again|drop": "それぞれ次で決定してください: "
+        "desman-registry "
+        "cluster settle "
+        "TASK "
+        "accept|again|drop",
+        "Goal": "目標",
+        "How long the cluster may take.": "クラスタにかけられる期間。",
+        "Jobs": "ジョブ",
+        "Make the appointer key (once), then assign it with the root: --scope appoint.": "任命鍵を作成し(一度だけ)、ルートで割り当てます: "
+        "--scope "
+        "appoint。",
+        "Material the cluster works on; repeat for several.": "クラスタが扱う資料。複数ある場合は繰り返します。",
+        "Members": "メンバー",
+        "More than one cluster task starts with {id}; give more of it.": "{id} "
+        "で始まるクラスタタスクが複数あります。もっと長く指定してください。",
+        "No cluster task {id}.": "クラスタタスク {id} はありません。",
+        "No cluster tasks.": "クラスタタスクはありません。",
+        "No plan yet.": "まだ計画はありません。",
+        "Note": "メモ",
+        "Only these.": "これらのみ。",
+        "Operator": "オペレーター",
+        "Plan": "計画",
+        "Sign a goal with the operator's key; a cluster is formed when enough nodes are free.": "オペレーターの鍵で目標に署名します。空きノードが十分になるとクラスタが作られます。",
+        "The appointer key exists already: {key}": "任命鍵はすでにあります: {key}",
+        "The cluster task is not valid: {error}": "クラスタタスクが正しくありません: {error}",
+        "The key the registry appoints cluster operators with, by itself (ADR 0006).": "レジストリがクラスタオペレーターを自ら任命するための鍵(ADR "
+        "0006)。",
+        "What the cluster is to do (at most 4000 characters).": "クラスタが行うこと(最大 4000 文字)。",
+        "What to tell the cluster (with again).": "クラスタへの伝言(again と共に)。",
+        "a cluster works on it": "クラスタが取り組み中",
+        "a job gave up": "ジョブが断念しました",
+        "its operators were lost": "オペレーターが失われました",
+        "its result came": "結果が届きました",
+        "no appointer key (appointer create)": "任命鍵がありません(appointer create)",
+        "no free node may lead": "率いることができる空きノードがありません",
+        "no fresh trust list (trust sign)": "新しい信頼リストがありません(trust sign)",
+        "the appointer is not assigned the scope appoint": "任命鍵に appoint スコープが割り当てられていません",
+        "waits for a cluster": "クラスタ待ち",
+        "{free} of {needed} free nodes": "空きノード {free}/{needed}",
+    }
+)
+
+MESSAGES.update(
+    {
+        "A cluster task lasts from 1 to {days} days.": "クラスタタスクの期間は 1〜{days} 日です。",
+        "Job {id} belongs to cluster task {task}: its cluster decides it (desman-registry cluster settle).": "ジョブ "
+        "{id} "
+        "はクラスタタスク "
+        "{task} "
+        "に属します: "
+        "そのクラスタが決定します(desman-registry "
+        "cluster "
+        "settle)。",
+    }
+)
+
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

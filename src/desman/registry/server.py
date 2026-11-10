@@ -17,6 +17,12 @@ Work (G.6) is `registry/work.py`'s: `CLAIM` lends a job, `EXTEND` keeps the leas
 takes a signed result or verdict. A token that names no lease the caller holds now is refused
 as `lease_lost` (409), like any refusal journaled; a node that leaves gives its leases back.
 
+Clusters (ADR 0006, T.4b) are `registry/clusters.py`'s: a claim says whether the node takes
+jobs and may lead; heartbeats and claims let the registry appoint by itself (`clusters.tick`,
+with `appointer.key` from the registry's directory, read when it exists); `CLUSTERS_MINE`
+answers a node's cluster (the operator's heartbeat) and `CLUSTER_RECORDS` takes its operator's
+records.
+
 What is answered before the signature is read (an unknown path, another method, a body over
 `protocol.MAX_BODY`) is not journaled: nobody could be named, and anyone could fill the journal.
 """
@@ -29,7 +35,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,7 +48,7 @@ from pydantic import BaseModel, ValidationError
 from desman.core import db
 from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import checks, messenger, releases, store, work
+from desman.registry import checks, clusters, messenger, releases, store, work
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -118,8 +124,11 @@ class Registry:
         clock: Callable[[], datetime] = _utc_now,
         heartbeat_seconds: int = protocol.HEARTBEAT_SECONDS,
         root: Path | None = None,
+        appointer: Path | None = None,
     ) -> None:
         self.path = path
+        self._appointer_path = path.parent / store.APPOINTER_KEY if appointer is None else appointer
+        self._appointer: sign.NodeKey | None = None
         self._clock = clock
         self._heartbeat = heartbeat_seconds
         self._root_path = root
@@ -134,6 +143,8 @@ class Registry:
             protocol.EXTEND: ("POST", self._extend),
             protocol.HAND_IN: ("POST", self._hand_in),
             protocol.CHECK_HAND_IN: ("POST", self._hand_in_check),
+            protocol.CLUSTERS_MINE: ("GET", self._clusters_mine),
+            protocol.CLUSTER_RECORDS: ("POST", self._cluster_records),
             protocol.PROPOSALS: ("POST", self._submit_proposal),
             protocol.REPORTS: ("POST", self._submit_report),
             protocol.MESSENGER_KEY: (
@@ -174,6 +185,24 @@ class Registry:
                 sign.ROOT_PUB if self._root_path is None else self._root_path
             )
         return self._root
+
+    @property
+    def appointer(self) -> sign.NodeKey | None:
+        """The key that signs appointments, once the person made it (`appointer create`)."""
+        if self._appointer is None and self._appointer_path.exists():
+            try:
+                self._appointer = sign.load_node_key(self._appointer_path)
+            except (sign.KeyFileError, OSError):
+                return None  # appoints nobody; `desman-registry clusters` says why
+        return self._appointer
+
+    @property
+    def online(self) -> timedelta:
+        """How recent a heartbeat a free node has: two of its intervals."""
+        return timedelta(seconds=2 * self._heartbeat)
+
+    def _tick(self, conn: sqlite3.Connection, now: datetime) -> None:
+        clusters.tick(conn, self.appointer, self.root, now, self.online)
 
     def handle(
         self, method: str, target: str, headers: Iterable[tuple[str, str]], body: bytes
@@ -290,6 +319,7 @@ class Registry:
                     caller.fingerprint,
                     {"capabilities": [c.model_dump(mode="json") for c in asked.capabilities]},
                 )
+        self._tick(conn, now)
         return self._state(caller.fingerprint)
 
     def _leave(
@@ -333,6 +363,17 @@ class Registry:
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
     ) -> Reply:
         asked = _body(protocol.Claim, body, caller)
+        with db.transaction(conn):
+            found = self._active(conn, caller)
+            if (found.takes_jobs, found.lead) != (asked.jobs, asked.lead):
+                conn.execute(
+                    "UPDATE nodes SET takes_jobs = ?, lead = ? WHERE fingerprint = ?",
+                    (int(asked.jobs), int(asked.lead), caller.fingerprint),
+                )
+                store.log(
+                    conn, "claims", caller.fingerprint, {"jobs": asked.jobs, "lead": asked.lead}
+                )
+        self._tick(conn, now)
         found = self._active(conn, caller)
         offered = work.claim(
             conn, found, self.root, now, jobs=asked.jobs, proposals=asked.proposals
@@ -356,6 +397,21 @@ class Registry:
         given = _body(protocol.HandIn, body, caller)
         found = self._active(conn, caller)
         return _ok(work.hand_in(conn, found, given, now))
+
+    def _clusters_mine(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        _no_body(body, caller)
+        found = self._active(conn, caller)
+        return _ok(clusters.poll(conn, found, self.appointer, self.root, now, self.online))
+
+    def _cluster_records(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        given = _body(protocol.ClusterHandIn, body, caller)
+        found = self._active(conn, caller)
+        self._tick(conn, now)
+        return _ok(clusters.hand_in(conn, found, given, self.root, now))
 
     def _hand_in_check(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime

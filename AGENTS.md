@@ -304,6 +304,10 @@ src/desman/
     ├── work.py    # Jobs (G.6): an operator's `task` record lent with a lease and token
     │              #   (claim | extend | hand-in), done, then rechecked by another owner's node;
     │              #   rejected, failed or leases lost → the operator's inbox (`job settle`)
+    ├── clusters.py # Clusters (ADR 0006, T.4b): cluster tasks; appointments the registry signs
+    │              #   itself with appointer.key (3 free nodes, one may lead); the operator polls
+    │              #   (`/v1/clusters/mine`, renewed past half its 30 min) and hands in plan, jobs,
+    │              #   result; lost → replaced; given up / result → `inbox`, `cluster settle`
     ├── admin.py   # assign / revoke signed by root.key (checked against root.pub and as a node
     │              #   would), backup (SQLite backup API); job add / settle, owner
     └── cli.py     # `desman-registry serve|backup|assign|revoke|nodes|log|job|jobs|inbox|owner`

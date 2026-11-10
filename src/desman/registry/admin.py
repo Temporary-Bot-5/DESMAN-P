@@ -1,7 +1,8 @@
 """What the owner does on the registry's server (ADR 0004; ROADMAP G.4, G.6): assign an
 operator, revoke a key, sign the trust list, back the database up; as the operator, add jobs
 and settle those that wait for a person, and say whose node is whose. The bodies of
-`desman-registry assign|revoke|trust|backup|job|owner`.
+`desman-registry assign|revoke|trust|backup|job|owner`, and (ADR 0006, T.4b) `appointer create`
+and `cluster add|settle`.
 
 Assignments and revocations are signed by the root key, which lives on this server only
 (`root.key` in the registry's directory, readable by its owner only). A key that is not the
@@ -26,7 +27,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from desman.core import db
 from desman.i18n import t
 from desman.net import protocol, sign
-from desman.registry import store, work
+from desman.registry import clusters, store, work
 
 ASSIGNMENT_DAYS: Final = 90
 JOB_DAYS: Final = 7
@@ -34,6 +35,9 @@ TRUST_DAYS: Final = 7
 """How long a trust list lasts unless the person says otherwise."""
 MAX_TRUST_DAYS: Final = 30
 """The longest a trust list may last: a hidden revocation is hidden at most this long."""
+CLUSTER_DAYS: Final = 30
+"""The longest a cluster task lasts: its appointments (renewed every quarter hour) stay
+within what a node keeps of one cluster (`sign.MAX_APPOINTMENTS`)."""
 REVOCATION_LIFETIME: Final = timedelta(days=3650)
 """A revocation is honoured past its term anyway; the term only has to be valid."""
 
@@ -281,6 +285,16 @@ def settle(
     conn: sqlite3.Connection, prefix: str, decision: work.Decision, *, now: datetime
 ) -> work.JobRow:
     job_id = find_job(conn, prefix)
+    found = work.job(conn, job_id)
+    if found is not None and found.cluster is not None:
+        raise AdminError(
+            t(
+                "Job {id} belongs to cluster task {task}: its cluster decides it"
+                " (desman-registry cluster settle).",
+                id=job_id[:8],
+                task=found.cluster[:8],
+            )
+        )
     work.expire(conn, now)  # decided on where the job is now, not where nodes last left it
     try:
         return work.settle(conn, job_id, decision, now)
@@ -311,3 +325,105 @@ def set_owner(conn: sqlite3.Connection, prefix: str, owner: str | None) -> str:
     fingerprint = find_node(conn, prefix)
     work.set_owner(conn, fingerprint, owner)
     return fingerprint
+
+
+# ── Clusters (ADR 0006, T.4b) ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Appointer:
+    fingerprint: str
+    public_key: str
+    created: bool
+
+
+def appointer_create(path: Path) -> Appointer:
+    """The registry's appointer key (`appointer.key`, 0600), made if missing. The root assigns
+    it `--scope appoint` alone; until then the registry appoints nobody."""
+    existed = path.exists()
+    try:
+        key = sign.node_key(path)
+    except (sign.KeyFileError, OSError) as e:
+        raise AdminError(t("The key cannot be used: {error}", error=str(e))) from e
+    return Appointer(key.fingerprint, sign.encode_public(key.public), not existed)
+
+
+def load_appointer(path: Path) -> sign.NodeKey | None:
+    """The appointer key if the person made it; None otherwise."""
+    if not path.exists():
+        return None
+    try:
+        return sign.load_node_key(path)
+    except (sign.KeyFileError, OSError) as e:
+        raise AdminError(t("The key cannot be used: {error}", error=str(e))) from e
+
+
+def add_cluster_task(
+    conn: sqlite3.Connection,
+    operator: sign.NodeKey,
+    task: protocol.ClusterTask,
+    *,
+    days: int,
+    now: datetime,
+    root_pub: Path | None = None,
+) -> clusters.ClusterTaskRow:
+    """Sign a goal as a `cluster_task` record and keep it, if a node would accept it; the
+    registry forms its cluster when enough nodes are free."""
+    if not 1 <= days <= CLUSTER_DAYS:
+        raise AdminError(t("A cluster task lasts from 1 to {days} days.", days=CLUSTER_DAYS))
+    root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
+    lifetime = timedelta(days=days)
+    assigned = store.trust(conn, root, now).operator(operator.fingerprint)
+    if assigned is not None:
+        lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
+    if lifetime <= timedelta(0):
+        raise AdminError(t("A node would refuse it: the assignment has ended."))
+    signed = sign.sign(
+        operator,
+        sign.RecordKind.CLUSTER_TASK,
+        task.model_dump(mode="json"),
+        issued_at=now,
+        lifetime=lifetime,
+    )
+    try:
+        return clusters.add(conn, signed, root, now)
+    except sign.Refused as e:
+        raise AdminError(t("A node would refuse it: {error}", error=str(e))) from e
+
+
+def find_cluster(conn: sqlite3.Connection, prefix: str) -> str:
+    found = clusters.find(conn, prefix)
+    if not found:
+        raise AdminError(t("No cluster task {id}.", id=prefix))
+    if len(found) > 1:
+        raise AdminError(
+            t("More than one cluster task starts with {id}; give more of it.", id=prefix)
+        )
+    return found[0]
+
+
+def settle_cluster(
+    conn: sqlite3.Connection,
+    prefix: str,
+    decision: clusters.Decision,
+    *,
+    note: str,
+    now: datetime,
+    appointer: sign.NodeKey | None,
+    online: timedelta,
+    root_pub: Path | None = None,
+) -> clusters.ClusterTaskRow:
+    task_id = find_cluster(conn, prefix)
+    root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
+    clusters.tick(conn, appointer, root, now, online)  # decided on where it is now
+    try:
+        return clusters.settle(conn, task_id, decision, now, note=note)
+    except clusters.SettleError as e:
+        raise AdminError(
+            t(
+                "Cluster task {id} is {status}: it cannot be settled with {decision}.",
+                id=task_id[:8],
+                status=e.status,
+                decision=decision,
+            )
+        ) from e
