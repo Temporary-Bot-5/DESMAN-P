@@ -16,7 +16,16 @@ public bytes, in hex. Only fingerprints and public keys ever leave the machine.
   `signer`, `body`) and the signature of its canonical JSON (`canonical()`: sorted keys, no
   spaces, UTF-8).
 
-**Authority** (`Trust`) is a chain of at most one link below the root. The root signs anything:
+**Authority** (`Trust`) is a chain of at most one link below the root, with one exception
+(ADR 0006): an *appointment*, signed by an operator with scope `appoint` (the appointer, a key
+on the registry's server), names a node's key as the operator of one cluster for at most
+APPOINTMENT_TERM. That key signs only the records of its cluster (`CLUSTER_KINDS`: its plan,
+its jobs, its result), naming the appointment's cluster and cluster task, issued inside the
+term of the appointment current at that moment (the newest of its cluster issued no later):
+what a replaced operator signs afterwards is refused. Appointments fall with their appointer
+(revoked, or no longer holding `appoint`); `appoint` is never assigned together with another
+scope. The registry takes cluster records only from the current operator during its term,
+and nodes get them only through the registry. Otherwise the root signs anything:
 an *assignment* names an operator's key, its scopes and its term; releases are signed by the
 root only. An operator signs tasks (scope `tasks`), moderation decisions and revocations of
 nodes (scope `moderation`), only while its assignment runs and is not revoked. A *revocation*
@@ -73,6 +82,12 @@ from desman.core import db
 ROOT_PUB: Final = Path(__file__).resolve().parent / "root.pub"
 NODE_KEY: Final = "node.key"
 TRUST_LIST_MAX_AGE: Final = timedelta(days=2)
+APPOINTMENT_TERM: Final = timedelta(minutes=30)
+"""The longest an appointment lasts: short terms take the place of revoking one."""
+MAX_MEMBERS: Final = 6
+"""Members of a cluster besides its operator."""
+MAX_APPOINTMENTS: Final = 256
+"""Appointments kept per cluster (the oldest are forgotten first)."""
 SKEW: Final = timedelta(minutes=5)
 """How far ahead of our clock a record's `issued_at` may be."""
 
@@ -246,10 +261,23 @@ class RecordKind(StrEnum):
     """A node's review of another node's result, signed like a result."""
     TRUST_LIST = "trust_list"
     """The root names every assignment and revocation in effect (`TrustList`)."""
+    CLUSTER_TASK = "cluster_task"
+    """A goal for a cluster to plan and do, signed by an operator with `tasks` (ADR 0006)."""
+    APPOINTMENT = "appointment"
+    """The appointer names a cluster's operator and members for a short term (`Appointment`)."""
+    CLUSTER_PLAN = "cluster_plan"
+    CLUSTER_JOB = "cluster_job"
+    CLUSTER_RESULT = "cluster_result"
 
 
 STATE: Final = frozenset(
-    {RecordKind.ASSIGNMENT, RecordKind.REVOCATION, RecordKind.TRUST_LIST, RecordKind.RELEASE}
+    {
+        RecordKind.ASSIGNMENT,
+        RecordKind.REVOCATION,
+        RecordKind.TRUST_LIST,
+        RecordKind.RELEASE,
+        RecordKind.APPOINTMENT,
+    }
 )
 """Kinds handed out again on every poll: receiving one twice is not a replay."""
 
@@ -257,14 +285,26 @@ STATE: Final = frozenset(
 class Scope(StrEnum):
     TASKS = "tasks"
     MODERATION = "moderation"
+    APPOINT = "appoint"
+    """Only appointments of cluster operators (ADR 0006); never with another scope."""
 
+
+DEFAULT_SCOPES: Final = frozenset({Scope.TASKS, Scope.MODERATION})
+"""What `assign` gives when no scope is named."""
 
 OPERATOR_KINDS: Final = {
     RecordKind.TASK: Scope.TASKS,
+    RecordKind.CLUSTER_TASK: Scope.TASKS,
     RecordKind.MODERATION: Scope.MODERATION,
     RecordKind.REVOCATION: Scope.MODERATION,
+    RecordKind.APPOINTMENT: Scope.APPOINT,
 }
-"""What an operator may sign, by the scope it needs. Anything else is the root's."""
+"""What an operator may sign, by the scope it needs. Anything else is the root's, except
+`CLUSTER_KINDS`, which only an appointed cluster operator signs."""
+
+CLUSTER_KINDS: Final = frozenset(
+    {RecordKind.CLUSTER_PLAN, RecordKind.CLUSTER_JOB, RecordKind.CLUSTER_RESULT}
+)
 
 
 def _utc(moment: datetime) -> datetime:
@@ -313,9 +353,49 @@ class Assignment(BaseModel):
     key: PublicKeyText
     scopes: frozenset[Scope] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def _appoint_alone(self) -> Assignment:
+        if Scope.APPOINT in self.scopes and len(self.scopes) > 1:
+            raise ValueError("the scope appoint is never assigned with another scope")
+        return self
+
     @property
     def fingerprint(self) -> str:
         return fingerprint(decode_public(self.key))
+
+
+class Appointment(BaseModel):
+    """The body of an appointment: `key` leads `cluster` on the cluster task `task`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cluster: RecordId
+    task: RecordId
+    """The id of the `cluster_task` record."""
+    key: PublicKeyText
+    """The cluster operator's public key."""
+    members: list[Fingerprint] = Field(min_length=1, max_length=MAX_MEMBERS)
+
+    @model_validator(mode="after")
+    def _members(self) -> Appointment:
+        if len(set(self.members)) != len(self.members):
+            raise ValueError("a member is named twice")
+        if self.fingerprint in self.members:
+            raise ValueError("the operator is not one of its members")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        return fingerprint(decode_public(self.key))
+
+
+class ClusterRef(BaseModel):
+    """What every record of a cluster names first; the rest of its body is `protocol`'s."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    cluster: RecordId
+    task: RecordId
 
 
 class Release(BaseModel):
@@ -404,6 +484,26 @@ def assign(
         root,
         RecordKind.ASSIGNMENT,
         body.model_dump(mode="json") | {"scopes": sorted(body.scopes)},
+        issued_at=issued_at,
+        lifetime=lifetime,
+    )
+
+
+def appoint(
+    appointer: NodeKey,
+    operator: Ed25519PublicKey,
+    *,
+    cluster: str,
+    task: str,
+    members: list[str],
+    issued_at: datetime,
+    lifetime: timedelta = APPOINTMENT_TERM,
+) -> Signed:
+    body = Appointment(cluster=cluster, task=task, key=encode_public(operator), members=members)
+    return sign(
+        appointer,
+        RecordKind.APPOINTMENT,
+        body.model_dump(mode="json"),
         issued_at=issued_at,
         lifetime=lifetime,
     )
@@ -521,6 +621,21 @@ class Operator:
         )
 
 
+@dataclass(frozen=True)
+class Appointed:
+    """An appointment accepted: who leads which cluster, with whom, until when."""
+
+    id: str
+    cluster: str
+    task: str
+    key: Ed25519PublicKey
+    fingerprint: str
+    members: frozenset[str]
+    issued_at: datetime
+    expires_at: datetime
+    appointer: str
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -546,9 +661,46 @@ class Trust:
         """Assignments and revocations accepted, by id: the canonical form of the signed record."""
         self._list: Record | None = None
         """The newest trust list received."""
+        self._appointments: dict[str, list[Appointed]] = {}
+        """Appointments accepted, by cluster, oldest first."""
 
     def operator(self, key: str) -> Operator | None:
         return self._operators.get(key)
+
+    def appointment(self, cluster: str) -> Appointed | None:
+        """The cluster's appointment in force now: the newest issued, still in its term, its
+        appointer still holding `appoint`; None if there is none."""
+        now = _utc(self._clock())
+        found = self._current(cluster, now)
+        if found is None or now >= found.expires_at:
+            return None
+        return found
+
+    def _current(self, cluster: str, moment: datetime) -> Appointed | None:
+        """The appointment that counted at `moment`: the newest of the cluster issued no later,
+        if its appointer still stands. Two of the same second must agree on the key."""
+        issued = [a for a in self._appointments.get(cluster, ()) if a.issued_at <= moment]
+        if not issued:
+            return None
+        newest = max(a.issued_at for a in issued)
+        tied = [a for a in issued if a.issued_at == newest]
+        if len({a.fingerprint for a in tied}) != 1:
+            return None
+        found = min(tied, key=lambda a: a.expires_at)
+        if not self._appointer_stands(found.appointer):
+            return None
+        return found
+
+    def _appointer_stands(self, signer: str) -> bool:
+        if signer == self.root_fingerprint:
+            return True
+        found = self._operators.get(signer)
+        return (
+            found is not None
+            and Scope.APPOINT in found.scopes
+            and signer not in self._revoked
+            and _utc(self._clock()) < found.expires_at
+        )
 
     def is_revoked(self, key: str) -> bool:
         return key in self._revoked
@@ -589,6 +741,8 @@ class Trust:
                 raise refuse(Reason.CONFLICT, "another record has this id")
             if record.signer in self._revoked:
                 raise refuse(Reason.REVOKED, "the signer's key is revoked")
+            if record.kind is RecordKind.APPOINTMENT and not self._appointer_stands(record.signer):
+                raise refuse(Reason.NOT_ALLOWED, "its appointer no longer appoints")
             self._check_body(record)
             return record
 
@@ -596,9 +750,13 @@ class Trust:
             raise refuse(Reason.REVOKED, "the signer's key is revoked")
         if record.kind is RecordKind.PROPOSAL_CHECK:
             raise refuse(Reason.NOT_ALLOWED, "a proposal check is not trust state")
-        key = self._signer_key(record)
-        check_signature(signed, key)
-        self._check_authority(record, now)
+        if record.kind in CLUSTER_KINDS:
+            key = self._cluster_signer(record)
+            check_signature(signed, key)
+        else:
+            key = self._signer_key(record)
+            check_signature(signed, key)
+            self._check_authority(record, now)
         body = self._check_body(record)
 
         if record.issued_at > now + SKEW:
@@ -622,6 +780,23 @@ class Trust:
         elif isinstance(body, TrustList):
             if self._list is None or record.issued_at > self._list.issued_at:
                 self._list = record  # an older list handed out again changes nothing
+        elif isinstance(body, Appointment):
+            kept = self._appointments.setdefault(body.cluster, [])
+            kept.append(
+                Appointed(
+                    id=record.id,
+                    cluster=body.cluster,
+                    task=body.task,
+                    key=decode_public(body.key),
+                    fingerprint=body.fingerprint,
+                    members=frozenset(body.members),
+                    issued_at=record.issued_at,
+                    expires_at=record.expires_at,
+                    appointer=record.signer,
+                )
+            )
+            kept.sort(key=lambda a: a.issued_at)
+            del kept[:-MAX_APPOINTMENTS]
         elif record.kind not in STATE and not self._seen.add(record.id, record.expires_at, now):
             raise refuse(Reason.REPLAY, "this record was already received")
 
@@ -642,6 +817,33 @@ class Trust:
             )
         return found.key
 
+    def _cluster_signer(self, record: Record) -> Ed25519PublicKey:
+        """The key of the cluster operator that may have signed this record, or `Refused`."""
+
+        def refuse(reason: Reason, detail: str) -> Refused:
+            return Refused(reason, detail, id=record.id, signer=record.signer)
+
+        try:
+            ref = ClusterRef.model_validate(record.body)
+        except ValidationError as e:
+            raise refuse(Reason.MALFORMED, str(e)) from e
+        current = self._current(ref.cluster, record.issued_at)
+        if current is None:
+            if record.signer not in {
+                a.fingerprint for a in self._appointments.get(ref.cluster, ())
+            }:
+                raise refuse(Reason.UNKNOWN_SIGNER, "no appointment of this cluster names it")
+            raise refuse(Reason.NOT_ALLOWED, "no appointment of this cluster stood when issued")
+        if current.fingerprint != record.signer:
+            if record.signer in {a.fingerprint for a in self._appointments[ref.cluster]}:
+                raise refuse(Reason.NOT_ALLOWED, "issued after its operator was replaced")
+            raise refuse(Reason.UNKNOWN_SIGNER, "not the operator of this cluster")
+        if ref.task != current.task:
+            raise refuse(Reason.NOT_ALLOWED, "names another task than its appointment")
+        if record.issued_at >= current.expires_at:
+            raise refuse(Reason.NOT_ALLOWED, "issued after its appointment's term")
+        return current.key
+
     def _check_authority(self, record: Record, now: datetime) -> None:
         if record.signer == self.root_fingerprint:
             return
@@ -658,7 +860,9 @@ class Trust:
         if record.kind is not RecordKind.REVOCATION and now >= term.expires_at:
             raise refuse(Reason.EXPIRED, "the operator's assignment has expired")
 
-    def _check_body(self, record: Record) -> Assignment | Revocation | TrustList | Release | None:
+    def _check_body(
+        self, record: Record
+    ) -> Assignment | Revocation | TrustList | Release | Appointment | None:
         def refuse(reason: Reason, detail: str) -> Refused:
             return Refused(reason, detail, id=record.id, signer=record.signer)
 
@@ -680,6 +884,19 @@ class Trust:
                 return revocation
             if record.kind is RecordKind.TRUST_LIST:
                 return TrustList.model_validate(record.body)
+            if record.kind is RecordKind.APPOINTMENT:
+                appointment = Appointment.model_validate(record.body)
+                if record.expires_at - record.issued_at > APPOINTMENT_TERM:
+                    raise refuse(Reason.NOT_ALLOWED, "an appointment lasts at most 30 minutes")
+                target = appointment.fingerprint
+                if target == self.root_fingerprint or target in self._operators:
+                    raise refuse(Reason.NOT_ALLOWED, "the root or an operator leads no cluster")
+                if target in self._revoked:
+                    raise refuse(Reason.REVOKED, "the appointed key is revoked")
+                earlier = self._appointments.get(appointment.cluster, ())
+                if any(a.task != appointment.task for a in earlier):
+                    raise refuse(Reason.CONFLICT, "this cluster works on another task")
+                return appointment
             if record.kind is RecordKind.RELEASE:
                 return Release.model_validate(record.body)
         except (ValidationError, KeyFileError) as e:

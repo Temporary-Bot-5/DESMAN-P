@@ -586,3 +586,282 @@ def test_a_list_in_term_must_be_younger_than_two_days(
     assert "more than 2 days ago" in (trust.fresh() or "")
     trust.receive(sign.trust_list(root, [], issued_at=clock(), lifetime=7 * DAY))
     assert trust.fresh() is None
+
+
+# ── Clusters (ADR 0006, ROADMAP T.4a) ────────────────────────────────────────
+
+MINUTE = timedelta(minutes=1)
+CLUSTER = "c" * 32
+CTASK = "d" * 32
+
+
+def appointer(trust: Trust, root: NodeKey, clock: FakeClock) -> NodeKey:
+    return operator(trust, root, clock, {Scope.APPOINT})
+
+
+def appoint(
+    signer: NodeKey,
+    lead: NodeKey,
+    clock: FakeClock,
+    *,
+    cluster: str = CLUSTER,
+    task: str = CTASK,
+    members: list[str] | None = None,
+    lifetime: timedelta = sign.APPOINTMENT_TERM,
+) -> Signed:
+    members = [NodeKey.generate().fingerprint] if members is None else members
+    return sign.appoint(
+        signer,
+        lead.public,
+        cluster=cluster,
+        task=task,
+        members=members,
+        issued_at=clock(),
+        lifetime=lifetime,
+    )
+
+
+def plan(lead: NodeKey, clock: FakeClock, *, cluster: str = CLUSTER, task: str = CTASK) -> Signed:
+    return sign.sign(
+        lead,
+        RecordKind.CLUSTER_PLAN,
+        {"cluster": cluster, "task": task, "version": 1, "nodes": []},
+        issued_at=clock(),
+        lifetime=HOUR,
+    )
+
+
+def test_appoint_is_never_assigned_with_another_scope(root: NodeKey, clock: FakeClock) -> None:
+    with pytest.raises(ValueError, match="appoint"):
+        sign.assign(
+            root,
+            NodeKey.generate().public,
+            {Scope.APPOINT, Scope.TASKS},
+            issued_at=clock(),
+            lifetime=DAY,
+        )
+    # Nor accepted when someone signs it by hand.
+    key = NodeKey.generate()
+    mixed = sign.sign(
+        root,
+        RecordKind.ASSIGNMENT,
+        {"key": sign.encode_public(key.public), "scopes": ["appoint", "tasks"]},
+        issued_at=clock(),
+        lifetime=DAY,
+    )
+    assert refused(Trust(root.public, clock=clock), mixed) is Reason.MALFORMED
+
+
+def test_an_appointed_operator_signs_its_clusters_records(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    lead = NodeKey.generate()
+    member = NodeKey.generate().fingerprint
+    signed = appoint(appointer(trust, root, clock), lead, clock, members=[member])
+    trust.receive(wire(signed))
+    found = trust.appointment(CLUSTER)
+    assert found is not None and found.fingerprint == lead.fingerprint
+    assert found.members == {member} and found.task == CTASK
+    for kind in sign.CLUSTER_KINDS:
+        record = sign.sign(
+            lead, kind, {"cluster": CLUSTER, "task": CTASK}, issued_at=clock(), lifetime=HOUR
+        )
+        assert trust.receive(wire(record)).kind is kind
+    # Handed out again on every poll: not a replay.
+    trust.receive(wire(signed))
+
+
+def test_only_an_operator_with_appoint_appoints(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    tasks = operator(trust, root, clock, {Scope.TASKS, Scope.MODERATION})
+    assert refused(trust, appoint(tasks, NodeKey.generate(), clock)) is Reason.NOT_ALLOWED
+    stranger = NodeKey.generate()
+    assert refused(trust, appoint(stranger, NodeKey.generate(), clock)) is Reason.UNKNOWN_SIGNER
+    # An appointer signs nothing else.
+    by_appointer = appointer(trust, root, clock)
+    assert refused(trust, task(by_appointer, clock)) is Reason.NOT_ALLOWED
+    assert (
+        refused(trust, sign.revoke(by_appointer, "e" * 64, "", issued_at=clock(), lifetime=DAY))
+        is Reason.NOT_ALLOWED
+    )
+
+
+def test_an_appointment_lasts_at_most_thirty_minutes(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    long = appoint(by, NodeKey.generate(), clock, lifetime=sign.APPOINTMENT_TERM + MINUTE)
+    assert refused(trust, long) is Reason.NOT_ALLOWED
+
+
+def test_an_appointment_names_its_members_once_and_not_its_operator(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    lead = NodeKey.generate()
+    with pytest.raises(ValueError):
+        appoint(by, lead, clock, members=[lead.fingerprint])
+    twice = NodeKey.generate().fingerprint
+    with pytest.raises(ValueError):
+        appoint(by, lead, clock, members=[twice, twice])
+    with pytest.raises(ValueError):
+        appoint(by, lead, clock, members=[])
+    with pytest.raises(ValueError):
+        appoint(
+            by,
+            lead,
+            clock,
+            members=[NodeKey.generate().fingerprint for _ in range(sign.MAX_MEMBERS + 1)],
+        )
+
+
+def test_the_root_or_an_operator_leads_no_cluster(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    assert refused(trust, appoint(by, root, clock)) is Reason.NOT_ALLOWED
+    other = operator(trust, root, clock, {Scope.TASKS})
+    assert refused(trust, appoint(by, other, clock)) is Reason.NOT_ALLOWED
+
+
+def test_a_cluster_keeps_its_task(trust: Trust, root: NodeKey, clock: FakeClock) -> None:
+    by = appointer(trust, root, clock)
+    trust.receive(appoint(by, NodeKey.generate(), clock))
+    clock.advance(60)
+    assert refused(trust, appoint(by, NodeKey.generate(), clock, task="e" * 32)) is Reason.CONFLICT
+
+
+def test_cluster_records_are_refused_outside_the_appointment(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    lead = NodeKey.generate()
+    trust.receive(appoint(by, lead, clock))
+    # Another cluster, another task, or a key not appointed.
+    assert refused(trust, plan(lead, clock, cluster="e" * 32)) is Reason.UNKNOWN_SIGNER
+    assert refused(trust, plan(lead, clock, task="e" * 32)) is Reason.NOT_ALLOWED
+    assert refused(trust, plan(NodeKey.generate(), clock)) is Reason.UNKNOWN_SIGNER
+    # The body must name its cluster.
+    bare = sign.sign(
+        lead, RecordKind.CLUSTER_PLAN, {"version": 1}, issued_at=clock(), lifetime=HOUR
+    )
+    assert refused(trust, bare) is Reason.MALFORMED
+    # The root and operators sign no cluster record.
+    assert refused(trust, plan(root, clock)) is Reason.UNKNOWN_SIGNER
+    # A cluster operator signs nothing else.
+    assert refused(trust, task(lead, clock)) is Reason.UNKNOWN_SIGNER
+    assert refused(trust, appoint(lead, NodeKey.generate(), clock)) is Reason.UNKNOWN_SIGNER
+    # Issued after the term.
+    clock.advance(sign.APPOINTMENT_TERM.total_seconds())
+    assert trust.appointment(CLUSTER) is None
+    assert refused(trust, plan(lead, clock)) is Reason.NOT_ALLOWED
+
+
+def test_a_forged_cluster_record_is_refused(trust: Trust, root: NodeKey, clock: FakeClock) -> None:
+    by = appointer(trust, root, clock)
+    lead = NodeKey.generate()
+    trust.receive(appoint(by, lead, clock))
+    signed = plan(lead, clock)
+    body = dict(signed.record.body, version=2)
+    forged = Signed(
+        record=signed.record.model_copy(update={"body": body}), signature=signed.signature
+    )
+    assert refused(trust, forged) is Reason.FORGED
+
+
+def test_a_renewed_operator_keeps_signing_and_a_replaced_one_stops(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    lead = NodeKey.generate()
+    trust.receive(appoint(by, lead, clock))
+    early = plan(lead, clock)
+    clock.advance(10 * 60)
+    trust.receive(appoint(by, lead, clock))  # renewed before half its term
+    clock.advance(25 * 60)  # past the first term, inside the second
+    trust.receive(plan(lead, clock))
+
+    successor = NodeKey.generate()
+    trust.receive(appoint(by, successor, clock))
+    clock.advance(1)
+    # The old operator's records from before stand; what it signs now is refused.
+    trust.receive(early)
+    assert refused(trust, plan(lead, clock)) is Reason.NOT_ALLOWED
+    trust.receive(plan(successor, clock))
+    found = trust.appointment(CLUSTER)
+    assert found is not None and found.fingerprint == successor.fingerprint
+
+
+def test_appointments_fall_with_their_appointer(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    lead = NodeKey.generate()
+    signed = appoint(by, lead, clock)
+    trust.receive(signed)
+    trust.receive(sign.revoke(root, by.fingerprint, "gone", issued_at=clock(), lifetime=DAY))
+    assert trust.appointment(CLUSTER) is None
+    assert refused(trust, plan(lead, clock)) is Reason.NOT_ALLOWED
+    assert refused(trust, signed) is Reason.REVOKED
+
+
+def test_appointments_fall_when_the_appointer_loses_appoint(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    lead = NodeKey.generate()
+    signed = appoint(by, lead, clock)
+    trust.receive(signed)
+    clock.advance(1)
+    trust.receive(sign.assign(root, by.public, {Scope.TASKS}, issued_at=clock(), lifetime=DAY))
+    assert trust.appointment(CLUSTER) is None
+    assert refused(trust, plan(lead, clock)) is Reason.NOT_ALLOWED
+    assert refused(trust, signed) is Reason.NOT_ALLOWED
+
+
+def test_a_revoked_cluster_operator_is_refused(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    moderator = operator(trust, root, clock, {Scope.MODERATION})
+    lead = NodeKey.generate()
+    trust.receive(appoint(by, lead, clock))
+    trust.receive(sign.revoke(moderator, lead.fingerprint, "", issued_at=clock(), lifetime=DAY))
+    assert refused(trust, plan(lead, clock)) is Reason.REVOKED
+    clock.advance(1)
+    assert refused(trust, appoint(by, lead, clock)) is Reason.REVOKED
+
+
+def test_two_appointments_of_one_second_must_agree(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = appointer(trust, root, clock)
+    first, second = NodeKey.generate(), NodeKey.generate()
+    trust.receive(appoint(by, first, clock))
+    trust.receive(appoint(by, second, clock))
+    assert trust.appointment(CLUSTER) is None
+    assert refused(trust, plan(first, clock)) is Reason.NOT_ALLOWED
+
+
+def test_a_cluster_task_needs_scope_tasks(trust: Trust, root: NodeKey, clock: FakeClock) -> None:
+    body = {"goal": "g", "acceptance_criteria": "c"}
+    ops = operator(trust, root, clock, {Scope.TASKS})
+    mod = operator(trust, root, clock, {Scope.MODERATION})
+    good = sign.sign(ops, RecordKind.CLUSTER_TASK, body, issued_at=clock(), lifetime=DAY)
+    assert trust.receive(good).kind is RecordKind.CLUSTER_TASK
+    bad = sign.sign(mod, RecordKind.CLUSTER_TASK, body, issued_at=clock(), lifetime=DAY)
+    assert refused(trust, bad) is Reason.NOT_ALLOWED
+
+
+def test_appointments_fall_when_the_appointers_assignment_ends(
+    trust: Trust, root: NodeKey, clock: FakeClock
+) -> None:
+    by = NodeKey.generate()
+    trust.receive(sign.assign(root, by.public, {Scope.APPOINT}, issued_at=clock(), lifetime=HOUR))
+    clock.advance(HOUR.total_seconds() - 60)
+    lead = NodeKey.generate()
+    trust.receive(appoint(by, lead, clock))
+    clock.advance(60)
+    assert trust.appointment(CLUSTER) is None
+    assert refused(trust, plan(lead, clock)) is Reason.NOT_ALLOWED

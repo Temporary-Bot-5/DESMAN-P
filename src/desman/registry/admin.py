@@ -180,6 +180,8 @@ def assign(
     days: int,
     now: datetime,
 ) -> Assigned:
+    if sign.Scope.APPOINT in scopes and len(scopes) > 1:
+        raise AdminError(t("The scope appoint is never assigned together with another scope."))
     signed = sign.assign(root, operator, scopes, issued_at=now, lifetime=timedelta(days=days))
     subject = _keep(conn, root, signed, now)
     return Assigned(subject, sorted(scopes), signed.record.expires_at)

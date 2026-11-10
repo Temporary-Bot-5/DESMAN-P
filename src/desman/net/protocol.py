@@ -472,6 +472,98 @@ class Received(BaseModel):
     status: str
 
 
+# ── Clusters (ADR 0006) ──────────────────────────────────────────────────────
+#
+# A cluster task is a goal the global operator signs (`cluster_task`, scope `tasks`). The
+# registry appoints a node to lead it (`sign.Appointment`); that operator signs the plan, one
+# `cluster_job` per node of the plan, and the final `cluster_result`. Every record of a
+# cluster names its cluster and its cluster task first (`sign.ClusterRef`), which is how
+# `sign.Trust` checks it against the appointment.
+
+MAX_PLAN_NODES: Final = 8
+MAX_PLAN_VERSIONS: Final = 3
+"""The first plan and at most two new versions (a failed node split)."""
+
+
+class ClusterTask(BaseModel):
+    """The body of a `cluster_task` record: a goal to plan, not one subtask."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    goal: str = Field(min_length=1, max_length=4000)
+    acceptance_criteria: str = Field(min_length=1, max_length=2000)
+    inputs: dict[InputName, str] = Field(default_factory=dict, max_length=16)
+
+    @model_validator(mode="after")
+    def _inputs_fit(self) -> ClusterTask:
+        if _encoded(*self.inputs.values()) > MAX_INPUT_BYTES:
+            raise ValueError(f"the inputs are over {MAX_INPUT_BYTES} bytes")
+        return self
+
+
+class PlanNode(BaseModel):
+    """One subtask of a cluster's plan; it depends only on nodes before it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    description: str = Field(min_length=1, max_length=4000)
+    acceptance_criteria: str = Field(min_length=1, max_length=2000)
+    depends_on: list[int] = Field(default_factory=list, max_length=MAX_PLAN_NODES)
+    kind: Kind = Kind.TEXT
+    runs_code: bool = False
+
+
+class ClusterPlan(BaseModel):
+    """The body of a `cluster_plan` record. A new version keeps every node of the one before
+    it whose result was accepted (ADR 0010: history is not rewritten); the last node gives
+    the final result."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cluster: RecordId
+    task: RecordId
+    version: int = Field(ge=1, le=MAX_PLAN_VERSIONS)
+    nodes: list[PlanNode] = Field(min_length=1, max_length=MAX_PLAN_NODES)
+
+    @model_validator(mode="after")
+    def _a_graph_in_order(self) -> ClusterPlan:
+        for index, node in enumerate(self.nodes):
+            if len(set(node.depends_on)) != len(node.depends_on):
+                raise ValueError(f"node {index} names a dependency twice")
+            if any(not 0 <= d < index for d in node.depends_on):
+                raise ValueError(f"node {index} depends on a node not before it")
+        return self
+
+
+class ClusterJob(BaseModel):
+    """The body of a `cluster_job` record: one node of a plan, lent like a job. Its inputs
+    are the accepted results of the node's dependencies, copied by code."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cluster: RecordId
+    task: RecordId
+    plan: RecordId
+    """The `cluster_plan` record the node belongs to."""
+    version: int = Field(ge=1, le=MAX_PLAN_VERSIONS)
+    node: int = Field(ge=0, lt=MAX_PLAN_NODES)
+    job: Job
+
+
+class ClusterResult(BaseModel):
+    """The body of a `cluster_result` record: the cluster task is done."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cluster: RecordId
+    task: RecordId
+    plan: RecordId
+    version: int = Field(ge=1, le=MAX_PLAN_VERSIONS)
+    result: RecordId
+    """The accepted `result` record of the plan's last node."""
+    summary: str = Field(default="", max_length=2000)
+
+
 def submission_hash(submission: ProposalSubmission) -> str:
     """Bind a check to the exact unsigned contents approved by the submitter."""
     return hashlib.sha256(canonical(submission.model_dump(mode="json"))).hexdigest()
