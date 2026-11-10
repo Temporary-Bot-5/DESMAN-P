@@ -76,6 +76,7 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             "blocked": True,
             "lines": [t("Cannot check the protected files: {error}", error=e)],
         }
+    network = global_cli.status(config, conn=conn)
     return {
         "general": {
             "language": config.language,
@@ -123,9 +124,9 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             for n, bounds in TUNING_BOUNDS.items()
         ],
         "network": {
-            **global_cli.status(config, conn=conn).as_json(),
+            **network.as_json(),
             "lead_label": t("Lead clusters"),
-            "cluster_text": global_cli.cluster_text(global_cli.status(config, conn=conn).cluster),
+            "cluster_text": global_cli.cluster_text(network.cluster),
             "default_quota": global_cli.DEFAULT_DONATION.model_dump(),
         },
         "protected": protection,

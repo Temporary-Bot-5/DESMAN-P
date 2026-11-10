@@ -683,3 +683,12 @@ def test_windows_tokenization(
 def test_windows_unclosed_quote() -> None:
     with pytest.raises(commands.BadArgs, match="Invalid quoting"):
         commands.parse_line('protected approve --note="unfinished', None, windows=True)
+
+
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_typed_personalize_parses_the_on_argument(value: str) -> None:
+    parsed = commands.parse_line(f"personalize {value}", Config())
+    assert parsed is not None
+    entry, args = parsed
+    assert entry.name == "personalize"
+    assert args.model_dump()["on"] is (value == "on")

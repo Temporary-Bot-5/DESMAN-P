@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from desman import planner
 from desman.core import calls, db, netlog
 from desman.core.models import SubtaskSpec
-from desman.llm.base import LLM, ProviderError
+from desman.llm.base import LLM
 from desman.net import protocol, sign
 
 CLUSTER_POLL: Final = timedelta(minutes=2)
@@ -26,7 +26,7 @@ def role(conn: sqlite3.Connection, now: datetime) -> dict[str, Any] | None:
     """Newest role receipt, only until its appointment ends."""
     row = conn.execute(
         "SELECT action, details_json FROM network_log WHERE action IN "
-        "('cluster_joined', 'cluster_left') ORDER BY seq DESC LIMIT 1"
+        "('cluster_joined', 'cluster_renewed', 'cluster_left') ORDER BY seq DESC LIMIT 1"
     ).fetchone()
     if row is None or row["action"] == "cluster_left":
         return None
@@ -36,9 +36,14 @@ def role(conn: sqlite3.Connection, now: datetime) -> dict[str, Any] | None:
     return details
 
 
-def left(conn: sqlite3.Connection, now: datetime) -> None:
-    if role(conn, now) is not None:
-        netlog.record(conn, "cluster_left", {})
+def left(conn: sqlite3.Connection, now: datetime, *, ended: bool = False) -> None:
+    row = conn.execute(
+        "SELECT action, details_json FROM network_log WHERE action IN "
+        "('cluster_joined', 'cluster_renewed', 'cluster_left') ORDER BY seq DESC LIMIT 1"
+    ).fetchone()
+    if row is not None and row["action"] != "cluster_left":
+        current = json.loads(row["details_json"])
+        netlog.record(conn, "cluster_left", {"cluster": current["cluster"], "ended": ended})
 
 
 def receive(state: protocol.ClusterState, trust: sign.Trust) -> None:
@@ -87,7 +92,27 @@ def receive(state: protocol.ClusterState, trust: sign.Trust) -> None:
                 raise sign.Refused(sign.Reason.MALFORMED, "accepted result is not done")
 
 
-def joined(conn: sqlite3.Connection, appointment: sign.Appointed, who: str, now: datetime) -> None:
+def joined(
+    conn: sqlite3.Connection,
+    appointment: sign.Appointed,
+    who: str,
+    now: datetime,
+    *,
+    from_trust: bool = False,
+) -> None:
+    if from_trust:
+        previous = conn.execute(
+            "SELECT action, details_json FROM network_log WHERE action IN "
+            "('cluster_joined', 'cluster_renewed', 'cluster_left') AND "
+            "json_extract(details_json, '$.cluster') = ? ORDER BY seq DESC LIMIT 1",
+            (appointment.cluster,),
+        ).fetchone()
+        if (
+            previous is not None
+            and previous["action"] == "cluster_left"
+            and json.loads(previous["details_json"]).get("ended")
+        ):
+            return
     details = dict(
         role=who,
         cluster=appointment.cluster,
@@ -95,15 +120,30 @@ def joined(conn: sqlite3.Connection, appointment: sign.Appointed, who: str, now:
         members=len(appointment.members),
         expires_at=db.to_iso(appointment.expires_at),
     )
-    if role(conn, now) != details:
-        netlog.record(conn, "cluster_joined", details)
+    current = role(conn, now)
+    if current != details:
+        renewed = current is not None and all(
+            current.get(k) == v for k, v in details.items() if k != "expires_at"
+        )
+        netlog.record(conn, "cluster_renewed" if renewed else "cluster_joined", details)
 
 
 def inputs(values: dict[str, str]) -> dict[str, str]:
     """Fit escaped JSON bytes, with a visible cut marker and at most sixteen inputs."""
     out: dict[str, str] = {}
     remaining = protocol.MAX_INPUT_BYTES
-    items = list(values.items())[:16]
+    items = list(values.items())
+    if len(items) > 16:
+        name, value = items[15]
+        items = items[:15] + [
+            (
+                name,
+                "[additional inputs folded into this entry]\n"
+                + value
+                + "\n"
+                + json.dumps(dict(items[16:]), ensure_ascii=False),
+            )
+        ]
     for i, (name, value) in enumerate(items):
         budget = remaining // (len(items) - i)
         if len(json.dumps(value, ensure_ascii=True)) > budget:
@@ -182,12 +222,9 @@ def _ordered(parts: list[SubtaskSpec]) -> list[protocol.PlanNode]:
 def split(
     llm: LLM, node: protocol.PlanNode, why: str | None, inputs: dict[str, str]
 ) -> list[protocol.PlanNode] | None:
-    try:
-        parts = planner.split_task(
-            llm, node.description, node.acceptance_criteria, node.kind, dict(inputs), why
-        )
-    except ProviderError:
-        return None
+    parts = planner.split_task(
+        llm, node.description, node.acceptance_criteria, node.kind, dict(inputs), why
+    )
     if parts is None:
         return None
     # As in Plan.spec, every unused branch must feed the final result.
@@ -223,10 +260,9 @@ def supervise(
             return
         plan = protocol.ClusterPlan.model_validate(latest.record.body)
         failed = next(((j, b) for j, b in jobs if j.status == "operator"), None)
-        replan = bool(
-            (state.result and state.result.record.body.get("plan") == latest.record.id)
-            or (state.note and latest.record.id != plan_id(plan, state.note))
-        )
+        # Notes persist even when settle again merely re-lends a job. They do not
+        # authorize a plan; ClusterState currently omits the registry replan flag.
+        replan = bool(state.result and state.result.record.body.get("plan") == latest.record.id)
         if failed or replan:
             if plan.version >= protocol.MAX_PLAN_VERSIONS:
                 stuck("versions")
@@ -252,7 +288,7 @@ def supervise(
                     n.model_copy(
                         update={
                             "depends_on": sorted(
-                                set([*accepted, *(prefix + d for d in n.depends_on)])
+                                set([*range(prefix), *(prefix + d for d in n.depends_on)])
                             )
                         }
                     )

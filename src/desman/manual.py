@@ -263,7 +263,7 @@ TOPICS: Final = (
         "quotas; `desman global undonate PROVIDER` takes it back. "
         "`desman global leave` withdraws everything; `desman global status` shows state. "
         "`desman global lead STATE` (on/off, default on) allows an appointed node to plan "
-        "and supervise a cluster with lent modules and quotas. Off stops renewal; another "
+        "and supervise a cluster with lent modules and quotas, only while idle. Personal work stops operator renewal. Off stops renewal; another "
         "node takes over. Status shows its current role.\n"
         "`desman worker` registers and fetches revocations. Jobs need a fresh root-signed "
         "trust list. Idle nodes execute/review jobs with lent models (own folder, sandbox, "

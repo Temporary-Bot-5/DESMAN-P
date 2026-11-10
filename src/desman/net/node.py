@@ -653,7 +653,7 @@ class Node:
             body = sign.Appointment.model_validate(signed.record.body)
             current = self._trust.appointment(body.cluster)
             if current is not None and key.fingerprint in current.members:
-                cluster.joined(self.conn, current, "member", self._clock())
+                cluster.joined(self.conn, current, "member", self._clock(), from_trust=True)
         return self._trust.is_revoked(key.fingerprint)
 
     def _once(self, mark: tuple[str, str], action: str, details: dict[str, Any]) -> None:
@@ -781,6 +781,8 @@ class Node:
             return self._refused(address, key, e.error, now)
 
     def _clusters(self, now: datetime, idle: bool) -> None:
+        if not idle:
+            return
         if self.cluster_at is not None and now < self.cluster_at:
             return
         config = self._config()
@@ -821,7 +823,7 @@ class Node:
             ]:
                 self._appointments[record.record.id] = record
             if state.cluster is None:
-                cluster.left(self.conn, now)
+                cluster.left(self.conn, now, ended=True)
                 return
             appointment = self._trust.appointment(state.cluster)
             if appointment is None:
@@ -886,6 +888,23 @@ class Node:
                     ):
                         raise _Unreachable("bad_reply")
                 except _Problem as e:
+                    if e.error in (sign.Reason.NOT_ALLOWED.value, sign.Reason.MALFORMED.value):
+                        if (
+                            self.conn.execute(
+                                "SELECT 1 FROM network_log WHERE action = 'record_refused' AND "
+                                "json_extract(details_json, '$.registry') = ? AND "
+                                "json_extract(details_json, '$.id') = ? AND "
+                                "json_extract(details_json, '$.reason') = ? LIMIT 1",
+                                (address, signed.record.id, e.error),
+                            ).fetchone()
+                            is None
+                        ):
+                            self._once(
+                                (signed.record.id, e.error),
+                                "record_refused",
+                                {"registry": address, "id": signed.record.id, "reason": e.error},
+                            )
+                        raise _ClusterRefused from e
                     if e.error == sign.Reason.CONFLICT.value:
                         return None
                     raise
@@ -923,6 +942,8 @@ class Node:
                     )
 
             cluster.supervise(state, self.cluster_model, send, stuck)
+        except _ClusterRefused:
+            pass
         except ProviderError:
             pass  # Quota/availability may change before the next cluster poll.
         except (ValidationError, sign.KeyFileError):
@@ -1298,3 +1319,7 @@ def _job_details(job: jobs.Held, why: str | None = None) -> dict[str, Any]:
 
 def _dump(lent: list[protocol.Capability]) -> list[dict[str, Any]]:
     return [json.loads(c.model_dump_json()) for c in lent]
+
+
+class _ClusterRefused(Exception):
+    """One cluster hand-in was refused; global connectivity remains healthy."""

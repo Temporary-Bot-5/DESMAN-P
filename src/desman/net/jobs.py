@@ -293,8 +293,9 @@ def used_today(conn: sqlite3.Connection, provider: str, now: datetime) -> tuple[
     """Calls and tokens jobs from the network spent today on `provider`'s models."""
     row = conn.execute(
         """SELECT count(*), COALESCE(SUM(m.prompt_tokens + m.completion_tokens), 0)
-           FROM model_calls m JOIN tasks t ON t.id = m.task_id
-           WHERE t.origin = 'network' AND m.provider = ? AND m.at >= ?""",
+           FROM model_calls m LEFT JOIN tasks t ON t.id = m.task_id
+           WHERE (t.origin = 'network' OR m.role = 'network_planner')
+             AND m.provider = ? AND m.at >= ?""",
         (provider, db.to_iso(day_start(now))),
     ).fetchone()
     return int(row[0]), int(row[1])

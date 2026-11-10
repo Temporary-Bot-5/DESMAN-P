@@ -2752,6 +2752,6 @@ def parse_line(
             raw["keys"] = {
                 k: v for k, v in tuning_cli.parse_keys(ctx.params["keys"]).items()
             } or None
-        if entry.name == "personalize" and raw.get("yes") is not None:
+        if entry.name == "personalize" and raw.get("on") is not None:
             raw["on"] = raw["on"] == "on"
         return entry, parse(entry, raw, config)

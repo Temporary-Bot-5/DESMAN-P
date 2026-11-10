@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -419,6 +420,13 @@ def test_planner_calls_count_against_lent_quota_and_appear_on_page(
     leader.poll()
     row = leader.conn.execute("SELECT role, task_id FROM model_calls").fetchone()
     assert tuple(row) == (calls.Role.NETWORK_PLANNER.value, task)
+    assert jobs.used_today(leader.conn, "ollama", clock())[0] == 1
+    from desman.config import Donation
+
+    leader.settings.config.network.donated["ollama"] = Donation(
+        calls_per_day=1, tokens_per_day=100000
+    )
+    assert not jobs.quota_left(leader.conn, leader.settings(), "ollama", clock())
     assert leader.conn.execute("SELECT count(*) FROM quota_holds").fetchone()[0] == 0
     result = cards(leader.conn, leader.settings(), [])
     assert any(
@@ -538,8 +546,27 @@ def test_provider_failure_waits_for_next_poll(
 ) -> None:
     leader = setup(machine, clock)[0]
     state = snapshot(leader, world, clock)
+    assert state.cluster is not None
     if replan:
-        state = state.model_copy(update={"note": "Try again"})
+        state = state.model_copy(
+            update={
+                "note": "Try again",
+                "result": sign.sign(
+                    leader.key,
+                    sign.RecordKind.CLUSTER_RESULT,
+                    protocol.ClusterResult(
+                        cluster=state.cluster,
+                        task=task,
+                        plan=state.plans[-1].record.id,
+                        version=1,
+                        result="a" * 32,
+                        summary="redo",
+                    ).model_dump(mode="json"),
+                    issued_at=clock(),
+                    lifetime=timedelta(days=1),
+                ),
+            }
+        )
     else:
         state = state.model_copy(update={"plans": []})
     assert state.cluster is not None
@@ -699,3 +726,210 @@ def test_donation_quota_defers_cluster_planning(clock: FakeClock) -> None:
     config.network.donated["ollama"] = Donation(calls_per_day=10, tokens_per_day=10000)
     assert len(cluster.nodes(limited, task, None)) == 2
     conn.close()
+
+
+def test_overflow_inputs_are_folded_or_visibly_cut() -> None:
+    values = {f"input-{i}": f"value-{i}" for i in range(24)}
+    fitted = cluster.inputs(values)
+    assert len(fitted) == 16
+    assert "additional inputs" in fitted["input-15"]
+    for i in range(16, 24):
+        assert values[f"input-{i}"] in fitted["input-15"]
+    values["input-15"] = "x" * 100000
+    fitted = cluster.inputs(values)
+    assert "additional inputs" in fitted["input-15"]
+    assert cluster.MARKER in fitted["input-15"]
+    protocol.Job(description="job", acceptance_criteria="ok", inputs=fitted)
+
+
+def test_busy_operator_does_not_renew(
+    task: str, machine: Callable[[str, FakeLLM], Machine], world: World, clock: FakeClock
+) -> None:
+    leader = setup(machine, clock)[0]
+    before = world.requests.count(("GET", protocol.CLUSTERS_MINE))
+    for _ in range(3):
+        clock.advance(120)
+        leader.poll(idle=False)
+    assert world.requests.count(("GET", protocol.CLUSTERS_MINE)) == before
+
+
+def test_ended_cluster_is_not_rejoined_from_trust_after_restart(
+    task: str, machine: Callable[[str, FakeLLM], Machine], world: World, clock: FakeClock
+) -> None:
+    member = setup(machine, clock)[1]
+    assert member.node._trust is not None
+    details = cluster.role(member.conn, clock())
+    assert details is not None
+    appointment = member.node._trust.appointment(details["cluster"])
+    assert appointment is not None
+    cluster.left(member.conn, clock(), ended=True)
+    before = member.log()
+    for _ in range(3):
+        cluster.joined(member.conn, appointment, "member", clock(), from_trust=True)
+        cluster.left(member.conn, clock())
+    assert member.log() == before
+    assert cluster.role(member.conn, clock()) is None
+    # A new explicit registry snapshot may reactivate the same cluster after settle again.
+    cluster.joined(member.conn, appointment, "member", clock())
+    assert cluster.role(member.conn, clock()) is not None
+    renewed = replace(appointment, expires_at=appointment.expires_at + timedelta(minutes=15))
+    cluster.joined(member.conn, renewed, "member", clock(), from_trust=True)
+    current = cluster.role(member.conn, clock())
+    assert current is not None
+    assert current["expires_at"] == db.to_iso(renewed.expires_at)
+    assert sum(a == "cluster_joined" for a, d in member.log()) == 2
+
+
+@pytest.mark.parametrize("reason", [sign.Reason.NOT_ALLOWED, sign.Reason.MALFORMED])
+def test_cluster_handin_refusal_does_not_backoff_global_work(
+    task: str,
+    machine: Callable[[str, FakeLLM], Machine],
+    world: World,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: sign.Reason,
+) -> None:
+    leader = setup(machine, clock)[0]
+    state = snapshot(leader, world, clock).model_copy(
+        update={"plans": [], "jobs": [], "note": "retry"}
+    )
+    signed_ids: list[str] = []
+
+    def contact(*args: Any, **kwargs: Any) -> Any:
+        if args[3] == "GET":
+            return state
+        signed_ids.append(args[5].record.record.id)
+        raise node._Problem(reason.value)
+
+    monkeypatch.setattr(node, "_call", contact)
+    before = len(leader.log())
+    clock.advance(120)
+    leader.node._clusters(clock(), True)
+    assert len(signed_ids) == 1
+    assert leader.node.failures == 0
+    assert leader.node.registered
+    refused = [(a, d) for a, d in leader.log()[before:] if a == "record_refused"]
+    assert len(refused) == 1
+    assert refused[0][1]["id"] == signed_ids[0]
+    # Restarting the in-memory journal must not duplicate a receipt for the same record.
+    leader.node._journaled.clear()
+    clock.advance(120)
+    leader.node._clusters(clock(), True)
+    assert signed_ids == [signed_ids[0], signed_ids[0]]
+    assert sum(a == "record_refused" for a, d in leader.log()[before:]) == 1
+    assert leader.node.failures == 0
+
+
+def test_note_on_relent_job_does_not_replan_or_block_lending(
+    task: str, machine: Callable[[str, FakeLLM], Machine], world: World, clock: FakeClock
+) -> None:
+    leader = setup(machine, clock)[0]
+    state = snapshot(leader, world, clock).model_copy(update={"note": "retry please", "jobs": []})
+    sent: list[sign.RecordKind] = []
+    cluster.supervise(state, FakeLLM(), lambda kind, body: sent.append(kind), pytest.fail)
+    assert sent == [sign.RecordKind.CLUSTER_JOB]
+
+
+@pytest.mark.parametrize("failure", [Timeout(), RateLimit(), Quota(), ServerError()])
+def test_split_provider_failure_defers_without_stuck(
+    task: str,
+    machine: Callable[[str, FakeLLM], Machine],
+    world: World,
+    clock: FakeClock,
+    failure: Any,
+) -> None:
+    from desman.llm.base import ProviderError
+
+    leader = setup(machine, clock)[0]
+    state = snapshot(leader, world, clock)
+    # First lend a node, then present it as returned to its operator.
+    clock.advance(120)
+    leader.poll()
+    state = snapshot(leader, world, clock)
+    assert state.jobs
+    state = state.model_copy(
+        update={"jobs": [state.jobs[0].model_copy(update={"status": "operator"})]}
+    )
+    model = FakeLLM(failure, SPLIT, clock=clock, sleep=clock.sleep)
+    sent: list[sign.RecordKind] = []
+    with pytest.raises(ProviderError):
+        cluster.supervise(state, model, lambda kind, body: sent.append(kind), pytest.fail)
+    assert sent == []
+    cluster.supervise(state, model, lambda kind, body: sent.append(kind), pytest.fail)
+    assert sent == [sign.RecordKind.CLUSTER_PLAN]
+
+
+def test_replan_prefix_nodes_all_feed_the_result(
+    task: str, machine: Callable[[str, FakeLLM], Machine], world: World, clock: FakeClock
+) -> None:
+    leader = setup(machine, clock)[0]
+    state = snapshot(leader, world, clock)
+    assert state.cluster is not None
+    # An independent node at index 1 was accepted while index 0 is still in flight.
+    original = protocol.ClusterPlan(
+        cluster=state.cluster,
+        task=task,
+        version=1,
+        nodes=[
+            protocol.PlanNode(description="running", acceptance_criteria="ok"),
+            protocol.PlanNode(description="accepted", acceptance_criteria="ok"),
+            protocol.PlanNode(description="combine", acceptance_criteria="ok", depends_on=[0, 1]),
+        ],
+    )
+    old = state.plans[0].model_copy(
+        update={
+            "record": state.plans[0].record.model_copy(
+                update={"body": original.model_dump(mode="json")}
+            )
+        }
+    )
+    job = protocol.ClusterJob(
+        cluster=state.cluster,
+        task=task,
+        plan=old.record.id,
+        version=1,
+        node=1,
+        job=protocol.Job(description="accepted", acceptance_criteria="ok"),
+    )
+    signed_job = sign.sign(
+        leader.key,
+        sign.RecordKind.CLUSTER_JOB,
+        job.model_dump(mode="json"),
+        issued_at=clock(),
+        lifetime=timedelta(days=1),
+    )
+    result = sign.sign(
+        leader.key,
+        sign.RecordKind.CLUSTER_RESULT,
+        protocol.ClusterResult(
+            cluster=state.cluster,
+            task=task,
+            plan=old.record.id,
+            version=1,
+            result="a" * 32,
+            summary="redo",
+        ).model_dump(mode="json"),
+        issued_at=clock(),
+        lifetime=timedelta(days=1),
+    )
+    state = state.model_copy(
+        update={
+            "plans": [old],
+            "result": result,
+            "jobs": [protocol.ClusterJobState(job=signed_job, status="accepted")],
+        }
+    )
+    sent: list[Any] = []
+    cluster.supervise(state, FakeLLM(PLAN), lambda kind, body: sent.append(body), pytest.fail)
+    changed = sent[0].nodes
+    assert changed[1] == original.nodes[1]
+    ancestors: set[int] = set()
+
+    def visit(index: int) -> None:
+        for dep in changed[index].depends_on:
+            if dep not in ancestors:
+                ancestors.add(dep)
+                visit(dep)
+
+    visit(len(changed) - 1)
+    assert ancestors == set(range(len(changed) - 1))
