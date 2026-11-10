@@ -126,7 +126,8 @@ class Models(Fields):
 
 class Network(Fields):
     section: Literal["network"]
-    operation: Literal["join", "leave", "donate", "undonate", "quota"]
+    operation: Literal["join", "leave", "donate", "undonate", "quota", "lead"]
+    state: Literal["on", "off"] = "on"
     provider: Provider | None = None
     registry: str | None = Field(default=None, max_length=200)
     calls: int | None = Field(default=None, ge=1, le=100000)

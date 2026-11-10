@@ -68,7 +68,7 @@ from desman.core.store import (
 )
 from desman.core.tools import Registry, Toolbox
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
-from desman.llm.base import ProviderError, among, noticing_unfit
+from desman.llm.base import LLM, ProviderError, among, noticing_unfit
 
 S = SubtaskStatus
 
@@ -194,6 +194,7 @@ class Crew:
     """None: the workspace tools only, as for the coordinator's own `access`."""
     strategies: Strategies = ONE_MODEL
     providers: Labels | Callable[[Subtask], Labels] | None = None
+    planner: LLM | None = None
 
 
 class RunResult(BaseModel):

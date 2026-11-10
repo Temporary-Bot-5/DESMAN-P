@@ -34,3 +34,6 @@ tools = ["read_file", "write_file", "list_files", "run_command"]
 
 [roles.network_reviewer]
 tools = []
+
+[roles.network_planner]
+tools = []

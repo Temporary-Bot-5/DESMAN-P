@@ -84,6 +84,7 @@ CATALOG: dict[str, tuple[Model, ...]] = {
 }
 
 NEEDS: dict[Role, Strength] = {
+    Role.NETWORK_PLANNER: Strength.ANALYSIS,
     Role.PLANNER: Strength.ANALYSIS,
     Role.DECOMPOSER: Strength.ANALYSIS,
     Role.REVIEWER: Strength.ANALYSIS,

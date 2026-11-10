@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -72,8 +73,25 @@ class Seen:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        self._inspecting = False
+
+    @contextmanager
+    def inspect(self) -> Iterator[None]:
+        """Verify a signed cluster snapshot without reserving its jobs as taken.
+
+        The same Trust still checks signatures, revocations and terms. Only its replay
+        reservation is omitted: an operator reading a job has not executed/rechecked it.
+        """
+        before = self._inspecting
+        self._inspecting = True
+        try:
+            yield
+        finally:
+            self._inspecting = before
 
     def add(self, id: str, expires_at: datetime, now: datetime) -> bool:
+        if self._inspecting:
+            return True
         with db.transaction(self.conn):
             self.conn.execute("DELETE FROM seen_records WHERE expires_at <= ?", (db.to_iso(now),))
             added = self.conn.execute(
@@ -275,8 +293,9 @@ def used_today(conn: sqlite3.Connection, provider: str, now: datetime) -> tuple[
     """Calls and tokens jobs from the network spent today on `provider`'s models."""
     row = conn.execute(
         """SELECT count(*), COALESCE(SUM(m.prompt_tokens + m.completion_tokens), 0)
-           FROM model_calls m JOIN tasks t ON t.id = m.task_id
-           WHERE t.origin = 'network' AND m.provider = ? AND m.at >= ?""",
+           FROM model_calls m LEFT JOIN tasks t ON t.id = m.task_id
+           WHERE (t.origin = 'network' OR m.role = 'network_planner')
+             AND m.provider = ? AND m.at >= ?""",
         (provider, db.to_iso(day_start(now))),
     ).fetchone()
     return int(row[0]), int(row[1])

@@ -641,3 +641,21 @@ def test_settings_role_key_options(tmp_path: Path) -> None:
         text=True,
         encoding="utf-8",
     )
+
+
+def test_settings_reads_network_status_once(
+    settings_app: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman import global_cli
+
+    original = global_cli.status
+    count = 0
+
+    def status(*args: Any, **kwargs: Any) -> Any:
+        nonlocal count
+        count += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(global_cli, "status", status)
+    snapshot(settings_app[0])
+    assert count == 1

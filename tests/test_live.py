@@ -72,7 +72,7 @@ def test_role_check_matches_the_enum(store: Store) -> None:
     sql = store.conn.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_calls'"
     ).fetchone()[0]
-    match = re.search(r"role TEXT\s+CHECK \(role IN \(([^)]*)\)\)", sql)
+    match = re.search(r'"?role"? TEXT\s+CHECK \(role IN \(([^)]*)\)\)', sql)
     assert match is not None
     assert set(re.findall(r"'(\w+)'", match.group(1))) == {r.value for r in calls.Role}
 

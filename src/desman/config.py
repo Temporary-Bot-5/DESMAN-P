@@ -92,7 +92,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -257,6 +257,7 @@ class Network(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: StrictBool = False
+    lead: StrictBool = True
     registry: RegistryUrl | None = None
     """None: the address DESMAN ships with (`net.DEFAULT_REGISTRY`)."""
     donated: dict[str, Donation] = Field(default_factory=dict)
@@ -280,7 +281,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[8] = 8
+    schema_version: Literal[9] = 9
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -382,6 +383,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
         del data["profile"]
     if version == 7:
         version = 8  # page turns default to four
+
+    if version == 8:
+        version = 9  # cluster leadership defaults on within the opt-in network
 
     data["schema_version"] = version
     return data

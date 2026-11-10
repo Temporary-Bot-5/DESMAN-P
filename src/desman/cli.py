@@ -516,7 +516,12 @@ def worker(
         )
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)
-        network = node.Node(store.conn, manager.load, work=crew is not None)
+        network = node.Node(
+            store.conn,
+            manager.load,
+            work=crew is not None,
+            cluster_model=crew.planner if crew else None,
+        )
         network_config = config
 
         def network_poll(*, idle: bool = False) -> node.Event | None:
@@ -534,6 +539,7 @@ def worker(
                     cache=not no_cache,
                 )
                 network.work = coordinator.network is not None
+                network.cluster_model = coordinator.network.planner if coordinator.network else None
                 network_config = current
             return _keep_in_touch(network, as_json, idle=idle)
 

@@ -194,10 +194,21 @@ def cards(
         "WHERE c.at >= ? AND c.seq IN (SELECT MAX(seq) FROM model_calls GROUP BY provider, model, key_id, task_id, session_id)",
         (hour,),
     ):
-        section = "network" if row["origin"] == "network" else "local"
+        section = (
+            "network" if row["origin"] == "network" or row["role"] == "network_planner" else "local"
+        )
         card = add(row["key_id"] or row["provider"], f"{row['provider']}/{row['model']}", section)
         if not card:
             continue
+        if row["role"] == "network_planner":
+            card["work"].append(
+                {
+                    "kind": "network job",
+                    "id": row["task_id"],
+                    "title": row["task_id"][:8],
+                    "role": row["role"],
+                }
+            )
         if row["error_type"] == "QuotaExhausted":
             card["state"] = t("quota used up")
         elif row["error_type"] == "RateLimited":
@@ -221,7 +232,8 @@ def cards(
         if historically_removed:
             continue
         if (
-            row["task_id"]
+            row["role"] != "network_planner"
+            and row["task_id"]
             and active_task(row["task_id"])
             and row["status"]
             in {

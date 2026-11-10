@@ -283,7 +283,7 @@ def test_shutdown_abandons_inflight_without_dropping_durable_reply(page: Harness
 
 def test_schema_seven_upgrade_and_all_chat_turn_bounds() -> None:
     config = Config.model_validate(upgrade({"schema_version": 7, "tuning": {"workers": 2}}))
-    assert config.schema_version == 8
+    assert config.schema_version == 9
     assert config.tuning.workers == 2 and config.tuning.chat_turns is None
     for n in (0, 9, True):
         with pytest.raises(ValueError):

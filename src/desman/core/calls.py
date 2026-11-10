@@ -28,6 +28,7 @@ class Role(StrEnum):
     """What a call was made for. Keep in sync with the `model_calls.role` CHECK (a test does)."""
 
     PLANNER = "planner"
+    NETWORK_PLANNER = "network_planner"
     EXECUTOR = "executor"
     REVIEWER = "reviewer"
     DECOMPOSER = "decomposer"

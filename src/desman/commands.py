@@ -448,6 +448,10 @@ class GlobalProposalArgs(Args):
     proposal: Annotated[int, Field(ge=1)] = Field(description="the local proposal number")
 
 
+class LeadArgs(Args):
+    state: Literal["on", "off"]
+
+
 class DonateArgs(Args):
     provider: ProviderName
     calls: Calls | None = Field(None, description="calls a day")
@@ -1000,7 +1004,7 @@ def _tuning(ctx: Context, args: TuningArgs) -> Outcome | Proposal:
 
 
 def _global_status(ctx: Context, args: NoArgs) -> Outcome:
-    found = global_cli.status(ctx.config())
+    found = global_cli.status(ctx.config(), conn=ctx.store.conn)
     global_cli.print_status(found)
     return Outcome(found.as_json())
 
@@ -1217,6 +1221,16 @@ def _global_leave(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 def _lent_outcome(lent: global_cli.Lent) -> Outcome:
     quota = None if lent.new is None else lent.new.model_dump()
     return Outcome({"provider": lent.provider, "changed": lent.changed, "quota": quota})
+
+
+def _global_lead(ctx: Context, args: LeadArgs) -> Proposal:
+    def apply() -> Outcome:
+        on = global_cli.set_lead(ctx.manager, args.state == "on", conn=ctx.store.conn)
+        return Outcome({"lead": on})
+
+    return Proposal(
+        [t("Lead clusters") + ": " + (t("yes") if args.state == "on" else t("off"))], apply
+    )
 
 
 def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
@@ -2328,6 +2342,13 @@ CATALOG: tuple[Entry, ...] = (
         _global_leave,
     ),
     Entry(
+        "global lead",
+        "Allow this node to lead clusters using only lent modules; the person confirms.",
+        LeadArgs,
+        Kind.CHANGE,
+        _global_lead,
+    ),
+    Entry(
         "global donate",
         "Lend a model provider of this machine to desman-global with a daily quota of calls "
         "and tokens (its key never leaves the machine; a local server, or a free provider whose "
@@ -2604,7 +2625,9 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
         changes.append(("operator_tuning", {"changed": parts}))
     if old.network != new.network:  # which parts, by name; quotas are not secret
         parts = [
-            n for n in ("enabled", "registry") if getattr(old.network, n) != getattr(new.network, n)
+            n
+            for n in ("enabled", "registry", "lead")
+            if getattr(old.network, n) != getattr(new.network, n)
         ]
         parts += [
             f"donated.{p}"

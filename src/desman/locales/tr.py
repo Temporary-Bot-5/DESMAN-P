@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Lead clusters": "Kümeleri yönet",
+    "Leads cluster {cluster} (task {task}), {members} member": (
+        "{cluster} kümesini yönetiyor (görev {task}), üye sayısı: {members}",
+    ),
+    "Member of cluster {cluster}": "{cluster} kümesinin üyesi",
+    "Allow this node to lead clusters with the modules lent.": "Bu düğümün ödünç verilen modüllerle kümeleri yönetmesine izin ver.",
     "Pause": "Duraklat",
     "Resume": "Sürdür",
     "Replace": "Değiştir",

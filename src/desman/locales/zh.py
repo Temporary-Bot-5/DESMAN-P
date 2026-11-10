@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Lead clusters": "领导集群",
+    "Leads cluster {cluster} (task {task}), {members} member": (
+        "领导集群 {cluster}（任务 {task}），成员数：{members}",
+    ),
+    "Member of cluster {cluster}": "集群 {cluster} 的成员",
+    "Allow this node to lead clusters with the modules lent.": "允许此节点使用借出的模块领导集群。",
     "Pause": "暂停",
     "Resume": "继续",
     "Replace": "替换",

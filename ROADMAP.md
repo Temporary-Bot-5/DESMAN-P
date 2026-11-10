@@ -360,7 +360,7 @@ CLI (`run/status/resume/list-tasks/audit/setup/config`). 15 тестов про�
   - [x] **T.4b Реестр.** Ключ-назначатель (`desman-registry appointer create`), `cluster add`,
     выбор оператора и участников, продление и замена назначения, задания кластера только
     участникам, перепроверка узлом не исполнителя и не оператора, `GET /clusters/mine`, `POST /clusters/{id}/records`, `desman-registry clusters`, инбокс.
-  - [ ] **T.4c Узел.** `network.lead` и `Claim.lead`, `global lead on|off`, цикл оператора
+  - [x] **T.4c Узел.** `network.lead` и `Claim.lead`, `global lead on|off`, цикл оператора
     (план ролью `network_planner`, задания, разбиение неудачных, итог), приём `cluster_job`
     участником; статус, страница, справка, 12 языков.
   - [ ] **T.4d Отказы и демо.** Сценарии `tests/faults.py` (оператор убит, поздняя запись,

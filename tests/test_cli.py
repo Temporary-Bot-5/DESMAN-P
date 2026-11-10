@@ -63,7 +63,7 @@ def test_save_and_load_roundtrip() -> None:
     [
         ("{not json", "not valid JSON"),
         ("[]", "not a JSON object"),
-        ('{"schema_version": 9}', "newer than this DESMAN"),
+        ('{"schema_version": 10}', "newer than this DESMAN"),
         ('{"schema_version": "1"}', "whole number"),
         ('{"schema_version": 1, "permissions": {"admin_rights": "yes"}}', "admin_rights"),
         ('{"schema_version": 1, "api_keys": {"GROQ_API_KEY": 5}}', "GROQ_API_KEY"),
