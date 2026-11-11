@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "अधिकार आवंटन",
+    "Backup": "बैकअप",
+    "Check failed: {error}": "जाँच विफल: {error}",
+    "Check registry health without changing the database.": "डेटाबेस बदले बिना रजिस्ट्री की स्थिति जाँचें।",
+    "Current.": "अद्यतन है।",
+    "Daily backups removed: {count}": "हटाए गए दैनिक बैकअप: {count}",
+    "Database": "डेटाबेस",
+    "Database integrity check failed.": "डेटाबेस अखंडता जाँच विफल हुई।",
+    "Disk": "डिस्क",
+    "Free bytes: {count}": "खाली बाइट: {count}",
+    "How long the trust list lasts.": "विश्वास सूची की वैधता अवधि।",
+    "How many daily backups to keep.": "रखने वाले दैनिक बैकअप की संख्या।",
+    "Inbox": "इनबॉक्स",
+    "Message": "संदेश",
+    "Missing or stale.": "गायब या पुराना।",
+    "Not checked.": "जाँच नहीं हुई।",
+    "Ready.": "तैयार।",
+    "Refresh soon.": "जल्द नवीनीकरण करें।",
+    "Renew or assign keys; check appointer.key.": "कुंजियाँ नवीनीकृत या आवंटित करें; appointer.key जाँचें।",
+    "Run the new version once / restart the service.": "नया संस्करण एक बार चलाएँ / सेवा पुनः शुरू करें।",
+    "Server": "सर्वर",
+    "Server URL; empty skips the HTTP check.": "सर्वर URL; खाली होने पर HTTP जाँच छोड़ें।",
+    "Sign the trust list, back up the database and rotate daily backups.": "विश्वास सूची पर हस्ताक्षर करें, डेटाबेस का बैकअप लें और दैनिक बैकअप घुमाएँ।",
+    "Trust list": "विश्वास सूची",
+    "Trust list signed.": "विश्वास सूची पर हस्ताक्षर हो गए।",
+    "Trust list signing failed: {error}": "विश्वास सूची पर हस्ताक्षर विफल: {error}",
+    "Unavailable.": "अनुपलब्ध।",
+    "Upgrade desman-registry.": "desman-registry अपग्रेड करें।",
+    "Waiting: {count}": "प्रतीक्षारत: {count}",
+    "Warning": "चेतावनी",
     "Lead clusters": "क्लस्टर का नेतृत्व करें",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "क्लस्टर {cluster} का नेतृत्व (कार्य {task}), सदस्य: {members}",
@@ -1754,6 +1784,15 @@ MESSAGES.update(
         "(desman-registry "
         "cluster "
         "settle)।",
+        "Operator key missing.": "ऑपरेटर की कुंजी गायब है।",
+        "Operator key unassigned or expired.": "ऑपरेटर की कुंजी आवंटित नहीं है या समाप्त हो गई है।",
+        "Appointer key missing: clusters will not form.": "नियुक्ति कुंजी गायब है: क्लस्टर नहीं बनेंगे।",
+        "Appointer key unassigned or expired.": "नियुक्ति कुंजी आवंटित नहीं है या समाप्त हो गई है।",
+        "Operator key current.": "ऑपरेटर की कुंजी मान्य है।",
+        "Appointer key current.": "नियुक्ति कुंजी मान्य है।",
+        "Operator key expires in {days} days.": "ऑपरेटर की कुंजी {days} दिनों में समाप्त होगी।",
+        "Appointer key expires in {days} days.": "नियुक्ति कुंजी {days} दिनों में समाप्त होगी।",
+        "Backup dated in the future.": "बैकअप की तारीख भविष्य में है।",
     }
 )
 

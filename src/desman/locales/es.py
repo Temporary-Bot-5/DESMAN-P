@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "Asignaciones",
+    "Backup": "Copia de seguridad",
+    "Check failed: {error}": "Falló la comprobación: {error}",
+    "Check registry health without changing the database.": "Comprobar el registro sin cambiar la base de datos.",
+    "Current.": "Actualizado.",
+    "Daily backups removed: {count}": "Copias diarias eliminadas: {count}",
+    "Database": "Base de datos",
+    "Database integrity check failed.": "Falló la comprobación de integridad de la base de datos.",
+    "Disk": "Disco",
+    "Free bytes: {count}": "Bytes libres: {count}",
+    "How long the trust list lasts.": "Duración de la lista de confianza.",
+    "How many daily backups to keep.": "Cuántas copias diarias conservar.",
+    "Inbox": "Bandeja de entrada",
+    "Message": "Mensaje",
+    "Missing or stale.": "Ausente o desactualizado.",
+    "Not checked.": "Sin comprobar.",
+    "Ready.": "Listo.",
+    "Refresh soon.": "Actualizar pronto.",
+    "Renew or assign keys; check appointer.key.": "Renovar o asignar claves; comprobar appointer.key.",
+    "Run the new version once / restart the service.": "Ejecutar la nueva versión una vez / reiniciar el servicio.",
+    "Server": "Servidor",
+    "Server URL; empty skips the HTTP check.": "URL del servidor; vacío omite la comprobación HTTP.",
+    "Sign the trust list, back up the database and rotate daily backups.": "Firmar la lista de confianza, copiar la base de datos y rotar las copias diarias.",
+    "Trust list": "Lista de confianza",
+    "Trust list signed.": "Lista de confianza firmada.",
+    "Trust list signing failed: {error}": "Falló la firma de la lista de confianza: {error}",
+    "Unavailable.": "No disponible.",
+    "Upgrade desman-registry.": "Actualizar desman-registry.",
+    "Waiting: {count}": "En espera: {count}",
+    "Warning": "Advertencia",
     "Lead clusters": "Dirigir clústeres",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "Dirige el clúster {cluster} (tarea {task}), {members} miembro",
@@ -1766,6 +1796,15 @@ MESSAGES.update(
         "(desman-registry "
         "cluster "
         "settle).",
+        "Operator key missing.": "Falta la clave del operador.",
+        "Operator key unassigned or expired.": "Clave del operador sin asignar o caducada.",
+        "Appointer key missing: clusters will not form.": "Falta la clave de nombramiento: no se formarán clústeres.",
+        "Appointer key unassigned or expired.": "Clave de nombramiento sin asignar o caducada.",
+        "Operator key current.": "Clave del operador vigente.",
+        "Appointer key current.": "Clave de nombramiento vigente.",
+        "Operator key expires in {days} days.": "La clave del operador caduca en {days} días.",
+        "Appointer key expires in {days} days.": "La clave de nombramiento caduca en {days} días.",
+        "Backup dated in the future.": "Copia de seguridad fechada en el futuro.",
     }
 )
 

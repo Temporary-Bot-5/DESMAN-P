@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "Zuweisungen",
+    "Backup": "Sicherung",
+    "Check failed: {error}": "Prüfung fehlgeschlagen: {error}",
+    "Check registry health without changing the database.": "Registrierungszustand prüfen, ohne die Datenbank zu ändern.",
+    "Current.": "Aktuell.",
+    "Daily backups removed: {count}": "Entfernte tägliche Sicherungen: {count}",
+    "Database": "Datenbank",
+    "Database integrity check failed.": "Integritätsprüfung der Datenbank fehlgeschlagen.",
+    "Disk": "Datenträger",
+    "Free bytes: {count}": "Freie Bytes: {count}",
+    "How long the trust list lasts.": "Gültigkeitsdauer der Vertrauensliste.",
+    "How many daily backups to keep.": "Anzahl aufzubewahrender täglicher Sicherungen.",
+    "Inbox": "Posteingang",
+    "Message": "Nachricht",
+    "Missing or stale.": "Fehlt oder ist veraltet.",
+    "Not checked.": "Nicht geprüft.",
+    "Ready.": "Bereit.",
+    "Refresh soon.": "Bald aktualisieren.",
+    "Renew or assign keys; check appointer.key.": "Schlüssel erneuern oder zuweisen; appointer.key prüfen.",
+    "Run the new version once / restart the service.": "Neue Version einmal starten / Dienst neu starten.",
+    "Server": "Server",
+    "Server URL; empty skips the HTTP check.": "Server-URL; leer überspringt die HTTP-Prüfung.",
+    "Sign the trust list, back up the database and rotate daily backups.": "Vertrauensliste signieren, Datenbank sichern und tägliche Sicherungen rotieren.",
+    "Trust list": "Vertrauensliste",
+    "Trust list signed.": "Vertrauensliste signiert.",
+    "Trust list signing failed: {error}": "Signieren der Vertrauensliste fehlgeschlagen: {error}",
+    "Unavailable.": "Nicht verfügbar.",
+    "Upgrade desman-registry.": "desman-registry aktualisieren.",
+    "Waiting: {count}": "Wartend: {count}",
+    "Warning": "Warnung",
     "Lead clusters": "Cluster leiten",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "Leitet Cluster {cluster} (Aufgabe {task}), {members} Mitglied",
@@ -1763,6 +1793,15 @@ MESSAGES.update(
         "(desman-registry "
         "cluster "
         "settle).",
+        "Operator key missing.": "Operatorschlüssel fehlt.",
+        "Operator key unassigned or expired.": "Operatorschlüssel nicht zugewiesen oder abgelaufen.",
+        "Appointer key missing: clusters will not form.": "Appointer-Schlüssel fehlt: Cluster werden nicht gebildet.",
+        "Appointer key unassigned or expired.": "Appointer-Schlüssel nicht zugewiesen oder abgelaufen.",
+        "Operator key current.": "Operatorschlüssel aktuell.",
+        "Appointer key current.": "Appointer-Schlüssel aktuell.",
+        "Operator key expires in {days} days.": "Operatorschlüssel läuft in {days} Tagen ab.",
+        "Appointer key expires in {days} days.": "Appointer-Schlüssel läuft in {days} Tagen ab.",
+        "Backup dated in the future.": "Backup liegt in der Zukunft.",
     }
 )
 

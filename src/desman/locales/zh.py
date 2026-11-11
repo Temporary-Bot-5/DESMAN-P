@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "授权",
+    "Backup": "备份",
+    "Check failed: {error}": "检查失败：{error}",
+    "Check registry health without changing the database.": "检查注册服务状态，不更改数据库。",
+    "Current.": "最新。",
+    "Daily backups removed: {count}": "已删除每日备份：{count}",
+    "Database": "数据库",
+    "Database integrity check failed.": "数据库完整性检查失败。",
+    "Disk": "磁盘",
+    "Free bytes: {count}": "可用字节：{count}",
+    "How long the trust list lasts.": "信任列表的有效期。",
+    "How many daily backups to keep.": "保留的每日备份数量。",
+    "Inbox": "收件箱",
+    "Message": "消息",
+    "Missing or stale.": "缺失或已过期。",
+    "Not checked.": "未检查。",
+    "Ready.": "就绪。",
+    "Refresh soon.": "请尽快刷新。",
+    "Renew or assign keys; check appointer.key.": "续期或授权密钥；检查 appointer.key。",
+    "Run the new version once / restart the service.": "运行一次新版本或重启服务。",
+    "Server": "服务器",
+    "Server URL; empty skips the HTTP check.": "服务器 URL；留空则跳过 HTTP 检查。",
+    "Sign the trust list, back up the database and rotate daily backups.": "签署信任列表，备份数据库并轮换每日备份。",
+    "Trust list": "信任列表",
+    "Trust list signed.": "信任列表已签署。",
+    "Trust list signing failed: {error}": "信任列表签署失败：{error}",
+    "Unavailable.": "不可用。",
+    "Upgrade desman-registry.": "请升级 desman-registry。",
+    "Waiting: {count}": "等待中：{count}",
+    "Warning": "警告",
     "Lead clusters": "领导集群",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "领导集群 {cluster}（任务 {task}），成员数：{members}",
@@ -1593,6 +1623,15 @@ MESSAGES.update(
         "{task}:由其集群处理(desman-registry "
         "cluster "
         "settle)。",
+        "Operator key missing.": "缺少操作员密钥。",
+        "Operator key unassigned or expired.": "操作员密钥未分配或已过期。",
+        "Appointer key missing: clusters will not form.": "缺少任命密钥：无法形成集群。",
+        "Appointer key unassigned or expired.": "任命密钥未分配或已过期。",
+        "Operator key current.": "操作员密钥有效。",
+        "Appointer key current.": "任命密钥有效。",
+        "Operator key expires in {days} days.": "操作员密钥将在 {days} 天后过期。",
+        "Appointer key expires in {days} days.": "任命密钥将在 {days} 天后过期。",
+        "Backup dated in the future.": "备份日期在未来。",
     }
 )
 

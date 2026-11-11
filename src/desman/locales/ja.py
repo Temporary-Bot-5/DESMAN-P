@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "権限付与",
+    "Backup": "バックアップ",
+    "Check failed: {error}": "チェック失敗: {error}",
+    "Check registry health without changing the database.": "データベースを変更せずにレジストリの状態を確認します。",
+    "Current.": "最新です。",
+    "Daily backups removed: {count}": "削除した日次バックアップ: {count}",
+    "Database": "データベース",
+    "Database integrity check failed.": "データベースの整合性チェックに失敗しました。",
+    "Disk": "ディスク",
+    "Free bytes: {count}": "空きバイト数: {count}",
+    "How long the trust list lasts.": "信頼リストの有効期間。",
+    "How many daily backups to keep.": "保持する日次バックアップの数。",
+    "Inbox": "受信箱",
+    "Message": "メッセージ",
+    "Missing or stale.": "存在しないか古くなっています。",
+    "Not checked.": "未確認。",
+    "Ready.": "準備完了。",
+    "Refresh soon.": "まもなく更新してください。",
+    "Renew or assign keys; check appointer.key.": "鍵の権限を更新または付与し、appointer.key を確認してください。",
+    "Run the new version once / restart the service.": "新しいバージョンを一度実行するかサービスを再起動してください。",
+    "Server": "サーバー",
+    "Server URL; empty skips the HTTP check.": "サーバー URL。空なら HTTP チェックを省略します。",
+    "Sign the trust list, back up the database and rotate daily backups.": "信頼リストに署名し、データベースをバックアップして日次バックアップを整理します。",
+    "Trust list": "信頼リスト",
+    "Trust list signed.": "信頼リストに署名しました。",
+    "Trust list signing failed: {error}": "信頼リストの署名に失敗: {error}",
+    "Unavailable.": "利用不可。",
+    "Upgrade desman-registry.": "desman-registry を更新してください。",
+    "Waiting: {count}": "待機中: {count}",
+    "Warning": "警告",
     "Lead clusters": "クラスターを主導",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "クラスター {cluster} を主導（タスク {task}）、メンバー数：{members}",
@@ -1622,6 +1652,15 @@ MESSAGES.update(
         "そのクラスタが決定します(desman-registry "
         "cluster "
         "settle)。",
+        "Operator key missing.": "オペレーター鍵がありません。",
+        "Operator key unassigned or expired.": "オペレーター鍵が未割り当てか期限切れです。",
+        "Appointer key missing: clusters will not form.": "任命鍵がありません。クラスターは形成されません。",
+        "Appointer key unassigned or expired.": "任命鍵が未割り当てか期限切れです。",
+        "Operator key current.": "オペレーター鍵は有効です。",
+        "Appointer key current.": "任命鍵は有効です。",
+        "Operator key expires in {days} days.": "オペレーター鍵は {days} 日後に失効します。",
+        "Appointer key expires in {days} days.": "任命鍵は {days} 日後に失効します。",
+        "Backup dated in the future.": "バックアップの日付が未来です。",
     }
 )
 

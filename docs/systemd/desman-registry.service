@@ -1,0 +1,13 @@
+[Unit]
+Description=desman-registry
+
+[Service]
+WorkingDirectory=%h/desman-registry-app
+ExecStart=%h/desman-registry-app/.venv/bin/desman-registry serve --host 127.0.0.1 --port 8470
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target
