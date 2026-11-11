@@ -260,27 +260,34 @@ def supervise(
             return
         plan = protocol.ClusterPlan.model_validate(latest.record.body)
         failed = next(((j, b) for j, b in jobs if j.status == "operator"), None)
-        # Notes persist even when settle again merely re-lends a job. They do not
-        # authorize a plan; ClusterState currently omits the registry replan flag.
-        replan = bool(state.result and state.result.record.body.get("plan") == latest.record.id)
+        # Older registries omit replan; a returned result still authorizes a fresh plan.
+        # Return after planning so dropped jobs are never lent under the old version.
+        replan = state.replan or bool(
+            state.result and state.result.record.body.get("plan") == latest.record.id
+        )
+        dropped = next(iter(state.dropped_nodes), None)
         if failed or replan:
             if plan.version >= protocol.MAX_PLAN_VERSIONS:
                 stuck("versions")
                 return
-            if failed:
-                j, body = failed
-                old = plan.nodes[body.node]
+            if failed or dropped is not None:
+                index = failed[1].node if failed else dropped
+                assert index is not None
+                old = plan.nodes[index]
                 if old.runs_code:
                     stuck("runs_code")
                     return
                 parts = split(
-                    llm, old, "\n".join(s for s in (j.reason, state.note) if s), body.job.inputs
+                    llm,
+                    old,
+                    "\n".join(s for s in (failed[0].reason if failed else None, state.note) if s),
+                    failed[1].job.inputs if failed else {},
                 )
                 if not parts:
                     stuck("cannot_split")
                     return
                 # Keep accepted indices stable and append the replacement's continuation.
-                changed = _replace(plan.nodes, body.node, parts, set(accepted))
+                changed = _replace(plan.nodes, index, parts, set(accepted))
             else:
                 fresh = nodes(llm, task, state.note)
                 prefix = max(accepted, default=-1) + 1

@@ -356,7 +356,7 @@ def claim(
             if lent_before is not None:
                 continue
             if found.cluster is not None:
-                if not _cluster_lends_to(conn, found, caller):
+                if not _cluster_lends_to(conn, found, caller, now):
                     continue
             elif found.status == "recheck":
                 owners = _owners_of_result(conn, found.result)
@@ -388,15 +388,27 @@ def cluster_members(conn: sqlite3.Connection, cluster_task: str) -> set[str]:
     return set() if row is None else set(json.loads(row["members_json"]))
 
 
-def _cluster_lends_to(conn: sqlite3.Connection, found: JobRow, caller: store.Node) -> bool:
+def _cluster_lends_to(
+    conn: sqlite3.Connection, found: JobRow, caller: store.Node, now: datetime
+) -> bool:
     """ADR 0006: a member executes; a node that neither executed it nor operated the cluster
     rechecks; nothing is lent once the cluster task is settled."""
     assert found.cluster is not None
     row = conn.execute("SELECT status FROM cluster_tasks WHERE id = ?", (found.cluster,)).fetchone()
     if row is None or row["status"] not in ("waiting", "running"):
         return False
+    appointment = conn.execute(
+        "SELECT a.issued_at, a.expires_at, a.members_json FROM appointments a "
+        "JOIN cluster_tasks c ON c.cluster=a.cluster WHERE c.id=? "
+        "ORDER BY a.issued_at DESC, a.seq DESC LIMIT 1",
+        (found.cluster,),
+    ).fetchone()
+    if appointment is None or not (
+        db.parse_iso(appointment["issued_at"]) <= now < db.parse_iso(appointment["expires_at"])
+    ):
+        return False
     if found.status == "execute":
-        return caller.fingerprint in cluster_members(conn, found.cluster)
+        return caller.fingerprint in json.loads(appointment["members_json"])
     done_by = conn.execute("SELECT node FROM results WHERE id = ?", (found.result,)).fetchone()
     if done_by is None or done_by["node"] == caller.fingerprint:
         return False

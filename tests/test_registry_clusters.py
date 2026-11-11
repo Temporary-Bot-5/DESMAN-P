@@ -195,7 +195,9 @@ def test_a_cluster_is_formed_once_three_nodes_are_free(
     assert state["appointment"]["record"]["kind"] == "appointment"
     assert mine(a)["role"] == "member" and mine(a)["appointment"] is not None
     stranger = member(registry, clock)
-    assert mine(stranger) == protocol.ClusterState().model_dump(mode="json")
+    assert mine(stranger) == protocol.ClusterState().model_dump(
+        mode="json", exclude={"replan", "dropped_nodes"}
+    )
 
     # A node checks the appointment with what the registry hands out.
     trusted = sign.Trust(sign.load_root(sign.ROOT_PUB), clock=clock)

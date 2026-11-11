@@ -381,12 +381,12 @@ def settle(
                 for job in work.jobs(conn, "operator", cluster=found.id):
                     if db.parse_iso(job.expires_at) <= now:
                         _drop_job(conn, job, "expired", moment)
-                        replan = True
+                        replan = version < protocol.MAX_PLAN_VERSIONS
                     elif not _untried_members(conn, found, job):
                         # Every member took it once (a node never takes a record twice): the
                         # cluster's operator plans it anew.
                         _drop_job(conn, job, "no_member_left", moment)
-                        replan = True
+                        replan = version < protocol.MAX_PLAN_VERSIONS
                     else:
                         conn.execute(
                             "UPDATE jobs SET status = 'execute', result = NULL, reason = NULL,"
@@ -688,7 +688,15 @@ def _renew(
 def _operator_state(conn: sqlite3.Connection, found: ClusterTaskRow) -> protocol.ClusterState:
     every = appointments(conn, found.cluster)
     jobs = []
+    dropped_nodes = []
+    plan = latest_plan(conn, found.cluster)
     for job in work.jobs(conn, cluster=found.id):
+        # Withdrawn records can be expired; they are history, not continuation state.
+        if job.status == "dropped":
+            body = job.cluster_job
+            if body is not None and plan is not None and body.version == plan.body.version:
+                dropped_nodes.append(body.node)
+            continue
         handed = work.handed_in(conn, job.id)
         result: sign.Signed | None = None
         result_key: str | None = None
@@ -722,6 +730,8 @@ def _operator_state(conn: sqlite3.Connection, found: ClusterTaskRow) -> protocol
         jobs=jobs,
         result=results[-1] if results else None,
         note=found.note,
+        replan=found.replan,
+        dropped_nodes=sorted(set(dropped_nodes)) if found.replan else [],
     )
 
 

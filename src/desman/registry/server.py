@@ -108,7 +108,13 @@ class _NotRegistered(Exception):
 
 
 def _ok(model: BaseModel) -> Reply:
-    return Reply(HTTPStatus.OK, model.model_dump(mode="json"))
+    exclude = set()
+    if isinstance(model, protocol.ClusterState):
+        if not model.replan:
+            exclude.add("replan")
+        if not model.dropped_nodes:
+            exclude.add("dropped_nodes")
+    return Reply(HTTPStatus.OK, model.model_dump(mode="json", exclude=exclude))
 
 
 Handler = Callable[[sqlite3.Connection, request.Caller, bytes, datetime], Reply]
