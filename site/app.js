@@ -3,6 +3,8 @@ const language = document.getElementById('language');
 function translate(value) {
   document.documentElement.lang = value;
   document.querySelectorAll('[data-en]').forEach(node => { node.textContent = node.dataset[value]; });
+  const key = value === 'ru' ? 'hrefRu' : 'hrefEn';
+  document.querySelectorAll('[data-href-en]').forEach(node => { node.href = node.dataset[key]; });
   document.getElementById('copy-status').textContent = '';
 }
 language.value = navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en';

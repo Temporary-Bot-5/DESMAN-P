@@ -1,6 +1,6 @@
 [project]
 name = "desman-p"
-version = "0.2.0.dev0"
+version = "0.2.0+test1"
 description = "Decentralized Self-Evolving Modular Agents Network (Prototype)"
 readme = "README.md"
 requires-python = ">=3.11"
