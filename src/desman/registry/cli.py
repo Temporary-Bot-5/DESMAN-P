@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shlex
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -1569,3 +1570,102 @@ def cluster_settle(ctx: click.Context, task_id: str, decision: str, note: str) -
             status=_cluster_status(settled),
         )
     )
+
+
+@cli.command()
+@click.option(
+    "--days",
+    default=admin.TRUST_DAYS,
+    type=click.IntRange(1, admin.MAX_TRUST_DAYS),
+    help="How long the trust list lasts.",
+)
+@click.option(
+    "--keep", default=14, type=click.IntRange(1, 365), help="How many daily backups to keep."
+)
+@_root_option
+@click.pass_context
+def daily(ctx: click.Context, days: int, keep: int, root_key: Path | None) -> None:
+    """Sign the trust list, back up the database and rotate daily backups."""
+    try:
+        done = admin.daily(_dir(ctx), days=days, keep=keep, root_key=root_key, now=_now())
+    except (admin.AdminError, OSError, sqlite3.Error) as e:
+        raise click.ClickException(str(e)) from e
+    if done.trust is not None:
+        ui.ok(t("Trust list signed."))
+    else:
+        ui.note(t("Trust list signing failed: {error}", error=done.error))
+    ui.ok(t("Backup written: {path}", path=str(done.backup)))
+    ui.ok(t("Daily backups removed: {count}", count=done.pruned))
+    if done.error is not None:
+        raise click.ClickException(done.error)
+
+
+@cli.command()
+@_json_option
+@click.option(
+    "--url", default="http://127.0.0.1:8470", help="Server URL; empty skips the HTTP check."
+)
+@click.pass_context
+def health(ctx: click.Context, as_json: bool, url: str) -> None:
+    """Check registry health without changing the database."""
+    from dataclasses import asdict
+
+    found = admin.health(_dir(ctx), now=_now(), url=url, root_pub=sign.ROOT_PUB)
+    ok = all(c.level != "fail" for c in found)
+    if as_json:
+        click.echo(json.dumps({"ok": ok, "checks": [asdict(c) for c in found]}))
+    else:
+        table = ui.table(t("Check"), t("Status"), t("Message"))
+        names = {
+            "database": t("Database"),
+            "trust_list": t("Trust list"),
+            "backup": t("Backup"),
+            "assignments": t("Assignments"),
+            "inbox": t("Inbox"),
+            "disk": t("Disk"),
+            "server": t("Server"),
+        }
+        messages = {
+            "operator missing": t("Operator key missing."),
+            "operator unassigned or expired": t("Operator key unassigned or expired."),
+            "appointer missing: clusters will not form": t(
+                "Appointer key missing: clusters will not form."
+            ),
+            "appointer unassigned or expired": t("Appointer key unassigned or expired."),
+            "operator current": t("Operator key current."),
+            "appointer current": t("Appointer key current."),
+            "backup dated in the future": t("Backup dated in the future."),
+            "missing or stale": t("Missing or stale."),
+            "current": t("Current."),
+            "ready": t("Ready."),
+            "refresh soon": t("Refresh soon."),
+            "renew or assign keys": t("Renew or assign keys; check appointer.key."),
+            "not checked": t("Not checked."),
+            "unavailable": t("Unavailable."),
+            "upgrade desman-registry": t("Upgrade desman-registry."),
+            "run the new version once / restart the service": t(
+                "Run the new version once / restart the service."
+            ),
+            "quick_check failed": t("Database integrity check failed."),
+        }
+        for c in found:
+            level = {"ok": t("OK"), "warn": t("Warning"), "fail": t("Failed")}[c.level]
+            message = messages.get(c.message)
+            for role in ("operator", "appointer"):
+                if c.message.startswith(role + " expires in "):
+                    days = c.message.split()[-2]
+                    message = (
+                        t("Operator key expires in {days} days.", days=days)
+                        if role == "operator"
+                        else t("Appointer key expires in {days} days.", days=days)
+                    )
+            if c.name == "inbox":
+                message = t("Waiting: {count}", count=c.message)
+            elif c.name == "disk" and c.message.isdigit():
+                message = t("Free bytes: {count}", count=c.message)
+            if message is None:
+                message = t("Check failed: {error}", error=c.message)
+            table.add_row(names[c.name], level, message)
+        ui.out(table)
+    if not ok:
+        ctx.exit(1)

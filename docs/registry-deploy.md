@@ -66,7 +66,7 @@ Each `assign` and `revoke` signs a new list lasting 7 days. Nodes accept a list 
 2 days after it is signed, so the daily timer matters. Sign one again every day from a timer (`crontab -e` as `desman`):
 
 ```cron
-0 4 * * * /srv/desman/DESMAN-P/.venv/bin/desman-registry trust sign --days 7
+0 4 * * * /srv/desman/DESMAN-P/.venv/bin/desman-registry daily --days 7 --keep 14
 ```
 
 `desman-registry trust show` says which list is handed out and until when. A list lasts 30
@@ -244,11 +244,9 @@ owner only:
 desman-registry backup /srv/desman/backups/registry-$(date +%F).db
 ```
 
-A daily timer (`crontab -e` as `desman`):
-
-```cron
-15 3 * * * /srv/desman/DESMAN-P/.venv/bin/desman-registry backup /srv/desman/backups/registry-$(date +\%F).db
-```
+The `daily` timer signs the trust list, then writes a backup under the registry directory's
+`backups/` (0700), keeping 14 timestamped copies (0600). A signing failure still takes a
+backup and fails the timer unit. Manually named backups are never rotated.
 
 Copy the backups off the server. To restore one:
 
@@ -268,16 +266,29 @@ revocation, for one, must be redone at once. Then sign a trust list (`trust sign
 the newest one they saw, which may name records the copy has lost, and they take no work until
 the restored registry hands out every record a list still names.
 
-## 8. Updating
+## Updating the server
+
+Stop maintenance timers, take a named backup, then install the chosen revision and restart:
 
 ```bash
-sudo -iu desman
-cd DESMAN-P && git pull && .venv/bin/pip install -e .
-exit
-sudo systemctl restart desman-registry
+systemctl --user stop desman-registry-daily.timer desman-registry-health.timer
+~/desman-registry-app/.venv/bin/desman-registry backup ~/registry-preupdate-$(date +%F-%H%M).db
+git -C ~/desman-registry-app fetch
+git -C ~/desman-registry-app checkout --detach <tag-or-commit>
+cd ~/desman-registry-app
+.venv/bin/pip install -e .
+systemctl --user restart desman-registry.service
+.venv/bin/desman-registry health
+systemctl --user start desman-registry-daily.timer desman-registry-health.timer
 ```
 
-The registry migrates its database on start. Take a backup first.
+Keep the timers stopped during the update: a timer running the new code could migrate the
+live database while the old server still runs. Start them again after the health check.
+
+For the system service use `sudo systemctl restart desman-registry` and its installation
+path instead. The service migrates on start. **A database migrated by a newer version cannot
+be opened by the old one. Never run a newer `desman-registry` against the live directory
+before updating the service.** Restore the pre-update backup before rolling back code.
 
 Independent proposal checks (G.7b) appear in `desman-registry proposal show ID`: the checking
 node, outcome, verdict, whether the metrics match the submission, reason, and both benchmark
@@ -346,3 +357,62 @@ remain available. `moderation list` shows the signed records; `moderation lift R
 --reason TEXT` lifts a suspension. An expired or revoked operator's suspension no longer applies.
 Use `--operator-key PATH` for an operator key outside the default `operator.key`. These records
 stay in the registry's moderation journal and are never distributed as trust records.
+
+
+## User service and timers
+
+The owner's user service lives under `~/desman-registry-app`. Install the supplied units:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ~/desman-registry-app/docs/systemd/* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now desman-registry.service
+systemctl --user enable --now desman-registry-daily.timer desman-registry-health.timer
+loginctl enable-linger $USER
+systemctl --user --failed
+journalctl --user -u desman-registry-health
+journalctl --user -u desman-registry-daily
+```
+
+Linger keeps user units running without a login. Daily maintenance runs around 04:00 UTC
+if the server timezone is UTC (otherwise 04:00 local time), with up to ten minutes of jitter;
+health runs hourly. Persistent timers catch up after downtime. For a system service, use the
+cron `daily` command above or a system timer with `User=desman` and absolute installation paths.
+
+## During the test
+
+For each participant, find their node with `desman-registry nodes`, then run
+`desman-registry owner NODE NAME`. Give all machines belonging to one person the same name:
+nodes of one owner never recheck each other. Ensure at least three nodes are lending modules
+and one allows leading before trying a cluster.
+
+Small, harmless jobs (code runs only on nodes with a sandbox and the person's permission):
+
+```bash
+desman-registry job add --description "Write three tips for keeping a desk tidy." --acceptance "Three short practical tips." --kind text
+desman-registry job add --description "Translate Good morning into French and Spanish." --acceptance "Both translations labelled." --kind text
+desman-registry job add --description "Compare walking and cycling for a 2 km trip." --acceptance "Two advantages and one limitation for each." --kind analysis
+desman-registry job add --description "Explain why backups should be tested." --acceptance "Under 150 words; mentions restoring." --kind text
+desman-registry job add --description "Write and run Python that sums the squares from 1 to 10." --acceptance "Code runs successfully and prints 385." --kind code --runs-code
+desman-registry job add --description "Write and run Python that asserts reversing a string twice returns the original." --acceptance "Successful run with empty and nonempty string cases." --kind code --runs-code
+desman-registry cluster add --goal "Create a short beginner guide to growing herbs on a windowsill." --acceptance "Three herbs, light and watering guidance, under 600 words."
+```
+
+Watch `desman-registry inbox`, `jobs`, `clusters`, `reports`, and `complaints`. Inspect a job
+with `job show JOB` or a cluster with `cluster show TASK`, then `job settle JOB accept|again|drop`
+or `cluster settle TASK accept|again|drop --note "What needs changing"`. Check complaints and
+reports as described above; their contents are untrusted.
+
+Run `desman-registry health` (`--json` for scripts, `--url ""` to skip HTTP). Warnings do not
+fail the command; any failed check exits 1. Diagnose each check as follows:
+
+| Check | Action |
+|---|---|
+| database | Check `--dir` and service logs. If newer, upgrade the installed code; if older, restart the updated service. For corruption stop the service and restore a verified backup using section 7. |
+| trust_list | Run `desman-registry daily`; check root.key permissions and the daily timer journal. |
+| backup | Run `desman-registry daily`; check free space, directory permissions and the daily timer. Copy backups off the machine. |
+| assignments | Renew `desman-registry assign`; for clusters run `appointer create`, export its displayed public key to a PEM file, and `assign APPOINTER_PUBLIC_KEY --scope appoint`. |
+| inbox | Inspect `inbox`, then `job settle` or `cluster settle` each item. |
+| disk | Use `df -h`, move old manual backups off-server and free space; `daily --keep 14` rotates only automatic copies. |
+| server | Check `systemctl --user status desman-registry` and `journalctl --user -u desman-registry`; restart after fixing the reported problem. Check `--url` and the reverse proxy if remote. |

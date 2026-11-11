@@ -15,6 +15,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "Призначення",
+    "Backup": "Резервна копія",
+    "Check failed: {error}": "Перевірка не пройдена: {error}",
+    "Check registry health without changing the database.": "Перевірити стан реєстру без зміни бази даних.",
+    "Current.": "Актуально.",
+    "Daily backups removed: {count}": "Видалено щоденних копій: {count}",
+    "Database": "База даних",
+    "Database integrity check failed.": "Перевірка цілісності бази даних не пройдена.",
+    "Disk": "Диск",
+    "Free bytes: {count}": "Вільно байтів: {count}",
+    "How long the trust list lasts.": "Термін дії списку довіри.",
+    "How many daily backups to keep.": "Скільки щоденних копій зберігати.",
+    "Inbox": "Вхідні",
+    "Message": "Повідомлення",
+    "Missing or stale.": "Відсутнє або застаріле.",
+    "Not checked.": "Не перевірено.",
+    "Ready.": "Готово.",
+    "Refresh soon.": "Незабаром оновіть.",
+    "Renew or assign keys; check appointer.key.": "Поновіть або призначте ключі; перевірте appointer.key.",
+    "Run the new version once / restart the service.": "Запустіть нову версію один раз / перезапустіть службу.",
+    "Server": "Сервер",
+    "Server URL; empty skips the HTTP check.": "URL сервера; порожнє значення пропускає перевірку HTTP.",
+    "Sign the trust list, back up the database and rotate daily backups.": "Підписати список довіри, скопіювати базу даних і видалити старі щоденні копії.",
+    "Trust list": "Список довіри",
+    "Trust list signed.": "Список довіри підписано.",
+    "Trust list signing failed: {error}": "Не вдалося підписати список довіри: {error}",
+    "Unavailable.": "Недоступно.",
+    "Upgrade desman-registry.": "Оновіть desman-registry.",
+    "Waiting: {count}": "Очікують: {count}",
+    "Warning": "Попередження",
     "Lead clusters": "Керувати кластерами",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "Керує кластером {cluster} (завдання {task}), {members} учасник",
@@ -1799,6 +1829,15 @@ MESSAGES.update(
         "(desman-registry "
         "cluster "
         "settle).",
+        "Operator key missing.": "Ключ оператора відсутній.",
+        "Operator key unassigned or expired.": "Ключ оператора не призначено або прострочено.",
+        "Appointer key missing: clusters will not form.": "Ключ призначення відсутній: кластери не утворюватимуться.",
+        "Appointer key unassigned or expired.": "Ключ призначення не призначено або прострочено.",
+        "Operator key current.": "Ключ оператора чинний.",
+        "Appointer key current.": "Ключ призначення чинний.",
+        "Operator key expires in {days} days.": "Ключ оператора спливає через {days} дн.",
+        "Appointer key expires in {days} days.": "Ключ призначення спливає через {days} дн.",
+        "Backup dated in the future.": "Резервну копію датовано майбутнім.",
     }
 )
 

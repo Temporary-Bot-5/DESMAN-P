@@ -34,6 +34,7 @@ import binascii
 import json
 import sqlite3
 from collections.abc import Callable, Iterable
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
@@ -213,6 +214,21 @@ class Registry:
     def handle(
         self, method: str, target: str, headers: Iterable[tuple[str, str]], body: bytes
     ) -> Reply:
+        if target.split("?", 1)[0] == "/healthz":
+            if method != "GET":
+                return _problem(HTTPStatus.METHOD_NOT_ALLOWED, NOT_ALLOWED_METHOD, "GET")
+            if body:
+                return _problem(HTTPStatus.BAD_REQUEST, "body_not_empty")
+            try:
+                with closing(
+                    sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True)
+                ) as conn:
+                    version = conn.execute("PRAGMA user_version").fetchone()[0]
+                    if version != len(store.MIGRATIONS):
+                        return Reply(503, {"status": "unavailable"})
+                return Reply(200, {"status": "ok"})
+            except (sqlite3.Error, OSError):
+                return Reply(503, {"status": "unavailable"})
         route = self._routes.get(target.split("?", 1)[0])
         if route is None:
             return _problem(HTTPStatus.NOT_FOUND, NOT_FOUND)

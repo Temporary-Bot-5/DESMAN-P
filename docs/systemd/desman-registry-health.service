@@ -1,0 +1,9 @@
+[Unit]
+Description=desman-registry health check
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/desman-registry-app
+ExecStart=%h/desman-registry-app/.venv/bin/desman-registry health
+NoNewPrivileges=yes
+UMask=0077

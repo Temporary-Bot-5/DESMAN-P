@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "Atamalar",
+    "Backup": "Yedek",
+    "Check failed: {error}": "Denetim başarısız: {error}",
+    "Check registry health without changing the database.": "Veritabanını değiştirmeden kayıt sunucusunu denetle.",
+    "Current.": "Güncel.",
+    "Daily backups removed: {count}": "Silinen günlük yedekler: {count}",
+    "Database": "Veritabanı",
+    "Database integrity check failed.": "Veritabanı bütünlük denetimi başarısız.",
+    "Disk": "Disk",
+    "Free bytes: {count}": "Boş bayt: {count}",
+    "How long the trust list lasts.": "Güven listesinin geçerlilik süresi.",
+    "How many daily backups to keep.": "Saklanacak günlük yedek sayısı.",
+    "Inbox": "Gelen kutusu",
+    "Message": "Mesaj",
+    "Missing or stale.": "Eksik veya eski.",
+    "Not checked.": "Denetlenmedi.",
+    "Ready.": "Hazır.",
+    "Refresh soon.": "Yakında yenileyin.",
+    "Renew or assign keys; check appointer.key.": "Anahtarları yenileyin veya atayın; appointer.key dosyasını denetleyin.",
+    "Run the new version once / restart the service.": "Yeni sürümü bir kez çalıştırın / hizmeti yeniden başlatın.",
+    "Server": "Sunucu",
+    "Server URL; empty skips the HTTP check.": "Sunucu URL'si; boşsa HTTP denetimi atlanır.",
+    "Sign the trust list, back up the database and rotate daily backups.": "Güven listesini imzala, veritabanını yedekle ve günlük yedekleri döndür.",
+    "Trust list": "Güven listesi",
+    "Trust list signed.": "Güven listesi imzalandı.",
+    "Trust list signing failed: {error}": "Güven listesi imzalanamadı: {error}",
+    "Unavailable.": "Kullanılamıyor.",
+    "Upgrade desman-registry.": "desman-registry sürümünü yükseltin.",
+    "Waiting: {count}": "Bekleyen: {count}",
+    "Warning": "Uyarı",
     "Lead clusters": "Kümeleri yönet",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "{cluster} kümesini yönetiyor (görev {task}), üye sayısı: {members}",
@@ -1666,6 +1696,15 @@ MESSAGES.update(
         "(desman-registry "
         "cluster "
         "settle).",
+        "Operator key missing.": "Operatör anahtarı eksik.",
+        "Operator key unassigned or expired.": "Operatör anahtarı atanmamış veya süresi dolmuş.",
+        "Appointer key missing: clusters will not form.": "Atayıcı anahtarı eksik: kümeler oluşmayacak.",
+        "Appointer key unassigned or expired.": "Atayıcı anahtarı atanmamış veya süresi dolmuş.",
+        "Operator key current.": "Operatör anahtarı geçerli.",
+        "Appointer key current.": "Atayıcı anahtarı geçerli.",
+        "Operator key expires in {days} days.": "Operatör anahtarının süresi {days} gün sonra dolacak.",
+        "Appointer key expires in {days} days.": "Atayıcı anahtarının süresi {days} gün sonra dolacak.",
+        "Backup dated in the future.": "Yedek gelecekte tarihlenmiş.",
     }
 )
 

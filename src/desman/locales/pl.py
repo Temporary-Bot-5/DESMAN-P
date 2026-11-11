@@ -15,6 +15,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "Przypisania",
+    "Backup": "Kopia zapasowa",
+    "Check failed: {error}": "Sprawdzanie nie powiodło się: {error}",
+    "Check registry health without changing the database.": "Sprawdź rejestr bez zmiany bazy danych.",
+    "Current.": "Aktualne.",
+    "Daily backups removed: {count}": "Usunięte kopie dzienne: {count}",
+    "Database": "Baza danych",
+    "Database integrity check failed.": "Sprawdzenie integralności bazy danych nie powiodło się.",
+    "Disk": "Dysk",
+    "Free bytes: {count}": "Wolne bajty: {count}",
+    "How long the trust list lasts.": "Okres ważności listy zaufania.",
+    "How many daily backups to keep.": "Liczba zachowywanych kopii dziennych.",
+    "Inbox": "Skrzynka odbiorcza",
+    "Message": "Wiadomość",
+    "Missing or stale.": "Brak lub nieaktualne.",
+    "Not checked.": "Nie sprawdzono.",
+    "Ready.": "Gotowe.",
+    "Refresh soon.": "Wkrótce odśwież.",
+    "Renew or assign keys; check appointer.key.": "Odnów lub przypisz klucze; sprawdź appointer.key.",
+    "Run the new version once / restart the service.": "Uruchom nową wersję raz / uruchom usługę ponownie.",
+    "Server": "Serwer",
+    "Server URL; empty skips the HTTP check.": "URL serwera; pusty pomija sprawdzanie HTTP.",
+    "Sign the trust list, back up the database and rotate daily backups.": "Podpisz listę zaufania, skopiuj bazę i rotuj kopie dzienne.",
+    "Trust list": "Lista zaufania",
+    "Trust list signed.": "Lista zaufania podpisana.",
+    "Trust list signing failed: {error}": "Podpisanie listy zaufania nie powiodło się: {error}",
+    "Unavailable.": "Niedostępne.",
+    "Upgrade desman-registry.": "Zaktualizuj desman-registry.",
+    "Waiting: {count}": "Oczekujące: {count}",
+    "Warning": "Ostrzeżenie",
     "Lead clusters": "Kierowanie klastrami",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "Kieruje klastrem {cluster} (zadanie {task}), {members} członek",
@@ -1803,6 +1833,15 @@ MESSAGES.update(
         "(desman-registry "
         "cluster "
         "settle).",
+        "Operator key missing.": "Brak klucza operatora.",
+        "Operator key unassigned or expired.": "Klucz operatora nieprzypisany lub wygasły.",
+        "Appointer key missing: clusters will not form.": "Brak klucza powołującego: klastry nie powstaną.",
+        "Appointer key unassigned or expired.": "Klucz powołującego nieprzypisany lub wygasły.",
+        "Operator key current.": "Klucz operatora aktualny.",
+        "Appointer key current.": "Klucz powołującego aktualny.",
+        "Operator key expires in {days} days.": "Klucz operatora wygasa za {days} dni.",
+        "Appointer key expires in {days} days.": "Klucz powołującego wygasa za {days} dni.",
+        "Backup dated in the future.": "Kopia zapasowa z datą w przyszłości.",
     }
 )
 

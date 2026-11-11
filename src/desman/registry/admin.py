@@ -16,12 +16,15 @@ so nodes learn of it at their next poll; the person signs one again before the l
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
+import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
@@ -427,3 +430,243 @@ def settle_cluster(
                 decision=decision,
             )
         ) from e
+
+
+_BACKUP_NAME = re.compile(r"registry-\d{8}-\d{6}Z\.db", re.ASCII)
+
+
+def backup_files(directory: Path) -> list[Path]:
+    """Only our timestamped regular backups; never follow a symlink."""
+    if not directory.exists():
+        return []
+    return sorted(
+        p
+        for p in directory.iterdir()
+        if _BACKUP_NAME.fullmatch(p.name) and not p.is_symlink() and p.is_file()
+    )
+
+
+@dataclass(frozen=True)
+class Daily:
+    trust: TrustListed | None
+    error: str | None
+    backup: Path
+    pruned: int
+
+
+def daily(
+    directory: Path, *, days: int, keep: int, now: datetime, root_key: Path | None = None
+) -> Daily:
+    """Signing failure must not prevent the independent backup."""
+    if not 1 <= keep <= 365:
+        raise ValueError("keep must be between 1 and 365")
+    signed = None
+    error = None
+    try:
+        root = load_root_key(directory / store.ROOT_KEY if root_key is None else root_key)
+        conn = store.open_registry(directory / store.DB_NAME)
+        try:
+            signed = sign_trust_list(conn, root, days=days, now=now)
+        finally:
+            conn.close()
+    except Exception as e:
+        error = str(e)
+    try:
+        return _daily_backup(directory, keep=keep, now=now, signed=signed, error=error)
+    except (AdminError, OSError, sqlite3.Error) as e:
+        if error is not None:
+            raise AdminError(f"{error}; {e}") from e
+        raise
+
+
+def _backup_stamp(path: Path) -> datetime | None:
+    try:
+        return datetime.strptime(path.name, "registry-%Y%m%d-%H%M%SZ.db").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def _daily_backup(
+    directory: Path, *, keep: int, now: datetime, signed: TrustListed | None, error: str | None
+) -> Daily:
+    folder = directory / "backups"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    dest = folder / now.astimezone(UTC).strftime("registry-%Y%m%d-%H%M%SZ.db")
+    backup(directory / store.DB_NAME, dest)
+    removed = [
+        p
+        for p in backup_files(folder)
+        if (stamp := _backup_stamp(p)) is not None and stamp <= now + timedelta(minutes=5)
+    ][:-keep]
+    for path in removed:
+        path.unlink()
+    return Daily(signed, error, dest, len(removed))
+
+
+@dataclass(frozen=True)
+class HealthCheck:
+    name: str
+    level: str
+    message: str
+
+
+def _age_check(name: str, age: timedelta | None, limit: timedelta) -> HealthCheck:
+    if age is None or age >= limit:
+        return HealthCheck(name, "fail", "missing or stale")
+    return HealthCheck(
+        name,
+        "ok" if age < timedelta(hours=26) else "warn",
+        "current" if age < timedelta(hours=26) else "refresh soon",
+    )
+
+
+def health(
+    directory: Path,
+    *,
+    now: datetime,
+    url: str = "http://127.0.0.1:8470",
+    client: httpx.Client | None = None,
+    root_pub: Path = sign.ROOT_PUB,
+) -> list[HealthCheck]:
+    """Inspect only: no schema migration, key creation, expiry sweep or journal writes."""
+    result: list[HealthCheck] = []
+    path = directory / store.DB_NAME
+    try:
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version != len(store.MIGRATIONS):
+                message = (
+                    "upgrade desman-registry"
+                    if version > len(store.MIGRATIONS)
+                    else "run the new version once / restart the service"
+                )
+                result.append(HealthCheck("database", "fail", message))
+            else:
+                verdict = conn.execute("PRAGMA quick_check").fetchall()
+                if len(verdict) != 1 or verdict[0][0] != "ok":
+                    result.append(HealthCheck("database", "fail", "quick_check failed"))
+            if not result:
+                result.append(HealthCheck("database", "ok", "ready"))
+                listed = trust_list(conn, now)
+                result.append(
+                    _age_check(
+                        "trust_list",
+                        None if listed is None else now - listed.issued_at,
+                        sign.TRUST_LIST_MAX_AGE,
+                    )
+                )
+                believed = store.trust(conn, sign.load_root(root_pub), now)
+                for role, filename in (
+                    ("operator", store.OPERATOR_KEY),
+                    ("appointer", store.APPOINTER_KEY),
+                ):
+                    try:
+                        key = (
+                            load_appointer(directory / filename)
+                            if role == "appointer"
+                            else load_operator_key(directory / filename)
+                        )
+                    except (AdminError, OSError) as e:
+                        result.append(
+                            HealthCheck(
+                                "assignments",
+                                "fail",
+                                "operator missing"
+                                if role == "operator" and not (directory / filename).exists()
+                                else f"{role}: {e}",
+                            )
+                        )
+                        continue
+                    if key is None:
+                        result.append(
+                            HealthCheck(
+                                "assignments", "warn", "appointer missing: clusters will not form"
+                            )
+                        )
+                        continue
+                    assigned = believed.operator(key.fingerprint)
+                    newest = conn.execute(
+                        "SELECT expires_at FROM records WHERE kind='assignment' AND subject=?"
+                        " ORDER BY issued_at DESC, seq DESC LIMIT 1",
+                        (key.fingerprint,),
+                    ).fetchone()
+                    if (
+                        assigned is None
+                        or newest is None
+                        or db.parse_iso(newest["expires_at"]) <= now
+                        or assigned.expires_at <= now
+                        or (role == "appointer" and sign.Scope.APPOINT not in assigned.scopes)
+                    ):
+                        result.append(
+                            HealthCheck("assignments", "fail", f"{role} unassigned or expired")
+                        )
+                    elif assigned.expires_at - now < timedelta(days=14):
+                        days_left = (assigned.expires_at - now).days
+                        result.append(
+                            HealthCheck(
+                                "assignments", "warn", f"{role} expires in {days_left} days"
+                            )
+                        )
+                    else:
+                        result.append(HealthCheck("assignments", "ok", f"{role} current"))
+                count = len(work.jobs(conn, "operator", cluster=None)) + len(
+                    clusters.cluster_tasks(conn, "operator")
+                )
+                result.append(HealthCheck("inbox", "warn" if count else "ok", str(count)))
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError, ValueError) as e:
+        result.append(HealthCheck("database", "fail", str(e)))
+    try:
+        stamps = [
+            stamp
+            for p in backup_files(directory / "backups")
+            if (stamp := _backup_stamp(p)) is not None
+        ]
+        valid = [stamp for stamp in stamps if stamp <= now + timedelta(minutes=5)]
+        stamp = max(valid, default=None)
+        result.append(
+            _age_check("backup", None if stamp is None else now - stamp, timedelta(hours=72))
+        )
+        if stamps and not valid:
+            result.append(HealthCheck("backup", "warn", "backup dated in the future"))
+    except OSError as e:
+        result.append(HealthCheck("backup", "fail", str(e)))
+    try:
+        location = directory
+        while not location.exists():
+            location = location.parent
+        free = shutil.disk_usage(location).free
+        result.append(
+            HealthCheck(
+                "disk",
+                "fail" if free < 100 * 1024**2 else "warn" if free < 1024**3 else "ok",
+                str(free),
+            )
+        )
+    except OSError as e:
+        result.append(HealthCheck("disk", "fail", str(e)))
+    if not url:
+        result.append(HealthCheck("server", "warn", "not checked"))
+    else:
+        try:
+
+            def fetch(http: httpx.Client) -> bool:
+                response = http.get(url.rstrip("/") + "/healthz", timeout=5)
+                return response.status_code == 200 and response.json() == {"status": "ok"}
+
+            if client is None:
+                with httpx.Client() as http:
+                    ready = fetch(http)
+            else:
+                ready = fetch(client)
+            result.append(
+                HealthCheck(
+                    "server", "ok" if ready else "fail", "ready" if ready else "unavailable"
+                )
+            )
+        except (httpx.HTTPError, ValueError, OSError) as e:
+            result.append(HealthCheck("server", "fail", str(e)))
+    return result

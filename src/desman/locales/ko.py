@@ -10,6 +10,36 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Assignments": "권한 할당",
+    "Backup": "백업",
+    "Check failed: {error}": "검사 실패: {error}",
+    "Check registry health without changing the database.": "데이터베이스를 변경하지 않고 레지스트리 상태를 확인합니다.",
+    "Current.": "최신입니다.",
+    "Daily backups removed: {count}": "삭제한 일일 백업: {count}",
+    "Database": "데이터베이스",
+    "Database integrity check failed.": "데이터베이스 무결성 검사에 실패했습니다.",
+    "Disk": "디스크",
+    "Free bytes: {count}": "사용 가능한 바이트: {count}",
+    "How long the trust list lasts.": "신뢰 목록의 유효 기간.",
+    "How many daily backups to keep.": "보관할 일일 백업 수.",
+    "Inbox": "받은 편지함",
+    "Message": "메시지",
+    "Missing or stale.": "없거나 오래되었습니다.",
+    "Not checked.": "확인하지 않음.",
+    "Ready.": "준비됨.",
+    "Refresh soon.": "곧 갱신하세요.",
+    "Renew or assign keys; check appointer.key.": "키를 갱신하거나 할당하고 appointer.key를 확인하세요.",
+    "Run the new version once / restart the service.": "새 버전을 한 번 실행하거나 서비스를 다시 시작하세요.",
+    "Server": "서버",
+    "Server URL; empty skips the HTTP check.": "서버 URL. 비워 두면 HTTP 검사를 건너뜁니다.",
+    "Sign the trust list, back up the database and rotate daily backups.": "신뢰 목록에 서명하고 데이터베이스를 백업하며 일일 백업을 순환합니다.",
+    "Trust list": "신뢰 목록",
+    "Trust list signed.": "신뢰 목록에 서명했습니다.",
+    "Trust list signing failed: {error}": "신뢰 목록 서명 실패: {error}",
+    "Unavailable.": "사용할 수 없음.",
+    "Upgrade desman-registry.": "desman-registry를 업그레이드하세요.",
+    "Waiting: {count}": "대기 중: {count}",
+    "Warning": "경고",
     "Lead clusters": "클러스터 주도",
     "Leads cluster {cluster} (task {task}), {members} member": (
         "클러스터 {cluster} 주도 (작업 {task}), 구성원 수: {members}",
@@ -1634,6 +1664,15 @@ MESSAGES.update(
         "결정합니다(desman-registry "
         "cluster "
         "settle).",
+        "Operator key missing.": "운영자 키가 없습니다.",
+        "Operator key unassigned or expired.": "운영자 키가 할당되지 않았거나 만료되었습니다.",
+        "Appointer key missing: clusters will not form.": "임명 키가 없어 클러스터가 형성되지 않습니다.",
+        "Appointer key unassigned or expired.": "임명 키가 할당되지 않았거나 만료되었습니다.",
+        "Operator key current.": "운영자 키가 유효합니다.",
+        "Appointer key current.": "임명 키가 유효합니다.",
+        "Operator key expires in {days} days.": "운영자 키가 {days}일 후 만료됩니다.",
+        "Appointer key expires in {days} days.": "임명 키가 {days}일 후 만료됩니다.",
+        "Backup dated in the future.": "백업 날짜가 미래입니다.",
     }
 )
 
