@@ -8,7 +8,9 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Any, Literal
+from unittest import mock
 
 import pytest
 from click.testing import CliRunner
@@ -323,6 +325,7 @@ def test_member_role_checks(
     job = state.jobs[0].job
     if candidate == 3 or renewed:
         machines.append(machine("outsider", doer()))
+        machines[-1].poll()
     m = machines[candidate]
     result = sign.sign(
         machines[1].key,
@@ -364,9 +367,18 @@ def test_member_role_checks(
         )
         m.node._trust.receive(appointed.model_dump(mode="json"))
         m.node._appointments[appointed.record.id] = appointed
-    monkeypatch.setattr(node, "_call", lambda *a, **kw: protocol.Offer(work=offered))
+    real_call = node._call
+
+    def reply(*args: Any, **kwargs: Any) -> Any:
+        if args[4] == protocol.CLAIM:
+            return protocol.Offer(work=offered)
+        return real_call(*args, **kwargs)
+
+    monkeypatch.setattr(node, "_call", reply)
     before = len(jobs.holding(m.conn))
-    m.node._claim(m.node._http(), m.key, m.settings(), "https://registry.test", clock(), 10)
+    m.node._claim(
+        m.node._http(), m.key, m.settings(), "https://registry.test", clock(), monotonic() + 10
+    )
     assert (len(jobs.holding(m.conn)) > before) is allowed, m.log()
     assert any(a == ("work_taken" if allowed else "work_refused") for a, d in m.log())
 
@@ -933,3 +945,239 @@ def test_replan_prefix_nodes_all_feed_the_result(
 
     visit(len(changed) - 1)
     assert ancestors == set(range(len(changed) - 1))
+
+
+@pytest.mark.parametrize("at_cap", [False, True])
+@pytest.mark.parametrize("expired", [False, True])
+def test_expired_given_up_job_replans_before_lending(
+    task: str,
+    machine: Callable[[str, FakeLLM], Machine],
+    world: World,
+    registry_db: Path,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+    at_cap: bool,
+    expired: bool,
+) -> None:
+    if at_cap:
+        monkeypatch.setattr(protocol, "MAX_PLAN_VERSIONS", 1)
+    real_sign = sign.sign
+
+    def short_job(*args: Any, **kwargs: Any) -> sign.Signed:
+        if expired and args[1] is sign.RecordKind.CLUSTER_JOB and args[2]["node"] == 1:
+            kwargs["lifetime"] = timedelta(seconds=121)
+        return real_sign(*args, **kwargs)
+
+    with mock.patch.object(sign, "sign", short_job):
+        machines = setup(machine, clock)
+        _expire_given_up(task, machines, world, registry_db, clock, at_cap, expired)
+
+
+def _expire_given_up(
+    task: str,
+    machines: list[Machine],
+    world: World,
+    registry_db: Path,
+    clock: FakeClock,
+    at_cap: bool,
+    expired: bool,
+) -> None:
+    for _ in range(12):
+        clock.advance(120)
+        machines[0].poll()
+        with store.connection(registry_db) as conn:
+            rows = work.jobs(conn, cluster=task)
+            if len(rows) == 2:
+                found = clusters.cluster_task(conn, task)
+                assert found is not None
+                before = clusters.latest_plan(conn, found.cluster)
+                # The person may see an exhausted job even on an early plan (runs_code).
+                with db.transaction(conn):
+                    work.to_operator(conn, rows[1], "failed", {})
+                    clock.advance(122)
+                    conn.execute(
+                        "UPDATE cluster_tasks SET status='operator', "
+                        "reason='job_given_up' WHERE id=?",
+                        (task,),
+                    )
+                with mock.patch.object(clusters, "_untried_members", return_value=False):
+                    clusters.settle(conn, task, "again", clock(), note="Use a new ending")
+                dropped = work.job(conn, rows[1].id)
+                assert dropped is not None
+                assert dropped.reason == ("expired" if expired else "no_member_left")
+                assert clusters.cluster_task(conn, task).replan == (not at_cap)  # type: ignore[union-attr]
+                accepted = rows[0]
+                break
+        for m in machines[1:]:
+            m.poll()
+            m.work()
+            m.poll(idle=False)
+    else:
+        pytest.fail("second job was not lent")
+    assert before is not None
+    if at_cap:
+        for _ in range(4):
+            run_round(machines, clock)
+        with store.connection(registry_db) as conn:
+            latest = clusters.latest_plan(conn, found.cluster)
+            assert latest is not None and latest.body.version == 1
+            replacement = [
+                j
+                for j in work.jobs(conn, cluster=task)
+                if j.id != rows[1].id and j.cluster_job and j.cluster_job.node == 1
+            ]
+            assert replacement
+            assert work.job(conn, accepted.id) == accepted
+        return
+    for _ in range(5):
+        run_round(machines, clock)
+        with store.connection(registry_db) as conn:
+            after = clusters.latest_plan(conn, found.cluster)
+            if after is not None and after.body.version == 2:
+                assert not clusters.cluster_task(conn, task).replan  # type: ignore[union-attr]
+                assert work.job(conn, accepted.id) == accepted
+                assert after.body.nodes[0] == before.body.nodes[0]
+                assert after.body.nodes[1].description == "First half"
+                assert len(after.body.nodes) == 3
+                # No replacement job was signed against the obsolete plan.
+                old_jobs = [
+                    r
+                    for r in clusters.records(conn, found.cluster, sign.RecordKind.CLUSTER_JOB)
+                    if r.record.body["version"] == 1
+                ]
+                assert len(old_jobs) == 2
+                break
+    else:
+        pytest.fail(str([m.log() for m in machines]))
+    assert any(
+        "Use a new ending" in msg.content
+        for m in machines
+        for req in m.crew.planner.calls  # type: ignore[union-attr]
+        for msg in req.messages
+    )
+
+
+def test_old_registry_result_heuristic(
+    task: str, machine: Callable[[str, FakeLLM], Machine], world: World, clock: FakeClock
+) -> None:
+    leader = setup(machine, clock)[0]
+    state = snapshot(leader, world, clock)
+    raw = state.model_dump(mode="json")
+    raw.pop("replan")
+    old = protocol.ClusterState.model_validate(raw)
+    result = sign.sign(
+        leader.key,
+        sign.RecordKind.CLUSTER_RESULT,
+        protocol.ClusterResult(
+            cluster=state.cluster or "a" * 32,
+            task=task,
+            plan=old.plans[-1].record.id,
+            version=1,
+            result="b" * 32,
+            summary="Try again",
+        ).model_dump(mode="json"),
+        issued_at=clock(),
+        lifetime=timedelta(days=1),
+    )
+    sent: list[protocol.ClusterPlan] = []
+
+    def send(kind: sign.RecordKind, body: Any) -> None:
+        assert kind is sign.RecordKind.CLUSTER_PLAN
+        sent.append(protocol.ClusterPlan.model_validate(body))
+
+    cluster.supervise(
+        old.model_copy(update={"result": result}), FakeLLM(PLAN), send, lambda why: pytest.fail(why)
+    )
+    assert sent[0].version == 2
+
+
+@pytest.mark.parametrize("role", ["none", "member", "operator"])
+def test_cluster_reply_compatible_without_replan(role: str) -> None:
+    from pydantic import ConfigDict, create_model
+
+    from desman.registry.server import _ok
+
+    fields: dict[str, Any] = {
+        name: (field.annotation, field)
+        for name, field in protocol.ClusterState.model_fields.items()
+        if name not in {"replan", "dropped_nodes"}
+    }
+    old = create_model(
+        "OldClusterState",
+        __config__=ConfigDict(extra="forbid"),
+        **fields,
+    )
+    state = protocol.ClusterState.model_validate({"role": role})
+    reply = _ok(state)
+    assert "replan" not in reply.body
+    assert "dropped_nodes" not in reply.body
+    old.model_validate(reply.body)
+    changed = _ok(state.model_copy(update={"replan": True, "dropped_nodes": [1]}))
+    assert changed.body["replan"] is True
+    assert changed.body["dropped_nodes"] == [1]
+
+
+@pytest.mark.parametrize("failure", ["unreachable", "stale"])
+def test_claim_trust_refresh_does_not_abandon_lease(
+    task: str,
+    machine: Callable[[str, FakeLLM], Machine],
+    world: World,
+    registry_db: Path,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    machines = setup(machine, clock)
+    clock.advance(120)
+    machines[0].poll()
+    member = machines[2]
+    real = node._call
+    granted: list[protocol.Work] = []
+
+    def call(*args: Any, **kwargs: Any) -> Any:
+        if args[4] == protocol.TRUST and granted and failure == "unreachable":
+            raise node._Unreachable("offline")
+        reply = real(*args, **kwargs)
+        if args[4] == protocol.CLAIM and reply.work is not None:
+            granted.append(reply.work)
+        return reply
+
+    monkeypatch.setattr(node, "_call", call)
+    monkeypatch.setattr(member.node, "_fresh", lambda address: False)
+    member.node._claim(
+        member.node._http(),
+        member.key,
+        member.settings(),
+        "https://registry.test",
+        clock(),
+        monotonic() + 10,
+    )
+    assert granted
+    assert any(
+        action in {"work_taken", "work_refused"} and details["job"] == granted[0].task.record.id
+        for action, details in member.log()
+    )
+
+
+def test_lending_uses_one_appointment_snapshot(
+    task: str,
+    machine: Callable[[str, FakeLLM], Machine],
+    world: World,
+    registry_db: Path,
+    clock: FakeClock,
+) -> None:
+    machines = setup(machine, clock)
+    clock.advance(120)
+    machines[0].poll()
+    with store.connection(registry_db) as conn:
+        job = work.jobs(conn, "execute", cluster=task)[0]
+        caller = store.node(conn, machines[1].key.fingerprint)
+        assert caller is not None
+        queries: list[str] = []
+        conn.set_trace_callback(queries.append)
+        assert work._cluster_lends_to(conn, job, caller, clock())
+        appointment_queries = [q for q in queries if "FROM appointments" in q]
+        assert len(appointment_queries) == 1
+        assert all(
+            field in appointment_queries[0] for field in ("issued_at", "expires_at", "members_json")
+        )

@@ -627,6 +627,9 @@ class ClusterState(BaseModel):
     result: Signed | None = None
     note: str | None = None
     """What the global operator said when sending the cluster task back."""
+    dropped_nodes: list[int] = Field(default_factory=list, max_length=MAX_PLAN_NODES)
+    replan: bool = False
+    """The registry allows and expects a new plan version."""
 
 
 def submission_hash(submission: ProposalSubmission) -> str:

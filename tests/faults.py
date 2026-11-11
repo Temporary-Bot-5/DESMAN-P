@@ -35,9 +35,11 @@ that can be replayed: `DESMAN_FAULT_SEED=<seed> pytest tests/test_faults.py`.
 from __future__ import annotations
 
 import functools
+import hashlib
 import itertools
 import json
 import random
+import uuid
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -47,6 +49,7 @@ from typing import Any
 from unittest import mock
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import BaseModel, ConfigDict
 
 from conftest import FakeClock
@@ -77,8 +80,9 @@ from desman.llm.base import Completion, Request
 from desman.llm.fake import GARBAGE, FakeLLM, RateLimit, ServerError, StepLike, Timeout
 from desman.net import protocol, sign
 from desman.net.node import Node
-from desman.registry import admin
+from desman.registry import admin, clusters
 from desman.registry import store as registry_store
+from desman.registry import work as registry_work
 from desman.registry.server import Registry as RegistryServer
 from helpers import make_config
 
@@ -605,6 +609,7 @@ class _NetNode:
             clock=sim.clock,
             root=sim.root_pub,
             work=True,
+            cluster_model=crew.planner if isinstance(sim, ClusterSimulation) else None,
         )
 
     def close(self) -> None:
@@ -624,6 +629,7 @@ class NetSimulation:
         self.clock = FakeClock()
         self.address = "https://registry.test"
         root = sign.NodeKey.generate()
+        self.root = root
         self.root_pub = directory / "root.pub"
         self.root_pub.write_bytes(sign.public_pem(root.public))
         self.registry_db = directory / "registry.db"
@@ -823,3 +829,427 @@ def simulate_network(
         return sim.run()
     finally:
         sim.close()
+
+
+# ── Cluster operators (ROADMAP T.4d; ADR 0006 decision 11) ───────────────────
+
+
+@dataclass(frozen=True)
+class ClusterFaults(NetFaults):
+    reject: float = 0.5
+    operator: float = 0.3
+    member: float = 0.6
+
+
+@dataclass(frozen=True)
+class ClusterShape:
+    nodes: int = 5
+    tasks: int = 2
+    steps: int = 45
+    calm_steps: int = 240
+
+
+CLUSTER_PLAN = json.dumps(
+    {
+        "subtasks": [
+            {"description": "Write a poem", "acceptance_criteria": "Four lines"},
+            {
+                "description": "Polish the poem",
+                "acceptance_criteria": "Polished",
+                "depends_on": [0],
+            },
+        ]
+    }
+)
+CLUSTER_SPLIT = json.dumps(
+    {
+        "subtasks": [
+            {"description": "First half", "acceptance_criteria": "First"},
+            {"description": "Second half", "acceptance_criteria": "Second", "depends_on": [0]},
+        ]
+    }
+)
+
+
+def _cluster_planning(model: FakeLLM) -> FakeLLM:
+
+    longer = json.loads(CLUSTER_PLAN)
+    longer["subtasks"].append(
+        {"description": "Combine the results", "acceptance_criteria": "Says 5", "depends_on": [1]}
+    )
+    return model.on("Plan task", CLUSTER_PLAN, json.dumps(longer), repeat_last=True).on(
+        "Split subtask", CLUSTER_SPLIT, repeat_last=True
+    )
+
+
+class ClusterSimulation(NetSimulation):
+    """Real registry/node loops; observations retain authority at receipt and lease time.
+
+    Faults stop before a bounded recovery phase. Only the global operator's final acceptance
+    is driven directly: appointments, plans, lending and results all use the node protocol.
+    """
+
+    def __init__(
+        self, directory: Path, seed: int, faults: ClusterFaults, shape: ClusterShape
+    ) -> None:
+        super().__init__(directory, seed, faults, NetShape(jobs=0, max_jobs=0, nodes=shape.nodes))
+        self.cluster_shape = shape
+        self.cluster_faults = faults
+        self.report.replay = f"DESMAN_FAULT_SEED={seed} pytest tests/test_faults.py -k cluster"
+        appointer_path = directory / registry_store.APPOINTER_KEY
+        appointer = sign.create_node_key(appointer_path)
+        with registry_store.connection(self.registry_db) as conn:
+            admin.assign(
+                conn, self.root, appointer.public, {sign.Scope.APPOINT}, days=30, now=self.clock()
+            )
+        _cluster_planning(self.model)
+        self.silent: dict[int, float] = {}
+        self.old: list[tuple[int, clusters.AppointmentRow]] = []
+        self.observed_leases: dict[str, clusters.AppointmentRow | None] = {}
+        self.observed_records: set[str] = set()
+        self.late_sent: set[str] = set()
+        self.registry_seen = 0
+        self.lease_seen = 0
+        self.verdict_seen = 0
+        self.record_seen = 0
+        self.rechecked_by: dict[str, str | None] = {}
+        for _ in range(shape.tasks):
+            self._add_cluster()
+
+    def _add_cluster(self) -> None:
+        with registry_store.connection(self.registry_db) as conn:
+            admin.add_cluster_task(
+                conn,
+                self.operator,
+                protocol.ClusterTask(
+                    goal=f"Sum 2 and 3 ({self.jobs})", acceptance_criteria="Says 5"
+                ),
+                days=7,
+                now=self.clock(),
+                root_pub=self.root_pub,
+            )
+        self.jobs += 1
+        self.report.trace.append(f"task added {self.jobs}")
+
+    def _handle(self, req: Any) -> Any:
+        reply = super()._handle(req)
+        # Observe after every request, before another poll can renew/replace an appointment.
+        if hasattr(self, "observed_leases"):
+            self.observe()
+        return reply
+
+    def observe(self) -> None:
+        with registry_store.connection(self.registry_db) as conn:
+            for event in conn.execute(
+                "SELECT seq, action FROM registry_log WHERE seq > ? ORDER BY seq",
+                (self.registry_seen,),
+            ).fetchall():
+                self.registry_seen = event["seq"]
+                self.report.actions[event["action"]] += 1
+                self.report.trace.append(f"registry: {event['action']}")
+            for row in conn.execute(
+                "SELECT l.rowid AS observation_id, l.*, j.cluster FROM leases l JOIN jobs j "
+                "ON j.id=l.job WHERE j.cluster IS NOT NULL AND l.rowid > ? ORDER BY l.rowid",
+                (self.lease_seen,),
+            ).fetchall():
+                self.lease_seen = row["observation_id"]
+                task = clusters.cluster_task(conn, row["cluster"])
+                assert task is not None
+                appointment = clusters.newest(conn, task.cluster)
+                self.observed_leases[row["token"]] = appointment
+                if appointment is None or not (
+                    appointment.issued_at <= self.clock() < appointment.expires_at
+                ):
+                    self.report.problems.append("lease without an appointment in force")
+                    continue
+                if row["node"] == appointment.operator:
+                    self.report.problems.append("operator took a lease on its own cluster")
+                if row["stage"] == "execute" and row["node"] not in appointment.members:
+                    self.report.problems.append("executor was not an appointed member")
+                if row["stage"] == "recheck":
+                    result = conn.execute(
+                        "SELECT r.node FROM results r JOIN jobs j ON j.result=r.id WHERE j.id=?",
+                        (row["job"],),
+                    ).fetchone()
+                    if result is None or row["node"] in (result["node"], appointment.operator):
+                        self.report.problems.append("recheck lent to executor or current operator")
+            for verdict in conn.execute(
+                "SELECT r.rowid AS observation_id, r.id, j.cluster FROM results r JOIN jobs j ON j.id=r.job "
+                "WHERE r.kind='verdict' AND j.cluster IS NOT NULL AND r.rowid > ? ORDER BY r.rowid",
+                (self.verdict_seen,),
+            ).fetchall():
+                self.verdict_seen = verdict["observation_id"]
+                if verdict["id"] not in self.rechecked_by:
+                    task = clusters.cluster_task(conn, verdict["cluster"])
+                    assert task is not None
+                    current = clusters.newest(conn, task.cluster)
+                    self.rechecked_by[verdict["id"]] = current.operator if current else None
+            for row in conn.execute(
+                "SELECT * FROM cluster_records WHERE seq > ? ORDER BY seq", (self.record_seen,)
+            ).fetchall():
+                self.record_seen = row["seq"]
+                self.observed_records.add(row["id"])
+                a = clusters.newest(conn, row["cluster"])
+                signer = registry_store.node(conn, row["signer"])
+                if signer is None:
+                    self.report.problems.append("cluster record has an unknown signer")
+                else:
+                    try:
+                        sign.check_signature(
+                            sign.Signed.model_validate_json(row["signed_json"]),
+                            sign.decode_public(signer.public_key),
+                        )
+                    except sign.Refused:
+                        self.report.problems.append("cluster record has a forged signature")
+                if (
+                    a is None
+                    or row["signer"] != a.operator
+                    or not (a.issued_at <= db.parse_iso(row["received_at"]) < a.expires_at)
+                ):
+                    self.report.problems.append("late cluster record accepted")
+                self.report.actions[row["kind"]] += 1
+
+    def _late(self) -> None:
+        from time import monotonic
+
+        from desman.net.node import _call, _Problem
+
+        for i, old in self.old:
+            if old.id in self.late_sent:
+                continue
+            with registry_store.connection(self.registry_db) as conn:
+                current = clusters.newest(conn, old.cluster)
+                task = clusters.by_cluster(conn, old.cluster)
+            if current is None or current.operator == old.operator:
+                continue
+            assert task is not None
+            m = self.nodes[i]
+            key = sign.load_node_key(m.home / "node.key")
+            signed = sign.sign(
+                key,
+                sign.RecordKind.CLUSTER_PLAN,
+                protocol.ClusterPlan(
+                    cluster=old.cluster,
+                    task=task.id,
+                    version=1,
+                    nodes=[protocol.PlanNode(description="late", acceptance_criteria="x")],
+                ).model_dump(mode="json"),
+                issued_at=old.issued_at,
+                lifetime=sign.APPOINTMENT_TERM,
+            )
+            self.late_sent.add(old.id)
+            self.report.faults["late record"] += 1
+            try:
+                _call(
+                    m.node._http(),
+                    key,
+                    self.address,
+                    "POST",
+                    protocol.CLUSTER_RECORDS,
+                    protocol.ClusterHandIn(record=signed),
+                    protocol.ClusterReceived,
+                    self.clock(),
+                    monotonic() + 10,
+                )
+            except _Problem as e:
+                # Refusals pass through Registry.handle, which journals them.
+                self.report.trace.append(f"late refused {e.error}")
+                with registry_store.connection(self.registry_db) as conn:
+                    if not conn.execute(
+                        "SELECT 1 FROM registry_log WHERE action='refused' AND node=?",
+                        (key.fingerprint,),
+                    ).fetchone():
+                        self.report.problems.append("late refusal not journaled")
+            else:
+                self.report.problems.append("late cluster record accepted")
+
+    def _cluster_step(self, n: int, faulty: bool) -> None:
+        f = self.cluster_faults
+        before_faults = self.report.faults.copy()
+        if faulty:
+            if n == self.cluster_shape.steps // 2:
+                self._add_cluster()
+            if self.rng.random() < f.down:
+                self.down_for = self.rng.randint(1, 3)
+                self.report.faults["registry down"] += 1
+            if self.rng.random() < f.jump:
+                self.clock.advance(self.rng.uniform(1, 700))
+                self.report.faults["clock jump"] += 1
+            with registry_store.connection(self.registry_db) as conn:
+                active = [
+                    clusters.newest(conn, t.cluster)
+                    for t in clusters.cluster_tasks(conn, "running")
+                ]
+                appointments = [
+                    a
+                    for a in active
+                    if a is not None
+                    and a.issued_at <= self.clock() < a.expires_at
+                    and clusters.latest_plan(conn, a.cluster) is not None
+                ]
+                if appointments and not self.old and self.rng.random() < f.operator:
+                    a = self.rng.choice(appointments)
+                    i = next(
+                        i
+                        for i, m in enumerate(self.nodes)
+                        if sign.load_node_key(m.home / "node.key").fingerprint == a.operator
+                    )
+                    self.old.append((i, a))
+                    self.silent[i] = self.clock().timestamp() + 1900
+                    self._restart(i)
+                    self.report.faults["operator killed"] += 1
+        i = self.rng.randrange(len(self.nodes)) if faulty else n % len(self.nodes)
+        if self.silent.get(i, 0) > self.clock().timestamp():
+            self.report.trace.append(f"{n}: n{i} silent")
+        else:
+            m = self.nodes[i]
+            before = self._leases(m)
+            m.node.poll(idle=True)
+            if self._leases(m) > before:
+                trust = m.node._trust
+                if trust is None or trust.fresh() is not None:
+                    self.report.problems.append(f"{m.name} took work while not fresh")
+            # Stop after a real execute lease: its expiry must let another member take it.
+            if (
+                faulty
+                and not self.report.faults["member gone"]
+                and self.rng.random() < f.member
+                and m.conn.execute(
+                    "SELECT 1 FROM network_work WHERE state='working' AND stage='execute'"
+                ).fetchone()
+            ):
+                self.silent[i] = self.clock().timestamp() + 750
+                self.report.faults["member gone"] += 1
+            if self.silent.get(i, 0) <= self.clock().timestamp():
+                m.coordinator.work(until_idle=True, max_ticks=4)
+                m.node.poll(idle=False)
+            self.report.trace.append(f"{n}: {m.name}#{m.lives}")
+        if not self.down_for:
+            self._late()
+        for kind, count in sorted((self.report.faults - before_faults).items()):
+            self.report.trace.append(f"fault: {kind} ({count})")
+        self.down_for = max(0, self.down_for - 1)
+        self.clock.advance(120)
+
+    def _settled(self) -> bool:
+        with registry_store.connection(self.registry_db) as conn:
+            return (
+                all(
+                    t.status in ("operator", "accepted", "dropped", "expired")
+                    for t in clusters.cluster_tasks(conn)
+                )
+                and not conn.execute("SELECT 1 FROM leases WHERE ended IS NULL").fetchone()
+            )
+
+    def run(self) -> Report:
+        for n in range(self.cluster_shape.steps):
+            self._cluster_step(n, True)
+        self.down_for = 0
+        # Existing disappearances last their full duration, including into recovery.
+        # Disable model faults too: the recovery phase must make progress.
+        self.model = _cluster_planning(
+            _net_model(self.rng, NetFaults(provider=0, reject=0), self.report, self.clock)
+        )
+        for i in range(len(self.nodes)):
+            self._restart(i)
+        for n in range(self.cluster_shape.calm_steps):
+            self._cluster_step(self.cluster_shape.steps + n, False)
+            if self._settled():
+                # Every node must notice leases withdrawn when a task enters the inbox.
+                for m in self.nodes:
+                    m.node.poll(idle=False)
+                if not any(
+                    m.conn.execute("SELECT 1 FROM network_work WHERE state='working'").fetchone()
+                    for m in self.nodes
+                ):
+                    break
+        self.check()
+        return self.report
+
+    def check(self) -> None:
+        self.observe()
+        problems = self.report.problems
+        with registry_store.connection(self.registry_db) as conn:
+            finished = 0
+            for t in clusters.cluster_tasks(conn):
+                if t.status == "operator" and t.reason == "result":
+                    try:
+                        clusters.settle(conn, t.id, "accept", self.clock())
+                        finished += 1
+                    except clusters.SettleError as e:
+                        problems.append(f"result could not be accepted: {e}")
+                elif (
+                    t.status == "operator"
+                    and t.reason == "job_given_up"
+                    and self.report.faults["reject"]
+                ):
+                    self.report.trace.append("inbox job_given_up explained by injected reject")
+                else:
+                    problems.append(f"cluster left {t.status}: {t.reason}")
+            if not finished:
+                problems.append("no cluster result accepted")
+            accepted: Counter[tuple[str, int, str]] = Counter()
+            for j in registry_work.jobs(conn, "accepted"):
+                b = j.cluster_job
+                assert b is not None
+                plan = next(
+                    p
+                    for p in clusters.records(conn, b.cluster, sign.RecordKind.CLUSTER_PLAN)
+                    if p.record.id == b.plan
+                )
+                content = protocol.ClusterPlan.model_validate(plan.record.body).nodes[b.node]
+                accepted[(b.cluster, b.node, content.model_dump_json())] += 1
+                result = conn.execute("SELECT node FROM results WHERE id=?", (j.result,)).fetchone()
+                verdicts = conn.execute(
+                    "SELECT * FROM results WHERE job=? AND kind='verdict' "
+                    "AND outcome='accept' AND round=?",
+                    (j.id, j.round),
+                ).fetchall()
+                valid = False
+                for v in verdicts:
+                    a = self.observed_leases.get(v["lease"])
+                    operator = self.rechecked_by.get(v["id"])
+                    if (
+                        a
+                        and result
+                        and operator is not None
+                        and v["node"] not in (result["node"], a.operator, operator)
+                    ):
+                        valid = True
+                if not valid:
+                    problems.append("accepted node without independent recheck")
+            if any(n > 1 for n in accepted.values()):
+                problems.append("plan node accepted twice")
+        for m in self.nodes:
+            for (task_id,) in m.conn.execute("SELECT id FROM tasks").fetchall():
+                problems.extend(f"{m.name}: {p}" for p in check_history(m.conn, task_id))
+                if any(
+                    s.status is SubtaskStatus.NEEDS_HUMAN for s in m.store.list_subtasks(task_id)
+                ):
+                    problems.append(f"{m.name}: network waits for the person")
+            if m.conn.execute("SELECT 1 FROM network_work WHERE state='working'").fetchone():
+                problems.append(f"{m.name}: still working")
+
+
+def simulate_clusters(
+    directory: Path,
+    seed: int,
+    faults: ClusterFaults | None = None,
+    shape: ClusterShape | None = None,
+) -> Report:
+    ids, keys = itertools.count(1), itertools.count(1)
+
+    def key() -> sign.NodeKey:
+        material = hashlib.sha256(f"cluster-test:{seed}:{next(keys)}".encode()).digest()
+        return sign.NodeKey(Ed25519PrivateKey.from_private_bytes(material))
+
+    with (
+        _counted_ids(),
+        mock.patch.object(uuid, "uuid4", lambda: uuid.UUID(int=next(ids))),
+        mock.patch.object(sign.NodeKey, "generate", key),
+    ):
+        sim = ClusterSimulation(directory, seed, faults or ClusterFaults(), shape or ClusterShape())
+        try:
+            return sim.run()
+        finally:
+            sim.close()

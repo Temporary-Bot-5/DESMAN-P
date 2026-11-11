@@ -37,5 +37,5 @@
 [checkout]
 # The test harness.
 "tests/conftest.py" = "4eb5c79559fbca455a86e40007fdc3ed2329b881ef6cd5c0503da190d4e8daad"
-"tests/faults.py" = "c14115055995f4510d69dea5e408313305a80f22f668abcf0ea4e06e61abdf87"
+"tests/faults.py" = "c8b862f3678b053f95574ec03d24beeebb642bd8aea4d7d93980414d5bf2b6f7"
 "tests/helpers.py" = "5cf62f2a06f09ae2e5bd630ef9a10d3214fbb5a75d7a6f096c5a5b5a4816fe2b"

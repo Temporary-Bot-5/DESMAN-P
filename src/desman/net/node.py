@@ -1101,6 +1101,26 @@ class Node:
             raise _Unreachable("bad_reply")
         assert self._trust is not None
         task = work.task.record
+        if task.kind is sign.RecordKind.CLUSTER_JOB:
+            # The claim itself can appoint a successor after our last trust fetch.
+            # Learn its membership before consuming this job's one receipt.
+            try:
+                trust = _call(
+                    client,
+                    key,
+                    address,
+                    "GET",
+                    protocol.TRUST,
+                    None,
+                    protocol.TrustState,
+                    now,
+                    deadline,
+                )
+            except _Unreachable:
+                pass  # The granted lease still needs receipt/refusal using the trust held.
+            else:
+                if self._receive(address, key, trust):
+                    return self._stop(address, key, "the trust list revokes this node")
         try:
             received = self._trust.receive(work.task.model_dump(mode="json"))
             cluster_id = None
