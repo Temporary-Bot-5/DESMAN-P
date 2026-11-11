@@ -6,6 +6,7 @@ import configparser
 import json
 import shlex
 import sqlite3
+import sys
 from pathlib import Path
 
 import httpx
@@ -62,8 +63,9 @@ def test_daily_rotation(ready: Path, clock: FakeClock) -> None:
     done = admin.daily(ready, days=7, keep=1, now=clock())
     assert done.trust is not None and done.error is None and done.pruned == 1
     assert not old.exists() and link.is_symlink() and manual.read_text() == "manual"
-    assert done.backup.stat().st_mode & 0o777 == 0o600
-    assert folder.stat().st_mode & 0o777 == 0o700
+    if sys.platform != "win32":  # POSIX modes
+        assert done.backup.stat().st_mode & 0o777 == 0o600
+        assert folder.stat().st_mode & 0o777 == 0o700
     with sqlite3.connect(done.backup) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert levels(ready, clock)["backup"] == "ok"
