@@ -813,8 +813,9 @@ def test_an_appointment_that_lapses_while_its_operator_polls_is_noticed(
     clock: FakeClock,
 ) -> None:
     task, lead, a, b = formed(registry, db_path, operator, clock)
-    # The appointer key goes bad: the registry keeps answering and appoints nobody.
-    (registry_dir / store.APPOINTER_KEY).chmod(0o644)
+    # The appointer key goes bad: the registry keeps answering and appoints nobody. (Not by
+    # chmod: Windows has no POSIX modes, so the mode check never refuses the key there.)
+    (registry_dir / store.APPOINTER_KEY).write_bytes(b"not a key")
     fresh = Registry(db_path, clock=clock)
     for n in (lead, a, b):
         n.registry = fresh
