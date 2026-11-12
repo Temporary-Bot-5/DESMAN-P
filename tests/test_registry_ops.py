@@ -59,10 +59,15 @@ def test_daily_rotation(ready: Path, clock: FakeClock) -> None:
     old = folder / "registry-20250101-000000Z.db"
     old.write_text("old")
     link = folder / "registry-20240101-000000Z.db"
-    link.symlink_to(manual)
+    try:
+        link.symlink_to(manual)
+        linked = True
+    except OSError:  # Windows: only administrators (or Developer Mode) make links
+        linked = False
     done = admin.daily(ready, days=7, keep=1, now=clock())
     assert done.trust is not None and done.error is None and done.pruned == 1
-    assert not old.exists() and link.is_symlink() and manual.read_text() == "manual"
+    assert not old.exists() and manual.read_text() == "manual"
+    assert link.is_symlink() or not linked
     if sys.platform != "win32":  # POSIX modes
         assert done.backup.stat().st_mode & 0o777 == 0o600
         assert folder.stat().st_mode & 0o777 == 0o700

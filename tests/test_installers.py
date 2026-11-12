@@ -214,7 +214,15 @@ def test_windows_dry_run(tmp_path: Path, tmp_path_factory: pytest.TempPathFactor
         USERPROFILE=str(tmp_path),
     )
     result = subprocess.run(
-        [powershell, "-NoProfile", "-File", str(ROOT / "install/install.ps1"), "-DryRun"],
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",  # as install.bat runs it: scripts are disabled by default
+            "Bypass",
+            "-File",
+            str(ROOT / "install/install.ps1"),
+            "-DryRun",
+        ],
         env=env,
         capture_output=True,
         text=True,
@@ -367,6 +375,8 @@ def test_windows_uninstall_dry_run(
         [
             powershell,
             "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
             "-File",
             str(ROOT / "install/install.ps1"),
             "-DryRun",
