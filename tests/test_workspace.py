@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,21 @@ from desman.core.workspace import (
     Workspace,
     check_path,
     default_workspace_root,
+)
+
+
+def _can_symlink() -> bool:
+    """Windows lets only administrators (or Developer Mode) make symbolic links."""
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            os.symlink(d, os.path.join(d, "link"))
+        except OSError:
+            return False
+    return True
+
+
+needs_symlinks = pytest.mark.skipif(
+    not _can_symlink(), reason="this account may not make symbolic links"
 )
 
 MALICIOUS = [
@@ -151,6 +167,7 @@ def test_bad_task_ids_are_refused(tmp_path: Path, task_id: str) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
+@needs_symlinks
 def test_task_directory_that_is_a_symlink_is_refused(tmp_path: Path, outside: Path) -> None:
     (tmp_path / "ws").mkdir()
     (tmp_path / "ws" / "task1").symlink_to(outside)
@@ -158,6 +175,7 @@ def test_task_directory_that_is_a_symlink_is_refused(tmp_path: Path, outside: Pa
         Workspace(tmp_path / "ws", "task1")
 
 
+@needs_symlinks
 def test_symlinked_directory_pointing_outside_is_not_followed(ws: Workspace, outside: Path) -> None:
     (ws.root / "link").symlink_to(outside)
     with pytest.raises(PathEscapeError, match="symlink"):
@@ -172,6 +190,7 @@ def test_symlinked_directory_pointing_outside_is_not_followed(ws: Workspace, out
     assert ws.files() == []
 
 
+@needs_symlinks
 def test_symlink_deeper_in_the_path_is_not_followed(ws: Workspace, outside: Path) -> None:
     ws.write("a/b/keep.txt", "ok")
     (ws.root / "a" / "b" / "c").symlink_to(outside)
@@ -180,6 +199,7 @@ def test_symlink_deeper_in_the_path_is_not_followed(ws: Workspace, outside: Path
     assert sorted(os.listdir(outside)) == ["secret"]
 
 
+@needs_symlinks
 def test_symlink_pointing_inside_is_not_followed_either(ws: Workspace) -> None:
     ws.write("real/f.txt", "x")
     (ws.root / "alias").symlink_to(ws.root / "real")
@@ -188,6 +208,7 @@ def test_symlink_pointing_inside_is_not_followed_either(ws: Workspace) -> None:
     assert ws.files() == ["real/f.txt"]
 
 
+@needs_symlinks
 def test_symlinked_file_is_not_read(ws: Workspace, outside: Path) -> None:
     (ws.root / "evil").symlink_to(outside / "secret")
     with pytest.raises(PathEscapeError, match="symlink"):
@@ -195,6 +216,7 @@ def test_symlinked_file_is_not_read(ws: Workspace, outside: Path) -> None:
     assert not ws.exists("evil")
 
 
+@needs_symlinks
 def test_writing_over_a_symlinked_file_replaces_the_link_not_the_target(
     ws: Workspace, outside: Path, secure: bool
 ) -> None:
@@ -242,6 +264,7 @@ def test_ordinary_os_errors_are_not_disguised(ws: Workspace) -> None:
     assert sorted(os.listdir(ws.root)) == ["dir", "file.txt"]  # no temp file left behind
 
 
+@needs_symlinks
 def test_files_skips_links_and_temp_files(ws: Workspace, outside: Path) -> None:
     ws.write("a.txt", "x")
     (ws.root / "dirlink").symlink_to(outside)
@@ -331,6 +354,7 @@ def test_forbidden_path_is_refused_and_the_model_can_correct_it(
 # ── Review regressions (PR #8) ───────────────────────────────────────────────
 
 
+@needs_symlinks
 def test_task_directory_replaced_by_a_symlink_later_is_not_followed(
     ws: Workspace, outside: Path
 ) -> None:
