@@ -3,6 +3,7 @@ on:
   push:
     branches: [master]
     paths: ['site/**']
+  workflow_dispatch:
 permissions:
   contents: read
   pages: write
