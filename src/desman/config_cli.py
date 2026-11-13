@@ -1265,7 +1265,7 @@ def print_model_blocks(db_path: Path | None = None) -> None:
             ui.note(
                 t(
                     "Model {scope} unavailable or limited until {until}.",
-                    scope=row["scope"],
+                    scope=row["scope"].removeprefix("gone:"),
                     until=row["blocked_until"],
                 )
             )

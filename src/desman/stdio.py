@@ -18,3 +18,6 @@ def configure_output() -> None:
     if sys.platform == "win32":
         utf8_stream(sys.stdout)
         utf8_stream(sys.stderr)
+        # Piped input too: an ANSI code page turns UTF-8 text into lone surrogates.
+        if sys.stdin is not None and not sys.stdin.isatty():
+            utf8_stream(sys.stdin)

@@ -546,7 +546,14 @@ class Interlocutor:
                 )
                 # The first answer stands if the correction fails: it never costs the turn.
                 with contextlib.suppress(StructuredOutputError, base.ProviderError):
-                    answer = complete_json(self.llm, request, Turn, heading=CHAT).root
+                    corrected = complete_json(self.llm, request, Turn, heading=CHAT).root
+                    # What the first answer noted (profile edits, a node) is kept.
+                    answer = corrected.model_copy(
+                        update={
+                            "profile": answer.profile or corrected.profile,
+                            "node": answer.node or corrected.node,
+                        }
+                    )
         finally:
             _TREE.reset(token)
         if self.nodes is None and answer.node is not None:  # never shown how: not taken

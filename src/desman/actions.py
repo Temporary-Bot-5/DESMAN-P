@@ -151,9 +151,9 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
     if store is not None and report.status == TaskStatus.DONE:
         output = report_output(store, report)
         result = output["result"]
-        text = result_text(result)
-        lines = text.splitlines()
-        click.echo("\n".join(lines[:40]))
+        lines = [] if result is None else result_text(result).splitlines()
+        if lines:
+            click.echo("\n".join(lines[:40]))
         if len(lines) > 40:
             click.echo(t("Omitted lines: {count}.", count=len(lines) - 40))
         if output["files"]:

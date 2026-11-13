@@ -612,10 +612,20 @@ def _short_help(entry: Entry) -> str:
     return "" if command is None else command.get_short_help_str(limit=90)
 
 
+STATUS_RESULT_CHARS = 2000
+"""How much of a done task's result the chat's `status` hands the interlocutor."""
+
+
 def _status(ctx: Context, args: TaskArgs) -> Outcome:
     report = task_report(ctx.store, actions.find_task(ctx.store, args.task))
     actions.print_report(report, ctx.store)
-    return Outcome({**report.model_dump(mode="json"), **actions.report_output(ctx.store, report)})
+    extra = actions.report_output(ctx.store, report)
+    if extra.get("result") is not None:  # the model sees its start; the person saw it printed
+        text = actions.result_text(extra["result"])
+        extra["result"] = text[:STATUS_RESULT_CHARS] + (
+            "…" if len(text) > STATUS_RESULT_CHARS else ""
+        )
+    return Outcome({**report.model_dump(mode="json"), **extra})
 
 
 def _list(ctx: Context, args: ListArgs) -> Outcome:
@@ -704,6 +714,7 @@ def _usage(ctx: Context, args: UsageArgs) -> Outcome:
     config = ctx.config()
     rows = config_cli.usage_since(args.since)
     config_cli.print_usage(config, rows, config_cli.parse_window(args.since), args.since)
+    config_cli.print_model_blocks()
     return Outcome(
         [{k: v for k, v in r.items() if k != "key"} for r in config_cli.usage_json(config, rows)]
     )

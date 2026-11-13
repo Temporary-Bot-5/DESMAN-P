@@ -85,10 +85,6 @@ class DesmanGroup(click.Group):
 
     def main(self, *args: Any, **kwargs: Any) -> Any:
         configure_output()
-        if not sys.stdin.isatty():
-            reconfigure = getattr(sys.stdin, "reconfigure", None)
-            if reconfigure is not None:
-                reconfigure(encoding="utf-8", errors="replace")
         i18n.set_language(_configured_language())
         i18n.translate_commands(self)
         return super().main(*args, **kwargs)
@@ -722,8 +718,9 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
     store = open_existing(db_path)
     try:
         report = task_report(store, find_task(store, task))
-        extra = actions.report_output(store, report)
-        if not as_json:
+        if as_json:
+            extra = actions.report_output(store, report)
+        else:
             print_report(report, store)
     finally:
         store.conn.close()

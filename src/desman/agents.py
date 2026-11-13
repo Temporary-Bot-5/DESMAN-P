@@ -204,17 +204,12 @@ def _execute(
                 request,
                 _Result,
                 heading=EXECUTE,
-                keep=lambda r: (
-                    not is_error_report(r.root)
-                    and not all(
-                        r.root.get(key) == prompt[key] for key in ("subtask", "acceptance_criteria")
-                    )
-                ),
+                keep=lambda r: not is_error_report(r.root) and not _echoes(r.root, prompt),
             )
         except StructuredOutputError as e:
             # The problem only: the reply may echo anything (it is in the call log).
             return Failure(kind=FailureKind.QUALITY, reason=f"unusable reply: {e.problem}")
-        if all(reply.root.get(key) == prompt[key] for key in ("subtask", "acceptance_criteria")):
+        if _echoes(reply.root, prompt):
             return Failure(
                 kind=FailureKind.QUALITY,
                 reason="the reply repeated the request instead of doing the work",
@@ -242,6 +237,13 @@ def _execute(
         kind=FailureKind.QUALITY,
         reason=f"still calling tools after {MAX_TOOL_ROUNDS} rounds, no result",
     )
+
+
+def _echoes(reply: Mapping[str, Any], request: Mapping[str, Any]) -> bool:
+    """A reply that is its own request: the request's subtask and criteria, nothing else."""
+    return all(
+        reply.get(key) == request[key] for key in ("subtask", "acceptance_criteria")
+    ) and set(reply) <= set(request)
 
 
 def llm_reviewer(

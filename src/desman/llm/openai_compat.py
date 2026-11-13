@@ -280,7 +280,7 @@ class OpenAICompatible:
         if not isinstance(text, str):  # reasoning or tools without text
             reason = (
                 "a native tool call instead of text"
-                if "tool_calls" in message
+                if message.get("tool_calls")
                 else "reply without text"
             )
             details = f"finish_reason={choice.get('finish_reason')}, message keys: {', '.join(sorted(message))}"

@@ -20,7 +20,7 @@ from desman.agents import llm_executor, llm_reviewer
 from desman.cli import cli
 from desman.core import db
 from desman.core.context import build_context
-from desman.core.coordinator import Coordinator, Failure, Work
+from desman.core.coordinator import Coordinator, Failure, Success, Work
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.report import task_report
 from desman.core.retry import FailureKind
@@ -53,13 +53,17 @@ def test_model_404_is_shared_and_expires(tmp_path: Path, clock: FakeClock) -> No
     choice = Choice(providers.find("groq"), "missing")
     first = Limited(dead, buckets, "groq/missing", 30, sleep=clock.sleep)
     assert Fallback([(first, choice), (alive, None)]).complete(REQUEST).text == '{"ok": true}'
-    assert buckets.blocked_until("groq/missing") == clock() + timedelta(hours=24)
+    assert buckets.blocked_until("gone:groq/missing") == clock() + timedelta(hours=24)
+    assert buckets.blocked_until("groq/missing") is None  # not a limit: nothing pauses
     # A new connection and fallback represent a later run in another process.
     path = Path(store.conn.execute("PRAGMA database_list").fetchone()[2])
     conn = db.open_db(path)
     try:
         second = Limited(dead, Buckets(conn, clock), "groq/missing", 30, sleep=clock.sleep)
         Fallback([(second, choice), (alive, None)]).complete(REQUEST)
+        assert len(dead.calls) == 1
+        with pytest.raises(ProviderRejected, match="no such model"):  # permanent, not a pause
+            second.complete(REQUEST)
         assert len(dead.calls) == 1
         clock.sleep(24 * 60 * 60)
         assert second.complete(REQUEST).text == '{"back": true}'
@@ -73,6 +77,7 @@ def test_key_401_does_not_block_model(store: Store, clock: FakeClock) -> None:
     with pytest.raises(ProviderRejected):
         llm.complete(REQUEST)
     assert llm.buckets.blocked_until("groq/m") is None
+    assert llm.buckets.blocked_until("gone:groq/m") is None
 
 
 def finish(store: Store, content: dict[str, Any]) -> str:
@@ -137,6 +142,23 @@ def test_executor_echo_is_quality_failure(store: Store, tmp_path: Path, clock: F
     assert f"Today is {clock().date()}." in llm.calls[0].messages[0].content
 
 
+def test_a_reply_restating_its_request_with_a_result_is_kept(
+    store: Store, tmp_path: Path, clock: FakeClock
+) -> None:
+    store.create_task(spec())
+    sub = store.claim("w")
+    assert sub is not None
+    work = Work(
+        subtask=sub,
+        context=build_context(sub, [], None),
+        heartbeat=lambda _: None,
+        tools=Toolbox(Workspace(tmp_path, sub.task_id)),
+    )
+    reply = '{"subtask":"work","acceptance_criteria":"done","result":"42"}'
+    result = llm_executor(FakeLLM(reply), clock=clock)(work)
+    assert isinstance(result, Success) and result.content["result"] == "42"
+
+
 def test_planner_and_reviewer_date_and_language(store: Store, clock: FakeClock) -> None:
     llm = FakeLLM(
         '{"subtasks":[{"description":"work","acceptance_criteria":"done"}]}', '{"verdict":"accept"}'
@@ -185,10 +207,18 @@ def test_cli_reconfigures_piped_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
         io.BytesIO("Привет".encode()), encoding="cp1252", errors="surrogateescape"
     )
     monkeypatch.setattr(sys, "stdin", stream)
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(click.Group, "main", lambda *a, **kw: None)
     cli.main([])
     assert stream.encoding == "utf-8" and stream.errors == "replace"
     assert stream.read() == "Привет"
+
+
+def test_no_stdin_at_all_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "stdin", None)  # pythonw, a process started without a console
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(click.Group, "main", lambda *a, **kw: None)
+    cli.main([])
 
 
 @pytest.mark.parametrize(
