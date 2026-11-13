@@ -15,6 +15,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Omitted lines: {count}.": "Пропущено рядків: {count}.",
+    "Files in {folder}:": "Файли в {folder}:",
+    "Model {scope} unavailable or limited until {until}.": "Модель {scope} недоступна або обмежена до {until}.",
     "Assignments": "Призначення",
     "Backup": "Резервна копія",
     "Check failed: {error}": "Перевірка не пройдена: {error}",

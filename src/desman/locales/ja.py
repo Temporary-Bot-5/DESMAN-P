@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Omitted lines: {count}.": "省略した行数：{count}。",
+    "Files in {folder}:": "{folder} 内のファイル：",
+    "Model {scope} unavailable or limited until {until}.": "モデル {scope} は {until} まで利用不可または制限されています。",
     "Assignments": "権限付与",
     "Backup": "バックアップ",
     "Check failed: {error}": "チェック失敗: {error}",

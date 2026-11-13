@@ -390,6 +390,7 @@ def run(
                 by_model=by_model,
                 as_json=as_json,
                 tree=runs.task_tree(store.conn, _config_or_default().personalize),
+                clock=store.clock,
             )
             spec = planned.spec
         elif level is not None:
@@ -717,12 +718,16 @@ def status(task: str, db_path: Path | None, as_json: bool) -> None:
     store = open_existing(db_path)
     try:
         report = task_report(store, find_task(store, task))
+        if as_json:
+            extra = actions.report_output(store, report)
+        else:
+            print_report(report, store)
     finally:
         store.conn.close()
     if as_json:
-        click.echo(json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2))
-    else:
-        print_report(report)
+        click.echo(
+            json.dumps({**report.model_dump(mode="json"), **extra}, ensure_ascii=False, indent=2)
+        )
     raise SystemExit(_exit_code(report.status, paused=_has_paused(report)))
 
 
@@ -774,6 +779,7 @@ def _plan(
     by_model: bool,
     as_json: bool,
     tree: tuple[knowledge.Node, ...] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> Planned:
     level = Priority.NORMAL if priority is None else priority
     tuning = _tuning()
@@ -790,6 +796,7 @@ def _plan(
                 level,
                 limit=runs.tuned(tuning, "max_subtasks"),
                 tree=knowledge.task_tree() if tree is None else tree,
+                clock=clock,
             )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
@@ -1081,7 +1088,7 @@ def _drive(
             out[key] = data
         click.echo(json.dumps(out, ensure_ascii=False, indent=2))
     else:
-        print_report(report)
+        print_report(report, store)
         if then is not None:
             then(False)
         if report.paused_at:

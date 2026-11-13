@@ -43,9 +43,13 @@ Prompts start with "Chat turn" and "Retell task", so a fake script can route on 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import unicodedata
+from collections.abc import Callable
 from contextvars import ContextVar
+from datetime import datetime
 from functools import cache
 from typing import Annotated, Any, Final, Literal
 
@@ -70,7 +74,8 @@ from desman.core.sessions import History, Kind, Message, Role
 from desman.i18n import CATALOGS
 from desman.llm import base
 from desman.llm.base import LLM, Request
-from desman.llm.structured import complete_json
+from desman.llm.structured import StructuredOutputError, complete_json
+from desman.prompting import today
 
 MAX_LOOKUP: Final = 3
 """The most nodes of the knowledge tree one lookup may open (ADR 0009)."""
@@ -110,7 +115,10 @@ INTERLOCUTOR_SYSTEM = (
     f"{MAX_FILES_FROM}); the workers then get copies of its files. Give "
     '"runs_code": true when the work must run code or a command and tell what came of it '
     "(testing a program, a crash test, measuring): it is then done only if it really ran. "
-    "Work is always a task turn, never a command: the person asked for it already. Only "
+    "Work is always a task turn, never a command: the person asked for it already. A "
+    "request for current information (prices, news, weather, latest versions, anything "
+    "found online) is a task turn too: its workers search the web; never reply that you "
+    "cannot go online. Only "
     "more work on a task DESMAN already named (add to it, or redo one of its done steps) is "
     "the command task extend or task redo, so the new work starts from its results;\n"
     '{"type": "command", "name": "...", "args": {...}} when the person wants DESMAN itself to '
@@ -482,7 +490,10 @@ class Interlocutor:
         profile: list[Note] | None = None,
         behaviour: Behaviour | None = None,
         nodes: tuple[knowledge.Node, ...] | None = None,
+        *,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
+        self.clock = clock
         self.llm = llm
         self.language = language
         """A language code of `i18n.CATALOGS`: the person's language."""
@@ -509,21 +520,54 @@ class Interlocutor:
         `StructuredOutputError` propagate: the chat tells the person."""
         token = _TREE.set(self.tree)
         try:
-            answer = self._turn(history)
+            answer, request = self._turn(history)
+            latest = next(
+                (m.text for m in reversed(history.messages) if m.role.value == "user"), ""
+            )
+            text = (
+                answer.text
+                if isinstance(answer, Reply)
+                else answer.question
+                if isinstance(answer, Clarify)
+                else ""
+            )
+            if wrong_script(latest, text):
+                request = request.model_copy(
+                    update={
+                        "messages": [
+                            *request.messages,
+                            base.Message(role="assistant", content=answer.model_dump_json()),
+                            base.Message(
+                                role="user",
+                                content=f"{CHAT} (language correction):\nAnswer in the language of the person's message.",
+                            ),
+                        ]
+                    }
+                )
+                # The first answer stands if the correction fails: it never costs the turn.
+                with contextlib.suppress(StructuredOutputError, base.ProviderError):
+                    corrected = complete_json(self.llm, request, Turn, heading=CHAT).root
+                    # What the first answer noted (profile edits, a node) is kept.
+                    answer = corrected.model_copy(
+                        update={
+                            "profile": answer.profile or corrected.profile,
+                            "node": answer.node or corrected.node,
+                        }
+                    )
         finally:
             _TREE.reset(token)
         if self.nodes is None and answer.node is not None:  # never shown how: not taken
             answer = answer.model_copy(update={"node": None})
         return answer
 
-    def _turn(self, history: History) -> AnyTurn:
+    def _turn(self, history: History) -> tuple[AnyTurn, Request]:
         request = self.build_request(history)
         payload = json.loads(request.messages[1].content.split(":\n", 1)[1])
         budget = HISTORY_TOKENS - (estimate_tokens(history.summary.text) if history.summary else 0)
         self.opened = []
         first = complete_json(self.llm, request, FirstTurn, heading=CHAT).root
         if not isinstance(first, Lookup):
-            return first
+            return first, request
         found: dict[str, Any] = {}
         given = first.profile if self.profile is not None else []
         proposed = first.node  # a node proposed with a lookup holds, like its profile edits
@@ -566,9 +610,9 @@ class Interlocutor:
         if answer.node is None and proposed is not None:
             answer = answer.model_copy(update={"node": proposed})
         if not given:
-            return answer
+            return answer, request
         edits = given + [e for e in answer.profile if e not in given]  # what the lookup noted
-        return answer.model_copy(update={"profile": edits[:MAX_EDITS]})
+        return answer.model_copy(update={"profile": edits[:MAX_EDITS]}), request
 
     def build_request(self, history: History) -> Request:
         """The initial chat request, also used by the operator's context inspection."""
@@ -628,7 +672,7 @@ class Interlocutor:
         )
         return Request(
             messages=[
-                base.Message(role="system", content=content),
+                base.Message(role="system", content=content + today(self.clock)),
                 base.Message(role="user", content=f"{heading}:\n{body}"),
             ]
         )
@@ -703,3 +747,28 @@ def said(message: Message) -> dict[str, str]:
     if message.kind is not Kind.MESSAGE:
         said["kind"] = message.kind.value
     return said
+
+
+def wrong_script(message: str, reply: str) -> bool:
+    """Retry only an obvious script mismatch, never guess a language from Latin letters."""
+    scripts = (
+        "CYRILLIC",
+        "CJK",
+        "HIRAGANA",
+        "KATAKANA",
+        "HANGUL",
+        "DEVANAGARI",
+        "ARABIC",
+        "HEBREW",
+        "THAI",
+        "GREEK",
+        "BENGALI",
+        "TAMIL",
+    )
+    letters = [c for c in message if c.isalpha()]
+    if not letters or not reply:
+        return False
+    for script in scripts:
+        if sum(script in unicodedata.name(c, "") for c in letters) > len(letters) / 2:
+            return not any(script in unicodedata.name(c, "") for c in reply)
+    return False

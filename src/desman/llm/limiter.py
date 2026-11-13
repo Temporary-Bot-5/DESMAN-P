@@ -34,6 +34,7 @@ from desman.core import db, filelock
 from desman.llm.base import (
     LLM,
     Completion,
+    ProviderRejected,
     ProviderUnavailable,
     QuotaExhausted,
     RateLimited,
@@ -166,11 +167,20 @@ class Limited:
             waited += wait
 
     def complete(self, request: Request) -> Completion:
+        gone = self.buckets.blocked_until(GONE + self.scope)
+        if gone is not None:  # no call: the provider said it has no such model
+            raise ProviderRejected(
+                self.name, 404, f"no such model; set aside until {db.to_iso(gone)}"
+            )
         if not self._per_request:
             self.pace()
         try:
             return self.inner.complete(request)
         except Paced:
+            raise
+        except ProviderRejected as e:
+            if e.status == 404:
+                self.buckets.block(GONE + self.scope, self.buckets.clock() + GONE_FOR)
             raise
         except RateLimited as e:
             after = DEFAULT_BLOCK if e.retry_after is None else e.retry_after
@@ -181,6 +191,12 @@ class Limited:
             if until is not None:
                 self.buckets.block(self.scope, until)
             raise
+
+
+GONE = "gone:"
+"""Scope prefix of a model the provider answered 404 for: it is skipped without a call (as a
+permanent rejection, never a pause) by every process until `GONE_FOR` has passed."""
+GONE_FOR = timedelta(hours=24)
 
 
 # ── A local server: paced by the machine ─────────────────────────────────────

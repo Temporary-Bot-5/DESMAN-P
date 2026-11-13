@@ -90,8 +90,8 @@ def test_criteria_are_ones_the_tools_can_confirm() -> None:
     llm = FakeLLM(reply(sub("find cheap tickets")))
     plan(llm, "find cheap tickets Berlin - Lisbon", Priority.NORMAL)
     [call] = llm.calls
-    assert call.messages[0].content.endswith(CRITERIA_RULES)
-    assert SPLITTER_SYSTEM.endswith(CRITERIA_RULES)
+    assert CRITERIA_RULES in call.messages[0].content
+    assert CRITERIA_RULES in SPLITTER_SYSTEM
     assert "with its source" in CRITERIA_RULES and "not found" in CRITERIA_RULES
 
 

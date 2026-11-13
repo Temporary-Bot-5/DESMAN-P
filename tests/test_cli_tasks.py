@@ -60,6 +60,7 @@ def test_run_goal_end_to_end(tmp_path: Path) -> None:
     lines = result.output.splitlines()
     assert lines[0] == f"Task {task_id} created (1 subtask)"
     assert lines[1] == f"Task {task_id}  done  (1/1 done)"
+    assert '"haiku": "WAL mode hums"' in result.output
     s = store()
     [sub] = s.list_subtasks(task_id)
     assert sub.description == "Write a haiku"

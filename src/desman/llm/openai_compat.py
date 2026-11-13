@@ -271,11 +271,20 @@ class OpenAICompatible:
         try:
             data = response.json()
             choice = data if self.name == "ollama" else data["choices"][0]
-            text = choice["message"]["content"]
+            message = choice["message"]
+            if not isinstance(message, dict):
+                raise TypeError("message is not an object")
+            text = message.get("content")
         except (ValueError, KeyError, IndexError, TypeError):
             raise ProviderUnavailable(self.name, 200, "reply without a message") from None
-        if not isinstance(text, str):  # e.g. null content with only reasoning or tool calls
-            raise ProviderUnavailable(self.name, 200, "reply without text")
+        if not isinstance(text, str):  # reasoning or tools without text
+            reason = (
+                "a native tool call instead of text"
+                if message.get("tool_calls")
+                else "reply without text"
+            )
+            details = f"finish_reason={choice.get('finish_reason')}, message keys: {', '.join(sorted(message))}"
+            raise ProviderUnavailable(self.name, 200, f"{reason}; {details}")
         return Completion(
             text=text,
             provider=self.name,

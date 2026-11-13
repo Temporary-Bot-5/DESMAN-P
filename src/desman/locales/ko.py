@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Omitted lines: {count}.": "생략된 줄 수: {count}.",
+    "Files in {folder}:": "{folder}의 파일:",
+    "Model {scope} unavailable or limited until {until}.": "모델 {scope}은(는) {until}까지 사용할 수 없거나 제한됩니다.",
     "Assignments": "권한 할당",
     "Backup": "백업",
     "Check failed: {error}": "검사 실패: {error}",

@@ -672,3 +672,10 @@ def test_the_chat_turns_an_answer_to_a_waiting_step_into_retry() -> None:
 
     assert "that is the command retry with that subtask and their answer" in INTERLOCUTOR_SYSTEM
     assert "or choose Retry, Accept or Fail" in RETELL_SYSTEM
+
+
+def test_lone_surrogate_in_chat_message_is_replaced(fake: FakeLLM) -> None:
+    fake.on(CHAT, '{"type":"reply","text":"Hello"}')
+    lines = iter(["hello \udc8f", "/exit"])
+    Chat(Sessions(db.open_db(db.default_db_path())), read=lambda: next(lines)).run()
+    assert any(m.role is Role.USER and m.text == "hello ?" for m in conversation())

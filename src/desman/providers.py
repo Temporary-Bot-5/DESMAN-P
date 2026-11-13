@@ -124,7 +124,7 @@ FREE = (
         "https://build.nvidia.com/explore/discover",
         "NVIDIA_API_KEY",
         base_url="https://integrate.api.nvidia.com/v1",
-        default_model="nvidia/llama-3.1-nemotron-70b-instruct",
+        default_model="nvidia/nemotron-3-ultra-550b-a55b",
         limits_url="https://docs.api.nvidia.com/nim/docs/api-limits",
     ),
     Provider(
@@ -197,7 +197,7 @@ FREE = (
         "https://vercel.com/dashboard/ai-gateway",
         "AI_GATEWAY_API_KEY",
         base_url="https://ai-gateway.vercel.sh/v1",
-        default_model="google/gemini-2.5-flash-lite",
+        default_model="google/gemini-3.5-flash-lite",
         limits_url="https://vercel.com/docs/ai-gateway/pricing",
     ),
 )

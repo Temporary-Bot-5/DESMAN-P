@@ -32,6 +32,7 @@ from desman.core.states import SubtaskStatus as S_
 from desman.core.store import Store
 from desman.llm import router
 from desman.llm.fake import FakeLLM
+from desman.prompting import today
 from helpers import make_config
 
 S = Strategy
@@ -84,11 +85,11 @@ def test_every_attempt_differs_from_the_one_before(store: Store, clock: FakeCloc
     assert (
         first.messages[0].content
         == feedback.messages[0].content
-        == EXECUTOR_SYSTEM + TOOLS_INSTRUCTIONS
+        == EXECUTOR_SYSTEM + TOOLS_INSTRUCTIONS + today()
     )
     assert first.temperature == feedback.temperature == 0.0
     assert json.loads(feedback.prompt.partition(":\n")[2])["feedback_on_previous_attempt"]
-    assert rephrased.messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS
+    assert rephrased.messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS + today()
     assert rephrased.temperature == REPHRASE_TEMPERATURE
     [switched] = executions(other)  # the fourth attempt went to the other model
     assert "1. wrong" in switched.prompt
@@ -109,7 +110,10 @@ def test_without_another_model_the_audit_says_rephrase(store: Store, clock: Fake
     main.on("Review", REJECT, REJECT, REJECT, ACCEPT)
     task_id = run(store, clock, main, None)
     assert len(executions(main)) == 4
-    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS
+    assert (
+        executions(main)[3].messages[0].content
+        == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS + today()
+    )
     started = [
         e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
     ]
@@ -149,7 +153,7 @@ def test_the_other_model_is_the_best_one_on_another_provider() -> None:
 
 def test_without_another_provider_the_other_model_is_the_next_one_of_the_same() -> None:
     config = make_config(api_keys={"GROQ_API_KEY": GROQ})
-    assert _other(config) == ["groq/openai/gpt-oss-120b", "groq/llama-3.3-70b-versatile"]
+    assert _other(config) == ["groq/openai/gpt-oss-120b", "groq/qwen/qwen3.8-27b"]
 
 
 def test_a_paid_provider_is_never_the_other_model() -> None:
@@ -223,7 +227,10 @@ def test_a_coordinator_without_another_model_never_claims_a_switch(
         e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
     ]
     assert started == ["first", "feedback", "rephrase", "rephrase"]
-    assert executions(main)[3].messages[0].content == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS
+    assert (
+        executions(main)[3].messages[0].content
+        == EXECUTOR_SYSTEM_REPHRASED + TOOLS_INSTRUCTIONS + today()
+    )
 
 
 def test_an_unusable_reply_is_feedback_for_the_next_attempt(store: Store, clock: FakeClock) -> None:

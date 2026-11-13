@@ -215,6 +215,10 @@ class Sessions:
     ) -> Message:
         """Append a message; `session_id` None starts a new session with it, `temporary` one if
         asked (this process holds it). A summary says which messages it `covers`."""
+        # Piped input and JSON can carry lone surrogates; SQLite accepts valid UTF-8 only.
+        text = text.encode("utf-8", errors="replace").decode("utf-8")
+        if styled is not None:
+            styled = styled.encode("utf-8", errors="replace").decode("utf-8")
         if initial_choice is not None and session_id is not None:
             raise ValueError("an initial choice belongs only to a new session")
         if (covers is not None) != (kind is Kind.SUMMARY):
