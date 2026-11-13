@@ -111,6 +111,31 @@ def test_connection_settings(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_a_database_ending_with_ctrl_z_is_left_whole(tmp_path: Path) -> None:
+    path = tmp_path / "ctrl-z.db"
+    blob = b"database payload\x1a"
+    conn = db.connect(path)
+    try:
+        conn.execute("CREATE TABLE payload (value BLOB)")
+        conn.execute("INSERT INTO payload VALUES (?)", (blob,))
+    finally:
+        conn.close()
+    before = path.read_bytes()
+    assert before[-1] == 0x1A
+
+    # Without binary mode this passes on Linux but loses the last byte on Windows.
+    db.connect(path).close()
+    after = path.read_bytes()
+    assert len(after) == len(before)
+    assert after[-1] == 0x1A
+    conn = db.connect(path)
+    try:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("SELECT value FROM payload").fetchone()[0] == blob
+    finally:
+        conn.close()
+
+
 def test_default_db_path_honours_env(tmp_path: Path) -> None:
     assert db.default_db_path() == tmp_path / "data" / "desman.db"
 

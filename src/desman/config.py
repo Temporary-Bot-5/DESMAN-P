@@ -11,7 +11,7 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 
 import click
 from pydantic import (
@@ -29,6 +29,8 @@ from desman.core import filelock
 from desman.core.atomic import replace_file
 from desman.tuning_limits import PAGE_TUNING_BOUNDS
 from desman.tuning_limits import TUNING_BOUNDS as WORKFLOW_TUNING_BOUNDS
+
+_BINARY: Final = getattr(os, "O_BINARY", 0)
 
 TUNING_BOUNDS = {**PAGE_TUNING_BOUNDS, **WORKFLOW_TUNING_BOUNDS}
 
@@ -77,7 +79,7 @@ def adopt_config(old: Path, new: Path) -> None:
     """Move `old` to `new` (0600). A config already at `new` wins and `old` is left alone."""
     data = old.read_bytes()
     try:
-        fd = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
     except FileExistsError:  # created meanwhile, e.g. by another `desman`
         return
     try:
@@ -442,7 +444,7 @@ class ConfigManager:
         text = config.model_dump_json(indent=2)
         target = self.config_path.resolve() if self.config_path.is_symlink() else self.config_path
         tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
@@ -472,7 +474,7 @@ class ConfigManager:
         """Hold the config's lock: other DESMAN processes that change it wait meanwhile.
         Advisory, on a lock file next to the config, shared by all processes."""
         lock_path = self.config_path.parent / f".{self.config_path.name}.lock"
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | _BINARY, 0o600)
         try:
             filelock.lock(fd)
             try:

@@ -26,6 +26,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+_BINARY: Final = getattr(os, "O_BINARY", 0)
+
 DATA_DIR_ENV: Final = "DESMAN_DATA_DIR"
 BUSY_TIMEOUT_MS: Final = 5000
 
@@ -793,7 +795,8 @@ def connect(path: Path | str) -> sqlite3.Connection:
         Path(path).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         # Created private: the call log holds provider error text and hashes of prompts.
         # SQLite gives the -wal and -shm files the same mode as the database.
-        os.close(os.open(path, os.O_RDWR | os.O_CREAT, 0o600))
+        # Binary mode: Windows text mode would drop a trailing CTRL+Z of the database.
+        os.close(os.open(path, os.O_RDWR | os.O_CREAT | _BINARY, 0o600))
     conn = sqlite3.connect(path, isolation_level=None, timeout=BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")

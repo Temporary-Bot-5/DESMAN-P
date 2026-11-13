@@ -377,10 +377,11 @@ CLI (`run/status/resume/list-tasks/audit/setup/config`). 15 тестов про�
   - [x] **T.6a Инструкция.** `docs/guide-ru.md` (ссылка с сайта для русского языка; тест сверяет
     названные команды с CLI), версия `0.2.0+test1`; тест реестра без `chmod` (на Windows нет прав
     POSIX).
-  - [ ] **T.6b Тег и пилот.** Перед тегом — зелёный CI на Windows: `tests/test_cluster_demo.py`
-    там иногда падает с `database disk image is malformed` (≈1 из 10 прогонов; Python 3.12 и
-    3.13, SQLite 3.49 и 3.50; `integrity_check`: сломан индекс `nonces` реестра). Затем тег
-    `v0.2.0-test1`, включить GitHub Pages, установка «с нуля», пилот.
+  - [ ] **T.6b Тег и пилот.** Перед тегом — зелёный CI на Windows. Порча БД на Windows
+    (`database disk image is malformed`, ≈1 из 10 прогонов `tests/test_cluster_demo.py`)
+    найдена и исправлена (#132): `os.open` без `O_BINARY` открывал файл БД в текстовом режиме,
+    и CRT отрезал последний байт, если он был Ctrl‑Z (0x1A). Затем тег `v0.2.0-test1`,
+    установка «с нуля», пилот.
 - [ ] **T.7 Тест.** Около 10 участников; итог — список найденных проблем и задачи по ним.
 
 ---
