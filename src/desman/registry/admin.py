@@ -32,6 +32,8 @@ from desman.i18n import t
 from desman.net import protocol, sign
 from desman.registry import clusters, store, work
 
+_BINARY: Final = getattr(os, "O_BINARY", 0)
+
 ASSIGNMENT_DAYS: Final = 90
 JOB_DAYS: Final = 7
 TRUST_DAYS: Final = 7
@@ -210,7 +212,7 @@ def backup(source: Path, dest: Path) -> None:
             t("No database at {path}: the registry has not run yet.", path=str(source))
         )
     try:
-        os.close(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        os.close(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600))
     except FileExistsError as e:
         raise AdminError(t("{path} exists already; choose another name.", path=str(dest))) from e
     except OSError as e:
