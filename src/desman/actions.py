@@ -16,7 +16,7 @@ from typing import Any
 import click
 from rich.text import Text
 
-from desman import knowledge, providers, ui
+from desman import knowledge, providers, task_files, ui
 from desman.config import ConfigError, open_config
 from desman.core import db, operator
 from desman.core.audit import AuditEntry, check_history, history
@@ -33,6 +33,7 @@ from desman.core.report import (
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.stats import Stats
 from desman.core.store import StaleStateError, Store
+from desman.core.workspace import workspace_root_for
 from desman.i18n import t, tn
 from desman.llm import hub
 
@@ -84,7 +85,33 @@ def print_init(path: Path, applied: int) -> None:
 # ── status, list ─────────────────────────────────────────────────────────────
 
 
-def print_report(report: TaskReport) -> None:
+def report_output(store: Store, report: TaskReport) -> dict[str, Any]:
+    """Extra output only for completed tasks."""
+    if report.status != TaskStatus.DONE:
+        return {}
+    root = workspace_root_for(store.conn)
+    return {
+        "result": store.final_result(report.id),
+        "folder": str(task_files.folder(root, report.id)),
+        "files": [{"path": f.path, "bytes": f.size} for f in task_files.listing(root, report.id)],
+    }
+
+
+def result_text(result: Any) -> str:
+    """A result as the person reads it: its text when it has one, else indented JSON."""
+    if isinstance(result, dict):
+        inner = result.get("result") if result.get("type") == "result" else None
+        if inner is not None:
+            return result_text(inner)
+        for key in ("content", "text", "answer", "result"):
+            if isinstance(result.get(key), str):
+                return str(result[key])
+    if isinstance(result, str):
+        return result
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def print_report(report: TaskReport, store: Store | None = None) -> None:
     click.echo(
         t(
             "Task {id}  {status}  ({done}/{total} done)",
@@ -121,6 +148,18 @@ def print_report(report: TaskReport) -> None:
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
         if sub.knowledge:
             click.echo("      " + t("knowledge: {paths}", paths=", ".join(sub.knowledge)))
+    if store is not None and report.status == TaskStatus.DONE:
+        output = report_output(store, report)
+        result = output["result"]
+        text = result_text(result)
+        lines = text.splitlines()
+        click.echo("\n".join(lines[:40]))
+        if len(lines) > 40:
+            click.echo(t("Omitted lines: {count}.", count=len(lines) - 40))
+        if output["files"]:
+            click.echo(t("Files in {folder}:", folder=output["folder"]))
+            for file in output["files"]:
+                click.echo(f"  {file['path']}")
     for text in suggestion_lines(report.suggestions):
         click.echo(text)
 
@@ -734,6 +773,7 @@ def continue_task(
         priority=task["priority"],
         limit=limit,
         tree=knowledge.task_tree() if tree is None else tree,
+        clock=store.clock,
     )
     last = subtasks[-1].id
     basis = [last] + ([pending.redo.id] if pending.redo and pending.redo.id != last else [])

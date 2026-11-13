@@ -321,7 +321,7 @@ def test_keys_check(mock_http: Callable[[Handler], None]) -> None:
     assert "free requests today: 3 of 50" in result.output
     assert "x-ratelimit-limit-requests: 1000" in result.output
     # The catalog's other Groq models are not listed: said once, though Groq has two keys.
-    unlisted = "openai/gpt-oss-120b, llama-3.3-70b-versatile"
+    unlisted = "openai/gpt-oss-120b, qwen/qwen3.8-27b"
     assert (
         result.output.count(f"GROQ does not list these models of DESMAN's catalog: {unlisted}") == 1
     )
@@ -331,7 +331,7 @@ def test_keys_check(mock_http: Callable[[Handler], None]) -> None:
     }
     assert out[("groq", 1)]["ok"] and out[("groq", 1)]["default_model_listed"]
     assert out[("groq", 1)]["models"] == 2
-    assert out[("groq", 1)]["unlisted"] == ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+    assert out[("groq", 1)]["unlisted"] == ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
     assert not out[("groq", 2)]["ok"] and out[("groq", 2)]["http_status"] == 401
     assert out[("openrouter", 1)]["ok"]
     for output in (result.output, desman("keys", "check", "--json").output):

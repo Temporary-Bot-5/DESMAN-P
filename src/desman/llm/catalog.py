@@ -53,11 +53,11 @@ CATALOG: dict[str, tuple[Model, ...]] = {
     "groq": (
         _m("openai/gpt-oss-20b", 131_072, _T, _C, rpm=30),
         _m("openai/gpt-oss-120b", 131_072, _A, _C, _T, rpm=30),
-        _m("llama-3.3-70b-versatile", 131_072, _T, rpm=30),
+        _m("qwen/qwen3.8-27b", 131_072, _T, _A, rpm=30),
     ),
     "google": (
         _m("gemini-3.5-flash-lite", 1_048_576, _T, _C, rpm=15),
-        _m("gemini-2.5-flash", 1_048_576, _A, _C, _T, rpm=10),
+        _m("gemini-3.8-flash", 1_048_576, _A, _C, _T, rpm=10),
     ),
     "mistral": (
         _m("mistral-small-latest", 131_072, _T, rpm=30),
@@ -65,7 +65,10 @@ CATALOG: dict[str, tuple[Model, ...]] = {
         _m("codestral-latest", 262_144, _C, rpm=30),
     ),
     "openrouter": (_m("nvidia/nemotron-3.5-lightning:free", 131_072, _T, _A, rpm=20),),
-    "nvidia": (_m("nvidia/llama-3.1-nemotron-70b-instruct", 131_072, _T, _A, rpm=40),),
+    "nvidia": (
+        _m("nvidia/nemotron-3-ultra-550b-a55b", 131_072, _T, _A, rpm=40),
+        _m("nvidia/nemotron-3.5-lightning-30b-a3b", 131_072, _T, rpm=40),
+    ),
     "cohere": (
         _m("command-r7b-12-2024", 131_072, _T, rpm=20),
         _m("command-a-03-2025", 262_144, _A, _T, rpm=20),
@@ -75,7 +78,7 @@ CATALOG: dict[str, tuple[Model, ...]] = {
         _m("@cf/meta/llama-3.1-8b-instruct", 8_192, _T, strict_json=False, rpm=60),
         _m("@cf/meta/llama-3.3-70b-instruct-fp8-fast", 24_000, _T, _A, rpm=60),
     ),
-    "vercel": (_m("google/gemini-2.5-flash-lite", 1_048_576, _T, rpm=10),),
+    "vercel": (_m("google/gemini-3.5-flash-lite", 1_048_576, _T, rpm=10),),
     # Paid: the default models only, at a cautious pace (the limit is the bill, not the rate).
     "openai": (_m("gpt-6-luna", 400_000, _A, _C, _T, rpm=60),),
     "anthropic": (_m("claude-haiku-5-5", 200_000, _A, _C, _T, rpm=50),),

@@ -614,8 +614,8 @@ def _short_help(entry: Entry) -> str:
 
 def _status(ctx: Context, args: TaskArgs) -> Outcome:
     report = task_report(ctx.store, actions.find_task(ctx.store, args.task))
-    actions.print_report(report)
-    return Outcome(report.model_dump(mode="json"))
+    actions.print_report(report, ctx.store)
+    return Outcome({**report.model_dump(mode="json"), **actions.report_output(ctx.store, report)})
 
 
 def _list(ctx: Context, args: ListArgs) -> Outcome:

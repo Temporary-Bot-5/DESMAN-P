@@ -436,6 +436,7 @@ class Chat:
     # ── Messages ─────────────────────────────────────────────────────────────
 
     def _message(self, text: str, *, added: bool = False) -> None:
+        text = text.encode("utf-8", errors="replace").decode("utf-8")
         config = self._config()
         text, cut = providers.redact_keys(text, config)
         if cut:  # before anything keeps it: the history, a model, a task's goal
@@ -461,6 +462,7 @@ class Chat:
             notes,
             config.behaviour,
             self._own_nodes(config),
+            clock=self.sessions.clock,
         )
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
         if self.session_id is not None and not self.temporary:  # nothing kept, nothing summarised
@@ -871,6 +873,7 @@ class Chat:
                     self.profile.notes() if config.personalize and not self.temporary else None,
                     config.behaviour,
                     self._own_nodes(config),
+                    clock=self.sessions.clock,
                 )
         self._command(
             Command(type="command", name=entry.name, args=args.model_dump(mode="json")),
@@ -1075,6 +1078,7 @@ class Chat:
                 limit=runs.tuned(config.tuning, "max_subtasks"),
                 # A temporary chat's work is given no personal node, as it is told no note.
                 tree=runs.task_tree(self.store.conn, config.personalize and not self.temporary),
+                clock=self.store.clock,
             )
         if planned.error is not None:
             ui.warn(
@@ -1279,6 +1283,7 @@ class Chat:
                         self.profile.notes() if config.personalize and not self.temporary else None,
                         config.behaviour,
                         self._own_nodes(config),
+                        clock=self.sessions.clock,
                     )
                     for task in settled:
                         self._outcome(task, self.store.short_id(task), speaker)
@@ -2134,7 +2139,12 @@ class Chat:
         )
         notes = self.profile.notes() if config.personalize and not self.temporary else None
         interlocutor = Interlocutor(
-            _InspectionLLM(), config.language, notes, config.behaviour, self._own_nodes(config)
+            _InspectionLLM(),
+            config.language,
+            notes,
+            config.behaviour,
+            self._own_nodes(config),
+            clock=self.sessions.clock,
         )
         placeholder = Message(
             seq=0,

@@ -611,13 +611,15 @@ def network_crew(
     except PolicyError as e:
         raise click.ClickException(t("Cannot use the tool policy: {error}", error=e)) from e
     reviewer = crew_models.for_(calls.Role.REVIEWER)
-    executor = llm_executor(crew_models.llm, crew_models.other, by_kind=crew_models.kinds)
+    executor = llm_executor(
+        crew_models.llm, crew_models.other, by_kind=crew_models.kinds, clock=store.clock
+    )
     return Crew(
         jobs.executor(store.conn, executor),
         jobs.reviewer(
             store.conn,
-            llm_reviewer(reviewer, evidence=functools.partial(evidence, store)),
-            llm_reviewer(reviewer),
+            llm_reviewer(reviewer, evidence=functools.partial(evidence, store), clock=store.clock),
+            llm_reviewer(reviewer, clock=store.clock),
         ),
         # The person's switches as they are at each tool call, not at the worker's start: a
         # permission turned off holds from the next call on (a config that fails: none on).
@@ -650,7 +652,7 @@ def _executor(models: Models, store: Store) -> Executor:
                     {"from": "other_model", "to": "rephrase", "reason": "no other module"},
                 )
                 other = None  # The executor already rephrases when no alternate exists.
-        return llm_executor(main, other)(work)
+        return llm_executor(main, other, clock=store.clock)(work)
 
     return execute
 
@@ -678,6 +680,7 @@ def _coordinator(
         llm_reviewer(
             models.for_(calls.Role.REVIEWER),
             evidence=functools.partial(evidence, store, knowledge=knowledge),
+            clock=store.clock,
         ),
         owner=current_owner(),
         lease_seconds=max(lease_seconds, models.step_seconds),
@@ -686,7 +689,9 @@ def _coordinator(
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
         providers=models.labels,
-        decomposer=decomposer(models.for_(calls.Role.DECOMPOSER), limit=tuned(tuning, "max_parts")),
+        decomposer=decomposer(
+            models.for_(calls.Role.DECOMPOSER), limit=tuned(tuning, "max_parts"), clock=store.clock
+        ),
         context_budget_tokens=tuned(tuning, "context_tokens"),
         access=access,
         tools=tools,

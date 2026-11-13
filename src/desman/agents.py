@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Annotated, Any, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
@@ -49,6 +50,7 @@ from desman.core.retry import FailureKind, Strategy
 from desman.core.tools import ToolCall
 from desman.llm.base import LLM, Message, Request
 from desman.llm.structured import StructuredOutputError, complete_json
+from desman.prompting import today
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -118,6 +120,8 @@ REVIEWER_SYSTEM = (
     'result of type "error".'
 )
 REVIEWER_EVIDENCE = (
+    " Evidence may be newer than what you know. Never reject a fact as future, unreleased "
+    "or outdated when the evidence shows it: only the evidence decides facts about the world."
     ' "evidence" is what the result can rest on: the subtask\'s inputs, the accepted results '
     "of the subtasks it depends on, the nodes of DESMAN's knowledge tree it was given, and "
     "what the tools returned to the executor in this attempt. Every specific fact about the world the result states (a price, time, date, "
@@ -143,18 +147,21 @@ def llm_executor(
     other: LLM | None = None,
     *,
     by_kind: Mapping[Kind, tuple[LLM, LLM | None]] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> Executor:
     """`other` serves the attempts whose strategy is another model (if None, `llm` does).
     `by_kind`: the main and other models for subtasks of a kind; a kind not in it asks `llm`
     and `other`."""
 
     def execute(work: Work) -> Success | Failure:
-        return _execute(work, *(by_kind or {}).get(work.subtask.kind, (llm, other)))
+        return _execute(work, *(by_kind or {}).get(work.subtask.kind, (llm, other)), clock=clock)
 
     return execute
 
 
-def _execute(work: Work, llm: LLM, other: LLM | None) -> Success | Failure:
+def _execute(
+    work: Work, llm: LLM, other: LLM | None, *, clock: Callable[[], datetime] | None = None
+) -> Success | Failure:
     """One attempt of the executor, with the models of its subtask's kind."""
     context = work.context
     prompt = {
@@ -185,6 +192,7 @@ def _execute(work: Work, llm: LLM, other: LLM | None) -> Success | Failure:
     system += TOOLS_INSTRUCTIONS if tools else NO_TOOLS
     if context.knowledge:
         system += KNOWLEDGE_INSTRUCTIONS
+    system += today(clock)
     request = _request(system, EXECUTE, prompt, temperature).model_copy(
         update={"avoid": work.unfit}
     )
@@ -196,11 +204,21 @@ def _execute(work: Work, llm: LLM, other: LLM | None) -> Success | Failure:
                 request,
                 _Result,
                 heading=EXECUTE,
-                keep=lambda r: not is_error_report(r.root),
+                keep=lambda r: (
+                    not is_error_report(r.root)
+                    and not all(
+                        r.root.get(key) == prompt[key] for key in ("subtask", "acceptance_criteria")
+                    )
+                ),
             )
         except StructuredOutputError as e:
             # The problem only: the reply may echo anything (it is in the call log).
             return Failure(kind=FailureKind.QUALITY, reason=f"unusable reply: {e.problem}")
+        if all(reply.root.get(key) == prompt[key] for key in ("subtask", "acceptance_criteria")):
+            return Failure(
+                kind=FailureKind.QUALITY,
+                reason="the reply repeated the request instead of doing the work",
+            )
         calls = reply.calls()
         if calls is None:
             return Success(content=reply.root)
@@ -226,7 +244,12 @@ def _execute(work: Work, llm: LLM, other: LLM | None) -> Success | Failure:
     )
 
 
-def llm_reviewer(llm: LLM, evidence: Callable[[Subtask], dict[str, Any]] | None = None) -> Reviewer:
+def llm_reviewer(
+    llm: LLM,
+    evidence: Callable[[Subtask], dict[str, Any]] | None = None,
+    *,
+    clock: Callable[[], datetime] | None = None,
+) -> Reviewer:
     """`evidence` gives what a result can rest on (`core.effects.evidence`): with it, the
     reviewer checks the result's facts against it."""
 
@@ -236,7 +259,7 @@ def llm_reviewer(llm: LLM, evidence: Callable[[Subtask], dict[str, Any]] | None 
             "acceptance_criteria": subtask.acceptance_criteria,
             "result": artifact,
         }
-        system = REVIEWER_SYSTEM
+        system = REVIEWER_SYSTEM + today(clock)
         if evidence is not None:
             prompt["evidence"] = evidence(subtask)
             system += REVIEWER_EVIDENCE

@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Omitted lines: {count}.": "Atlanan satır sayısı: {count}.",
+    "Files in {folder}:": "{folder} içindeki dosyalar:",
+    "Model {scope} unavailable or limited until {until}.": "{scope} modeli {until} tarihine kadar kullanılamıyor veya sınırlı.",
     "Assignments": "Atamalar",
     "Backup": "Yedek",
     "Check failed: {error}": "Denetim başarısız: {error}",

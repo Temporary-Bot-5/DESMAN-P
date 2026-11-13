@@ -32,6 +32,7 @@ from desman.core.workspace import Workspace, workspace_root_for
 from desman.interlocutor import CHAT, RETELL, NewTask, unbacked_code
 from desman.llm.fake import FakeLLM
 from desman.planner import Plan, Split, planner_system, splitter_system
+from desman.prompting import today
 from helpers import make_config
 
 S = SubtaskStatus
@@ -218,7 +219,7 @@ def test_the_executor_is_told_what_it_cannot_do(store: Store, tmp_path: Path) ->
         task_id = store.create_task(spec)
         Coordinator(store, llm_executor(fake), accept, workspaces=tmp_path).run(task_id)
     without, granted = (r.messages[0].content for r in fake.calls)
-    assert HONEST in without and without.endswith(NO_TOOLS)
+    assert HONEST in without and without.endswith(NO_TOOLS + today())
     assert HONEST in granted and NO_TOOLS not in granted
 
 

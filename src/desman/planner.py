@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import functools
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
@@ -42,6 +43,7 @@ from desman.core.models import MAX_KNOWLEDGE, Kind, Priority, SubtaskSpec, TaskS
 from desman.knowledge import Node
 from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
+from desman.prompting import today
 
 PLAN = "Plan task"
 """Prompt heading: fake scripts route on it."""
@@ -71,6 +73,13 @@ RUN_RULES = (
     "never plan a subtask that says what running something would print without it."
 )
 """Not a target of the Improvement Analyst: the analyst may not loosen what code checks."""
+
+LANGUAGE_RULES = (
+    " The person wrote the goal in their language. Every subtask producing text for the "
+    "person must explicitly say in its description to write in that language, naming the "
+    "language. The last subtask must produce its result in that language. Preserve these "
+    "language instructions when splitting a subtask."
+)
 
 PLANNER_RULES = (
     "You split a goal into subtasks for small language models. Each subtask is done by one "
@@ -105,6 +114,7 @@ def planner_system(limit: int = MAX_SUBTASKS) -> str:
         + KIND_RULES
         + RUN_RULES
         + CRITERIA_RULES
+        + LANGUAGE_RULES
     )
 
 
@@ -230,9 +240,12 @@ class Planned:
         return details
 
 
-def _system(rules: str, tree: Sequence[Node] | None) -> str:
+def _system(
+    rules: str, tree: Sequence[Node] | None, clock: Callable[[], datetime] | None = None
+) -> str:
     """The planner's instructions, with the knowledge tree's table of contents when it has
     any: without a tree a plan names no context."""
+    rules += today(clock)
     if not tree:
         return rules
     return rules + KNOWLEDGE_RULES + knowledge.contents(tree)
@@ -279,6 +292,7 @@ def plan(
     limit: int | None = None,
     tree: Sequence[Node] | None = None,
     provider_fallback: bool = True,
+    clock: Callable[[], datetime] | None = None,
 ) -> Planned:
     """The model's plan for `goal`, or the template plan if the model fails. `limit`: the most
     subtasks (default `MAX_SUBTASKS`). `tree`: the knowledge tree it may give subtasks nodes
@@ -287,7 +301,7 @@ def plan(
     limit = limit or MAX_SUBTASKS
     request = Request(
         messages=[
-            Message(role="system", content=_system(planner_system(limit), tree)),
+            Message(role="system", content=_system(planner_system(limit), tree, clock)),
             Message(role="user", content=f"{PLAN}:\n{goal}"),
         ]
     )
@@ -329,6 +343,7 @@ def continuation(
     priority: int = Priority.NORMAL,
     limit: int | None = None,
     tree: Sequence[Node] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> Planned:
     """New subtasks for a task that was worked on (ADR 0010): `subtasks` are its (seq,
     description, status), `ask` what to add or why a step is redone (`redo`: that step's seq).
@@ -344,7 +359,9 @@ def continuation(
     }
     request = Request(
         messages=[
-            Message(role="system", content=_system(planner_system(limit) + CONTINUE_RULES, tree)),
+            Message(
+                role="system", content=_system(planner_system(limit) + CONTINUE_RULES, tree, clock)
+            ),
             Message(role="user", content=f"{CONTINUE}:\n{json.dumps(asked, ensure_ascii=False)}"),
         ]
     )
@@ -396,6 +413,7 @@ def splitter_system(limit: int = MAX_PARTS) -> str:
         + KIND_RULES
         + RUN_RULES
         + CRITERIA_RULES
+        + LANGUAGE_RULES
     )
 
 
@@ -446,7 +464,9 @@ def split_schema(limit: int) -> type[Split]:
     return Limited
 
 
-def decomposer(llm: LLM, *, limit: int | None = None) -> Decomposer:
+def decomposer(
+    llm: LLM, *, limit: int | None = None, clock: Callable[[], datetime] | None = None
+) -> Decomposer:
     """Splits a subtask the model's way; None (the coordinator retries normally) when the reply
     stays unusable. Provider errors propagate: the coordinator pauses or retries as usual.
     `limit`: the most parts (default `MAX_PARTS`)."""
@@ -461,6 +481,7 @@ def decomposer(llm: LLM, *, limit: int | None = None) -> Decomposer:
             context.inputs,
             context.feedback.text if context.feedback else None,
             limit=limit,
+            clock=clock,
         )
 
     return split
@@ -475,6 +496,7 @@ def split_task(
     feedback: str | None,
     *,
     limit: int | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> list[SubtaskSpec] | None:
     """The decomposer's model call, also for a cluster node without a local Work lease."""
     payload = {
@@ -486,7 +508,7 @@ def split_task(
     }
     request = Request(
         messages=[
-            Message(role="system", content=splitter_system(limit or MAX_PARTS)),
+            Message(role="system", content=splitter_system(limit or MAX_PARTS) + today(clock)),
             Message(
                 role="user",
                 content=f"{SPLIT}:\n{json.dumps(payload, ensure_ascii=False, indent=2)}",

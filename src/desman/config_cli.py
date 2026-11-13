@@ -762,6 +762,7 @@ def usage(since: str, as_json: bool, db_path: Path | None) -> None:
         click.echo(json.dumps(usage_json(config, rows), indent=2))
         return
     print_usage(config, rows, window, since)
+    print_model_blocks(db_path)
 
 
 def usage_since(since: str, db_path: Path | None = None) -> list[calls.KeyUsage]:
@@ -1247,3 +1248,26 @@ def print_imported(manager: ConfigManager, file: Path, result: Imported) -> None
                 file=file,
             )
         )
+
+
+def print_model_blocks(db_path: Path | None = None) -> None:
+    """Shared limiter blocks, including models refused as unavailable (404)."""
+    path = db_path or db.default_db_path()
+    if not path.exists():
+        return
+    conn = db.open_db(path)
+    try:
+        rows = conn.execute(
+            "SELECT scope, blocked_until FROM rate_buckets WHERE blocked_until > ? ORDER BY scope",
+            (db.to_iso(datetime.now(UTC)),),
+        ).fetchall()
+        for row in rows:
+            ui.note(
+                t(
+                    "Model {scope} unavailable or limited until {until}.",
+                    scope=row["scope"],
+                    until=row["blocked_until"],
+                )
+            )
+    finally:
+        conn.close()

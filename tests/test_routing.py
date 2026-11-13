@@ -97,10 +97,14 @@ def test_each_role_asks_the_model_best_for_it_first() -> None:
     assert executor[0] == "groq/openai/gpt-oss-20b"  # the preferred provider's default
     # Judging needs analysis: a model strong at it, even of a provider later in preference,
     # comes before one that is not.
-    assert reviewer[:2] == ["groq/openai/gpt-oss-120b", "google/gemini-2.5-flash"]
+    assert reviewer[:3] == [
+        "groq/openai/gpt-oss-120b",
+        "groq/qwen/qwen3.8-27b",
+        "google/gemini-3.8-flash",
+    ]
     assert labels(router.lineup(config, Role.PLANNER)) == reviewer
     assert sorted(executor) == sorted(reviewer)  # the same models, in another order
-    assert executor.index("groq/llama-3.3-70b-versatile") < executor.index(
+    assert executor.index("groq/qwen/qwen3.8-27b") < executor.index(
         "google/gemini-3.5-flash-lite"
     )  # with the need met by both, the provider's place decides
 
@@ -118,7 +122,7 @@ def test_a_model_that_keeps_to_json_comes_before_one_that_does_not() -> None:
 def test_provider_and_model_narrow_the_lineup() -> None:
     config = make_config(api_keys={"GROQ_API_KEY": GROQ, "GOOGLE_API_KEY": GOOGLE})
     google = labels(router.lineup(config, Role.REVIEWER, "google"))
-    assert google == ["google/gemini-2.5-flash", "google/gemini-3.5-flash-lite"]
+    assert google == ["google/gemini-3.8-flash", "google/gemini-3.5-flash-lite"]
     pinned = router.lineup(config, Role.REVIEWER, "google", "gemini-x")
     assert labels(pinned) == ["google/gemini-x"]
     assert labels(router.lineup(config, Role.PLANNER, model="m")) == ["groq/m"]
@@ -601,7 +605,7 @@ def test_an_unfit_model_the_lineup_fell_back_to_is_not_asked_again(
     assert store.unfit_providers(task_id) == {"groq/openai/gpt-oss-120b"}
     executed = [model for _, model, what in seen if what == "Execute subtask"]
     assert executed.count("openai/gpt-oss-120b") == 1
-    assert executed[-1] == "llama-3.3-70b-versatile"
+    assert executed[-1] == "qwen/qwen3.8-27b"
 
 
 # ── The kind of a subtask picks its executor's model (4.5, part 2) ───────────

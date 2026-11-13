@@ -34,6 +34,7 @@ from desman.core import db, filelock
 from desman.llm.base import (
     LLM,
     Completion,
+    ProviderRejected,
     ProviderUnavailable,
     QuotaExhausted,
     RateLimited,
@@ -171,6 +172,10 @@ class Limited:
         try:
             return self.inner.complete(request)
         except Paced:
+            raise
+        except ProviderRejected as e:
+            if e.status == 404:
+                self.buckets.block(self.scope, self.buckets.clock() + timedelta(hours=24))
             raise
         except RateLimited as e:
             after = DEFAULT_BLOCK if e.retry_after is None else e.retry_after

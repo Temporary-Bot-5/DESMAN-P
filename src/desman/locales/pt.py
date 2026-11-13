@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Omitted lines: {count}.": "Linhas omitidas: {count}.",
+    "Files in {folder}:": "Ficheiros em {folder}:",
+    "Model {scope} unavailable or limited until {until}.": "Modelo {scope} indisponível ou limitado até {until}.",
     "Assignments": "Atribuições",
     "Backup": "Cópia de segurança",
     "Check failed: {error}": "Falha na verificação: {error}",
