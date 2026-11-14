@@ -14,7 +14,7 @@
 # The reviewer (and the executor it judges).
 "agents.py" = "85c78e52b687a04689989383da0fdb0429be61a3e0bb337d7de33978d4e3800c"
 # Security rules: the sandbox for generated code, the workspace guard for files.
-"core/sandbox.py" = "8a9f8c48ba1952d1667fa588bb296e520f331971a98c0b66ce45a33143f5de07"
+"core/sandbox.py" = "2cda2b250051e8e1f80d45882c817f140972e9ad49d274f2edd7f97d7ff3956d"
 "core/workspace.py" = "36f3ae20366db16c4e99ded0ac81d70f9a93856b9c75dcca0c5f984987951001"
 "core/atomic.py" = "08a1ada8de45275dbbbda0bb7d938f56f2003719efbc9d3c1bb6b918f04ab032"
 # Approval rules: who may take which edge (the operator's decisions), and this check.

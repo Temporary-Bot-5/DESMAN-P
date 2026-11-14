@@ -110,7 +110,7 @@ def test_the_environment_is_cleared(ws: Workspace, monkeypatch: pytest.MonkeyPat
     outcome = py(ws, "import os, json; print(json.dumps(dict(os.environ)))")
     env = json.loads(outcome.stdout)
     assert "GROQ_API_KEY" not in env and "gsk_secret" not in outcome.stdout
-    assert set(env) <= {"PATH", "HOME", "TMPDIR", "LANG", "PWD", "PYTHONPATH"}
+    assert set(env) <= {"PATH", "HOME", "TMPDIR", "LANG", "PWD", "PYTHONPATH", "LD_LIBRARY_PATH"}
     assert env.get("PYTHONPATH", "/opt/desman/python") == "/opt/desman/python"
 
 

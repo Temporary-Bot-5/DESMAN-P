@@ -176,6 +176,9 @@ class Sandbox:
             target = "/opt/desman/runtime"
             argv += ["--ro-bind", str(runtime), target]
             argv += ["--setenv", "PATH", target + "/bin:" + SANDBOX_PATH]
+            # An interpreter linked to its own libpython (setup-python's builds) finds it by
+            # the path it was built at, which is not there: point the loader at the bind.
+            argv += ["--setenv", "LD_LIBRARY_PATH", target + "/lib"]
             if not (runtime / "bin/python3").exists():
                 # A new bin mount lets bwrap add the alias without writing to the
                 # read-only interpreter tree. Keep every original entry read-only.

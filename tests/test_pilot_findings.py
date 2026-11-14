@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,10 @@ from desman.llm import router
 from desman.llm.base import Message, Request
 from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, RateLimit, Reply
+
+linux_only = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="the sandbox (bubblewrap) is Linux only"
+)
 
 
 def claim(store: Store) -> Subtask:
@@ -262,6 +267,7 @@ def test_all_other_models_must_be_unfit_to_lose_strategy(store: Store) -> None:
     assert avoid["avoid_other"]
 
 
+@linux_only
 def test_sandbox_binds_only_pytest_runtime_imports(tmp_path: Path) -> None:
     argv = Sandbox(bwrap="bwrap", prlimit="prlimit")._argv(["true"], tmp_path)
     index = argv.index("PYTHONPATH")
@@ -371,6 +377,7 @@ def test_latest_evidence_exhausts_budget_before_earlier_web(store: Store) -> Non
     assert shown[0]["truncated"]
 
 
+@linux_only
 def test_sandbox_silently_skips_missing_runtime_imports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -408,6 +415,7 @@ def test_native_openai_tool_calls_remain_strict() -> None:
             _ToolCalls.model_validate({"tool_calls": [bad]})
 
 
+@linux_only
 @pytest.mark.parametrize("python3", [True, False])
 def test_sandbox_binds_standalone_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, python3: bool
@@ -427,9 +435,15 @@ def test_sandbox_binds_standalone_python(
         argv.index(str(runtime)) - 1 : argv.index(str(runtime)) + 2
     ]
     assert "/opt/desman/runtime/bin:/usr/local/bin:/usr/bin:/bin" in argv
+    assert argv[argv.index("LD_LIBRARY_PATH") - 1 : argv.index("LD_LIBRARY_PATH") + 2] == [
+        "--setenv",
+        "LD_LIBRARY_PATH",
+        "/opt/desman/runtime/lib",
+    ]
     assert ("/opt/desman/runtime/bin/python3" in argv) is not python3
 
 
+@linux_only
 def test_sandbox_system_python_needs_no_runtime_bind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
