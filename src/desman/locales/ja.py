@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Waiting {seconds} s for a provider limit…": "プロバイダーの制限が解除されるまで {seconds} 秒待機中…",
     "Allow a release that changes the registry database schema.": "レジストリのデータベース構造を変更するリリースを許可します。",
     "Another registry update is running.": "別のレジストリ更新が実行中です。",
     "Check the release without applying or journaling it.": "適用やログ記録をせずにリリースを確認します。",

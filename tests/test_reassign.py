@@ -42,7 +42,7 @@ def script(tmp_path: Path, name: str, execute: Any, review: Any) -> Path:
         {"match": "Review", "steps": [review], "repeat_last": True},
     ]
     path = tmp_path / f"{name}.json"
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 

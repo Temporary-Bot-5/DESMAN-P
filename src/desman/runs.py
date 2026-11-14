@@ -241,6 +241,7 @@ def models(
             sticky=not other,
             on_used=None if other else remember,
             label_for=actual_label,
+            conn=conn,
         )
         if other:
             alternatives = router.other_lineup(choices)

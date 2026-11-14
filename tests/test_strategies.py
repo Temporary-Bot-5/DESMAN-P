@@ -95,7 +95,11 @@ def test_every_attempt_differs_from_the_one_before(store: Store, clock: FakeCloc
     assert "1. wrong" in switched.prompt
     assert len(executions(main)) == 3
 
-    started = [e.details for e in history(store.conn, task_id) if e.action == "attempt_started"]
+    started = [
+        {key: e.details[key] for key in ("attempt", "strategy")}
+        for e in history(store.conn, task_id)
+        if e.action == "attempt_started"
+    ]
     assert started == [
         {"attempt": 1, "strategy": "first"},
         {"attempt": 2, "strategy": "feedback"},
@@ -127,7 +131,11 @@ def test_a_transient_retry_keeps_the_strategy(store: Store, clock: FakeClock) ->
     main = FakeLLM().on("Execute", ServerError(status=503), '{"v": 1}')
     main.on("Review", ACCEPT)
     task_id = run(store, clock, main, None)
-    started = [e.details for e in history(store.conn, task_id) if e.action == "attempt_started"]
+    started = [
+        {key: e.details[key] for key in ("attempt", "strategy")}
+        for e in history(store.conn, task_id)
+        if e.action == "attempt_started"
+    ]
     assert started == [{"attempt": 1, "strategy": "first"}] * 2
 
 

@@ -38,22 +38,29 @@ class Model:
     strengths: frozenset[Strength] = frozenset({Strength.TEXT})
     rpm: int = 10
     """Requests a minute one key may make (free tier; for paid providers a cautious pace)."""
+    request_tokens: int | None = None
+    """Free-tier ceiling for one request, independent of the context window."""
 
 
 _C, _T, _A = Strength.CODE, Strength.TEXT, Strength.ANALYSIS
 
 
 def _m(
-    id: str, context: int, *strengths: Strength, strict_json: bool = True, rpm: int = 10
+    id: str,
+    context: int,
+    *strengths: Strength,
+    strict_json: bool = True,
+    rpm: int = 10,
+    request_tokens: int | None = None,
 ) -> Model:
-    return Model(id, context, strict_json, frozenset(strengths), rpm)
+    return Model(id, context, strict_json, frozenset(strengths), rpm, request_tokens)
 
 
 CATALOG: dict[str, tuple[Model, ...]] = {
     "groq": (
-        _m("openai/gpt-oss-20b", 131_072, _T, _C, rpm=30),
-        _m("openai/gpt-oss-120b", 131_072, _A, _C, _T, rpm=30),
-        _m("qwen/qwen3.8-27b", 131_072, _T, _A, rpm=30),
+        _m("openai/gpt-oss-20b", 131_072, _T, _C, rpm=30, request_tokens=8000),
+        _m("openai/gpt-oss-120b", 131_072, _A, _C, _T, rpm=30, request_tokens=8000),
+        _m("qwen/qwen3.8-27b", 131_072, _T, _A, rpm=30, request_tokens=6000),
     ),
     "google": (
         _m("gemini-3.5-flash-lite", 1_048_576, _T, _C, rpm=15),
@@ -70,8 +77,8 @@ CATALOG: dict[str, tuple[Model, ...]] = {
         _m("nvidia/nemotron-3.5-lightning-30b-a3b", 131_072, _T, rpm=40),
     ),
     "cohere": (
-        _m("command-r7b-12-2024", 131_072, _T, rpm=20),
         _m("command-a-03-2025", 262_144, _A, _T, rpm=20),
+        _m("command-r7b-12-2024", 131_072, rpm=20),
     ),
     "aion": (_m("aion-labs/aion-3.0-mini", 131_072, _T, _A, rpm=10),),
     "cloudflare": (

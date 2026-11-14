@@ -54,7 +54,7 @@ from desman.core.context import (
     build_context,
     given,
 )
-from desman.core.effects import Effects, earlier_lookups
+from desman.core.effects import Effects, earlier_lookups, workspace_files
 from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
@@ -303,12 +303,20 @@ class Coordinator:
         """Who works jobs from desman-global; None: they are never taken here."""
 
     def run(
-        self, task_id: str, *, wait_for_pauses: bool = False, max_ticks: int = 10_000
+        self,
+        task_id: str,
+        *,
+        wait_for_pauses: bool = False,
+        max_ticks: int = 10_000,
+        short_pause_seconds: float = 0,
+        on_pause: Callable[[float], None] | None = None,
     ) -> RunResult:
         """Work on `task_id` until it is no longer ACTIVE.
 
         With `wait_for_pauses` the coordinator sleeps until the earliest pause ends; otherwise it
-        returns, and a later `run()` resumes (the state is all in the database). `max_ticks` is
+        returns, and a later `run()` resumes (the state is all in the database). Callers can
+        opt into waiting for pauses up to `short_pause_seconds`, announced by `on_pause`.
+        `max_ticks` is
         a safety net against bugs, not part of normal termination.
         """
         result = RunResult(task_id=task_id, status=self.store.task_status(task_id), ticks=0)
@@ -333,10 +341,13 @@ class Coordinator:
                 continue
             if pause_until is None:
                 raise RuntimeError(f"task {task_id} is active but nothing can move")  # a bug
-            if not wait_for_pauses:
+            seconds = self._seconds_until(pause_until)
+            if not wait_for_pauses and seconds > short_pause_seconds:
                 result.paused_until = pause_until
                 return result
-            self.sleep(self._seconds_until(pause_until))
+            if not wait_for_pauses and on_pause is not None:
+                on_pause(seconds)
+            self.sleep(seconds)
         return result
 
     def work(
@@ -498,11 +509,17 @@ class Coordinator:
                 self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
+                files=(lambda chars: workspace_files(self.store, subtask, tools.workspace, chars))
+                if any(
+                    spec["name"] in {"read_file", "write_file", "list_files"}
+                    for spec in tools.specs()
+                )
+                else None,
                 earlier=lambda chars: earlier_lookups(
                     self.store, subtask, self.store.executions(subtask.id), chars
                 ),
             )
-            self._started(subtask, context)
+            self._started(subtask, context, [str(tool["name"]) for tool in tools.specs()])
             work = Work(
                 subtask=subtask,
                 context=context,
@@ -518,7 +535,7 @@ class Coordinator:
                     update={"strategy": crew.strategies(attempt, split=False, **avoid)}
                 )
                 work = work.model_copy(update={"context": context})
-                self._started(subtask, context)
+                self._started(subtask, context, [str(tool["name"]) for tool in tools.specs()])
 
             def unfit_heard(label: str) -> None:
                 self.store.note(
@@ -640,12 +657,17 @@ class Coordinator:
             self.store.note(subtask.id, Actor.EXECUTOR, "context_missing", {"paths": missing})
         return found
 
-    def _started(self, subtask: Subtask, context: Context) -> None:
+    def _started(self, subtask: Subtask, context: Context, tools: list[str]) -> None:
         self.store.note(
             subtask.id,
             Actor.EXECUTOR,
             "attempt_started",
-            {"attempt": context.attempt, "strategy": context.strategy.value},
+            {
+                "attempt": context.attempt,
+                "strategy": context.strategy.value,
+                "execution": self.store.executions(subtask.id),
+                "tools": tools,
+            },
         )
 
     def _decompose(self, work: Work, lease: str, events: list[str]) -> bool:

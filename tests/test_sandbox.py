@@ -73,7 +73,17 @@ def test_code_works_in_the_workspace_and_its_files_stay(ws: Workspace) -> None:
 @confined
 def test_generated_tests_run_with_pytest(ws: Workspace) -> None:
     ws.write("test_x.py", "def test_one():\n    assert 1 + 1 == 2\n")
-    outcome = run(ws, "python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", timeout=60)
+    outcome = run(ws, "python3", "-m", "pytest", "-q", timeout=60)
+    assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
+    assert "1 passed" in outcome.stdout
+    assert not (ws.root / ".pytest_cache").exists()
+    assert not (ws.root / "__pycache__").exists()
+
+
+@confined
+def test_pytest_header_reads_plugin_metadata(ws: Workspace) -> None:
+    ws.write("test_x.py", "def test_one():\n    assert True\n")
+    outcome = run(ws, "python3", "-m", "pytest", "test_x.py", timeout=60)
     assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
     assert "1 passed" in outcome.stdout
 
@@ -110,7 +120,19 @@ def test_the_environment_is_cleared(ws: Workspace, monkeypatch: pytest.MonkeyPat
     outcome = py(ws, "import os, json; print(json.dumps(dict(os.environ)))")
     env = json.loads(outcome.stdout)
     assert "GROQ_API_KEY" not in env and "gsk_secret" not in outcome.stdout
-    assert set(env) <= {"PATH", "HOME", "TMPDIR", "LANG", "PWD", "PYTHONPATH", "LD_LIBRARY_PATH"}
+    assert set(env) <= {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "LANG",
+        "PWD",
+        "PYTHONPATH",
+        "LD_LIBRARY_PATH",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTEST_ADDOPTS",
+    }
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTEST_ADDOPTS"] == "-p no:cacheprovider"
     assert env.get("PYTHONPATH", "/opt/desman/python") == "/opt/desman/python"
 
 
@@ -205,7 +227,8 @@ def test_without_a_working_bwrap_nothing_runs(ws: Workspace, tmp_path: Path) -> 
         missing().run(["touch", "x"], ws.root)
     refusing = tmp_path / "bwrap"
     refusing.write_text(
-        "#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n"
+        "#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n",
+        encoding="utf-8",
     )
     refusing.chmod(0o755)
     sandbox = Sandbox(bwrap=str(refusing))
@@ -382,7 +405,7 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
         {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
     ]
     script = tmp_path / "fake.json"
-    script.write_text(json.dumps({"routes": routes}))
+    script.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     monkeypatch.setattr(runs_module, "Sandbox", missing)
     warning = "shell_execution is on, but there is no sandbox to run commands in"
 

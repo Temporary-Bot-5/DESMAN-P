@@ -253,3 +253,10 @@ def test_a_section_with_a_preamble_opens_as_a_section_and_texts_are_bounded() ->
     size = sum(len(json.dumps(v, ensure_ascii=False)) for v in found.values()) // 4
     assert size <= KNOWLEDGE_TOKENS + 50
     assert any(v["text"].endswith("[… cut]") for v in found.values())
+
+
+def test_files_topic_keeps_the_interlocutor_honesty_rule() -> None:
+    assert (
+        "The interlocutor itself does nothing: only DESMAN's own messages tell what was done."
+        in manual.BY_NAME["files"].text
+    )

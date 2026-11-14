@@ -105,7 +105,7 @@ def test_an_idle_worker_still_tells_what_others_sent_to_the_person(
 def fake_script(tmp_path: Path) -> Path:
     routes = [{"match": "Execute", "steps": [{"type": "rejected", "status": 401}]}]
     path = tmp_path / "fake.json"
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 
@@ -134,7 +134,7 @@ def test_a_worker_tells_what_waits_and_what_comes_to_wait(tmp_path: Path) -> Non
     json.loads(quiet.output)
 
 
-def test_the_chat_tells_what_waits_then_what_comes_from_elsewhere(
+def test_the_chat_tells_only_what_comes_from_elsewhere_after_opening(
     clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     conn = db.open_db(":memory:")
@@ -162,11 +162,11 @@ def test_the_chat_tells_what_waits_then_what_comes_from_elsewhere(
     finally:
         conn.close()
     # Without a model the chat retells nothing, so its own task is told as a notice too.
-    assert told[0] == "from before"
-    assert sorted(told[1:]) == ["asked here", "from a worker"]  # both told after /help
+    assert "from before" not in told
+    assert sorted(told) == ["asked here", "from a worker"]  # both told after /help
 
 
-def test_the_chat_shows_what_waits_when_it_opens() -> None:
+def test_the_chat_keeps_old_waiting_work_in_inbox_without_startup_notice() -> None:
     ConfigManager(default_config_path()).save(make_config(language="en", configured=True))
     store = Store(db.open_db(db.default_db_path()))
     try:
@@ -175,16 +175,13 @@ def test_the_chat_shows_what_waits_when_it_opens() -> None:
         store.conn.close()
     result = CliRunner().invoke(cli, [], input="/exit\n")
     assert result.exit_code == 0, result.output
-    assert "1 new in General Terminal (/terminal)" in result.output
+    assert "new in General Terminal" not in result.output
     assert "left from yesterday" not in result.output
     conn = db.open_db(db.default_db_path())
     try:
         sessions = Sessions(conn)
         text = "\n".join(message.text for message in sessions.messages(sessions.terminal()))
-        assert "1 subtask waits for your decision:" in text
-        assert (
-            "left from yesterday" in text
-            and "Decide with `inbox`, or `retry`, `accept`, `fail` REF." in text
-        )
+        assert "left from yesterday" not in text
+        assert [item.goal for item in inbox(Store(conn))] == ["left from yesterday"]
     finally:
         conn.close()

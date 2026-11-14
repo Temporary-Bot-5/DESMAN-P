@@ -40,26 +40,30 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "A planner makes up to 8 text/code/analysis subtasks (template on failure). Executors work; reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show completed results (up to 40 lines) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 knowledge-tree nodes (status lists them).",
+        "A planner uses one subtask for simple goals, up to 8 for tools/dependencies; template fallback. Executors work; reviewers judge. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show completed results (up to 40 lines) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 knowledge-tree nodes (status lists them).",
     ),
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Each task has a folder of its own (workspaces/TASK next to the database), where the "
+        "Each task has a folder (workspaces/TASK next to the database), where the "
         "executor reads and writes files with its tools; nothing outside it. After a task, the "
-        "chat lists its files and their folder itself. A task sees only its own folder: when "
+        "chat lists its files and folder. A task sees only its folder: when "
         'a request builds on what an earlier task of the same chat wrote ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "the original files stay as they were. Saving something is work too: a task writes it.\n"
+        "originals stay unchanged. On retries, with file tools, it sees work files and "
+        "resets or rewrites stale demonstration state and files that contradict its result.\n"
         "Running code (a test, a crash test, checking what a program prints) needs the "
         "run_command tool, which needs the person's shell_execution switch (`desman "
-        "permissions`) and a working sandbox. A subtask that must run code is marked so by the "
-        "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with the reason, and "
+        "permissions`) and a working sandbox. Code-running subtasks are marked by the "
+        "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
         "with it its result counts only if the code really ran. No part of DESMAN reports "
-        "what code would print without running it. python3 -m pytest is available in the "
+        "what code would print without running it. Web lookups and prose need no code run. "
+        "Requested prose goes in the result; files are extra. Review requires web lookups for current facts and checks dates, sources and prose language, allowing names "
+        "and requested translations. It sees current text of files written "
+        "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
-        "A retelling shows code only as the task left it.",
+        "A retelling shows code only as the task left it, in the language of your latest message.",
     ),
     Topic(
         "retries",
@@ -69,7 +73,8 @@ TOPICS: Final = (
         "then the subtask is split into 2-4 smaller parts whose results are combined. By "
         "default a subtask gets 5 attempts and 5 interruptions (network errors, crashes); "
         "the tuning may change both. A provider's limit costs no attempt: the subtask is "
-        "paused until the limit resets. A failure retrying cannot help (a refused key, a "
+        "paused until the limit resets. Run/resume wait in-process for limits up to 120 seconds; "
+        "longer pauses need `desman resume TASK`, or --wait to keep waiting. A failure retrying cannot help (a refused key, a "
         "denied permission) goes to the person at once.\n"
         "DESMAN never gives up by itself: when the attempts run out the subtask waits for the "
         "person (needs_human). `desman inbox` lists what waits, with the reason, and in a terminal or the chat lets the person pick a subtask and decide; `desman inbox --list` only lists. The person "
@@ -193,7 +198,7 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
+        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count events since this chat opened; temporary chats show no terminal notice. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
     ),
     Topic(
         "gui",
@@ -238,7 +243,7 @@ TOPICS: Final = (
     Topic(
         "language",
         "the chat language and confirmed language changes",
-        "Configure the language with `desman language CODE`. Replies always follow the latest message’s language, using the configured interface language only when unclear. The language command is proposed only when the person explicitly asks to change the interface language.",
+        "Configure the language with `desman language CODE`. Replies follow the latest message’s language. Retellings fall back to the goal’s language when the latest message gives no signal (ok, /status), then to the interface language. Other replies fall back to the interface language. The language command is proposed only when the person explicitly asks to change the interface language.",
     ),
     Topic(
         "data",

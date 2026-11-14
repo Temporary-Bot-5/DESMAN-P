@@ -355,7 +355,7 @@ def test_plain_check_refuses_before_running_and_cleans_up(checkout: Path, tmp_pa
     diff, details = improve.render([rules_change(checkout)], package(checkout))
     spy = tmp_path / "python-spy"
     marker = tmp_path / "called"
-    spy.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    spy.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
     spy.chmod(0o700)
     result = evaluation.check(
         checkout,

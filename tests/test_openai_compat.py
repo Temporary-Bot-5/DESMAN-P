@@ -289,7 +289,7 @@ def test_run_on_a_real_provider_logs_its_calls(mock_http: Callable[[Handler], No
 
 def test_run_refuses_fake_and_real_together(tmp_path: Any) -> None:
     script = tmp_path / "s.json"
-    script.write_text('{"steps": []}')
+    script.write_text('{"steps": []}', encoding="utf-8")
     result = desman("run", "g", "--fake-llm", str(script), "--provider", "groq")
     assert result.exit_code == 2 and "drop --provider" in result.output
 
@@ -865,3 +865,19 @@ def test_a_short_limit_waited_out_frees_the_key() -> None:
     assert llm.complete(REQUEST).text == '{"ok": true}'
     assert [r.http_status for r in records] == [429, 200]
     assert clock() == datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=3)
+
+
+def test_groq_request_too_large_is_routable_without_key_rotation() -> None:
+    from desman.llm.base import RequestTooLarge
+
+    llm, records = client(
+        lambda request: httpx.Response(
+            413,
+            json={"error": {"message": "Request too large for model tokens per minute"}},
+            headers={"x-ratelimit-limit-tokens": "8000"},
+        )
+    )
+    with pytest.raises(RequestTooLarge):
+        llm.complete(REQUEST)
+    assert len(records) == 1
+    assert records[0].limits["x-ratelimit-limit-tokens"] == "8000"

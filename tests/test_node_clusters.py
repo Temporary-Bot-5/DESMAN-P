@@ -116,7 +116,7 @@ def test_config_upgrade_and_lead_command() -> None:
     assert Config.model_validate(upgrade(old)).network.lead
     manager = ConfigManager(default_config_path())
     manager.config_path.parent.mkdir(parents=True, exist_ok=True)
-    manager.config_path.write_text(json.dumps(old))
+    manager.config_path.write_text(json.dumps(old), encoding="utf-8")
     config = manager.load()
     assert config.schema_version == 9 and config.network.lead
     for state in ("off", "on"):

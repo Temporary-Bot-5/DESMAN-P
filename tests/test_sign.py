@@ -364,7 +364,7 @@ def test_the_node_key_lives_next_to_the_database(
 
 def test_a_key_shows_its_fingerprint_never_itself(tmp_path: Path) -> None:
     key = sign.node_key(tmp_path / sign.NODE_KEY)
-    secret = (tmp_path / sign.NODE_KEY).read_text()
+    secret = (tmp_path / sign.NODE_KEY).read_text(encoding="utf-8")
     body = "".join(line for line in secret.splitlines() if not line.startswith("-----"))
     for shown in (repr(key), str(key), f"{key!r}"):
         assert key.fingerprint in shown

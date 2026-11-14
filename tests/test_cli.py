@@ -145,7 +145,7 @@ def test_symlinked_config_is_updated_at_its_target(tmp_path: Path) -> None:
     path.symlink_to(target)
     ConfigManager(path).save(make_config(**{"api_keys": {"GROQ_API_KEY": "gsk_new"}}))
     assert path.is_symlink() and path.resolve() == target
-    assert json.loads(target.read_text())["api_keys"] == {
+    assert json.loads(target.read_text(encoding="utf-8"))["api_keys"] == {
         "GROQ_API_KEY": [{"value": "gsk_new", "label": ""}]
     }
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
@@ -194,6 +194,7 @@ def test_git_ignores_the_config_and_its_temp_files() -> None:
         ["git", "-C", str(root), "check-ignore", "--no-index", *names],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.stdout.split() == names, done.stderr
 

@@ -203,7 +203,8 @@ def test_one_real_worker_finishes_a_task(tmp_path: Path) -> None:
                     {"match": "Review", "steps": ['{"verdict": "accept"}']},
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     pool = Pool(path, tmp_path, 1)
     pool.argv.extend(["--fake-llm", str(script)])
@@ -454,14 +455,14 @@ def test_model_wait_and_config_change_retry(tmp_path: Path, clock: FakeClock) ->
     pool.tick()
     assert checks == 2 and pool.slots[0].deaths == 0
     ready = True
-    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "config.json").write_text("{}", encoding="utf-8")
     pool.tick()
     assert len(launcher.calls) == 1
     launcher.processes[0].code = 1
     pool.slots[0].deaths = 4
     pool.tick()
     assert pool.slots[0].stopped
-    (tmp_path / "config.json").write_text('{"language": "en"}')
+    (tmp_path / "config.json").write_text('{"language": "en"}', encoding="utf-8")
     pool.tick()
     assert len(launcher.calls) == 2 and pool.slots[0].deaths == 0
 

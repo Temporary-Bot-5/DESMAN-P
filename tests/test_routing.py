@@ -72,7 +72,8 @@ def test_every_cloud_provider_is_in_the_catalog_with_its_default_model_first() -
         models = catalog.CATALOG[p.id]
         assert models[0].id == p.default_model
         assert len({m.id for m in models}) == len(models)
-        assert all(m.rpm > 0 and m.context > 0 and m.strengths for m in models)
+        assert all(m.rpm > 0 and m.context > 0 for m in models)
+        assert models[0].strengths
     assert set(catalog.CATALOG) == {p.id for p in providers.CLOUD}
 
 
@@ -256,15 +257,11 @@ def test_old_unfit_entries_name_a_provider_and_still_count() -> None:
 
 
 def test_a_model_too_small_for_the_request_is_skipped() -> None:
-    config = make_config(
-        api_keys={"GROQ_API_KEY": GROQ, "CLOUDFLARE_API_TOKEN": "t" * 40},
-        settings={"CLOUDFLARE_ACCOUNT_ID": "acc"},
-    )
     small = router.Choice(providers.find("cloudflare"), "@cf/meta/llama-3.1-8b-instruct")
-    large = router.lineup(config, Role.EXECUTOR)[0]
+    large = router.Choice(providers.find("google"), "gemini-3.5-flash-lite")
     tiny, big = FakeLLM("tiny", name="cloudflare"), FakeLLM("big", name="groq")
     lineup = router.Fallback([(tiny, small), (big, large)])
-    long = Request(messages=[Message(role="user", content="x" * 30_000)])
+    long = Request(messages=[Message(role="user", content="x" * 30_000)], max_tokens=500)
     assert lineup.complete(long).text == "big"
     assert tiny.calls == []
     # When no model is large enough, each is tried all the same.
@@ -826,3 +823,86 @@ def test_default_ollama_discovery_never_opens_socket(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     assert local_models.installed(Config(), refresh=True) == ([], False)
+
+
+def test_groq_request_ceiling_skips_without_calling_and_uses_reported_limit(store: Store) -> None:
+    from desman.llm.openai_compat import CallRecord
+
+    groq = router.Choice(providers.find("groq"), "qwen/qwen3.8-27b")
+    google = router.Choice(providers.find("google"), "gemini-3.5-flash-lite")
+    small, large = FakeLLM("small"), FakeLLM("large", repeat_last=True)
+    fallback = router.Fallback([(small, groq), (large, google)], conn=store.conn)
+    request = Request(messages=[Message(role="user", content="x" * 18_000)])
+    assert fallback.complete(request).text == "large"
+    assert not small.calls
+    assert fallback.last_call.skipped[0].reason == "context"
+    from desman.core.calls import recorder
+
+    recorder(store.conn)(
+        CallRecord(
+            provider="groq",
+            model=groq.model,
+            key_id="key",
+            prompt_hash="p",
+            response_hash=None,
+            prompt_tokens=0,
+            completion_tokens=0,
+            latency_ms=0,
+            http_status=413,
+            error_kind=None,
+            error=None,
+            limits={"x-ratelimit-limit-tokens": "7500"},
+        ),
+    )
+    assert router.request_ceiling(groq, store.conn) == 7500
+    assert fallback.complete(request).text == "small"
+
+
+def test_request_too_large_moves_to_next_model_without_backoff() -> None:
+    from desman.llm.base import RequestTooLarge
+
+    class Oversized:
+        name = "groq"
+        calls = 0
+
+        def complete(self, request: Request) -> Completion:
+            self.calls += 1
+            raise RequestTooLarge("groq", 413, "Request too large")
+
+    from desman.llm.base import Completion
+
+    first = Oversized()
+    fallback = router.Fallback(members(router.Backoff(first), FakeLLM("ok")))
+    assert fallback.complete(REQUEST).text == "ok"
+    assert first.calls == 1
+    assert fallback.last_call.skipped[0].reason == "context"
+
+
+def test_all_ceilings_too_small_never_send_known_impossible_request() -> None:
+    from desman.core.retry import FailureKind
+    from desman.llm.base import ProviderRejected
+
+    groq = router.Choice(providers.find("groq"), "openai/gpt-oss-20b")
+    fake = FakeLLM("must not be sent")
+    fallback = router.Fallback([(fake, groq)])
+    with pytest.raises(
+        ProviderRejected, match="needs .* largest available request ceiling"
+    ) as caught:
+        fallback.complete(Request(messages=[Message(role="user", content="x" * 32_000)]))
+    assert caught.value.kind is FailureKind.PERMANENT
+    unbounded = FakeLLM("ok")
+    assert (
+        router.Fallback([(fake, groq), (unbounded, None)])
+        .complete(Request(messages=[Message(role="user", content="x" * 32_000)]))
+        .text
+        == "ok"
+    )
+    assert not fake.calls
+    assert fallback.last_call.skipped[0].reason == "context"
+
+
+def test_cohere_quality_default_and_last_resort() -> None:
+    models = catalog.models_of(providers.find("cohere"))
+    assert models[0].id == providers.find("cohere").default_model == "command-a-03-2025"
+    assert models[-1].id == "command-r7b-12-2024"
+    assert not models[-1].strengths

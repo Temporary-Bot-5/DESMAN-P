@@ -495,7 +495,9 @@ assert.equal(sent.at(-1).change.language, 'ru');
 """,
         encoding="utf-8",
     )
-    subprocess.run([node, str(script)], check=True, capture_output=True, text=True)
+    subprocess.run(
+        [node, str(script)], check=True, capture_output=True, text=True, encoding="utf-8"
+    )
 
 
 @pytest.mark.parametrize("section", ["roles", "keys"])

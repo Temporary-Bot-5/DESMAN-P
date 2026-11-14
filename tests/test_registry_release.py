@@ -150,7 +150,7 @@ def test_refusals_change_nothing(
             git(checkout, "checkout", "--detach")
         elif case in ("dirty", "base"):
             path = package(checkout) / "planner.py"
-            path.write_text(path.read_text() + "\n# changed\n")
+            path.write_text(path.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
             if case == "base":
                 git(checkout, "add", ".")
                 git(checkout, "commit", "-m", "changed base")
@@ -178,7 +178,7 @@ def test_refusals_change_nothing(
                     ]
 
                 monkeypatch.setattr(checks, "results", results)
-        lock = (registry_dir / "releases.lock").open("a")
+        lock = (registry_dir / "releases.lock").open("a", encoding="utf-8")
         try:
             if case == "lock":
                 filelock.lock(lock.fileno(), blocking=False)
@@ -384,7 +384,7 @@ def test_no_hooks_run(
         "post-merge",
     ):
         hook = hooks / name
-        hook.write_text(f"#!/bin/sh\ntouch '{touched}'\nexit 1\n")
+        hook.write_text(f"#!/bin/sh\ntouch '{touched}'\nexit 1\n", encoding="utf-8")
         hook.chmod(0o700)
     git(checkout, "config", "core.hooksPath", str(hooks))
     with store.connection(db_path) as conn:

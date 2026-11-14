@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import importlib.metadata
 import importlib.util
 import os
 import selectors
@@ -156,6 +157,12 @@ class Sandbox:
             "ALL",
             "--clearenv",
             "--setenv",
+            "PYTHONDONTWRITEBYTECODE",
+            "1",
+            "--setenv",
+            "PYTEST_ADDOPTS",
+            "-p no:cacheprovider",
+            "--setenv",
             "PATH",
             SANDBOX_PATH,
             "--setenv",
@@ -207,6 +214,16 @@ class Sandbox:
             source = Path(spec.origin).parent if package else Path(spec.origin)
             target = name if package else name + ".py"
             argv += ["--ro-bind", str(source), "/opt/desman/python/" + target]
+        for name in ("pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
+            try:
+                distribution = importlib.metadata.distribution(name)
+            except importlib.metadata.PackageNotFoundError:
+                continue
+            for file in distribution.files or ():
+                if file.parts[0].endswith(".dist-info"):
+                    source = Path(str(distribution.locate_file(file.parts[0])))
+                    argv += ["--ro-bind", str(source), "/opt/desman/python/" + source.name]
+                    break
         argv += [
             "--proc",
             "/proc",

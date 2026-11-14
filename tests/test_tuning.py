@@ -160,7 +160,8 @@ def test_planned_tasks_take_the_tuned_retry_budgets(tmp_path: Any) -> None:
                     {"match": "Review", "steps": ['{"verdict": "accept"}']},
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     assert desman("run", "a goal", "--fake-llm", str(script)).exit_code == 0
     store = Store(db.open_db())

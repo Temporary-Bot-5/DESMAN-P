@@ -189,7 +189,7 @@ def test_join_creates_the_node_key_and_switches_it_on() -> None:
     assert key.fingerprint in result.output
     if os.name != "nt":
         assert stat.S_IMODE(node_key().stat().st_mode) == 0o600
-    secret = node_key().read_text()
+    secret = node_key().read_text(encoding="utf-8")
     assert secret.splitlines()[1] not in result.output
     network = saved().network
     assert network.enabled and network.registry == REGISTRY

@@ -64,7 +64,7 @@ SCRIPT
     }
     for name, body in scripts.items():
         path = tools / name
-        path.write_text("#!/bin/sh\nset -eu\n" + body)
+        path.write_text("#!/bin/sh\nset -eu\n" + body, encoding="utf-8")
         path.chmod(0o755)
     env["DESMAN_TTY"] = str(tmp_path / "unavailable" / "tty")
     env["UV_STUB"] = str(tools / "uv")
@@ -73,7 +73,12 @@ SCRIPT
 
 def run_installer(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["/bin/sh", str(SHELL), *args], env=env, input="", capture_output=True, text=True
+        ["/bin/sh", str(SHELL), *args],
+        env=env,
+        input="",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
 
 
@@ -119,7 +124,7 @@ def test_install_rerun_uninstall_and_config_preserved(
     assert calls.count("uv venv -p 3.12") == 1
     app = home / ".local/share/desman-app"
     assert (home / ".local/bin/desman").resolve() == app / ".venv/bin/desman"
-    (app / "config.json").write_text("secret")
+    (app / "config.json").write_text("secret", encoding="utf-8")
     data = home / ".local/share/desman"
     data.mkdir()
     (data / "desman.db").touch()
@@ -168,7 +173,7 @@ def test_missing_git_hint(tmp_path: Path) -> None:
     tools = tmp_path / "tools"
     tools.mkdir()
     apt = tools / "apt-get"
-    apt.write_text("#!/bin/sh\nexit 0\n")
+    apt.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     apt.chmod(0o755)
     env = {"PATH": str(tools), "HOME": str(tmp_path)}
     result = run_installer(env, "--yes")
@@ -221,6 +226,7 @@ def test_the_windows_wrapper_ends_cleanly(tmp_path: Path, deletes: bool, code: i
         text=True,
         cwd=tmp_path,
         timeout=120,
+        encoding="utf-8",
     )
     output = result.stdout + result.stderr
     assert "cannot find" not in output.lower(), output
@@ -348,10 +354,10 @@ def test_uninstall_refuses_without_confirmation_and_config_collision(
     app = home / ".local/share/desman-app"
     assert run_installer(env, "--uninstall").returncode == 1
     assert app.exists()
-    (app / "config.json").write_text("new")
+    (app / "config.json").write_text("new", encoding="utf-8")
     fallback = home / ".config/desman/config.json"
     fallback.parent.mkdir(parents=True)
-    fallback.write_text("old")
+    fallback.write_text("old", encoding="utf-8")
     result = run_installer(env, "--yes", "--uninstall")
     assert result.returncode == 1
     assert "backup exists" in result.stderr
@@ -375,7 +381,9 @@ def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str
     assert run_installer(env, "--yes", "--no-start").returncode == 0
     for folder in (data, config, desktop):
         folder.mkdir()
-    (desktop / "desman.desktop").write_text(f'Exec="{app}/.venv/bin/desman" gui\n')
+    (desktop / "desman.desktop").write_text(
+        f'Exec="{app}/.venv/bin/desman" gui\n', encoding="utf-8"
+    )
     result = run_installer(env, "--yes", "--uninstall", "--purge")
     assert result.returncode == 0, result.stderr
     for path in (app, data, config):
@@ -476,14 +484,14 @@ def test_uninstall_preserves_foreign_launchers(
     launcher.unlink()
     foreign = home / "pipx/desman"
     foreign.parent.mkdir()
-    foreign.write_text("foreign")
+    foreign.write_text("foreign", encoding="utf-8")
     launcher.symlink_to(foreign)
     shortcuts = [home / "Desktop/desman.desktop", home / ".local/share/applications/desman.desktop"]
     for shortcut in shortcuts:
-        shortcut.write_text(f'Exec="{foreign}" gui\n')
+        shortcut.write_text(f'Exec="{foreign}" gui\n', encoding="utf-8")
     data = home / ".local/share/desman"
     data.mkdir()
-    (data / "keep").write_text("history")
+    (data / "keep").write_text("history", encoding="utf-8")
     if not app_present:
         shutil.rmtree(app)
     result = run_installer(env, "--yes", "--uninstall", "--purge")

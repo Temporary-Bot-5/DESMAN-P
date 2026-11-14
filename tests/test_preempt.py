@@ -206,7 +206,7 @@ def test_a_tool_call_is_a_step_and_done_calls_are_not_repeated(
     assert written == ["urgent", "low"]
     tool_entries = [r["action"] for r in store.audit_log(low) if r["action"].startswith("tool_")]
     assert tool_entries == ["tool_called", "tool_replayed", "tool_called"]
-    assert (tmp_path / low / "b").read_text() == "2"
+    assert (tmp_path / low / "b").read_text(encoding="utf-8") == "2"
     assert store.task_status(low) is TaskStatus.DONE
 
 

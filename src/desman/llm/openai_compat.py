@@ -32,6 +32,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from desman.llm.base import (
     Completion,
@@ -43,8 +44,10 @@ from desman.llm.base import (
     QuotaExhausted,
     RateLimited,
     Request,
+    RequestTooLarge,
     Usage,
 )
+from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_LIMIT_PAUSE = 60.0  # a rate limit without a hint
@@ -237,14 +240,25 @@ class OpenAICompatible:
             )
 
         try:
-            response = self.client.post(
+            with self.client.stream(
+                "POST",
                 (self.base_url.removesuffix("/v1") + "/api/chat")
                 if self.name == "ollama"
                 else f"{self.base_url}/chat/completions",
                 json=body,
                 headers={name: value.format(key=key) for name, value in self.auth},
                 timeout=self.timeout,
-            )
+            ) as response:
+                chunks = []
+                for chunk in response.iter_bytes():
+                    if self.monotonic() - started >= self.timeout:
+                        raise httpx.ReadTimeout("whole-call deadline exceeded")
+                    chunks.append(chunk)
+                response = httpx.Response(
+                    response.status_code,
+                    headers={k: v for k, v in response.headers.items() if k != "content-encoding"},
+                    content=b"".join(chunks),
+                )
         except httpx.TimeoutException:
             error: ProviderError = ProviderTimeout(self.name, self.timeout)
             record(error)
@@ -262,6 +276,18 @@ class OpenAICompatible:
                 raise
             record(None, completion)
             return completion
+        if response.status_code == 400 and _code(response) == "tool_use_failed":
+            try:
+                failed = response.json()["error"]["failed_generation"]
+            except (ValueError, KeyError, TypeError):
+                failed = None
+            recovered = _tool_text(failed)
+            if recovered is not None:
+                completion = Completion(
+                    text=recovered, provider=self.name, model=model, usage=_usage(response)
+                )
+                record(None, completion)
+                return completion
         error = self._error(response)
         error.model = model
         record(error)
@@ -277,6 +303,12 @@ class OpenAICompatible:
             text = message.get("content")
         except (ValueError, KeyError, IndexError, TypeError):
             raise ProviderUnavailable(self.name, 200, "reply without a message") from None
+        if not isinstance(text, str) or not text.strip():
+            recovered = _tool_text(message.get("tool_calls"))
+            if recovered is not None:
+                text = recovered
+            elif "MALFORMED_FUNCTION_CALL" in str(choice.get("finish_reason", "")).upper():
+                raise GenerationFailed(self.name, "reply without text: MALFORMED_FUNCTION_CALL")
         if not isinstance(text, str):  # reasoning or tools without text
             reason = (
                 "a native tool call instead of text"
@@ -298,6 +330,8 @@ class OpenAICompatible:
     def _error(self, response: httpx.Response) -> ProviderError:
         status = response.status_code
         message = self._redact(_message(response))
+        if status == 413 and "request too large" in message.lower():
+            return RequestTooLarge(self.name, status, message)
         if status == 429 and _zero_limit(response):
             # A limit of 0 never resets: the account has no access to this API or model yet
             # (e.g. a plan that still has to be activated). Waiting would wait forever.
@@ -328,10 +362,31 @@ class OpenAICompatible:
         return text
 
 
+def _tool_text(value: Any) -> str | None:
+    """Recover only validated native calls; unrelated provider error data is discarded."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, dict):
+        value = value["tool_calls"] if set(value) == {"tool_calls"} else [value]
+    if not isinstance(value, list) or not 1 <= len(value) <= 10:
+        return None
+    normalized = normalize_tool_calls({"tool_calls": value})
+    calls = []
+    for item in normalized["tool_calls"]:
+        try:
+            calls.append(ToolCall.model_validate(item).model_dump())
+        except ValidationError:
+            return None
+    return json.dumps({"tool_calls": calls}, ensure_ascii=False)
+
+
 def _usage(response: httpx.Response, *, native: bool = False) -> Usage:
     try:
         data = response.json()
-    except ValueError:
+    except (ValueError, httpx.ResponseNotRead):
         data = None
     if native and isinstance(data, dict):
         return Usage(

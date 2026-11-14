@@ -398,7 +398,8 @@ def test_a_spec_file_names_only_nodes_of_the_tree(tmp_path: Path) -> None:
                         {"description": "d", "acceptance_criteria": "ok", "knowledge": paths}
                     ],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         return CliRunner().invoke(
             cli, ["run", "--spec", str(spec_path), "--db", str(tmp_path / "d.db"), "--json"]

@@ -1144,6 +1144,7 @@ def report_upload(
             check=False,
             timeout=5,
             stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
         commit = commit_result.stdout.strip() if commit_result.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):

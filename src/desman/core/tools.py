@@ -59,6 +59,8 @@ from desman.core.web import (
 )
 from desman.core.workspace import PathEscapeError, Workspace
 from desman.llm import hub
+from desman.llm.tool_calls import ToolCall as ToolCall
+from desman.llm.tool_calls import normalize_tool_calls as normalize_tool_calls
 
 __all__ = ["Access", "Permission"]  # re-exported: tools are declared with a Permission
 
@@ -77,15 +79,6 @@ MAX_RUN_SECONDS: Final = int(Limits().timeout)
 MAX_COMMAND_ARGS: Final = 64
 MAX_COMMAND_ARG_CHARS: Final = 100_000
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
-
-
-class ToolCall(BaseModel):
-    """One call asked for by an executor."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    tool: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
-    args: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolResult(BaseModel):

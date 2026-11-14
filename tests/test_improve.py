@@ -48,7 +48,7 @@ def script(tmp_path: Path, execute: list[Any], review: list[Any] | None = None) 
         {"match": "Execute", "steps": execute, "repeat_last": True},
         {"match": "Review", "steps": review or [ACCEPT], "repeat_last": True},
     ]
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 
@@ -140,12 +140,14 @@ def test_a_diff_applies_and_makes_exactly_the_change(tmp_path: Path) -> None:
         Change(target="planner.rules", value=new_rules),
         Change(target="planner.criteria_rules", value=criteria_change()["value"] + " \"q\" 's' \\"),
     ]
-    before = {p: (package / p).read_text() for p in ("planner.py",)}
+    before = {p: (package / p).read_text(encoding="utf-8") for p in ("planner.py",)}
     diff, details = render(changes, package)
     assert [c["target"] for c in details["changes"]] == [c.target for c in changes]
     assert set(details["base"]) == {"src/desman/planner.py"}
     assert "settings" not in details
-    assert (package / "planner.py").read_text() == before["planner.py"]  # nothing written
+    assert (package / "planner.py").read_text(encoding="utf-8") == before[
+        "planner.py"
+    ]  # nothing written
     apply(tmp_path, diff)
     for change in changes:
         assert improve.current(BY_ID[change.target], package) == change.value
@@ -157,6 +159,7 @@ def test_a_diff_applies_and_makes_exactly_the_change(tmp_path: Path) -> None:
             [ruff, "format", "--check", "--config", str(ROOT / "pyproject.toml"), str(package)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         assert checked.returncode == 0, checked.stdout + checked.stderr
 
@@ -301,7 +304,7 @@ def test_a_window_reads_only_what_happened_in_it(tmp_path: Path) -> None:
 
 def test_analyze_proposes_a_diff_and_applies_nothing(tmp_path: Path) -> None:
     a_failure(tmp_path)
-    planner = (improve.PACKAGE / "planner.py").read_text()
+    planner = (improve.PACKAGE / "planner.py").read_text(encoding="utf-8")
     fake = script(tmp_path, [analysis([criteria_change()])])
     result = desman("proposals", "analyze", "--fake-llm", fake)
     assert result.exit_code == EXIT_DONE, result.output
@@ -309,7 +312,7 @@ def test_analyze_proposes_a_diff_and_applies_nothing(tmp_path: Path) -> None:
     assert "Proposal 1: proposed" in result.output
     assert "Never ask for a seat map." in result.output
     assert "Not applied. If you agree, apply it: desman proposals apply 1" in result.output
-    assert (improve.PACKAGE / "planner.py").read_text() == planner
+    assert (improve.PACKAGE / "planner.py").read_text(encoding="utf-8") == planner
     [p] = proposals.listing(store().conn)
     assert p.status is Status.PROPOSED and p.diff is not None
     assert p.details["evidence"] == ["the criteria ask for a live seat map"]
@@ -355,7 +358,7 @@ def test_a_proposed_setting_is_made_by_the_person_with_the_command(tmp_path: Pat
     assert "If you agree, apply it: desman proposals apply 1" in result.output
     [p] = proposals.listing(store().conn)
     assert improve.changed(p) == ["planner.criteria_rules", "tuning.max_attempts"]
-    text = (db.default_db_path().parent / "proposals" / "1.diff").read_text()
+    text = (db.default_db_path().parent / "proposals" / "1.diff").read_text(encoding="utf-8")
     assert "# The settings change with: desman tuning --max-attempts 6" in text
     assert open_config().load().tuning.max_attempts is None  # nothing applied
     assert desman("tuning", "--max-attempts", "6").exit_code == 0

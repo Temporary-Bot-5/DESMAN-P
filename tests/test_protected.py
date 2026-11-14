@@ -77,7 +77,9 @@ class Package:
         lines += [f'"{n}" = "{sha(d)}"' for n, d in self.files.items()]
         lines += ["[checkout]"]
         lines += [f'"{n}" = "{sha(d)}"' for n, d in self.tests.items()]
-        (self.package / "protected.toml").write_text("\n".join(lines) + "\n" + extra)
+        (self.package / "protected.toml").write_text(
+            "\n".join(lines) + "\n" + extra, encoding="utf-8"
+        )
 
     def edit(self, name: str, data: bytes) -> None:
         (self.package / name).write_bytes(data)
@@ -229,7 +231,7 @@ def test_an_installed_package_does_not_check_the_harness(
 def test_a_manifest_that_cannot_be_used_blocks_everything(
     pkg: Package, conn: sqlite3.Connection, manifest: str
 ) -> None:
-    (pkg.package / "protected.toml").write_text(manifest)
+    (pkg.package / "protected.toml").write_text(manifest, encoding="utf-8")
     with pytest.raises(ProtectedError):
         protected.require(conn, pkg.layout)
     with pytest.raises(ProtectedError):
@@ -275,7 +277,7 @@ def fake_script(tmp_path: Path) -> Path:
         {"match": "Execute", "steps": ['{"x": 1}']},
         {"match": "Review", "steps": ['{"verdict": "accept"}']},
     ]
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 
@@ -328,7 +330,7 @@ def test_protected_json(here: Package) -> None:
 
 
 def test_a_broken_manifest_is_said_plainly(here: Package, tmp_path: Path) -> None:
-    (here.package / "protected.toml").write_text("[")
+    (here.package / "protected.toml").write_text("[", encoding="utf-8")
     for args in (
         ("protected",),
         ("protected", "approve"),

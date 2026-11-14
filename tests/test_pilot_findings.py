@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import json
 import sys
@@ -283,7 +284,12 @@ def test_sandbox_binds_only_pytest_runtime_imports(tmp_path: Path) -> None:
         pos = argv.index(target)
         assert argv[pos - 2 : pos] == ["--ro-bind", str(source)]
         targets.append(target)
-    assert len([a for a in argv if a.startswith("/opt/desman/python/")]) == len(targets)
+    metadata_targets = [
+        arg for arg in argv if arg.startswith("/opt/desman/python/") and arg.endswith(".dist-info")
+    ]
+    assert set(arg for arg in argv if arg.startswith("/opt/desman/python/")) == set(
+        targets + metadata_targets
+    )
 
 
 def test_other_lineup_skips_unfit_first_and_reaches_same_provider(store: Store) -> None:
@@ -382,6 +388,11 @@ def test_sandbox_silently_skips_missing_runtime_imports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(importlib.util, "find_spec", lambda _: None)
+
+    def missing(name: str) -> Any:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "distribution", missing)
     argv = Sandbox(bwrap="bwrap", prlimit="prlimit")._argv(["true"], tmp_path)
     assert "/opt/desman/python" in argv
     assert not any(arg.startswith("/opt/desman/python/") for arg in argv)

@@ -32,9 +32,11 @@ def release_repo(tmp_path: Path) -> tuple[Path, Path, str, str]:
     git(source, "config", "user.name", "Test")
     git(source, "config", "user.email", "test@example.com")
     (source / "src/desman").mkdir(parents=True)
-    (source / "src/desman/protected.toml").write_text('[package]\n"agents.py" = "hash"\n')
-    (source / "src/desman/agents.py").write_text("old\n")
-    (source / "pyproject.toml").write_text("old\n")
+    (source / "src/desman/protected.toml").write_text(
+        '[package]\n"agents.py" = "hash"\n', encoding="utf-8"
+    )
+    (source / "src/desman/agents.py").write_text("old\n", encoding="utf-8")
+    (source / "pyproject.toml").write_text("old\n", encoding="utf-8")
     git(source, "add", ".")
     git(source, "commit", "-m", "base")
     base = git(source, "rev-parse", "HEAD").strip()
@@ -43,11 +45,11 @@ def release_repo(tmp_path: Path) -> tuple[Path, Path, str, str]:
     node = tmp_path / "node"
     git(source, "clone", str(remote), str(node))
     git(source, "remote", "add", "origin", str(remote))
-    (source / "src/desman/agents.py").write_text("new\n")
+    (source / "src/desman/agents.py").write_text("new\n", encoding="utf-8")
     git(source, "add", ".")
     git(source, "commit", "-m", "intermediate")
     parent = git(source, "rev-parse", "HEAD").strip()
-    (source / "pyproject.toml").write_text("new\n")
+    (source / "pyproject.toml").write_text("new\n", encoding="utf-8")
     git(source, "add", ".")
     git(source, "commit", "-m", "release")
     commit = git(source, "rev-parse", "HEAD").strip()
@@ -160,7 +162,7 @@ def test_apply_refusals(
         conn.execute("DROP TRIGGER releases_no_update")
         conn.execute("UPDATE releases SET signed_json = ?", (signed.model_dump_json(),))
     if case == "dirty":
-        (repo / "src/desman/agents.py").write_text("mine")
+        (repo / "src/desman/agents.py").write_text("mine", encoding="utf-8")
     if case == "diverged":
         git(
             repo,
@@ -210,7 +212,7 @@ def test_revert_refusals(
     if case in ("schema", "plan_schema"):
         conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
     if case == "dirty":
-        (repo / "pyproject.toml").write_text("mine")
+        (repo / "pyproject.toml").write_text("mine", encoding="utf-8")
     if case == "plan_record":
         applying.carry_out_update(conn, plan)
     with pytest.raises(applying.ApplyError):
@@ -348,9 +350,11 @@ def test_stacked_updates(
     base = git(repo, "rev-parse", "HEAD").strip()
     pub, root = receive(conn, tmp_path, parent, first)
     applying.carry_out_update(conn, applying.plan_update(conn, repo=repo, root=pub))
-    (source / "src/desman/protected.toml").write_text('[package]\n"new.py" = "hash"\n')
-    (source / "src/desman/new.py").write_text("new\n")
-    (source / "src/desman/agents.py").write_text("newer\n")
+    (source / "src/desman/protected.toml").write_text(
+        '[package]\n"new.py" = "hash"\n', encoding="utf-8"
+    )
+    (source / "src/desman/new.py").write_text("new\n", encoding="utf-8")
+    (source / "src/desman/agents.py").write_text("newer\n", encoding="utf-8")
     git(source, "add", ".")
     git(source, "commit", "-m", "second release")
     second = git(source, "rev-parse", "HEAD").strip()

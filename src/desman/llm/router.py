@@ -48,6 +48,7 @@ from desman.llm.base import (
     ProviderUnavailable,
     RateLimited,
     Request,
+    RequestTooLarge,
     among,
     unfit_seen,
 )
@@ -431,6 +432,26 @@ def estimated_tokens(request: Request) -> int:
     return chars // CHARS_PER_TOKEN + (request.max_tokens or REPLY_TOKENS)
 
 
+def request_ceiling(choice: Choice, conn: sqlite3.Connection | None = None) -> int | None:
+    """Latest reported Groq token ceiling, otherwise the catalog's free-tier limit."""
+    ceiling = choice.spec.request_tokens
+    if choice.provider.id != "groq" or conn is None:
+        return ceiling
+    row = conn.execute(
+        "SELECT json_extract(limits_json, '$.\"x-ratelimit-limit-tokens\"') "
+        "FROM model_calls WHERE provider = ? AND model = ? "
+        "AND CAST(json_extract(limits_json, '$.\"x-ratelimit-limit-tokens\"') AS INTEGER) > 0 "
+        "ORDER BY seq DESC LIMIT 1",
+        (choice.provider.id, choice.model),
+    ).fetchone()
+    if row is not None:
+        try:
+            return int(row[0])
+        except (ValueError, TypeError):
+            pass
+    return ceiling
+
+
 @dataclass(frozen=True)
 class SkippedModel:
     model: str
@@ -459,7 +480,9 @@ class Fallback:
     combines a split subtask's parts, say) is not lost to a quirk. When it was the last model
     left, its error is raised as it is. Nor does a slow failure (`ProviderError.slow`, set by
     `Backoff`: one call that took over `QUICK_FAILURE` seconds), for the reason `Backoff` does
-    not repeat one: nobody renews the subtask's lease while it waits. When the models tried failed, the error raised is a
+    not repeat one: nobody renews the subtask's lease while it waits. If models remain
+    untried, the slow error propagates and the next call in that scope starts with them.
+    When all models were tried, the error raised is a
     limit if any model was limited (the soonest one: the subtask pauses until then), else a
     passing one, else the first model's.
     """
@@ -472,10 +495,12 @@ class Fallback:
         sticky: bool = True,
         on_used: Callable[[str], None] | None = None,
         label_for: Callable[[], str | None] | None = None,
+        conn: sqlite3.Connection | None = None,
     ) -> None:
         if not members:
             raise ValueError("a lineup needs at least one model")
         self.members = list(members)
+        self.conn = conn
         self.order = order
         self.sticky = sticky
         self.on_used = on_used
@@ -486,6 +511,7 @@ class Fallback:
         self.label = first.name if choice is None else choice.label
         self._last: tuple[Completion, LLM] | None = None
         self._call = LastCall()
+        self._deferred: dict[tuple[str, str] | None, list[str]] = {}
         self._unfit: set[str] = set()
         """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
 
@@ -516,6 +542,16 @@ class Fallback:
             choices = self.choices
             choices = self.order(choices) if held is None else held
             ordered_members = [m for c in choices for m in self.members if m[1] == c]
+        deferred = self._deferred.get(scope, [])
+        if deferred:
+            ordered_members = sorted(
+                ordered_members,
+                key=lambda m: (
+                    deferred.index(m[1].label if m[1] else m[0].name)
+                    if (m[1].label if m[1] else m[0].name) in deferred
+                    else -1
+                ),
+            )
         fit = [
             (llm, choice)
             for llm, choice in ordered_members
@@ -535,7 +571,16 @@ class Fallback:
                 and not any(known.id == m[1].model for known in catalog.models_of(m[1].provider))
             )
         ]
-        members = large or fit
+        ceilings = {
+            choice.label: request_ceiling(choice, self.conn)
+            for _, choice in self.members
+            if choice is not None
+        }
+        members = [
+            m
+            for m in (large or fit)
+            if m[1] is None or (ceiling := ceilings[m[1].label]) is None or ceiling >= need
+        ]
         for llm, choice in self.members:
             if (llm, choice) not in members:
                 skipped.append(
@@ -543,10 +588,26 @@ class Fallback:
                         llm.name if choice is None else choice.label,
                         "context" if (llm, choice) in fit else "unfit",
                         needed=need,
-                        context=choice.spec.context if choice else None,
+                        context=min(
+                            choice.spec.context,
+                            ceilings[choice.label] or choice.spec.context,
+                        )
+                        if choice
+                        else None,
                     )
                 )
         errors: list[ProviderError] = []
+        if not members:
+            self._call = LastCall(skipped=tuple(skipped))
+            largest = max(
+                ceilings[choice.label] or 0 for _, choice in (large or fit) if choice is not None
+            )
+            raise ProviderRejected(
+                self.name,
+                413,
+                f"request needs {need} tokens; largest available request ceiling is {largest}. "
+                "Choose a model with a larger request ceiling or reduce the task context.",
+            )
         failed_over = False
         for i, (llm, choice) in enumerate(members):
             label = llm.name if choice is None else choice.label
@@ -562,7 +623,9 @@ class Fallback:
             except ProviderError as e:
                 label = llm.name if choice is None else choice.label
                 reason = (
-                    "busy"
+                    "context"
+                    if isinstance(e, RequestTooLarge)
+                    else "busy"
                     if isinstance(e, Busy)
                     else "limit"
                     if e.kind is FailureKind.LIMIT
@@ -596,8 +659,15 @@ class Fallback:
                     self._scopes.pop(scope, None)
                 errors.append(e)
                 if e.slow:
+                    if i < len(members) - 1:
+                        rotated = members[i + 1 :] + members[: i + 1]
+                        self._deferred[scope] = [c.label if c else m.name for m, c in rotated]
+                        if len(self._deferred) > 256:
+                            self._deferred.pop(next(iter(self._deferred)))
+                        raise
                     break
                 continue
+            self._deferred.pop(scope, None)
             self._last = (reply, llm)
             ahead = [
                 c.label if c else m.name
@@ -680,6 +750,8 @@ class Backoff:
             except ProviderError as e:
                 # Said of this call alone, not of the repeats before it (`Fallback` asks).
                 e.slow = self.monotonic() - started > QUICK_FAILURE
+                if isinstance(e, RequestTooLarge):
+                    raise
                 if not isinstance(e, (ProviderTimeout, ProviderUnavailable, RateLimited)):
                     raise
                 if attempt == self.attempts or e.slow:

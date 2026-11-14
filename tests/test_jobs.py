@@ -806,7 +806,7 @@ def test_resume_refuses_a_job(tmp_path: Path, store: Store) -> None:
     task = network_task(s)
     s.conn.close()
     script = tmp_path / "script.json"
-    script.write_text('{"steps": []}')
+    script.write_text('{"steps": []}', encoding="utf-8")
     result = CliRunner().invoke(
         cli, ["resume", task[:8], "--db", str(path), "--fake-llm", str(script)]
     )

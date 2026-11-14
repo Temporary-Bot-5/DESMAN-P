@@ -192,6 +192,10 @@ class Chat:
         self._terminal_id = sessions.terminal()
         self._previous: tuple[str | None, bool] | None = None
         self._terminal_seen = 0
+        self._terminal_started = db.to_iso(sessions.clock())
+        self._terminal_floor = int(
+            sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
+        )
         self._pending_choice: choices.Choice | None = None
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
@@ -210,7 +214,8 @@ class Chat:
         """A new session (it starts with the first message) unless asked to continue the last
         one (`desman -c`); /sessions continues any."""
         self.waiting = InboxWatch(self.store)
-        """What waits for the person's decision: told at the start, then as it comes (5.1)."""
+        self.waiting.new()  # Existing inbox entries predate this chat; /inbox still lists them.
+        """What reaches the inbox while this chat is open (5.1)."""
         self._proposing = False
         """A continuation DESMAN proposed is in its window (journaled as such once accepted)."""
         self._opened: dict[str, list[str]] = {}
@@ -417,13 +422,20 @@ class Chat:
             )
             if self.in_terminal:
                 self._seen_terminal()
-            else:
+            elif not self.temporary:
                 count = self.sessions.conn.execute(
                     "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' "
-                    "AND seq > ? AND seq > (SELECT cleared_seq FROM sessions WHERE id = ?)",
-                    (self._terminal_id, self._terminal_seen, self._terminal_id),
+                    "AND seq > ? AND at >= ? "
+                    "AND seq > (SELECT cleared_seq FROM sessions WHERE id = ?)",
+                    (
+                        self._terminal_id,
+                        max(self._terminal_seen, self._terminal_floor),
+                        self._terminal_started,
+                        self._terminal_id,
+                    ),
                 ).fetchone()[0]
-                ui.note(t("{n} new in General Terminal (/terminal)", n=count))
+                if count:
+                    ui.note(t("{n} new in General Terminal (/terminal)", n=count))
 
     def _erase_session(self, session_id: str) -> None:
         self.sessions.erase(session_id)
@@ -1381,7 +1393,13 @@ class Chat:
         files = task_files.for_retelling(root, task_id)
         proposal: str | None = None
         remember: AddNode | ChangeNode | None = None
+        latest = self.sessions.conn.execute(
+            "SELECT text FROM messages WHERE session_id = ? AND role = 'user' "
+            "ORDER BY seq DESC LIMIT 1",
+            (self.session_id,),
+        ).fetchone()
         outcome = {
+            "latest_message": latest[0] if latest else report.goal,
             "goal": report.goal,
             "status": report.status.value,
             "result": None if result is None else excerpt(result),
@@ -2227,6 +2245,10 @@ class Chat:
             return
         self._erase()
         self.temporary = temporary
+        self._terminal_started = db.to_iso(self.sessions.clock())
+        self._terminal_floor = int(
+            self.sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
+        )
         self.models, self._models_for = None, None
         self.session_id = None
         ui.reset()

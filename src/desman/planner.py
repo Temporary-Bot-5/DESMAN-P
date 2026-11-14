@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -57,7 +58,8 @@ CRITERIA_RULES = (
     "what a search may well not give: an exact time or seat on a date, a booking page, the "
     "current lowest price anywhere. For live data (prices, schedules, availability) ask for "
     "the best that was found, each fact with its source, and a plain statement of what was "
-    "not found."
+    "not found. Language requirements concern prose: never demand that proper names, "
+    "product names, code, quotes, URLs or text requested in another language be translated."
 )
 
 KIND_RULES = (
@@ -70,15 +72,20 @@ RUN_RULES = (
     " A subtask that must run code or a command and report what it printed (testing a "
     'program, measuring, checking that something works) also gets "runs_code": true. Only '
     "such a subtask is given a way to run anything, and it is done only once it really ran: "
-    "never plan a subtask that says what running something would print without it."
+    "never plan a subtask that says what running something would print without it. "
+    "Looking facts up, searching the web, reading pages and writing text never need "
+    "runs_code; only running a program or command the work is about does. A program using "
+    "randomness or input should accept a seed or supplied input so a run can check it."
 )
 """Not a target of the Improvement Analyst: the analyst may not loosen what code checks."""
 
 LANGUAGE_RULES = (
-    " The person wrote the goal in their language. Every subtask producing text for the "
-    "person must explicitly say in its description to write in that language, naming the "
-    "language. The last subtask must produce its result in that language. Preserve these "
-    "language instructions when splitting a subtask."
+    " The prose addressed to the person must use the language of their goal. For every "
+    "subtask producing prose for the person, append an instruction naming that language at "
+    "the END of its description, after the work to do. This applies only to prose addressed "
+    "to the person: text the goal requests in another language (a translation, a letter in "
+    "English, or code) must stay in that requested language. Preserve this distinction and "
+    "the instruction's position when splitting a subtask, including the final subtask."
 )
 
 PLANNER_RULES = (
@@ -86,10 +93,14 @@ PLANNER_RULES = (
     "model call that sees only that subtask's description, its acceptance criteria and the "
     "results of the subtasks it depends on, never the goal itself, so every description must "
     "make sense on its own. Use as few subtasks as the goal needs (one is fine for a simple "
-    "goal). Reply with a single JSON object: "
+    "goal). A goal a single model can answer in one reply (a short text, a translation, "
+    "a list, an explanation, a small calculation) is ONE subtask. Split only when parts "
+    "need different tools/kinds or depend on looked-up facts. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
     'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier subtasks, '
-    "counting from 0]}]}. The last subtask must produce the final result of the goal."
+    "counting from 0]}]}. The last subtask must produce the final result of the goal, "
+    "containing everything the person asked to receive (for example both the original haiku "
+    "and its translation), copying earlier results from its dependencies as needed."
 )
 """The planner's own instructions. Like `KIND_RULES`, `CRITERIA_RULES` and the limits, a plain
 value the Improvement Analyst may propose to change (`improve.TARGETS`)."""
@@ -147,6 +158,19 @@ class PlannedSubtask(BaseModel):
         return []
 
 
+def needs_run(sub: PlannedSubtask, kind: Kind) -> bool:
+    """Discard a model's spurious run mark on prose/lookup work."""
+    return sub.runs_code and (
+        kind is not Kind.TEXT
+        or re.search(
+            r"\b(?:run|execute|python|bash|shell|pytest|program|script|code|test|command|запуст|выполн|исполн|программ|скрипт|код|тест|команд)|\.(?:py|sh|js)\b",
+            sub.description,
+            re.I,
+        )
+        is not None
+    )
+
+
 class Plan(BaseModel):
     """What the planner model must reply."""
 
@@ -184,7 +208,7 @@ class Plan(BaseModel):
                     acceptance_criteria=sub.acceptance_criteria,
                     depends_on=sub.depends_on + unused if i == last else sub.depends_on,
                     kind=sub.kind or Kind.TEXT,
-                    runs_code=sub.runs_code,
+                    runs_code=needs_run(sub, sub.kind or Kind.TEXT),
                     knowledge=sub.context[:MAX_KNOWLEDGE],  # checked by `known`
                 )
                 for i, sub in enumerate(self.subtasks)
@@ -444,7 +468,7 @@ class Split(BaseModel):
                     acceptance_criteria=sub.acceptance_criteria,
                     depends_on=sub.depends_on,
                     kind=sub.kind or kind,
-                    runs_code=sub.runs_code,
+                    runs_code=needs_run(sub, sub.kind or kind),
                 )
                 for sub in self.subtasks
             ],

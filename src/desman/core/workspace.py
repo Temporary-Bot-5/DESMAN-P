@@ -96,6 +96,11 @@ def check_path(path: str) -> tuple[str, ...]:
     return parts
 
 
+def is_work_file(path: str) -> bool:
+    """Exclude runtime caches from task file inventories."""
+    return not any(part in {"__pycache__", ".pytest_cache"} for part in Path(path).parts[:-1])
+
+
 class Workspace:
     """The directory of one task. All file access by agents goes through it."""
 
@@ -160,6 +165,19 @@ class Workspace:
                 if info.st_nlink > 1:
                     raise PathEscapeError(f"{path!r} has other hard links")
                 return f.read()
+
+    def size(self, path: str) -> int:
+        """Size of a regular, unlinked file without reading its contents."""
+        parts = check_path(path)
+        if not SECURE:
+            self._check_no_links(parts)
+            info = self.root.joinpath(*parts).lstat()
+        else:
+            with self._parent(parts, create=False) as parent:
+                info = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
+            raise PathEscapeError(f"{path!r} is not a regular, unlinked file")
+        return info.st_size
 
     def read_text(self, path: str) -> str:
         return self.read(path).decode()

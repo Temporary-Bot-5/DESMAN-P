@@ -185,7 +185,8 @@ def test_scripts_load_from_json(tmp_path: Path, clock: FakeClock) -> None:
                 "steps": ["plain", {"type": "rate_limit", "retry_after": 5}],
                 "routes": [{"match": "Review", "steps": [{"type": "reply", "text": "accept"}]}],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     llm = FakeLLM.from_file(path, clock=clock)
     assert llm.complete(ask("Review")).text == "accept"
@@ -401,7 +402,8 @@ def test_json_script_drives_the_loop(store: Store, clock: FakeClock, tmp_path: P
                     {"match": "Review", "steps": ["accept"], "repeat_last": True},
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     llm = FakeLLM.from_file(path, clock=clock, sleep=clock.sleep)
     task_id = store.create_task(one_step())

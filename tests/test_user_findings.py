@@ -169,7 +169,7 @@ def test_planner_and_reviewer_date_and_language(store: Store, clock: FakeClock) 
     assert sub is not None
     llm_reviewer(llm, evidence=lambda _: {}, clock=clock)(sub, {"content": "answer"})
     assert all(f"Today is {clock().date()}." in r.messages[0].content for r in llm.calls)
-    assert "naming the language" in llm.calls[0].messages[0].content
+    assert "naming that language" in llm.calls[0].messages[0].content
     assert "only the evidence decides" in llm.calls[1].messages[0].content
 
 
@@ -276,12 +276,12 @@ def test_language_retry_stops_after_one_failure(store: Store, kind: str, field: 
     assert getattr(result, field) == "Still English" and len(llm.calls) == 2
 
 
-def test_non_content_result_is_indented_json(
+def test_non_content_result_has_readable_lines(
     store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
     task = finish(store, {"answer": [1, 2]})
     actions.print_report(task_report(store, task), store)
-    assert '"answer": [\n    1,\n    2\n  ]' in capsys.readouterr().out
+    assert "answer:\n  - 1\n  - 2" in capsys.readouterr().out
 
 
 def test_reasoning_is_not_the_reply() -> None:
@@ -352,10 +352,10 @@ def test_language_correction_keeps_looked_up_evidence(store: Store) -> None:
     assert "DESMAN/Manual/tasks" in llm.calls[-1].messages[1].content
 
 
-def test_a_result_is_shown_as_its_text_or_as_indented_json() -> None:
+def test_a_result_is_shown_as_its_text_or_as_readable_lines() -> None:
     from desman.actions import result_text
 
     assert result_text({"content": "hello", "files_written": []}) == "hello"
     assert result_text({"text": "привет"}) == "привет"
     assert result_text({"type": "result", "result": {"answer": "42"}}) == "42"
-    assert result_text({"names": ["a"]}) == '{\n  "names": [\n    "a"\n  ]\n}'
+    assert result_text({"names": ["a"]}) == "names:\n  - a"

@@ -378,7 +378,7 @@ def test_a_task_without_tools_gets_none_from_any_worker(store: Store, clock: Fak
 
 
 def write(path: Path, data: Any) -> Path:
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
 

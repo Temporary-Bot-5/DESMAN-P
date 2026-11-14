@@ -33,17 +33,19 @@ def test_linux_shortcuts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deskto
     monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/desman")
     if desktop:
         (tmp_path / "config").mkdir()
-        (tmp_path / "config" / "user-dirs.dirs").write_text('XDG_DESKTOP_DIR="$HOME/My Desktop"\n')
+        (tmp_path / "config" / "user-dirs.dirs").write_text(
+            'XDG_DESKTOP_DIR="$HOME/My Desktop"\n', encoding="utf-8"
+        )
         (tmp_path / "My Desktop").mkdir()
     paths = shortcuts.create()
     assert len(paths) == (2 if desktop else 1)
-    content = paths[0].read_text()
+    content = paths[0].read_text(encoding="utf-8")
     assert f'Exec="{script}" gui\n' in content
     assert "Terminal=false\nCategories=Utility;\n" in content
     assert "logo.png\n" in content
     assert paths[0].stat().st_mode & 0o777 == 0o644
     if desktop:
-        assert paths[1].read_text() == content
+        assert paths[1].read_text(encoding="utf-8") == content
         assert paths[1].stat().st_mode & 0o777 == 0o755
 
 
@@ -113,5 +115,5 @@ def test_linux_shortcut_without_a_script_runs_this_python(
     python.parent.mkdir(parents=True)
     monkeypatch.setattr(sys, "executable", str(python))
     monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/desman")
-    content = shortcuts.create()[0].read_text()
+    content = shortcuts.create()[0].read_text(encoding="utf-8")
     assert f'Exec="{python}" -m desman gui\n' in content

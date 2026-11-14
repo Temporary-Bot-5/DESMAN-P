@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Waiting {seconds} s for a provider limit…": "正在等待提供商限额重置，剩余 {seconds} 秒…",
     "Allow a release that changes the registry database schema.": "允许更改注册表数据库结构的版本。",
     "Another registry update is running.": "另一个注册表更新正在运行。",
     "Check the release without applying or journaling it.": "检查版本，不应用也不写入日志。",
