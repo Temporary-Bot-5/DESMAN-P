@@ -268,6 +268,46 @@ the restored registry hands out every record a list still names.
 
 ## Updating the server
 
+For the user service, install the automatic release updater (after installing a version
+that includes `update`):
+
+```bash
+cp ~/desman-registry-app/docs/systemd/desman-registry-update.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now desman-registry-update.timer
+~/desman-registry-app/.venv/bin/desman-registry update --app ~/desman-registry-app --check
+```
+
+At 03:30 (server time, plus up to ten minutes), it fetches release tags and chooses the
+newest `v*` tag merged into `origin/master`. It requires a clean checkout and advances only
+from an ancestor of that release. Tags are published after full CI. `--to TAG` selects an
+eligible tag explicitly. `--check` fetches tags and probes the candidate in a temporary
+worktree, but does not apply it or write the registry journal.
+
+A release that adds database migrations, or whose schema cannot be probed, waits for the
+owner. A failed probe is reported as an unknown schema, separately from a known schema change. Repeated checks of the same waiting release do not duplicate the journal entry. `update --check` reports whether it would apply or wait and whether `--allow-schema` is needed. An explicit `--to` refuses older or sideways releases and identifies an already installed release. `desman-registry health` shows an Update warning with the command:
+
+```bash
+~/desman-registry-app/.venv/bin/desman-registry update --app ~/desman-registry-app --allow-schema
+```
+
+The updater stops maintenance timers, saves an integrity-checked pre-update backup in
+`backups/registry-preupdate-*.db` (keeps the latest 14), installs the release and restarts
+the server. The new code's health command is retried for up to about one minute. A failure restores
+the previous code; if an allowed migration changed the database version, it stops the
+service and restores the backup too. Timers are started again even on failure. Inspect
+`desman-registry log` and `journalctl --user -u desman-registry-update` for the outcome;
+an Update warning remains after failure until a later update succeeds or confirms the checkout is current. The update runs
+in its own oneshot service, so restarting the registry does not kill the updater. A file
+lock prevents overlapping updates. The unit intentionally omits `NoNewPrivileges` because
+it controls other user units through `systemctl --user`.
+
+The manual fallback follows. Stop the update timer first to avoid competing with it:
+
+```bash
+systemctl --user stop desman-registry-update.timer
+```
+
 Stop maintenance timers, take a named backup, then install the chosen revision and restart:
 
 ```bash
@@ -276,14 +316,17 @@ systemctl --user stop desman-registry-daily.timer desman-registry-health.timer
 git -C ~/desman-registry-app fetch
 git -C ~/desman-registry-app checkout --detach <tag-or-commit>
 cd ~/desman-registry-app
-.venv/bin/pip install -e .
+uv pip install --python .venv/bin/python -e .
 systemctl --user restart desman-registry.service
 .venv/bin/desman-registry health
 systemctl --user start desman-registry-daily.timer desman-registry-health.timer
 ```
 
+For a venv with pip installed, the equivalent install command is
+`.venv/bin/python -m pip install -e .`. The updater checks for pip first, then uses uv from PATH.
+
 Keep the timers stopped during the update: a timer running the new code could migrate the
-live database while the old server still runs. Start them again after the health check.
+live database while the old server still runs. Start them again after the health check, including `desman-registry-update.timer`.
 
 For the system service use `sudo systemctl restart desman-registry` and its installation
 path instead. The service migrates on start. **A database migrated by a newer version cannot
@@ -368,7 +411,7 @@ mkdir -p ~/.config/systemd/user
 cp ~/desman-registry-app/docs/systemd/* ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now desman-registry.service
-systemctl --user enable --now desman-registry-daily.timer desman-registry-health.timer
+systemctl --user enable --now desman-registry-daily.timer desman-registry-health.timer desman-registry-update.timer
 loginctl enable-linger $USER
 systemctl --user --failed
 journalctl --user -u desman-registry-health
@@ -377,7 +420,7 @@ journalctl --user -u desman-registry-daily
 
 Linger keeps user units running without a login. Daily maintenance runs around 04:00 UTC
 if the server timezone is UTC (otherwise 04:00 local time), with up to ten minutes of jitter;
-health runs hourly. Persistent timers catch up after downtime. For a system service, use the
+health runs hourly; release updates run at 03:30 with up to ten minutes of jitter. Persistent timers catch up after downtime. For a system service, use the
 cron `daily` command above or a system timer with `User=desman` and absolute installation paths.
 
 ## During the test

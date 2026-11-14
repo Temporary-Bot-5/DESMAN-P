@@ -15,6 +15,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "Разрешить выпуск, изменяющий схему базы реестра.",
+    "Another registry update is running.": "Уже выполняется другое обновление реестра.",
+    "Check the release without applying or journaling it.": "Проверить выпуск без применения и записи в журнал.",
+    "Choose a release tag on origin/master.": "Выбрать тег выпуска из origin/master.",
+    "Registry is up to date.": "Реестр уже обновлён.",
+    "Registry update failed at {step}; rolled back: {rollback}.": "Ошибка обновления реестра на шаге {step}; откат: {rollback}.",
+    "Registry update refused: {error}": "Обновление реестра отклонено: {error}",
+    "Registry updated to {tag}.": "Реестр обновлён до {tag}.",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "Выпуск {tag} ожидает: он меняет базу данных; выполните desman-registry update --allow-schema.",
+    "The database is newer than the release schema.": "База данных новее схемы выпуска.",
+    "The registry checkout has uncommitted changes.": "В рабочей копии реестра есть незакоммиченные изменения.",
+    "The registry git checkout (default: installed source).": "Рабочая копия git реестра (по умолчанию: установленные исходники).",
+    "The release tag must be on origin/master.": "Тег выпуска должен быть в origin/master.",
+    "Update": "Обновление",
+    "Update the registry to the newest release tag, with rollback on failure.": "Обновить реестр до последнего тега выпуска с откатом при сбое.",
+    "Use an existing PEM public-key file or a base64 public key.": "Укажите существующий PEM-файл открытого ключа или открытый ключ в base64.",
     "Omitted lines: {count}.": "Пропущено строк: {count}.",
     "Files in {folder}:": "Файлы в {folder}:",
     "Model {scope} unavailable or limited until {until}.": "Модель {scope} недоступна или ограничена до {until}.",
@@ -1489,7 +1505,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "Действие",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Адрес для приёма соединений; оставьте 127.0.0.1 за обратным прокси, который даёт TLS.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Отвечать узлам, пока не остановят (простой HTTP: TLS даёт обратный прокси).",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "Назначить оператора подписью корня: ключ из PUBLIC_KEY (файл PEM) или собственный ключ оператора реестра (создаётся при первом использовании).",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "Назначить оператора подписью корня: ключ из PUBLIC_KEY (файл PEM / base64) или собственный ключ оператора реестра (создаётся при первом использовании).",
     "Backup written: {path}": "Резервная копия записана: {path}",
     "Copy the database to DEST while the server runs.": "Скопировать базу в DEST, не останавливая сервер.",
     "Details": "Подробности",
@@ -2084,5 +2100,30 @@ MESSAGES.update(
         "Backup dated in the future.": "Резервная копия датирована будущим.",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "Установщик недоступен: установите pip в venv реестра или добавьте uv в PATH."
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "Релиз {tag} старее установленной версии или находится в другой ветке: отказ.",
+        "Registry is already at release {tag}.": "В реестре уже установлен релиз {tag}.",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "Релиз {tag} будет ждать (схема неизвестна); нужен --allow-schema.",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "Релиз {tag} будет ждать (схема {before} → {after}); нужен --allow-schema.",
+        "Release {tag} would apply.": "Релиз {tag} будет установлен.",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "Релиз {tag} ждёт: не удалось проверить схему базы данных; после проверки выполните desman-registry update --allow-schema.",
+        "Registry update failed at {step}.": "Обновление реестра не удалось на этапе {step}.",
+        "stop timers": "остановка таймеров",
+        "backup": "резервная копия",
+        "checkout": "переключение версии",
+        "install packages": "установка пакетов",
+        "restart": "перезапуск",
+        "health": "проверка состояния",
+        "start timers": "запуск таймеров",
+    }
+)
+
+MESSAGES.update({"yes": "да", "no": "нет"})
 
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)

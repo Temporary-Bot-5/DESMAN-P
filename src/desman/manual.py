@@ -267,7 +267,7 @@ TOPICS: Final = (
         "and supervise a cluster with lent modules and quotas, only while idle. Personal work stops operator renewal. Off stops renewal; another "
         "node takes over. Status shows its current role.\n"
         "`desman worker` registers and fetches revocations. Jobs need a fresh root-signed "
-        "trust list. Owner timers sign, back up and check health (docs/registry-deploy.md). "
+        "trust list. Owner timers update releases; changed/unknown schemas need consent. "
         "Idle nodes execute/review jobs with lent models (own folder, sandbox, "
         "no web) or check proposals with an isolated fake benchmark. Own tasks go first. "
         "Unreachable: retry later; revoked: stop.\n"

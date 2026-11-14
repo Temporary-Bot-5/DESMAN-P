@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "रजिस्ट्री डेटाबेस की संरचना बदलने वाली रिलीज़ की अनुमति दें।",
+    "Another registry update is running.": "रजिस्ट्री का दूसरा अपडेट चल रहा है।",
+    "Check the release without applying or journaling it.": "रिलीज़ को लागू किए या लॉग में लिखे बिना जाँचें।",
+    "Choose a release tag on origin/master.": "origin/master पर रिलीज़ टैग चुनें।",
+    "Registry is up to date.": "रजिस्ट्री अद्यतन है।",
+    "Registry update failed at {step}; rolled back: {rollback}.": "रजिस्ट्री अपडेट {step} पर विफल; वापस किया गया: {rollback}।",
+    "Registry update refused: {error}": "रजिस्ट्री अपडेट अस्वीकृत: {error}",
+    "Registry updated to {tag}.": "रजिस्ट्री {tag} में अपडेट हुई।",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "रिलीज़ {tag} प्रतीक्षा में है: यह डेटाबेस बदलती है; desman-registry update --allow-schema चलाएँ।",
+    "The database is newer than the release schema.": "डेटाबेस रिलीज़ की संरचना से नया है।",
+    "The registry checkout has uncommitted changes.": "रजिस्ट्री की कार्य प्रति में कमिट न किए गए बदलाव हैं।",
+    "The registry git checkout (default: installed source).": "रजिस्ट्री की git कार्य प्रति (डिफ़ॉल्ट: स्थापित स्रोत)।",
+    "The release tag must be on origin/master.": "रिलीज़ टैग origin/master पर होना चाहिए।",
+    "Update": "अपडेट",
+    "Update the registry to the newest release tag, with rollback on failure.": "रजिस्ट्री को नवीनतम रिलीज़ टैग में अपडेट करें, विफल होने पर वापस करें।",
+    "Use an existing PEM public-key file or a base64 public key.": "मौजूदा PEM सार्वजनिक कुंजी फ़ाइल या base64 सार्वजनिक कुंजी दें।",
     "Omitted lines: {count}.": "छोड़ी गई पंक्तियाँ: {count}।",
     "Files in {folder}:": "{folder} में फ़ाइलें:",
     "Model {scope} unavailable or limited until {until}.": "मॉडल {scope}, {until} तक अनुपलब्ध या सीमित है।",
@@ -1238,7 +1254,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "कार्रवाई",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "सुनने का पता; TLS देने वाले रिवर्स प्रॉक्सी के पीछे 127.0.0.1 ही रखें।",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "रोके जाने तक नोड्स को जवाब दें (सादा HTTP: TLS रिवर्स प्रॉक्सी देता है)।",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "रूट के हस्ताक्षर से एक ऑपरेटर नियुक्त करें: PUBLIC_KEY में दी गई कुंजी (एक PEM फ़ाइल), या रजिस्ट्री की अपनी ऑपरेटर कुंजी (पहली बार उपयोग पर बनती है)।",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "रूट के हस्ताक्षर से एक ऑपरेटर नियुक्त करें: PUBLIC_KEY में दी गई कुंजी (एक PEM / base64 फ़ाइल), या रजिस्ट्री की अपनी ऑपरेटर कुंजी (पहली बार उपयोग पर बनती है)।",
     "Backup written: {path}": "बैकअप लिखा गया: {path}",
     "Copy the database to DEST while the server runs.": "सर्वर चलते हुए डेटाबेस को DEST में कॉपी करें।",
     "Details": "विवरण",
@@ -1798,5 +1814,30 @@ MESSAGES.update(
         "Backup dated in the future.": "बैकअप की तारीख भविष्य में है।",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "कोई इंस्टॉलर उपलब्ध नहीं है: रजिस्ट्री के venv में pip स्थापित करें या uv को PATH में रखें।"
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "रिलीज़ {tag} स्थापित संस्करण से पुरानी या दूसरी शाखा पर है: अस्वीकृत।",
+        "Registry is already at release {tag}.": "रजिस्ट्री पहले से रिलीज़ {tag} पर है।",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "रिलीज़ {tag} प्रतीक्षा करेगी (स्कीमा अज्ञात); --allow-schema आवश्यक है।",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "रिलीज़ {tag} प्रतीक्षा करेगी (स्कीमा {before} → {after}); --allow-schema आवश्यक है।",
+        "Release {tag} would apply.": "रिलीज़ {tag} लागू होगी।",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "रिलीज़ {tag} प्रतीक्षा में है: डेटाबेस स्कीमा जाँचा नहीं जा सका; जाँच के बाद desman-registry update --allow-schema चलाएँ।",
+        "Registry update failed at {step}.": "रजिस्ट्री अपडेट {step} चरण पर विफल हुआ।",
+        "stop timers": "टाइमर रोकना",
+        "backup": "बैकअप",
+        "checkout": "संस्करण बदलना",
+        "install packages": "पैकेज स्थापित करना",
+        "restart": "पुनः आरंभ",
+        "health": "स्वास्थ्य जाँच",
+        "start timers": "टाइमर शुरू करना",
+    }
+)
+
+MESSAGES.update({"yes": "हाँ", "no": "नहीं"})
 
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

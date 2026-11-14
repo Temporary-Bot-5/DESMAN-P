@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "Autoriser une version qui modifie le schéma de la base du registre.",
+    "Another registry update is running.": "Une autre mise à jour du registre est en cours.",
+    "Check the release without applying or journaling it.": "Vérifier la version sans l'appliquer ni la journaliser.",
+    "Choose a release tag on origin/master.": "Choisir une étiquette de version sur origin/master.",
+    "Registry is up to date.": "Le registre est à jour.",
+    "Registry update failed at {step}; rolled back: {rollback}.": "Échec de mise à jour du registre à {step} ; retour arrière : {rollback}.",
+    "Registry update refused: {error}": "Mise à jour du registre refusée : {error}",
+    "Registry updated to {tag}.": "Registre mis à jour vers {tag}.",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "La version {tag} attend : elle modifie la base ; exécutez desman-registry update --allow-schema.",
+    "The database is newer than the release schema.": "La base est plus récente que le schéma de la version.",
+    "The registry checkout has uncommitted changes.": "La copie de travail du registre contient des modifications non validées.",
+    "The registry git checkout (default: installed source).": "Copie git du registre (par défaut : sources installées).",
+    "The release tag must be on origin/master.": "L'étiquette de version doit être sur origin/master.",
+    "Update": "Mise à jour",
+    "Update the registry to the newest release tag, with rollback on failure.": "Mettre à jour le registre vers la dernière version, avec retour arrière en cas d'échec.",
+    "Use an existing PEM public-key file or a base64 public key.": "Utilisez un fichier PEM de clé publique existant ou une clé publique en base64.",
     "Omitted lines: {count}.": "Lignes omises : {count}.",
     "Files in {folder}:": "Fichiers dans {folder} :",
     "Model {scope} unavailable or limited until {until}.": "Modèle {scope} indisponible ou limité jusqu’au {until}.",
@@ -1241,7 +1257,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "Action",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Adresse d'écoute ; gardez 127.0.0.1 derrière le proxy inverse qui fournit TLS.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Répondre aux nœuds jusqu'à l'arrêt (HTTP simple : TLS est fourni par le proxy inverse).",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "Désigner un opérateur, signé par la racine : la clé de PUBLIC_KEY (un fichier PEM) ou la clé d'opérateur propre au registre (créée au premier usage).",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "Désigner un opérateur, signé par la racine : la clé de PUBLIC_KEY (un fichier PEM / base64) ou la clé d'opérateur propre au registre (créée au premier usage).",
     "Backup written: {path}": "Sauvegarde écrite : {path}",
     "Copy the database to DEST while the server runs.": "Copier la base vers DEST pendant que le serveur tourne.",
     "Details": "Détails",
@@ -1814,5 +1830,30 @@ MESSAGES.update(
         "Backup dated in the future.": "Sauvegarde datée dans le futur.",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "Aucun installateur disponible : installez pip dans le venv du registre ou ajoutez uv au PATH."
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "La version {tag} est plus ancienne que celle installée ou sur une autre branche : refusée.",
+        "Registry is already at release {tag}.": "Le registre utilise déjà la version {tag}.",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "La version {tag} attendrait (schéma inconnu) ; nécessite --allow-schema.",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "La version {tag} attendrait (schéma {before} → {after}) ; nécessite --allow-schema.",
+        "Release {tag} would apply.": "La version {tag} serait appliquée.",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "La version {tag} attend : son schéma de base de données n’a pas pu être vérifié ; après vérification, exécutez desman-registry update --allow-schema.",
+        "Registry update failed at {step}.": "La mise à jour du registre a échoué à l’étape {step}.",
+        "stop timers": "arrêt des minuteurs",
+        "backup": "sauvegarde",
+        "checkout": "changement de version",
+        "install packages": "installation des paquets",
+        "restart": "redémarrage",
+        "health": "vérification de santé",
+        "start timers": "démarrage des minuteurs",
+    }
+)
+
+MESSAGES.update({"yes": "oui", "no": "non"})
 
 CATALOG = Catalog("Français", plural, MESSAGES, CLICK, forms=2)

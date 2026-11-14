@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "레지스트리 데이터베이스 구조를 변경하는 릴리스를 허용합니다.",
+    "Another registry update is running.": "다른 레지스트리 업데이트가 실행 중입니다.",
+    "Check the release without applying or journaling it.": "적용하거나 기록하지 않고 릴리스를 확인합니다.",
+    "Choose a release tag on origin/master.": "origin/master의 릴리스 태그를 선택합니다.",
+    "Registry is up to date.": "레지스트리가 최신 상태입니다.",
+    "Registry update failed at {step}; rolled back: {rollback}.": "{step} 단계에서 레지스트리 업데이트 실패; 롤백: {rollback}.",
+    "Registry update refused: {error}": "레지스트리 업데이트 거부: {error}",
+    "Registry updated to {tag}.": "레지스트리를 {tag}로 업데이트했습니다.",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "릴리스 {tag} 대기 중: 데이터베이스를 변경합니다. desman-registry update --allow-schema를 실행하세요.",
+    "The database is newer than the release schema.": "데이터베이스가 릴리스 구조보다 새롭습니다.",
+    "The registry checkout has uncommitted changes.": "레지스트리 작업 사본에 커밋되지 않은 변경 사항이 있습니다.",
+    "The registry git checkout (default: installed source).": "레지스트리 git 작업 사본(기본값: 설치된 소스).",
+    "The release tag must be on origin/master.": "릴리스 태그는 origin/master에 있어야 합니다.",
+    "Update": "업데이트",
+    "Update the registry to the newest release tag, with rollback on failure.": "레지스트리를 최신 릴리스 태그로 업데이트하며 실패 시 롤백합니다.",
+    "Use an existing PEM public-key file or a base64 public key.": "기존 PEM 공개 키 파일 또는 base64 공개 키를 사용하세요.",
     "Omitted lines: {count}.": "생략된 줄 수: {count}.",
     "Files in {folder}:": "{folder}의 파일:",
     "Model {scope} unavailable or limited until {until}.": "모델 {scope}은(는) {until}까지 사용할 수 없거나 제한됩니다.",
@@ -1173,7 +1189,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "동작",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "수신 대기할 주소입니다. TLS를 제공하는 리버스 프록시 뒤에서는 127.0.0.1로 두세요.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "중지될 때까지 노드에 응답합니다(일반 HTTP: TLS는 리버스 프록시가 제공).",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "루트 서명으로 운영자를 지정합니다: PUBLIC_KEY의 키(PEM 파일) 또는 레지스트리 자체 운영자 키(처음 사용할 때 생성).",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "루트 서명으로 운영자를 지정합니다: PUBLIC_KEY의 키(PEM / base64 파일) 또는 레지스트리 자체 운영자 키(처음 사용할 때 생성).",
     "Backup written: {path}": "백업을 기록했습니다: {path}",
     "Copy the database to DEST while the server runs.": "서버가 실행 중인 상태로 데이터베이스를 DEST에 복사합니다.",
     "Details": "세부 정보",
@@ -1678,5 +1694,30 @@ MESSAGES.update(
         "Backup dated in the future.": "백업 날짜가 미래입니다.",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "설치 프로그램이 없습니다. 레지스트리 venv에 pip를 설치하거나 PATH에 uv를 추가하세요."
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "릴리스 {tag}은 설치된 버전보다 오래되었거나 다른 브랜치에 있습니다: 거부됨.",
+        "Registry is already at release {tag}.": "레지스트리는 이미 릴리스 {tag}입니다.",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "릴리스 {tag}은 대기합니다(스키마 알 수 없음). --allow-schema가 필요합니다.",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "릴리스 {tag}은 대기합니다(스키마 {before} → {after}). --allow-schema가 필요합니다.",
+        "Release {tag} would apply.": "릴리스 {tag}을 적용합니다.",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "릴리스 {tag} 대기 중: 데이터베이스 스키마를 확인할 수 없습니다. 확인 후 desman-registry update --allow-schema를 실행하세요.",
+        "Registry update failed at {step}.": "레지스트리 업데이트가 {step} 단계에서 실패했습니다.",
+        "stop timers": "타이머 중지",
+        "backup": "백업",
+        "checkout": "버전 전환",
+        "install packages": "패키지 설치",
+        "restart": "다시 시작",
+        "health": "상태 확인",
+        "start timers": "타이머 시작",
+    }
+)
+
+MESSAGES.update({"yes": "예", "no": "아니요"})
 
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check desman-registry releases daily
+
+[Timer]
+OnCalendar=*-*-* 03:30
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
