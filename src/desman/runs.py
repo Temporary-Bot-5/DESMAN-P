@@ -101,12 +101,13 @@ class Models:
         with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=subtask.task_id)):
             chain = other.current() if isinstance(other, Scoped) else other
             choices = getattr(chain, "choices", None) if chain is not None else None
-            if choices and isinstance(chain, router.Fallback) and chain.order is not None:
-                choices = chain.order(choices)
-            alternatives = tuple(c.label for c in choices) if choices else None
-            if alternatives is not None and len(alternatives) == 1:
-                return label(main), alternatives[0]
-            return label(main), alternatives or (None if other is None else label(other))
+            main_chain = main.current() if isinstance(main, Scoped) else main
+            main_choices = getattr(main_chain, "choices", None)
+            if main_choices:
+                alternatives = tuple(c.label for c in router.other_lineup(main_choices))
+            else:
+                alternatives = tuple(c.label for c in choices) if choices else ()
+            return label(main), (alternatives or (label(other),)) if other is not None else None
 
     def first(self, role: calls.Role) -> router.Choice | None:
         """The model `role` asks first (None for a fake)."""

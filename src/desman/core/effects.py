@@ -231,8 +231,11 @@ class Effects:
         return Replayed(result.model_copy(update={"at": self._at(ordinal)}), interrupted=True)
 
     def _at(self, ordinal: int) -> str | None:
-        row = self.store.effects(self.subtask_id, self.execution)[ordinal]
-        return timestamp(row["finished_at"])
+        row = self.store.conn.execute(
+            "SELECT finished_at FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal = ?",
+            (self.subtask_id, self.execution, ordinal),
+        ).fetchone()
+        return timestamp(row["finished_at"]) if row is not None else None
 
     def finish(self, result: ToolResult) -> ToolResult:
         assert self._running is not None, "no call was started"

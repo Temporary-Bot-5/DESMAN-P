@@ -47,7 +47,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from desman.core import calls, db
 from desman.core.context import (
-    CHARS_PER_TOKEN,
     DEFAULT_BUDGET_TOKENS,
     Context,
     Knowledge,
@@ -179,7 +178,7 @@ class Work(BaseModel):
 
 
 Executor = Callable[[Work], Outcome]
-Labels = tuple[str, str | tuple[str, ...] | None]
+Labels = tuple[str, tuple[str, ...] | None]
 """The main model and alternatives (None: no other), as `provider/model` labels."""
 Decomposer = Callable[[Work], list[SubtaskSpec] | None]
 """Splits the subtask of `Work` into smaller ones (ROADMAP 2.9b); None if it cannot. Provider
@@ -499,23 +498,10 @@ class Coordinator:
                 self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
+                earlier=lambda chars: earlier_lookups(
+                    self.store, subtask, self.store.executions(subtask.id), chars
+                ),
             )
-            if attempt >= 2 and strategy is not Strategy.COMBINE:
-                used = sum(
-                    len(json.dumps(d.content, ensure_ascii=False, sort_keys=True))
-                    for d in context.dependencies
-                )
-                used += sum(len(node.text) for node in context.knowledge)
-                context = context.model_copy(
-                    update={
-                        "earlier_lookups": earlier_lookups(
-                            self.store,
-                            subtask,
-                            self.store.executions(subtask.id),
-                            max(0, self.context_budget_tokens * CHARS_PER_TOKEN - used),
-                        )
-                    }
-                )
             self._started(subtask, context)
             work = Work(
                 subtask=subtask,
@@ -798,10 +784,7 @@ class Coordinator:
         if crew.providers is None:
             return {}
         main, other = crew.providers(subtask) if callable(crew.providers) else crew.providers
-        alternatives = (other,) if isinstance(other, str) else other
-        avoid_other = alternatives is not None and all(
-            among(candidate, unfit) for candidate in alternatives
-        )
+        avoid_other = other is not None and all(among(candidate, unfit) for candidate in other)
         return {"avoid_main": among(main, unfit) and not avoid_other, "avoid_other": avoid_other}
 
     def _earliest(self, task_id: str | None, status: str, column: str) -> str | None:

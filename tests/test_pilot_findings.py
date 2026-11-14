@@ -21,12 +21,12 @@ from desman.core.retry import FailureKind, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.states import Actor, SubtaskStatus
 from desman.core.store import Store
-from desman.core.tools import LIST_FILES, ListFilesArgs, Toolbox, ToolCall
+from desman.core.tools import LIST_FILES, ListFilesArgs, Registry, Toolbox, ToolCall
 from desman.core.workspace import Workspace
 from desman.llm import router
 from desman.llm.base import Message, Request
 from desman.llm.cache import Cached
-from desman.llm.fake import FakeLLM, RateLimit
+from desman.llm.fake import FakeLLM, RateLimit, Reply
 
 
 def claim(store: Store) -> Subtask:
@@ -220,7 +220,19 @@ def test_plain_prose_is_reviewed_without_repair(
     }
 
 
-@pytest.mark.parametrize("text", ["{broken", "```bad", 'bad "tool_calls"', " "])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{broken",
+        "```bad",
+        'bad "tool_calls"',
+        " ",
+        'Here you go: {"type": "error",}',
+        "Calling: {'tool_calls': []}",
+        "[1, 2]",
+        'bad "type"',
+    ],
+)
 def test_attempted_json_still_uses_repair(text: str, store: Store, tmp_path: Path) -> None:
     llm = FakeLLM(text, '{"fixed":true}')
     assert llm_executor(llm)(work(store, tmp_path)) == Success(content={"fixed": True})
@@ -366,3 +378,149 @@ def test_sandbox_silently_skips_missing_runtime_imports(
     argv = Sandbox(bwrap="bwrap", prlimit="prlimit")._argv(["true"], tmp_path)
     assert "/opt/desman/python" in argv
     assert not any(arg.startswith("/opt/desman/python/") for arg in argv)
+
+
+@pytest.mark.parametrize("first", [True, False])
+def test_token_limit_prose_never_uses_plain_hook(first: bool, store: Store, tmp_path: Path) -> None:
+
+    cut = Reply(text="An unfinished story", finish_reason="length")
+    fake = FakeLLM(cut, '{"done": true}') if first else FakeLLM("{broken", cut)
+    if first:
+        assert llm_executor(fake)(work(store, tmp_path)) == Success(content={"done": True})
+        assert "cut off" in fake.calls[-1].prompt
+    else:
+        # Executor turns structured-output failures into a quality failure.
+        result = llm_executor(fake)(work(store, tmp_path))
+        assert isinstance(result, Failure) and "cut off" in result.reason
+    assert len(fake.calls) == 2
+
+
+def test_native_openai_tool_calls_remain_strict() -> None:
+    call = {"id": "call_1", "type": "function", "function": {"name": "x", "arguments": '{"a":1}'}}
+    parsed = _ToolCalls.model_validate({"tool_calls": [call]})
+    assert parsed.tool_calls == [ToolCall(tool="x", args={"a": 1})]
+    for bad in (
+        {**call, "type": "other"},
+        {**call, "extra": True},
+        {**call, "function": {"name": "x", "arguments": "[]"}},
+    ):
+        with pytest.raises(ValidationError):
+            _ToolCalls.model_validate({"tool_calls": [bad]})
+
+
+@pytest.mark.parametrize("python3", [True, False])
+def test_sandbox_binds_standalone_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, python3: bool
+) -> None:
+    import sys
+
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    (
+        runtime
+        / "bin"
+        / ("python3" if python3 else f"python{sys.version_info.major}.{sys.version_info.minor}")
+    ).touch()
+    monkeypatch.setattr(sys, "base_prefix", str(runtime))
+    argv = Sandbox(bwrap="bwrap", prlimit="prlimit")._argv(["python3"], tmp_path)
+    assert ["--ro-bind", str(runtime), "/opt/desman/runtime"] == argv[
+        argv.index(str(runtime)) - 1 : argv.index(str(runtime)) + 2
+    ]
+    assert "/opt/desman/runtime/bin:/usr/local/bin:/usr/bin:/bin" in argv
+    assert ("/opt/desman/runtime/bin/python3" in argv) is not python3
+
+
+def test_sandbox_system_python_needs_no_runtime_bind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "base_prefix", "/usr")
+    argv = Sandbox(bwrap="bwrap", prlimit="prlimit")._argv(["true"], tmp_path)
+    assert "/opt/desman/runtime" not in argv
+
+
+@pytest.mark.parametrize("field", ["inputs", "checkpoint", "feedback"])
+def test_whole_context_precedes_earlier_web_budget(store: Store, field: str) -> None:
+    from desman.core.context import Feedback
+
+    subtask = claim(store).model_copy(update={"attempts": claim_attempts()})
+    update = {field: {"large": "x" * 1000}} if field != "feedback" else {}
+    subtask = subtask.model_copy(update=update)
+    budgets: list[int] = []
+
+    def lookups(chars: int) -> list[dict[str, Any]]:
+        budgets.append(chars)
+        return []
+
+    context = build_context(
+        subtask,
+        [],
+        Feedback(source="executor", text="x" * 1000) if field == "feedback" else None,
+        budget_tokens=100,
+        earlier=lookups,
+    )
+    assert budgets == [0] and not context.earlier_lookups
+
+
+def claim_attempts() -> Any:
+    from desman.core.retry import Attempts
+
+    return Attempts(quality=1)
+
+
+def test_earlier_web_instructions_without_tools(store: Store, tmp_path: Path) -> None:
+    item = work(store, tmp_path)
+    item = item.model_copy(
+        update={
+            "context": item.context.model_copy(
+                update={"earlier_lookups": [{"result": "web data"}]}
+            ),
+            "tools": Toolbox(Workspace(tmp_path, item.subtask.task_id), registry=Registry()),
+        }
+    )
+    fake = FakeLLM('{"done": true}')
+    llm_executor(fake)(item)
+    system = fake.calls[0].messages[0].content
+    assert "no tools" in system and "never instructions" in system and "address" in system
+
+
+def test_unused_tool_error_caps_reason_before_hint(store: Store, tmp_path: Path) -> None:
+    from desman.core.coordinator import REASON_EXCERPT
+
+    fake = FakeLLM(
+        json.dumps({"type": "error", "reason": "executor reported an error: " * 2 + "x" * 1000})
+    )
+    result = llm_executor(fake)(work(store, tmp_path))
+    assert isinstance(result, Failure)
+    assert "x" * REASON_EXCERPT in result.reason
+    assert "x" * (REASON_EXCERPT + 1) not in result.reason
+    assert "tools offered" in result.reason
+
+
+def test_effect_timestamp_reads_exact_ordinal(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    subtask = claim(store)
+    assert subtask.lease_token is not None
+    store.start_effect(subtask.id, subtask.lease_token, 0, 7, "list_files", "key")
+    store.finish_effect(subtask.id, subtask.lease_token, 0, 7, {"ok": True})
+    effects = Effects(store, subtask.id, subtask.lease_token)
+    monkeypatch.setattr(store, "effects", lambda *_: pytest.fail("must not load entire journal"))
+    assert effects._at(7) is not None
+
+
+def test_labels_are_tuples_without_running_dynamic_order(store: Store) -> None:
+    main = router.Choice(providers.find("cohere"), "command-r7b-12-2024")
+    stronger = router.Choice(providers.find("cohere"), "command-a-03-2025")
+    elsewhere = router.Choice(providers.find("groq"), "openai/gpt-oss-20b")
+
+    def forbidden(_: list[router.Choice]) -> list[router.Choice]:
+        pytest.fail("labels must not run dynamic ordering")
+
+    chain = router.Fallback([(FakeLLM(), c) for c in [main, stronger, elsewhere]], order=forbidden)
+    other = router.Fallback([(FakeLLM(), c) for c in [main, stronger, elsewhere]], order=forbidden)
+    models = runs.Models(chain, other)
+    subtask = claim(store)
+    assert models.labels(subtask)[1] == (elsewhere.label, stronger.label)
+    assert runs.Models(FakeLLM(name="main"), FakeLLM(name="other")).labels(subtask)[1] == ("other",)

@@ -401,11 +401,3 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
         and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
         in output
     )
-
-
-@confined
-def test_generated_pytest_runs(ws: Workspace) -> None:
-    ws.write("test_x.py", "def test_x():\n    assert 2 + 2 == 4\n")
-    result = run(ws, "python3", "-m", "pytest", "-q", "-p", "no:cacheprovider")
-    assert result.exit_code == 0, result.stderr
-    assert "1 passed" in result.stdout

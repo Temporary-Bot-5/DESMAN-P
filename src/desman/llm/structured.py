@@ -94,7 +94,12 @@ def complete_json(
     """
     reply = _complete(llm, request)
     value, problem = _validate(reply, schema)
-    if value is None and json_object(reply.text) is None and plain is not None:
+    if (
+        value is None
+        and reply.finish_reason != "length"
+        and json_object(reply.text) is None
+        and plain is not None
+    ):
         value = plain(reply.text)
     if value is not None:
         if keep(value):
@@ -117,7 +122,12 @@ def complete_json(
     )
     second = _complete(llm, repair)
     value, problem = _validate(second, schema)
-    if value is None and json_object(second.text) is None and plain is not None:
+    if (
+        value is None
+        and second.finish_reason != "length"
+        and json_object(second.text) is None
+        and plain is not None
+    ):
         value = plain(second.text)
     if value is not None:
         if keep(value):

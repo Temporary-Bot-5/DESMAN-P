@@ -105,12 +105,14 @@ def build_context(
     budget_tokens: int = DEFAULT_BUDGET_TOKENS,
     strategy: Strategy | None = None,
     knowledge: list[KnowledgeText] | None = None,
+    *,
+    earlier: Callable[[int], list[dict[str, Any]]] | None = None,
 ) -> Context:
     """`strategy` defaults to the one the attempt number picks. Dependency results and
     `knowledge` share the budget."""
     attempt = subtask.attempts.quality + 1
     fitted, nodes = fit(dependencies, knowledge or [], budget_tokens)
-    return Context(
+    context = Context(
         description=subtask.description,
         acceptance_criteria=subtask.acceptance_criteria,
         inputs=subtask.inputs,
@@ -121,6 +123,14 @@ def build_context(
         attempt=attempt,
         strategy=strategy or strategy_for(attempt),
     )
+
+    if earlier is not None and attempt >= 2 and context.strategy is not Strategy.COMBINE:
+        # Account for the entire rendered context before adding older web material.
+        used = len(json.dumps(context.model_dump(mode="json"), ensure_ascii=False))
+        context = context.model_copy(
+            update={"earlier_lookups": earlier(max(0, budget_tokens * CHARS_PER_TOKEN - used))}
+        )
+    return context
 
 
 def estimate_tokens(text: str) -> int:

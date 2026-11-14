@@ -285,7 +285,7 @@ def coordinator(store: Store, clock: FakeClock, main: FakeLLM, other: FakeLLM, *
         llm_reviewer(main),
         sleep=clock.sleep,
         strategies=functools.partial(strategy_for, other_model=True),
-        providers=(main.name, other.name),
+        providers=(main.name, (other.name,)),
         **kw,
     )
 

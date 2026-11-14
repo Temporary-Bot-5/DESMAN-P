@@ -28,6 +28,10 @@ Only pytest and its runtime imports (pytest, _pytest, pluggy, iniconfig, packagi
 and py.py when present) are bound read-only from the running interpreter under
 /opt/desman/python, so generated tests can run without exposing other site-packages.
 
+A standalone Python tree holds only the interpreter and its standard library. When
+DESMAN uses one outside /usr, it is bound at /opt/desman/runtime so pytest runs with
+the Python version it was installed for.
+
 Known limits: the workspace is the disk the code may fill (each file is capped, the number of
 files is not); `/usr` is readable (system files only, nothing of the person's).
 """
@@ -167,6 +171,22 @@ class Sandbox:
             "/usr",
             "/usr",
         ]
+        runtime = Path(sys.base_prefix).resolve()
+        if not runtime.is_relative_to("/usr"):
+            target = "/opt/desman/runtime"
+            argv += ["--ro-bind", str(runtime), target]
+            argv += ["--setenv", "PATH", target + "/bin:" + SANDBOX_PATH]
+            if not (runtime / "bin/python3").exists():
+                # A new bin mount lets bwrap add the alias without writing to the
+                # read-only interpreter tree. Keep every original entry read-only.
+                argv += ["--tmpfs", target + "/bin"]
+                for executable in sorted((runtime / "bin").iterdir()):
+                    argv += ["--ro-bind", str(executable), target + "/bin/" + executable.name]
+                argv += [
+                    "--symlink",
+                    f"python{sys.version_info.major}.{sys.version_info.minor}",
+                    target + "/bin/python3",
+                ]
         for name in _SYSTEM_LINKS:
             path = Path(name)
             if path.is_symlink():
