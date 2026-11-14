@@ -197,12 +197,35 @@ def test_windows_wrapper_and_evaluation_source() -> None:
     assert '-File "%DESMAN_INSTALLER%" %*' in wrapper
     assert wrapper.index("echo Downloading") < wrapper.index("Invoke-WebRequest")
     assert wrapper.index("echo Running") < wrapper.index("-File ")
-    assert "if errorlevel 1 goto failed" in wrapper
-    # -Uninstall deletes the batch file it runs from: cmd must not read a line after it.
-    assert (
-        '-File "%DESMAN_INSTALLER%" %* && (if not exist "%~f0" ((goto) 2>nul & ver >nul) else '
-        'exit /b 0) || (pause & if not exist "%~f0" ((goto) 2>nul) else exit /b 1)'
-    ) in wrapper
+    assert "if errorlevel 1 goto failed" in wrapper  # the download
+    # -Uninstall deletes the batch file it runs from: the run is the last line read.
+    run = next(line for line in wrapper.splitlines() if '-File "%DESMAN_INSTALLER%"' in line)
+    assert run.endswith("exit /b 1)")
+    assert wrapper.index(run) < wrapper.index(":failed")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd.exe batch files")
+@pytest.mark.parametrize(("deletes", "code"), [(True, 0), (True, 3), (False, 0), (False, 3)])
+def test_the_windows_wrapper_ends_cleanly(tmp_path: Path, deletes: bool, code: int) -> None:
+    """`install.bat -Uninstall` deletes its own folder: no "cannot find the path" after it,
+    and the exit code is the installer's (0, or 1 after the pause on a failure)."""
+    folder = tmp_path / "app" / "install"
+    folder.mkdir(parents=True)
+    shutil.copy(ROOT / "install/install.bat", folder / "install.bat")
+    remove = f"Remove-Item -LiteralPath '{tmp_path / 'app'}' -Recurse -Force; " if deletes else ""
+    (folder / "install.ps1").write_text(f"{remove}exit {code}\n", encoding="utf-8")
+    result = subprocess.run(
+        ["cmd", "/c", str(folder / "install.bat")],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        timeout=120,
+    )
+    output = result.stdout + result.stderr
+    assert "cannot find" not in output.lower(), output
+    assert result.returncode == (0 if code == 0 else 1), output
+    assert (folder / "install.bat").exists() is not deletes
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell dry-run")
