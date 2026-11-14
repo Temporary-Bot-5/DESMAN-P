@@ -644,7 +644,9 @@ def test_the_registry_reads_no_config() -> None:
         "bad = [m for m in ('desman.config', 'desman.providers', 'desman.runs') if m in sys.modules];"
         "print(bad); sys.exit(1 if bad else 0)"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8"
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 

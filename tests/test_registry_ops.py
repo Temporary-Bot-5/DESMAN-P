@@ -55,9 +55,9 @@ def test_daily_rotation(ready: Path, clock: FakeClock) -> None:
     folder = ready / "backups"
     folder.mkdir(mode=0o700)
     manual = folder / "registry-2026-11-05-preupdate.db"
-    manual.write_text("manual")
+    manual.write_text("manual", encoding="utf-8")
     old = folder / "registry-20250101-000000Z.db"
-    old.write_text("old")
+    old.write_text("old", encoding="utf-8")
     link = folder / "registry-20240101-000000Z.db"
     try:
         link.symlink_to(manual)
@@ -66,7 +66,7 @@ def test_daily_rotation(ready: Path, clock: FakeClock) -> None:
         linked = False
     done = admin.daily(ready, days=7, keep=1, now=clock())
     assert done.trust is not None and done.error is None and done.pruned == 1
-    assert not old.exists() and manual.read_text() == "manual"
+    assert not old.exists() and manual.read_text(encoding="utf-8") == "manual"
     assert link.is_symlink() or not linked
     if sys.platform != "win32":  # POSIX modes
         assert done.backup.stat().st_mode & 0o777 == 0o600
@@ -217,7 +217,7 @@ def test_health_missing_trust_and_invalid_backup(ready: Path, clock: FakeClock) 
     assert levels(ready, clock)["trust_list"] == "fail"
     folder = ready / "backups"
     folder.mkdir()
-    (folder / "registry-99999999-999999Z.db").write_text("invalid timestamp")
+    (folder / "registry-99999999-999999Z.db").write_text("invalid timestamp", encoding="utf-8")
     assert levels(ready, clock)["backup"] == "fail"
 
 
@@ -296,7 +296,7 @@ def test_future_backups(ready: Path, clock: FakeClock) -> None:
     folder = ready / "backups"
     folder.mkdir()
     future = folder / "registry-20990101-000000Z.db"
-    future.write_text("future")
+    future.write_text("future", encoding="utf-8")
     found = admin.health(ready, now=clock(), root_pub=sign.ROOT_PUB, url="")
     assert any(c.name == "backup" and c.level == "fail" for c in found)
     assert any(c.message == "backup dated in the future" and c.level == "warn" for c in found)
@@ -351,7 +351,9 @@ def test_assignment_messages(ready: Path, clock: FakeClock) -> None:
 
 
 def test_update_instructions() -> None:
-    text = (Path(__file__).resolve().parents[1] / "docs/registry-deploy.md").read_text()
+    text = (Path(__file__).resolve().parents[1] / "docs/registry-deploy.md").read_text(
+        encoding="utf-8"
+    )
     section = text.split("## Updating the server", 1)[1].split("## Accepting", 1)[0]
     assert section.index("stop desman-registry-daily.timer") < section.index(
         "backup ~/registry-preupdate-$(date +%F-%H%M)"

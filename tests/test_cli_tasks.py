@@ -27,7 +27,7 @@ def script(tmp_path: Path, execute: list[Any], review: list[Any] | None = None) 
         {"match": "Execute", "steps": execute, "repeat_last": False},
         {"match": "Review", "steps": review or [ACCEPT], "repeat_last": True},
     ]
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 
@@ -93,7 +93,8 @@ def test_run_spec_with_dependencies(tmp_path: Path) -> None:
                     {"description": "write", "acceptance_criteria": "ok", "depends_on": [0]},
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     fake = script(tmp_path, ['{"data": [1, 2]}', '{"text": "done"}'])
     result = desman("run", "--spec", spec, "--fake-llm", fake, "--priority", "critical")
@@ -120,7 +121,8 @@ def test_run_refuses_bad_input_without_creating_anything(
 ) -> None:
     good = tmp_path / "spec.json"
     good.write_text(
-        json.dumps({"goal": "g", "subtasks": [{"description": "d", "acceptance_criteria": "c"}]})
+        json.dumps({"goal": "g", "subtasks": [{"description": "d", "acceptance_criteria": "c"}]}),
+        encoding="utf-8",
     )
     bad = tmp_path / "bad.json"
     bad.write_text(
@@ -129,7 +131,8 @@ def test_run_refuses_bad_input_without_creating_anything(
                 "goal": "g",
                 "subtasks": [{"description": "d", "acceptance_criteria": "c", "depends_on": [0]}],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     resolved = [str(good) if a == "SPEC" else str(bad) if a == "BAD" else a for a in args]
     result = desman("run", *resolved, "--fake-llm", script(tmp_path, ["{}"]))
@@ -154,7 +157,7 @@ def test_run_without_provider_fails_fast() -> None:
 
 def test_run_with_invalid_script(tmp_path: Path) -> None:
     bad = tmp_path / "bad.json"
-    bad.write_text('{"steps": [{"type": "explode"}]}')
+    bad.write_text('{"steps": [{"type": "explode"}]}', encoding="utf-8")
     result = desman("run", "g", "--fake-llm", bad)
     assert result.exit_code == 1 and "not a valid fake LLM script" in result.output
 

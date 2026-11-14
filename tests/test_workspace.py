@@ -118,7 +118,7 @@ def ws(tmp_path: Path, secure: bool) -> Workspace:
 def outside(tmp_path: Path) -> Path:
     target = tmp_path / "outside"
     target.mkdir()
-    (target / "secret").write_text("keep me")
+    (target / "secret").write_text("keep me", encoding="utf-8")
     return target
 
 
@@ -269,7 +269,7 @@ def test_files_skips_links_and_temp_files(ws: Workspace, outside: Path) -> None:
     ws.write("a.txt", "x")
     (ws.root / "dirlink").symlink_to(outside)
     (ws.root / "filelink").symlink_to(outside / "secret")
-    (ws.root / ".desman-tmp-dead").write_text("left by a crash")
+    (ws.root / ".desman-tmp-dead").write_text("left by a crash", encoding="utf-8")
     assert ws.files() == ["a.txt"]
 
 
@@ -383,7 +383,7 @@ def test_files_lists_only_names_the_guard_accepts(ws: Workspace) -> None:
     # Generated code (3.3) can create any name; list only what read() will accept.
     ws.write("ok.txt", "x")
     for name in ("a:b", "back\\slash", "line\nbreak"):
-        (ws.root / name).write_text("x")
+        (ws.root / name).write_text("x", encoding="utf-8")
     fd = os.open(os.fsencode(str(ws.root)) + b"/\xff\xfe", os.O_WRONLY | os.O_CREAT, 0o600)
     os.close(fd)
     assert ws.files() == ["ok.txt"]

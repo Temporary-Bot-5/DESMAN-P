@@ -286,6 +286,7 @@ def _video() -> int | None:
                 text=True,
                 timeout=5,
                 check=True,
+                encoding="utf-8",
             )
             return sum(int(line) for line in done.stdout.split()) * 1024 * 1024
         except (OSError, ValueError, subprocess.SubprocessError):

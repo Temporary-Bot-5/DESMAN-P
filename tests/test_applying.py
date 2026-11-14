@@ -143,11 +143,11 @@ def test_uncommitted_changes_in_its_files_stop_it(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
     planner = package(checkout) / "planner.py"
-    planner.write_text(planner.read_text() + "\n# mine\n")
+    planner.write_text(planner.read_text(encoding="utf-8") + "\n# mine\n", encoding="utf-8")
     before = head(checkout)
     with pytest.raises(applying.ApplyError, match="uncommitted changes in src/desman/planner.py"):
         apply(s, p, checkout)
-    assert head(checkout) == before and planner.read_text().endswith("# mine\n")
+    assert head(checkout) == before and planner.read_text(encoding="utf-8").endswith("# mine\n")
     assert proposals.applications(s.conn, p.id) == []
 
 
@@ -155,7 +155,7 @@ def test_changes_in_other_files_stay_as_they_are(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
     other = checkout / "pyproject.toml"
-    other.write_text(other.read_text() + "\n# mine\n")
+    other.write_text(other.read_text(encoding="utf-8") + "\n# mine\n", encoding="utf-8")
     done = apply(s, p, checkout)
     assert done.commit is not None
     assert git(checkout, "show", "--name-only", "--format=", done.commit).split() == [PLANNER]
@@ -176,7 +176,9 @@ def test_a_proposal_made_from_other_files_is_not_applied(checkout: Path) -> None
     s = store()
     p = a_proposal(s, checkout)
     planner = package(checkout) / "planner.py"
-    planner.write_text(planner.read_text() + "\n# changed since\n")
+    planner.write_text(
+        planner.read_text(encoding="utf-8") + "\n# changed since\n", encoding="utf-8"
+    )
     git(checkout, "commit", "-q", "-am", "later")
     before = head(checkout)
     with pytest.raises(applying.ApplyError, match="other versions of src/desman/planner"):
@@ -263,8 +265,10 @@ def test_a_revert_over_later_changes_to_the_same_lines_is_refused(checkout: Path
     apply(s, p, checkout)
     planner = package(checkout) / "planner.py"
     rules = BY_ID["planner.rules"]
-    mine = improve.replace(planner.read_text(), rules, planner_rules(checkout) + " Mine.")
-    planner.write_text(mine)
+    mine = improve.replace(
+        planner.read_text(encoding="utf-8"), rules, planner_rules(checkout) + " Mine."
+    )
+    planner.write_text(mine, encoding="utf-8")
     git(checkout, "commit", "-q", "-am", "the person's edit")
     before = head(checkout)
     with pytest.raises(applying.ApplyError, match="later commits changed the same lines"):
@@ -464,7 +468,8 @@ def test_no_hook_of_the_checkout_runs(checkout: Path) -> None:
         hook.write_text(
             "#!/bin/sh\n"
             f"echo {name} >> {marker}\n"
-            'echo "# sneaked" >> src/desman/agents.py && git add src/desman/agents.py\n'
+            'echo "# sneaked" >> src/desman/agents.py && git add src/desman/agents.py\n',
+            encoding="utf-8",
         )
         hook.chmod(0o755)
     s = store()

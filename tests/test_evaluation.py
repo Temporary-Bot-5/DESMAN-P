@@ -315,7 +315,9 @@ def test_a_proposal_made_from_other_files_is_not_evaluated(checkout: Path) -> No
     s = store()
     p = a_proposal(s, checkout)
     planner = package(checkout) / "planner.py"
-    planner.write_text(planner.read_text() + "\n# changed since\n")
+    planner.write_text(
+        planner.read_text(encoding="utf-8") + "\n# changed since\n", encoding="utf-8"
+    )
     git(checkout, "commit", "-q", "-am", "later")
     with pytest.raises(evaluation.EvaluationError, match="other versions of src/desman/planner"):
         evaluate(s, p, checkout)
@@ -327,7 +329,7 @@ def edited_diff(repo: Path, edit: Any) -> tuple[str, dict[str, Any]]:
     """The diff of a real proposal, with `edit(text)` also applied to planner.py."""
     diff, details = improve.render([rules_change(repo)], package(repo))
     name = improve.SOURCE_PREFIX + "planner.py"
-    before = (repo / name).read_text()
+    before = (repo / name).read_text(encoding="utf-8")
     after = edit(improve.replace(before, BY_ID["planner.rules"], details["changes"][0]["new"]))
     lines = difflib.unified_diff(
         before.splitlines(keepends=True), after.splitlines(keepends=True), f"a/{name}", f"b/{name}"
@@ -358,7 +360,7 @@ def test_a_diff_giving_other_texts_than_proposed_is_refused(checkout: Path) -> N
 def test_a_diff_touching_another_file_is_refused(checkout: Path) -> None:
     s = store()
     name = "src/desman/agents.py"
-    before = (checkout / name).read_text()
+    before = (checkout / name).read_text(encoding="utf-8")
     after = before.replace("MAX_TOOL_ROUNDS = 8", "MAX_TOOL_ROUNDS = 80")
     lines = difflib.unified_diff(
         before.splitlines(keepends=True), after.splitlines(keepends=True), f"a/{name}", f"b/{name}"
@@ -480,7 +482,7 @@ def test_evaluate_command_refusals(checkout: Path, monkeypatch: pytest.MonkeyPat
     assert no_provider.exit_code == 1 and "current version" not in no_provider.output
     assert proposals.evaluations(s.conn, p.id) == []
     missing = desman("proposals", "evaluate", "99")
-    default_config_path().write_text("{not json")
+    default_config_path().write_text("{not json", encoding="utf-8")
     broken = desman("proposals", "evaluate", str(p.id))
     assert broken.exit_code == 1 and "not valid JSON" in broken.output
     default_config_path().unlink()

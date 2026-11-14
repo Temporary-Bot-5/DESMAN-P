@@ -45,7 +45,9 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "W", "B", "SIM"]
+select = ["E", "F", "I", "UP", "W", "B", "SIM", "PLW1514"]
+preview = true
+explicit-preview-rules = true
 # Long UI strings are fine; `ruff format` keeps code lines within line-length.
 ignore = ["E501"]
 

@@ -222,6 +222,7 @@ def test_tool_contract_is_reexported_without_loading_runtime() -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0, result.stderr
 

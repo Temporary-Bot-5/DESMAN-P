@@ -105,7 +105,7 @@ def test_an_idle_worker_still_tells_what_others_sent_to_the_person(
 def fake_script(tmp_path: Path) -> Path:
     routes = [{"match": "Execute", "steps": [{"type": "rejected", "status": 401}]}]
     path = tmp_path / "fake.json"
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 

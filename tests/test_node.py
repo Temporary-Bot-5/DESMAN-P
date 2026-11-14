@@ -585,7 +585,7 @@ def test_the_network_never_stops_the_workers_own_work(tmp_path: Path) -> None:
     path = tmp_path / "desman.db"
     Store(db.open_db(path)).conn.close()
     script = tmp_path / "fake.json"
-    script.write_text(json.dumps({"routes": []}))
+    script.write_text(json.dumps({"routes": []}), encoding="utf-8")
     args = ["worker", "--until-idle", "--fake-llm", str(script), "--db", str(path)]
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == 0, result.output

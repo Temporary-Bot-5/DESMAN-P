@@ -99,7 +99,8 @@ def test_retry_with_a_note_reaches_the_next_attempt(store: Store, tmp_path: Path
                     {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     resumed = desman("resume", task_id, "--fake-llm", script)
     assert resumed.exit_code == 0, resumed.output

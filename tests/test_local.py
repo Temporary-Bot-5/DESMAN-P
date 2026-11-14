@@ -221,7 +221,7 @@ def held(tmp_path: Path) -> Iterator[Callable[[str], None]]:
         folder = tmp_path / "locks"
         folder.mkdir(parents=True, exist_ok=True)
         name = hashlib.sha256(server.encode()).hexdigest()[:16]
-        handle = open(folder / f"{name}.0.lock", "a")  # noqa: SIM115
+        handle = open(folder / f"{name}.0.lock", "a", encoding="utf-8")  # noqa: SIM115
         filelock.lock(handle.fileno(), blocking=False)
         handles.append(handle)
 

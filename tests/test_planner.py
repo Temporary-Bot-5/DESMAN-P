@@ -160,7 +160,7 @@ def script(tmp_path: Path, planner: list[Any], execute: list[Any]) -> Path:
         {"match": "Execute", "steps": execute},
         {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
     ]
-    path.write_text(json.dumps({"routes": routes}))
+    path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path
 
 
@@ -210,7 +210,7 @@ def test_a_fake_run_uses_the_template_unless_asked(tmp_path: Path) -> None:
 
 def test_plan_does_not_go_with_a_spec(tmp_path: Path) -> None:
     spec = tmp_path / "spec.json"
-    spec.write_text(json.dumps({"goal": "g", "subtasks": [sub("a")]}))
+    spec.write_text(json.dumps({"goal": "g", "subtasks": [sub("a")]}), encoding="utf-8")
     result = desman("run", "--spec", spec, "--plan", "template")
     assert result.exit_code == 2 and "--spec is already a plan" in result.output
 

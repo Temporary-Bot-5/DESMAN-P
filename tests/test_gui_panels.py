@@ -411,7 +411,9 @@ transcript.scrollTop = 679; transcript.onscroll(); assert.equal(control.hidden, 
 """,
         encoding="utf-8",
     )
-    subprocess.run([node, str(script)], check=True, capture_output=True, text=True)
+    subprocess.run(
+        [node, str(script)], check=True, capture_output=True, text=True, encoding="utf-8"
+    )
 
 
 def test_stored_transcript_follows_new_output(tmp_path: Path) -> None:
@@ -473,4 +475,6 @@ const reply = (version, rows, last = false, session = 's') => ({events: [], stat
 """,
         encoding="utf-8",
     )
-    subprocess.run([node, str(script)], check=True, capture_output=True, text=True)
+    subprocess.run(
+        [node, str(script)], check=True, capture_output=True, text=True, encoding="utf-8"
+    )

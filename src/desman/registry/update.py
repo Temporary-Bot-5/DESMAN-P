@@ -7,7 +7,6 @@ are injectable; importing this module never contacts git, systemd or the live re
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import sqlite3
@@ -16,6 +15,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -122,24 +122,14 @@ def _backup(directory: Path, now: datetime) -> Path:
 
 def _restore(directory: Path, backup: Path) -> None:
     path = directory / store.DB_NAME
-    # Service must be stopped before replacing the DB and discarding its old WAL.
-    with tempfile.NamedTemporaryFile(dir=directory, delete=False) as target:
-        temp = Path(target.name)
-        try:
-            with backup.open("rb") as source:
-                shutil.copyfileobj(source, target)
-            target.flush()
-            os.fsync(target.fileno())
-        except BaseException:
-            temp.unlink(missing_ok=True)
-            raise
-    try:
-        temp.chmod(0o600)
-        os.replace(temp, path)
-        Path(str(path) + "-wal").unlink(missing_ok=True)
-        Path(str(path) + "-shm").unlink(missing_ok=True)
-    finally:
-        temp.unlink(missing_ok=True)
+    # The service is stopped by the caller. Restore through SQLite so Windows
+    # does not need to replace a file held by an otherwise idle connection.
+    with (
+        closing(sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True)) as source,
+        closing(sqlite3.connect(path, timeout=5)) as target,
+    ):
+        source.backup(target)
+    path.chmod(0o600)
 
 
 def update(
@@ -284,6 +274,7 @@ def _update(
     step = "stop timers"
     failure: Exception | None = None
     rolled_back = False
+    rollback_errors: list[dict[str, str]] = []
     backup: Path | None = None
     changed = False
     timers_started = False
@@ -318,7 +309,14 @@ def _update(
             try:
                 git("checkout", "--detach", old)
                 _command(runner, app, installer)
-            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, sqlite3.Error):
+            except (
+                OSError,
+                subprocess.SubprocessError,
+                RuntimeError,
+                ValueError,
+                sqlite3.Error,
+            ) as e:
+                rollback_errors.append({"step": "checkout/install", "reason": str(e)[:500]})
                 rolled_back = False
         try:
             if (
@@ -328,11 +326,13 @@ def _update(
             ):
                 _command(runner, app, ["systemctl", "--user", "stop", "desman-registry.service"])
                 _restore(directory, backup)
-        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, sqlite3.Error):
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, sqlite3.Error) as e:
+            rollback_errors.append({"step": "restore database", "reason": str(e)[:500]})
             rolled_back = False
         try:
             _command(runner, app, ["systemctl", "--user", "restart", "desman-registry.service"])
-        except (OSError, subprocess.SubprocessError, RuntimeError):
+        except (OSError, subprocess.SubprocessError, RuntimeError) as e:
+            rollback_errors.append({"step": "restart", "reason": str(e)[:500]})
             rolled_back = False
     finally:
         try:
@@ -340,6 +340,7 @@ def _update(
                 _command(runner, app, ["systemctl", "--user", "start", *TIMERS])
         except (OSError, subprocess.SubprocessError, RuntimeError) as e:
             rolled_back = False
+            rollback_errors.append({"step": "start timers", "reason": str(e)[:500]})
             if failure is None:
                 failure = e
                 step = "start timers"
@@ -347,7 +348,12 @@ def _update(
         _log(
             directory,
             "update_failed",
-            {"step": step, "reason": str(failure)[:500], "rolled_back": rolled_back},
+            {
+                "step": step,
+                "reason": str(failure)[:500],
+                "rolled_back": rolled_back,
+                "rollback_errors": rollback_errors,
+            },
         )
         return t(
             "Registry update failed at {step}; rolled back: {rollback}.",

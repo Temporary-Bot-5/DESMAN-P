@@ -7,6 +7,7 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -66,7 +67,7 @@ class FakeRunner:
             code = 1 if self.health_fails else 0
         elif args[:3] == ["systemctl", "--user", "restart"] and self.bump:
             self.bump = False
-            with sqlite3.connect(self.directory / store.DB_NAME) as conn:
+            with closing(sqlite3.connect(self.directory / store.DB_NAME)) as conn, conn:
                 conn.execute(f"PRAGMA user_version={len(store.MIGRATIONS) + 1}")
                 conn.execute("CREATE TABLE migration_marker (n)")
         if self.fail is not None and self.fail in args:
@@ -307,7 +308,13 @@ def test_local_git_selects_only_merged_releases(tmp_path: Path, clock: FakeClock
 
     def git(*args: str, cwd: Path = tmp_path) -> str:
         return subprocess.run(
-            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True, timeout=30
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            encoding="utf-8",
         ).stdout.strip()
 
     git("init", "--bare", str(origin))
@@ -315,23 +322,23 @@ def test_local_git_selects_only_merged_releases(tmp_path: Path, clock: FakeClock
     git("config", "user.email", "test@example.invalid", cwd=app)
     git("config", "user.name", "Test", cwd=app)
     git("checkout", "-b", "master", cwd=app)
-    (app / "file").write_text("one")
+    (app / "file").write_text("one", encoding="utf-8")
     git("add", ".", cwd=app)
     git("commit", "-m", "one", cwd=app)
     git("tag", "v0.2.0-test1", cwd=app)
     git("tag", "v0.2.0", cwd=app)
     old = git("rev-parse", "HEAD", cwd=app)
-    (app / "file").write_text("two")
+    (app / "file").write_text("two", encoding="utf-8")
     git("commit", "-am", "two", cwd=app)
     git("tag", "v0.2.1-test1", cwd=app)
     prerelease = git("rev-parse", "HEAD", cwd=app)
-    (app / "file").write_text("release")
+    (app / "file").write_text("release", encoding="utf-8")
     git("commit", "-am", "release", cwd=app)
     git("tag", "-a", "v0.2.1", "-m", "release", cwd=app)
     new = git("rev-parse", "HEAD", cwd=app)
     git("push", "origin", "master", "--tags", cwd=app)
     git("checkout", "-b", "side", cwd=app)
-    (app / "file").write_text("side")
+    (app / "file").write_text("side", encoding="utf-8")
     git("commit", "-am", "side", cwd=app)
     git("tag", "v99", cwd=app)
     git("push", "origin", "side", "--tags", cwd=app)
@@ -395,30 +402,37 @@ def test_preupdate_backup_rotation(setup: tuple[Path, FakeRunner], clock: FakeCl
     folder = directory / "backups"
     folder.mkdir()
     for day in range(1, 17):
-        (folder / f"registry-preupdate-202501{day:02}-000000Z.db").write_text("old")
+        (folder / f"registry-preupdate-202501{day:02}-000000Z.db").write_text(
+            "old", encoding="utf-8"
+        )
     retained = [
         "registry-preupdate-manual.db",
         "registry-20250101-000000Z.db",
         "registry-preupdate-29990101-000000Z.db",
     ]
     for name in retained:
-        (folder / name).write_text("keep")
+        (folder / name).write_text("keep", encoding="utf-8")
     assert execute(directory, runner, clock)[1]
-    assert all((folder / name).read_text() == "keep" for name in retained)
+    assert all((folder / name).read_text(encoding="utf-8") == "keep" for name in retained)
     assert not (folder / "registry-preupdate-20250101-000000Z.db").exists()
     assert len(list(folder.iterdir())) == 17
 
 
-def test_restore_removes_wal_and_shm(setup: tuple[Path, FakeRunner], clock: FakeClock) -> None:
+def test_restore_with_open_connection(setup: tuple[Path, FakeRunner], clock: FakeClock) -> None:
     directory, _ = setup
     backup = update._backup(directory, clock())
     path = directory / store.DB_NAME
-    for suffix in ("-wal", "-shm"):
-        Path(str(path) + suffix).write_bytes(b"stale")
-    update._restore(directory, backup)
-    assert not Path(str(path) + "-wal").exists()
-    assert not Path(str(path) + "-shm").exists()
-    assert update._schema(path) == len(store.MIGRATIONS)
+    with closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute("PRAGMA user_version=999")
+        conn.execute("CREATE TABLE migration_marker (n)")
+        conn.commit()
+        update._restore(directory, backup)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.MIGRATIONS)
+        assert (
+            conn.execute("SELECT name FROM sqlite_master WHERE name='migration_marker'").fetchone()
+            is None
+        )
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     if sys.platform != "win32":
         assert path.stat().st_mode & 0o777 == 0o600
 
@@ -606,7 +620,7 @@ def test_explicit_non_new_tag(setup: tuple[Path, FakeRunner], clock: FakeClock, 
 @pytest.mark.parametrize("raw", [None, "garbage", "null", "[]", "42", "{}"])
 @pytest.mark.parametrize("action", ["update_waiting", "update_failed"])
 def test_health_bad_details(raw: str | None, action: str) -> None:
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         conn.execute("CREATE TABLE registry_log (seq INTEGER, action TEXT, details_json TEXT)")
         conn.execute("INSERT INTO registry_log VALUES (1, ?, ?)", (action, raw))
         check = update.update_health(conn)
@@ -617,7 +631,7 @@ def test_health_schema_failure_skips_update(
     setup: tuple[Path, FakeRunner], clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     directory, _ = setup
-    with sqlite3.connect(directory / store.DB_NAME) as conn:
+    with closing(sqlite3.connect(directory / store.DB_NAME)) as conn, conn:
         conn.execute("PRAGMA user_version=1")
 
     def forbidden(conn: sqlite3.Connection) -> admin.HealthCheck:
@@ -659,3 +673,23 @@ def test_health_json_is_untranslated(ready: Path, monkeypatch: pytest.MonkeyPatc
     assert (
         next(c for c in checks if c["name"] == "update")["message"] == "waiting unknown schema v9"
     )
+
+
+def test_restore_failure_detail_is_journaled(
+    setup: tuple[Path, FakeRunner], clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory, fake = setup
+    fake.health_fails = True
+    fake.bump = True
+
+    def broken(directory: Path, backup: Path) -> None:
+        raise sqlite3.OperationalError("restore test failure")
+
+    monkeypatch.setattr(update, "_restore", broken)
+    assert not execute(directory, fake, clock, allow_schema=True)[1]
+    details = entries(directory)[-1].details
+    assert details["rolled_back"] is False
+    assert details["rollback_errors"] == [
+        {"step": "restore database", "reason": "restore test failure"}
+    ]
+    assert fake.calls[-2] == ["systemctl", "--user", "restart", "desman-registry.service"]

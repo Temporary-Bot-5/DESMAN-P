@@ -32,7 +32,7 @@ SLOW = 120  # seconds a scripted reply "takes": the run is always killed long be
 
 
 def write(path: Path, data: Any) -> Path:
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
 
@@ -113,6 +113,7 @@ def resume(path: Path, script: Path) -> tuple[subprocess.CompletedProcess[str], 
         capture_output=True,
         text=True,
         timeout=60,
+        encoding="utf-8",
     )
     return done, time.monotonic() - started
 
@@ -231,7 +232,7 @@ sys.exit(0 if loop.run(task_id).status.value == "done" else 1)
 def test_checkpoint_survives_sigkill_and_reaches_the_next_executor(tmp_path: Path) -> None:
     path = tmp_path / "desman.db"
     worker = tmp_path / "worker.py"
-    worker.write_text(WORKER)
+    worker.write_text(WORKER, encoding="utf-8")
     conn = db.open_db(path)
     spec = TaskSpec(
         goal="g", subtasks=[SubtaskSpec(description="long job", acceptance_criteria="ok")]

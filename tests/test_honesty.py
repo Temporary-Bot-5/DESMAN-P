@@ -374,7 +374,7 @@ def test_a_template_plan_is_held_to_running_code_when_the_person_says_so(tmp_pat
 
     script = tmp_path / "script.json"
     routes = [{"match": "Execute", "steps": ['{"stdout": "5"}'], "repeat_last": True}]
-    script.write_text(json.dumps({"routes": routes}))
+    script.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     args = ["run", "run calc.py and show its output", "--plan", "template", "--runs-code"]
     result = CliRunner().invoke(cli, [*args, "--fake-llm", str(script)])
     assert result.exit_code == EXIT_NEEDS_HUMAN, result.output
@@ -473,7 +473,7 @@ def test_a_hard_link_in_a_workspace_is_never_read_or_listed(tmp_path: Path) -> N
     from desman.core.workspace import PathEscapeError
 
     outside = tmp_path / "secret.txt"
-    outside.write_text("not the task's")
+    outside.write_text("not the task's", encoding="utf-8")
     workspace = Workspace(tmp_path / "ws", "a" * 32)
     workspace.write("own.txt", "mine")
     os.link(outside, workspace.root / "linked.txt")

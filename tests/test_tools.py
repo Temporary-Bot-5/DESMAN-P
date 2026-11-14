@@ -271,7 +271,7 @@ def test_executor_writes_files_through_tool_calls(
     root = tmp_path / "ws"
     coordinator = Coordinator(store, llm_executor(llm), accept, workspaces=root, sleep=clock.sleep)
     assert coordinator.run(task_id).status is TaskStatus.DONE
-    assert (root / task_id / "note.md").read_text() == "hello"
+    assert (root / task_id / "note.md").read_text(encoding="utf-8") == "hello"
     [sub] = store.list_subtasks(task_id)
     assert store.latest_artifact(sub.id) == {"summary": "wrote note.md", "files": ["note.md"]}
 

@@ -110,7 +110,8 @@ def test_cli_waits_only_for_short_provider_pauses(
                     {"match": "Review", "steps": ['{"verdict":"accept"}']},
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     args = [command, "goal", "--db", str(path), "--fake-llm", str(script)]
     if command == "resume":

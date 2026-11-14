@@ -126,7 +126,9 @@ def test_import_of_a_file_without_keys(tmp_path: Path) -> None:
 def test_config_reset() -> None:
     saved().save(make_config(api_keys={"GROQ_API_KEY": GROQ}))
     path = default_config_path()
-    (path.parent / ".config.json.abcdef123456.tmp").write_text("{}")  # left by a crash
+    (path.parent / ".config.json.abcdef123456.tmp").write_text(
+        "{}", encoding="utf-8"
+    )  # left by a crash
 
     kept = desman("config", "reset", input="n\n")
     assert kept.exit_code == 1 and path.exists()

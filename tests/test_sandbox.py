@@ -227,7 +227,8 @@ def test_without_a_working_bwrap_nothing_runs(ws: Workspace, tmp_path: Path) -> 
         missing().run(["touch", "x"], ws.root)
     refusing = tmp_path / "bwrap"
     refusing.write_text(
-        "#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n"
+        "#!/bin/sh\necho 'bwrap: No permissions to create new namespace' >&2\nexit 1\n",
+        encoding="utf-8",
     )
     refusing.chmod(0o755)
     sandbox = Sandbox(bwrap=str(refusing))
@@ -404,7 +405,7 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
         {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
     ]
     script = tmp_path / "fake.json"
-    script.write_text(json.dumps({"routes": routes}))
+    script.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     monkeypatch.setattr(runs_module, "Sandbox", missing)
     warning = "shell_execution is on, but there is no sandbox to run commands in"
 

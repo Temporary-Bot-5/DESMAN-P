@@ -289,7 +289,7 @@ def test_run_on_a_real_provider_logs_its_calls(mock_http: Callable[[Handler], No
 
 def test_run_refuses_fake_and_real_together(tmp_path: Any) -> None:
     script = tmp_path / "s.json"
-    script.write_text('{"steps": []}')
+    script.write_text('{"steps": []}', encoding="utf-8")
     result = desman("run", "g", "--fake-llm", str(script), "--provider", "groq")
     assert result.exit_code == 2 and "drop --provider" in result.output
 

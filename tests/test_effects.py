@@ -196,7 +196,9 @@ def test_a_repeatable_call_is_run_again_after_an_interruption(
 
     box = toolbox(store, crash_and_reclaim(store), tmp_path, registry(bump_tool([])))
     result = box.call(ToolCall(tool="write_file", args=args.model_dump()))
-    assert result.ok and (tmp_path / claimed.task_id / "a.txt").read_text() == "hello"
+    assert (
+        result.ok and (tmp_path / claimed.task_id / "a.txt").read_text(encoding="utf-8") == "hello"
+    )
     [row] = store.effects(claimed.id, 0)
     assert row["state"] == "done"
 
@@ -221,7 +223,7 @@ def test_reads_are_replayed_as_they_were(store: Store, claimed: Subtask, tmp_pat
     # Read now, the file would say "final": the replay shows what the run saw at this point.
     assert box.call(read("a.txt")) == seen and seen.output["content"] == "draft"
     box.call(write("a.txt", "final"))
-    assert (tmp_path / claimed.task_id / "a.txt").read_text() == "final"
+    assert (tmp_path / claimed.task_id / "a.txt").read_text(encoding="utf-8") == "final"
 
 
 def test_a_resume_from_a_checkpoint_replays_from_there(
