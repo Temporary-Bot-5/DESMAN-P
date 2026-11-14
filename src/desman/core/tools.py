@@ -91,6 +91,8 @@ class ToolCall(BaseModel):
 class ToolResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    at: str | None = None
+    """UTC completion time from the effects journal, when journaled."""
     ok: bool
     output: Any = None
     """JSON: what the tool returned."""
@@ -181,7 +183,7 @@ class Journal(Protocol):
         (the intent is then recorded). Raises StaleStateError if the lease is lost."""
         ...
 
-    def finish(self, result: ToolResult) -> None:
+    def finish(self, result: ToolResult) -> ToolResult:
         """After the call `begin` let run: its result, for replays."""
         ...
 
@@ -291,7 +293,7 @@ class Toolbox:
                 self.record(tool.records, summarize(output))
             result = ToolResult(ok=True, output=output)
         if journal is not None:
-            journal.finish(result)
+            result = journal.finish(result)
         return result
 
     def _failed(self, summary: dict[str, Any], error: str) -> ToolResult:
@@ -468,7 +470,8 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         "other files. Time, memory, file size and processes are limited. Returns {exit_code, "
         "stdout, stderr}; timed_out: true when it was killed (exit_code null), stdout_cut / "
         "stderr_cut when output was cut (the start of stdout and the end of stderr are kept). "
-        "An exit code of 128+N means killed by signal N.",
+        "An exit code of 128+N means killed by signal N. python3 -m pytest is available; "
+        "there is no network, so nothing can be pip-installed.",
         args=RunCommandArgs,
         permission=Permission.SHELL,
         run=run,

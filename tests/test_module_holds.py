@@ -333,7 +333,7 @@ def test_one_remaining_module_does_not_wait_for_missing_alternate(clock: FakeClo
     models = runs.models(cfg, conn, provider="groq", cache=False, clock=clock, sleep=clock.sleep)
     main, alternate = models.labels(store.list_subtasks(identity)[0])
     assert main == lineup[0].label
-    assert alternate in {main, None}
+    assert alternate in {(main,), None}
     conn.close()
 
 

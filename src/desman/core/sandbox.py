@@ -24,6 +24,14 @@ When `bwrap` (or `prlimit`) is missing or cannot create namespaces (some distrib
 it to unprivileged users), the sandbox is *unavailable*: `run` refuses, and the tool that needs
 it is not offered (`Tool.ready`). There is no fallback to running code unconfined.
 
+Only pytest and its runtime imports (pytest, _pytest, pluggy, iniconfig, packaging, pygments,
+and py.py when present) are bound read-only from the running interpreter under
+/opt/desman/python, so generated tests can run without exposing other site-packages.
+
+A standalone Python tree holds only the interpreter and its standard library. When
+DESMAN uses one outside /usr, it is bound at /opt/desman/runtime so pytest runs with
+the Python version it was installed for.
+
 Known limits: the workspace is the disk the code may fill (each file is capped, the number of
 files is not); `/usr` is readable (system files only, nothing of the person's).
 """
@@ -32,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import importlib.util
 import os
 import selectors
 import shutil
@@ -162,6 +171,25 @@ class Sandbox:
             "/usr",
             "/usr",
         ]
+        runtime = Path(sys.base_prefix).resolve()
+        if not runtime.is_relative_to("/usr"):
+            target = "/opt/desman/runtime"
+            argv += ["--ro-bind", str(runtime), target]
+            argv += ["--setenv", "PATH", target + "/bin:" + SANDBOX_PATH]
+            # An interpreter linked to its own libpython (setup-python's builds) finds it by
+            # the path it was built at, which is not there: point the loader at the bind.
+            argv += ["--setenv", "LD_LIBRARY_PATH", target + "/lib"]
+            if not (runtime / "bin/python3").exists():
+                # A new bin mount lets bwrap add the alias without writing to the
+                # read-only interpreter tree. Keep every original entry read-only.
+                argv += ["--tmpfs", target + "/bin"]
+                for executable in sorted((runtime / "bin").iterdir()):
+                    argv += ["--ro-bind", str(executable), target + "/bin/" + executable.name]
+                argv += [
+                    "--symlink",
+                    f"python{sys.version_info.major}.{sys.version_info.minor}",
+                    target + "/bin/python3",
+                ]
         for name in _SYSTEM_LINKS:
             path = Path(name)
             if path.is_symlink():
@@ -170,6 +198,15 @@ class Sandbox:
                 argv += ["--ro-bind", name, name]
         for name in _SYSTEM_FILES:
             argv += ["--ro-bind-try", name, name]
+        argv += ["--setenv", "PYTHONPATH", "/opt/desman/python"]
+        for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
+            spec = importlib.util.find_spec(name)
+            if spec is None or spec.origin is None:
+                continue
+            package = spec.submodule_search_locations is not None
+            source = Path(spec.origin).parent if package else Path(spec.origin)
+            target = name if package else name + ".py"
+            argv += ["--ro-bind", str(source), "/opt/desman/python/" + target]
         argv += [
             "--proc",
             "/proc",

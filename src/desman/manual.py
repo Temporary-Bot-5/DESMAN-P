@@ -56,7 +56,8 @@ TOPICS: Final = (
         "permissions`) and a working sandbox. A subtask that must run code is marked so by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with the reason, and "
         "with it its result counts only if the code really ran. No part of DESMAN reports "
-        "what code would print without running it.\n"
+        "what code would print without running it. python3 -m pytest is available in the "
+        "sandbox; nothing can be pip-installed because it has no network.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "A retelling shows code only as the task left it.",
     ),

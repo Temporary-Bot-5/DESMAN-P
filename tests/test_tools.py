@@ -281,7 +281,12 @@ def test_executor_writes_files_through_tool_calls(
     assert '"tool_calls"' in first.messages[0].content
     assert second.prompt.startswith(f"{TOOL_RESULTS}:\n")
     assert json.loads(second.prompt.split("\n", 1)[1]) == [
-        {"tool": "write_file", "ok": True, "output": {"path": "note.md", "chars": 5}}
+        {
+            "tool": "write_file",
+            "at": "2026-01-01T00:00:00Z",
+            "ok": True,
+            "output": {"path": "note.md", "chars": 5},
+        }
     ]
     results = json.loads(third.prompt.split("\n", 1)[1])
     assert results[0]["output"]["content"] == "hello"
@@ -308,7 +313,7 @@ def test_malformed_tool_calls_get_the_repair_request(
 ) -> None:
     llm = FakeLLM().on(
         "Execute",
-        '{"tool_calls": [{"name": "write_file"}]}',  # "tool" missing, "name" not allowed
+        '{"tool_calls": [{"arguments": {}}]}',  # neither "tool" nor its "name" alias
         '{"done": true}',
     )
     task_id = store.create_task(one_step())

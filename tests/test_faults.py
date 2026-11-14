@@ -73,7 +73,9 @@ def test_the_faults_and_their_recoveries_all_happen(tmp_path: Path) -> None:
     faults: Counter[str] = Counter()
     actions: Counter[str] = Counter()
     statuses: Counter[TaskStatus] = Counter()
-    for seed in range(8):
+    # Plain executor prose is now a result, which changes the simulated fault schedule.
+    # Keep enough seeds to exercise every recovery without weakening the assertions.
+    for seed in range(16):
         report = run(tmp_path, seed)
         faults += report.faults
         actions += report.actions
