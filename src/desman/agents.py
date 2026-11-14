@@ -49,9 +49,9 @@ from desman.core.coordinator import (
 )
 from desman.core.models import Kind, Subtask
 from desman.core.retry import FailureKind, Strategy
-from desman.core.tools import ToolCall, normalize_tool_calls
 from desman.llm.base import LLM, Message, Request
 from desman.llm.structured import StructuredOutputError, complete_json
+from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 from desman.prompting import today
 
 T = TypeVar("T", bound=BaseModel)

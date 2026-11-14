@@ -163,7 +163,7 @@ def needs_run(sub: PlannedSubtask, kind: Kind) -> bool:
     return sub.runs_code and (
         kind is not Kind.TEXT
         or re.search(
-            r"\b(?:program|script|code|test|command|программ|скрипт|код|тест|команд)",
+            r"\b(?:run|execute|python|bash|shell|pytest|program|script|code|test|command|запуст|выполн|исполн|программ|скрипт|код|тест|команд)|\.(?:py|sh|js)\b",
             sub.description,
             re.I,
         )

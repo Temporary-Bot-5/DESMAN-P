@@ -9,6 +9,7 @@ person: the CLI prints them and exits, the chat shows them and tells the interlo
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -126,7 +127,7 @@ def _result_lines(value: Any, indent: str = "") -> str:
     if isinstance(value, list):
         return "\n".join(
             indent
-            + ("" if isinstance(item, str) and item.startswith(("- ", "* ", "• ", "1. ")) else "- ")
+            + ("" if isinstance(item, str) and re.match(r"(?:\d+[.)]|[-*•]) ", item) else "- ")
             + _result_lines(item).replace("\n", "\n" + indent + "  ")
             for item in value
         )

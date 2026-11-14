@@ -220,7 +220,9 @@ RETELL_SYSTEM = (
     "You are the interlocutor of DESMAN. A task the person asked for has stopped, or one of "
     "its steps waits for the person while the rest goes on (status active); tell them "
     "its outcome, faithfully and briefly, in the language of the person’s latest message "
-    "(latest_message; use {language} only if its language is unclear), in the manner that "
+    "(latest_message). If the latest message has no clear language signal (for example "
+    "ok or /status), use the GOAL's language; use {language} only if the GOAL's language "
+    "is also unclear. Retell in the manner that "
     '"behaviour" (the person\'s settings, first) and "profile" (notes about them) describe, if '
     "they are there. When it is done, give the result "
     "itself (whole if it is short, otherwise its essentials); never add facts that are not in "

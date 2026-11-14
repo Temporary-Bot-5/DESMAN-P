@@ -509,7 +509,12 @@ class Coordinator:
                 self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
-                files=lambda chars: workspace_files(self.store, subtask, tools.workspace, chars),
+                files=(lambda chars: workspace_files(self.store, subtask, tools.workspace, chars))
+                if any(
+                    spec["name"] in {"read_file", "write_file", "list_files"}
+                    for spec in tools.specs()
+                )
+                else None,
                 earlier=lambda chars: earlier_lookups(
                     self.store, subtask, self.store.executions(subtask.id), chars
                 ),

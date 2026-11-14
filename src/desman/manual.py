@@ -50,7 +50,7 @@ TOPICS: Final = (
         "chat lists its files and folder. A task sees only its folder: when "
         'a request builds on what an earlier task of the same chat wrote ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "originals stay unchanged. On retries the executor sees existing files and "
+        "originals stay unchanged. On retries, with file tools, it sees work files and "
         "resets or rewrites stale demonstration state and files that contradict its result.\n"
         "Running code (a test, a crash test, checking what a program prints) needs the "
         "run_command tool, which needs the person's shell_execution switch (`desman "
@@ -243,7 +243,7 @@ TOPICS: Final = (
     Topic(
         "language",
         "the chat language and confirmed language changes",
-        "Configure the language with `desman language CODE`. Replies always follow the latest message’s language, using the configured interface language only when unclear. The language command is proposed only when the person explicitly asks to change the interface language.",
+        "Configure the language with `desman language CODE`. Replies follow the latest message’s language. Retellings fall back to the goal’s language when the latest message gives no signal (ok, /status), then to the interface language. Other replies fall back to the interface language. The language command is proposed only when the person explicitly asks to change the interface language.",
     ),
     Topic(
         "data",

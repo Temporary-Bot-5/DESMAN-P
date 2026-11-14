@@ -51,7 +51,7 @@ from desman.core.context import (
 from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import Replayed, Tool, ToolResult
-from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
+from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
 
 INTERRUPTED: Final = (
     "this exact call was started by an earlier run of this subtask and interrupted before it "
@@ -301,6 +301,8 @@ def workspace_files(
     store: Store, subtask: Subtask, workspace: Workspace, chars: int
 ) -> list[dict[str, Any]]:
     """Bounded retry inventory; a successful write's journal identifies its attempt."""
+    if chars <= 0:
+        return []
     writers: dict[str, int] = {}
     starts = store.conn.execute(
         "SELECT details_json FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started' ORDER BY seq",
@@ -323,15 +325,19 @@ def workspace_files(
                 writers[result.output["path"]] = attempts[execution]
     out: list[dict[str, Any]] = []
     for path in workspace.files():
+        if chars <= 0:
+            break
+        if not is_work_file(path):
+            continue
         try:
-            item: dict[str, Any] = {"path": path, "size": len(workspace.read(path))}
+            item: dict[str, Any] = {"path": path, "size": workspace.size(path)}
         except (OSError, PathEscapeError):
             continue
         if path in writers:
             item["earlier_attempt"] = writers[path]
         cost = len(json.dumps(item, ensure_ascii=False)) + 2
         if cost > chars:
-            continue
+            break
         out.append(item)
         chars -= cost
     return out

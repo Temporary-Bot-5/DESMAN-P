@@ -197,5 +197,5 @@ class ProviderUnavailable(ProviderError):
         self.status = status
 
 
-class RequestTooLarge(ProviderUnavailable):
+class RequestTooLarge(ProviderRejected):
     """The request exceeds a provider's token ceiling; another model may take it."""

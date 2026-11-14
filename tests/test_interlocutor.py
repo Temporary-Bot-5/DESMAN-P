@@ -693,4 +693,4 @@ def test_retelling_uses_latest_message_even_when_task_goal_and_interface_are_eng
     assert outcome["goal"] == "Find cheap flights to Lisbon"
     system = retold.messages[0].content
     assert "person’s latest message" in system
-    assert "only if its language is unclear" in system
+    assert "only if the GOAL's language" in system

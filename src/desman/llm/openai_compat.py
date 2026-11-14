@@ -34,7 +34,6 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from desman.core.tools import ToolCall, normalize_tool_calls
 from desman.llm.base import (
     Completion,
     GenerationFailed,
@@ -48,6 +47,7 @@ from desman.llm.base import (
     RequestTooLarge,
     Usage,
 )
+from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_LIMIT_PAUSE = 60.0  # a rate limit without a hint
@@ -254,8 +254,6 @@ class OpenAICompatible:
                     if self.monotonic() - started >= self.timeout:
                         raise httpx.ReadTimeout("whole-call deadline exceeded")
                     chunks.append(chunk)
-                if self.monotonic() - started >= self.timeout:
-                    raise httpx.ReadTimeout("whole-call deadline exceeded")
                 response = httpx.Response(
                     response.status_code,
                     headers={k: v for k, v in response.headers.items() if k != "content-encoding"},

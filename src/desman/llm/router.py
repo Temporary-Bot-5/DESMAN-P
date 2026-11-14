@@ -22,7 +22,6 @@ to the next key when one is refused or limited).
 
 from __future__ import annotations
 
-import json
 import random
 import sqlite3
 import time
@@ -438,19 +437,18 @@ def request_ceiling(choice: Choice, conn: sqlite3.Connection | None = None) -> i
     ceiling = choice.spec.request_tokens
     if choice.provider.id != "groq" or conn is None:
         return ceiling
-    rows = conn.execute(
-        "SELECT limits_json FROM model_calls WHERE provider = ? AND model = ? "
-        "AND limits_json != '{}' ORDER BY seq DESC",
+    row = conn.execute(
+        "SELECT json_extract(limits_json, '$.\"x-ratelimit-limit-tokens\"') "
+        "FROM model_calls WHERE provider = ? AND model = ? "
+        "AND CAST(json_extract(limits_json, '$.\"x-ratelimit-limit-tokens\"') AS INTEGER) > 0 "
+        "ORDER BY seq DESC LIMIT 1",
         (choice.provider.id, choice.model),
-    )
-    for row in rows:
-        value = json.loads(row[0]).get("x-ratelimit-limit-tokens")
+    ).fetchone()
+    if row is not None:
         try:
-            reported = int(value)
+            return int(row[0])
         except (ValueError, TypeError):
-            continue
-        if reported > 0:
-            return reported
+            pass
     return ceiling
 
 
@@ -573,12 +571,15 @@ class Fallback:
                 and not any(known.id == m[1].model for known in catalog.models_of(m[1].provider))
             )
         ]
+        ceilings = {
+            choice.label: request_ceiling(choice, self.conn)
+            for _, choice in self.members
+            if choice is not None
+        }
         members = [
             m
             for m in (large or fit)
-            if m[1] is None
-            or (ceiling := request_ceiling(m[1], self.conn)) is None
-            or ceiling >= need
+            if m[1] is None or (ceiling := ceilings[m[1].label]) is None or ceiling >= need
         ]
         for llm, choice in self.members:
             if (llm, choice) not in members:
@@ -589,7 +590,7 @@ class Fallback:
                         needed=need,
                         context=min(
                             choice.spec.context,
-                            request_ceiling(choice, self.conn) or choice.spec.context,
+                            ceilings[choice.label] or choice.spec.context,
                         )
                         if choice
                         else None,
@@ -599,9 +600,7 @@ class Fallback:
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
             largest = max(
-                request_ceiling(choice, self.conn) or 0
-                for _, choice in (large or fit)
-                if choice is not None
+                ceilings[choice.label] or 0 for _, choice in (large or fit) if choice is not None
             )
             raise ProviderRejected(
                 self.name,

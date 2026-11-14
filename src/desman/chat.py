@@ -2245,7 +2245,6 @@ class Chat:
             return
         self._erase()
         self.temporary = temporary
-        self.waiting.new()
         self._terminal_started = db.to_iso(self.sessions.clock())
         self._terminal_floor = int(
             self.sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]

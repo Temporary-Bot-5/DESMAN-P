@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from desman.core.context import CHARS_PER_TOKEN
-from desman.core.workspace import PathEscapeError, Workspace
+from desman.core.workspace import PathEscapeError, Workspace, is_work_file
 
 FILE_TOKENS = 3000
 """How much of the files' texts the retelling sees, all of them together."""
@@ -61,10 +61,10 @@ def listing(root: Path, task_id: str) -> list[File]:
         return []
     found = []
     for path in workspace.files():
-        if any(part in {"__pycache__", ".pytest_cache"} for part in Path(path).parts[:-1]):
+        if not is_work_file(path):
             continue
         try:
-            found.append(File(path, len(workspace.read(path))))
+            found.append(File(path, workspace.size(path)))
         except (OSError, PathEscapeError):
             continue  # changed meanwhile: what is listed can be read back
     return found
