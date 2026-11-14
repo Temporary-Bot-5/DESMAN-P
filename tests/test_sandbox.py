@@ -73,9 +73,11 @@ def test_code_works_in_the_workspace_and_its_files_stay(ws: Workspace) -> None:
 @confined
 def test_generated_tests_run_with_pytest(ws: Workspace) -> None:
     ws.write("test_x.py", "def test_one():\n    assert 1 + 1 == 2\n")
-    outcome = run(ws, "python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", timeout=60)
+    outcome = run(ws, "python3", "-m", "pytest", "-q", timeout=60)
     assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
     assert "1 passed" in outcome.stdout
+    assert not (ws.root / ".pytest_cache").exists()
+    assert not (ws.root / "__pycache__").exists()
 
 
 @confined
@@ -118,7 +120,19 @@ def test_the_environment_is_cleared(ws: Workspace, monkeypatch: pytest.MonkeyPat
     outcome = py(ws, "import os, json; print(json.dumps(dict(os.environ)))")
     env = json.loads(outcome.stdout)
     assert "GROQ_API_KEY" not in env and "gsk_secret" not in outcome.stdout
-    assert set(env) <= {"PATH", "HOME", "TMPDIR", "LANG", "PWD", "PYTHONPATH", "LD_LIBRARY_PATH"}
+    assert set(env) <= {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "LANG",
+        "PWD",
+        "PYTHONPATH",
+        "LD_LIBRARY_PATH",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTEST_ADDOPTS",
+    }
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTEST_ADDOPTS"] == "-p no:cacheprovider"
     assert env.get("PYTHONPATH", "/opt/desman/python") == "/opt/desman/python"
 
 

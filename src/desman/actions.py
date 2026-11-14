@@ -103,6 +103,8 @@ def result_text(result: Any) -> str:
         inner = result.get("result") if result.get("type") == "result" else None
         if inner is not None:
             return result_text(inner)
+        if result.get("type") == "result":
+            result = {key: value for key, value in result.items() if key != "type"}
         for key in ("content", "text", "answer", "result", "output"):
             if isinstance(result.get(key), str):
                 return str(result[key])
@@ -123,7 +125,9 @@ def _result_lines(value: Any, indent: str = "") -> str:
         return "\n".join(lines)
     if isinstance(value, list):
         return "\n".join(
-            indent + "- " + _result_lines(item).replace("\n", "\n" + indent + "  ")
+            indent
+            + ("" if isinstance(item, str) and item.startswith(("- ", "* ", "• ", "1. ")) else "- ")
+            + _result_lines(item).replace("\n", "\n" + indent + "  ")
             for item in value
         )
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)

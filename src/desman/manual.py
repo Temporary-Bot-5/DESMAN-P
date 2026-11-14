@@ -45,24 +45,24 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Each task has a folder of its own (workspaces/TASK next to the database), where the "
+        "Each task has a folder (workspaces/TASK next to the database), where the "
         "executor reads and writes files with its tools; nothing outside it. After a task, the "
-        "chat lists its files and their folder itself. A task sees only its own folder: when "
+        "chat lists its files and folder. A task sees only its folder: when "
         'a request builds on what an earlier task of the same chat wrote ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "the original files stay as they were. On retries the executor sees existing files and "
+        "originals stay unchanged. On retries the executor sees existing files and "
         "resets or rewrites stale demonstration state and files that contradict its result.\n"
         "Running code (a test, a crash test, checking what a program prints) needs the "
         "run_command tool, which needs the person's shell_execution switch (`desman "
-        "permissions`) and a working sandbox. A subtask that must run code is marked so by the "
-        "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with the reason, and "
+        "permissions`) and a working sandbox. Code-running subtasks are marked by the "
+        "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
         "with it its result counts only if the code really ran. No part of DESMAN reports "
         "what code would print without running it. Web lookups and prose need no code run. "
         "Requested prose goes in the result; files are extra. Review requires web lookups for current facts and checks dates, sources and prose language, allowing names "
         "and requested translations. It sees current text of files written "
         "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
-        "DESMAN confirms actions. "
+        "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "A retelling shows code only as the task left it, in the language of your latest message.",
     ),
     Topic(

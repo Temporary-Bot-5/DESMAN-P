@@ -356,3 +356,38 @@ def test_simple_goals_and_readable_results_prompt_contracts() -> None:
     assert "Never decide from memory" in REVIEWER_EVIDENCE
     assert "search the web first" in REVIEWER_EVIDENCE
     assert "Never escalate for that omission" in REVIEWER_EVIDENCE
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="bubblewrap is Linux only")
+def test_sandbox_disables_generated_python_caches(tmp_path: Path) -> None:
+    argv = Sandbox(bwrap="bwrap", prlimit="prlimit")._argv(["python3"], tmp_path)
+    env = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTEST_ADDOPTS"] == "-p no:cacheprovider"
+
+
+def test_task_listing_omits_nested_cache_directories(tmp_path: Path) -> None:
+    from desman import task_files
+
+    ws = Workspace(tmp_path, "task")
+    for path in (
+        ".pytest_cache/a",
+        "nested/__pycache__/a.pyc",
+        "nested/.pytest_cache/b",
+        "answer.py",
+        "__pycache__.txt",
+    ):
+        ws.write(path, "x")
+    assert [f.path for f in task_files.listing(tmp_path, "task")] == [
+        "__pycache__.txt",
+        "answer.py",
+    ]
+
+
+@pytest.mark.parametrize("bullet", ["- ", "* ", "• ", "1. "])
+def test_result_summary_preserves_existing_bullets(bullet: str) -> None:
+    assert (
+        actions.result_text({"type": "result", "summary": [bullet + "**Период**", "plain"]})
+        == "summary:\n  " + bullet + "**Период**\n  - plain"
+    )
+    assert actions.result_text({"type": "error", "summary": ["plain"]}).startswith("type: error\n")

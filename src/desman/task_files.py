@@ -61,6 +61,8 @@ def listing(root: Path, task_id: str) -> list[File]:
         return []
     found = []
     for path in workspace.files():
+        if any(part in {"__pycache__", ".pytest_cache"} for part in Path(path).parts[:-1]):
+            continue
         try:
             found.append(File(path, len(workspace.read(path))))
         except (OSError, PathEscapeError):
