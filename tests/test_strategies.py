@@ -234,9 +234,9 @@ def test_a_coordinator_without_another_model_never_claims_a_switch(
 
 
 def test_an_unusable_reply_is_feedback_for_the_next_attempt(store: Store, clock: FakeClock) -> None:
-    from desman.llm.fake import ServerError, garbage
+    from desman.llm.fake import ServerError
 
-    prose = garbage("prose")
+    prose = "{broken"
     main = FakeLLM().on("Execute", prose, prose, ServerError(status=503), '{"v": 1}')
     main.on("Review", ACCEPT)
     task_id = store.create_task(one_step())

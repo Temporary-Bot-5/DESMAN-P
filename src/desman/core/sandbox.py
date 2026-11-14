@@ -24,6 +24,10 @@ When `bwrap` (or `prlimit`) is missing or cannot create namespaces (some distrib
 it to unprivileged users), the sandbox is *unavailable*: `run` refuses, and the tool that needs
 it is not offered (`Tool.ready`). There is no fallback to running code unconfined.
 
+Only pytest and its runtime imports (pytest, _pytest, pluggy, iniconfig, packaging, pygments,
+and py.py when present) are bound read-only from the running interpreter under
+/opt/desman/python, so generated tests can run without exposing other site-packages.
+
 Known limits: the workspace is the disk the code may fill (each file is capped, the number of
 files is not); `/usr` is readable (system files only, nothing of the person's).
 """
@@ -32,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import importlib.util
 import os
 import selectors
 import shutil
@@ -170,6 +175,15 @@ class Sandbox:
                 argv += ["--ro-bind", name, name]
         for name in _SYSTEM_FILES:
             argv += ["--ro-bind-try", name, name]
+        argv += ["--setenv", "PYTHONPATH", "/opt/desman/python"]
+        for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
+            spec = importlib.util.find_spec(name)
+            if spec is None or spec.origin is None:
+                continue
+            package = spec.submodule_search_locations is not None
+            source = Path(spec.origin).parent if package else Path(spec.origin)
+            target = name if package else name + ".py"
+            argv += ["--ro-bind", str(source), "/opt/desman/python/" + target]
         argv += [
             "--proc",
             "/proc",

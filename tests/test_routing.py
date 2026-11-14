@@ -746,7 +746,10 @@ def test_an_unfit_model_is_avoided_by_the_kind_that_asks_it(store: Store, clock:
         )
     )
     code, text = store.list_subtasks(task_id)
-    assert models.labels(code) == ("mistral/codestral-latest", "mistral/mistral-small-latest")
+    assert models.labels(code) == (
+        "mistral/codestral-latest",
+        ("mistral/mistral-small-latest", "mistral/mistral-medium-latest"),
+    )
     assert models.labels(text)[0] == "mistral/mistral-small-latest"
     assert runs.summarizer(store, models).run(task_id).status is TaskStatus.DONE
     assert store.unfit_providers(task_id) == {"mistral/codestral-latest"}

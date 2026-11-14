@@ -71,6 +71,14 @@ def test_code_works_in_the_workspace_and_its_files_stay(ws: Workspace) -> None:
 
 
 @confined
+def test_generated_tests_run_with_pytest(ws: Workspace) -> None:
+    ws.write("test_x.py", "def test_one():\n    assert 1 + 1 == 2\n")
+    outcome = run(ws, "python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", timeout=60)
+    assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
+    assert "1 passed" in outcome.stdout
+
+
+@confined
 def test_there_is_no_network(ws: Workspace) -> None:
     outcome = py(
         ws,
@@ -102,7 +110,8 @@ def test_the_environment_is_cleared(ws: Workspace, monkeypatch: pytest.MonkeyPat
     outcome = py(ws, "import os, json; print(json.dumps(dict(os.environ)))")
     env = json.loads(outcome.stdout)
     assert "GROQ_API_KEY" not in env and "gsk_secret" not in outcome.stdout
-    assert set(env) <= {"PATH", "HOME", "TMPDIR", "LANG", "PWD"}
+    assert set(env) <= {"PATH", "HOME", "TMPDIR", "LANG", "PWD", "PYTHONPATH"}
+    assert env.get("PYTHONPATH", "/opt/desman/python") == "/opt/desman/python"
 
 
 @confined
@@ -392,3 +401,11 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
         and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
         in output
     )
+
+
+@confined
+def test_generated_pytest_runs(ws: Workspace) -> None:
+    ws.write("test_x.py", "def test_x():\n    assert 2 + 2 == 4\n")
+    result = run(ws, "python3", "-m", "pytest", "-q", "-p", "no:cacheprovider")
+    assert result.exit_code == 0, result.stderr
+    assert "1 passed" in result.stdout

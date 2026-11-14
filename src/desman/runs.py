@@ -99,7 +99,14 @@ class Models:
         """How the coordinator tells apart the models the executor asks for `subtask`."""
         main, other = self.executor(subtask.kind)
         with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=subtask.task_id)):
-            return label(main), None if other is None else label(other)
+            chain = other.current() if isinstance(other, Scoped) else other
+            choices = getattr(chain, "choices", None) if chain is not None else None
+            if choices and isinstance(chain, router.Fallback) and chain.order is not None:
+                choices = chain.order(choices)
+            alternatives = tuple(c.label for c in choices) if choices else None
+            if alternatives is not None and len(alternatives) == 1:
+                return label(main), alternatives[0]
+            return label(main), alternatives or (None if other is None else label(other))
 
     def first(self, role: calls.Role) -> router.Choice | None:
         """The model `role` asks first (None for a fake)."""

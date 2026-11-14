@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from desman.core import calls, db
 from desman.core.context import (
+    CHARS_PER_TOKEN,
     DEFAULT_BUDGET_TOKENS,
     Context,
     Knowledge,
@@ -54,7 +55,7 @@ from desman.core.context import (
     build_context,
     given,
 )
-from desman.core.effects import Effects
+from desman.core.effects import Effects, earlier_lookups
 from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
@@ -136,7 +137,11 @@ def is_error_report(content: dict[str, Any] | None) -> bool:
 
 def _error_reason(content: dict[str, Any]) -> str:
     reason = content.get("reason") or content.get("message") or "no reason given"
-    return f"executor reported an error: {str(reason)[:REASON_EXCERPT]}"
+    text = str(reason)
+    prefix = "executor reported an error: "
+    while text.startswith(prefix):
+        text = text[len(prefix) :]
+    return f"{prefix}{text[:REASON_EXCERPT]}"
 
 
 class Verdict(StrEnum):
@@ -174,8 +179,8 @@ class Work(BaseModel):
 
 
 Executor = Callable[[Work], Outcome]
-Labels = tuple[str, str | None]
-"""The executor's main model and its other one (None: no other), as `provider/model`."""
+Labels = tuple[str, str | tuple[str, ...] | None]
+"""The main model and alternatives (None: no other), as `provider/model` labels."""
 Decomposer = Callable[[Work], list[SubtaskSpec] | None]
 """Splits the subtask of `Work` into smaller ones (ROADMAP 2.9b); None if it cannot. Provider
 errors propagate like the executor's."""
@@ -495,6 +500,22 @@ class Coordinator:
                 strategy,
                 self._knowledge(subtask) if own else None,
             )
+            if attempt >= 2 and strategy is not Strategy.COMBINE:
+                used = sum(
+                    len(json.dumps(d.content, ensure_ascii=False, sort_keys=True))
+                    for d in context.dependencies
+                )
+                used += sum(len(node.text) for node in context.knowledge)
+                context = context.model_copy(
+                    update={
+                        "earlier_lookups": earlier_lookups(
+                            self.store,
+                            subtask,
+                            self.store.executions(subtask.id),
+                            max(0, self.context_budget_tokens * CHARS_PER_TOKEN - used),
+                        )
+                    }
+                )
             self._started(subtask, context)
             work = Work(
                 subtask=subtask,
@@ -773,12 +794,14 @@ class Coordinator:
 
     def _avoid(self, crew: Crew, subtask: Subtask, unfit: frozenset[str]) -> dict[str, bool]:
         """Which of the models the executor asks for `subtask` an execution of the task found
-        unfit (C.9): the other one is then not switched to; the main one is not asked while the
-        other is fit."""
+        unfit (C.9): switch to another model while any alternative is still fit."""
         if crew.providers is None:
             return {}
         main, other = crew.providers(subtask) if callable(crew.providers) else crew.providers
-        avoid_other = other is not None and among(other, unfit)
+        alternatives = (other,) if isinstance(other, str) else other
+        avoid_other = alternatives is not None and all(
+            among(candidate, unfit) for candidate in alternatives
+        )
         return {"avoid_main": among(main, unfit) and not avoid_other, "avoid_other": avoid_other}
 
     def _earliest(self, task_id: str | None, status: str, column: str) -> str | None:

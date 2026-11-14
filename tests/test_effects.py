@@ -172,7 +172,8 @@ def test_an_interrupted_call_is_not_run_again(
     box = toolbox(store, crash_and_reclaim(store), tmp_path, tools)
     box.call(bump(1))
     interrupted = box.call(bump(2))
-    assert interrupted == ToolResult(ok=False, error=INTERRUPTED)
+    assert interrupted == ToolResult(ok=False, error=INTERRUPTED, at=interrupted.at)
+    assert interrupted.at is not None
     assert ran == [1, 2]  # its effects may have happened: not risked twice
     action, details = tool_entries(store, claimed.task_id)[-1]
     assert action == "tool_replayed" and details["interrupted"] is True
@@ -370,6 +371,7 @@ def test_the_reviewer_sees_what_the_tools_gave_the_attempt_under_review(
     [call] = evidence(store, claimed)["tool_results"]
     assert call == {
         "tool": "bump",
+        "at": call["at"],
         "result": {"ok": True, "output": {"runs": 1}, "error": None},
         "truncated": False,
     }

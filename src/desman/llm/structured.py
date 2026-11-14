@@ -82,15 +82,20 @@ def complete_json(
     *,
     heading: str,
     keep: Callable[[T], bool] = lambda value: True,
+    plain: Callable[[str], T | None] | None = None,
 ) -> T:
     """Ask `llm` and return its reply validated as `schema`, repairing it once if needed.
 
     A valid reply is cached unless `keep(value)` says it is not worth reusing (e.g. a reply
     that reports a failure: asked again later, the model may succeed). Provider errors
-    propagate untouched: they are not the reply's fault.
+    propagate untouched: they are not the reply's fault. When no JSON object is found,
+    `plain` may accept the raw text as a value before spending a repair call; None keeps
+    the usual repair path. This hook is only used by the executor.
     """
     reply = _complete(llm, request)
     value, problem = _validate(reply, schema)
+    if value is None and json_object(reply.text) is None and plain is not None:
+        value = plain(reply.text)
     if value is not None:
         if keep(value):
             _accept(llm, request, reply)
@@ -112,6 +117,8 @@ def complete_json(
     )
     second = _complete(llm, repair)
     value, problem = _validate(second, schema)
+    if value is None and json_object(second.text) is None and plain is not None:
+        value = plain(second.text)
     if value is not None:
         if keep(value):
             _accept(llm, repair, second)

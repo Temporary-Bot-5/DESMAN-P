@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from pydantic import BaseModel
@@ -71,8 +72,9 @@ def evidence(
 ) -> dict[str, Any]:
     """What the result under review can rest on: the subtask's inputs, the accepted results of
     its dependencies, the knowledge tree's nodes it was given (looked up by `knowledge`), and
-    what the tools returned to the execution that handed it in (the latest one ended: a
-    rejected attempt's searches are not this result's). In call order, fitted to
+    what the latest execution returned, plus earlier web lookups of this same subtask
+    marked earlier_attempt. Latest results take budget first; older lookups share what
+    remains, newest execution first. In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
     shows its tool and its result."""
     execution = store.executions(subtask.id) - 1
@@ -104,9 +106,56 @@ def evidence(
             out["tool_results"].append({"tool": item["tool"], "result": None, "finished": False})
         else:
             out["tool_results"].append(
-                {"tool": item["tool"], "result": content, "truncated": not whole}
+                {
+                    "tool": item["tool"],
+                    "at": timestamp(item["finished_at"]),
+                    "result": content,
+                    "truncated": not whole,
+                }
             )
+    used = sum(shares) + sum(len(node.text) for node in nodes)
+    out["tool_results"].extend(
+        earlier_lookups(store, subtask, execution, max(0, budget_tokens * CHARS_PER_TOKEN - used))
+    )
     return out
+
+
+def timestamp(value: str | None) -> str | None:
+    """The journal's completion time, in UTC to whole seconds."""
+    if value is None:
+        return None
+    return (
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        .astimezone(UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def earlier_lookups(
+    store: Store, subtask: Subtask, before: int, chars: int
+) -> list[dict[str, Any]]:
+    """Finished web results before `before`, newest execution first, shared fairly."""
+    rows = [
+        row
+        for execution in range(before - 1, -1, -1)
+        for row in store.effects(subtask.id, execution)
+        if row["tool"] in ("web_search", "web_fetch") and row["state"] == "done"
+    ]
+    texts = [str(row["result_json"]) for row in rows]
+    shares = fair_shares([len(text) for text in texts], chars)
+    return [
+        {
+            "tool": row["tool"],
+            "at": timestamp(row["finished_at"]),
+            "earlier_attempt": True,
+            "untrusted": True,
+            "result": json.loads(text) if share >= len(text) else truncate(text, share),
+            "truncated": share < len(text),
+        }
+        for row, text, share in zip(rows, texts, shares, strict=True)
+        if share > 0
+    ]
 
 
 def _evidence_text(kind: str, item: Any) -> str:
@@ -162,7 +211,9 @@ class Effects:
             self._running = ordinal
             return None
         if past["state"] != "started":
-            result = ToolResult.model_validate_json(past["result_json"])
+            result = ToolResult.model_validate_json(past["result_json"]).model_copy(
+                update={"at": timestamp(past["finished_at"])}
+            )
             return Replayed(result, interrupted=past["state"] == "interrupted")
         if tool.repeatable:
             self.store.adopt_effect(self.subtask_id, self.lease, self.execution, ordinal)
@@ -177,16 +228,21 @@ class Effects:
             _stored(result),
             interrupted=True,
         )
-        return Replayed(result, interrupted=True)
+        return Replayed(result.model_copy(update={"at": self._at(ordinal)}), interrupted=True)
 
-    def finish(self, result: ToolResult) -> None:
+    def _at(self, ordinal: int) -> str | None:
+        row = self.store.effects(self.subtask_id, self.execution)[ordinal]
+        return timestamp(row["finished_at"])
+
+    def finish(self, result: ToolResult) -> ToolResult:
         assert self._running is not None, "no call was started"
         ordinal, self._running = self._running, None
         self.store.finish_effect(
             self.subtask_id, self.lease, self.execution, ordinal, _stored(result)
         )
+        return result.model_copy(update={"at": self._at(ordinal)})
 
 
 def _stored(result: ToolResult) -> dict[str, Any]:
-    stored: dict[str, Any] = result.model_dump(mode="json")
+    stored: dict[str, Any] = result.model_dump(mode="json", exclude={"at"})
     return stored

@@ -12,9 +12,9 @@
 "policy.toml" = "e1d97b1816a6ac8b7a61e8242d152eb654dff28b31d54685c82b4d71b8f82565"
 "core/policy.py" = "f05e222d40b3ec68582960f9095fd826a90f0edccd907d8fec8441957f6223da"
 # The reviewer (and the executor it judges).
-"agents.py" = "795cab579f988536c355e5c929baf153b8821cfa86dc4096a0f05632776bb689"
+"agents.py" = "2af42918e4220c8693cb3e6235770f3d7015297fbf061d438a0834a5c417a70d"
 # Security rules: the sandbox for generated code, the workspace guard for files.
-"core/sandbox.py" = "542dd5febdfa0a3745ad0752b6678580362a872d7fdec8eabe9c3066beca5abc"
+"core/sandbox.py" = "6ac578f2e36af4fbd0aac6dd61f3be6e244972b0f82b4ed851e4eab4a05cf5ff"
 "core/workspace.py" = "36f3ae20366db16c4e99ded0ac81d70f9a93856b9c75dcca0c5f984987951001"
 "core/atomic.py" = "08a1ada8de45275dbbbda0bb7d938f56f2003719efbc9d3c1bb6b918f04ab032"
 # Approval rules: who may take which edge (the operator's decisions), and this check.

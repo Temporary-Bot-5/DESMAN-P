@@ -119,7 +119,7 @@ def test_an_honest_not_found_is_no_reason_to_retry(store: Store) -> None:
 
 def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path: Path) -> None:
     # Each call: a reply, then (if unusable) one repair request.
-    llm = FakeLLM(garbage("prose"), garbage("not_object"), garbage("truncated"), '{"ok": 1}')
+    llm = FakeLLM("{bad", "{bad", garbage("truncated"), '{"ok": 1}')
     execute = llm_executor(llm)
     store.create_task(one_step())
     claimed = store.claim("w")
@@ -322,7 +322,8 @@ def test_an_error_report_is_not_cached(store: Store, tmp_path: Path) -> None:
         tools=Toolbox(Workspace(tmp_path, claimed.task_id)),
     )
     results = [execute(work) for _ in range(3)]
-    # The coordinator turns the report into a failed attempt; here it is just not kept.
-    assert results[0] == Success(content={"type": "error", "reason": "down"})
+    # An error with unused tools is a failure, and is never kept in the response cache.
+    assert isinstance(results[0], Failure)
+    assert "tools offered in this attempt" in results[0].reason
     assert results[1] == results[2] == Success(content={"ok": 1})  # this one is kept
     assert len(fake.calls) == 2

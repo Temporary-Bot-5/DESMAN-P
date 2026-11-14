@@ -90,6 +90,7 @@ class Context(BaseModel):
     dependencies: list[DependencyContext]
     knowledge: list[KnowledgeText] = []
     """What the planner chose of the knowledge tree for this subtask."""
+    earlier_lookups: list[dict[str, Any]] = []
     feedback: Feedback | None = None
     attempt: int = 1
     """1 for the first try; grows with every quality retry."""
