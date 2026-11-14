@@ -40,7 +40,7 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "A planner makes up to 8 text/code/analysis subtasks (template on failure). Executors work; reviewers accept or return feedback. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show completed results (up to 40 lines) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 knowledge-tree nodes (status lists them).",
+        "A planner uses one subtask for simple goals, up to 8 for tools/dependencies; template fallback. Executors work; reviewers judge. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show completed results (up to 40 lines) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 knowledge-tree nodes (status lists them).",
     ),
     Topic(
         "files",
@@ -58,11 +58,11 @@ TOPICS: Final = (
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with the reason, and "
         "with it its result counts only if the code really ran. No part of DESMAN reports "
         "what code would print without running it. Web lookups and prose need no code run. "
-        "The reviewer checks dates, named-source reading and prose language, allowing names "
+        "Requested prose goes in the result; files are extra. Review requires web lookups for current facts and checks dates, sources and prose language, allowing names "
         "and requested translations. It sees current text of files written "
-        "in the latest attempt, within its evidence budget. python3 -m pytest is available in the "
+        "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
-        "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
+        "DESMAN confirms actions. "
         "A retelling shows code only as the task left it, in the language of your latest message.",
     ),
     Topic(

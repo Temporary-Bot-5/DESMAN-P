@@ -291,3 +291,68 @@ def test_language_rule_distinguishes_requested_text_from_prose() -> None:
     assert "translation, a letter in" in LANGUAGE_RULES
     assert "must stay in that requested language" in LANGUAGE_RULES
     assert "when splitting a subtask" in LANGUAGE_RULES
+
+
+@pytest.mark.parametrize("step, times_out", [(20.0, True), (5.0, False)])
+def test_whole_call_deadline_stops_dribbling_body(step: float, times_out: bool) -> None:
+    from collections.abc import Iterator
+
+    elapsed = [0.0]
+    closed = []
+
+    class Body(httpx.SyncByteStream):
+        def __iter__(self) -> Iterator[bytes]:
+            for chunk in [b'{"choices":', b'[{"message":', b'{"content":"ok"}}]}']:
+                elapsed[0] += step
+                yield chunk
+
+        def close(self) -> None:
+            closed.append(True)
+
+    records: list[CallRecord] = []
+    llm = OpenAICompatible(
+        "openrouter",
+        "https://example.test/v1",
+        ["secret"],
+        "m",
+        timeout=60,
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200, stream=Body(), headers={"x-ratelimit-limit": "10"}
+                )
+            )
+        ),
+        monotonic=lambda: elapsed[0],
+        on_call=records.append,
+    )
+    if times_out:
+        with pytest.raises(ProviderTimeout):
+            llm.complete(REQUEST)
+        assert records[0].error_type == "ProviderTimeout"
+        assert records[0].response_hash is None
+    else:
+        assert llm.complete(REQUEST).text == "ok"
+        assert records[0].error_type is None
+    assert closed == [True]
+    assert len(records) == 1
+    assert records[0].latency_ms == int(step * 3000)
+    assert records[0].http_status == 200
+    assert records[0].limits == {"x-ratelimit-limit": "10"}
+
+
+def test_simple_goals_and_readable_results_prompt_contracts() -> None:
+    from desman.agents import EXECUTOR_SYSTEM, REVIEWER_EVIDENCE, REVIEWER_SYSTEM
+    from desman.planner import MAX_SUBTASKS, PLANNER_RULES, template_plan
+
+    assert "ONE subtask" in PLANNER_RULES
+    assert "a translation" in PLANNER_RULES
+    assert "different tools/kinds" in PLANNER_RULES
+    assert MAX_SUBTASKS == 8
+    assert len(template_plan("Translate a phrase").subtasks) == 1
+    assert "put that text in the result itself" in EXECUTOR_SYSTEM
+    assert "put the text in the result" in REVIEWER_SYSTEM
+    assert "README.md" in REVIEWER_SYSTEM
+    assert "Never decide from memory" in REVIEWER_EVIDENCE
+    assert "search the web first" in REVIEWER_EVIDENCE
+    assert "Never escalate for that omission" in REVIEWER_EVIDENCE

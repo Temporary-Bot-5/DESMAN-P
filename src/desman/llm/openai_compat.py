@@ -240,14 +240,27 @@ class OpenAICompatible:
             )
 
         try:
-            response = self.client.post(
+            with self.client.stream(
+                "POST",
                 (self.base_url.removesuffix("/v1") + "/api/chat")
                 if self.name == "ollama"
                 else f"{self.base_url}/chat/completions",
                 json=body,
                 headers={name: value.format(key=key) for name, value in self.auth},
                 timeout=self.timeout,
-            )
+            ) as response:
+                chunks = []
+                for chunk in response.iter_bytes():
+                    if self.monotonic() - started >= self.timeout:
+                        raise httpx.ReadTimeout("whole-call deadline exceeded")
+                    chunks.append(chunk)
+                if self.monotonic() - started >= self.timeout:
+                    raise httpx.ReadTimeout("whole-call deadline exceeded")
+                response = httpx.Response(
+                    response.status_code,
+                    headers={k: v for k, v in response.headers.items() if k != "content-encoding"},
+                    content=b"".join(chunks),
+                )
         except httpx.TimeoutException:
             error: ProviderError = ProviderTimeout(self.name, self.timeout)
             record(error)
@@ -375,7 +388,7 @@ def _tool_text(value: Any) -> str | None:
 def _usage(response: httpx.Response, *, native: bool = False) -> Usage:
     try:
         data = response.json()
-    except ValueError:
+    except (ValueError, httpx.ResponseNotRead):
         data = None
     if native and isinstance(data, dict):
         return Usage(

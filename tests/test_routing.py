@@ -879,13 +879,24 @@ def test_request_too_large_moves_to_next_model_without_backoff() -> None:
 
 
 def test_all_ceilings_too_small_never_send_known_impossible_request() -> None:
-    from desman.llm.base import RequestTooLarge
+    from desman.core.retry import FailureKind
+    from desman.llm.base import ProviderRejected
 
     groq = router.Choice(providers.find("groq"), "openai/gpt-oss-20b")
     fake = FakeLLM("must not be sent")
     fallback = router.Fallback([(fake, groq)])
-    with pytest.raises(RequestTooLarge):
+    with pytest.raises(
+        ProviderRejected, match="needs .* largest available request ceiling"
+    ) as caught:
         fallback.complete(Request(messages=[Message(role="user", content="x" * 32_000)]))
+    assert caught.value.kind is FailureKind.PERMANENT
+    unbounded = FakeLLM("ok")
+    assert (
+        router.Fallback([(fake, groq), (unbounded, None)])
+        .complete(Request(messages=[Message(role="user", content="x" * 32_000)]))
+        .text
+        == "ok"
+    )
     assert not fake.calls
     assert fallback.last_call.skipped[0].reason == "context"
 

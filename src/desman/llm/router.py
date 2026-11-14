@@ -598,7 +598,17 @@ class Fallback:
         errors: list[ProviderError] = []
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
-            raise RequestTooLarge(self.name, 413, "request exceeds every model token ceiling")
+            largest = max(
+                request_ceiling(choice, self.conn) or 0
+                for _, choice in (large or fit)
+                if choice is not None
+            )
+            raise ProviderRejected(
+                self.name,
+                413,
+                f"request needs {need} tokens; largest available request ceiling is {largest}. "
+                "Choose a model with a larger request ceiling or reduce the task context.",
+            )
         failed_over = False
         for i, (llm, choice) in enumerate(members):
             label = llm.name if choice is None else choice.label

@@ -74,18 +74,24 @@ NO_TOOLS = (
     " You have no tools in this subtask: you cannot read or write files, run anything or go "
     "online, so your result can only be what you write yourself."
 )
+TEXT_RESULT = (
+    " When the goal asks for text for the person to read, put that text in the result itself. "
+    "Writing a file is extra, only when asked or useful. When the goal asks for a file "
+    "(a README.md or script), pointing to the written file is fine."
+)
+
 EXECUTOR_SYSTEM = (
     "You complete one subtask of a larger task. Reply with a single JSON object holding the "
     "result, and nothing else. If feedback on a previous attempt is given, fix every point of "
     'it. If you cannot do the subtask, reply {"type": "error", "reason": "why"} instead of '
-    "pretending: such a reply is never taken as a result." + HONEST
+    "pretending: such a reply is never taken as a result." + HONEST + TEXT_RESULT
 )
 EXECUTOR_SYSTEM_REPHRASED = (
     "Earlier attempts at this subtask were rejected. Start again from scratch rather than "
     "patching them: read the subtask and its acceptance criteria, then the feedback, and check "
     "each criterion before answering. Your whole reply must be one JSON object with the result. "
     "When the subtask cannot be done, the JSON object is "
-    '{"type": "error", "reason": "why"}; never present a guess as a result.' + HONEST
+    '{"type": "error", "reason": "why"}; never present a guess as a result.' + HONEST + TEXT_RESULT
 )
 EXECUTOR_SYSTEM_COMBINE = (
     EXECUTOR_SYSTEM + " This subtask was split into smaller parts, which are done: their "
@@ -127,8 +133,15 @@ REVIEWER_SYSTEM = (
     "product names, code, quotes, URLs and text the goal requests in another language never "
     "break them. Check every date against today and the request: compute relative deadlines "
     "from today; an invented date is wrong."
+    " When the goal asks for text for the person, a result only pointing to a file is retry: "
+    "put the text in the result. If the goal asks for a file (README.md or a script), pointing "
+    "to it is fine; check its written_files evidence."
 )
 REVIEWER_EVIDENCE = (
+    " Never decide from memory that something does not exist, is not released or is out of "
+    "date: today may be after your training data; only the evidence counts. For a lookup "
+    "subtask with web tools available but no web_search/web_fetch results in evidence, "
+    "reply retry with feedback: search the web first. Never escalate for that omission."
     " Evidence may be newer than what you know. Never reject a fact as future, unreleased "
     "or outdated when the evidence shows it: only the evidence decides facts about the world."
     ' "evidence" is what the result can rest on: the subtask\'s inputs, the accepted results '

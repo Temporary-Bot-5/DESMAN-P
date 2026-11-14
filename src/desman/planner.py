@@ -93,7 +93,9 @@ PLANNER_RULES = (
     "model call that sees only that subtask's description, its acceptance criteria and the "
     "results of the subtasks it depends on, never the goal itself, so every description must "
     "make sense on its own. Use as few subtasks as the goal needs (one is fine for a simple "
-    "goal). Reply with a single JSON object: "
+    "goal). A goal a single model can answer in one reply (a short text, a translation, "
+    "a list, an explanation, a small calculation) is ONE subtask. Split only when parts "
+    "need different tools/kinds or depend on looked-up facts. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
     'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier subtasks, '
     "counting from 0]}]}. The last subtask must produce the final result of the goal, "
