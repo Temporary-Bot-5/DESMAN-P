@@ -75,10 +75,12 @@ RUN_RULES = (
 """Not a target of the Improvement Analyst: the analyst may not loosen what code checks."""
 
 LANGUAGE_RULES = (
-    " The person wrote the goal in their language. Every subtask producing text for the "
-    "person must explicitly say in its description to write in that language, naming the "
-    "language. The last subtask must produce its result in that language. Preserve these "
-    "language instructions when splitting a subtask."
+    " The prose addressed to the person must use the language of their goal. For every "
+    "subtask producing prose for the person, append an instruction naming that language at "
+    "the END of its description, after the work to do. This applies only to prose addressed "
+    "to the person: text the goal requests in another language (a translation, a letter in "
+    "English, or code) must stay in that requested language. Preserve this distinction and "
+    "the instruction's position when splitting a subtask, including the final subtask."
 )
 
 PLANNER_RULES = (

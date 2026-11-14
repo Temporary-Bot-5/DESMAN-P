@@ -459,7 +459,9 @@ class Fallback:
     combines a split subtask's parts, say) is not lost to a quirk. When it was the last model
     left, its error is raised as it is. Nor does a slow failure (`ProviderError.slow`, set by
     `Backoff`: one call that took over `QUICK_FAILURE` seconds), for the reason `Backoff` does
-    not repeat one: nobody renews the subtask's lease while it waits. When the models tried failed, the error raised is a
+    not repeat one: nobody renews the subtask's lease while it waits. If models remain
+    untried, the slow error propagates and the next call in that scope starts with them.
+    When all models were tried, the error raised is a
     limit if any model was limited (the soonest one: the subtask pauses until then), else a
     passing one, else the first model's.
     """
@@ -486,6 +488,7 @@ class Fallback:
         self.label = first.name if choice is None else choice.label
         self._last: tuple[Completion, LLM] | None = None
         self._call = LastCall()
+        self._deferred: dict[tuple[str, str] | None, list[str]] = {}
         self._unfit: set[str] = set()
         """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
 
@@ -516,6 +519,16 @@ class Fallback:
             choices = self.choices
             choices = self.order(choices) if held is None else held
             ordered_members = [m for c in choices for m in self.members if m[1] == c]
+        deferred = self._deferred.get(scope, [])
+        if deferred:
+            ordered_members = sorted(
+                ordered_members,
+                key=lambda m: (
+                    deferred.index(m[1].label if m[1] else m[0].name)
+                    if (m[1].label if m[1] else m[0].name) in deferred
+                    else -1
+                ),
+            )
         fit = [
             (llm, choice)
             for llm, choice in ordered_members
@@ -596,8 +609,15 @@ class Fallback:
                     self._scopes.pop(scope, None)
                 errors.append(e)
                 if e.slow:
+                    if i < len(members) - 1:
+                        rotated = members[i + 1 :] + members[: i + 1]
+                        self._deferred[scope] = [c.label if c else m.name for m, c in rotated]
+                        if len(self._deferred) > 256:
+                            self._deferred.pop(next(iter(self._deferred)))
+                        raise
                     break
                 continue
+            self._deferred.pop(scope, None)
             self._last = (reply, llm)
             ahead = [
                 c.label if c else m.name

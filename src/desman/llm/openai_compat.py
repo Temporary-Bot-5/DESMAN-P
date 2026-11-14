@@ -32,7 +32,9 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
+from desman.core.tools import ToolCall
 from desman.llm.base import (
     Completion,
     GenerationFailed,
@@ -262,6 +264,18 @@ class OpenAICompatible:
                 raise
             record(None, completion)
             return completion
+        if response.status_code == 400 and _code(response) == "tool_use_failed":
+            try:
+                failed = response.json()["error"]["failed_generation"]
+            except (ValueError, KeyError, TypeError):
+                failed = None
+            recovered = _tool_text(failed)
+            if recovered is not None:
+                completion = Completion(
+                    text=recovered, provider=self.name, model=model, usage=_usage(response)
+                )
+                record(None, completion)
+                return completion
         error = self._error(response)
         error.model = model
         record(error)
@@ -277,6 +291,12 @@ class OpenAICompatible:
             text = message.get("content")
         except (ValueError, KeyError, IndexError, TypeError):
             raise ProviderUnavailable(self.name, 200, "reply without a message") from None
+        if not isinstance(text, str) or not text.strip():
+            recovered = _tool_text(message.get("tool_calls"))
+            if recovered is not None:
+                text = recovered
+            elif "MALFORMED_FUNCTION_CALL" in str(choice.get("finish_reason", "")).upper():
+                raise GenerationFailed(self.name, "reply without text: MALFORMED_FUNCTION_CALL")
         if not isinstance(text, str):  # reasoning or tools without text
             reason = (
                 "a native tool call instead of text"
@@ -326,6 +346,46 @@ class OpenAICompatible:
             if key and key in text:
                 text = text.replace(key, "<key>")
         return text
+
+
+def _tool_text(value: Any) -> str | None:
+    """Recover only validated native calls; unrelated provider error data is discarded."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, dict):
+        value = value["tool_calls"] if set(value) == {"tool_calls"} else [value]
+    if not isinstance(value, list) or not 1 <= len(value) <= 10:
+        return None
+    calls = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        item = dict(item)
+        if item.get("type") == "function" and isinstance(item.get("function"), dict):
+            function = item.pop("function")
+            item.pop("id", None)
+            item.pop("type")
+            if set(item) & set(function):
+                return None
+            item = {**item, **function}
+        if "name" in item and "tool" not in item:
+            item["tool"] = item.pop("name")
+        if "arguments" in item and "args" not in item:
+            item["args"] = item.pop("arguments")
+        if isinstance(item.get("args"), str):
+            try:
+                item["args"] = json.loads(item["args"])
+            except ValueError:
+                return None
+        try:
+            call = ToolCall.model_validate(item)
+        except ValidationError:
+            return None
+        calls.append(call.model_dump())
+    return json.dumps({"tool_calls": calls}, ensure_ascii=False)
 
 
 def _usage(response: httpx.Response, *, native: bool = False) -> Usage:

@@ -51,6 +51,7 @@ from desman.core.context import (
 from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import Replayed, Tool, ToolResult
+from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 
 INTERRUPTED: Final = (
     "this exact call was started by an earlier run of this subtask and interrupted before it "
@@ -69,6 +70,7 @@ def evidence(
     budget_tokens: int = EVIDENCE_TOKENS,
     *,
     knowledge: Knowledge | None = None,
+    workspace: Workspace | None = None,
 ) -> dict[str, Any]:
     """What the result under review can rest on: the subtask's inputs, the accepted results of
     its dependencies, the knowledge tree's nodes it was given (looked up by `knowledge`), and
@@ -76,7 +78,8 @@ def evidence(
     marked earlier_attempt. Latest results take budget first; older lookups share what
     remains, newest execution first. In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
-    shows its tool and its result."""
+    shows its tool and its result. Files successfully written in that execution also show
+    their current workspace text (or an unreadable/binary note), sharing the same budget."""
     execution = store.executions(subtask.id) - 1
     rows = store.effects(subtask.id, execution) if execution >= 0 else []
     dependencies = store.dependency_results(subtask.id)
@@ -91,6 +94,10 @@ def evidence(
     items: list[tuple[str, Any]] = [("inputs", subtask.inputs)] if subtask.inputs else []
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
+    files = _written_files(rows, workspace, store, subtask)
+    if files:
+        out["written_files"] = []
+        items += [("file", file) for file in files]
     texts = [_evidence_text(kind, item) for kind, item in items]
     shares = fair_shares([len(text) for text in texts], budget)
     for (kind, item), text, chars in zip(items, texts, shares, strict=True):
@@ -101,6 +108,10 @@ def evidence(
         elif kind == "dependency":
             out["results_of_dependencies"].append(
                 {"subtask": item.description, "result": content, "truncated": not whole}
+            )
+        elif kind == "file":
+            out["written_files"].append(
+                {"path": item["path"], "content": content, "truncated": not whole}
             )
         elif item["state"] != "done":  # cut off midway: what it returned is unknown
             out["tool_results"].append({"tool": item["tool"], "result": None, "finished": False})
@@ -118,6 +129,33 @@ def evidence(
         earlier_lookups(store, subtask, execution, max(0, budget_tokens * CHARS_PER_TOKEN - used))
     )
     return out
+
+
+def _written_files(
+    rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
+) -> list[dict[str, str]]:
+    paths: list[str] = []
+    for row in rows:
+        if row["tool"] != "write_file" or row["state"] != "done":
+            continue
+        result = ToolResult.model_validate_json(row["result_json"])
+        if result.ok and isinstance(result.output, dict):
+            path = result.output.get("path")
+            if isinstance(path, str) and path not in paths:
+                paths.append(path)
+    if not paths:
+        return []
+    files = []
+    for path in paths:
+        try:
+            workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
+            text = workspace.read_text(path)
+            if "\x00" in text:
+                text = "Binary file: content unavailable."
+        except (OSError, UnicodeError, PathEscapeError):
+            text = "File unreadable or not UTF-8: content unavailable."
+        files.append({"path": path, "text": text})
+    return files
 
 
 def timestamp(value: str | None) -> str | None:
@@ -161,6 +199,8 @@ def earlier_lookups(
 def _evidence_text(kind: str, item: Any) -> str:
     if kind == "inputs":
         return json.dumps(item, ensure_ascii=False, sort_keys=True)
+    if kind == "file":
+        return json.dumps(item["text"], ensure_ascii=False)
     if kind == "dependency":
         return json.dumps(item.content, ensure_ascii=False, sort_keys=True)
     return str(item["result_json"] or "null")

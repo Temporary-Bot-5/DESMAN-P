@@ -303,12 +303,20 @@ class Coordinator:
         """Who works jobs from desman-global; None: they are never taken here."""
 
     def run(
-        self, task_id: str, *, wait_for_pauses: bool = False, max_ticks: int = 10_000
+        self,
+        task_id: str,
+        *,
+        wait_for_pauses: bool = False,
+        max_ticks: int = 10_000,
+        short_pause_seconds: float = 0,
+        on_pause: Callable[[float], None] | None = None,
     ) -> RunResult:
         """Work on `task_id` until it is no longer ACTIVE.
 
         With `wait_for_pauses` the coordinator sleeps until the earliest pause ends; otherwise it
-        returns, and a later `run()` resumes (the state is all in the database). `max_ticks` is
+        returns, and a later `run()` resumes (the state is all in the database). Callers can
+        opt into waiting for pauses up to `short_pause_seconds`, announced by `on_pause`.
+        `max_ticks` is
         a safety net against bugs, not part of normal termination.
         """
         result = RunResult(task_id=task_id, status=self.store.task_status(task_id), ticks=0)
@@ -333,10 +341,13 @@ class Coordinator:
                 continue
             if pause_until is None:
                 raise RuntimeError(f"task {task_id} is active but nothing can move")  # a bug
-            if not wait_for_pauses:
+            seconds = self._seconds_until(pause_until)
+            if not wait_for_pauses and seconds > short_pause_seconds:
                 result.paused_until = pause_until
                 return result
-            self.sleep(self._seconds_until(pause_until))
+            if not wait_for_pauses and on_pause is not None:
+                on_pause(seconds)
+            self.sleep(seconds)
         return result
 
     def work(

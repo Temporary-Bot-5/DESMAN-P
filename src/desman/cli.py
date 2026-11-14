@@ -6,6 +6,7 @@ G.7b reports independent proposal check hand-ins alongside job events.
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from collections.abc import Callable
@@ -1056,6 +1057,18 @@ def _executor_access(as_json: bool) -> Access:
     return runs.executor_access(load_config().load(), stderr=as_json)
 
 
+SHORT_PROVIDER_WAIT = 120
+"""CLI runs wait in-process for provider pauses up to two minutes."""
+
+
+def _provider_wait(seconds: float, as_json: bool) -> None:
+    text = t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds))
+    if as_json:
+        ui.warn(text, stderr=True)
+    else:
+        ui.note(text)
+
+
 def _drive(
     store: Store,
     models: runs.Models,
@@ -1073,7 +1086,12 @@ def _drive(
         store, models, access, load_config().load(), lease_seconds=lease_seconds
     )
     try:
-        result = coordinator.run(task_id, wait_for_pauses=wait)
+        result = coordinator.run(
+            task_id,
+            wait_for_pauses=wait,
+            short_pause_seconds=SHORT_PROVIDER_WAIT,
+            on_pause=lambda seconds: _provider_wait(seconds, as_json),
+        )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
     report = task_report(store, task_id)

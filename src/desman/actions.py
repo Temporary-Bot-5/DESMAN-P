@@ -98,17 +98,36 @@ def report_output(store: Store, report: TaskReport) -> dict[str, Any]:
 
 
 def result_text(result: Any) -> str:
-    """A result as the person reads it: its text when it has one, else indented JSON."""
+    """A result as the person reads it: its text when it has one, else indented key/value lines."""
     if isinstance(result, dict):
         inner = result.get("result") if result.get("type") == "result" else None
         if inner is not None:
             return result_text(inner)
-        for key in ("content", "text", "answer", "result"):
+        for key in ("content", "text", "answer", "result", "output"):
             if isinstance(result.get(key), str):
                 return str(result[key])
-    if isinstance(result, str):
-        return result
-    return json.dumps(result, ensure_ascii=False, indent=2)
+        if len(result) == 1 and isinstance(next(iter(result.values())), str):
+            return str(next(iter(result.values())))
+    return _result_lines(result)
+
+
+def _result_lines(value: Any, indent: str = "") -> str:
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"{indent}{key}:\n{_result_lines(item, indent + '  ')}")
+            else:
+                text = _result_lines(item).replace("\n", "\n" + indent + "  ")
+                lines.append(f"{indent}{key}: {text}")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        return "\n".join(
+            indent + "- " + _result_lines(item).replace("\n", "\n" + indent + "  ")
+            for item in value
+        )
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return indent + text.replace("\n", "\n" + indent)
 
 
 def print_report(report: TaskReport, store: Store | None = None) -> None:

@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Waiting {seconds} s for a provider limit…": "Aguardando {seconds} s pelo limite do provedor…",
     "Allow a release that changes the registry database schema.": "Permitir uma versão que altere o esquema da base do registro.",
     "Another registry update is running.": "Outra atualização do registro está em execução.",
     "Check the release without applying or journaling it.": "Verificar a versão sem aplicar nem registrar no diário.",
