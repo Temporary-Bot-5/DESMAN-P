@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "允许更改注册表数据库结构的版本。",
+    "Another registry update is running.": "另一个注册表更新正在运行。",
+    "Check the release without applying or journaling it.": "检查版本，不应用也不写入日志。",
+    "Choose a release tag on origin/master.": "选择 origin/master 上的版本标签。",
+    "Registry is up to date.": "注册表已是最新版本。",
+    "Registry update failed at {step}; rolled back: {rollback}.": "注册表更新在 {step} 失败；已回滚：{rollback}。",
+    "Registry update refused: {error}": "注册表更新被拒绝：{error}",
+    "Registry updated to {tag}.": "注册表已更新至 {tag}。",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "版本 {tag} 正在等待：它会更改数据库；请运行 desman-registry update --allow-schema。",
+    "The database is newer than the release schema.": "数据库比该版本的结构更新。",
+    "The registry checkout has uncommitted changes.": "注册表工作副本中有未提交的更改。",
+    "The registry git checkout (default: installed source).": "注册表的 git 工作副本（默认：已安装的源代码）。",
+    "The release tag must be on origin/master.": "版本标签必须位于 origin/master 上。",
+    "Update": "更新",
+    "Update the registry to the newest release tag, with rollback on failure.": "将注册表更新至最新版本标签，失败时回滚。",
+    "Use an existing PEM public-key file or a base64 public key.": "请使用现有的 PEM 公钥文件或 base64 公钥。",
     "Omitted lines: {count}.": "省略行数：{count}。",
     "Files in {folder}:": "{folder} 中的文件：",
     "Model {scope} unavailable or limited until {until}.": "模型 {scope} 在 {until} 之前不可用或受限。",
@@ -1165,7 +1181,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "操作",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "监听地址；在提供 TLS 的反向代理之后请保持 127.0.0.1。",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "持续响应节点直到被停止（普通 HTTP：TLS 由反向代理提供）。",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "以根密钥签名指派一名运营者：PUBLIC_KEY 中的密钥（PEM 文件），或注册中心自己的运营者密钥（首次使用时创建）。",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "以根密钥签名指派一名运营者：PUBLIC_KEY 中的密钥（PEM / base64 文件），或注册中心自己的运营者密钥（首次使用时创建）。",
     "Backup written: {path}": "备份已写入：{path}",
     "Copy the database to DEST while the server runs.": "在服务器运行时将数据库复制到 DEST。",
     "Details": "详情",
@@ -1637,5 +1653,30 @@ MESSAGES.update(
         "Backup dated in the future.": "备份日期在未来。",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "没有可用的安装工具：请在注册表的 venv 中安装 pip，或将 uv 添加到 PATH。"
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "版本 {tag} 比已安装版本旧或位于其他分支：已拒绝。",
+        "Registry is already at release {tag}.": "注册中心已使用版本 {tag}。",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "版本 {tag} 将等待（数据库结构未知）；需要 --allow-schema。",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "版本 {tag} 将等待（数据库结构 {before} → {after}）；需要 --allow-schema。",
+        "Release {tag} would apply.": "将应用版本 {tag}。",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "版本 {tag} 等待中：无法检查其数据库结构；检查后请运行 desman-registry update --allow-schema。",
+        "Registry update failed at {step}.": "注册中心更新在 {step} 步骤失败。",
+        "stop timers": "停止计时器",
+        "backup": "备份",
+        "checkout": "切换版本",
+        "install packages": "安装软件包",
+        "restart": "重启",
+        "health": "健康检查",
+        "start timers": "启动计时器",
+    }
+)
+
+MESSAGES.update({"yes": "是", "no": "否"})
 
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

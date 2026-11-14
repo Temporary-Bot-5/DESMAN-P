@@ -79,6 +79,15 @@ def public_key(path: Path) -> Ed25519PublicKey:
         raise AdminError(t("The key cannot be used: {error}", error=str(e))) from e
 
 
+def assignment_key(value: str) -> Ed25519PublicKey:
+    """Accept the printed appointer key as well as the historical PEM file path."""
+    try:
+        path = Path(value)
+        return sign.load_public(path) if path.is_file() else sign.decode_public(value)
+    except (sign.KeyFileError, OSError, ValueError) as e:
+        raise AdminError(t("Use an existing PEM public-key file or a base64 public key.")) from e
+
+
 def _keep(conn: sqlite3.Connection, root: sign.NodeKey, signed: sign.Signed, now: datetime) -> str:
     with db.transaction(conn):
         believed = store.trust(conn, root.public, now)
@@ -549,6 +558,8 @@ def health(
                 verdict = conn.execute("PRAGMA quick_check").fetchall()
                 if len(verdict) != 1 or verdict[0][0] != "ok":
                     result.append(HealthCheck("database", "fail", "quick_check failed"))
+            from desman.registry.update import update_health
+
             if not result:
                 result.append(HealthCheck("database", "ok", "ready"))
                 listed = trust_list(conn, now)
@@ -617,6 +628,7 @@ def health(
                     clusters.cluster_tasks(conn, "operator")
                 )
                 result.append(HealthCheck("inbox", "warn" if count else "ok", str(count)))
+                result.append(update_health(conn))
         finally:
             conn.close()
     except (sqlite3.Error, OSError, ValueError) as e:

@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "Kayıt sunucusunun veritabanı şemasını değiştiren bir sürüme izin ver.",
+    "Another registry update is running.": "Başka bir kayıt sunucusu güncellemesi çalışıyor.",
+    "Check the release without applying or journaling it.": "Sürümü uygulamadan ve günlüğe yazmadan denetle.",
+    "Choose a release tag on origin/master.": "origin/master üzerinde bir sürüm etiketi seç.",
+    "Registry is up to date.": "Kayıt sunucusu güncel.",
+    "Registry update failed at {step}; rolled back: {rollback}.": "Kayıt sunucusu güncellemesi {step} adımında başarısız; geri alındı: {rollback}.",
+    "Registry update refused: {error}": "Kayıt sunucusu güncellemesi reddedildi: {error}",
+    "Registry updated to {tag}.": "Kayıt sunucusu {tag} sürümüne güncellendi.",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "{tag} sürümü bekliyor: veritabanını değiştiriyor; desman-registry update --allow-schema çalıştırın.",
+    "The database is newer than the release schema.": "Veritabanı sürümün şemasından daha yeni.",
+    "The registry checkout has uncommitted changes.": "Kayıt sunucusunun çalışma kopyasında kaydedilmemiş değişiklikler var.",
+    "The registry git checkout (default: installed source).": "Kayıt sunucusunun git çalışma kopyası (varsayılan: kurulu kaynak).",
+    "The release tag must be on origin/master.": "Sürüm etiketi origin/master üzerinde olmalıdır.",
+    "Update": "Güncelleme",
+    "Update the registry to the newest release tag, with rollback on failure.": "Kayıt sunucusunu en yeni sürüm etiketine güncelle; başarısızlıkta geri al.",
+    "Use an existing PEM public-key file or a base64 public key.": "Mevcut bir PEM açık anahtar dosyası veya base64 açık anahtar kullanın.",
     "Omitted lines: {count}.": "Atlanan satır sayısı: {count}.",
     "Files in {folder}:": "{folder} içindeki dosyalar:",
     "Model {scope} unavailable or limited until {until}.": "{scope} modeli {until} tarihine kadar kullanılamıyor veya sınırlı.",
@@ -1177,7 +1193,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "Eylem",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "Dinlenecek adres; TLS sağlayan ters vekil sunucunun arkasında 127.0.0.1 olarak bırakın.",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "Durdurulana kadar düğümlere yanıt ver (düz HTTP: TLS'yi ters vekil sağlar).",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "Kök imzasıyla bir operatör ata: PUBLIC_KEY içindeki anahtar (PEM dosyası) ya da kayıt defterinin kendi operatör anahtarı (ilk kullanımda oluşturulur).",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "Kök imzasıyla bir operatör ata: PUBLIC_KEY içindeki anahtar (PEM / base64 dosyası) ya da kayıt defterinin kendi operatör anahtarı (ilk kullanımda oluşturulur).",
     "Backup written: {path}": "Yedek yazıldı: {path}",
     "Copy the database to DEST while the server runs.": "Sunucu çalışırken veritabanını DEST konumuna kopyala.",
     "Details": "Ayrıntılar",
@@ -1710,5 +1726,30 @@ MESSAGES.update(
         "Backup dated in the future.": "Yedek gelecekte tarihlenmiş.",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "Yükleyici bulunamadı: kayıt defteri venv ortamına pip kurun veya uv aracını PATH içine ekleyin."
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "{tag} sürümü kurulu sürümden eski veya başka bir dalda: reddedildi.",
+        "Registry is already at release {tag}.": "Kayıt defteri zaten {tag} sürümünde.",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "{tag} sürümü beklerdi (şema bilinmiyor); --allow-schema gerekli.",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "{tag} sürümü beklerdi (şema {before} → {after}); --allow-schema gerekli.",
+        "Release {tag} would apply.": "{tag} sürümü uygulanırdı.",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "{tag} sürümü bekliyor: veritabanı şeması denetlenemedi; denetledikten sonra desman-registry update --allow-schema çalıştırın.",
+        "Registry update failed at {step}.": "Kayıt defteri güncellemesi {step} adımında başarısız oldu.",
+        "stop timers": "zamanlayıcıları durdurma",
+        "backup": "yedekleme",
+        "checkout": "sürüm değiştirme",
+        "install packages": "paketleri yükleme",
+        "restart": "yeniden başlatma",
+        "health": "sağlık denetimi",
+        "start timers": "zamanlayıcıları başlatma",
+    }
+)
+
+MESSAGES.update({"yes": "evet", "no": "hayır"})
 
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

@@ -134,9 +134,7 @@ def _open(ctx: click.Context, root_key: Path | None) -> tuple[Any, sign.NodeKey]
 
 
 @cli.command()
-@click.argument(
-    "public_key", required=False, type=click.Path(dir_okay=False, exists=True, path_type=Path)
-)
+@click.argument("public_key", required=False, type=str)
 @click.option(
     "--scope",
     "scopes",
@@ -155,12 +153,12 @@ def _open(ctx: click.Context, root_key: Path | None) -> tuple[Any, sign.NodeKey]
 @click.pass_context
 def assign(
     ctx: click.Context,
-    public_key: Path | None,
+    public_key: str | None,
     scopes: tuple[str, ...],
     days: int,
     root_key: Path | None,
 ) -> None:
-    """Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the
+    """Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the
     registry's own operator key (created on first use)."""
     try:
         conn, root = _open(ctx, root_key)
@@ -168,7 +166,7 @@ def assign(
             operator = (
                 admin.operator_key(_dir(ctx) / store.OPERATOR_KEY)
                 if public_key is None
-                else admin.public_key(public_key)
+                else admin.assignment_key(public_key)
             )
             wanted = {sign.Scope(s) for s in scopes} or set(sign.DEFAULT_SCOPES)
             done = admin.assign(conn, root, operator, wanted, days=days, now=_now())
@@ -1624,6 +1622,7 @@ def health(ctx: click.Context, as_json: bool, url: str) -> None:
             "inbox": t("Inbox"),
             "disk": t("Disk"),
             "server": t("Server"),
+            "update": t("Update"),
         }
         messages = {
             "operator missing": t("Operator key missing."),
@@ -1659,7 +1658,11 @@ def health(ctx: click.Context, as_json: bool, url: str) -> None:
                         if role == "operator"
                         else t("Appointer key expires in {days} days.", days=days)
                     )
-            if c.name == "inbox":
+            if c.name == "update":
+                from desman.registry.update import health_message
+
+                message = health_message(c.message)
+            elif c.name == "inbox":
                 message = t("Waiting: {count}", count=c.message)
             elif c.name == "disk" and c.message.isdigit():
                 message = t("Free bytes: {count}", count=c.message)
@@ -1667,5 +1670,36 @@ def health(ctx: click.Context, as_json: bool, url: str) -> None:
                 message = t("Check failed: {error}", error=c.message)
             table.add_row(names[c.name], level, message)
         ui.out(table)
+    if not ok:
+        ctx.exit(1)
+
+
+@cli.command("update")
+@click.option(
+    "--app",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="The registry git checkout (default: installed source).",
+)
+@click.option("--check", is_flag=True, help="Check the release without applying or journaling it.")
+@click.option(
+    "--allow-schema",
+    is_flag=True,
+    help="Allow a release that changes the registry database schema.",
+)
+@click.option("--to", "tag", help="Choose a release tag on origin/master.")
+@click.pass_context
+def update_command(
+    ctx: click.Context, app: Path | None, check: bool, allow_schema: bool, tag: str | None
+) -> None:
+    """Update the registry to the newest release tag, with rollback on failure."""
+    from desman.registry import update
+
+    try:
+        message, ok = update.update(
+            _dir(ctx), app=app, check=check, allow_schema=allow_schema, to=tag
+        )
+    except (admin.AdminError, OSError) as e:
+        raise click.ClickException(str(e)) from e
+    ui.note(message)
     if not ok:
         ctx.exit(1)

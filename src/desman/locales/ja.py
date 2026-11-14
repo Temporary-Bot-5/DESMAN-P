@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Allow a release that changes the registry database schema.": "レジストリのデータベース構造を変更するリリースを許可します。",
+    "Another registry update is running.": "別のレジストリ更新が実行中です。",
+    "Check the release without applying or journaling it.": "適用やログ記録をせずにリリースを確認します。",
+    "Choose a release tag on origin/master.": "origin/master 上のリリースタグを選びます。",
+    "Registry is up to date.": "レジストリは最新です。",
+    "Registry update failed at {step}; rolled back: {rollback}.": "レジストリ更新が {step} で失敗しました。ロールバック：{rollback}。",
+    "Registry update refused: {error}": "レジストリ更新を拒否しました：{error}",
+    "Registry updated to {tag}.": "レジストリを {tag} に更新しました。",
+    "Release {tag} waits: it changes the database; run desman-registry update --allow-schema.": "リリース {tag} は待機中です。データベースを変更するため、desman-registry update --allow-schema を実行してください。",
+    "The database is newer than the release schema.": "データベースがリリースの構造より新しいです。",
+    "The registry checkout has uncommitted changes.": "レジストリの作業コピーに未コミットの変更があります。",
+    "The registry git checkout (default: installed source).": "レジストリの git 作業コピー（既定：インストール済みのソース）。",
+    "The release tag must be on origin/master.": "リリースタグは origin/master 上にある必要があります。",
+    "Update": "更新",
+    "Update the registry to the newest release tag, with rollback on failure.": "レジストリを最新のリリースタグに更新し、失敗時はロールバックします。",
+    "Use an existing PEM public-key file or a base64 public key.": "既存の PEM 公開鍵ファイルまたは base64 公開鍵を指定してください。",
     "Omitted lines: {count}.": "省略した行数：{count}。",
     "Files in {folder}:": "{folder} 内のファイル：",
     "Model {scope} unavailable or limited until {until}.": "モデル {scope} は {until} まで利用不可または制限されています。",
@@ -1175,7 +1191,7 @@ MESSAGES: dict[str, Forms] = {
     "Action": "操作",
     "Address to listen on; keep 127.0.0.1 behind the reverse proxy that gives TLS.": "待ち受けるアドレス。TLS を提供するリバースプロキシの背後では 127.0.0.1 のままにしてください。",
     "Answer nodes until stopped (plain HTTP: TLS is the reverse proxy's).": "停止されるまでノードに応答します（素の HTTP：TLS はリバースプロキシが提供）。",
-    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file), or the\nregistry's own operator key (created on first use).": "ルートの署名でオペレーターを任命します：PUBLIC_KEY の鍵（PEM ファイル）、またはレジストリ自身のオペレーター鍵（初回使用時に作成）。",
+    "Assign an operator, signed by the root: the key in PUBLIC_KEY (a PEM file or base64 text), or the\nregistry's own operator key (created on first use).": "ルートの署名でオペレーターを任命します：PUBLIC_KEY の鍵（PEM / base64 ファイル）、またはレジストリ自身のオペレーター鍵（初回使用時に作成）。",
     "Backup written: {path}": "バックアップを書き込みました: {path}",
     "Copy the database to DEST while the server runs.": "サーバーを動かしたままデータベースを DEST にコピーします。",
     "Details": "詳細",
@@ -1666,5 +1682,30 @@ MESSAGES.update(
         "Backup dated in the future.": "バックアップの日付が未来です。",
     }
 )
+
+MESSAGES["No installer available: install pip in the registry venv or put uv on PATH."] = (
+    "インストーラーがありません。レジストリの venv に pip をインストールするか、uv を PATH に追加してください。"
+)
+
+MESSAGES.update(
+    {
+        "Release {tag} is older than the installed version or on another branch: refused.": "リリース {tag} はインストール済みより古いか別ブランチです：拒否しました。",
+        "Registry is already at release {tag}.": "レジストリはすでにリリース {tag} です。",
+        "Release {tag} would wait (schema unknown); needs --allow-schema.": "リリース {tag} は待機します（スキーマ不明）。--allow-schema が必要です。",
+        "Release {tag} would wait (schema {before} → {after}); needs --allow-schema.": "リリース {tag} は待機します（スキーマ {before} → {after}）。--allow-schema が必要です。",
+        "Release {tag} would apply.": "リリース {tag} を適用します。",
+        "Release {tag} waits: its database schema could not be checked; run desman-registry update --allow-schema after checking it.": "リリース {tag} は待機中です。データベーススキーマを確認できませんでした。確認後に desman-registry update --allow-schema を実行してください。",
+        "Registry update failed at {step}.": "レジストリ更新は {step} で失敗しました。",
+        "stop timers": "タイマー停止",
+        "backup": "バックアップ",
+        "checkout": "バージョン切替",
+        "install packages": "パッケージインストール",
+        "restart": "再起動",
+        "health": "正常性確認",
+        "start timers": "タイマー開始",
+    }
+)
+
+MESSAGES.update({"yes": "はい", "no": "いいえ"})
 
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)
