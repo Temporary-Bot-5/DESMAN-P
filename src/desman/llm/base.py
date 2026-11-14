@@ -195,3 +195,7 @@ class ProviderUnavailable(ProviderError):
         what = f"server error {status}" if status is not None else "unreachable"
         super().__init__(provider, what + (f": {message}" if message else ""))
         self.status = status
+
+
+class RequestTooLarge(ProviderUnavailable):
+    """The request exceeds a provider's token ceiling; another model may take it."""

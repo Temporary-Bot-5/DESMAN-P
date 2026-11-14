@@ -79,6 +79,14 @@ def test_generated_tests_run_with_pytest(ws: Workspace) -> None:
 
 
 @confined
+def test_pytest_header_reads_plugin_metadata(ws: Workspace) -> None:
+    ws.write("test_x.py", "def test_one():\n    assert True\n")
+    outcome = run(ws, "python3", "-m", "pytest", "test_x.py", timeout=60)
+    assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
+    assert "1 passed" in outcome.stdout
+
+
+@confined
 def test_there_is_no_network(ws: Workspace) -> None:
     outcome = py(
         ws,

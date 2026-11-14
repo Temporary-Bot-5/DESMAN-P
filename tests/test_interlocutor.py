@@ -679,3 +679,18 @@ def test_lone_surrogate_in_chat_message_is_replaced(fake: FakeLLM) -> None:
     lines = iter(["hello \udc8f", "/exit"])
     Chat(Sessions(db.open_db(db.default_db_path())), read=lambda: next(lines)).run()
     assert any(m.role is Role.USER and m.text == "hello ?" for m in conversation())
+
+
+def test_retelling_uses_latest_message_even_when_task_goal_and_interface_are_english(
+    fake: FakeLLM,
+) -> None:
+    worked(fake.on(CHAT, TASK_TURN)).on(RETELL, '{"text":"Результат найден."}')
+    result = chat("Найди дешёвые билеты в Лиссабон")
+    assert "Результат найден" in result.output
+    [retold] = calls(fake, RETELL)
+    outcome = payload(retold)
+    assert outcome["latest_message"] == "Найди дешёвые билеты в Лиссабон"
+    assert outcome["goal"] == "Find cheap flights to Lisbon"
+    system = retold.messages[0].content
+    assert "person’s latest message" in system
+    assert "only if its language is unclear" in system

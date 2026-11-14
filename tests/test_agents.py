@@ -327,3 +327,34 @@ def test_an_error_report_is_not_cached(store: Store, tmp_path: Path) -> None:
     assert "tools offered in this attempt" in results[0].reason
     assert results[1] == results[2] == Success(content={"ok": 1})  # this one is kept
     assert len(fake.calls) == 2
+
+
+def test_reviewer_prompt_checks_prose_dates_named_sources_and_independent_evidence(
+    store: Store,
+) -> None:
+    task = store.create_task(one_step())
+    claimed = store.claim("test")
+    assert claimed is not None
+    llm = FakeLLM('{"verdict":"accept"}')
+    llm_reviewer(llm, evidence=lambda sub: {"tools_available": ["web_search"]})(
+        claimed, {"text": "Open-Meteo"}
+    )
+    system = llm.calls[0].messages[0].content
+    for rule in (
+        "proper names",
+        "quotes, URLs",
+        "relative deadlines",
+        "from today",
+        "never read",
+        "reply retry",
+        "executor's own conclusion",
+    ):
+        assert rule in system
+    assert task == claimed.task_id
+
+
+def test_executor_is_told_to_fix_broken_code_and_run_again() -> None:
+    from desman.agents import TOOLS_INSTRUCTIONS
+
+    assert "fix it with write_file" in TOOLS_INSTRUCTIONS
+    assert "run it again" in TOOLS_INSTRUCTIONS

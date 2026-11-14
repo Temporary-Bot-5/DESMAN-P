@@ -50,17 +50,20 @@ TOPICS: Final = (
         "chat lists its files and their folder itself. A task sees only its own folder: when "
         'a request builds on what an earlier task of the same chat wrote ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "the original files stay as they were. Saving something is work too: a task writes it.\n"
+        "the original files stay as they were. On retries the executor sees existing files and "
+        "resets or rewrites stale demonstration state and files that contradict its result.\n"
         "Running code (a test, a crash test, checking what a program prints) needs the "
         "run_command tool, which needs the person's shell_execution switch (`desman "
         "permissions`) and a working sandbox. A subtask that must run code is marked so by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with the reason, and "
         "with it its result counts only if the code really ran. No part of DESMAN reports "
-        "what code would print without running it. The reviewer sees current text of files written "
+        "what code would print without running it. Web lookups and prose need no code run. "
+        "The reviewer checks dates, named-source reading and prose language, allowing names "
+        "and requested translations. It sees current text of files written "
         "in the latest attempt, within its evidence budget. python3 -m pytest is available in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
-        "A retelling shows code only as the task left it.",
+        "A retelling shows code only as the task left it, in the language of your latest message.",
     ),
     Topic(
         "retries",
@@ -195,7 +198,7 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
+        "Bare `desman` opens a new chat; `desman -c` continues the last one, `/sessions` an earlier one. `desman gui` opens the same chat in a browser. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Explicit /COMMAND (also !COMMAND) runs the same body as desman COMMAND; chat commands take precedence. `/help` lists both sets, as does `desman help`. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count events since this chat opened; temporary chats show no terminal notice. Terminal input must start with / and never calls a model. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized to fit the budget; failed summaries leave older messages out of view. A fallback reply is followed by the actual answering model and skipped models' reasons. Pasted API keys are redacted before storage.",
     ),
     Topic(
         "gui",

@@ -642,3 +642,63 @@ def test_notice_recording_matches_page_colours() -> None:
     restored = WebFront.render(Text.from_ansi(rec.styled))
     for event in front.events:
         assert event["html"] in restored
+
+
+@pytest.mark.parametrize("temporary", [False, True])
+def test_terminal_pointer_excludes_historical_events_and_temporary_chats(
+    sessions: Sessions,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    temporary: bool,
+) -> None:
+    terminal = sessions.terminal()
+    for _ in range(3):
+        sessions.add(terminal, Role.DESMAN, "old notice", kind=Kind.EVENT)
+    chat = Chat(sessions, temporary=temporary)
+    monkeypatch.setattr(chat, "_tell_waiting", lambda: ui.note("new notice"))
+    monkeypatch.setattr(chat, "_tell_blocked", lambda: None)
+    chat._notices()
+    output = capsys.readouterr().out
+    if temporary:
+        assert "new in General Terminal" not in output
+    else:
+        assert "1 new in General Terminal" in output
+        assert "4 new" not in output
+
+
+def test_startup_does_not_reannounce_existing_inbox_but_new_arrivals_are_noticed(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor, SubtaskStatus
+    from desman.core.store import Store
+
+    store = Store(sessions.conn, clock=sessions.clock)
+
+    def waiting() -> None:
+        store.create_task(
+            TaskSpec(
+                goal="old task",
+                subtasks=[SubtaskSpec(description="work", acceptance_criteria="done")],
+            )
+        )
+        sub = store.claim("worker")
+        assert sub is not None
+        store.record_failure(
+            sub.id,
+            SubtaskStatus.RUNNING,
+            Actor.EXECUTOR,
+            FailureKind.PERMANENT,
+            lease=sub.lease_token,
+            reason="missing tool",
+        )
+
+    waiting()
+    chat = Chat(sessions)
+    monkeypatch.setattr(chat, "_tell_blocked", lambda: None)
+    chat._notices()
+    assert "new in General Terminal" not in capsys.readouterr().out
+    waiting()
+    chat._notices()
+    assert "1 new in General Terminal" in capsys.readouterr().out

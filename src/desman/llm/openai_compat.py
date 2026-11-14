@@ -34,7 +34,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from desman.core.tools import ToolCall
+from desman.core.tools import ToolCall, normalize_tool_calls
 from desman.llm.base import (
     Completion,
     GenerationFailed,
@@ -45,6 +45,7 @@ from desman.llm.base import (
     QuotaExhausted,
     RateLimited,
     Request,
+    RequestTooLarge,
     Usage,
 )
 
@@ -318,6 +319,8 @@ class OpenAICompatible:
     def _error(self, response: httpx.Response) -> ProviderError:
         status = response.status_code
         message = self._redact(_message(response))
+        if status == 413 and "request too large" in message.lower():
+            return RequestTooLarge(self.name, status, message)
         if status == 429 and _zero_limit(response):
             # A limit of 0 never resets: the account has no access to this API or model yet
             # (e.g. a plan that still has to be activated). Waiting would wait forever.
@@ -359,32 +362,13 @@ def _tool_text(value: Any) -> str | None:
         value = value["tool_calls"] if set(value) == {"tool_calls"} else [value]
     if not isinstance(value, list) or not 1 <= len(value) <= 10:
         return None
+    normalized = normalize_tool_calls({"tool_calls": value})
     calls = []
-    for item in value:
-        if not isinstance(item, dict):
-            return None
-        item = dict(item)
-        if item.get("type") == "function" and isinstance(item.get("function"), dict):
-            function = item.pop("function")
-            item.pop("id", None)
-            item.pop("type")
-            if set(item) & set(function):
-                return None
-            item = {**item, **function}
-        if "name" in item and "tool" not in item:
-            item["tool"] = item.pop("name")
-        if "arguments" in item and "args" not in item:
-            item["args"] = item.pop("arguments")
-        if isinstance(item.get("args"), str):
-            try:
-                item["args"] = json.loads(item["args"])
-            except ValueError:
-                return None
+    for item in normalized["tool_calls"]:
         try:
-            call = ToolCall.model_validate(item)
+            calls.append(ToolCall.model_validate(item).model_dump())
         except ValidationError:
             return None
-        calls.append(call.model_dump())
     return json.dumps({"tool_calls": calls}, ensure_ascii=False)
 
 

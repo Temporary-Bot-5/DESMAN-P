@@ -163,7 +163,7 @@ def test_the_planner_marks_work_that_runs_code_and_it_reaches_the_store(store: S
             "subtasks": [
                 {"description": "write it", "acceptance_criteria": "c", "kind": "code"},
                 {
-                    "description": "run it",
+                    "description": "run the program",
                     "acceptance_criteria": "c",
                     "depends_on": [0],
                     "runs_code": True,
@@ -177,7 +177,7 @@ def test_the_planner_marks_work_that_runs_code_and_it_reaches_the_store(store: S
         {
             "subtasks": [
                 {"description": "a", "acceptance_criteria": "c"},
-                {"description": "b", "acceptance_criteria": "c", "runs_code": True},
+                {"description": "test the program", "acceptance_criteria": "c", "runs_code": True},
             ]
         }
     ).parts()
@@ -392,7 +392,7 @@ def test_must_run_marks_the_last_subtask_and_keeps_the_plan_s_marks() -> None:
     plan = Plan.model_validate(
         {
             "subtasks": [
-                {"description": "a", "acceptance_criteria": "c", "runs_code": True},
+                {"description": "run setup command", "acceptance_criteria": "c", "runs_code": True},
                 {"description": "b", "acceptance_criteria": "c", "depends_on": [0]},
             ]
         }

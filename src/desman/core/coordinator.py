@@ -54,7 +54,7 @@ from desman.core.context import (
     build_context,
     given,
 )
-from desman.core.effects import Effects, earlier_lookups
+from desman.core.effects import Effects, earlier_lookups, workspace_files
 from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
@@ -509,11 +509,12 @@ class Coordinator:
                 self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
+                files=lambda chars: workspace_files(self.store, subtask, tools.workspace, chars),
                 earlier=lambda chars: earlier_lookups(
                     self.store, subtask, self.store.executions(subtask.id), chars
                 ),
             )
-            self._started(subtask, context)
+            self._started(subtask, context, [str(tool["name"]) for tool in tools.specs()])
             work = Work(
                 subtask=subtask,
                 context=context,
@@ -529,7 +530,7 @@ class Coordinator:
                     update={"strategy": crew.strategies(attempt, split=False, **avoid)}
                 )
                 work = work.model_copy(update={"context": context})
-                self._started(subtask, context)
+                self._started(subtask, context, [str(tool["name"]) for tool in tools.specs()])
 
             def unfit_heard(label: str) -> None:
                 self.store.note(
@@ -651,12 +652,17 @@ class Coordinator:
             self.store.note(subtask.id, Actor.EXECUTOR, "context_missing", {"paths": missing})
         return found
 
-    def _started(self, subtask: Subtask, context: Context) -> None:
+    def _started(self, subtask: Subtask, context: Context, tools: list[str]) -> None:
         self.store.note(
             subtask.id,
             Actor.EXECUTOR,
             "attempt_started",
-            {"attempt": context.attempt, "strategy": context.strategy.value},
+            {
+                "attempt": context.attempt,
+                "strategy": context.strategy.value,
+                "execution": self.store.executions(subtask.id),
+                "tools": tools,
+            },
         )
 
     def _decompose(self, work: Work, lease: str, events: list[str]) -> bool:

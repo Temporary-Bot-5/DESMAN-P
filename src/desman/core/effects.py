@@ -85,6 +85,12 @@ def evidence(
     dependencies = store.dependency_results(subtask.id)
     budget = budget_tokens * CHARS_PER_TOKEN
     out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
+    offered = store.conn.execute(
+        "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+        "AND action = 'attempt_started' ORDER BY seq DESC LIMIT 1",
+        (subtask.id,),
+    ).fetchone()
+    out["tools_available"] = json.loads(offered[0]).get("tools", []) if offered else []
     # What the executor was given of the knowledge tree, within at most half the budget, as
     # it got it (`context.fit`): the rest is for what the work itself rests on.
     nodes = fit_knowledge(given(knowledge, subtask.knowledge)[0], budget // 2)
@@ -289,3 +295,43 @@ class Effects:
 def _stored(result: ToolResult) -> dict[str, Any]:
     stored: dict[str, Any] = result.model_dump(mode="json", exclude={"at"})
     return stored
+
+
+def workspace_files(
+    store: Store, subtask: Subtask, workspace: Workspace, chars: int
+) -> list[dict[str, Any]]:
+    """Bounded retry inventory; a successful write's journal identifies its attempt."""
+    writers: dict[str, int] = {}
+    starts = store.conn.execute(
+        "SELECT details_json FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started' ORDER BY seq",
+        (subtask.id,),
+    ).fetchall()
+    attempts = {
+        d["execution"]: d["attempt"] for row in starts if "execution" in (d := json.loads(row[0]))
+    }
+    for execution in range(store.executions(subtask.id)):
+        for row in store.effects(subtask.id, execution):
+            if row["tool"] != "write_file" or row["state"] != "done":
+                continue
+            result = ToolResult.model_validate_json(row["result_json"])
+            if (
+                result.ok
+                and isinstance(result.output, dict)
+                and isinstance(result.output.get("path"), str)
+                and execution in attempts
+            ):
+                writers[result.output["path"]] = attempts[execution]
+    out: list[dict[str, Any]] = []
+    for path in workspace.files():
+        try:
+            item: dict[str, Any] = {"path": path, "size": len(workspace.read(path))}
+        except (OSError, PathEscapeError):
+            continue
+        if path in writers:
+            item["earlier_attempt"] = writers[path]
+        cost = len(json.dumps(item, ensure_ascii=False)) + 2
+        if cost > chars:
+            continue
+        out.append(item)
+        chars -= cost
+    return out

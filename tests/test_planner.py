@@ -213,3 +213,50 @@ def test_plan_does_not_go_with_a_spec(tmp_path: Path) -> None:
     spec.write_text(json.dumps({"goal": "g", "subtasks": [sub("a")]}))
     result = desman("run", "--spec", spec, "--plan", "template")
     assert result.exit_code == 2 and "--spec is already a plan" in result.output
+
+
+def test_lookup_marks_are_removed_but_program_runs_and_explicit_requirement_survive() -> None:
+    from desman.planner import Plan, PlannedSubtask, must_run
+
+    for description in (
+        "Find top three AI news today",
+        "Find the latest AI news today",
+        "Summarise the contest results",
+        "Find this week's box office leader",
+        "Найди новости",
+    ):
+        spec = Plan(
+            subtasks=[
+                PlannedSubtask(
+                    description=description,
+                    acceptance_criteria="sources",
+                    kind=Kind.TEXT,
+                    runs_code=True,
+                )
+            ]
+        ).spec(description)
+        assert not spec.subtasks[0].runs_code
+        assert must_run(spec).subtasks[-1].runs_code
+    for description, kind in (
+        ("Run the program with input 42", Kind.TEXT),
+        ("Запусти код", Kind.TEXT),
+        ("Implement a game", Kind.CODE),
+    ):
+        spec = Plan(
+            subtasks=[
+                PlannedSubtask(
+                    description=description, acceptance_criteria="works", kind=kind, runs_code=True
+                )
+            ]
+        ).spec(description)
+        assert spec.subtasks[0].runs_code
+
+
+def test_planner_prompt_preserves_all_deliverables_and_language_exceptions() -> None:
+    from desman.planner import PLANNER_SYSTEM
+
+    assert "both the original haiku" in PLANNER_SYSTEM
+    assert "its translation" in PLANNER_SYSTEM
+    assert "proper names" in PLANNER_SYSTEM and "another language" in PLANNER_SYSTEM
+    assert "seed or supplied input" in PLANNER_SYSTEM
+    assert "searching the web" in PLANNER_SYSTEM

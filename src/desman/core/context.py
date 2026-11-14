@@ -90,6 +90,7 @@ class Context(BaseModel):
     dependencies: list[DependencyContext]
     knowledge: list[KnowledgeText] = []
     """What the planner chose of the knowledge tree for this subtask."""
+    workspace_files: list[dict[str, Any]] = []
     earlier_lookups: list[dict[str, Any]] = []
     feedback: Feedback | None = None
     attempt: int = 1
@@ -107,17 +108,21 @@ def build_context(
     knowledge: list[KnowledgeText] | None = None,
     *,
     earlier: Callable[[int], list[dict[str, Any]]] | None = None,
+    files: Callable[[int], list[dict[str, Any]]] | None = None,
 ) -> Context:
     """`strategy` defaults to the one the attempt number picks. Dependency results and
     `knowledge` share the budget."""
     attempt = subtask.attempts.quality + 1
-    fitted, nodes = fit(dependencies, knowledge or [], budget_tokens)
+    inventory = files(budget_tokens * CHARS_PER_TOKEN // 4) if files and attempt > 1 else []
+    reserved = estimate_tokens(json.dumps(inventory, ensure_ascii=False)) if inventory else 0
+    fitted, nodes = fit(dependencies, knowledge or [], max(0, budget_tokens - reserved))
     context = Context(
         description=subtask.description,
         acceptance_criteria=subtask.acceptance_criteria,
         inputs=subtask.inputs,
         checkpoint=subtask.checkpoint,
         dependencies=fitted,
+        workspace_files=inventory,
         knowledge=nodes,
         feedback=feedback,
         attempt=attempt,

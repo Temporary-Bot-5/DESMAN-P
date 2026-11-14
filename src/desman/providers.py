@@ -170,7 +170,7 @@ FREE = (
         "https://dashboard.cohere.com/api-keys",
         "COHERE_API_KEY",
         base_url="https://api.cohere.ai/compatibility/v1",
-        default_model="command-r7b-12-2024",
+        default_model="command-a-03-2025",
         limits_url="https://docs.cohere.com/docs/rate-limits",
     ),
     Provider(

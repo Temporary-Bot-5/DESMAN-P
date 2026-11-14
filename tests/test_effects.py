@@ -418,3 +418,56 @@ def test_evidence_holds_inputs_and_dependencies_and_fits_its_budget(store: Store
     assert dependency["subtask"] == "find" and dependency["truncated"]
     assert "TP 1351" in dependency["result"] and len(json.dumps(shown)) < 1000
     assert shown["tool_results"] == []
+
+
+def test_retry_sees_stale_files_sizes_and_writer_attempt_within_budget(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    from desman.core.context import build_context
+    from desman.core.effects import workspace_files
+
+    fake = FakeLLM().on(
+        "Execute",
+        '{"tool_calls":[{"tool":"write_file","args":{"path":"tasks.json","content":"[1,2]"}}]}',
+        '{"done":true}',
+        '{"done":true}',
+    )
+    reviews = iter(
+        [Review(verdict=Verdict.RETRY, feedback="reset demo"), Review(verdict=Verdict.ACCEPT)]
+    )
+    task = store.create_task(one_step())
+    coordinator = Coordinator(
+        store,
+        llm_executor(fake),
+        lambda sub, result: next(reviews),
+        tools=Registry([WRITE_FILE]),
+        access=ACCESS,
+        workspaces=tmp_path,
+        sleep=clock.sleep,
+    )
+    assert coordinator.run(task).status is TaskStatus.DONE
+    retry = json.loads(fake.calls[-1].prompt.split(":\n", 1)[1])
+    assert retry["workspace_files"] == [{"path": "tasks.json", "size": 5, "earlier_attempt": 1}]
+    assert "reset or rewrite" in retry["workspace_files_note"]
+    sub = store.get_subtask(
+        store.conn.execute("SELECT id FROM subtasks WHERE task_id = ?", (task,)).fetchone()[0]
+    )
+    ws = Workspace(tmp_path, task)
+    ws.write("unknown.txt", "other")
+    files = workspace_files(store, sub, ws, 4000)
+    assert files[-1] == {"path": "unknown.txt", "size": 5}
+    assert workspace_files(store, sub, ws, 1) == []
+    called: list[int] = []
+
+    def inventory(chars: int) -> list[dict[str, Any]]:
+        called.append(chars)
+        return workspace_files(store, sub, ws, chars)
+
+    build_context(
+        sub,
+        [],
+        None,
+        budget_tokens=40,
+        files=inventory,
+    )
+    assert called == [40]

@@ -22,6 +22,7 @@ to the next key when one is refused or limited).
 
 from __future__ import annotations
 
+import json
 import random
 import sqlite3
 import time
@@ -48,6 +49,7 @@ from desman.llm.base import (
     ProviderUnavailable,
     RateLimited,
     Request,
+    RequestTooLarge,
     among,
     unfit_seen,
 )
@@ -431,6 +433,27 @@ def estimated_tokens(request: Request) -> int:
     return chars // CHARS_PER_TOKEN + (request.max_tokens or REPLY_TOKENS)
 
 
+def request_ceiling(choice: Choice, conn: sqlite3.Connection | None = None) -> int | None:
+    """Latest reported Groq token ceiling, otherwise the catalog's free-tier limit."""
+    ceiling = choice.spec.request_tokens
+    if choice.provider.id != "groq" or conn is None:
+        return ceiling
+    rows = conn.execute(
+        "SELECT limits_json FROM model_calls WHERE provider = ? AND model = ? "
+        "AND limits_json != '{}' ORDER BY seq DESC",
+        (choice.provider.id, choice.model),
+    )
+    for row in rows:
+        value = json.loads(row[0]).get("x-ratelimit-limit-tokens")
+        try:
+            reported = int(value)
+        except (ValueError, TypeError):
+            continue
+        if reported > 0:
+            return reported
+    return ceiling
+
+
 @dataclass(frozen=True)
 class SkippedModel:
     model: str
@@ -474,10 +497,12 @@ class Fallback:
         sticky: bool = True,
         on_used: Callable[[str], None] | None = None,
         label_for: Callable[[], str | None] | None = None,
+        conn: sqlite3.Connection | None = None,
     ) -> None:
         if not members:
             raise ValueError("a lineup needs at least one model")
         self.members = list(members)
+        self.conn = conn
         self.order = order
         self.sticky = sticky
         self.on_used = on_used
@@ -548,7 +573,13 @@ class Fallback:
                 and not any(known.id == m[1].model for known in catalog.models_of(m[1].provider))
             )
         ]
-        members = large or fit
+        members = [
+            m
+            for m in (large or fit)
+            if m[1] is None
+            or (ceiling := request_ceiling(m[1], self.conn)) is None
+            or ceiling >= need
+        ]
         for llm, choice in self.members:
             if (llm, choice) not in members:
                 skipped.append(
@@ -556,10 +587,18 @@ class Fallback:
                         llm.name if choice is None else choice.label,
                         "context" if (llm, choice) in fit else "unfit",
                         needed=need,
-                        context=choice.spec.context if choice else None,
+                        context=min(
+                            choice.spec.context,
+                            request_ceiling(choice, self.conn) or choice.spec.context,
+                        )
+                        if choice
+                        else None,
                     )
                 )
         errors: list[ProviderError] = []
+        if not members:
+            self._call = LastCall(skipped=tuple(skipped))
+            raise RequestTooLarge(self.name, 413, "request exceeds every model token ceiling")
         failed_over = False
         for i, (llm, choice) in enumerate(members):
             label = llm.name if choice is None else choice.label
@@ -575,7 +614,9 @@ class Fallback:
             except ProviderError as e:
                 label = llm.name if choice is None else choice.label
                 reason = (
-                    "busy"
+                    "context"
+                    if isinstance(e, RequestTooLarge)
+                    else "busy"
                     if isinstance(e, Busy)
                     else "limit"
                     if e.kind is FailureKind.LIMIT
@@ -700,6 +741,8 @@ class Backoff:
             except ProviderError as e:
                 # Said of this call alone, not of the repeats before it (`Fallback` asks).
                 e.slow = self.monotonic() - started > QUICK_FAILURE
+                if isinstance(e, RequestTooLarge):
+                    raise
                 if not isinstance(e, (ProviderTimeout, ProviderUnavailable, RateLimited)):
                     raise
                 if attempt == self.attempts or e.slow:
