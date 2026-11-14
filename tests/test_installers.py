@@ -198,6 +198,11 @@ def test_windows_wrapper_and_evaluation_source() -> None:
     assert wrapper.index("echo Downloading") < wrapper.index("Invoke-WebRequest")
     assert wrapper.index("echo Running") < wrapper.index("-File ")
     assert "if errorlevel 1 goto failed" in wrapper
+    # -Uninstall deletes the batch file it runs from: cmd must not read a line after it.
+    assert (
+        '-File "%DESMAN_INSTALLER%" %* && (if not exist "%~f0" ((goto) 2>nul & ver >nul) else '
+        'exit /b 0) || (pause & if not exist "%~f0" ((goto) 2>nul) else exit /b 1)'
+    ) in wrapper
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell dry-run")

@@ -9,9 +9,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBa
 if errorlevel 1 goto failed
 :run
 echo Running "%DESMAN_INSTALLER%".
-powershell -NoProfile -ExecutionPolicy Bypass -File "%DESMAN_INSTALLER%" %*
-if errorlevel 1 goto failed
-exit /b 0
+rem One line, read whole before it runs: -Uninstall deletes this very file, and cmd would read
+rem the next line from it ("The system cannot find the path specified"). (goto) ends the batch
+rem without reading on; exit /b would close a terminal the person typed the command in.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%DESMAN_INSTALLER%" %* && (if not exist "%~f0" ((goto) 2>nul & ver >nul) else exit /b 0) || (pause & if not exist "%~f0" ((goto) 2>nul) else exit /b 1)
 :failed
 pause
 exit /b 1
