@@ -504,6 +504,7 @@ def decomposer(
             work.subtask.kind,
             context.inputs,
             context.feedback.text if context.feedback else None,
+            goal=context.goal,
             limit=limit,
             clock=clock,
         )
@@ -519,6 +520,7 @@ def split_task(
     inputs: dict[str, Any],
     feedback: str | None,
     *,
+    goal: str | None = None,
     limit: int | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> list[SubtaskSpec] | None:
@@ -530,6 +532,9 @@ def split_task(
         "inputs": inputs,
         "feedback_on_previous_attempt": feedback,
     }
+    if goal is not None:
+        payload["goal"] = goal
+        payload["goal_note"] = "The person’s request; use its language for prose addressed to them."
     request = Request(
         messages=[
             Message(role="system", content=splitter_system(limit or MAX_PARTS) + today(clock)),
