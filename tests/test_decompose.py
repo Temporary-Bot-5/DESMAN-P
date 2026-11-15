@@ -11,6 +11,7 @@ from conftest import FakeClock
 from desman.agents import EXECUTOR_SYSTEM_COMBINE, llm_executor, llm_reviewer
 from desman.core.audit import check_history, history
 from desman.core.coordinator import Coordinator
+from desman.core.effects import evidence
 from desman.core.models import Kind, SubtaskSpec, TaskSpec
 from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
@@ -142,7 +143,7 @@ def coordinator(store: Store, clock: FakeClock, llm: FakeLLM, **kw: Any) -> Coor
     return Coordinator(
         store,
         llm_executor(llm),
-        llm_reviewer(llm),
+        llm_reviewer(llm, lambda sub: evidence(store, sub)),
         decomposer=decomposer(llm),
         sleep=clock.sleep,
         **kw,
@@ -166,7 +167,8 @@ def test_the_fifth_attempt_splits_and_the_parent_combines(store: Store, clock: F
         .on("Review", REJECT, REJECT, REJECT, REJECT, ACCEPT, repeat_last=True)
         .on(SPLIT, split_reply("first half", "second half"))
     )
-    task_id = store.create_task(one_step())
+    spec = one_step().model_copy(update={"goal": "Ответь по-русски"})
+    task_id = store.create_task(spec)
     assert coordinator(store, clock, llm).run(task_id).status is TaskStatus.DONE
 
     hard, first, second = store.list_subtasks(task_id)
@@ -184,6 +186,20 @@ def test_the_fifth_attempt_splits_and_the_parent_combines(store: Store, clock: F
     ]
     [split] = [r for r in llm.calls if r.prompt.startswith(SPLIT)]
     assert "1. too vague" in split.prompt and str(MAX_PARTS) in split.messages[0].content
+    split_payload = json.loads(split.prompt.partition(":\n")[2])
+    assert split_payload["goal"] == spec.goal
+    assert "use its language" in split_payload["goal_note"]
+    for request in llm.calls:
+        if request.prompt.startswith(("Execute", "Review")):
+            body = json.loads(request.prompt.partition(":\n")[2])
+            if body["subtask"] in {"first half", "second half"}:
+                assert "goal" not in body
+            else:
+                assert body["goal"] == spec.goal
+                assert "person" in body["goal_note"]
+                if request.prompt.startswith("Review"):
+                    assert "answer every part of the goal" in request.messages[0].content
+                    assert "name the missing part" in request.messages[0].content
     combine = [r for r in llm.calls if r.prompt.startswith("Execute")][-1]
     assert combine.messages[0].content.startswith(EXECUTOR_SYSTEM_COMBINE)
     payload = json.loads(combine.prompt.partition(":\n")[2])

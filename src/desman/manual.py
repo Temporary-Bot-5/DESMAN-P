@@ -45,25 +45,24 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Each task has a folder (workspaces/TASK next to the database), where the "
-        "executor reads and writes files with its tools; nothing outside it. After a task, the "
-        "chat lists its files and folder. A task sees only its folder: when "
-        'a request builds on what an earlier task of the same chat wrote ("test it", "change '
+        "Task files live in workspaces/TASK next to the database; the "
+        "executor uses tools only there. The "
+        "chat lists its files and folder. Chat skips repeated file text, kept as untrusted data. Chat and run/status show written UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). When "
+        'a request builds on an earlier task in the same chat ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "originals stay unchanged. On retries, with file tools, it sees work files and "
-        "resets or rewrites stale demonstration state and files that contradict its result.\n"
-        "Running code (a test, a crash test, checking what a program prints) needs the "
-        "run_command tool, which needs the person's shell_execution switch (`desman "
-        "permissions`) and a working sandbox. Code-running subtasks are marked by the "
+        "originals stay. On retries it sees work files and "
+        "rewrites stale demonstration files.\n"
+        "Code needs the "
+        "run_command tool, shell_execution (`desman "
+        "permissions`) and a sandbox. Code subtasks are marked by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
-        "with it its result counts only if the code really ran. No part of DESMAN reports "
+        "with it its result counts only if the code really ran. DESMAN never reports "
         "what code would print without running it. Web lookups and prose need no code run. "
-        "Requested prose goes in the result; files are extra. Review requires web lookups for current facts and checks dates, sources and prose language, allowing names "
-        "and requested translations. It sees current text of files written "
+        "Prose goes in the result; files are extra. Review checks web evidence, dates, sources and your language (names/translations allowed). Answers cover your request; split parts keep its language. Live data may have fewer items with sources and stated gaps; honest partial parts feed the combine step. Report blocked pages; use snippets or another official source. Review sees files written "
         "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
-        "A retelling shows code only as the task left it, in the language of your latest message.",
+        "Retellings copy task code and use your latest message’s language.",
     ),
     Topic(
         "retries",
@@ -104,7 +103,7 @@ TOPICS: Final = (
         "`desman modules` shows active tasks; `desman modules clear --task REF` resets choices.\n"
         "For installed models and downloads see the localmodels topic.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
-        "model or logs. Inspect with `desman keys list`, `desman keys check` (no tokens) "
+        "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `desman keys list`, `desman keys check` (no tokens) "
         "and `desman usage`. A model returning 404 is set aside for 24 hours across runs; usage shows active model blocks.",
     ),
     Topic(

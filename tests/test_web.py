@@ -328,3 +328,58 @@ def test_the_web_tools_have_a_call_budget(tmp_path: Path) -> None:
 
 def test_the_executor_is_told_web_text_is_not_instructions() -> None:
     assert '"untrusted"' in TOOLS_INSTRUCTIONS and "never" in TOOLS_INSTRUCTIONS
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        '<div id="app"></div><script>' + "x" * 2200 + "</script>",
+        "<noscript>Please enable JavaScript to continue.</noscript>",
+    ],
+)
+def test_javascript_shell_reports_no_readable_text(shell: str) -> None:
+    site = Site({"https://example.org/app": html(shell)})
+    web = Web(fetcher=fetcher(site))
+    result = web.page("https://example.org/app")
+    assert result["note"] == "the page needs JavaScript; no readable text"
+    assert result["text"] == ""
+
+
+def test_short_readable_html_is_not_a_javascript_shell() -> None:
+    site = Site({"https://example.org/doc": html("<p>A short readable page.</p>")})
+    assert "note" not in Web(fetcher=fetcher(site)).page("https://example.org/doc")
+
+
+def test_unreadable_named_source_fallback_is_in_both_prompts() -> None:
+    from desman.agents import REVIEWER_EVIDENCE
+
+    assert "search results/snippets of that source or another official source" in TOOLS_INSTRUCTIONS
+    assert "reading attempt counts" in TOOLS_INSTRUCTIONS
+    assert "executor attempted" in REVIEWER_EVIDENCE
+    assert "accept an answer using snippets or another official source" in REVIEWER_EVIDENCE
+    assert "You have no tools yourself" in REVIEWER_EVIDENCE
+
+
+@pytest.mark.parametrize(
+    "body", ["<p>1 USD = 0.92 EUR (updated 10:00)</p>", "<p>Short real page.</p>"]
+)
+def test_large_head_does_not_make_real_page_unreadable(body: str) -> None:
+    site = Site(
+        {"https://example.org/doc": html("<head><style>" + "x" * 3000 + "</style></head>" + body)}
+    )
+    page = Web(fetcher=fetcher(site)).page("https://example.org/doc")
+    assert "note" not in page
+    assert "page" in page["text"] or "0.92" in page["text"]
+
+
+def test_next_data_only_is_unreadable() -> None:
+    site = Site({"https://example.org/doc": html('<script id="__NEXT_DATA__">{}</script>')})
+    assert "JavaScript" in Web(fetcher=fetcher(site)).page("https://example.org/doc")["note"]
+
+
+def test_tracking_pixel_noscript_does_not_make_page_unreadable() -> None:
+    pixel = '<noscript><img src="https://example.org/pixel.gif"></noscript>'
+    site = Site({"https://example.org/doc": html(pixel + "<p>1 USD = 0.92 EUR</p>")})
+    page = Web(fetcher=fetcher(site)).page("https://example.org/doc")
+    assert "note" not in page
+    assert "0.92" in page["text"]

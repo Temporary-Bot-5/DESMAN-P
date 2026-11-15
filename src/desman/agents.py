@@ -97,8 +97,10 @@ EXECUTOR_SYSTEM_COMBINE = (
     EXECUTOR_SYSTEM + " This subtask was split into smaller parts, which are done: their "
     "results are among the results of dependencies. Build this subtask's result from them."
 )
+UNREADABLE_SOURCE = " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
 TOOLS_INSTRUCTIONS = (
-    ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
+    UNREADABLE_SOURCE
+    + ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
     "To call them, reply instead of the result with "
     '{"tool_calls": [{"tool": "name", "args": {...}}, ...]}; you will get their results and '
     "continue. Files you write stay in the task's workspace, where later subtasks can read them; "
@@ -138,6 +140,9 @@ REVIEWER_SYSTEM = (
     "to it is fine; check its written_files evidence."
 )
 REVIEWER_EVIDENCE = (
+    " If the executor attempted a named source but it was unreadable (including captcha or bot protection), "
+    "accept an answer using snippets or another official source when it plainly says what "
+    "could not be read and the rest meets the criteria. You have no tools yourself."
     " Never decide from memory that something does not exist, is not released or is out of "
     "date: today may be after your training data; only the evidence counts. For a lookup "
     "subtask with web tools available but no web_search/web_fetch results in evidence, "
@@ -167,6 +172,13 @@ REVIEWER_EVIDENCE = (
     "shows it was never read, reply retry with feedback to read that source. A run_command "
     "that merely prints the executor's own conclusion (for example echo Top film: ...) "
     "does not verify that conclusion and is not evidence for it."
+    " For live data (prices, vacancies, schedules, news), the best results found, each with "
+    "its source, plus a plain statement of what was not found meet criteria asking for "
+    "more items or details, unless the evidence shows the missing items were available "
+    "and ignored. This also applies to the final answer's coverage of the goal. "
+    'When part_of_split is true, this is a part feeding a combine step: reply "accept" '
+    "for an honestly marked partial result; the combine step chooses what to use. "
+    "These rules do not excuse invented facts or ignoring available evidence."
 )
 
 
@@ -204,6 +216,9 @@ def _execute(
         "attempt": context.attempt,
         "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
     }
+    if context.final_goal is not None:
+        prompt["goal"] = context.final_goal
+        prompt["goal_note"] = "The person’s request; this subtask produces the final answer."
     if context.knowledge:
         prompt["knowledge"] = [node.model_dump(exclude_defaults=True) for node in context.knowledge]
     if context.earlier_lookups and context.strategy is not Strategy.COMBINE:
@@ -321,9 +336,22 @@ def llm_reviewer(
             "result": artifact,
         }
         system = REVIEWER_SYSTEM + today(clock)
+        if subtask.parent_id is not None and evidence is not None:
+            prompt["part_of_split"] = True
         if evidence is not None:
-            prompt["evidence"] = evidence(subtask)
+            prompt["evidence"] = dict(evidence(subtask))
             system += REVIEWER_EVIDENCE
+            if "goal" in prompt["evidence"]:
+                prompt["goal"] = prompt["evidence"].pop("goal")
+                prompt["goal_note"] = (
+                    "The person’s request; this subtask produces the final answer."
+                )
+                system += (
+                    " The final result must answer every part of the goal, using what the "
+                    "dependencies found, subject to the live-data and split-part rules above. "
+                    "An unaddressed part means retry: name the missing part "
+                    "in feedback (including requested values, dates and sources)."
+                )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an
         # interrupted review, so the work is reviewed again, not redone.
         verdict = _ask(llm, system, REVIEW, prompt, _Verdict)

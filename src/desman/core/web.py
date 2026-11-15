@@ -116,6 +116,7 @@ class Page:
     content_type: str
     text: str
     title: str = ""
+    note: str | None = None
     cut: bool = False
     """More than MAX_BYTES: only the start was read."""
 
@@ -206,9 +207,21 @@ class Fetcher:
             raise WebError(f"fetch failed: {type(e).__name__}") from e
         text = bytes(body).decode(response.encoding or "utf-8", errors="replace")
         title = ""
+        note = None
         if content_type in ("text/html", "application/xhtml+xml"):
-            title, text = html_text(text)
-        return Page(url=url, content_type=content_type, text=text, title=title, cut=cut)
+            raw = text
+            title, text = html_text(raw)
+            noscript = re.search(r"<noscript\b[^>]*>(.*?)</noscript\s*>", raw, re.I | re.S)
+            if len(text) < 200 and (
+                (noscript and "javascript" in noscript[1].lower())
+                or re.search(r"enable\s+javascript", raw, re.I)
+                or re.search(
+                    r'<div\b[^>]*id=[\'"](?:root|app|__next)[\'"][^>]*>\s*</div>', raw, re.I
+                )
+                or (not text.strip() and "__NEXT_DATA__" in raw)
+            ):
+                note = "the page needs JavaScript; no readable text"
+        return Page(url=url, content_type=content_type, text=text, title=title, cut=cut, note=note)
 
 
 _NAT64: Final = ipaddress.IPv6Network("64:ff9b::/96")
@@ -394,6 +407,8 @@ class Web:
             "text": page.text,
             "cut": page.cut,
         }
+        if page.note:
+            body["note"] = page.note
         if self.cache:
             self.cache.put("page", url, body)
         return body

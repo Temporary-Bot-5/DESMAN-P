@@ -85,6 +85,9 @@ def evidence(
     dependencies = store.dependency_results(subtask.id)
     budget = budget_tokens * CHARS_PER_TOKEN
     out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
+    goal = store.final_goal(subtask)
+    if goal is not None:
+        out["goal"] = goal
     offered = store.conn.execute(
         "SELECT details_json FROM audit_log WHERE subtask_id = ? "
         "AND action = 'attempt_started' ORDER BY seq DESC LIMIT 1",
