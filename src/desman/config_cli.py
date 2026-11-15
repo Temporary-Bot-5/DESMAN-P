@@ -574,19 +574,21 @@ def key_rows(config: Config, db_path: Path | None = None) -> list[dict[str, Any]
                 "keys": keys,
             }
         )
-    rows.append(
-        {
-            "provider": "searxng",
-            "name": "SearXNG",
-            "env": None,
-            "paid": False,
-            "search": True,
-            "hub": False,
-            "ready": bool(config.settings.get("SEARXNG_URL")),
-            "keys": [],
-            "url": config.settings.get("SEARXNG_URL", ""),
-        }
-    )
+    for service in providers.SEARCH:
+        if service.key_env is None:
+            rows.append(
+                {
+                    "provider": service.id,
+                    "name": service.name,
+                    "env": None,
+                    "paid": service.paid,
+                    "search": True,
+                    "hub": False,
+                    "ready": service.is_ready(config),
+                    "keys": [],
+                    "url": config.settings.get(service.settings[0].env, ""),
+                }
+            )
     return rows
 
 
@@ -634,7 +636,7 @@ def print_key_rows(rows: list[dict[str, Any]]) -> None:
             "{n} keys from {with_keys} of {providers} providers. `desman keys check` tests them "
             "(no tokens spent), `desman usage` shows totals.",
             with_keys=len(with_keys),
-            providers=len(rows),
+            providers=sum(r["env"] is not None for r in rows),
         )
     )
 
@@ -778,7 +780,7 @@ def _local_hint(p: providers.Provider, r: check.KeyCheck) -> None:
 def _model_provider(name: str) -> providers.Provider:
     """A model provider, cloud or local, by any of its names."""
     try:
-        return providers.find_keyed(name) if name.lower() == "searxng" else providers.find(name)
+        return providers.find_keyed(name)
     except providers.UnknownProvider as e:
         raise click.BadParameter(str(e), param_hint="PROVIDER") from e
 

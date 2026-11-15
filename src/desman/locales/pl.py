@@ -15,6 +15,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Nothing changed. Confirm with: {command}": "Nic nie zmieniono. Potwierdź poleceniem: {command}",
     "Not configured": "Nie skonfigurowano",
     "SearXNG container: {state}": "Kontener SearXNG: {state}",
     "SearXNG URL is not configured. Run `desman search setup`.": "Brak adresu SearXNG. Uruchom `desman search setup`.",

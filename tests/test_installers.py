@@ -510,4 +510,86 @@ def test_installers_offer_search_only_with_docker_and_interactive_input() -> Non
     assert "command -v docker" in shell and "[ -t 0 ]" in shell
     assert ".venv/bin/desman search setup" in shell
     assert "Get-Command docker" in powershell and "![Console]::IsInputRedirected" in powershell
-    assert "@('search', 'setup')" in powershell
+    assert "@('search', 'setup', '--yes')" in powershell
+
+
+if sys.platform != "win32":
+
+    @linux
+    def test_optional_search_failure_still_starts_gui(
+        installer: tuple[Path, dict[str, str]],
+    ) -> None:
+        _, env = installer
+        tools = Path(env["UV_STUB"]).parent
+        (tools / "docker").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (tools / "docker").chmod(0o755)
+        stub = tools / "uv"
+        stub.write_text(
+            stub.read_text(encoding="utf-8").replace(
+                'echo "desman $*" >> "$LOG"',
+                'echo "desman $*" >> "$LOG"\nif [ "$1" = search ]; then echo "daemon down" >&2; exit 1; fi',
+            ),
+            encoding="utf-8",
+        )
+        master, slave = os.openpty()
+        try:
+            os.write(master, b"y\n")
+            result = subprocess.run(
+                ["sh", str(SHELL)],
+                env=env,
+                stdin=slave,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+            )
+        finally:
+            os.close(master)
+            os.close(slave)
+        assert result.returncode == 0, result.stderr
+        assert "search not set up: daemon down" in result.stderr
+        assert "later: desman search setup --yes" in result.stderr
+        assert Path(env["LOG"]).read_text(encoding="utf-8").endswith("desman gui\n")
+
+
+def test_powershell_optional_search_is_dry_run_safe_and_catches_failure() -> None:
+    source = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
+    dry_run = source.split("if ($DryRun) {", 1)[1].split("\ntry {", 1)[0]
+    assert "Run '.\\.venv\\Scripts\\desman.exe'" not in dry_run
+    assert "Write-Output 'Optional: desman search setup --yes" in dry_run
+    optional = source.split("Read-Host 'Set up SearXNG", 1)[1]
+    assert "try { Run" in optional
+    assert (
+        'catch { Write-Warning "search not set up: $_; later: desman search setup --yes" }'
+        in optional
+    )
+    assert optional.index("catch { Write-Warning") < optional.index("if (!$NoStart)")
+
+
+def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
+    powershell = shutil.which("powershell") or shutil.which("pwsh")
+    if powershell is None:
+        pytest.skip("PowerShell is unavailable")
+    source = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
+    start = source.index("            if ((Read-Host 'Set up SearXNG")
+    end = source.index("        if (!$NoStart)", start)
+    # Exercise the installer's actual optional block with no Docker or install side effects.
+    script = tmp_path / "optional.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Read-Host { return 'y' }\n"
+        "function Run { throw 'daemon down' }\n"
+        + source[start:end].rsplit("        }", 1)[0]
+        + "\nWrite-Output 'GUI reached'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "search not set up: daemon down" in result.stdout
+    assert "GUI reached" in result.stdout

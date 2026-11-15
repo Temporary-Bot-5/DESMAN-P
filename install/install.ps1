@@ -49,7 +49,7 @@ if ($DryRun) {
         Write-Output 'git clone; git fetch origin --tags; git checkout -B desman-installed REF'
         Write-Output 'uv venv -p 3.12; uv pip install --python .venv\Scripts\python.exe -e .; desman gui --shortcut'
         if ((Get-Command docker -ErrorAction SilentlyContinue) -and !$Yes -and ![Console]::IsInputRedirected) {
-            Run '.\.venv\Scripts\desman.exe' @('search', 'setup')
+            Write-Output 'Optional: desman search setup --yes (Docker, about 100 MB; asks first)'
         }
         if (!$NoStart) { Write-Output 'desman gui' }
         Write-Output 'Updates: desman global update --show; desman global update --apply NUMBER'
@@ -175,7 +175,10 @@ try {
         Run '.\.venv\Scripts\desman.exe' @('gui', '--shortcut')
         Write-Host 'Installed. Updates: desman global update --show, then --apply NUMBER.'
         if ((Get-Command docker -ErrorAction SilentlyContinue) -and !$Yes -and ![Console]::IsInputRedirected) {
-            Run '.\.venv\Scripts\desman.exe' @('search', 'setup')
+            if ((Read-Host 'Set up SearXNG on this computer (Docker, about 100 MB)? (y/N)') -match '^(y|yes)$') {
+                try { Run '.\.venv\Scripts\desman.exe' @('search', 'setup', '--yes') }
+                catch { Write-Warning "search not set up: $_; later: desman search setup --yes" }
+            }
         }
         if (!$NoStart) { Run '.\.venv\Scripts\desman.exe' @('gui') }
     } finally { Pop-Location }

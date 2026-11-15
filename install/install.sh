@@ -153,6 +153,15 @@ ln -sfn "$APP/.venv/bin/desman" "$launcher"
 .venv/bin/desman gui --shortcut
 echo 'Installed. Updates: desman global update (inspect), then --apply NUMBER. Add ~/.local/bin to PATH for terminal use.'
 if command -v docker >/dev/null 2>&1 && [ -t 0 ] && [ "$YES" = 0 ]; then
-    .venv/bin/desman search setup
+    printf 'Set up SearXNG on this computer (Docker, about 100 MB)? (y/N) '
+    read -r search_answer || search_answer=n
+    case "$search_answer" in
+        y|Y|yes|YES)
+            if search_error=$(.venv/bin/desman search setup --yes 2>&1); then
+                printf '%s\n' "$search_error"
+            else
+                printf 'Warning: search not set up: %s; later: desman search setup --yes\n' "$search_error" >&2
+            fi ;;
+    esac
 fi
 if [ "$START" = 1 ]; then .venv/bin/desman gui; fi

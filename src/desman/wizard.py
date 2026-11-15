@@ -11,11 +11,13 @@ saved until the end; leaving with Ctrl+C or Esc saves nothing.
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import click
 from rich.panel import Panel
 from rich.text import Text
 
@@ -28,7 +30,6 @@ from desman.config import (
     ConfigManager,
     Network,
     Permissions,
-    open_config,
 )
 from desman.core import search
 from desman.i18n import t, tn
@@ -240,7 +241,7 @@ def _providers_menu(s: _Session) -> None:
             (t("Models for local servers"), providers.HUB),
         ):
             choices.append(ui.Heading(title))
-            if group is providers.SEARCH:
+            if group is providers.SEARCH and shutil.which("docker") is not None:
                 choices.append(
                     ui.Choice(t("Set up SearXNG on this computer (Docker)"), "search_setup")
                 )
@@ -256,9 +257,11 @@ def _providers_menu(s: _Session) -> None:
             from desman import searxng
 
             if ui.confirm(searxng.consent()):
-                s.config.settings["SEARXNG_URL"] = searxng.setup(
-                    s.manager or open_config(), save_url=False
-                )
+                assert s.manager is not None
+                try:
+                    s.config.settings["SEARXNG_URL"] = searxng.setup(s.manager, save_url=False)
+                except click.ClickException as e:
+                    ui.warn(str(e))
             continue
         if picked == "roles":
             ask_roles(s.config)

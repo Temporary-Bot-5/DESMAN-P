@@ -71,13 +71,17 @@ def parse_results(response: httpx.Response, engine: str) -> list[SearchResult]:
     if response.status_code != 200:
         raise WebError(f"{engine} answered HTTP {response.status_code}")
     try:
-        return [
-            r
-            for r in _Results.model_validate_json(response.content).results
-            if urlsplit(r.url).hostname
-        ]
+        results = _Results.model_validate_json(response.content).results
     except ValidationError as e:
         raise WebError(f"{engine} sent an answer that is not a list of results") from e
+    valid = []
+    for result in results:
+        try:
+            if urlsplit(result.url).hostname:
+                valid.append(result)
+        except ValueError:
+            continue
+    return valid
 
 
 # ── The whole web ────────────────────────────────────────────────────────────

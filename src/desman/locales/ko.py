@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Nothing changed. Confirm with: {command}": "변경 사항이 없습니다. 다음 명령으로 확인하세요: {command}",
     "Not configured": "설정되지 않음",
     "SearXNG container: {state}": "SearXNG 컨테이너: {state}",
     "SearXNG URL is not configured. Run `desman search setup`.": "SearXNG URL이 설정되지 않았습니다. `desman search setup`을 실행하세요.",

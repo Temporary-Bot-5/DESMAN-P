@@ -73,8 +73,8 @@ def inspect() -> dict[str, Any] | None:
         raise click.ClickException(t("Docker failed: {error}", error=str(e))) from e
 
 
-def free_port(port: int | None = None) -> int:
-    for candidate in range(port or 8888, (port + 1) if port else 65536):
+def free_port(port: int | None = None, *, start: int = 8888) -> int:
+    for candidate in range(port or start, (port + 1) if port else 65536):
         with socket.socket() as sock:
             try:
                 sock.bind(("127.0.0.1", candidate))
@@ -124,7 +124,7 @@ def setup(
                 "Cannot read or write {file}: {error}. An older setup may have left the folder owned by another user. Remove that folder with Docker, then run `desman search setup` again: {command}",
                 file=str(settings),
                 error=str(e),
-                command=f'docker run --rm -v "{folder.parent.resolve()}:/x" {IMAGE} rm -rf /x/searxng',
+                command=f'docker run --rm --user root --entrypoint rm -v "{folder.parent.resolve()}:/x" {IMAGE} -rf /x/searxng',
             )
         ) from e
     bindings = existing.get("HostConfig", {}).get("PortBindings", {}) if existing else {}
@@ -150,22 +150,44 @@ def setup(
         docker(["pull", IMAGE], timeout=600)
         if existing:
             docker(["rm", "-f", "-v", CONTAINER])
-        chosen = free_port(port)
-        docker(
-            [
-                "run",
-                "-d",
-                "--name",
-                CONTAINER,
-                "--restart",
-                "unless-stopped",
-                "-p",
-                f"127.0.0.1:{chosen}:8080",
-                "-v",
-                f"{settings.resolve()}:/etc/searxng/settings.yml:ro",
-                IMAGE,
-            ]
-        )
+        candidate = port
+        for attempt in range(5):
+            chosen = free_port(candidate)
+            try:
+                docker(
+                    [
+                        "run",
+                        "-d",
+                        "--name",
+                        CONTAINER,
+                        "--restart",
+                        "unless-stopped",
+                        "-p",
+                        f"127.0.0.1:{chosen}:8080",
+                        "-v",
+                        f"{settings.resolve()}:/etc/searxng/settings.yml:ro",
+                        IMAGE,
+                    ]
+                )
+                break
+            except click.ClickException as e:
+                message = str(e).lower()
+                if (
+                    attempt == 4
+                    or chosen == 65535
+                    or not any(
+                        text in message
+                        for text in (
+                            "port is already allocated",
+                            "address already in use",
+                            "port is in use",
+                        )
+                    )
+                ):
+                    raise
+                # Docker may have created a stopped container before failing to bind.
+                docker(["rm", "-f", "-v", CONTAINER])
+                candidate = free_port(start=chosen + 1)
     url = f"http://127.0.0.1:{chosen}"
     problem: str | None = None
     with search.client() as http:
@@ -185,15 +207,24 @@ def setup(
 
 
 def status(manager: ConfigManager, *, display: bool = True) -> dict[str, object]:
-    available()
-    container = inspect()
+    container = None
+    unknown = False
+    try:
+        available()
+        container = inspect()
+    except click.ClickException:
+        unknown = True
     url = manager.load().settings.get("SEARXNG_URL", "")
     problem = None
     if url:
         with search.client() as http:
             problem = search.check_searxng(url, http)
     result = {
-        "container": container.get("State", {}).get("Status") if container else None,
+        "container": "unknown"
+        if unknown
+        else container.get("State", {}).get("Status")
+        if container
+        else None,
         "url": url,
         "answers": bool(url and problem is None),
         "error": problem,

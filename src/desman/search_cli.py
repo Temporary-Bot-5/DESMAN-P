@@ -19,10 +19,11 @@ def search() -> None:
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def setup(port: int | None, yes: bool) -> None:
     """Set up SearXNG with Docker (about 100 MB)."""
-    if yes or ui.confirm(searxng.consent()):
+    if yes:
         searxng.setup(load_config(), port)
     else:
-        ui.note(t("Nothing changed."))
+        ui.note(searxng.consent())
+        ui.note(t("Nothing changed. Confirm with: {command}", command="desman search setup --yes"))
 
 
 @search.command()
@@ -50,7 +51,8 @@ def stop() -> None:
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def remove(yes: bool) -> None:
     """Remove the SearXNG container; keep its settings."""
-    if yes or ui.confirm(t("Remove the local SearXNG container?")):
+    if yes:
         searxng.operate(load_config(), "remove")
     else:
-        ui.note(t("Nothing changed."))
+        ui.note(t("Remove the local SearXNG container?"))
+        ui.note(t("Nothing changed. Confirm with: {command}", command="desman search remove --yes"))

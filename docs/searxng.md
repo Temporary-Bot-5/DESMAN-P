@@ -12,10 +12,10 @@ and macOS), then run:
 desman search setup
 ```
 
-DESMAN asks before downloading the pinned image (about 100 MB), writes settings under its
+Without `--yes`, DESMAN previews the change and exits without changing anything. Add `--yes` to confirm downloading the pinned image (about 100 MB), writes settings under its
 config directory, and starts `desman-searxng`, reachable only at `127.0.0.1`. It picks a free
 port starting at 8888. Only after a JSON search answers does it save `SEARXNG_URL`. Run setup
-again to repair or reuse the container. `--port 8889` chooses a port; `--yes` skips consent.
+again to repair or reuse the container. `--port 8889` chooses a port; `--yes` confirms setup.
 The configuration wizard also offers setup under Web search. Only `settings.yml` is mounted
 into the container, read-only; setup makes that file readable by the container while keeping
 the settings folder private.
@@ -27,10 +27,10 @@ desman search start
 desman search remove
 ```
 
-Removal asks for consent (`--yes` for scripts), removes the container, and keeps settings
+Removal previews the change; `desman search remove --yes` removes the container and keeps settings
 and the downloaded image. `desman keys list` shows the URL; `desman keys check searxng`
 checks whether it answers. `search status --json` returns the container state, URL and
-search health for scripts. Docker restarts the container with the computer unless stopped.
+search health for scripts, even without Docker (container state: unknown). Docker restarts the container with the computer unless stopped.
 
 ## Manual fallback
 

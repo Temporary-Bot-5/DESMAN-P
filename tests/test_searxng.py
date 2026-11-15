@@ -13,7 +13,7 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-from desman import commands, searxng
+from desman import commands, searxng, ui
 from desman.cli import cli
 from desman.config import ConfigManager
 from desman.core import search
@@ -121,9 +121,11 @@ def test_consent_before_mutation(action: str, monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(searxng, "setup", forbidden)
     monkeypatch.setattr(searxng, "operate", forbidden)
+    monkeypatch.setattr(ui, "confirm", forbidden)
     result = CliRunner().invoke(cli, ["search", action], input="n\n")
     assert result.exit_code == 0, result.output
     assert "Nothing changed." in result.output
+    assert "--yes" in result.output
 
 
 def test_port_selection_skips_busy_ports(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,6 +159,7 @@ def test_malformed_host_dropped_before_result_limit() -> None:
                 json={
                     "results": [
                         {"title": "broken", "url": "http:///go/v1/no"},
+                        {"title": "bad brackets", "url": "http://[bad"},
                         {"title": "valid", "url": "https://example.com"},
                     ]
                 },
@@ -191,7 +194,7 @@ def test_search_catalog_matches_cli() -> None:
 
 
 def test_wizard_setup_uses_staged_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    from test_wizard import DONE, KEEP_PERMISSIONS, KEEP_PERSONAL, saved, wizard
+    from test_wizard import KEEP_PERMISSIONS, KEEP_PERSONAL, saved, wizard
 
     seen: list[bool] = []
 
@@ -200,10 +203,16 @@ def test_wizard_setup_uses_staged_url(monkeypatch: pytest.MonkeyPatch) -> None:
         return "http://127.0.0.1:8889"
 
     monkeypatch.setattr(searxng, "setup", setup)
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/docker")
     from desman import providers
 
     result = wizard(
-        "1", str(len(providers.PROVIDERS) + 1), "y", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+        "1",
+        str(len(providers.PROVIDERS) + 1),
+        "y",
+        str(len(providers.PROVIDERS + providers.SERVICES) + 2),
+        *KEEP_PERMISSIONS,
+        *KEEP_PERSONAL,
     )
     assert result.exit_code == 0, result.output
     assert seen == [False]
@@ -287,7 +296,10 @@ def test_settings_oserror_is_actionable(
     message = str(caught.value)
     assert str(settings) in message
     assert "docker run --rm" in message
-    assert "rm -rf /x/searxng" in message
+    assert (
+        f'docker run --rm --user root --entrypoint rm -v "{folder.parent.resolve()}:/x" {searxng.IMAGE} -rf /x/searxng'
+        in message
+    )
     assert "desman search setup" in message
     assert not any(call[0] in ("pull", "run", "rm") for call in calls)
 
@@ -363,3 +375,124 @@ def test_status_readable_and_json(
         "answers": bool(url and not problem),
         "error": problem,
     }
+
+
+def test_status_without_docker_checks_configured_url(
+    manager: ConfigManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.config_cli import load_config
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with load_config().edit() as config:
+        config.settings["SEARXNG_URL"] = "https://search.example.com"
+    seen: list[str] = []
+    monkeypatch.setattr(search, "check_searxng", lambda url, http: seen.append(url))
+    for options in ([], ["--json"]):
+        result = CliRunner().invoke(cli, ["search", "status", *options])
+        assert result.exit_code == 0, result.output
+        assert "unknown" in result.output
+        if options:
+            assert json.loads(result.output)["answers"] is True
+    assert seen == ["https://search.example.com"] * 2
+
+
+@pytest.mark.parametrize("message", ["port is already allocated", "address already in use"])
+def test_run_port_collision_retries(
+    manager: ConfigManager, calls: list[list[str]], monkeypatch: pytest.MonkeyPatch, message: str
+) -> None:
+    original = searxng.docker
+    runs = 0
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        nonlocal runs
+        original(args, timeout)
+        if args[0] == "run":
+            runs += 1
+            if runs == 1:
+                raise click.ClickException(message)
+        return ""
+
+    monkeypatch.setattr(searxng, "docker", docker)
+    monkeypatch.setattr(searxng, "free_port", lambda port=None, *, start=8888: port or start)
+    assert searxng.setup(manager).endswith(":8889")
+    assert ["rm", "-f", "-v", searxng.CONTAINER] in calls
+    assert len([c for c in calls if c[0] == "pull"]) == 1
+
+
+def test_wizard_setup_failure_keeps_staged_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman import wizard
+    from desman.config import Config
+
+    session = wizard._Session(Config(), ConfigManager(Path("/tmp/unused-t6j-config.json")))
+    session.config.settings["SEARXNG_URL"] = "https://previous.example.com"
+    session.config.language = "de"
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/docker")
+    choices = iter(["search_setup", None])
+    monkeypatch.setattr(ui, "select", lambda *a, **kw: next(choices))
+    monkeypatch.setattr(ui, "confirm", lambda *a: True)
+
+    def fail(*a: Any, **kw: Any) -> str:
+        raise click.ClickException("pull timed out")
+
+    warnings: list[str] = []
+    monkeypatch.setattr(searxng, "setup", fail)
+    monkeypatch.setattr(ui, "warn", warnings.append)
+    wizard._providers_menu(session)
+    assert warnings == ["pull timed out"]
+    assert session.config.language == "de"
+    assert session.config.settings["SEARXNG_URL"] == "https://previous.example.com"
+
+
+def test_wizard_hides_setup_without_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman import wizard
+    from desman.config import Config
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    def select(title: str, choices: list[Any], **kwargs: Any) -> None:
+        assert not any(getattr(c, "value", None) == "search_setup" for c in choices)
+        assert any(getattr(getattr(c, "value", None), "id", None) == "searxng" for c in choices)
+
+    monkeypatch.setattr(ui, "select", select)
+    wizard._providers_menu(wizard._Session(Config()))
+
+
+def test_service_does_not_inflate_key_provider_count(
+    manager: ConfigManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman import config_cli
+
+    monkeypatch.setattr(config_cli, "_usage", lambda *a: [])
+    rows = config_cli.key_rows(manager.load())
+    expected = sum(r["env"] is not None for r in rows)
+    seen: list[str] = []
+    monkeypatch.setattr(ui, "note", seen.append)
+    config_cli.print_key_rows(rows)
+    assert f"of {expected} providers" in seen[-1]
+    assert config_cli._model_provider("tavily").id == "tavily"
+
+
+@pytest.mark.parametrize(
+    "message,expected_runs", [("port is already allocated", 5), ("bad image", 1)]
+)
+def test_run_failures_are_bounded_and_do_not_save_url(
+    manager: ConfigManager,
+    calls: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    expected_runs: int,
+) -> None:
+    original = searxng.docker
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        original(args, timeout)
+        if args[0] == "run":
+            raise click.ClickException(message)
+        return ""
+
+    monkeypatch.setattr(searxng, "docker", docker)
+    monkeypatch.setattr(searxng, "free_port", lambda port=None, *, start=8888: port or start)
+    with pytest.raises(click.ClickException, match=message):
+        searxng.setup(manager)
+    assert len([c for c in calls if c[0] == "run"]) == expected_runs
+    assert "SEARXNG_URL" not in manager.load().settings

@@ -1879,11 +1879,10 @@ _KEYED = [p.id for p in providers.CLOUD + providers.SERVICES if p.key_env is not
 
 class SearchSetupArgs(Args):
     port: int | None = Field(default=None, ge=1, le=65535)
-    yes: bool = False
 
 
 class SearchRemoveArgs(Args):
-    yes: bool = False
+    pass
 
 
 def _search_status(ctx: Context, args: NoArgs) -> Outcome:
