@@ -110,11 +110,13 @@ def test_busy_gui_port_real_socket() -> None:
             gui_app.run(False, False, port, False)
 
 
-def test_busy_gui_windows_error(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("code", [10048, 10013])
+def test_busy_gui_windows_error(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    class WindowsBusy(OSError):
+        winerror = code  # a class attribute: OSError's own slot is read-only on Windows
+
     def busy(app: Any) -> Any:
-        exc = OSError("busy")
-        exc.__dict__["winerror"] = 10048
-        raise exc
+        raise WindowsBusy("busy")
 
     monkeypatch.setattr(gui_app, "http_server", busy)
     with pytest.raises(click.ClickException, match="Use another --port"):

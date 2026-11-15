@@ -36,7 +36,8 @@ def run(
     try:
         server = http_server(app)
     except OSError as exc:
-        if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) != 10048:
+        # Windows: 10048 in use; 10013 when the port is held by another socket (or reserved).
+        if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) not in {10048, 10013}:
             raise
         raise click.ClickException(
             t(
