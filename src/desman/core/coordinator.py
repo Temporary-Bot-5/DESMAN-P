@@ -509,6 +509,8 @@ class Coordinator:
                 self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
+                goal=self.store.find_task(subtask.task_id)["goal"],
+                final_goal=self.store.final_goal(subtask),
                 files=(lambda chars: workspace_files(self.store, subtask, tools.workspace, chars))
                 if any(
                     spec["name"] in {"read_file", "write_file", "list_files"}

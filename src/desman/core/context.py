@@ -83,6 +83,8 @@ class Feedback(BaseModel):
 class Context(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    goal: str | None = None
+    final_goal: str | None = None
     description: str
     acceptance_criteria: str
     inputs: dict[str, Any]
@@ -107,6 +109,8 @@ def build_context(
     strategy: Strategy | None = None,
     knowledge: list[KnowledgeText] | None = None,
     *,
+    goal: str | None = None,
+    final_goal: str | None = None,
     earlier: Callable[[int], list[dict[str, Any]]] | None = None,
     files: Callable[[int], list[dict[str, Any]]] | None = None,
 ) -> Context:
@@ -117,6 +121,8 @@ def build_context(
     reserved = estimate_tokens(json.dumps(inventory, ensure_ascii=False)) if inventory else 0
     fitted, nodes = fit(dependencies, knowledge or [], max(0, budget_tokens - reserved))
     context = Context(
+        goal=goal,
+        final_goal=final_goal,
         description=subtask.description,
         acceptance_criteria=subtask.acceptance_criteria,
         inputs=subtask.inputs,

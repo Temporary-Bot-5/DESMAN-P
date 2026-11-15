@@ -45,21 +45,21 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Each task has a folder (workspaces/TASK next to the database), where the "
-        "executor reads and writes files with its tools; nothing outside it. After a task, the "
+        "Task files live in workspaces/TASK next to the database; the "
+        "executor uses tools only there. The "
         "chat lists its files and folder. Chat and run/status also show omitted written UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). When "
         'a request builds on an earlier task in the same chat ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
         "originals stay. On retries it sees work files and "
-        "resets or rewrites stale demonstration state and files that contradict its result.\n"
-        "Running code needs the "
-        "run_command tool, which needs the person's shell_execution switch (`desman "
-        "permissions`) and a working sandbox. Code-running subtasks are marked by the "
+        "rewrites stale demonstration files.\n"
+        "Code needs the "
+        "run_command tool, shell_execution (`desman "
+        "permissions`) and a sandbox. Code subtasks are marked by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
-        "with it its result counts only if the code really ran. No part of DESMAN reports "
+        "with it its result counts only if the code really ran. DESMAN never reports "
         "what code would print without running it. Web lookups and prose need no code run. "
         "Requested prose goes in the result; files are extra. Review requires web lookups for current facts and checks dates, sources and prose language, allowing names "
-        "and requested translations. It sees current text of files written "
+        "and requested translations. Final answers cover your whole request; split parts keep its language. If a named page cannot be read, search snippets or another official source may be used, stating the limitation. It sees current text of files written "
         "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "

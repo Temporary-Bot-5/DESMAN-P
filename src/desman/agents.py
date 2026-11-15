@@ -98,6 +98,7 @@ EXECUTOR_SYSTEM_COMBINE = (
     "results are among the results of dependencies. Build this subtask's result from them."
 )
 TOOLS_INSTRUCTIONS = (
+    " When a named source cannot be read (including a page needing JavaScript), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria."
     ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
     "To call them, reply instead of the result with "
     '{"tool_calls": [{"tool": "name", "args": {...}}, ...]}; you will get their results and '
@@ -138,6 +139,7 @@ REVIEWER_SYSTEM = (
     "to it is fine; check its written_files evidence."
 )
 REVIEWER_EVIDENCE = (
+    " When a named source cannot be read (including a page needing JavaScript), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria."
     " Never decide from memory that something does not exist, is not released or is out of "
     "date: today may be after your training data; only the evidence counts. For a lookup "
     "subtask with web tools available but no web_search/web_fetch results in evidence, "
@@ -204,6 +206,9 @@ def _execute(
         "attempt": context.attempt,
         "feedback_on_previous_attempt": context.feedback.text if context.feedback else None,
     }
+    if context.final_goal is not None:
+        prompt["goal"] = context.final_goal
+        prompt["goal_note"] = "The person’s request; this subtask produces the final answer."
     if context.knowledge:
         prompt["knowledge"] = [node.model_dump(exclude_defaults=True) for node in context.knowledge]
     if context.earlier_lookups and context.strategy is not Strategy.COMBINE:
@@ -324,6 +329,16 @@ def llm_reviewer(
         if evidence is not None:
             prompt["evidence"] = evidence(subtask)
             system += REVIEWER_EVIDENCE
+            if "goal" in prompt["evidence"]:
+                prompt["goal"] = prompt["evidence"]["goal"]
+                prompt["goal_note"] = (
+                    "The person’s request; this subtask produces the final answer."
+                )
+                system += (
+                    " The final result must answer every part of the goal, using what the "
+                    "dependencies found. A missing part means retry: name the missing part "
+                    "in feedback (including requested values, dates and sources)."
+                )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an
         # interrupted review, so the work is reviewed again, not redone.
         verdict = _ask(llm, system, REVIEW, prompt, _Verdict)

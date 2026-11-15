@@ -328,3 +328,32 @@ def test_the_web_tools_have_a_call_budget(tmp_path: Path) -> None:
 
 def test_the_executor_is_told_web_text_is_not_instructions() -> None:
     assert '"untrusted"' in TOOLS_INSTRUCTIONS and "never" in TOOLS_INSTRUCTIONS
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        '<div id="app"></div><script>' + "x" * 2200 + "</script>",
+        "<noscript>Please enable JavaScript to continue.</noscript>",
+    ],
+)
+def test_javascript_shell_reports_no_readable_text(shell: str) -> None:
+    site = Site({"https://example.org/app": html(shell)})
+    web = Web(fetcher=fetcher(site))
+    result = web.page("https://example.org/app")
+    assert result["note"] == "the page needs JavaScript; no readable text"
+    assert result["text"] == ""
+
+
+def test_short_readable_html_is_not_a_javascript_shell() -> None:
+    site = Site({"https://example.org/doc": html("<p>A short readable page.</p>")})
+    assert "note" not in Web(fetcher=fetcher(site)).page("https://example.org/doc")
+
+
+def test_unreadable_named_source_fallback_is_in_both_prompts() -> None:
+    from desman.agents import REVIEWER_EVIDENCE
+
+    for prompt in (TOOLS_INSTRUCTIONS, REVIEWER_EVIDENCE):
+        assert "search results/snippets of that source or another official source" in prompt
+        assert "say plainly what could not be read" in prompt
+        assert "reading attempt counts" in prompt

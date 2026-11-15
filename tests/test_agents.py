@@ -67,6 +67,9 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
     assert result.status is TaskStatus.DONE
     executions = [payload(r.prompt) for r in llm.calls if r.prompt.startswith("Execute")]
     assert [h for h, _ in executions] == ["Execute subtask"] * 3
+    assert "goal" not in executions[0][1]
+    assert executions[1][1]["goal"] == "g"
+    assert "person" in executions[1][1]["goal_note"]
     _, retry = executions[2]
     assert retry["subtask"] == "write" and retry["acceptance_criteria"] == "short"
     assert retry["inputs"] == {"tone": "dry"}

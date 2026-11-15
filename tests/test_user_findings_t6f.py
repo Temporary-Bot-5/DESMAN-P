@@ -107,7 +107,7 @@ def test_busy_gui_port_real_socket() -> None:
 def test_busy_gui_windows_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def busy(app: Any) -> Any:
         exc = OSError("busy")
-        setattr(exc, "winerror", 10048)
+        exc.__dict__["winerror"] = 10048
         raise exc
 
     monkeypatch.setattr(gui_app, "http_server", busy)

@@ -935,6 +935,15 @@ class Store:
         content: dict[str, Any] | None = json.loads(row[0]) if row else None
         return content
 
+    def final_goal(self, subtask: Subtask) -> str | None:
+        """The person's request only for the subtask whose result becomes the task result."""
+        row = self.conn.execute(
+            "SELECT id FROM subtasks WHERE task_id = ? AND parent_id IS NULL "
+            "ORDER BY seq DESC LIMIT 1",
+            (subtask.task_id,),
+        ).fetchone()
+        return self.find_task(subtask.task_id)["goal"] if row and row[0] == subtask.id else None
+
     def final_result(self, task_id: str) -> dict[str, Any] | None:
         """The accepted result of the task's last subtask (the planner makes it produce the
         result of the goal); None until it is done, or when it was accepted without one."""
