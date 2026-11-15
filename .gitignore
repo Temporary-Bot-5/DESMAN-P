@@ -41,3 +41,5 @@ DESMAN_API-Keys/
 config.json
 .config.json.*.tmp
 .config.json.lock
+# SearXNG's settings next to config.json (`desman search setup`): they hold its secret key.
+/searxng/
