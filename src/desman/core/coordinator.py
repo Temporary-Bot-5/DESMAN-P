@@ -66,7 +66,7 @@ from desman.core.store import (
     StaleStateError,
     Store,
 )
-from desman.core.tools import Registry, Toolbox
+from desman.core.tools import Registry, Toolbox, ToolResult
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import LLM, ProviderError, among, noticing_unfit
 
@@ -577,6 +577,13 @@ class Coordinator:
                     f"subtask must run the code with {RUN_TOOL} and report what it printed"
                 ),
             )
+        if (
+            isinstance(outcome, Failure)
+            and outcome.kind is FailureKind.QUALITY
+            and self._missing_search(journal)
+        ):
+            self._cannot_search(subtask, lease, events)
+            return
         try:
             if isinstance(outcome, Success):
                 self.store.submit(subtask.id, lease, outcome.content)
@@ -610,7 +617,9 @@ class Coordinator:
         access: Access | None,
     ) -> Toolbox:
         def record(action: str, details: dict[str, Any]) -> None:
-            self.store.note(subtask.id, Actor.EXECUTOR, action, details)
+            self.store.note(
+                subtask.id, Actor.EXECUTOR, action, {**details, "execution": journal.execution}
+            )
 
         granted = self.store.tools(subtask.task_id) is Tools.GRANTED
         return Toolbox(
@@ -622,14 +631,59 @@ class Coordinator:
             journal=journal,
         )
 
+    def _execution_results(self, journal: Effects) -> list[tuple[str, ToolResult]]:
+        """Finished tool calls of this execution, in their original order."""
+        return [
+            (row["tool"], ToolResult.model_validate_json(row["result_json"]))
+            for row in self.store.effects(journal.subtask_id, journal.execution)
+            if row["state"] == "done"
+        ]
+
     def _ran(self, journal: Effects) -> bool:
-        """Whether this execution called `run_command` and got its result back."""
-        for row in self.store.effects(journal.subtask_id, journal.execution):
-            if row["tool"] != RUN_TOOL or row["state"] != "done":
-                continue
-            if json.loads(row["result_json"]).get("ok") is True:
-                return True
-        return False
+        """Whether this execution successfully called `run_command`."""
+        return any(
+            tool == RUN_TOOL and result.ok for tool, result in self._execution_results(journal)
+        )
+
+    def _missing_search(self, journal: Effects) -> bool:
+        """A missing whole-web engine was the last kind of tool failure."""
+        missing = False
+        for tool, result in self._execution_results(journal):
+            if not result.ok:
+                missing = tool == "web_search" and result.missing == "search_engine"
+        if not missing:
+            return False
+        # Refusals and invalid arguments have no effects to replay, but still stop work.
+        last = self.store.conn.execute(
+            "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+            "AND json_extract(details_json, '$.execution') = ? "
+            "AND (action = 'tool_refused' OR (action IN ('tool_called', 'tool_replayed') "
+            "AND json_extract(details_json, '$.ok') = 0)) ORDER BY seq DESC LIMIT 1",
+            (journal.subtask_id, journal.execution),
+        ).fetchone()
+        return last is None or json.loads(last[0]).get("missing") == "search_engine"
+
+    def _cannot_search(self, subtask: Subtask, lease: str, events: list[str]) -> None:
+        try:
+            moved = self.store.record_failure(
+                subtask.id,
+                S.RUNNING,
+                Actor.EXECUTOR,
+                FailureKind.PERMANENT,
+                lease=lease,
+                reason=(
+                    "A search engine for the whole web is needed; "
+                    "run desman config to add a Tavily key or SearXNG."
+                ),
+                action="tool_unavailable",
+                details={"tool": "web_search", "missing": "search_engine"},
+            )
+        except StaleStateError:
+            self._discard(
+                subtask, "lease lost before the missing search engine was recorded", events
+            )
+            return
+        events.append(f"permanent {subtask.id} -> {moved.status}")
 
     def _cannot_run(self, subtask: Subtask, lease: str, why: str, events: list[str]) -> None:
         """A subtask that must run code, without the tool to run it: the person decides (turn

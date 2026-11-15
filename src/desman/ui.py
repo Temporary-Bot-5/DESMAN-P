@@ -30,6 +30,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
+from desman import i18n
 from desman.i18n import t
 from desman.settings_actions import Setting
 from desman.thread_output import Routed, redirect_stderr, redirect_stdout
@@ -247,11 +248,20 @@ def _terminal_confirm(question: str, default: bool = False) -> bool:
         raw = _fold(raw.strip())
         if not raw:
             return default
-        if raw in _answers("y", "yes", t("yes")):
+        if raw in _answers("y", "yes", t("yes")) or raw in _every_language("yes"):
             return True
-        if raw in _answers("n", "no", t("no")):
+        if raw in _answers("n", "no", t("no")) or raw in _every_language("no"):
             return False
         error(t("enter y or n"))
+
+
+def _every_language(word: str) -> set[str]:
+    """The whole word in every catalog: a person may answer in the language they write in,
+    not the interface's ("да" while the interface is English). First letters only count for
+    the interface's own language (`_answers`), so no letter can mean yes in one and no in
+    another."""
+    forms = (catalog.messages.get(word) for catalog in i18n.CATALOGS.values())
+    return {_fold(form) for form in forms if isinstance(form, str)}
 
 
 def _answers(*words: str) -> set[str]:

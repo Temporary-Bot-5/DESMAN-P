@@ -54,6 +54,7 @@ from desman.core.web import (
     MAX_TEXT_CHARS,
     SOURCES,
     UNTRUSTED,
+    MissingSearchEngine,
     Web,
     WebError,
 )
@@ -89,6 +90,7 @@ class ToolResult(BaseModel):
     ok: bool
     output: Any = None
     """JSON: what the tool returned."""
+    missing: str | None = None
     error: str | None = None
     """Why the call failed, written for the model to correct it."""
 
@@ -129,6 +131,10 @@ class Tool(Generic[A]):
 
 class ToolError(ValueError):
     """A call the tool cannot carry out because of its arguments (shown to the model)."""
+
+
+class MissingSearchToolError(ToolError):
+    """Whole-web search needs the person to configure an engine."""
 
 
 class Registry:
@@ -259,6 +265,8 @@ class Toolbox:
             if replayed is not None:
                 if replayed.interrupted:
                     summary["interrupted"] = True
+                if replayed.result.missing is not None:
+                    summary["missing"] = replayed.result.missing
                 self.record("tool_replayed", {**summary, "ok": replayed.result.ok})
                 return replayed.result
         try:
@@ -270,7 +278,11 @@ class Toolbox:
             NotADirectoryError,
             IsADirectoryError,
         ) as e:
+            if isinstance(e, MissingSearchToolError):
+                summary["missing"] = "search_engine"
             result = self._failed(summary, f"{type(e).__name__}: {e}")
+            if isinstance(e, MissingSearchToolError):
+                result = result.model_copy(update={"missing": "search_engine"})
         except Exception as e:
             # Not the model's mistake, but the attempted call must stay in the history. The
             # journal keeps it as started: a rerun learns it was interrupted.
@@ -507,6 +519,8 @@ def web_tools(web: Web) -> list[Tool[Any]]:
     def search(args: WebSearchArgs, workspace: Workspace) -> dict[str, Any]:
         try:
             return web.search(args.query, args.max_results, args.source, args.language)
+        except MissingSearchEngine as e:
+            raise MissingSearchToolError(str(e)) from e
         except WebError as e:
             raise ToolError(str(e)) from e
 
@@ -587,7 +601,7 @@ class SuggestModelArgs(_Args):
 
 
 def suggest_model_tool(
-    look_up: ModelLookup | None = None, memory: Callable[[], hub.Memory] = hub.memory
+    look_up: ModelLookup | None = None, memory: Callable[[], hub.Memory] | None = None
 ) -> Tool[SuggestModelArgs]:
     """`suggest_model`: an executor may only *suggest* a model; nothing is downloaded and the
     config is not changed. The suggestion is recorded in the audit (`model_suggested`), and the
@@ -621,7 +635,7 @@ def suggest_model_tool(
             "reason": " ".join(args.reason.split()),
             "size": model.size,
             "memory": model.memory,
-            "fits": hub.fits(model, memory()),
+            "fits": hub.fits(model, (memory or hub.memory)()),  # looked up when called
             "gated": model.gated,
             "note": "Suggested to the person; nothing was downloaded or changed.",
         }

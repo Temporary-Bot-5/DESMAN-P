@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Set up a search engine for the whole web: `desman search setup` (SearXNG, on this computer) or a Tavily key in `desman config`.": "Configure um buscador para toda a web: `desman search setup` (SearXNG neste computador) ou uma chave Tavily em `desman config`.",
     "Nothing changed. Confirm with: {command}": "Nada mudou. Confirme com: {command}",
     "Not configured": "Não configurado",
     "SearXNG container: {state}": "Contêiner SearXNG: {state}",

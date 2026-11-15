@@ -25,6 +25,7 @@ from desman.core.models import Subtask
 from desman.core.report import (
     InboxItem,
     ModelSuggestion,
+    SubtaskReport,
     TaskReport,
     inbox,
     short_description,
@@ -256,6 +257,8 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
+        if hint := search_setup_hint(sub):
+            click.echo("      " + hint)
         if sub.knowledge:
             click.echo("      " + t("knowledge: {paths}", paths=", ".join(sub.knowledge)))
     if store is not None and report.status == TaskStatus.DONE:
@@ -427,6 +430,15 @@ def _short(value: Any, limit: int = 80) -> str:
 # ── inbox, operator decisions ────────────────────────────────────────────────
 
 
+def search_setup_hint(item: SubtaskReport | InboxItem) -> str | None:
+    """Explain the structured missing-engine escalation in the configured language."""
+    if item.action == "tool_unavailable" and item.details.get("missing") == "search_engine":
+        return t(
+            "Set up a search engine for the whole web: `desman search setup` (SearXNG, on this computer) or a Tavily key in `desman config`."
+        )
+    return None
+
+
 def print_inbox(items: list[InboxItem], hint: bool = True) -> None:
     if not items:
         click.echo(t("Nothing is waiting for you."))
@@ -438,6 +450,8 @@ def print_inbox(items: list[InboxItem], hint: bool = True) -> None:
         )
         if item.reason:
             click.echo(f"{'':<12} {one_line(item.reason, 110)}")
+        if setup := search_setup_hint(item):
+            click.echo(" " * 12 + setup)
     if hint:
         click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
 
@@ -541,6 +555,8 @@ def print_waiting(items: list[InboxItem], hint: str) -> None:
         )
         if item.reason:
             ui.note(f"    {one_line(item.reason, 110)}")
+        if setup := search_setup_hint(item):
+            ui.note(setup)
     ui.note(hint)
 
 
