@@ -157,6 +157,18 @@ TOPICS: Final = (
         "tools. admin_rights is for test machines: while it is on, every run warns.",
     ),
     Topic(
+        "search",
+        "set up and manage whole-web search",
+        "`desman search setup` previews installing local SearXNG through Docker (about "
+        "100 MB). Docker must be installed and running; the wizard offers setup under Web search. "
+        "The container is bound to 127.0.0.1, starting at a free port from 8888; --port chooses "
+        "one; --yes confirms setup. The wizard asks and preserves choices if setup fails. The URL is saved only after a JSON search answers. "
+        "`desman search status` shows the container (unknown without Docker), URL and search health (--json for scripts); `desman search start` and `desman search stop` control "
+        "it; `desman search remove` previews removal; --yes confirms it, keeping settings. "
+        "`desman keys list` shows its URL and `desman keys check PROVIDER` with searxng checks searches. "
+        "Tavily with a key is the alternative; an existing SearXNG URL can be set in the wizard.",
+    ),
+    Topic(
         "protected",
         "what judges the agents, and why tasks may be blocked",
         "Some files decide what agents may do and whether their work is good: the tool "

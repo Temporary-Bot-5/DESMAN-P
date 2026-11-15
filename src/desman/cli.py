@@ -66,6 +66,7 @@ from desman.nodes_cli import nodes_group
 from desman.planner import Planned, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
+from desman.search_cli import search
 from desman.stdio import configure_output
 from desman.tuning_cli import tuning
 
@@ -220,6 +221,7 @@ cli.add_command(behaviour)
 cli.add_command(tuning)
 cli.add_command(modules)
 cli.add_command(models)
+cli.add_command(search)
 cli.add_command(protected_group, name="protected")
 cli.add_command(nodes_group, name="nodes")
 cli.add_command(proposals_group, name="proposals")

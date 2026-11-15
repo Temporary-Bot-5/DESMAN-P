@@ -557,7 +557,14 @@ def test_delete_all_without_unpinned_sessions_skips_confirmation(
 
 def test_cli_confirmations_are_explicit_in_catalog() -> None:
     # CLI reset asks; uploads preview and require --confirm SHA256 to send.
-    confirming = {"config reset", "global report", "global share", "global submit-proposal"}
+    confirming = {
+        "config reset",
+        "global report",
+        "global share",
+        "global submit-proposal",
+        "search setup",
+        "search remove",
+    }
     assert {entry.name for entry in commands.CATALOG if entry.typed_confirm} == confirming
     for entry in commands.CATALOG:
         command = commands.cli_command(cli, entry.name)
@@ -692,3 +699,25 @@ def test_typed_personalize_parses_the_on_argument(value: str) -> None:
     entry, args = parsed
     assert entry.name == "personalize"
     assert args.model_dump()["on"] is (value == "on")
+
+
+@pytest.mark.parametrize("yes", [False, True])
+@pytest.mark.parametrize("action", ["setup", "remove"])
+def test_typed_search_keeps_cli_consent(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, yes: bool, action: str
+) -> None:
+    from desman import searxng
+
+    seen: list[commands.Proposal] = []
+    applied: list[str] = []
+
+    def decline(self: Chat, proposal: commands.Proposal) -> bool:
+        seen.append(proposal)
+        return False
+
+    monkeypatch.setattr(Chat, "_confirmed", decline)
+    monkeypatch.setattr(searxng, "setup", lambda *a, **kw: applied.append("setup"))
+    monkeypatch.setattr(searxng, "operate", lambda manager, operation: applied.append(operation))
+    Chat(sessions)._typed(f"search {action}" + (" --yes" if yes else ""))
+    assert bool(seen) is not yes
+    assert applied == ([action] if yes else [])

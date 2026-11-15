@@ -46,6 +46,12 @@ class KeyCheck:
 def check(
     config: Config, provider: Provider, client: httpx.Client, timeout: float = 20.0
 ) -> list[KeyCheck]:
+    if provider.id == "searxng":
+        from desman.core import search
+
+        url = config.settings.get("SEARXNG_URL", "")
+        problem = search.check_searxng(url, client)
+        return [KeyCheck(provider.id, 0, "", problem is None, None, problem or "", url=url)]
     if provider.key_env is None:
         return [_check_local(config, provider, client, min(timeout, 5.0))]
     out = []

@@ -490,7 +490,7 @@ def executor_access(config: Config, *, stderr: bool = False) -> Access:
             t(
                 "network_access is on, but no engine for the whole web is set up: web_search "
                 "covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman "
-                "config`."
+                "search setup` or use `desman config`."
             ),
             stderr=stderr,
         )
