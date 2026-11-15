@@ -67,13 +67,13 @@ TOPICS: Final = (
     Topic(
         "retries",
         "what happens after a failed attempt; what waits for the person's decision",
-        "A rejected or unusable attempt is tried again, each time differently: with the "
+        "A rejected or unusable attempt is retried differently: with the "
         "reviewer's feedback, then with the instructions reworded, then with another model, "
         "then the subtask is split into 2-4 smaller parts whose results are combined. By "
         "default a subtask gets 5 attempts and 5 interruptions (network errors, crashes); "
-        "the tuning may change both. A provider's limit costs no attempt: the subtask is "
-        "paused until the limit resets. Run/resume wait in-process for limits up to 120 seconds; "
-        "longer pauses need `desman resume TASK`, or --wait to keep waiting. A failure retrying cannot help (a refused key, a "
+        "tuning may change both. A provider's limit costs no attempt: the subtask is "
+        "paused until the limit resets. Run/resume, chat and planning wait ≤15 min when every model is limited; "
+        "longer task pauses need `desman resume --wait TASK` / `desman worker` to wait automatically. A failure retrying cannot help (a refused key, a "
         "denied permission) goes to the person at once.\n"
         "DESMAN never gives up by itself: when the attempts run out the subtask waits for the "
         "person (needs_human). `desman inbox` lists what waits, with the reason, and in a terminal or the chat lets the person pick a subtask and decide; `desman inbox --list` only lists. The person "

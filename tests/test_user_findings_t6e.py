@@ -75,7 +75,7 @@ def test_slow_failure_does_not_mask_untried_models_with_an_earlier_limit(
 
 @pytest.mark.parametrize("as_json", [False, True])
 @pytest.mark.parametrize("command", ["run", "resume"])
-@pytest.mark.parametrize("seconds, expected", [(18, 0), (120, 0), (121, 4)])
+@pytest.mark.parametrize("seconds, expected", [(18, 0), (600, 0), (900, 0), (901, 4)])
 def test_cli_waits_only_for_short_provider_pauses(
     command: str,
     as_json: bool,
@@ -137,6 +137,14 @@ def test_cli_waits_only_for_short_provider_pauses(
         assert clock.slept == 0
         if not as_json:
             assert "Continue with:" in result.output
+            conn = db.open_db(path)
+            try:
+                ref = Store(conn, clock=clock).short_id(
+                    conn.execute("SELECT id FROM tasks").fetchone()[0]
+                )
+            finally:
+                conn.close()
+            assert f"`desman resume --wait {ref}` or `desman worker`" in result.output
 
 
 @pytest.mark.parametrize(

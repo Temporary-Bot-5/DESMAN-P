@@ -39,6 +39,7 @@ from desman.core.models import Kind
 from desman.core.retry import FailureKind
 from desman.i18n import t
 from desman.llm import catalog
+from desman.llm import waiting as provider_wait
 from desman.llm.base import (
     LLM,
     Completion,
@@ -658,7 +659,7 @@ class Fallback:
                 if scope is not None:
                     self._scopes.pop(scope, None)
                 errors.append(e)
-                if e.slow:
+                if e.slow and not (e.kind is FailureKind.LIMIT and provider_wait.enabled()):
                     if i < len(members) - 1:
                         rotated = members[i + 1 :] + members[: i + 1]
                         self._deferred[scope] = [c.label if c else m.name for m, c in rotated]

@@ -94,6 +94,7 @@ from desman.interlocutor import (
 )
 from desman.live import Progress
 from desman.llm import hub, router
+from desman.llm import waiting as provider_wait
 from desman.llm.base import Completion, ProviderError, Request
 from desman.llm.structured import StructuredOutputError
 from desman.net import protocol
@@ -489,13 +490,19 @@ class Chat:
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
             try:
-                with self._for(calls.Role.INTERLOCUTOR):
+                with (
+                    provider_wait.waiting(
+                        sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+                    ) as waiting,
+                    self._for(calls.Role.INTERLOCUTOR),
+                ):
                     turn = interlocutor.turn(history)
             finally:  # what this answer read, also when it failed
                 self._opened[self.session_id] = interlocutor.opened
         except runs.ModuleWaiting:
             raise
         except ProviderError as e:
+            ui.provider_limit(waiting.limited_until)
             ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
             return
         except StructuredOutputError:
@@ -755,6 +762,9 @@ class Chat:
                 config,
                 by,
                 personal=config.personalize and not self.temporary,
+                sleep=self.sleep,
+                clock=self.store.clock,
+                announce=ui.provider_wait,
             )
             self._event(
                 tn(
@@ -1083,7 +1093,12 @@ class Chat:
                 "file tools): " + ", ".join(paths) + "."
             )
         ui.note(t("Planning…"))
-        with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
+        with (
+            provider_wait.waiting(
+                sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+            ) as wait_state,
+            self._for(calls.Role.PLANNER),
+        ):  # the task does not exist yet: the session asked
             planned = plan(
                 models.for_(calls.Role.PLANNER),
                 goal,
@@ -1093,6 +1108,7 @@ class Chat:
                 clock=self.store.clock,
             )
         if planned.error is not None:
+            ui.provider_limit(wait_state.limited_until)
             ui.warn(
                 t(
                     "The model did not make a plan, so the goal is the only subtask: {error}",
@@ -1224,7 +1240,11 @@ class Chat:
                     access=access,
                     http=self._http,
                     watch=progress.refresh,
-                ).run(task_id)
+                ).run(
+                    task_id,
+                    short_pause_seconds=provider_wait.PROVIDER_WAIT,
+                    on_pause=ui.provider_wait,
+                )
         except click.ClickException as e:  # protected files changed while it ran (5.3)
             ui.error(e.message)
             self._event(
@@ -1358,6 +1378,12 @@ class Chat:
                 task_id,
             )
         elif paused_until is not None:
+            ui.note(
+                t(
+                    "`desman resume --wait {ref}` or `desman worker` waits automatically for longer limits.",
+                    ref=ref,
+                )
+            )
             self._event(
                 t(
                     "Task {ref} is paused by a provider limit until {until}. "
@@ -1429,9 +1455,15 @@ class Chat:
         self._outcome_audit = watermark
         shown_retold = ""
         try:
-            with self._for(calls.Role.INTERLOCUTOR):
+            with (
+                provider_wait.waiting(
+                    sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+                ) as wait_state,
+                self._for(calls.Role.INTERLOCUTOR),
+            ):
                 retold = interlocutor.retell(outcome)
         except (ProviderError, StructuredOutputError):
+            ui.provider_limit(wait_state.limited_until)
             if result is None:
                 self._event(t("Task {ref} is {status}.", ref=ref, status=report.status), task_id)
             if result is not None:  # the work is not lost with the retelling
@@ -2600,7 +2632,7 @@ def _paused_until(report: TaskReport) -> str | None:
 
 def _when(moment: str) -> str:
     """A database timestamp in the person's local time, to the minute."""
-    return db.parse_iso(moment).astimezone().strftime("%Y-%m-%d %H:%M")
+    return ui.when(moment)
 
 
 def _size(size: int) -> str:
