@@ -56,6 +56,7 @@ from desman import (
     knowledge,
     messenger_cli,
     modules_cli,
+    provider_wait,
     providers,
     runs,
     task_files,
@@ -489,7 +490,10 @@ class Chat:
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
         try:
             try:
-                with self._for(calls.Role.INTERLOCUTOR):
+                with (
+                    provider_wait.waiting(sleep=self.sleep, clock=self.store.clock),
+                    self._for(calls.Role.INTERLOCUTOR),
+                ):
                     turn = interlocutor.turn(history)
             finally:  # what this answer read, also when it failed
                 self._opened[self.session_id] = interlocutor.opened
@@ -1006,7 +1010,13 @@ class Chat:
         summary = None
         blocked = False
         try:
-            runs.summarizer(self.store, models).run(task_id)
+            result = runs.summarizer(self.store, models).run(
+                task_id,
+                short_pause_seconds=provider_wait.PROVIDER_WAIT,
+                on_pause=provider_wait.announce,
+            )
+            if result.paused_until is not None:
+                ui.warn(t("Provider limit until {until}.", until=result.paused_until))
             if self.store.task_status(task_id) is TaskStatus.DONE:
                 summary = compaction.summary_of(self.store.final_result(task_id))
         except KeyboardInterrupt:
@@ -1083,7 +1093,10 @@ class Chat:
                 "file tools): " + ", ".join(paths) + "."
             )
         ui.note(t("Planning…"))
-        with self._for(calls.Role.PLANNER):  # the task does not exist yet: the session asked
+        with (
+            provider_wait.waiting(sleep=self.sleep, clock=self.store.clock),
+            self._for(calls.Role.PLANNER),
+        ):  # the task does not exist yet: the session asked
             planned = plan(
                 models.for_(calls.Role.PLANNER),
                 goal,
@@ -1224,7 +1237,11 @@ class Chat:
                     access=access,
                     http=self._http,
                     watch=progress.refresh,
-                ).run(task_id)
+                ).run(
+                    task_id,
+                    short_pause_seconds=provider_wait.PROVIDER_WAIT,
+                    on_pause=provider_wait.announce,
+                )
         except click.ClickException as e:  # protected files changed while it ran (5.3)
             ui.error(e.message)
             self._event(
@@ -1358,6 +1375,9 @@ class Chat:
                 task_id,
             )
         elif paused_until is not None:
+            ui.note(
+                t("`desman run --wait` or `desman worker` waits automatically for longer limits.")
+            )
             self._event(
                 t(
                     "Task {ref} is paused by a provider limit until {until}. "
@@ -1428,7 +1448,10 @@ class Chat:
             ]
         self._outcome_audit = watermark
         try:
-            with self._for(calls.Role.INTERLOCUTOR):
+            with (
+                provider_wait.waiting(sleep=self.sleep, clock=self.store.clock),
+                self._for(calls.Role.INTERLOCUTOR),
+            ):
                 retold = interlocutor.retell(outcome)
         except (ProviderError, StructuredOutputError):
             if result is None:

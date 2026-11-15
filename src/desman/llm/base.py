@@ -156,6 +156,8 @@ class GenerationFailed(ProviderError):
 
 class RateLimited(ProviderError):
     kind = FailureKind.LIMIT
+    automatic_wait: ClassVar[bool] = True
+    """Human holds override this: their own queue decides when to ask again."""
 
     def __init__(self, provider: str, retry_after: float | None = None) -> None:
         hint = f", retry after {retry_after:g}s" if retry_after is not None else ""

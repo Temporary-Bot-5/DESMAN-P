@@ -28,6 +28,7 @@ from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from desman import provider_wait
 from desman.llm.base import LLM, Completion, Message, Request
 from desman.llm.cache import Cached
 from desman.llm.router import Fallback
@@ -65,14 +66,17 @@ def completion_guard(check: Callable[[], None]) -> Iterator[None]:
 
 
 def _complete(llm: LLM, request: Request) -> Completion:
-    check = _completion_guard.get()
-    if check is not None:
-        check()
-    try:
-        return llm.complete(request)
-    finally:
+    def complete() -> Completion:
+        check = _completion_guard.get()
         if check is not None:
             check()
+        try:
+            return llm.complete(request)
+        finally:
+            if check is not None:
+                check()
+
+    return provider_wait.retry(complete)
 
 
 def complete_json(

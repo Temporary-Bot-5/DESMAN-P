@@ -15,6 +15,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "`desman run --wait` or `desman worker` waits automatically for longer limits.": "`desman run --wait` или `desman worker` автоматически ждёт снятия более долгих ограничений.",
+    "Provider limit until {until}.": "Ограничение провайдера до {until}.",
     "Waiting {seconds} s for a provider limit…": "Ожидание {seconds} с до снятия ограничения провайдера…",
     "Allow a release that changes the registry database schema.": "Разрешить выпуск, изменяющий схему базы реестра.",
     "Another registry update is running.": "Уже выполняется другое обновление реестра.",

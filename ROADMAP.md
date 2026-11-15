@@ -404,6 +404,8 @@ CLI (`run/status/resume/list-tasks/audit/setup/config`). 15 тестов про�
     «нет инструмента», когда инструменты были, это объясняется; вызовы в стиле OpenAI (`name`,
     `arguments`) принимаются; последний раунд инструментов предупреждён; ответ простым текстом
     становится результатом `{"text": ...}`; в песочнице есть `python3 -m pytest`.
+  - [ ] **T.6g** — One-key operation: wait up to 15 minutes for provider limits in planning, CLI runs and chat; longer task pauses remain resumable.
+
 - [ ] **T.7 Тест.** Около 10 участников; итог — список найденных проблем и задачи по ним.
 
 ---

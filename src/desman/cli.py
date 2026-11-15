@@ -6,7 +6,6 @@ G.7b reports independent proposal check hand-ins alongside job events.
 from __future__ import annotations
 
 import json
-import math
 import sys
 import time
 from collections.abc import Callable
@@ -18,7 +17,17 @@ from typing import Any, TypeVar
 import click
 from pydantic import ValidationError
 
-from desman import __version__, actions, i18n, knowledge, proposals_cli, providers, runs, ui
+from desman import (
+    __version__,
+    actions,
+    i18n,
+    knowledge,
+    proposals_cli,
+    provider_wait,
+    providers,
+    runs,
+    ui,
+)
 from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
 from desman.config import Config, ConfigError, Tuning, open_config
@@ -790,7 +799,10 @@ def _plan(
         ui.note(t("Planning…"))
         sys.stdout.flush()
     try:
-        with calls.for_(calls.Purpose(calls.Role.PLANNER)):  # before the task exists
+        with (
+            provider_wait.waiting(as_json=as_json),
+            calls.for_(calls.Purpose(calls.Role.PLANNER)),
+        ):  # before the task exists
             planned = plan(
                 llm,
                 goal,
@@ -1057,16 +1069,8 @@ def _executor_access(as_json: bool) -> Access:
     return runs.executor_access(load_config().load(), stderr=as_json)
 
 
-SHORT_PROVIDER_WAIT = 120
-"""CLI runs wait in-process for provider pauses up to two minutes."""
-
-
-def _provider_wait(seconds: float, as_json: bool) -> None:
-    text = t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds))
-    if as_json:
-        ui.warn(text, stderr=True)
-    else:
-        ui.note(text)
+SHORT_PROVIDER_WAIT = provider_wait.PROVIDER_WAIT
+_provider_wait = provider_wait.announce
 
 
 def _drive(
@@ -1112,6 +1116,9 @@ def _drive(
         if report.paused_at:
             ui.note(t("Task {ref} paused. `desman resume {ref}` continues it.", ref=short))
         if result.paused_until:
+            ui.note(
+                t("`desman run --wait` or `desman worker` waits automatically for longer limits.")
+            )
             click.echo(
                 t(
                     "Paused by a provider limit until {until}. Continue with: desman resume {ref}",
@@ -1410,7 +1417,10 @@ def continued(
 ) -> tuple[str, int]:
     """Plan and add a continuation (ADR 0010); the task's ref and how many subtasks it got.
     Shared by the CLI and the chat."""
-    with calls.for_(calls.Purpose(calls.Role.PLANNER, task_id=pending.task_id)):
+    with (
+        provider_wait.waiting(),
+        calls.for_(calls.Purpose(calls.Role.PLANNER, task_id=pending.task_id)),
+    ):
         ids, error = actions.continue_task(
             store,
             models.for_(calls.Role.PLANNER),

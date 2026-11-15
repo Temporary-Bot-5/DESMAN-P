@@ -404,6 +404,8 @@ def models(
 class ModuleWaiting(RateLimited):
     """A human hold is a LIMIT wait: it never spends a task attempt."""
 
+    automatic_wait = False
+
     def __init__(self, role: str) -> None:
         super().__init__("modules", retry_after=30)
         self.role = role

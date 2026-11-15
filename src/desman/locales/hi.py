@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "`desman run --wait` or `desman worker` waits automatically for longer limits.": "`desman run --wait` या `desman worker` लंबी सीमाओं के लिए अपने आप प्रतीक्षा करता है।",
+    "Provider limit until {until}.": "प्रदाता की सीमा {until} तक।",
     "Waiting {seconds} s for a provider limit…": "प्रदाता की सीमा के लिए {seconds} सेकंड प्रतीक्षा…",
     "Allow a release that changes the registry database schema.": "रजिस्ट्री डेटाबेस की संरचना बदलने वाली रिलीज़ की अनुमति दें।",
     "Another registry update is running.": "रजिस्ट्री का दूसरा अपडेट चल रहा है।",

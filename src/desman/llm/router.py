@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from desman import providers
+from desman import provider_wait, providers
 from desman.config import Config
 from desman.core import calls, db, holds
 from desman.core.calls import Role
@@ -658,7 +658,7 @@ class Fallback:
                 if scope is not None:
                     self._scopes.pop(scope, None)
                 errors.append(e)
-                if e.slow:
+                if e.slow and not (e.kind is FailureKind.LIMIT and provider_wait.enabled()):
                     if i < len(members) - 1:
                         rotated = members[i + 1 :] + members[: i + 1]
                         self._deferred[scope] = [c.label if c else m.name for m, c in rotated]
