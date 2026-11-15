@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from desman import provider_wait, providers
+from desman import providers
 from desman.config import Config
 from desman.core import calls, db, holds
 from desman.core.calls import Role
@@ -39,6 +39,7 @@ from desman.core.models import Kind
 from desman.core.retry import FailureKind
 from desman.i18n import t
 from desman.llm import catalog
+from desman.llm import waiting as provider_wait
 from desman.llm.base import (
     LLM,
     Completion,

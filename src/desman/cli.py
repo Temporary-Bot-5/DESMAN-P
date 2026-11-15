@@ -23,7 +23,6 @@ from desman import (
     i18n,
     knowledge,
     proposals_cli,
-    provider_wait,
     providers,
     runs,
     ui,
@@ -56,6 +55,7 @@ from desman.global_cli import global_group
 from desman.i18n import t, tn
 from desman.info import print_project_info
 from desman.llm import router
+from desman.llm import waiting as provider_wait
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
 from desman.messenger_cli import register_commands
@@ -800,7 +800,10 @@ def _plan(
         sys.stdout.flush()
     try:
         with (
-            provider_wait.waiting(as_json=as_json),
+            provider_wait.waiting(
+                clock=clock or (lambda: datetime.now(UTC)),
+                announce=lambda seconds: ui.provider_wait(seconds, as_json),
+            ) as waiting,
             calls.for_(calls.Purpose(calls.Role.PLANNER)),
         ):  # before the task exists
             planned = plan(
@@ -813,6 +816,8 @@ def _plan(
             )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
+    if planned.error is not None:
+        ui.provider_limit(waiting.limited_until, as_json=as_json)
     if planned.error is not None and not as_json:
         ui.warn(
             t(
@@ -1069,10 +1074,6 @@ def _executor_access(as_json: bool) -> Access:
     return runs.executor_access(load_config().load(), stderr=as_json)
 
 
-SHORT_PROVIDER_WAIT = provider_wait.PROVIDER_WAIT
-_provider_wait = provider_wait.announce
-
-
 def _drive(
     store: Store,
     models: runs.Models,
@@ -1093,8 +1094,8 @@ def _drive(
         result = coordinator.run(
             task_id,
             wait_for_pauses=wait,
-            short_pause_seconds=SHORT_PROVIDER_WAIT,
-            on_pause=lambda seconds: _provider_wait(seconds, as_json),
+            short_pause_seconds=provider_wait.PROVIDER_WAIT,
+            on_pause=lambda seconds: ui.provider_wait(seconds, as_json),
         )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
@@ -1117,12 +1118,15 @@ def _drive(
             ui.note(t("Task {ref} paused. `desman resume {ref}` continues it.", ref=short))
         if result.paused_until:
             ui.note(
-                t("`desman run --wait` or `desman worker` waits automatically for longer limits.")
+                t(
+                    "`desman resume --wait {ref}` or `desman worker` waits automatically for longer limits.",
+                    ref=short,
+                )
             )
             click.echo(
                 t(
                     "Paused by a provider limit until {until}. Continue with: desman resume {ref}",
-                    until=result.paused_until,
+                    until=ui.when(result.paused_until),
                     ref=short,
                 )
             )
@@ -1414,11 +1418,16 @@ def continued(
     by: str = "person",
     *,
     personal: bool | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], datetime] | None = None,
+    announce: Callable[[float], None] = ui.provider_wait,
 ) -> tuple[str, int]:
     """Plan and add a continuation (ADR 0010); the task's ref and how many subtasks it got.
     Shared by the CLI and the chat."""
     with (
-        provider_wait.waiting(),
+        provider_wait.waiting(
+            sleep=sleep, clock=clock or store.clock, announce=announce
+        ) as waiting,
         calls.for_(calls.Purpose(calls.Role.PLANNER, task_id=pending.task_id)),
     ):
         ids, error = actions.continue_task(
@@ -1431,6 +1440,7 @@ def continued(
             tree=runs.task_tree(store.conn, config.personalize if personal is None else personal),
         )
     if error is not None:
+        ui.provider_limit(waiting.limited_until)
         ui.warn(
             t(
                 "The model did not make a plan, so the goal is the only subtask: {error}",

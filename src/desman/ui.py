@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
 import click
@@ -628,6 +629,9 @@ class TerminalFront:
         return _terminal_ok(text)
 
     def warn(self, text: str, *, stderr: bool = False) -> None:
+        if self._live is not None and not stderr:
+            self._live.console.print(Text("! ", style="bold warn") + Text(text, style="warn"))
+            return
         return _terminal_warn(text, stderr=stderr)
 
     def error(self, text: str) -> None:
@@ -964,3 +968,21 @@ def panel_output(quiet: bool) -> AbstractContextManager[None]:
 def clear_screen() -> None:
     with _ui_writes():
         _front.clear_screen()
+
+
+def provider_wait(seconds: float, as_json: bool = False) -> None:
+    """Announce a provider pause through the current front (including live progress)."""
+    import math
+
+    warn(t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds)), stderr=as_json)
+
+
+def when(moment: str) -> str:
+    """A stored timestamp in local time, to the minute."""
+    return datetime.fromisoformat(moment).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def provider_limit(until: datetime | None, *, as_json: bool = False) -> None:
+    """Report the final limit once, after the caller gives up waiting."""
+    if until is not None:
+        warn(t("Provider limit until {until}.", until=when(until.isoformat())), stderr=as_json)

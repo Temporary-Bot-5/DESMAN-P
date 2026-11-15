@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from conftest import FakeClock
-from desman import provider_wait, runs
+from desman import runs, ui
 from desman.chat import Chat
 from desman.config import ConfigManager, default_config_path
 from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
@@ -17,6 +17,7 @@ from desman.core.sessions import Role, Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.interlocutor import CHAT
+from desman.llm import waiting as provider_wait
 from desman.llm.base import RateLimited
 from desman.llm.fake import FakeLLM, RateLimit
 from desman.planner import plan
@@ -29,7 +30,7 @@ def test_planner_waits_ten_minutes_then_uses_model(
     clock: FakeClock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     llm = FakeLLM(RateLimit(retry_after=600), PLAN)
-    with provider_wait.waiting(sleep=clock.sleep):
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock, announce=ui.provider_wait):
         result = plan(llm, "Write a poem")
     assert result.source == "llm"
     assert clock.slept == 600
@@ -39,11 +40,11 @@ def test_planner_waits_ten_minutes_then_uses_model(
 def test_planner_long_limit_falls_back_and_shows_reset(
     capsys: pytest.CaptureFixture[str], clock: FakeClock
 ) -> None:
-    with provider_wait.waiting(sleep=clock.sleep):
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock, announce=ui.provider_wait):
         result = plan(FakeLLM(RateLimit(retry_after=901)), "Write a poem")
     assert result.source == "template"
     assert clock.slept == 0
-    assert "Provider limit until" in capsys.readouterr().out
+    assert "Provider limit until" not in capsys.readouterr().out
 
 
 def test_planner_interrupt_does_not_create_template() -> None:
@@ -55,7 +56,7 @@ def test_planner_interrupt_does_not_create_template() -> None:
 
 
 def test_waits_have_a_total_bound(clock: FakeClock) -> None:
-    with provider_wait.waiting(sleep=clock.sleep):
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock, announce=ui.provider_wait):
         result = plan(FakeLLM(RateLimit(retry_after=600), RateLimit(retry_after=600)), "poem")
     assert result.source == "template"
     assert clock.slept == 600
@@ -138,7 +139,7 @@ def test_untried_model_answers_before_wait(
     monkeypatch.setattr(limited, "complete", slow_limit)
     good = FakeLLM(PLAN, name="good")
     chain = Fallback([(limited, None), (good, None)])
-    with provider_wait.waiting(sleep=clock.sleep):
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock, announce=ui.provider_wait):
         result = plan(chain, "Write a poem")
     assert result.source == "llm"
     assert clock.slept == 0
@@ -156,7 +157,7 @@ def test_known_quota_reset_waits(clock: FakeClock) -> None:
 
 
 def test_wait_scope_does_not_leak(clock: FakeClock) -> None:
-    with provider_wait.waiting(sleep=clock.sleep):
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock, announce=ui.provider_wait):
         pass
     result = plan(FakeLLM(RateLimit(retry_after=600)), "Write a poem")
     assert result.source == "template"
@@ -246,7 +247,7 @@ def test_retelling_waits_without_losing_result(store: Store, clock: FakeClock) -
     assert any(m.text == "A poem" for m in sessions.messages(chat.session_id))
 
 
-def test_compaction_waits_between_attempts(
+def test_compaction_returns_without_waiting(
     store: Store, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sessions = Sessions(store.conn, clock=clock)
@@ -272,8 +273,8 @@ def test_compaction_waits_between_attempts(
     summary = chat._compact(
         sessions.history(chat.session_id), runs.Models(llm, None), keep_tokens=0
     )
-    assert summary == "The person wants preferences remembered."
-    assert clock.slept == 600
+    assert summary is None
+    assert clock.slept == 0
 
 
 @pytest.mark.parametrize("seconds", [600, 901])
@@ -321,7 +322,7 @@ def test_terminal_chat_task_waits_or_reports_long_pause(
         assert store.list_subtasks(row[0])[0].status is SubtaskStatus.PAUSED
         assert clock.slept == 0
         assert "paused by a provider limit until" in output
-        assert "`desman run --wait` or `desman worker`" in output
+        assert "`desman resume --wait" in output
 
 
 def test_all_slow_models_limited_wait_once(
@@ -339,7 +340,141 @@ def test_all_slow_models_limited_wait_once(
     monkeypatch.setattr(limited, "complete", slow_limit)
     recovers = FakeLLM(RateLimit(retry_after=600), PLAN, name="recovers")
     chain = Fallback([(limited, None), (recovers, None)])
-    with provider_wait.waiting(sleep=clock.sleep):
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock, announce=ui.provider_wait):
         result = plan(chain, "Write a poem")
     assert result.source == "llm"
     assert clock.slept == 600
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_operation_shares_budget_across_calls(clock: FakeClock, repair: bool) -> None:
+    # Either two independent planning calls or the repair inside complete_json.
+    llm = FakeLLM(
+        RateLimit(retry_after=600), "garbage" if repair else PLAN, RateLimit(retry_after=400), PLAN
+    )
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock):
+        first = plan(llm, "poem")
+        result = first if repair else plan(llm, "poem")
+    assert result.source == "template"
+    assert clock.slept == 600
+
+
+def test_time_in_calls_consumes_budget(clock: FakeClock) -> None:
+    attempts = 0
+
+    def call() -> str:
+        nonlocal attempts
+        attempts += 1
+        clock.sleep(500)
+        raise RateLimited("key", 401)
+
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock), pytest.raises(RateLimited):
+        provider_wait.retry(call)
+    assert attempts == 1
+    assert clock.slept == 500
+
+
+@pytest.mark.parametrize("expired_quota", [False, True])
+def test_expired_limit_retries_immediately(clock: FakeClock, expired_quota: bool) -> None:
+    from datetime import timedelta
+
+    from desman.llm.base import QuotaExhausted
+
+    attempts = 0
+
+    def call() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            if expired_quota:
+                raise QuotaExhausted("key", clock() - timedelta(seconds=1))
+            raise RateLimited("key", 0)
+        return "ok"
+
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock):
+        assert provider_wait.retry(call) == "ok"
+    assert clock.slept == 0
+    assert attempts == 2
+
+
+def test_immediate_retries_are_bounded(clock: FakeClock) -> None:
+    attempts = 0
+
+    def call() -> str:
+        nonlocal attempts
+        attempts += 1
+        raise RateLimited("key", 0)
+
+    with provider_wait.waiting(sleep=clock.sleep, clock=clock), pytest.raises(RateLimited):
+        provider_wait.retry(call)
+    assert attempts == 4
+    assert clock.slept == 0
+
+
+def test_live_wait_uses_live_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    from io import StringIO
+
+    from rich.console import Console
+
+    output = StringIO()
+    front = ui.TerminalFront()
+    monkeypatch.setattr(
+        ui, "console", lambda *args, **kwargs: Console(file=output, force_terminal=True)
+    )
+    with ui.use(front):
+        assert ui.live_start(terminal=True)
+        ui.provider_wait(600)
+        ui.live_stop()
+    assert "Waiting 600 s" in output.getvalue()
+
+
+def test_cli_reset_report_is_once_and_local(
+    clock: FakeClock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from functools import partial
+
+    from desman.cli import _plan
+
+    monkeypatch.setattr(provider_wait, "waiting", partial(provider_wait.waiting, sleep=clock.sleep))
+    _plan(
+        FakeLLM(RateLimit(retry_after=901)), "poem", None, by_model=True, as_json=False, clock=clock
+    )
+    output = capsys.readouterr().out
+    assert output.count("Provider limit until") == 1
+    from datetime import timedelta
+
+    assert ui.when((clock() + timedelta(seconds=901)).isoformat()) in output
+
+
+def test_continuation_uses_injected_wait_callbacks(store: Store, clock: FakeClock) -> None:
+    from desman import actions
+    from desman.cli import continued
+    from test_continue import done_task
+
+    task = done_task(store, clock)
+    pending = actions.prepare_continuation(store, task, "add a poem", None)
+    notices: list[float] = []
+    llm = FakeLLM(RateLimit(retry_after=600), PLAN)
+    ref, count = continued(
+        store,
+        pending,
+        runs.Models(llm, None),
+        make_config(),
+        sleep=clock.sleep,
+        clock=clock,
+        announce=notices.append,
+    )
+    assert ref == store.short_id(task)
+    assert count == 1
+    assert notices == [600]
+    assert clock.slept == 600
+
+
+def test_resume_accepts_wait_option() -> None:
+    from click.testing import CliRunner
+
+    from desman.cli import cli
+
+    result = CliRunner().invoke(cli, ["resume", "--help"])
+    assert result.exit_code == 0
+    assert "--wait" in result.output

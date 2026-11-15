@@ -56,7 +56,6 @@ from desman import (
     knowledge,
     messenger_cli,
     modules_cli,
-    provider_wait,
     providers,
     runs,
     task_files,
@@ -95,6 +94,7 @@ from desman.interlocutor import (
 )
 from desman.live import Progress
 from desman.llm import hub, router
+from desman.llm import waiting as provider_wait
 from desman.llm.base import Completion, ProviderError, Request
 from desman.llm.structured import StructuredOutputError
 from desman.net import protocol
@@ -491,7 +491,9 @@ class Chat:
         try:
             try:
                 with (
-                    provider_wait.waiting(sleep=self.sleep, clock=self.store.clock),
+                    provider_wait.waiting(
+                        sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+                    ) as waiting,
                     self._for(calls.Role.INTERLOCUTOR),
                 ):
                     turn = interlocutor.turn(history)
@@ -500,6 +502,7 @@ class Chat:
         except runs.ModuleWaiting:
             raise
         except ProviderError as e:
+            ui.provider_limit(waiting.limited_until)
             ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
             return
         except StructuredOutputError:
@@ -759,6 +762,9 @@ class Chat:
                 config,
                 by,
                 personal=config.personalize and not self.temporary,
+                sleep=self.sleep,
+                clock=self.store.clock,
+                announce=ui.provider_wait,
             )
             self._event(
                 tn(
@@ -1010,13 +1016,7 @@ class Chat:
         summary = None
         blocked = False
         try:
-            result = runs.summarizer(self.store, models).run(
-                task_id,
-                short_pause_seconds=provider_wait.PROVIDER_WAIT,
-                on_pause=provider_wait.announce,
-            )
-            if result.paused_until is not None:
-                ui.warn(t("Provider limit until {until}.", until=result.paused_until))
+            runs.summarizer(self.store, models).run(task_id)
             if self.store.task_status(task_id) is TaskStatus.DONE:
                 summary = compaction.summary_of(self.store.final_result(task_id))
         except KeyboardInterrupt:
@@ -1094,7 +1094,9 @@ class Chat:
             )
         ui.note(t("Planning…"))
         with (
-            provider_wait.waiting(sleep=self.sleep, clock=self.store.clock),
+            provider_wait.waiting(
+                sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+            ) as wait_state,
             self._for(calls.Role.PLANNER),
         ):  # the task does not exist yet: the session asked
             planned = plan(
@@ -1106,6 +1108,7 @@ class Chat:
                 clock=self.store.clock,
             )
         if planned.error is not None:
+            ui.provider_limit(wait_state.limited_until)
             ui.warn(
                 t(
                     "The model did not make a plan, so the goal is the only subtask: {error}",
@@ -1240,7 +1243,7 @@ class Chat:
                 ).run(
                     task_id,
                     short_pause_seconds=provider_wait.PROVIDER_WAIT,
-                    on_pause=provider_wait.announce,
+                    on_pause=ui.provider_wait,
                 )
         except click.ClickException as e:  # protected files changed while it ran (5.3)
             ui.error(e.message)
@@ -1376,7 +1379,10 @@ class Chat:
             )
         elif paused_until is not None:
             ui.note(
-                t("`desman run --wait` or `desman worker` waits automatically for longer limits.")
+                t(
+                    "`desman resume --wait {ref}` or `desman worker` waits automatically for longer limits.",
+                    ref=ref,
+                )
             )
             self._event(
                 t(
@@ -1449,11 +1455,14 @@ class Chat:
         self._outcome_audit = watermark
         try:
             with (
-                provider_wait.waiting(sleep=self.sleep, clock=self.store.clock),
+                provider_wait.waiting(
+                    sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+                ) as wait_state,
                 self._for(calls.Role.INTERLOCUTOR),
             ):
                 retold = interlocutor.retell(outcome)
         except (ProviderError, StructuredOutputError):
+            ui.provider_limit(wait_state.limited_until)
             if result is None:
                 self._event(t("Task {ref} is {status}.", ref=ref, status=report.status), task_id)
             if result is not None:  # the work is not lost with the retelling
@@ -2609,7 +2618,7 @@ def _paused_until(report: TaskReport) -> str | None:
 
 def _when(moment: str) -> str:
     """A database timestamp in the person's local time, to the minute."""
-    return db.parse_iso(moment).astimezone().strftime("%Y-%m-%d %H:%M")
+    return ui.when(moment)
 
 
 def _size(size: int) -> str:

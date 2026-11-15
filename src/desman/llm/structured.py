@@ -28,7 +28,7 @@ from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from desman import provider_wait
+from desman.llm import waiting as provider_wait
 from desman.llm.base import LLM, Completion, Message, Request
 from desman.llm.cache import Cached
 from desman.llm.router import Fallback
