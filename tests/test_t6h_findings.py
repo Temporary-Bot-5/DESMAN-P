@@ -82,9 +82,22 @@ def test_planning_keeps_writing_and_running_together() -> None:
     system = planner_system()
     assert "ONE code subtask" in system
     assert "Reading the files a subtask works on is never a separate subtask" in system
-    assert "several independent parts" in system
+    assert "translations into two languages" in system
+    assert "never write / run / combine as separate subtasks" in system
     assert system.endswith(LANGUAGE_RULES)
     assert "ONE subtask" in CONTINUE_RULES
     assert "same code subtask" in CONTINUE_RULES
     spec = template_plan("Write and run palindrome")
     assert must_run(spec).subtasks[-1].runs_code
+
+
+@pytest.mark.parametrize("reply", ["我不知道", "不知道", "몰라요", "わからない", "カナ"])
+def test_short_dense_wrong_script_triggers(reply: str) -> None:
+    assert wrong_script("Какой результат?", reply)
+    assert not wrong_script(reply, reply)
+    assert wrong_script(reply, "Я не знаю")
+
+
+@pytest.mark.parametrize("reply", ["391", "391 USD", "是", "가", "Hi"])
+def test_short_nonprose_still_ignored(reply: str) -> None:
+    assert not wrong_script("Какой результат?", reply)

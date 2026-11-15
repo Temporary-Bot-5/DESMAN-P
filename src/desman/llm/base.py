@@ -135,6 +135,7 @@ class ProviderRejected(ProviderError):
     def __init__(self, provider: str, status: int, message: str = "") -> None:
         super().__init__(provider, f"rejected with {status}" + (f": {message}" if message else ""))
         self.status = status
+        self.message = message
 
 
 class GenerationFailed(ProviderError):

@@ -651,6 +651,18 @@ def check_keys(
             if not p.is_ready(config):
                 raise click.ClickException(t("{name} is not configured", name=p.name))
             results += check.check(config, p, client)
+    path = db.default_db_path()
+    if path.exists():
+        conn = db.open_db(path)
+        try:
+            with db.transaction(conn):
+                for result in results:
+                    conn.execute(
+                        "DELETE FROM model_refusals WHERE scope LIKE ? AND scope LIKE ?",
+                        (result.provider + "/%", "%:" + result.key_id),
+                    )
+        finally:
+            conn.close()
     return targets, results
 
 
@@ -675,6 +687,7 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
         number = "-" if p.local else str(r.number)
         table.add_row(p.name, number, status, str(r.models or ""), default)
     ui.out(table)
+    ui.note(t("Remembered model access refusals cleared for the checked keys."))
     ui.out("")
     warned: set[str] = set()
     for r in results:
@@ -1257,21 +1270,41 @@ def print_model_blocks(db_path: Path | None = None) -> None:
         return
     conn = db.open_db(path)
     try:
+        config = load_config().load()
+        for row in conn.execute(
+            "SELECT scope, until, message FROM model_refusals WHERE until > ? ORDER BY scope",
+            (db.to_iso(datetime.now(UTC)),),
+        ):
+            model, _, fingerprint = row["scope"].rpartition(":")
+            provider = providers.find(model.split("/", 1)[0])
+            number = (
+                next(
+                    (
+                        str(n)
+                        for n, key in enumerate(config.keys(provider.key_env), 1)
+                        if key_id(key.value) == fingerprint
+                    ),
+                    "?",
+                )
+                if provider.key_env
+                else "?"
+            )
+            ui.note(
+                t(
+                    "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}",
+                    model=model,
+                    number=number,
+                    fingerprint=fingerprint,
+                    until=row["until"],
+                    words=row["message"],
+                )
+            )
         rows = conn.execute(
             "SELECT scope, blocked_until FROM rate_buckets WHERE blocked_until > ? ORDER BY scope",
             (db.to_iso(datetime.now(UTC)),),
         ).fetchall()
         for row in rows:
             if row["scope"].startswith("tokens:"):
-                continue
-            if row["scope"].startswith("unavailable:"):
-                ui.note(
-                    t(
-                        "Model {scope} unavailable to this key until {until}.",
-                        scope=row["scope"].removeprefix("unavailable:"),
-                        until=row["blocked_until"],
-                    )
-                )
                 continue
             ui.note(
                 t(

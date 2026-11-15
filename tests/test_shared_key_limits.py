@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,6 +18,13 @@ from desman.llm.limiter import Buckets, Limited
 from desman.llm.openai_compat import OpenAICompatible, key_id
 
 REQUEST = Request(messages=[Message(role="user", content="hello")], max_tokens=100)
+
+
+@pytest.fixture
+def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
+    connection = db.open_db(tmp_path / "test.db")
+    yield connection
+    connection.close()
 
 
 def api(
@@ -43,7 +51,7 @@ def reply(headers: dict[str, str] | None = None) -> httpx.Response:
 
 @pytest.mark.parametrize(
     "status,headers",
-    [(429, {"x-ratelimit-limit-requests": "0"}), (403, {}), (400, {}), (404, {}), (402, {})],
+    [(429, {"x-ratelimit-limit-requests": "0"}), (403, {}), (400, {})],
 )
 def test_account_refusal_shared_keyed_and_expires(
     tmp_path: Path,
@@ -69,12 +77,13 @@ def test_account_refusal_shared_keyed_and_expires(
     with pytest.raises(ProviderRejected):
         a.complete(REQUEST)
     b = api(second, clock, transport)
-    with pytest.raises(ProviderRejected, match="unavailable to this key"):
+    with pytest.raises(ProviderRejected, match="credit card") as remembered:
         b.complete(REQUEST)
+    assert remembered.value.status == status
     assert len(sent) == 1
     print_model_blocks(path)
     output = capsys.readouterr().out
-    assert "unavailable to this key" in output and "secret" not in output
+    assert "unavailable to key #" in output and "credit card" in output and "secret" not in output
     # Other models/keys still work; key material is never persisted.
     good = httpx.MockTransport(lambda r: reply())
     assert api(second, clock, good, ["other"]).complete(REQUEST).text == "ok"
@@ -109,29 +118,24 @@ def test_refused_first_key_rotates_and_other_process_skips_it(
 
 
 @pytest.mark.parametrize("wait", [5, 60])
-def test_reported_tokens_reserve_across_connections(
+def test_reported_tokens_wait_across_connections(
     tmp_path: Path, clock: FakeClock, wait: int
 ) -> None:
-    clock.now = datetime(2099, 1, 1, tzinfo=UTC)
     path = tmp_path / "limits.db"
     first, second = db.open_db(path), db.open_db(path)
-    sent: list[httpx.Request] = []
+    sent = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        return reply(
-            {"x-ratelimit-remaining-tokens": "250", "x-ratelimit-reset-tokens": f"{wait}s"}
-        )
+        return reply({"x-ratelimit-remaining-tokens": "10", "x-ratelimit-reset-tokens": f"{wait}s"})
 
     transport = httpx.MockTransport(handle)
     assert api(first, clock, transport).complete(REQUEST).text == "ok"
-    assert api(second, clock, transport).complete(REQUEST).text == "ok"  # 101 reserved
-    assert api(first, clock, transport).complete(REQUEST).text == "ok"  # another 101
     start = clock()
     if wait > 10:
         with pytest.raises(RateLimited):
             api(second, clock, transport).complete(REQUEST)
-        assert len(sent) == 3
+        assert len(sent) == 1
     else:
         assert api(second, clock, transport).complete(REQUEST).text == "ok"
         assert (clock() - start).total_seconds() == wait
@@ -239,3 +243,155 @@ def test_token_wait_falls_back_without_sending(tmp_path: Path, clock: FakeClock)
     clock.advance(61)
     assert first.complete(REQUEST).text == "ok"
     conn.close()
+
+
+def test_latest_token_report_wins_without_deductions(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    buckets = Buckets(conn, clock)
+    scope = "tokens:groq/m:fingerprint"
+    buckets.report_tokens(scope, 200, clock() + timedelta(seconds=60))
+    for _ in range(5):
+        assert buckets.take_tokens(scope, 150) == 0
+    buckets.report_tokens(scope, 300, clock() + timedelta(seconds=30))
+    assert buckets.take_tokens(scope, 250) == 0
+    assert buckets.take_tokens(scope, 301) == 30
+    buckets.report_tokens(scope, 10, clock() + timedelta(seconds=5))
+    assert buckets.take_tokens(scope, 11) == 5
+
+
+@pytest.mark.parametrize("status", [402, 403, 404])
+def test_other_refusals_are_not_shared_as_account_blocks(
+    conn: sqlite3.Connection, clock: FakeClock, status: int
+) -> None:
+    sent = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(status, text="balance or generic refusal")
+
+    transport = httpx.MockTransport(handle)
+    for _ in range(2):
+        limited = api(conn, clock, transport)
+        assert isinstance(limited.inner, OpenAICompatible)
+        limited.inner.paid = True
+        with pytest.raises(ProviderRejected):
+            limited.complete(REQUEST)
+    assert not conn.execute("SELECT * FROM model_refusals").fetchall()
+    assert len(sent) == (1 if status == 404 else 2)
+    if status == 404:
+        assert Buckets(conn, clock).blocked_until("gone:groq/m") is not None
+
+
+def test_after_key_db_failure_keeps_completion_and_journal(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    limited = api(conn, clock, httpx.MockTransport(lambda r: reply()))
+    assert isinstance(limited.inner, OpenAICompatible)
+    events = []
+    limited.inner.on_call = lambda r: events.append("journal")
+
+    def fail(*args: object) -> None:
+        events.append("limits")
+        raise sqlite3.OperationalError("locked")
+
+    limited.inner.after_key = fail
+    assert limited.complete(REQUEST).text == "ok"
+    assert events == ["journal", "limits"]
+
+
+def test_keys_check_clears_only_checked_fingerprints(
+    conn: sqlite3.Connection, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman import providers
+    from desman.config import Config
+    from desman.config_cli import check_keys
+    from desman.llm import check
+
+    path = Path(conn.execute("PRAGMA database_list").fetchone()[2])
+    for scope in ("groq/m:checked", "groq/m:other", "mistral/m:checked"):
+        conn.execute(
+            "INSERT INTO model_refusals VALUES (?, 403, 'requires a card', ?)",
+            (scope, db.to_iso(clock() + timedelta(hours=24))),
+        )
+    monkeypatch.setattr(db, "default_db_path", lambda: path)
+    monkeypatch.setattr(providers.Provider, "is_ready", lambda *args: True)
+    monkeypatch.setattr(
+        check, "check", lambda *args: [check.KeyCheck("groq", 1, "checked", True, 200, "ok")]
+    )
+    check_keys(Config(), "groq")
+    assert [r[0] for r in conn.execute("SELECT scope FROM model_refusals ORDER BY scope")] == [
+        "groq/m:other",
+        "mistral/m:checked",
+    ]
+
+
+@pytest.mark.parametrize("failure", ["pace", "timeout", "transport"])
+def test_failed_send_does_not_spend_reported_tokens(
+    conn: sqlite3.Connection, clock: FakeClock, failure: str
+) -> None:
+    from desman.llm.base import ProviderTimeout, ProviderUnavailable
+    from desman.llm.limiter import Paced
+    from desman.llm.router import estimated_tokens
+
+    scope = "tokens:groq/m:" + key_id("secret")
+    buckets = Buckets(conn, clock)
+    buckets.report_tokens(scope, 200, clock() + timedelta(seconds=60))
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if failure == "timeout":
+            raise httpx.ReadTimeout("timeout")
+        raise httpx.ConnectError("unreachable")
+
+    limited = api(conn, clock, httpx.MockTransport(handle))
+    assert isinstance(limited.inner, OpenAICompatible)
+    estimates = []
+    original = limited.inner.before_key
+    assert original is not None
+
+    def before(fingerprint: str, model: str, estimate: int) -> None:
+        estimates.append(estimate)
+        original(fingerprint, model, estimate)
+
+    limited.inner.before_key = before
+    if failure == "pace":
+        buckets.block("groq/m", clock() + timedelta(seconds=60))
+    with pytest.raises((Paced, ProviderTimeout, ProviderUnavailable)):
+        limited.complete(REQUEST)
+    assert estimates == [estimated_tokens(REQUEST)]
+    assert (
+        conn.execute("SELECT tokens FROM rate_buckets WHERE scope = ?", (scope,)).fetchone()[0]
+        == 200
+    )
+
+
+@pytest.mark.parametrize("status", [400, 403])
+@pytest.mark.parametrize(
+    "words",
+    [
+        "requires a plan",
+        "payment required",
+        "model is not available to your account",
+        "requires a valid credit card",
+    ],
+)
+def test_only_clear_account_access_words_are_remembered(status: int, words: str) -> None:
+    from desman.llm.openai_compat import account_unavailable
+
+    assert account_unavailable(ProviderRejected("groq", status, words))
+    assert not account_unavailable(ProviderRejected("groq", status, "content policy refusal"))
+
+
+def test_expired_report_replaces_old_token_window(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    limited = api(conn, clock, httpx.MockTransport(lambda r: reply()))
+    scope = "tokens:groq/m:" + key_id("secret")
+    limited.buckets.report_tokens(scope, 0, clock() + timedelta(seconds=60))
+    limited.after_key(
+        key_id("secret"),
+        "m",
+        {"x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "0"},
+        None,
+    )
+    assert limited.complete(REQUEST).text == "ok"

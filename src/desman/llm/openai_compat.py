@@ -24,8 +24,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -118,7 +120,7 @@ class OpenAICompatible:
         self.clock = clock
         self.monotonic = monotonic
         self._aside_until: dict[int, datetime] = {}  # key index -> limited until
-        self._preflight_limits: dict[int, RateLimited] = {}
+        self._preflight: set[int] = set()
         self._quota: set[int] = set()  # aside for a used-up quota, not a rate limit
         self._refused: set[int] = set()  # key indexes the provider refused
         self._refusal: ProviderRejected | None = None  # the latest, with the provider's words
@@ -172,11 +174,13 @@ class OpenAICompatible:
         for i in usable:
             self._aside_until.pop(i, None)
             self._quota.discard(i)
-            self._preflight_limits.pop(i, None)
+            self._preflight.discard(i)
             try:
                 if self.before_key is not None:
-                    estimate = sum(len(m.content) for m in request.messages) // 3 + (
-                        max_tokens or 1024
+                    from desman.llm.router import estimated_tokens
+
+                    estimate = estimated_tokens(
+                        request.model_copy(update={"max_tokens": max_tokens})
                     )
                     self.before_key(key_id(self.keys[i]), model, estimate)
             except ProviderRejected as e:
@@ -186,21 +190,20 @@ class OpenAICompatible:
                 self._aside_until[i] = self.clock() + timedelta(
                     seconds=DEFAULT_LIMIT_PAUSE if e.retry_after is None else e.retry_after
                 )
-                self._preflight_limits[i] = e
+                self._preflight.add(i)
                 continue
             if self.pace is not None:
                 self.pace()  # request bucket limits apply to every key, outside key rotation
             try:
                 return self._attempt(i, model, body, prompt_hash)
             except ProviderRejected as e:
-                # 401/403: the key is refused; a 429 rejection is a limit of 0 (an account
-                # without access); a 402 one is a paid account out of money. All belong to
-                # this key's account: set it aside, try the next one.
-                if e.status != 401 and (
-                    not account_unavailable(e) or (e.status == 404 and self.after_key is None)
+                if e.status not in (401, 402, 403) and not account_unavailable(e):
+                    raise
+                if (
+                    self.after_key is None
+                    or e.status in (401, 402)
+                    or (e.status == 403 and not account_unavailable(e))
                 ):
-                    raise  # the request is wrong, not the key: another key will not help
-                if self.after_key is None or e.status == 401:
                     self._refused.add(i)
                 self._refusal = e
             except (RateLimited, QuotaExhausted) as e:
@@ -221,10 +224,10 @@ class OpenAICompatible:
         if not waiting:
             return self._refusal or ProviderRejected(self.name, 401, "every key was refused")
         soonest = min(waiting, key=lambda i: waiting[i])
-        if soonest in self._preflight_limits:
-            return type(self._preflight_limits[soonest])(
-                self.name, retry_after=max(0.0, (waiting[soonest] - now).total_seconds())
-            )
+        if soonest in self._preflight:
+            from desman.llm.limiter import Paced
+
+            return Paced(self.name, retry_after=max(0.0, (waiting[soonest] - now).total_seconds()))
         if soonest in self._quota:
             return QuotaExhausted(self.name, waiting[soonest])
         return RateLimited(
@@ -242,39 +245,40 @@ class OpenAICompatible:
             error: ProviderError | None,
             completion: Completion | None = None,
         ) -> None:
-            if self.after_key is not None:
-                self.after_key(
-                    key_id(key),
-                    model,
-                    _limit_headers(response) if response is not None else {},
-                    error,
-                )
-            if self.on_call is None:
-                return
             spent = (
                 _usage(response, native=self.name == "ollama")
                 if response is not None
                 else Usage(prompt_tokens=0, completion_tokens=0)
             )
-            self.on_call(
-                CallRecord(
-                    provider=self.name,
-                    model=completion.model if completion else model,
-                    key_id=key_id(key) if key else None,
-                    prompt_hash=prompt_hash,
-                    response_hash=text_hash(completion.text) if completion else None,
-                    # From the response, not the completion: a 200 without usable text may
-                    # still have cost tokens.
-                    prompt_tokens=spent.prompt_tokens,
-                    completion_tokens=spent.completion_tokens,
-                    latency_ms=max(0, round((self.monotonic() - started) * 1000)),
-                    http_status=response.status_code if response is not None else None,
-                    error_kind=error.kind.value if error else None,
-                    error_type=type(error).__name__ if error else None,
-                    error=str(error)[:300] if error else None,
-                    limits=_limit_headers(response) if response is not None else {},
+            if self.on_call is not None:
+                self.on_call(
+                    CallRecord(
+                        provider=self.name,
+                        model=completion.model if completion else model,
+                        key_id=key_id(key) if key else None,
+                        prompt_hash=prompt_hash,
+                        response_hash=text_hash(completion.text) if completion else None,
+                        # From the response, not the completion: a 200 without usable text may
+                        # still have cost tokens.
+                        prompt_tokens=spent.prompt_tokens,
+                        completion_tokens=spent.completion_tokens,
+                        latency_ms=max(0, round((self.monotonic() - started) * 1000)),
+                        http_status=response.status_code if response is not None else None,
+                        error_kind=error.kind.value if error else None,
+                        error_type=type(error).__name__ if error else None,
+                        error=str(error)[:300] if error else None,
+                        limits=_limit_headers(response) if response is not None else {},
+                    )
                 )
-            )
+            if self.after_key is not None:
+                # Limit reporting must not discard the completion or its journal.
+                with suppress(sqlite3.Error):
+                    self.after_key(
+                        key_id(key),
+                        model,
+                        _limit_headers(response) if response is not None else {},
+                        error,
+                    )
 
         try:
             with self.client.stream(
@@ -401,13 +405,14 @@ class OpenAICompatible:
 
 def account_unavailable(error: ProviderRejected) -> bool:
     """Account/model access refusals; a malformed request must never disable a model."""
-    if error.status in (402, 403, 404, 429):
-        return True
-    return error.status == 400 and bool(
+    if error.status == 429:
+        return True  # Only a zero-limit 429 is classified as ProviderRejected.
+    return error.status in (400, 403) and bool(
         re.search(
-            r"requires? (?:a |an )?(?:valid )?(?:credit card|payment)|"
+            r"requires? (?:a |an )?(?:valid )?(?:credit card|card|payment|paid plan|plan|subscription)|"
+            r"(?:credit card|payment|paid plan|plan|subscription).{0,30}required|"
             r"model.{0,80}(?:not available|unavailable|not enabled).{0,40}(?:account|plan|key)",
-            str(error),
+            error.message,
             re.I,
         )
     )
@@ -529,7 +534,7 @@ def _retry_after(response: httpx.Response, message: str, now: datetime) -> float
         if not name.startswith("x-ratelimit-remaining") or remaining != "0":
             continue
         reset = headers.get(name.replace("remaining", "reset", 1), "")
-        wait = _reset_in(reset, now)
+        wait = reset_in(reset, now)
         if wait is not None:
             waits.append(wait)
     return max(waits) if waits else None
@@ -553,7 +558,7 @@ def _retry_info(response: httpx.Response) -> float | None:
     return None
 
 
-def _reset_in(value: str, now: datetime) -> float | None:
+def reset_in(value: str, now: datetime) -> float | None:
     """A reset header as seconds from `now`: a duration ("2m52.8s", "30"), a Unix time in
     seconds or milliseconds (OpenRouter), or a date."""
     try:

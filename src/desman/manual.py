@@ -103,7 +103,7 @@ TOPICS: Final = (
         "See localmodels for downloads.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
         "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `desman keys list`, `desman keys check` (no tokens) "
-        "and `desman usage`. Unavailable models are skipped per key for 24 hours across runs; usage shows blocks. Reported token budgets are shared across workers.",
+        "and `desman usage`. Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
     ),
     Topic(
         "modules",
