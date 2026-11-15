@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 from pathlib import Path
@@ -331,7 +332,7 @@ def test_unsafe_existing_mount_recreated(
     )
     searxng.setup(manager)
     assert ["rm", "-f", "-v", searxng.CONTAINER] in calls
-    assert calls[-1][-2].endswith("/settings.yml:/etc/searxng/settings.yml:ro")
+    assert calls[-1][-2].endswith(f"{os.sep}settings.yml:/etc/searxng/settings.yml:ro")
 
 
 def test_settings_container_readable(manager: ConfigManager, calls: list[list[str]]) -> None:
