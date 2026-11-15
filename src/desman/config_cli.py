@@ -1262,6 +1262,17 @@ def print_model_blocks(db_path: Path | None = None) -> None:
             (db.to_iso(datetime.now(UTC)),),
         ).fetchall()
         for row in rows:
+            if row["scope"].startswith("tokens:"):
+                continue
+            if row["scope"].startswith("unavailable:"):
+                ui.note(
+                    t(
+                        "Model {scope} unavailable to this key until {until}.",
+                        scope=row["scope"].removeprefix("unavailable:"),
+                        until=row["blocked_until"],
+                    )
+                )
+                continue
             ui.note(
                 t(
                     "Model {scope} unavailable or limited until {until}.",

@@ -118,6 +118,7 @@ class OpenAICompatible:
         self.clock = clock
         self.monotonic = monotonic
         self._aside_until: dict[int, datetime] = {}  # key index -> limited until
+        self._preflight_limits: dict[int, RateLimited] = {}
         self._quota: set[int] = set()  # aside for a used-up quota, not a rate limit
         self._refused: set[int] = set()  # key indexes the provider refused
         self._refusal: ProviderRejected | None = None  # the latest, with the provider's words
@@ -128,6 +129,10 @@ class OpenAICompatible:
         self.prepare_context: Callable[[str], tuple[int, bool]] | None = None
         self.memory_risk = False
         self.context = context
+        self.before_key: Callable[[str, str, int], None] | None = None
+        self.after_key: Callable[[str, str, dict[str, str], ProviderError | None], None] | None = (
+            None
+        )
         self.pace: Callable[[], None] | None = None
         """Called before every request sent (one per key tried): the rate limiter
         (`llm.limiter.Limited`) waits there, or raises `RateLimited` and nothing is sent."""
@@ -165,17 +170,38 @@ class OpenAICompatible:
         if not usable:
             raise self._all_aside(now)
         for i in usable:
+            self._aside_until.pop(i, None)
+            self._quota.discard(i)
+            self._preflight_limits.pop(i, None)
+            try:
+                if self.before_key is not None:
+                    estimate = sum(len(m.content) for m in request.messages) // 3 + (
+                        max_tokens or 1024
+                    )
+                    self.before_key(key_id(self.keys[i]), model, estimate)
+            except ProviderRejected as e:
+                self._refusal = e
+                continue
+            except RateLimited as e:
+                self._aside_until[i] = self.clock() + timedelta(
+                    seconds=DEFAULT_LIMIT_PAUSE if e.retry_after is None else e.retry_after
+                )
+                self._preflight_limits[i] = e
+                continue
             if self.pace is not None:
-                self.pace()  # outside the try: a wait for the bucket sets no key aside
+                self.pace()  # request bucket limits apply to every key, outside key rotation
             try:
                 return self._attempt(i, model, body, prompt_hash)
             except ProviderRejected as e:
                 # 401/403: the key is refused; a 429 rejection is a limit of 0 (an account
                 # without access); a 402 one is a paid account out of money. All belong to
                 # this key's account: set it aside, try the next one.
-                if e.status not in (401, 402, 403, 429):
+                if e.status != 401 and (
+                    not account_unavailable(e) or (e.status == 404 and self.after_key is None)
+                ):
                     raise  # the request is wrong, not the key: another key will not help
-                self._refused.add(i)
+                if self.after_key is None or e.status == 401:
+                    self._refused.add(i)
                 self._refusal = e
             except (RateLimited, QuotaExhausted) as e:
                 if isinstance(e, QuotaExhausted):
@@ -195,6 +221,10 @@ class OpenAICompatible:
         if not waiting:
             return self._refusal or ProviderRejected(self.name, 401, "every key was refused")
         soonest = min(waiting, key=lambda i: waiting[i])
+        if soonest in self._preflight_limits:
+            return type(self._preflight_limits[soonest])(
+                self.name, retry_after=max(0.0, (waiting[soonest] - now).total_seconds())
+            )
         if soonest in self._quota:
             return QuotaExhausted(self.name, waiting[soonest])
         return RateLimited(
@@ -212,6 +242,13 @@ class OpenAICompatible:
             error: ProviderError | None,
             completion: Completion | None = None,
         ) -> None:
+            if self.after_key is not None:
+                self.after_key(
+                    key_id(key),
+                    model,
+                    _limit_headers(response) if response is not None else {},
+                    error,
+                )
             if self.on_call is None:
                 return
             spent = (
@@ -360,6 +397,20 @@ class OpenAICompatible:
             if key and key in text:
                 text = text.replace(key, "<key>")
         return text
+
+
+def account_unavailable(error: ProviderRejected) -> bool:
+    """Account/model access refusals; a malformed request must never disable a model."""
+    if error.status in (402, 403, 404, 429):
+        return True
+    return error.status == 400 and bool(
+        re.search(
+            r"requires? (?:a |an )?(?:valid )?(?:credit card|payment)|"
+            r"model.{0,80}(?:not available|unavailable|not enabled).{0,40}(?:account|plan|key)",
+            str(error),
+            re.I,
+        )
+    )
 
 
 def _tool_text(value: Any) -> str | None:
