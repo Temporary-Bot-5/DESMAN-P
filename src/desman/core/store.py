@@ -33,7 +33,8 @@ from desman.core.states import transition as check_transition
 S = SubtaskStatus
 
 _EXECUTION_ENDED = """actor = 'executor' AND from_status = 'running'
-    AND (action IN ('submit', 'decomposed') OR json_extract(details_json, '$.failure') = 'quality')"""
+    AND (action IN ('submit', 'decomposed') OR (action = 'tool_unavailable'
+         AND json_extract(details_json, '$.missing') = 'search_engine') OR json_extract(details_json, '$.failure') = 'quality')"""
 """SQL condition on audit_log: the entry ended an execution with something to judge."""
 Clock = Callable[[], datetime]
 
@@ -1016,6 +1017,22 @@ class Store:
             return None
         details = json.loads(rows[0]["details_json"])
         text = details.get("cause") or details.get("reason")
+        # A setup retry must ask afresh, including when the person repeats their note.
+        ended = self.conn.execute(
+            f"SELECT details_json FROM audit_log WHERE subtask_id = ? AND {_EXECUTION_ENDED} "
+            "ORDER BY seq DESC LIMIT 1",
+            (subtask_id,),
+        ).fetchone()
+        previous = json.loads(ended[0]) if ended else {}
+        if previous.get("missing") == "search_engine":
+            return Feedback(
+                source="executor",
+                text=(
+                    f"Execution {self.executions(subtask_id)} stopped because whole-web search "
+                    "had no engine. The person retried: check search again with the current setup."
+                    + (f" Operator feedback: {text}" if text else "")
+                ),
+            )
         return Feedback(source=rows[0]["actor"], text=text) if text else None
 
     # ── Leases and recovery ──────────────────────────────────────────────────
@@ -1287,7 +1304,7 @@ class Store:
 
     def executions(self, subtask_id: str) -> int:
         """How many executions of the subtask have ended with something to judge: a result, a
-        split or a quality failure. An interrupted one (crash, lost lease, provider error,
+        split, a quality failure or a missing-engine escalation. An interrupted one (crash, lost lease, provider error,
         limits) has not ended: the next run continues it, so its effects are replayed."""
         row = self.conn.execute(
             f"SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND {_EXECUTION_ENDED}",

@@ -297,6 +297,8 @@ class Effects:
 
 def _stored(result: ToolResult) -> dict[str, Any]:
     stored: dict[str, Any] = result.model_dump(mode="json", exclude={"at"})
+    if result.missing is None:
+        stored.pop("missing")
     return stored
 
 
