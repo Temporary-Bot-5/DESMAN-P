@@ -98,7 +98,7 @@ EXECUTOR_SYSTEM_COMBINE = (
     "results are among the results of dependencies. Build this subtask's result from them."
 )
 TOOLS_INSTRUCTIONS = (
-    " When a named source cannot be read (including a page needing JavaScript), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria."
+    " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
     ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
     "To call them, reply instead of the result with "
     '{"tool_calls": [{"tool": "name", "args": {...}}, ...]}; you will get their results and '
@@ -139,7 +139,7 @@ REVIEWER_SYSTEM = (
     "to it is fine; check its written_files evidence."
 )
 REVIEWER_EVIDENCE = (
-    " When a named source cannot be read (including a page needing JavaScript), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria."
+    " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
     " Never decide from memory that something does not exist, is not released or is out of "
     "date: today may be after your training data; only the evidence counts. For a lookup "
     "subtask with web tools available but no web_search/web_fetch results in evidence, "
@@ -169,6 +169,13 @@ REVIEWER_EVIDENCE = (
     "shows it was never read, reply retry with feedback to read that source. A run_command "
     "that merely prints the executor's own conclusion (for example echo Top film: ...) "
     "does not verify that conclusion and is not evidence for it."
+    " For live data (prices, vacancies, schedules, news), the best results found, each with "
+    "its source, plus a plain statement of what was not found meet criteria asking for "
+    "more items or details, unless the evidence shows the missing items were available "
+    "and ignored. This also applies to the final answer's coverage of the goal. "
+    'When part_of_split is true, this is a part feeding a combine step: reply "accept" '
+    "for an honestly marked partial result; the combine step chooses what to use. "
+    "These rules do not excuse invented facts or ignoring available evidence."
 )
 
 
@@ -326,6 +333,8 @@ def llm_reviewer(
             "result": artifact,
         }
         system = REVIEWER_SYSTEM + today(clock)
+        if subtask.parent_id is not None:
+            prompt["part_of_split"] = True
         if evidence is not None:
             prompt["evidence"] = evidence(subtask)
             system += REVIEWER_EVIDENCE
@@ -336,7 +345,8 @@ def llm_reviewer(
                 )
                 system += (
                     " The final result must answer every part of the goal, using what the "
-                    "dependencies found. A missing part means retry: name the missing part "
+                    "dependencies found, subject to the live-data and split-part rules above. "
+                    "An unaddressed part means retry: name the missing part "
                     "in feedback (including requested values, dates and sources)."
                 )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an

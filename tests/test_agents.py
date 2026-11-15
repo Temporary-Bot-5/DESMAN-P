@@ -83,6 +83,7 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
         "acceptance_criteria": "short",
         "result": {"draft": "v1"},
     }
+    assert all("part_of_split" not in body for _, body in reviews)
     assert all(r.messages[0].role == "system" for r in llm.calls)
 
 
@@ -118,6 +119,38 @@ def test_an_honest_not_found_is_no_reason_to_retry(store: Store) -> None:
     assert "honest, not incomplete" in system
     assert "is met by the best found, with its source" in system
     assert "is made up" in system  # invention is still a retry
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_review_live_data_shortfall_and_blocked_sites(store: Store, split: bool) -> None:
+    """Check the request sent to the model, not the scripted model's judgment."""
+    store.create_task(one_step())
+    subtask = store.claim("w")
+    assert subtask is not None
+    if split:
+        subtask = subtask.model_copy(update={"parent_id": "original"})
+    result = {
+        "text": "Found two vacancies with salaries on hh.ru; requested three.",
+        "sources": ["https://hh.ru/vacancy/1", "https://hh.ru/vacancy/2"],
+        "not_found": "No third match; Habr Career captcha; SuperJob bot protection.",
+    }
+    shown = {"goal": "Find 3 junior frontend vacancies in Moscow with salary and links"}
+    llm = FakeLLM().on("Review", '{"verdict": "accept"}')
+    llm_reviewer(llm, evidence=lambda sub: shown)(subtask, result)
+    [request] = llm.calls
+    body = payload(request.prompt)[1]
+    assert body.get("part_of_split", False) is split
+    assert body["result"] == result
+    system = request.messages[0].content
+    assert "prices, vacancies, schedules, news" in system
+    assert "more items or details" in system
+    assert "missing items were available and ignored" in system
+    assert 'reply "accept" for an honestly marked partial result' in system
+    assert "the combine step chooses" in system
+    assert "captcha or bot protection" in system
+    assert "report the block and move on" in system
+    assert "subject to the live-data and split-part rules above" in system
+    assert "do not excuse invented facts or ignoring available evidence" in system
 
 
 def test_executor_turns_non_objects_into_quality_failures(store: Store, tmp_path: Path) -> None:
