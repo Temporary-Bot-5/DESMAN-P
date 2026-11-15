@@ -56,7 +56,7 @@ TOPICS: Final = (
         "run_command tool, shell_execution (`desman "
         "permissions`) and a sandbox. Code subtasks are marked by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
-        "with it the executor is told to run the reported code successfully in this subtask. DESMAN never reports output of code it did not run. Web lookups and prose need no code run. "
+        "with it the executor is told to run the reported code successfully in this subtask. DESMAN never reports output it did not run. Web lookups and prose need no code run. "
         "Prose goes in the result; files are extra. Review checks web evidence, dates, sources and your language (names/translations allowed). Answers cover your request; split parts keep its language. Live data may have fewer items with sources and stated gaps; honest partial parts feed the combine step. Report blocked pages; use snippets or another official source. Review sees files written "
         "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
