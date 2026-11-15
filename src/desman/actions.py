@@ -34,7 +34,7 @@ from desman.core.report import (
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.stats import Stats
 from desman.core.store import StaleStateError, Store
-from desman.core.workspace import workspace_root_for
+from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.i18n import t, tn
 from desman.llm import hub
 
@@ -106,12 +106,84 @@ def result_text(result: Any) -> str:
             return result_text(inner)
         if result.get("type") == "result":
             result = {key: value for key, value in result.items() if key != "type"}
-        for key in ("content", "text", "answer", "result", "output"):
+        for key in (
+            "content",
+            "text",
+            "answer",
+            "result",
+            "output",
+        ):
             if isinstance(result.get(key), str):
                 return str(result[key])
+        prose_metadata = not any(isinstance(v, (dict, list)) for v in result.values())
+        for key in (
+            "response_text",
+            "response",
+            "message",
+            "summary",
+            "final_answer",
+            "answer_text",
+            "reply",
+        ):
+            if prose_metadata and isinstance(result.get(key), str):
+                return str(result[key])
+        prose = [v for v in result.values() if isinstance(v, str) and ("\n" in v or len(v) >= 80)]
+        if len(prose) == 1 and all(
+            isinstance(v, (str, int, float, bool, type(None))) for v in result.values()
+        ):
+            return prose[0]
         if len(result) == 1 and isinstance(next(iter(result.values())), str):
             return str(next(iter(result.values())))
     return _result_lines(result)
+
+
+def result_file_texts(store: Store, report: TaskReport) -> list[tuple[str, str]]:
+    """Small text deliverables omitted from a completed task's result, read through Workspace."""
+    if report.status != TaskStatus.DONE:
+        return []
+    final = store.conn.execute(
+        "SELECT id FROM subtasks WHERE task_id = ? AND parent_id IS NULL ORDER BY seq DESC LIMIT 1",
+        (report.id,),
+    ).fetchone()
+    if final is None:
+        return []
+    written = set()
+    for row in store.conn.execute(
+        "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+        "AND action IN ('tool_called', 'tool_replayed') ORDER BY seq",
+        (final[0],),
+    ):
+        detail = json.loads(row[0])
+        if detail.get("tool") == "write_file" and detail.get("ok") is True:
+            path = detail.get("args", {}).get("path")
+            if isinstance(path, str):
+                written.add(path)
+    result = store.final_result(report.id)
+    rendered = result_text(result) if result is not None else ""
+    serialized = json.dumps(result, ensure_ascii=False)
+    root = workspace_root_for(store.conn)
+    texts = []
+    for file in task_files.listing(root, report.id):
+        if file.path not in written or file.size > 16000:
+            continue
+        if file.path not in serialized and len(rendered) >= 800:
+            continue
+        try:
+            text = Workspace(root, report.id).read(file.path).decode("utf-8")
+        except (OSError, PathEscapeError, UnicodeDecodeError):
+            continue
+        if (
+            not text.strip()
+            or "\0" in text
+            or len(text) > 4000
+            or len(text.splitlines()) > 40
+            or text.strip() in rendered
+        ):
+            continue
+        texts.append((file.path, text))
+        if len(texts) == 2:
+            break
+    return texts
 
 
 def _result_lines(value: Any, indent: str = "") -> str:
@@ -180,6 +252,9 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
             click.echo("\n".join(lines[:40]))
         if len(lines) > 40:
             click.echo(t("Omitted lines: {count}.", count=len(lines) - 40))
+        for path, text in result_file_texts(store, report):
+            click.echo(t("{path}:", path=path))
+            click.echo(text)
         if output["files"]:
             click.echo(t("Files in {folder}:", folder=output["folder"]))
             for file in output["files"]:

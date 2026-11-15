@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import threading
 import time
 import webbrowser
@@ -17,6 +18,7 @@ from desman.gui.front import WebFront
 from desman.gui.runners import PageChat, Runners
 from desman.gui.server import Server, http_server
 from desman.gui.workers import Pool
+from desman.i18n import t
 from desman.info import print_project_info
 
 
@@ -31,7 +33,18 @@ def run(
     """Keep setup and navigation on the main thread; model turns own their sessions."""
     front = WebFront()
     app = Server(front, port)
-    server = http_server(app)
+    try:
+        server = http_server(app)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) != 10048:
+            raise
+        raise click.ClickException(
+            t(
+                "Port {port} is busy (is another `desman gui` open?). Use another --port, "
+                "or leave it out to pick a free one.",
+                port=port,
+            )
+        ) from exc
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

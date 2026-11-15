@@ -47,12 +47,12 @@ TOPICS: Final = (
         "where a task's files are, giving them to a later task, running code",
         "Each task has a folder (workspaces/TASK next to the database), where the "
         "executor reads and writes files with its tools; nothing outside it. After a task, the "
-        "chat lists its files and folder. A task sees only its folder: when "
-        'a request builds on what an earlier task of the same chat wrote ("test it", "change '
+        "chat lists its files and folder. Chat and run/status also show omitted written UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). When "
+        'a request builds on an earlier task in the same chat ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "originals stay unchanged. On retries, with file tools, it sees work files and "
+        "originals stay. On retries it sees work files and "
         "resets or rewrites stale demonstration state and files that contradict its result.\n"
-        "Running code (a test, a crash test, checking what a program prints) needs the "
+        "Running code needs the "
         "run_command tool, which needs the person's shell_execution switch (`desman "
         "permissions`) and a working sandbox. Code-running subtasks are marked by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
@@ -104,7 +104,7 @@ TOPICS: Final = (
         "`desman modules` shows active tasks; `desman modules clear --task REF` resets choices.\n"
         "For installed models and downloads see the localmodels topic.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
-        "model or logs. Inspect with `desman keys list`, `desman keys check` (no tokens) "
+        "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `desman keys list`, `desman keys check` (no tokens) "
         "and `desman usage`. A model returning 404 is set aside for 24 hours across runs; usage shows active model blocks.",
     ),
     Topic(

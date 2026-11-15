@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "A porta {port} está ocupada (outro `desman gui` está aberto?). Use outra --port ou omita a opção para escolher uma porta livre.",
+    "{path}:": "{path}:",
     "Waiting {seconds} s for a provider limit…": "Aguardando {seconds} s pelo limite do provedor…",
     "Allow a release that changes the registry database schema.": "Permitir uma versão que altere o esquema da base do registro.",
     "Another registry update is running.": "Outra atualização do registro está em execução.",

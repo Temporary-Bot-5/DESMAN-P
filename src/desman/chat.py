@@ -63,7 +63,7 @@ from desman import (
     ui,
     wizard,
 )
-from desman.actions import suggestion_lines
+from desman.actions import result_file_texts, suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, choices, db, nodes, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -1464,6 +1464,8 @@ class Chat:
                 self._fallback_note(interlocutor, task_id)
                 proposal = interlocutor.proposal  # only from a retelling that was shown
                 remember = interlocutor.remember
+        for path, text in result_file_texts(self.store, report):
+            self._event(t("{path}:", path=path) + "\n" + text, task_id)
         self._files(task_id, ref, root)
         if report.status is TaskStatus.DONE and remember is not None:
             self._remember(task_id, remember, interlocutor)
