@@ -355,7 +355,7 @@ def test_language_correction_keeps_looked_up_evidence(store: Store) -> None:
 def test_a_result_is_shown_as_its_text_or_as_readable_lines() -> None:
     from desman.actions import result_text
 
-    assert result_text({"content": "hello", "files_written": []}) == "hello"
+    assert result_text({"content": "hello", "files_written": []}) == "hello\nfiles_written:\n"
     assert result_text({"text": "привет"}) == "привет"
     assert result_text({"type": "result", "result": {"answer": "42"}}) == "42"
     assert result_text({"names": ["a"]}) == "names:\n  - a"

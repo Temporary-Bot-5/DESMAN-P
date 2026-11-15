@@ -148,7 +148,7 @@ def test_review_live_data_shortfall_and_blocked_sites(store: Store, split: bool)
     assert 'reply "accept" for an honestly marked partial result' in system
     assert "the combine step chooses" in system
     assert "captcha or bot protection" in system
-    assert "report the block and move on" in system
+    assert "You have no tools yourself" in system
     assert "subject to the live-data and split-part rules above" in system
     assert "do not excuse invented facts or ignoring available evidence" in system
 
@@ -394,3 +394,25 @@ def test_executor_is_told_to_fix_broken_code_and_run_again() -> None:
 
     assert "fix it with write_file" in TOOLS_INSTRUCTIONS
     assert "run it again" in TOOLS_INSTRUCTIONS
+
+
+def test_review_goal_once_and_does_not_mutate_evidence(store: Store) -> None:
+    store.create_task(one_step())
+    subtask = store.claim("w")
+    assert subtask is not None
+    shown = {"goal": "Unique personal request"}
+    llm = FakeLLM().on("Review", '{"verdict": "accept"}')
+    llm_reviewer(llm, evidence=lambda sub: shown)(subtask, {"text": "answer"})
+    body = payload(llm.calls[0].prompt)[1]
+    assert body["goal"] == shown["goal"]
+    assert "goal" not in body["evidence"]
+    assert llm.calls[0].prompt.count(shown["goal"]) == 1
+
+
+def test_split_review_without_evidence_has_no_unexplained_flag(store: Store) -> None:
+    store.create_task(one_step())
+    subtask = store.claim("w")
+    assert subtask is not None
+    llm = FakeLLM().on("Review", '{"verdict": "accept"}')
+    llm_reviewer(llm)(subtask.model_copy(update={"parent_id": "parent"}), {"text": "part"})
+    assert "part_of_split" not in payload(llm.calls[0].prompt)[1]

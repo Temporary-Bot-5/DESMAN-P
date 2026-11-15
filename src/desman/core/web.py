@@ -213,7 +213,12 @@ class Fetcher:
             title, text = html_text(raw)
             noscript = re.search(r"<noscript\b[^>]*>(.*?)</noscript\s*>", raw, re.I | re.S)
             if len(text) < 200 and (
-                len(raw) >= 2000 or (noscript and "javascript" in noscript[1].lower())
+                (noscript and "javascript" in noscript[1].lower())
+                or re.search(r"enable\s+javascript", raw, re.I)
+                or re.search(
+                    r'<div\b[^>]*id=[\'"](?:root|app|__next)[\'"][^>]*>\s*</div>', raw, re.I
+                )
+                or (not text.strip() and "__NEXT_DATA__" in raw)
             ):
                 note = "the page needs JavaScript; no readable text"
         return Page(url=url, content_type=content_type, text=text, title=title, cut=cut, note=note)

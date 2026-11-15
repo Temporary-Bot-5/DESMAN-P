@@ -502,6 +502,7 @@ class Coordinator:
                     # No model is asked: whatever it handed in could not rest on a run.
                     self._cannot_run(subtask, lease, missing, events)
                     return
+            goal, is_final = self.store.subtask_goal(subtask)
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
@@ -509,8 +510,8 @@ class Coordinator:
                 self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
-                goal=self.store.find_task(subtask.task_id)["goal"],
-                final_goal=self.store.final_goal(subtask),
+                goal=goal,
+                final_goal=goal if is_final else None,
                 files=(lambda chars: workspace_files(self.store, subtask, tools.workspace, chars))
                 if any(
                     spec["name"] in {"read_file", "write_file", "list_files"}

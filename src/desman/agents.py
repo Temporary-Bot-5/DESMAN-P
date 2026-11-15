@@ -97,9 +97,10 @@ EXECUTOR_SYSTEM_COMBINE = (
     EXECUTOR_SYSTEM + " This subtask was split into smaller parts, which are done: their "
     "results are among the results of dependencies. Build this subtask's result from them."
 )
+UNREADABLE_SOURCE = " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
 TOOLS_INSTRUCTIONS = (
-    " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
-    ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
+    UNREADABLE_SOURCE
+    + ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
     "To call them, reply instead of the result with "
     '{"tool_calls": [{"tool": "name", "args": {...}}, ...]}; you will get their results and '
     "continue. Files you write stay in the task's workspace, where later subtasks can read them; "
@@ -139,7 +140,9 @@ REVIEWER_SYSTEM = (
     "to it is fine; check its written_files evidence."
 )
 REVIEWER_EVIDENCE = (
-    " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
+    " If the executor attempted a named source but it was unreadable (including captcha or bot protection), "
+    "accept an answer using snippets or another official source when it plainly says what "
+    "could not be read and the rest meets the criteria. You have no tools yourself."
     " Never decide from memory that something does not exist, is not released or is out of "
     "date: today may be after your training data; only the evidence counts. For a lookup "
     "subtask with web tools available but no web_search/web_fetch results in evidence, "
@@ -333,13 +336,13 @@ def llm_reviewer(
             "result": artifact,
         }
         system = REVIEWER_SYSTEM + today(clock)
-        if subtask.parent_id is not None:
+        if subtask.parent_id is not None and evidence is not None:
             prompt["part_of_split"] = True
         if evidence is not None:
-            prompt["evidence"] = evidence(subtask)
+            prompt["evidence"] = dict(evidence(subtask))
             system += REVIEWER_EVIDENCE
             if "goal" in prompt["evidence"]:
-                prompt["goal"] = prompt["evidence"]["goal"]
+                prompt["goal"] = prompt["evidence"].pop("goal")
                 prompt["goal_note"] = (
                     "The person’s request; this subtask produces the final answer."
                 )

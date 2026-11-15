@@ -935,14 +935,30 @@ class Store:
         content: dict[str, Any] | None = json.loads(row[0]) if row else None
         return content
 
-    def final_goal(self, subtask: Subtask) -> str | None:
-        """The person's request only for the subtask whose result becomes the task result."""
+    def subtask_goal(self, subtask: Subtask) -> tuple[str, bool]:
+        """Current request with original context, and whether this is the final step."""
+        goal: str = self.find_task(subtask.task_id)["goal"]
+        extension = self.conn.execute(
+            "SELECT details_json FROM audit_log WHERE task_id = ? "
+            "AND action = 'task_extended' ORDER BY seq DESC LIMIT 1",
+            (subtask.task_id,),
+        ).fetchone()
+        if extension:
+            details = json.loads(extension[0])
+            ask = details.get("why") if "redo" in details else details.get("add")
+            if isinstance(ask, str) and ask:
+                goal = f"Original goal (context): {goal}\nCurrent continuation request: {ask}"
         row = self.conn.execute(
             "SELECT id FROM subtasks WHERE task_id = ? AND parent_id IS NULL "
             "ORDER BY seq DESC LIMIT 1",
             (subtask.task_id,),
         ).fetchone()
-        return self.find_task(subtask.task_id)["goal"] if row and row[0] == subtask.id else None
+        return goal, bool(row and row[0] == subtask.id)
+
+    def final_goal(self, subtask: Subtask) -> str | None:
+        """Current request only for the step whose result becomes the task result."""
+        goal, is_final = self.subtask_goal(subtask)
+        return goal if is_final else None
 
     def final_result(self, task_id: str) -> dict[str, Any] | None:
         """The accepted result of the task's last subtask (the planner makes it produce the

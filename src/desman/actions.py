@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import click
@@ -114,24 +114,37 @@ def result_text(result: Any) -> str:
             "output",
         ):
             if isinstance(result.get(key), str):
-                return str(result[key])
-        prose_metadata = not any(isinstance(v, (dict, list)) for v in result.values())
-        for key in (
-            "response_text",
-            "response",
-            "message",
-            "summary",
-            "final_answer",
-            "answer_text",
-            "reply",
-        ):
-            if prose_metadata and isinstance(result.get(key), str):
-                return str(result[key])
-        prose = [v for v in result.values() if isinstance(v, str) and ("\n" in v or len(v) >= 80)]
-        if len(prose) == 1 and all(
-            isinstance(v, (str, int, float, bool, type(None))) for v in result.values()
-        ):
-            return prose[0]
+                rest = {k: v for k, v in result.items() if k != key}
+                return str(result[key]) + ("\n" + _result_lines(rest) if rest else "")
+        prose_key = next(
+            (
+                key
+                for key in (
+                    "response_text",
+                    "response",
+                    "message",
+                    "summary",
+                    "final_answer",
+                    "answer_text",
+                    "reply",
+                )
+                if isinstance(result.get(key), str)
+            ),
+            None,
+        )
+        if prose_key is None:
+            prose = [
+                key
+                for key, value in result.items()
+                if isinstance(value, str) and ("\n" in value or len(value) >= 80)
+            ]
+            if len(prose) == 1 and all(
+                isinstance(v, (str, int, float, bool, type(None))) for v in result.values()
+            ):
+                prose_key = prose[0]
+        if prose_key is not None:
+            rest = {key: value for key, value in result.items() if key != prose_key}
+            return str(result[prose_key]) + ("\n" + _result_lines(rest) if rest else "")
         if len(result) == 1 and isinstance(next(iter(result.values())), str):
             return str(next(iter(result.values())))
     return _result_lines(result)
@@ -149,15 +162,16 @@ def result_file_texts(store: Store, report: TaskReport) -> list[tuple[str, str]]
         return []
     written = set()
     for row in store.conn.execute(
-        "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+        "SELECT details_json FROM audit_log WHERE subtask_id IN "
+        "(SELECT id FROM subtasks WHERE id = ? OR parent_id = ?) "
         "AND action IN ('tool_called', 'tool_replayed') ORDER BY seq",
-        (final[0],),
+        (final[0], final[0]),
     ):
         detail = json.loads(row[0])
         if detail.get("tool") == "write_file" and detail.get("ok") is True:
             path = detail.get("args", {}).get("path")
             if isinstance(path, str):
-                written.add(path)
+                written.add(str(PurePosixPath(path)))
     result = store.final_result(report.id)
     rendered = result_text(result) if result is not None else ""
     serialized = json.dumps(result, ensure_ascii=False)

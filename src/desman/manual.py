@@ -47,7 +47,7 @@ TOPICS: Final = (
         "where a task's files are, giving them to a later task, running code",
         "Task files live in workspaces/TASK next to the database; the "
         "executor uses tools only there. The "
-        "chat lists its files and folder. Chat and run/status also show omitted written UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). When "
+        "chat lists its files and folder. Chat skips repeated file text, kept as untrusted data. Chat and run/status show written UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). When "
         'a request builds on an earlier task in the same chat ("test it", "change '
         'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
         "originals stay. On retries it sees work files and "
@@ -58,11 +58,11 @@ TOPICS: Final = (
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
         "with it its result counts only if the code really ran. DESMAN never reports "
         "what code would print without running it. Web lookups and prose need no code run. "
-        "Prose goes in the result; files are extra. Review checks web evidence, dates, sources and your language (names/translations allowed). Answers cover your request; split parts keep its language. Live data may have fewer items with sources and stated gaps; honest partial parts feed the combine step. Report unreadable/bot-blocked pages; snippets or another official source may be used. Review sees files written "
+        "Prose goes in the result; files are extra. Review checks web evidence, dates, sources and your language (names/translations allowed). Answers cover your request; split parts keep its language. Live data may have fewer items with sources and stated gaps; honest partial parts feed the combine step. Report blocked pages; use snippets or another official source. Review sees files written "
         "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
-        "A retelling shows code only as the task left it, in the language of your latest message.",
+        "Retellings copy task code and use your latest message’s language.",
     ),
     Topic(
         "retries",
