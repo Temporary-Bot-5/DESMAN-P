@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +38,8 @@ class SubtaskReport(BaseModel):
     lease_owner: str | None
     lease_until: str | None
     paused_until: str | None
+    action: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
     reason: str | None
     """Why it reached its current status, from the audit log (e.g. the escalation reason)."""
 
@@ -105,6 +107,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     lease_owner=sub.lease_owner,
                     lease_until=sub.lease_until,
                     paused_until=sub.paused_until,
+                    **_status_details(store, sub),
                     reason=reason,
                 )
             )
@@ -202,6 +205,8 @@ class InboxItem(BaseModel):
     description: str
     status: SubtaskStatus
     attempts: Attempts
+    action: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
     reason: str | None
 
 
@@ -238,6 +243,7 @@ def inbox(store: Store) -> list[InboxItem]:
                         description=sub.description,
                         status=sub.status,
                         attempts=sub.attempts,
+                        **_status_details(store, sub),
                         reason=_reason(store, sub, by_id),
                     )
                 )
@@ -263,6 +269,22 @@ class InboxWatch:
     def told(self, items: list[InboxItem]) -> None:
         """Items shown another way (the chat retelling its task): not new any more."""
         self._seen |= {(i.subtask_id, i.version) for i in items}
+
+
+def _status_details(store: Store, sub: Subtask) -> dict[str, Any]:
+    row = store.conn.execute(
+        "SELECT action, details_json FROM audit_log WHERE subtask_id = ? AND to_status = ? "
+        "ORDER BY seq DESC LIMIT 1",
+        (sub.id, sub.status.value),
+    ).fetchone()
+    if row is None:
+        return {}
+    details = json.loads(row[1])
+    # Audit entries can contain lease capabilities; expose only the tool diagnosis.
+    return {
+        "action": row[0],
+        "details": {key: details[key] for key in ("tool", "missing") if key in details},
+    }
 
 
 def _reason(store: Store, sub: Subtask, by_id: dict[str, Subtask]) -> str | None:

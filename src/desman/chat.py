@@ -214,6 +214,7 @@ class Chat:
         self.session_id: str | None = latest.id if latest else None
         """A new session (it starts with the first message) unless asked to continue the last
         one (`desman -c`); /sessions continues any."""
+        self._search_hints_told: set[tuple[str, int]] = set()
         self.waiting = InboxWatch(self.store)
         self.waiting.new()  # Existing inbox entries predate this chat; /inbox still lists them.
         """What reaches the inbox while this chat is open (5.1)."""
@@ -1402,8 +1403,17 @@ class Chat:
             )
             if item.reason:
                 ui.out(Text(f"    {_shorten(item.reason, 110)}", style="muted"))
-            if setup := search_setup_hint(item.reason):
-                self._event(setup, task_id)
+        missing_search = [item for item in waiting if search_setup_hint(item)]
+        if any(
+            (item.subtask_id, item.version) not in self._search_hints_told
+            for item in missing_search
+        ):
+            setup = search_setup_hint(missing_search[0])
+            assert setup is not None
+            self._event(setup, task_id)
+            self._search_hints_told.update(
+                (item.subtask_id, item.version) for item in missing_search
+            )
         if asking and self.background_tasks:  # the page's workers go on after a decision
             ui.note(t("Answer in the field below the chat, or choose Retry, Accept or Fail there."))
         elif waiting:

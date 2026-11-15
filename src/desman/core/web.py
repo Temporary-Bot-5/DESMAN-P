@@ -63,11 +63,12 @@ TEXT_TYPES: Final = (
 )
 
 
-MISSING_SEARCH_ENGINE = "[missing_search_engine]"
-
-
 class WebError(ValueError):
     """A request that cannot be made or answered (shown to the model)."""
+
+
+class MissingSearchEngine(WebError):
+    """Whole-web search has no configured engine."""
 
 
 # ── Search ───────────────────────────────────────────────────────────────────
@@ -365,11 +366,12 @@ class Web:
         if not engines:
             others = ", ".join(self.sources) or "none"
             what = (
-                f"{MISSING_SEARCH_ENGINE} no search engine for the whole web is set up"
+                "no search engine for the whole web is set up"
                 if source == "web"
                 else f"the source {source!r} is not available"
             )
-            raise WebError(f"{what}; sources available: {others}")
+            error = MissingSearchEngine if source == "web" else WebError
+            raise error(f"{what}; sources available: {others}")
         # Which engines: after SEARXNG_URL changes, the old server's answers are not reused.
         asked = " ".join(f"{e.name}={getattr(e, 'url', '')}" for e in engines)
         request = f"{source}\0{asked}\0{language}\0{max_results}\0{query}"
