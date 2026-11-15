@@ -215,7 +215,7 @@ def test_click_errors_and_messages_are_translated() -> None:
     assert "Ошибка: Нет такой команды 'inboxx'. Может быть, 'inbox'?" in result.output
     assert "укажите либо GOAL, либо --spec" in desman("run").output
     assert "нет базы данных" in desman("list").output
-    keyed = len(providers.CLOUD) + sum(p.key_env is not None for p in providers.SERVICES)
+    keyed = len(providers.CLOUD) + sum(p.key_env is not None for p in providers.SERVICES) + 1
     assert f"0 ключей у 0 из {keyed} провайдеров" in desman("keys").output
 
 
@@ -239,7 +239,7 @@ def test_a_broken_config_shows_english_and_the_error() -> None:
 def test_the_wizard_switches_the_language_for_the_rest_of_the_command() -> None:
     # Language 2 (Русский), providers menu: Done, then the four permission questions,
     # personalisation, how it talks, desman-global.
-    done = str(len(providers.PROVIDERS + providers.SERVICES) + 1)
+    done = str(len(providers.PROVIDERS + providers.SERVICES) + 2)
     result = CliRunner().invoke(cli, ["config"], input=f"2\n{done}\n\n\n\n\n\n\n\n")
     assert result.exit_code == 0, result.output
     assert "Настройки сохранены в" in result.output

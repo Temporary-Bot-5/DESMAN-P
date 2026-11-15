@@ -119,6 +119,7 @@ src/desman/
 │                  #   checkout fast-forwarded; settings into `tuning`; revert = `git revert` the
 │                  #   same way. Also installs/reverts root-signed releases (`global update`).
 │                  #   Recorded in `applications` (in turn). Protected
+├── searxng.py     # Local Docker search component: setup/status/start/stop/remove (ADR 0011)
 ├── local_models.py # their bodies (look up, size vs free memory, plan, fetch, use), shared by
 │                  #   the CLI, the wizard and the chat's catalog
 ├── wizard.py      # setup wizard (language, provider menu loop, permissions, personalisation

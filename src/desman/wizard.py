@@ -21,7 +21,15 @@ from rich.text import Text
 
 from desman import config as config_module
 from desman import i18n, net, providers, ui
-from desman.config import BEHAVIOUR_CHARS, Behaviour, Config, ConfigManager, Network, Permissions
+from desman.config import (
+    BEHAVIOUR_CHARS,
+    Behaviour,
+    Config,
+    ConfigManager,
+    Network,
+    Permissions,
+    open_config,
+)
 from desman.core import search
 from desman.i18n import t, tn
 from desman.providers import Provider
@@ -67,8 +75,9 @@ def behaviour_shown(behaviour: Behaviour, part: str) -> str:
 
 
 class _Session:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, manager: ConfigManager | None = None) -> None:
         self.config = config
+        self.manager = manager
         # Accepted before if a cloud key was already saved; otherwise asked once, on first add.
         self.privacy_ok = any(config.keys(p.key_env or "") for p in providers.CLOUD)
 
@@ -87,7 +96,7 @@ def run(manager: ConfigManager) -> None:
     )
     i18n.set_language(lang)  # the rest of the wizard, and of this command, in that language
     config = saved.model_copy(deep=True, update={"language": lang, "configured": True})
-    session = _Session(config)
+    session = _Session(config, manager)
 
     _providers_menu(session)
     config.permissions = _permissions(config.permissions)
@@ -116,7 +125,7 @@ def run_section(manager: ConfigManager, section: str) -> None:
     seen = manager.snapshot()
     config = manager.load().model_copy(deep=True)
     if section == "providers":
-        _providers_menu(_Session(config))
+        _providers_menu(_Session(config, manager))
     elif section == "permissions":
         config.permissions = _permissions(config.permissions)
     elif section == "personalize":
@@ -231,6 +240,10 @@ def _providers_menu(s: _Session) -> None:
             (t("Models for local servers"), providers.HUB),
         ):
             choices.append(ui.Heading(title))
+            if group is providers.SEARCH:
+                choices.append(
+                    ui.Choice(t("Set up SearXNG on this computer (Docker)"), "search_setup")
+                )
             choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
         choices.append(ui.Choice(t("Done — continue"), None))
         choices.append(ui.Choice(t("Models and keys for roles"), "roles"))
@@ -239,6 +252,14 @@ def _providers_menu(s: _Session) -> None:
         )
         if picked is None:
             return
+        if picked == "search_setup":
+            from desman import searxng
+
+            if ui.confirm(searxng.consent()):
+                s.config.settings["SEARXNG_URL"] = searxng.setup(
+                    s.manager or open_config(), save_url=False
+                )
+            continue
         if picked == "roles":
             ask_roles(s.config)
             continue

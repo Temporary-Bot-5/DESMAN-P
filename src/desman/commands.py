@@ -1876,7 +1876,66 @@ def _config_reset(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 
 _KEYED = [p.id for p in providers.CLOUD + providers.SERVICES if p.key_env is not None]
 
+
+class SearchSetupArgs(Args):
+    port: int | None = Field(default=None, ge=1, le=65535)
+    yes: bool = False
+
+
+class SearchRemoveArgs(Args):
+    yes: bool = False
+
+
+def _search_status(ctx: Context, args: NoArgs) -> Outcome:
+    from desman import searxng
+
+    return Outcome(searxng.status(ctx.manager))
+
+
+def _search_change(action: str) -> Handler:
+    def handle(ctx: Context, args: Any) -> Proposal:
+        from desman import searxng
+
+        def apply() -> Outcome:
+            if action == "setup":
+                searxng.setup(ctx.manager, args.port)
+            else:
+                searxng.operate(ctx.manager, action)
+            return Outcome({"action": action})
+
+        if action == "setup":
+            line = searxng.consent()
+        elif action == "start":
+            line = t("Start the local SearXNG container.")
+        elif action == "stop":
+            line = t("Stop the local SearXNG container.")
+        else:
+            line = t("Remove the local SearXNG container?")
+        return Proposal([line], apply)
+
+    return handle
+
+
 CATALOG: tuple[Entry, ...] = (
+    Entry(
+        "search setup",
+        "Set up local SearXNG with Docker (about 100 MB).",
+        SearchSetupArgs,
+        Kind.CHANGE,
+        _search_change("setup"),
+        typed_confirm=True,
+    ),
+    Entry("search status", "Check local SearXNG.", NoArgs, Kind.READ, _search_status),
+    Entry("search start", "Start local SearXNG.", NoArgs, Kind.CHANGE, _search_change("start")),
+    Entry("search stop", "Stop local SearXNG.", NoArgs, Kind.CHANGE, _search_change("stop")),
+    Entry(
+        "search remove",
+        "Remove local SearXNG; keep settings.",
+        SearchRemoveArgs,
+        Kind.CHANGE,
+        _search_change("remove"),
+        typed_confirm=True,
+    ),
     Entry(
         "gui",
         "Explain desman gui and desman gui --shortcut; never create a shortcut from the chat.",
@@ -2736,7 +2795,7 @@ def parse_line(
         for name, value in ctx.params.items():
             field_name = mapping.get(name, name)
             supplied = ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
-            if entry.name == "config reset" and name == "yes":
+            if entry.name in {"config reset", "search setup", "search remove"} and name == "yes":
                 if value:
                     entry = replace(entry, typed_confirm=False)
                 continue

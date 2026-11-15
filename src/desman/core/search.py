@@ -18,6 +18,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -70,7 +71,11 @@ def parse_results(response: httpx.Response, engine: str) -> list[SearchResult]:
     if response.status_code != 200:
         raise WebError(f"{engine} answered HTTP {response.status_code}")
     try:
-        return _Results.model_validate_json(response.content).results
+        return [
+            r
+            for r in _Results.model_validate_json(response.content).results
+            if urlsplit(r.url).hostname
+        ]
     except ValidationError as e:
         raise WebError(f"{engine} sent an answer that is not a list of results") from e
 

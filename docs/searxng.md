@@ -1,60 +1,69 @@
 # Your own search engine: SearXNG
 
-DESMAN's `web_search` tool can always search Wikipedia, Stack Overflow, arXiv and GitHub. To
-search the whole web without an account or an API key, run [SearXNG](https://docs.searxng.org)
-on your machine: a free, open-source metasearch engine that asks Google, Bing, DuckDuckGo and
-others for you and sends back one list of results.
+DESMAN searches Wikipedia, Stack Overflow, arXiv and GitHub without configuration. For the
+whole web, set up its local SearXNG component: no account or search key is needed.
 
-## Start it (Docker, about two minutes)
+## Set up and manage
 
-1. Make a folder for its settings and write `settings.yml` into it. DESMAN reads results as JSON,
-   which SearXNG has to be told to allow:
+Install and start [Docker](https://docs.docker.com/get-docker/) (Docker Desktop on Windows
+and macOS), then run:
 
-   ```bash
-   mkdir -p ~/.config/searxng
-   cat > ~/.config/searxng/settings.yml <<EOF
-   use_default_settings: true
-   server:
-     secret_key: "$(openssl rand -hex 32)"
-     limiter: false
-   search:
-     formats:
-       - html
-       - json
-   EOF
-   ```
+```bash
+desman search setup
+```
 
-2. Start it, reachable only from this machine (`127.0.0.1`), restarted with the computer:
+DESMAN asks before downloading the pinned image (about 100 MB), writes settings under its
+config directory, and starts `desman-searxng`, reachable only at `127.0.0.1`. It picks a free
+port starting at 8888. Only after a JSON search answers does it save `SEARXNG_URL`. Run setup
+again to repair or reuse the container. `--port 8889` chooses a port; `--yes` skips consent.
+The configuration wizard also offers setup under Web search. Only `settings.yml` is mounted
+into the container, read-only; setup makes that file readable by the container while keeping
+the settings folder private.
 
-   ```bash
-   docker run -d --name searxng --restart unless-stopped \
-     -p 127.0.0.1:8888:8080 \
-     -v ~/.config/searxng:/etc/searxng \
-     searxng/searxng
-   ```
+```bash
+desman search status
+desman search stop
+desman search start
+desman search remove
+```
 
-3. Open <http://localhost:8888> in a browser: a search page means it works.
+Removal asks for consent (`--yes` for scripts), removes the container, and keeps settings
+and the downloaded image. `desman keys list` shows the URL; `desman keys check searxng`
+checks whether it answers. `search status --json` returns the container state, URL and
+search health for scripts. Docker restarts the container with the computer unless stopped.
 
-4. In `desman config`, pick **SearXNG** under *Web search* and set its URL to
-   `http://localhost:8888`. The wizard checks it right away.
+## Manual fallback
 
-Without Docker, see SearXNG's own
-[installation guide](https://docs.searxng.org/admin/installation.html).
+For an existing server, set its URL under SearXNG in `desman config`. To run Docker yourself,
+write `settings.yml` in a folder of your choice:
 
-## When something is wrong
+```yaml
+use_default_settings: true
+general:
+  contact_url: https://github.com/Temporary-Bot-5/DESMAN-P
+server:
+  secret_key: REPLACE_WITH_A_RANDOM_SECRET
+  limiter: false
+search:
+  formats: [html, json]
+```
 
-- **"SearXNG refuses the JSON format"**: `json` is missing under `search.formats` in
-  `settings.yml`. Fix it, then `docker restart searxng`.
-- **"cannot be reached"**: the container is not running (`docker ps`, `docker start searxng`) or
-  the URL is not the one in step 2.
-- **Few or no results**: the big engines sometimes refuse SearXNG for a while (too many
-  searches). It recovers by itself; DESMAN falls back to the next engine you set up, if any.
+Generate a random secret (for example `openssl rand -hex 32`), make the file readable
+by the container (`chmod 644 settings.yml` on Linux), then run:
 
-## Other ways to search the whole web
+```bash
+docker run -d --name searxng --restart unless-stopped \
+  -p 127.0.0.1:8888:8080 -v /absolute/settings/folder/settings.yml:/etc/searxng/settings.yml:ro \
+  searxng/searxng:2026.11.15-2d500cb6b
+```
 
-**Tavily**: an API with free monthly searches; needs a free account and its key
-(`desman keys add tavily`). Set in `desman config` under *Web search*; tried after SearXNG.
+Open <http://127.0.0.1:8888>, then set that URL in `desman config`.
+For installation without Docker, see the [SearXNG guide](https://docs.searxng.org/admin/installation.html).
 
-DESMAN does not read search engines' pages meant for people (DuckDuckGo, Google, ...): they
-refuse programs, and getting around that is not something DESMAN does. SearXNG asks them in
-the way their operators allow.
+## Troubleshooting and alternatives
+
+A JSON-format refusal means `json` is missing from `search.formats`: correct settings and
+restart the container. An unreachable server needs Docker running and the configured port
+available. Individual engines can temporarily limit searches; DESMAN tries the next configured
+engine. Tavily is an alternative with free monthly searches and an account/key
+(`desman keys add tavily`). DESMAN does not scrape search pages meant for people.

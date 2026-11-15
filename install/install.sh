@@ -152,4 +152,7 @@ if [ -e "$launcher" ] && [ ! -L "$launcher" ]; then fail "Refusing to replace $l
 ln -sfn "$APP/.venv/bin/desman" "$launcher"
 .venv/bin/desman gui --shortcut
 echo 'Installed. Updates: desman global update (inspect), then --apply NUMBER. Add ~/.local/bin to PATH for terminal use.'
+if command -v docker >/dev/null 2>&1 && [ -t 0 ] && [ "$YES" = 0 ]; then
+    .venv/bin/desman search setup
+fi
 if [ "$START" = 1 ]; then .venv/bin/desman gui; fi

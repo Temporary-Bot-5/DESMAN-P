@@ -502,3 +502,12 @@ def test_uninstall_preserves_foreign_launchers(
     if not app_present:
         assert "nothing removed" in result.stdout
         assert (data / "keep").read_text(encoding="utf-8") == "history"
+
+
+def test_installers_offer_search_only_with_docker_and_interactive_input() -> None:
+    shell = (ROOT / "install/install.sh").read_text(encoding="utf-8")
+    powershell = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
+    assert "command -v docker" in shell and "[ -t 0 ]" in shell
+    assert ".venv/bin/desman search setup" in shell
+    assert "Get-Command docker" in powershell and "![Console]::IsInputRedirected" in powershell
+    assert "@('search', 'setup')" in powershell

@@ -574,6 +574,19 @@ def key_rows(config: Config, db_path: Path | None = None) -> list[dict[str, Any]
                 "keys": keys,
             }
         )
+    rows.append(
+        {
+            "provider": "searxng",
+            "name": "SearXNG",
+            "env": None,
+            "paid": False,
+            "search": True,
+            "hub": False,
+            "ready": bool(config.settings.get("SEARXNG_URL")),
+            "keys": [],
+            "url": config.settings.get("SEARXNG_URL", ""),
+        }
+    )
     return rows
 
 
@@ -590,7 +603,11 @@ def print_key_rows(rows: list[dict[str, Any]]) -> None:
         title=t("API keys"),
     )
     for r in rows:
-        shown = r["name"] + (f" · {t('paid')}" if r["paid"] else "")
+        shown = (
+            r["name"]
+            + (" · " + r["url"] if r.get("url") else "")
+            + (f" · {t('paid')}" if r["paid"] else "")
+        )
         if r["search"]:
             shown += f" · {t('web search')}"
         if r["hub"]:
@@ -643,6 +660,12 @@ def check_keys(
     """The providers asked (`provider`, or every ready one) and what they said of each key
     (of a local server: whether it runs and serves its model)."""
     targets = [_model_provider(provider)] if provider else providers.ready(config)
+    if (
+        provider is None
+        and config.settings.get("SEARXNG_URL")
+        and not any(p.id == "searxng" for p in targets)
+    ):
+        targets.append(providers.find_keyed("searxng"))
     if not targets:
         raise click.ClickException(t("no keys to check: add one with `desman keys add PROVIDER`"))
     results = []
@@ -669,7 +692,7 @@ def check_keys(
 def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck]) -> None:
     table = ui.table(t("provider"), "#", t("status"), t("models"), t("default model"))
     for r in results:
-        p = providers.find(r.provider)
+        p = providers.find_keyed(r.provider)
         status = (
             Text(t("ok"), style="good")
             if r.ok
@@ -684,15 +707,21 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
                 style="good" if r.default_model_listed else "warn",
             )
         )
-        number = "-" if p.local else str(r.number)
-        table.add_row(p.name, number, status, str(r.models or ""), default)
+        number = "-" if p.local or p.id == "searxng" else str(r.number)
+        table.add_row(
+            p.name + (" · " + r.url if p.id == "searxng" else ""),
+            number,
+            status,
+            str(r.models or ""),
+            default,
+        )
     ui.out(table)
     ui.note(t("Remembered model access refusals cleared for the checked keys."))
     ui.out("")
     warned: set[str] = set()
     for r in results:
-        p = providers.find(r.provider)
-        name = p.name if p.local else f"{p.name} #{r.number}"
+        p = providers.find_keyed(r.provider)
+        name = p.name if p.local or p.id == "searxng" else f"{p.name} #{r.number}"
         if not r.ok and p.local:
             ui.warn(f"{name}: {_local_problem(r)}")
             _local_hint(p, r)
@@ -704,7 +733,7 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
                 t(
                     "{name} does not list these models of DESMAN's catalog: {models}. Calls "
                     "to them fail and go to the next model.",
-                    name=providers.find(r.provider).name,
+                    name=providers.find_keyed(r.provider).name,
                     models=", ".join(r.unlisted),
                 )
             )
@@ -749,7 +778,7 @@ def _local_hint(p: providers.Provider, r: check.KeyCheck) -> None:
 def _model_provider(name: str) -> providers.Provider:
     """A model provider, cloud or local, by any of its names."""
     try:
-        return providers.find(name)
+        return providers.find_keyed(name) if name.lower() == "searxng" else providers.find(name)
     except providers.UnknownProvider as e:
         raise click.BadParameter(str(e), param_hint="PROVIDER") from e
 
