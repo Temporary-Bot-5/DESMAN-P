@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Add a Tavily key or SearXNG in desman config to search the whole web.": "ウェブ全体を検索するには、desman config で Tavily キーまたは SearXNG を追加してください。",
     "Remembered model access refusals cleared for the checked keys.": "確認したキーのモデルアクセス拒否の記録を消去しました。",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} はキー #{number} ({fingerprint}) では {until} まで利用不可: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "ポート {port} は使用中です（別の `desman gui` が開いていますか？）。別の --port を指定するか、省略して空きポートを選んでください。",

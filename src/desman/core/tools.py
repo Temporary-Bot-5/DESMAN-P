@@ -587,7 +587,7 @@ class SuggestModelArgs(_Args):
 
 
 def suggest_model_tool(
-    look_up: ModelLookup | None = None, memory: Callable[[], hub.Memory] = hub.memory
+    look_up: ModelLookup | None = None, memory: Callable[[], hub.Memory] | None = None
 ) -> Tool[SuggestModelArgs]:
     """`suggest_model`: an executor may only *suggest* a model; nothing is downloaded and the
     config is not changed. The suggestion is recorded in the audit (`model_suggested`), and the
@@ -621,7 +621,7 @@ def suggest_model_tool(
             "reason": " ".join(args.reason.split()),
             "size": model.size,
             "memory": model.memory,
-            "fits": hub.fits(model, memory()),
+            "fits": hub.fits(model, (memory or hub.memory)()),  # looked up when called
             "gated": model.gated,
             "note": "Suggested to the person; nothing was downloaded or changed.",
         }

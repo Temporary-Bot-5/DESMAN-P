@@ -63,7 +63,7 @@ from desman import (
     ui,
     wizard,
 )
-from desman.actions import result_file_texts, suggestion_lines
+from desman.actions import result_file_texts, search_setup_hint, suggestion_lines
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, choices, db, nodes, operator
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
@@ -1402,6 +1402,8 @@ class Chat:
             )
             if item.reason:
                 ui.out(Text(f"    {_shorten(item.reason, 110)}", style="muted"))
+            if setup := search_setup_hint(item.reason):
+                self._event(setup, task_id)
         if asking and self.background_tasks:  # the page's workers go on after a decision
             ui.note(t("Answer in the field below the chat, or choose Retry, Accept or Fail there."))
         elif waiting:

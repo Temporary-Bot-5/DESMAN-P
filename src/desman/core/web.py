@@ -63,6 +63,9 @@ TEXT_TYPES: Final = (
 )
 
 
+MISSING_SEARCH_ENGINE = "[missing_search_engine]"
+
+
 class WebError(ValueError):
     """A request that cannot be made or answered (shown to the model)."""
 
@@ -362,7 +365,7 @@ class Web:
         if not engines:
             others = ", ".join(self.sources) or "none"
             what = (
-                "no search engine for the whole web is set up"
+                f"{MISSING_SEARCH_ENGINE} no search engine for the whole web is set up"
                 if source == "web"
                 else f"the source {source!r} is not available"
             )
