@@ -95,7 +95,11 @@ PLANNER_RULES = (
     "make sense on its own. Use as few subtasks as the goal needs (one is fine for a simple "
     "goal). A goal a single model can answer in one reply (a short text, a translation, "
     "a list, an explanation, a small calculation) is ONE subtask. Split only when parts "
-    "need different tools/kinds or depend on looked-up facts. Reply with a single JSON object: "
+    "need different tools/kinds or depend on looked-up facts. Writing code and running it "
+    "(tests or examples) is ONE code subtask that runs the code itself. Reading the files "
+    "a subtask works on is never a separate subtask. A separate final answer subtask is "
+    "needed only to combine results of several independent parts; otherwise the last "
+    "working subtask gives the final result itself. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
     'done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier subtasks, '
     "counting from 0]}]}. The last subtask must produce the final result of the goal, "
@@ -353,7 +357,10 @@ CONTINUE_RULES = (
     "the new subtasks that do what is asked now. The new subtasks that depend on no other new "
     "one are given the results of the task's last subtask (its result so far) and, when a step "
     "is to be redone, of that step. The last new subtask must produce the complete result of "
-    "the whole goal, what was done before included, changed as asked."
+    "the whole goal, what was done before included, changed as asked. A simple change is "
+    "ONE subtask: read the files, modify the code and run its tests or examples in that "
+    "same code subtask. Do not split off reading files or a final answer unless results "
+    "of several independent parts must be combined."
 )
 
 
