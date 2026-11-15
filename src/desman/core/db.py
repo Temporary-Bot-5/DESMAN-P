@@ -784,6 +784,16 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     CREATE TRIGGER model_calls_no_update BEFORE UPDATE ON model_calls
         BEGIN SELECT RAISE(ABORT, 'model_calls is append-only'); END;
     """,
+    # 49: preserve the provider's account/model refusal, separately from rate windows.
+    """
+    CREATE TABLE model_refusals (
+        scope TEXT PRIMARY KEY,
+        status INTEGER NOT NULL,
+        message TEXT NOT NULL,
+        until TEXT NOT NULL
+    );
+    DELETE FROM rate_buckets WHERE scope LIKE 'unavailable:%';
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -844,3 +844,21 @@ def test_v41_upgrade_preserves_plain_messages_and_adds_style(tmp_path: Path) -> 
         assert Sessions(conn).messages("chat")[-1].styled == added.styled
     finally:
         conn.close()
+
+
+def test_v48_upgrade_preserves_windows_and_discards_ambiguous_refusals(tmp_path: Path) -> None:
+    path = tmp_path / "v48.db"
+    old = _db_at_version(path, 48)
+    for scope in ("tokens:groq/m:key", "gone:groq/m", "unavailable:groq/m:key"):
+        old.execute(
+            "INSERT INTO rate_buckets VALUES (?, 10, '2099-01-01T00:00:00+00:00', '2099-01-02T00:00:00+00:00')",
+            (scope,),
+        )
+    old.close()
+    conn = db.open_db(path)
+    assert not conn.execute("SELECT * FROM model_refusals").fetchall()
+    assert {r[0] for r in conn.execute("SELECT scope FROM rate_buckets")} == {
+        "tokens:groq/m:key",
+        "gone:groq/m",
+    }
+    conn.close()

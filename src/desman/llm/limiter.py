@@ -7,6 +7,11 @@ one token. A limit the provider reported (429 with a wait, a used-up quota with 
 remembered too, as `blocked_until`, so no process calls it again before then: free tiers count
 per model, and a restarted run would otherwise spend its first calls finding out again.
 
+The model_refusals table holds account/model access refusals for 24 hours.
+The buckets also hold `tokens:provider/model:fingerprint` reported token windows. For a token window,
+`tokens` is the remaining budget and `blocked_until` is its reset (not a model block).
+The latest report replaces the previous window. Estimates are checked, never deducted.
+
 A short wait (`MAX_WAIT` seconds or less) is waited out here; a longer one is `RateLimited`
 raised without a call, so the run moves on to the next model (`router.Fallback`) or, when
 every model has to wait, the subtask pauses until the soonest.
@@ -20,6 +25,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import math
 import os
 import sqlite3
 import sys
@@ -34,13 +40,14 @@ from desman.core import db, filelock
 from desman.llm.base import (
     LLM,
     Completion,
+    ProviderError,
     ProviderRejected,
     ProviderUnavailable,
     QuotaExhausted,
     RateLimited,
     Request,
 )
-from desman.llm.openai_compat import OpenAICompatible
+from desman.llm.openai_compat import OpenAICompatible, account_unavailable, reset_in
 
 MAX_WAIT = 10.0
 """Seconds a call may wait for its turn here (as long as `router.Backoff` waits out a limit)."""
@@ -120,6 +127,27 @@ class Buckets:
         until = db.parse_iso(row["blocked_until"])
         return until if until > self.clock() else None
 
+    def take_tokens(self, scope: str, amount: int) -> float:
+        """Check an estimate against the latest reported window without reserving tokens."""
+        now = self.clock()
+        with db.transaction(self.conn):
+            row = self.conn.execute(
+                "SELECT tokens, blocked_until FROM rate_buckets WHERE scope = ?", (scope,)
+            ).fetchone()
+            if row is None or not row["blocked_until"]:
+                return 0.0
+            until = db.parse_iso(row["blocked_until"])
+            if until <= now:
+                return 0.0
+            if row["tokens"] < amount:
+                return (until - now).total_seconds()
+        return 0.0
+
+    def report_tokens(self, scope: str, remaining: float, until: datetime) -> None:
+        """Replace the window with exactly what the latest response reported."""
+        with db.transaction(self.conn):
+            self._write(scope, remaining, self.clock(), until)
+
     def _write(self, scope: str, tokens: float, now: datetime, blocked: datetime | None) -> None:
         self.conn.execute(
             "INSERT INTO rate_buckets (scope, tokens, updated_at, blocked_until) "
@@ -155,6 +183,60 @@ class Limited:
         self._per_request = isinstance(llm, OpenAICompatible)
         if isinstance(llm, OpenAICompatible):
             llm.pace = self.pace
+            llm.before_key = self.before_key
+            llm.after_key = self.after_key
+
+    def key_scope(self, fingerprint: str, model: str) -> str:
+        return f"{self.name}/{model}:{fingerprint}"
+
+    def before_key(self, fingerprint: str, model: str, estimate: int) -> None:
+        scope = self.key_scope(fingerprint, model)
+        row = self.buckets.conn.execute(
+            "SELECT status, message, until FROM model_refusals WHERE scope = ?", (scope,)
+        ).fetchone()
+        if row is not None and db.parse_iso(row["until"]) > self.buckets.clock():
+            raise ProviderRejected(self.name, row["status"], row["message"])
+        waited = 0.0
+        while (wait := self.buckets.take_tokens("tokens:" + scope, estimate)) > 0:
+            if waited + wait > MAX_WAIT:
+                raise Paced(self.name, retry_after=wait)
+            (self.sleep or _sleep)(wait)
+            waited += wait
+
+    def after_key(
+        self, fingerprint: str, model: str, headers: dict[str, str], error: ProviderError | None
+    ) -> None:
+        scope = self.key_scope(fingerprint, model)
+        if isinstance(error, ProviderRejected) and account_unavailable(error):
+            with db.transaction(self.buckets.conn):
+                self.buckets.conn.execute(
+                    "INSERT INTO model_refusals (scope, status, message, until) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(scope) DO UPDATE SET status=excluded.status, "
+                    "message=excluded.message, until=excluded.until",
+                    (
+                        scope,
+                        error.status,
+                        error.message,
+                        db.to_iso(self.buckets.clock() + GONE_FOR),
+                    ),
+                )
+        if isinstance(error, ProviderRejected) and error.status == 404:
+            self.buckets.block(GONE + self.scope, self.buckets.clock() + GONE_FOR)
+        try:
+            remaining = float(headers.get("x-ratelimit-remaining-tokens", ""))
+            wait = reset_in(headers.get("x-ratelimit-reset-tokens", ""), self.buckets.clock())
+        except (ValueError, OverflowError):
+            return
+        if (
+            math.isfinite(remaining)
+            and remaining >= 0
+            and wait is not None
+            and math.isfinite(wait)
+            and 0 <= wait <= 86400
+        ):
+            self.buckets.report_tokens(
+                "tokens:" + scope, remaining, self.buckets.clock() + timedelta(seconds=wait)
+            )
 
     def pace(self) -> None:
         """Takes a token, waiting for it if that is short; raises `RateLimited` if it is not

@@ -768,7 +768,16 @@ def wrong_script(message: str, reply: str) -> bool:
         "TAMIL",
     )
     letters = [c for c in message if c.isalpha()]
-    if not letters or not reply:
+    # Numbers and short units do not provide enough prose to infer a script mismatch.
+    reply_letters = [c for c in reply if c.isalpha()]
+    dense = sum(
+        any(
+            script in unicodedata.name(c, "")
+            for script in ("CJK", "HANGUL", "HIRAGANA", "KATAKANA")
+        )
+        for c in reply_letters
+    )
+    if not letters or (len(reply_letters) < 5 and dense < 2):
         return False
     for script in scripts:
         if sum(script in unicodedata.name(c, "") for c in letters) > len(letters) / 2:

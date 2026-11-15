@@ -40,7 +40,7 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "A planner uses one subtask for simple goals, up to 8 for tools/dependencies; template fallback. Executors work; reviewers judge. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; completed work is never repeated. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show completed results (up to 40 lines) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. A retelling may propose one (window first). A subtask may get ≤3 knowledge-tree nodes (status lists them).",
+        "Planner: 1 subtask for simple work, up to 8 for tools/dependencies; template fallback. Simple code changes and tests share one subtask. Executors work; reviewers check. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; done work is kept. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show completed results (up to 40 lines) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. Retellings may propose these (window first). Subtasks get ≤3 knowledge nodes (see status).",
     ),
     Topic(
         "files",
@@ -56,8 +56,7 @@ TOPICS: Final = (
         "run_command tool, shell_execution (`desman "
         "permissions`) and a sandbox. Code subtasks are marked by the "
         "planner (`desman run --runs-code` holds a task to it): without the tool it waits for the person at once, with a reason; "
-        "with it its result counts only if the code really ran. DESMAN never reports "
-        "what code would print without running it. Web lookups and prose need no code run. "
+        "with it the executor is told to run the reported code successfully in this subtask. DESMAN never reports output it did not run. Web lookups and prose need no code run. "
         "Prose goes in the result; files are extra. Review checks web evidence, dates, sources and your language (names/translations allowed). Answers cover your request; split parts keep its language. Live data may have fewer items with sources and stated gaps; honest partial parts feed the combine step. Report blocked pages; use snippets or another official source. Review sees files written "
         "in the latest attempt, within budget. python3 -m pytest works in the "
         "sandbox; nothing can be pip-installed because it has no network.\n"
@@ -101,10 +100,10 @@ TOPICS: Final = (
         "for one chat (interlocutor only) use `desman modules set ROLE --session ID --key PROVIDER:KEY`. "
         "Auto inherits the role again. "
         "`desman modules` shows active tasks; `desman modules clear --task REF` resets choices.\n"
-        "For installed models and downloads see the localmodels topic.\n"
+        "See localmodels for downloads.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
         "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `desman keys list`, `desman keys check` (no tokens) "
-        "and `desman usage`. A model returning 404 is set aside for 24 hours across runs; usage shows active model blocks.",
+        "and `desman usage`. Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
     ),
     Topic(
         "modules",
