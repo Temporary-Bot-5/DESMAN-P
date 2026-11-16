@@ -126,6 +126,8 @@ FREE = (
         base_url="https://integrate.api.nvidia.com/v1",
         default_model="nvidia/nemotron-3-ultra-550b-a55b",
         limits_url="https://docs.api.nvidia.com/nim/docs/api-limits",
+        # Big free models write ~60–90 tokens/s: long replies take over a minute.
+        timeout=140.0,  # Under half the 300-second task lease (no heartbeat during a call).
     ),
     Provider(
         "google",

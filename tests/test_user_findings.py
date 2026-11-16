@@ -35,6 +35,7 @@ from desman.llm.limiter import Buckets, Limited
 from desman.llm.openai_compat import OpenAICompatible
 from desman.llm.router import Choice, Fallback
 from desman.planner import plan
+from desman.prompting import today
 
 REQUEST = Request(messages=[Message(role="user", content="hello")])
 
@@ -139,7 +140,7 @@ def test_executor_echo_is_quality_failure(store: Store, tmp_path: Path, clock: F
     result = llm_executor(llm, clock=clock)(work)
     assert isinstance(result, Failure) and result.kind is FailureKind.QUALITY
     assert result.reason == "the reply repeated the request instead of doing the work"
-    assert f"Today is {clock().date()}." in llm.calls[0].messages[0].content
+    assert today(clock).strip() in llm.calls[0].messages[0].content
 
 
 def test_a_reply_restating_its_request_with_a_result_is_kept(
@@ -168,7 +169,7 @@ def test_planner_and_reviewer_date_and_language(store: Store, clock: FakeClock) 
     sub = store.claim("w")
     assert sub is not None
     llm_reviewer(llm, evidence=lambda _: {}, clock=clock)(sub, {"content": "answer"})
-    assert all(f"Today is {clock().date()}." in r.messages[0].content for r in llm.calls)
+    assert all(today(clock).strip() in r.messages[0].content for r in llm.calls)
     assert "naming that language" in llm.calls[0].messages[0].content
     assert "only the evidence decides" in llm.calls[1].messages[0].content
 
@@ -199,7 +200,7 @@ def test_interlocutor_retries_language_once(store: Store, clock: FakeClock) -> N
     assert isinstance(result, Reply) and result.text == "Привет"
     assert len(llm.calls) == 2
     assert "Answer in the language" in llm.calls[1].messages[-1].content
-    assert f"Today is {clock().date()}." in llm.calls[0].messages[0].content
+    assert today(clock).strip() in llm.calls[0].messages[0].content
 
 
 def test_cli_reconfigures_piped_stdin(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -881,3 +881,38 @@ def test_groq_request_too_large_is_routable_without_key_rotation() -> None:
         llm.complete(REQUEST)
     assert len(records) == 1
     assert records[0].limits["x-ratelimit-limit-tokens"] == "8000"
+
+
+@pytest.mark.parametrize("provider_id, timeout", [("nvidia", 140.0), ("groq", 60.0)])
+def test_provider_timeout_reaches_client_and_deadline(
+    provider_id: str, timeout: float, clock: FakeClock
+) -> None:
+    provider = next(p for p in providers.FREE if p.id == provider_id)
+    config = make_config(api_keys={provider.key_env: KEY_A})
+    connected = router.connect(config, router.Choice(provider, provider.default_model))
+    try:
+        assert connected.timeout == timeout
+        assert connected.client.timeout == httpx.Timeout(timeout)
+    finally:
+        connected.client.close()
+
+    def slow_reply(request: httpx.Request) -> httpx.Response:
+        assert request.extensions["timeout"] == {
+            "connect": timeout,
+            "read": timeout,
+            "write": timeout,
+            "pool": timeout,
+        }
+        clock.sleep(120)
+        return reply()
+
+    with httpx.Client(transport=httpx.MockTransport(slow_reply)) as http:
+        connected = router.connect(
+            config, router.Choice(provider, provider.default_model), client=http
+        )
+        connected.monotonic = lambda: clock().timestamp()
+        if provider_id == "nvidia":
+            assert connected.complete(REQUEST).text == '{"ok": true}'
+        else:
+            with pytest.raises(ProviderTimeout):
+                connected.complete(REQUEST)
