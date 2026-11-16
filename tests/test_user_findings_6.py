@@ -11,7 +11,7 @@ from desman.core.store import Store
 from desman.llm import router
 from desman.llm.fake import FakeLLM
 from helpers import make_config
-from test_routing import GOOGLE, GROQ, REQUEST
+from test_routing import GOOGLE, GROQ, REQUEST, backed
 
 
 @pytest.mark.parametrize(
@@ -121,3 +121,95 @@ def test_runs_refreshes_health_for_whole_lineup(store: Store, clock: FakeClock) 
         )
         models.llm.complete(REQUEST)
         assert seen[-1] == original
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("export $MY_VAR and $OTHER", "export $MY_VAR and $OTHER"),
+        ("price $3 = cheap vs $5", "price $3 = cheap vs $5"),
+        ("$$ a_b = c $$", "$$ a_b = c $$"),
+        ("$ 2 + 3 $", "$ 2 + 3 $"),
+        (r"regex \(\d+\) and", r"regex \(\d+\) and"),
+        (r"\[\unknown{x}\]", r"\[\unknown{x}\]"),
+        (r"\(\textual{x}\)", r"\(\textual{x}\)"),
+        ("\\(x^2\n\ny\\)", "\\(x^2\n\ny\\)"),
+        ("\\[x^2\n \t\ny\\]", "\\[x^2\n \t\ny\\]"),
+        ("\\[x^2\n+y\\]", "x²\n+y"),
+        (r"\(2 + 3\)", "2 + 3"),
+    ],
+)
+def test_math_detection_preserves_nonmath(source: str, expected: str) -> None:
+    assert plain_math(source) == expected
+
+
+def test_wrapped_result_converts_math_once() -> None:
+    # After the outer delimiter is removed, the remaining delimiters must stay literal.
+    source = r"\(\text{\(}x^2\text{\)}\)"
+    assert result_text({"type": "result", "result": {"text": source}}) == plain_math(source)
+
+
+def test_health_keeps_preferred_slow_failure_deferred(store: Store, clock: FakeClock) -> None:
+    from desman.llm.base import ProviderTimeout
+    from desman.llm.fake import Timeout
+
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ, "GOOGLE_API_KEY": GOOGLE})
+    preferred, other = router.lineup(config, calls.Role.REVIEWER)[:2]
+    first = FakeLLM(Timeout(after=140), name="preferred", sleep=clock.sleep)
+    second = FakeLLM("other")
+    fallback = router.Fallback(
+        [(backed(first, clock), preferred), (second, other)],
+        health=router.health_order(store.conn, clock, keep=preferred.label),
+    )
+    with calls.for_(calls.Purpose(calls.Role.REVIEWER, task_id="slow")):
+        with pytest.raises(ProviderTimeout):
+            fallback.complete(REQUEST)
+        assert fallback.complete(REQUEST).text == "other"
+    assert len(first.calls) == 1
+
+
+def test_health_preserves_members_without_choices(store: Store, clock: FakeClock) -> None:
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ, "GOOGLE_API_KEY": GOOGLE})
+    sick, healthy = router.lineup(config, calls.Role.REVIEWER)[:2]
+    for _ in range(2):
+        store.conn.execute(
+            "INSERT INTO model_calls(provider, model, prompt_hash, latency_ms, error_kind, at) "
+            "VALUES (?, ?, '', 0, 'transient', ?)",
+            (sick.provider.id, sick.model, db.to_iso(clock())),
+        )
+    unknown = FakeLLM("uncatalogued")
+    fallback = router.Fallback(
+        [(FakeLLM("sick"), sick), (unknown, None), (FakeLLM("healthy"), healthy)],
+        health=router.health_order(store.conn, clock),
+    )
+    assert fallback.complete(REQUEST).text == "healthy"
+    # Unknown remains in the middle and is tried if the healthy member is avoided.
+    assert (
+        fallback.complete(REQUEST.model_copy(update={"avoid": frozenset({healthy.label})})).text
+        == "uncatalogued"
+    )
+    assert (
+        router.Fallback([(FakeLLM("alone"), None)], health=fallback.health).complete(REQUEST).text
+        == "alone"
+    )
+
+
+def test_health_skips_query_for_single_choice(store: Store, clock: FakeClock) -> None:
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ})
+    choices = router.lineup(config, calls.Role.REVIEWER)[:1]
+    queries: list[str] = []
+    store.conn.set_trace_callback(queries.append)
+    try:
+        order = router.health_order(store.conn, clock)
+        assert order([]) == []
+        assert order(choices) == choices
+    finally:
+        store.conn.set_trace_callback(None)
+    assert queries == []
+
+
+def test_formula_prompt_examples_are_english() -> None:
+    from desman.interlocutor import INTERLOCUTOR_SYSTEM, RETELL_SYSTEM
+
+    for prompt in (INTERLOCUTOR_SYSTEM, RETELL_SYSTEM):
+        assert "700 km × 7 L / 100 km" in prompt

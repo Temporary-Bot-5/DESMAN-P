@@ -98,7 +98,7 @@ CODE_LINES = 2
 task left (`unbacked_code`): the retelling copies code, it never writes it."""
 
 INTERLOCUTOR_SYSTEM = (
-    "Use plain text and plain formulas (700 км × 7 л / 100 км), never LaTeX. "
+    "Use plain text and plain formulas (700 km × 7 L / 100 km), never LaTeX. "
     "You are the interlocutor of DESMAN, a program that does work for a person through small "
     "language models. You talk with the person; you cannot do anything yourself: you have no "
     "tools, cannot read files, cannot go online and cannot change any setting. Other parts of "
@@ -220,7 +220,7 @@ AGAIN = "You opened a section: you may take one more lookup for its nodes. "
 LAST = "Another lookup is not possible in this turn. "
 
 RETELL_SYSTEM = (
-    "Use plain text and plain formulas (700 км × 7 л / 100 км), never LaTeX. "
+    "Use plain text and plain formulas (700 km × 7 L / 100 km), never LaTeX. "
     "You are the interlocutor of DESMAN. A task the person asked for has stopped, or one of "
     "its steps waits for the person while the rest goes on (status active); tell them "
     "its outcome, faithfully and briefly, in the language of the person’s latest message "

@@ -108,7 +108,13 @@ def plain_math(text: str) -> str:
             return value
         dollars = value.startswith("$")
         inner = value[2:-2] if value.startswith(("$$", r"\(", r"\[")) else value[1:-1]
-        if dollars and not re.search(r"\\[A-Za-z]+|[=^_]|\d\s*[+*/×÷-]\s*\d", inner):
+        if dollars and not re.search(r"\\[A-Za-z]+|\^", inner):
+            return value
+
+        if not dollars and not re.search(
+            r"\\(?:text|mathrm|textbf|frac|sqrt|times|cdot|div|approx|le|leq|ge|geq|ne|neq|pm|pi|infty|rightarrow|to|degree)(?![A-Za-z])|\^|\d\s*[+*/×÷-]\s*\d",
+            inner,
+        ):
             return value
 
         def part(value: str) -> str:
@@ -152,7 +158,7 @@ def plain_math(text: str) -> str:
         return re.sub(r"[ \t]+", " ", inner).strip()
 
     return re.sub(
-        r"```[\s\S]*?```|`[^`\n]*`|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\$\$[^$]*?\$\$|(?<!\$)\$[^$\n]+\$(?!\$)",
+        r"```[\s\S]*?```|`[^`\n]*`|\\\((?:(?!\n[ \t]*\n)[\s\S])*?\\\)|\\\[(?:(?!\n[ \t]*\n)[\s\S])*?\\\]|\$\$[^$]*?\$\$|(?<!\$)\$[^$\n]+\$(?!\$)",
         convert,
         text,
     )
@@ -168,7 +174,7 @@ def _result_text(result: Any) -> str:
     if isinstance(result, dict):
         inner = result.get("result") if result.get("type") == "result" else None
         if inner is not None:
-            return result_text(inner)
+            return _result_text(inner)
         if result.get("type") == "result":
             result = {key: value for key, value in result.items() if key != "type"}
         for key in (

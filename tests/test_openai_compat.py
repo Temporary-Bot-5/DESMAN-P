@@ -883,7 +883,7 @@ def test_groq_request_too_large_is_routable_without_key_rotation() -> None:
     assert records[0].limits["x-ratelimit-limit-tokens"] == "8000"
 
 
-@pytest.mark.parametrize("provider_id, timeout", [("nvidia", 140.0), ("groq", 60.0)])
+@pytest.mark.parametrize("provider_id, timeout", [("nvidia", 120.0), ("groq", 60.0)])
 def test_provider_timeout_reaches_client_and_deadline(
     provider_id: str, timeout: float, clock: FakeClock
 ) -> None:
@@ -903,7 +903,7 @@ def test_provider_timeout_reaches_client_and_deadline(
             "write": timeout,
             "pool": timeout,
         }
-        clock.sleep(120)
+        clock.sleep(92)
         return reply()
 
     with httpx.Client(transport=httpx.MockTransport(slow_reply)) as http:

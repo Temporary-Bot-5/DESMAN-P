@@ -298,35 +298,34 @@ def health_order(
     """Stably defer repeated transient failures using the shared, indexed call journal."""
 
     def order(choices: list[Choice]) -> list[Choice]:
-        if not choices:
+        if len(choices) < 2:
             return choices
         values = ",".join("(?, ?)" for _ in choices)
         args = [v for c in choices for v in (c.provider.id, c.model)]
         rows = conn.execute(
             f"WITH candidates(provider, model) AS (VALUES {values}) "
-            "SELECT c.provider, c.model, m.seq, m.at, m.error_kind "
+            "SELECT c.provider, c.model, "
+            "SUM(CASE WHEN m.error_kind = 'transient' THEN 1 ELSE 0 END) AS failures, "
+            "MAX(CASE WHEN m.error_kind = 'transient' THEN m.seq END) AS failed, "
+            "MAX(CASE WHEN m.error_kind IS NULL THEN m.seq END) AS succeeded "
             "FROM candidates c JOIN model_calls m "
             "ON m.provider = c.provider AND m.model = c.model WHERE m.at >= ? "
-            "ORDER BY m.at, m.seq",
+            "GROUP BY c.provider, c.model",
             (*args, db.to_iso(clock() - timedelta(minutes=15))),
         ).fetchall()
-        failures: dict[tuple[str, str], int] = {}
-        latest: dict[tuple[str, str], bool] = {}
-        for row in rows:
-            key = (row["provider"], row["model"])
-            if row["error_kind"] is None:
-                latest[key] = False
-            elif row["error_kind"] == "transient":
-                failures[key] = failures.get(key, 0) + 1
-                latest[key] = True
-        return sorted(
-            choices,
-            key=lambda c: (
-                c.label != keep,
-                failures.get((c.provider.id, c.model), 0) >= 2
-                and latest.get((c.provider.id, c.model), False),
-            ),
+        unhealthy = {
+            (row["provider"], row["model"])
+            for row in rows
+            if row["failures"] >= 2 and row["failed"] > (row["succeeded"] or 0)
+        }
+        # The person's choice keeps its incoming position, including after slow failures.
+        movable = iter(
+            sorted(
+                (c for c in choices if c.label != keep),
+                key=lambda c: (c.provider.id, c.model) in unhealthy,
+            )
         )
+        return [c if c.label == keep else next(movable) for c in choices]
 
     return order
 
@@ -602,7 +601,8 @@ class Fallback:
             before_health = [c for _, c in ordered_members if c is not None]
             healthy_choices = self.health(before_health)
             health_changed = healthy_choices != before_health
-            ordered_members = [m for c in healthy_choices for m in ordered_members if m[1] == c]
+            health_members = iter(m for c in healthy_choices for m in ordered_members if m[1] == c)
+            ordered_members = [m if m[1] is None else next(health_members) for m in ordered_members]
         fit = [
             (llm, choice)
             for llm, choice in ordered_members
