@@ -32,7 +32,10 @@ def test_result_drops_only_repeated_extras(key: str) -> None:
         "price": 20,
         "source": "https://example.org",
     }
-    assert actions.result_text(result) == prose + "\nprice: 20\nsource: https://example.org"
+    assert (
+        actions.result_text(result)
+        == prose + "\nscript: print('hi')\nprice: 20\nsource: https://example.org"
+    )
     assert "files_written" in result
 
 
@@ -45,11 +48,17 @@ def test_degrees(source: str) -> None:
     assert actions.result_text("$5 and $10") == "$5 and $10"
 
 
+@pytest.mark.parametrize("slow_count", [2, 3])
 @pytest.mark.parametrize("continuation", [False, True])
-def test_planning_slow_model_moves_to_untried(clock: FakeClock, continuation: bool) -> None:
-    slow = backed(FakeLLM(Timeout(after=60), name="slow", sleep=clock.sleep), clock)
+def test_planning_slow_model_moves_to_untried(
+    clock: FakeClock, continuation: bool, slow_count: int
+) -> None:
+    slow = [
+        backed(FakeLLM(Timeout(after=60), name=f"slow-{i}", sleep=clock.sleep), clock)
+        for i in range(slow_count)
+    ]
     second = FakeLLM(reply(sub("answer")), name="next")
-    llm = Fallback(members(slow, second))
+    llm = Fallback(members(*slow, second))
     result = (
         planner.continuation(llm, "goal", [], "change")
         if continuation
@@ -59,17 +68,34 @@ def test_planning_slow_model_moves_to_untried(clock: FakeClock, continuation: bo
     assert len(second.calls) == 1
 
 
+def test_planning_through_scoped_moves_to_untried(clock: FakeClock) -> None:
+    """runs.Scoped (the planner's model in a real run) delegates to a Fallback: the planner
+    must see that Fallback's untried models."""
+    from desman.runs import Scoped
+
+    slow = backed(FakeLLM(Timeout(after=60), name="slow", sleep=clock.sleep), clock)
+    second = FakeLLM(reply(sub("answer")), name="next")
+    inner = Fallback(members(slow, second))
+    result = planner.plan(Scoped(lambda: inner, inner), "goal", provider_fallback=False)
+    assert result.source == "llm"
+    assert len(second.calls) == 1
+
+
+@pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("continuation", [False, True])
-def test_planning_slow_retry_is_bounded(clock: FakeClock, continuation: bool) -> None:
+def test_planning_slow_retry_is_bounded(
+    clock: FakeClock, continuation: bool, fallback: bool
+) -> None:
     llm = backed(FakeLLM(*[Timeout(after=60)] * 4, sleep=clock.sleep), clock)
+    provider = Fallback(members(llm)) if fallback else llm
     result = (
-        planner.continuation(llm, "goal", [], "change")
+        planner.continuation(provider, "goal", [], "change")
         if continuation
-        else planner.plan(llm, "goal")
+        else planner.plan(provider, "goal")
     )
     assert result.source == "template"
     assert isinstance(llm.inner, FakeLLM)
-    assert len(llm.inner.calls) == 3
+    assert len(llm.inner.calls) == 1
 
 
 @pytest.mark.parametrize("text", ["Однопarentalные", "maternalным", "abcЖ", "Жabc", "éЖ"])
@@ -134,10 +160,10 @@ def test_prompt_rules() -> None:
     assert "retrieval time" not in agents.TOOLS_INSTRUCTIONS
 
 
-@pytest.mark.parametrize("background", [False, True])
+@pytest.mark.parametrize("can_resume", [False, True])
 @pytest.mark.parametrize("decision", ["retry", "accept"])
-def test_decision_continues_only_foreground(
-    store: Store, background: bool, decision: str, capsys: pytest.CaptureFixture[str]
+def test_decision_hint_depends_on_resume_result(
+    store: Store, can_resume: bool, decision: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from desman import commands
     from desman.config import open_config
@@ -164,9 +190,12 @@ def test_decision_continues_only_foreground(
         reason="Which dates?",
     )
     resumed: list[str] = []
-    ctx = commands.Context(
-        store, open_config(), lambda *_: None, resumed.append, background_tasks=background
-    )
+
+    def resume(task_id: str) -> bool:
+        resumed.append(task_id)
+        return can_resume
+
+    ctx = commands.Context(store, open_config(), lambda *_: None, resume)
     entry = commands.find(decision)
     assert entry is not None
     proposal = entry.handler(
@@ -175,6 +204,73 @@ def test_decision_continues_only_foreground(
     assert isinstance(proposal, commands.Proposal)
     assert resumed == []
     proposal.apply()
-    assert resumed == ([] if background else [task])
+    assert resumed == [task]
     assert store.task_status(task) is TaskStatus.ACTIVE
-    assert "Continue with: desman resume" not in capsys.readouterr().out
+    assert ("Continue with: desman resume" in capsys.readouterr().out) is (not can_resume)
+
+
+@pytest.mark.parametrize(
+    "source", ["description", "acceptance_criteria", "inputs", "goal", "evidence"]
+)
+@pytest.mark.parametrize("invented", [False, True])
+def test_review_preserves_supplied_mixed_words(store: Store, source: str, invented: bool) -> None:
+    name = "Яndex"
+    spec = SubtaskSpec(description="Answer", acceptance_criteria="ok")
+    if source in {"description", "acceptance_criteria"}:
+        spec = spec.model_copy(update={source: name})
+    elif source == "inputs":
+        spec = spec.model_copy(update={"inputs": {"brand": name}})
+    task = store.create_task(TaskSpec(goal="g", subtasks=[spec]))
+    subtask = store.list_subtasks(task)[0]
+    supplied = (
+        {"goal": name} if source == "goal" else {"quote": name} if source == "evidence" else {}
+    )
+    llm = FakeLLM('{"verdict":"accept"}')
+    seen: list[str] = []
+
+    def evidence(subtask: object) -> dict[str, str]:
+        seen.append("read")
+        return supplied
+
+    review = agents.llm_reviewer(llm, evidence)(
+        subtask, {"text": name + (" inventedЖ" if invented else "")}
+    )
+    assert seen == ["read"]
+    assert isinstance(review, Review)
+    assert review.verdict is (Verdict.RETRY if invented else Verdict.ACCEPT)
+    assert len(llm.calls) == (0 if invented else 1)
+
+
+@pytest.mark.parametrize("key", ["files", "files_written", "written_files"])
+@pytest.mark.parametrize("value", [{"answer.txt": "contents"}, [{"path": "a", "content": "b"}]])
+def test_file_contents_remain_visible(key: str, value: object) -> None:
+    assert actions._result_extras({"text": "Answer", key: value}, "text") == {key: value}
+
+
+@pytest.mark.parametrize("value", ["USD", "ok", "", "nineteen characters", "twenty characters!!!"])
+def test_repeated_extra_length(value: str) -> None:
+    extras = actions._result_extras({"text": "Answer " + value, "detail": value}, "text")
+    assert extras == ({} if len(value) >= 20 else {"detail": value})
+
+
+def test_named_request_limits_keep_unsuffixed_headers() -> None:
+    headers = {
+        "x-ratelimit-limit": "50",
+        "x-ratelimit-reset": "123",
+        "X-RateLimit-Remaining-Requests": "7",
+    }
+    found, other = calls.limits(headers)
+    assert found == [calls.Limit("requests", "7", None, None)]
+    assert other == {"x-ratelimit-limit": "50", "x-ratelimit-reset": "123"}
+
+
+def test_usage_json_preserves_raw_reset(clock: FakeClock) -> None:
+    from desman.config import Config
+    from desman.config_cli import usage_json, usage_view
+
+    reset = str(int((clock() + timedelta(hours=7)).timestamp() * 1000))
+    headers = {"x-ratelimit-reset": reset}
+    row = calls.KeyUsage("openrouter", None, 1, 0, 0, 1, 1, None, None, headers)
+    assert usage_json(Config(), [row])[0]["limits"] == headers
+    assert usage_view(Config(), [row], None)["limits"][0]["reset"] == reset
+    assert _usage_reset(reset, clock()) == "7h"

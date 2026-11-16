@@ -302,7 +302,7 @@ def test_catalog_proposal_uses_current_session_and_waits_for_confirmation() -> N
     conn = db.open_db(":memory:")
     session = Sessions(conn).add(None, SessionRole.USER, "chat").session_id
     ctx = commands.Context(
-        Store(conn), open_config(), lambda *_: None, lambda _: None, session_id=lambda: session
+        Store(conn), open_config(), lambda *_: None, lambda _: False, session_id=lambda: session
     )
     entry = commands.find("modules set")
     assert entry and entry.kind == commands.Kind.CHANGE
@@ -452,7 +452,7 @@ def test_unused_scope_roles_are_refused_without_writes(scope: choices.Scope, rol
     assert_no_writes()
 
     ctx = commands.Context(
-        Store(conn), open_config(), lambda *_: None, lambda _: None, session_id=lambda: session
+        Store(conn), open_config(), lambda *_: None, lambda _: False, session_id=lambda: session
     )
     entry = commands.find("modules set")
     assert entry is not None

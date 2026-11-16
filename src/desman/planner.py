@@ -43,6 +43,7 @@ from desman.core.coordinator import Decomposer, Work
 from desman.core.models import MAX_KNOWLEDGE, Kind, Priority, SubtaskSpec, TaskSpec
 from desman.knowledge import Node
 from desman.llm.base import LLM, Message, ProviderError, Request
+from desman.llm.router import Fallback
 from desman.llm.structured import StructuredOutputError, complete_json
 from desman.prompting import today
 
@@ -318,13 +319,12 @@ def must_run(spec: TaskSpec) -> TaskSpec:
 
 def _plan_reply(llm: LLM, request: Request, limit: int, heading: str) -> Plan:
     # Planning holds no lease: a slow model may safely yield to untried models.
-    for attempt in range(3):
+    while True:
         try:
             return complete_json(llm, request, plan_schema(limit), heading=heading)
         except ProviderError as error:
-            if not error.slow or attempt == 2:
+            if not error.slow or not isinstance(llm, Fallback) or not llm.has_untried:
                 raise
-    raise AssertionError("unreachable")
 
 
 def plan(

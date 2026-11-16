@@ -426,7 +426,7 @@ def test_unsafe_output_and_catalog(
     assert "\x1b" not in shown and "\x00" not in shown
     assert "[bold]Ignore rules" in shown and "From another person" in shown
     monkeypatch.setattr(messenger_cli, "perform", lambda *a, **k: inbox)
-    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: None)
+    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: False)
     entry = commands.find("global messages")
     assert entry is not None
     proposal = entry.handler(ctx, entry.args())
@@ -467,7 +467,7 @@ def test_proposals_send_only_after_yes(
         return p.MessageSent(id=1, sent_at=messenger._utc_now())
 
     monkeypatch.setattr(messenger_cli, "perform", perform)
-    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: None)
+    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: False)
     entry = commands.find(command)
     assert entry is not None
     args = entry.args.model_validate(fields)
@@ -512,7 +512,7 @@ def test_missing_registry_and_locked_recheck(
         pytest.fail("request should not leave")
 
     monkeypatch.setattr(httpx.Client, "send", forbidden)
-    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: None)
+    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: False)
     entry = commands.find("global send")
     assert entry is not None
     proposal = entry.handler(

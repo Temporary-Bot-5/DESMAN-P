@@ -743,9 +743,10 @@ class Chat:
                 interlocutor,
             )
 
-        def resume_task(task_id: str) -> None:
+        def resume_task(task_id: str) -> bool:
             if models is not None:  # decisions are also available before models are configured
-                self._resume(task_id, config, models, interlocutor)
+                return self._resume(task_id, config, models, interlocutor)
+            return False
 
         def continue_task(pending: actions.Continuation) -> None:
             from desman.cli import continued  # the CLI imports the chat
@@ -786,7 +787,6 @@ class Chat:
             session_id=lambda: self.session_id,
             in_terminal=self.in_terminal,
             continue_task=continue_task,
-            background_tasks=self.background_tasks,
             temporary=self.temporary,
             node_author=node_author or (NodeAuthor.PERSON if typed else NodeAuthor.INTERLOCUTOR),
         )
@@ -854,7 +854,7 @@ class Chat:
                     self.store,
                     open_config(),
                     start_task=lambda *_: None,
-                    resume_task=lambda _: None,
+                    resume_task=lambda _: False,
                     session_id=lambda: self.session_id,
                     in_terminal=True,
                 ),
@@ -1199,15 +1199,16 @@ class Chat:
 
     def _resume(
         self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor | None
-    ) -> None:
+    ) -> bool:
         access = self._access(config)
         if access is None:
-            return
+            return False
         ref = self.store.short_id(task_id)
         self._event(t("Task {ref} continues.", ref=ref), task_id)
         if self.background_tasks:
-            return
+            return True
         self._work(task_id, ref, config, models, access, interlocutor)
+        return True
 
     def _access(self, config: Config) -> Access | None:
         try:
@@ -1809,7 +1810,7 @@ class Chat:
             if operation == "hide"
             else commands.TaskPauseArgs(all=True)
         )
-        context = commands.Context(self.store, open_config(), lambda *_: None, lambda _: None)
+        context = commands.Context(self.store, open_config(), lambda *_: None, lambda _: False)
         proposal = entry.handler(context, args)
         if isinstance(proposal, commands.Proposal):
             confirmed = self._confirmed(proposal, in_prompt=True)
@@ -1837,7 +1838,7 @@ class Chat:
                 self.store,
                 open_config(),
                 start_task=lambda *_: None,
-                resume_task=lambda _: None,
+                resume_task=lambda _: False,
                 session_id=lambda: self.session_id,
             )
             proposal = entry.handler(context, args)
@@ -1925,7 +1926,7 @@ class Chat:
                     self.store,
                     open_config(),
                     start_task=lambda *_: None,
-                    resume_task=lambda _: None,
+                    resume_task=lambda _: False,
                     session_id=lambda: self.session_id,
                 )
                 with ui.recording() as shown:

@@ -177,9 +177,13 @@ def _result_extras(result: dict[str, Any], prose_key: str) -> dict[str, Any]:
         key: value
         for key, value in result.items()
         if key != prose_key
-        and key not in {"files_written", "written_files", "files"}
+        and not (
+            key in {"files_written", "written_files", "files"}
+            and isinstance(value, list)
+            and all(isinstance(path, str) for path in value)
+        )
         and not (key == "type" and isinstance(value, str) and len(value) <= 20)
-        and not (isinstance(value, str) and value in prose)
+        and not (isinstance(value, str) and len(value) >= 20 and value in prose)
     }
 
 

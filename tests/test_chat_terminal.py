@@ -704,3 +704,33 @@ def test_startup_does_not_reannounce_existing_inbox_but_new_arrivals_are_noticed
     waiting()
     chat._notices()
     assert "1 new in General Terminal" in capsys.readouterr().out
+
+
+def test_decision_without_models_shows_resume_hint(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor, SubtaskStatus
+
+    chat = Chat(sessions)
+    task = chat.store.create_task(
+        TaskSpec(
+            goal="Answer", subtasks=[SubtaskSpec(description="Work", acceptance_criteria="ok")]
+        )
+    )
+    subtask = chat.store.claim("worker", task_id=task)
+    assert subtask is not None
+    chat.store.record_failure(
+        subtask.id,
+        SubtaskStatus.RUNNING,
+        Actor.EXECUTOR,
+        FailureKind.PERMANENT,
+        lease=subtask.lease_token,
+        reason="Need dates",
+    )
+    monkeypatch.setattr(runs, "models", lambda *a, **kw: None)
+    monkeypatch.setattr(chat, "_confirmed", lambda *a, **kw: True)
+    chat._terminal_command(f"retry {subtask.id}")
+    assert "Continue with: desman resume" in capsys.readouterr().out
+    assert chat.store.get_subtask(subtask.id).status is SubtaskStatus.READY

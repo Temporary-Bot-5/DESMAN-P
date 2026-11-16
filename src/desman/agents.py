@@ -114,8 +114,8 @@ TOOLS_INSTRUCTIONS = (
     "results. What the results do not say, say that you did not find. "
     "When asked to run or check code and the workspace code is wrong, fix it with write_file, "
     "run it again, and report what you fixed. "
-    "A source that does not date its data may be reported as of the tool result's at, "
-    "say in the language of the goal that this is the time the data was retrieved."
+    "A source that does not date its data may be reported as of the tool result's at; say so in "
+    "the language of the goal (the time the data was retrieved)."
 )
 KNOWLEDGE_INSTRUCTIONS = (
     ' "knowledge" holds nodes of DESMAN\'s knowledge tree chosen for this subtask: material '
@@ -339,12 +339,12 @@ def _echoes(reply: Mapping[str, Any], request: Mapping[str, Any]) -> bool:
     ) and set(reply) <= set(request)
 
 
-def mixed_script_words(value: Any) -> list[str]:
+def mixed_script_words(value: Any, *, limit: int | None = 5) -> list[str]:
     """Check prose values only; code, URLs and tokens containing digits are excluded."""
     if isinstance(value, dict):
-        texts = [word for item in value.values() for word in mixed_script_words(item)]
+        texts = [word for item in value.values() for word in mixed_script_words(item, limit=None)]
     elif isinstance(value, list):
-        texts = [word for item in value for word in mixed_script_words(item)]
+        texts = [word for item in value for word in mixed_script_words(item, limit=None)]
     elif isinstance(value, str):
         prose = re.sub(r"```[\s\S]*?```|`[^`\n]*`|(?:https?://|www\.)[^\s<>]+", " ", value)
         texts = [
@@ -356,7 +356,7 @@ def mixed_script_words(value: Any) -> list[str]:
         ]
     else:
         texts = []
-    return list(dict.fromkeys(texts))[:5]
+    return list(dict.fromkeys(texts))[:limit]
 
 
 def llm_reviewer(
@@ -369,13 +369,6 @@ def llm_reviewer(
     reviewer checks the result's facts against it."""
 
     def review(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
-        if words := mixed_script_words(artifact):
-            return Review(
-                verdict=Verdict.RETRY,
-                feedback="Mixed Latin/Cyrillic words: "
-                + ", ".join(words)
-                + "; write them in the language of the goal.",
-            )
         prompt: dict[str, Any] = {
             "subtask": subtask.description,
             "acceptance_criteria": subtask.acceptance_criteria,
@@ -398,6 +391,23 @@ def llm_reviewer(
                     "An unaddressed part means retry: name the missing part "
                     "in feedback (including requested values, dates and sources)."
                 )
+        allowed = set(
+            re.findall(
+                r"[^\W_]+",
+                json.dumps(
+                    {**prompt, "result": None, "inputs": subtask.inputs}, ensure_ascii=False
+                ),
+            )
+        )
+        if words := [
+            word for word in mixed_script_words(artifact, limit=None) if word not in allowed
+        ][:5]:
+            return Review(
+                verdict=Verdict.RETRY,
+                feedback="Mixed Latin/Cyrillic words: "
+                + ", ".join(words)
+                + "; write them in the language of the goal.",
+            )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an
         # interrupted review, so the work is reviewed again, not redone.
         verdict = _ask(llm, system, REVIEW, prompt, _Verdict)

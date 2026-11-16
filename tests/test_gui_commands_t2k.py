@@ -255,7 +255,7 @@ def test_bulk_preview_does_not_capture_new_tasks_or_ignore_new_pins(tmp_path: Pa
     conn = db.open_db(tmp_path / "bulk.db")
     store = Store(conn)
     original = task(store)
-    context = commands.Context(store, open_config(), lambda *_: None, lambda _: None)
+    context = commands.Context(store, open_config(), lambda *_: None, lambda _: False)
     entry = commands.find("task pause")
     assert entry
     preview = entry.handler(context, commands.TaskPauseArgs(all=True))
@@ -368,7 +368,12 @@ def test_worker_preview_does_not_resume_a_new_operator_pause(tmp_path: Path) -> 
     store = Store(conn)
     ref = task(store)
     started: list[str] = []
-    context = commands.Context(store, open_config(), lambda *_: None, started.append)
+
+    def resume(task: str) -> bool:
+        started.append(task)
+        return True
+
+    context = commands.Context(store, open_config(), lambda *_: None, resume)
     entry = commands.find("worker")
     assert entry
     preview = entry.handler(context, commands.NoArgs())

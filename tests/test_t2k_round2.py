@@ -70,7 +70,7 @@ def test_remove_preview_confirm_and_preserve_choices(
     )
     entry, args = command(Models(section="models", operation="remove", model="tiny:latest"), config)
     assert entry.kind is commands.Kind.CHANGE
-    context = commands.Context(store, open_config(), lambda *_: None, lambda _: None)
+    context = commands.Context(store, open_config(), lambda *_: None, lambda _: False)
     proposal = entry.handler(context, args)
     assert isinstance(proposal, commands.Proposal)
     assert "tiny:latest" in str(proposal.question) and "GB" in str(proposal.question)

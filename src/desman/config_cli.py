@@ -863,7 +863,7 @@ def usage_view(
                     "key": label,
                     "name": limit.name,
                     "left": f"{limit.remaining or '?'} / {limit.limit or '?'}",
-                    "reset": _usage_reset(limit.reset),
+                    "reset": limit.reset,
                     "limits_current": row.limits_current,
                     "exhausted_for_good": limit.exhausted_for_good and row.limits_current,
                 }

@@ -150,7 +150,7 @@ def test_the_catalog_asks_before_planning(store: Store, clock: FakeClock) -> Non
         store,
         None,  # type: ignore[arg-type]
         start_task=lambda *_: None,
-        resume_task=lambda _: None,
+        resume_task=lambda _: False,
         continue_task=planned.append,
     )
     entry = commands.find("task extend")

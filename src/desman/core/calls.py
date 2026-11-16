@@ -258,11 +258,19 @@ def limits(headers: dict[str, str]) -> tuple[list[Limit], dict[str, str]]:
     the provider sent them, and whatever else did not fit that pattern."""
     found: dict[str, dict[str, str]] = {}
     other: dict[str, str] = {}
+    named_requests = any(
+        header.lower()
+        in {f"x-ratelimit-{kind}-requests" for kind in ("limit", "remaining", "reset")}
+        for header in headers
+    )
     for header, value in headers.items():
         name = header.lower().removeprefix("x-ratelimit-")
         kind, _, limit = name.partition("-")
         if header.lower().startswith("x-ratelimit-") and kind in ("limit", "remaining", "reset"):
-            found.setdefault(limit or "requests", {})[kind] = value
+            if not limit and named_requests:
+                other[header] = value
+            else:
+                found.setdefault(limit or "requests", {})[kind] = value
         else:
             other[header] = value
     return [

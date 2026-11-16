@@ -82,7 +82,7 @@ TOPICS: Final = (
         "failed subtask can still be sent back with retry. A step of a chat's task that comes "
         "to wait is told in that chat at once, even while the rest runs; the page shows a field "
         "under that chat (answer, Retry, Accept, Fail); an answer in words becomes retry with it "
-        "as the note. Confirm chat decisions; retry or accept resumes active work automatically.",
+        "as the note. Confirm decisions; retry/accept resumes with models, else shows a resume hint.",
     ),
     Topic(
         "providers",
