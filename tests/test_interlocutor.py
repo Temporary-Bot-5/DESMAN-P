@@ -277,7 +277,12 @@ def test_a_pasted_key_is_cut_before_anything_keeps_it(fake: FakeLLM) -> None:
     ConfigManager(default_config_path()).save(
         make_config(language="en", configured=True, api_keys={"GROQ_API_KEY": configured})
     )
-    fake.on(CHAT, '{"type": "reply", "text": "Use desman keys add."}', TASK_TURN)
+    fake.on(
+        CHAT,
+        '{"type": "reply", "text": "Use desman keys add."}',
+        '{"type": "reply", "text": "Use desman keys add."}',  # correction keeps first
+        TASK_TURN,
+    )
     worked(fake).on(RETELL, '{"text": "Done."}')
     pasted = "gsk_" + "Q" * 30
     result = chat(f"my key is {pasted}, add it", f"and this one {configured} for flights")

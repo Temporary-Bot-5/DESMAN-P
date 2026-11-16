@@ -6,4 +6,6 @@ from datetime import UTC, datetime
 
 def today(clock: Callable[[], datetime] | None = None) -> str:
     now = clock() if clock is not None else datetime.now(UTC)
-    return f" Today is {now.astimezone(UTC).date().isoformat()}."
+    date = now.astimezone(UTC).date()
+    weekdays = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    return f" Today is {weekdays[date.weekday()]}, {date.isoformat()} (UTC)."

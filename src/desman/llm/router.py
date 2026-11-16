@@ -289,6 +289,47 @@ def capacity_order(
     return order
 
 
+def health_order(
+    conn: sqlite3.Connection,
+    clock: Callable[[], datetime],
+    *,
+    keep: str | None = None,
+) -> Callable[[list[Choice]], list[Choice]]:
+    """Stably defer repeated transient failures using the shared, indexed call journal."""
+
+    def order(choices: list[Choice]) -> list[Choice]:
+        if len(choices) < 2:
+            return choices
+        values = ",".join("(?, ?)" for _ in choices)
+        args = [v for c in choices for v in (c.provider.id, c.model)]
+        rows = conn.execute(
+            f"WITH candidates(provider, model) AS (VALUES {values}) "
+            "SELECT c.provider, c.model, "
+            "SUM(CASE WHEN m.error_kind = 'transient' THEN 1 ELSE 0 END) AS failures, "
+            "MAX(CASE WHEN m.error_kind = 'transient' THEN m.seq END) AS failed, "
+            "MAX(CASE WHEN m.error_kind IS NULL THEN m.seq END) AS succeeded "
+            "FROM candidates c JOIN model_calls m "
+            "ON m.provider = c.provider AND m.model = c.model WHERE m.at >= ? "
+            "GROUP BY c.provider, c.model",
+            (*args, db.to_iso(clock() - timedelta(minutes=15))),
+        ).fetchall()
+        unhealthy = {
+            (row["provider"], row["model"])
+            for row in rows
+            if row["failures"] >= 2 and row["failed"] > (row["succeeded"] or 0)
+        }
+        # The person's choice keeps its incoming position, including after slow failures.
+        movable = iter(
+            sorted(
+                (c for c in choices if c.label != keep),
+                key=lambda c: (c.provider.id, c.model) in unhealthy,
+            )
+        )
+        return [c if c.label == keep else next(movable) for c in choices]
+
+    return order
+
+
 def call_scope() -> tuple[str, str] | None:
     purpose = calls.purpose()
     if purpose.task_id is not None:
@@ -494,6 +535,7 @@ class Fallback:
         *,
         order: Callable[[list[Choice]], list[Choice]] | None = None,
         sticky: bool = True,
+        health: Callable[[list[Choice]], list[Choice]] | None = None,
         on_used: Callable[[str], None] | None = None,
         label_for: Callable[[], str | None] | None = None,
         conn: sqlite3.Connection | None = None,
@@ -504,6 +546,7 @@ class Fallback:
         self.conn = conn
         self.order = order
         self.sticky = sticky
+        self.health = health
         self.on_used = on_used
         self.label_for = label_for
         self._scopes: dict[tuple[str, str], list[Choice]] = {}
@@ -553,6 +596,13 @@ class Fallback:
                     else -1
                 ),
             )
+        health_changed = False
+        if self.health is not None:
+            before_health = [c for _, c in ordered_members if c is not None]
+            healthy_choices = self.health(before_health)
+            health_changed = healthy_choices != before_health
+            health_members = iter(m for c in healthy_choices for m in ordered_members if m[1] == c)
+            ordered_members = [m if m[1] is None else next(health_members) for m in ordered_members]
         fit = [
             (llm, choice)
             for llm, choice in ordered_members
@@ -614,7 +664,13 @@ class Fallback:
             label = llm.name if choice is None else choice.label
             if self.on_used is not None:
                 self.on_used(label)
-            if self.order is not None and scope is not None and self.sticky and not failed_over:
+            if (
+                self.order is not None
+                and scope is not None
+                and self.sticky
+                and not failed_over
+                and not health_changed
+            ):
                 self._scopes.pop(scope, None)
                 self._scopes[scope] = sorted(choices, key=lambda c: c.label != label)
                 if len(self._scopes) > 256:
