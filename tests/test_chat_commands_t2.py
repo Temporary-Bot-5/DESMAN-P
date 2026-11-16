@@ -242,7 +242,7 @@ def test_inbox_catalog_input_and_read(sessions: Sessions, monkeypatch: pytest.Mo
     assert entry.kind_of(commands.InboxArgs()) is commands.Kind.INPUT
     assert entry.kind_of(commands.InboxArgs(list=True)) is commands.Kind.READ
     result = entry.handler(
-        commands.Context(store, open_config(), lambda *a: None, lambda *a: None),
+        commands.Context(store, open_config(), lambda *a: None, lambda *a: False),
         commands.InboxArgs(),
     )
     assert isinstance(result, commands.Outcome) and result.data["decisions"]
@@ -383,7 +383,7 @@ def test_list_catalog_omits_subtasks_unless_requested(sessions: Sessions) -> Non
     waiting(store)
     entry = commands.find("list")
     assert entry is not None
-    ctx = commands.Context(store, open_config(), lambda *a: None, lambda *a: None)
+    ctx = commands.Context(store, open_config(), lambda *a: None, lambda *a: False)
     for include in (False, True):
         outcome = entry.handler(ctx, commands.ListArgs(subtasks=include))
         assert isinstance(outcome, commands.Outcome)

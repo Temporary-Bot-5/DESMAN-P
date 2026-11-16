@@ -284,7 +284,7 @@ def test_terminal_task_commands_use_code_report_without_retelling(
     monkeypatch.setattr(Chat, "_work", work)
     llm = FakeLLM()
     llm.on("Plan task", '{"subtasks": [{"description": "find", "acceptance_criteria": "found"}]}')
-    llm.on("Execute subtask", json.dumps({"answer": "terminal answer", "key": secret}))
+    llm.on("Execute subtask", json.dumps({"answer": "terminal answer\nsecond line", "key": secret}))
     llm.on("Review subtask", '{"verdict": "accept"}')
     monkeypatch.setattr(runs, "models", lambda *a, **kw: runs.Models(llm, None))
     chat = Chat(sessions)
@@ -306,6 +306,8 @@ def test_terminal_task_commands_use_code_report_without_retelling(
         assert "The result as it is:" in output and "terminal answer" in output
         assert "Files of task" in output and "answer.txt" in output
         assert secret not in output
+        assert "terminal answer\nsecond line" in output
+        assert "\\n" not in output
         assert (
             output.index("Goal: find it")
             < output.index("terminal answer")
@@ -702,3 +704,33 @@ def test_startup_does_not_reannounce_existing_inbox_but_new_arrivals_are_noticed
     waiting()
     chat._notices()
     assert "1 new in General Terminal" in capsys.readouterr().out
+
+
+def test_decision_without_models_shows_resume_hint(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from desman.core.models import SubtaskSpec, TaskSpec
+    from desman.core.retry import FailureKind
+    from desman.core.states import Actor, SubtaskStatus
+
+    chat = Chat(sessions)
+    task = chat.store.create_task(
+        TaskSpec(
+            goal="Answer", subtasks=[SubtaskSpec(description="Work", acceptance_criteria="ok")]
+        )
+    )
+    subtask = chat.store.claim("worker", task_id=task)
+    assert subtask is not None
+    chat.store.record_failure(
+        subtask.id,
+        SubtaskStatus.RUNNING,
+        Actor.EXECUTOR,
+        FailureKind.PERMANENT,
+        lease=subtask.lease_token,
+        reason="Need dates",
+    )
+    monkeypatch.setattr(runs, "models", lambda *a, **kw: None)
+    monkeypatch.setattr(chat, "_confirmed", lambda *a, **kw: True)
+    chat._terminal_command(f"retry {subtask.id}")
+    assert "Continue with: desman resume" in capsys.readouterr().out
+    assert chat.store.get_subtask(subtask.id).status is SubtaskStatus.READY

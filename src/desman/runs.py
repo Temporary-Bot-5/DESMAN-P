@@ -451,6 +451,10 @@ class Scoped(router.Fallback):
     def last_call(self) -> router.LastCall:
         return self.last.last_call if self.last is not None else router.LastCall()
 
+    @property
+    def has_untried(self) -> bool:
+        return self.last is not None and self.last.has_untried
+
     def complete(self, request: Request) -> Completion:
         self.last = self.current()
         return self.last.complete(request)

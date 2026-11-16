@@ -99,7 +99,7 @@ def test_catalog_defers_fetch(conn: sqlite3.Connection, wire: list[str]) -> None
     assert entry is not None
     args = entry.args.model_validate({"name": "bobby"})
     assert entry.kind_of(args) is commands.Kind.CHANGE
-    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: None)
+    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: False)
     proposal = entry.handler(ctx, args)
     assert isinstance(proposal, commands.Proposal) and wire == []
     assert "Show your messages to the interlocutor?" in proposal.lines

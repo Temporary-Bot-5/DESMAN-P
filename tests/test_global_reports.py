@@ -195,7 +195,7 @@ def test_chat_window_contains_exact_body(
     conn: sqlite3.Connection, joined: Config, name: str, args: dict[str, Any]
 ) -> None:
     context = commands.Context(
-        Store(conn), open_config(), lambda *_: None, lambda _: None, lambda: None
+        Store(conn), open_config(), lambda *_: None, lambda _: False, lambda: None
     )
     entry = commands.find(name)
     assert entry is not None

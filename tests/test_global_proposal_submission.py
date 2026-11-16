@@ -315,7 +315,7 @@ def test_the_chat_sends_only_after_the_window(
     opened = db.open_db()
     try:
         ctx = commands.Context(
-            Store(opened), open_config(), lambda *_: None, lambda task: None, lambda: None
+            Store(opened), open_config(), lambda *_: None, lambda task: False, lambda: None
         )
         entry = commands.find("global submit-proposal")
         assert entry is not None

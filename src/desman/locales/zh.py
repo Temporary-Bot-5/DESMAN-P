@@ -57,7 +57,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "更新",
     "Update the registry to the newest release tag, with rollback on failure.": "将注册表更新至最新版本标签，失败时回滚。",
     "Use an existing PEM public-key file or a base64 public key.": "请使用现有的 PEM 公钥文件或 base64 公钥。",
-    "Omitted lines: {count}.": "省略行数：{count}。",
     "Files in {folder}:": "{folder} 中的文件：",
     "Model {scope} unavailable or limited until {until}.": "模型 {scope} 在 {until} 之前不可用或受限。",
     "Assignments": "授权",
@@ -753,7 +752,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} started: {title} ({n} subtask).": ("任务 {ref} 已开始：{title}（{n} 个子任务）。",),
     "Task {ref} is done.": "任务 {ref} 已完成。",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "请在聊天下方的输入框中回答，或在那里选择“使用此回答重试”、“按原样接受”或“标记失败”。",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "在这里决定：/retry、/accept 或 /fail <ref> [--note 文本]，然后 /resume {ref}。",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "在这里决定：/retry、/accept 或 /fail <ref> [--note 文本]；/retry 或 /accept 后任务会继续。",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "任务 {ref}：步骤 {steps} 在等您；其余部分继续进行。",
     ),

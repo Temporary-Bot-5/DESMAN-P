@@ -57,7 +57,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "Atualização",
     "Update the registry to the newest release tag, with rollback on failure.": "Atualizar o registro para a última versão, com reversão em caso de falha.",
     "Use an existing PEM public-key file or a base64 public key.": "Use um arquivo PEM de chave pública existente ou uma chave pública em base64.",
-    "Omitted lines: {count}.": "Linhas omitidas: {count}.",
     "Files in {folder}:": "Ficheiros em {folder}:",
     "Model {scope} unavailable or limited until {until}.": "Modelo {scope} indisponível ou limitado até {until}.",
     "Assignments": "Atribuições",
@@ -795,7 +794,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Task {ref} is done.": "A tarefa {ref} está concluída.",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "Responda no campo abaixo do chat, ou escolha ali «Tentar novamente com esta resposta», «Aceitar como está» ou «Marcar como falha».",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "Decida aqui: /retry, /accept ou /fail <ref> [--note TEXTO], depois /resume {ref}.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "Decida aqui: /retry, /accept ou /fail <ref> [--note TEXTO]; a tarefa continua após /retry ou /accept.",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "Tarefa {ref}: o passo {steps} espera por você; o resto continua.",
         "Tarefa {ref}: os passos {steps} esperam por você; o resto continua.",

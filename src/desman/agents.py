@@ -30,6 +30,8 @@ go back as "Execute subtask (tool results)", served by the same route.
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Annotated, Any, Self, TypeVar
@@ -112,8 +114,8 @@ TOOLS_INSTRUCTIONS = (
     "results. What the results do not say, say that you did not find. "
     "When asked to run or check code and the workspace code is wrong, fix it with write_file, "
     "run it again, and report what you fixed. "
-    "A source that does not date its data may be reported as of the tool result's at, "
-    "explicitly saying this is the retrieval time."
+    "A source that does not date its data may be reported as of the tool result's at; say so in "
+    "the language of the goal (the time the data was retrieved)."
 )
 KNOWLEDGE_INSTRUCTIONS = (
     ' "knowledge" holds nodes of DESMAN\'s knowledge tree chosen for this subtask: material '
@@ -138,8 +140,14 @@ REVIEWER_SYSTEM = (
     " When the goal asks for text for the person, a result only pointing to a file is retry: "
     "put the text in the result. If the goal asks for a file (README.md or a script), pointing "
     "to it is fine; check its written_files evidence."
+    " A criterion naming a site, domain, URL pattern or source count not named by the "
+    "person’s goal is met by an equivalent reliable source. Judge by the person’s goal "
+    "(or the subtask description when no goal is given), not an invented detail."
 )
 REVIEWER_EVIDENCE = (
+    " For a current figure (price, rate, salary), use the newest dated data found in "
+    "evidence and state its date. If an older figure is used while a newer one is in "
+    "evidence, reply retry naming the newer figure and its date."
     " If the executor attempted a named source but it was unreadable (including captcha or bot protection), "
     "accept an answer using snippets or another official source when it plainly says what "
     "could not be read and the rest meets the criteria. You have no tools yourself."
@@ -218,7 +226,12 @@ def _execute(
     }
     if context.final_goal is not None:
         prompt["goal"] = context.final_goal
-        prompt["goal_note"] = "The person’s request; this subtask produces the final answer."
+        prompt["goal_note"] = (
+            "The person’s request; this subtask produces the final answer. The person reads "
+            "the result as is: put the complete answer as Markdown in text, in the language "
+            "of the goal, rather than a data structure unless the goal asks for data. "
+            "Never mention subtasks, parts or steps (such as subtask 0) in the answer."
+        )
     if context.knowledge:
         prompt["knowledge"] = [node.model_dump(exclude_defaults=True) for node in context.knowledge]
     if context.earlier_lookups and context.strategy is not Strategy.COMBINE:
@@ -326,6 +339,26 @@ def _echoes(reply: Mapping[str, Any], request: Mapping[str, Any]) -> bool:
     ) and set(reply) <= set(request)
 
 
+def mixed_script_words(value: Any, *, limit: int | None = 5) -> list[str]:
+    """Check prose values only; code, URLs and tokens containing digits are excluded."""
+    if isinstance(value, dict):
+        texts = [word for item in value.values() for word in mixed_script_words(item, limit=None)]
+    elif isinstance(value, list):
+        texts = [word for item in value for word in mixed_script_words(item, limit=None)]
+    elif isinstance(value, str):
+        prose = re.sub(r"```[\s\S]*?```|`[^`\n]*`|(?:https?://|www\.)[^\s<>]+", " ", value)
+        texts = [
+            word
+            for word in re.findall(r"[^\W_]+", prose)
+            if word.isalpha()
+            and any("LATIN" in unicodedata.name(letter, "") for letter in word)
+            and any("CYRILLIC" in unicodedata.name(letter, "") for letter in word)
+        ]
+    else:
+        texts = []
+    return list(dict.fromkeys(texts))[:limit]
+
+
 def llm_reviewer(
     llm: LLM,
     evidence: Callable[[Subtask], dict[str, Any]] | None = None,
@@ -358,6 +391,23 @@ def llm_reviewer(
                     "An unaddressed part means retry: name the missing part "
                     "in feedback (including requested values, dates and sources)."
                 )
+        allowed = set(
+            re.findall(
+                r"[^\W_]+",
+                json.dumps(
+                    {**prompt, "result": None, "inputs": subtask.inputs}, ensure_ascii=False
+                ),
+            )
+        )
+        if words := [
+            word for word in mixed_script_words(artifact, limit=None) if word not in allowed
+        ][:5]:
+            return Review(
+                verdict=Verdict.RETRY,
+                feedback="Mixed Latin/Cyrillic words: "
+                + ", ".join(words)
+                + "; write them in the language of the goal.",
+            )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an
         # interrupted review, so the work is reviewed again, not redone.
         verdict = _ask(llm, system, REVIEW, prompt, _Verdict)

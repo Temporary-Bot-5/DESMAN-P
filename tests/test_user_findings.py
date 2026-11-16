@@ -118,12 +118,12 @@ def test_pending_report_has_no_result_or_files(
     assert actions.report_output(store, report) == {}
 
 
-def test_result_line_limit(store: Store, capsys: pytest.CaptureFixture[str]) -> None:
+def test_result_is_printed_in_full(store: Store, capsys: pytest.CaptureFixture[str]) -> None:
     task = finish(store, {"content": "\n".join(f"answer-{i}" for i in range(45))})
     actions.print_report(task_report(store, task), store)
     output = capsys.readouterr().out
-    assert "answer-39" in output and "answer-40" not in output
-    assert "Omitted lines: 5." in output
+    assert "answer-39" in output and "answer-44" in output
+    assert "Omitted lines" not in output
 
 
 def test_executor_echo_is_quality_failure(store: Store, tmp_path: Path, clock: FakeClock) -> None:
@@ -356,7 +356,7 @@ def test_language_correction_keeps_looked_up_evidence(store: Store) -> None:
 def test_a_result_is_shown_as_its_text_or_as_readable_lines() -> None:
     from desman.actions import result_text
 
-    assert result_text({"content": "hello", "files_written": []}) == "hello\nfiles_written:\n"
+    assert result_text({"content": "hello", "files_written": []}) == "hello"
     assert result_text({"text": "привет"}) == "привет"
     assert result_text({"type": "result", "result": {"answer": "42"}}) == "42"
     assert result_text({"names": ["a"]}) == "names:\n  - a"

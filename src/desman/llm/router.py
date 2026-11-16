@@ -556,6 +556,7 @@ class Fallback:
         self._last: tuple[Completion, LLM] | None = None
         self._call = LastCall()
         self._deferred: dict[tuple[str, str] | None, list[str]] = {}
+        self._untried: dict[tuple[str, str] | None, set[str]] = {}
         self._unfit: set[str] = set()
         """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
 
@@ -570,6 +571,11 @@ class Fallback:
     @property
     def last_call(self) -> LastCall:
         return self._call
+
+    @property
+    def has_untried(self) -> bool:
+        """Whether a slow failure left models untried in the current call scope."""
+        return bool(self._untried.get(call_scope()))
 
     @property
     def choices(self) -> list[Choice]:
@@ -647,6 +653,7 @@ class Fallback:
                         else None,
                     )
                 )
+        untried = self._untried.pop(scope, {c.label if c else m.name for m, c in members})
         errors: list[ProviderError] = []
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
@@ -662,6 +669,7 @@ class Fallback:
         failed_over = False
         for i, (llm, choice) in enumerate(members):
             label = llm.name if choice is None else choice.label
+            untried.discard(label)
             if self.on_used is not None:
                 self.on_used(label)
             if (
@@ -717,10 +725,15 @@ class Fallback:
                 errors.append(e)
                 if e.slow and not (e.kind is FailureKind.LIMIT and provider_wait.enabled()):
                     if i < len(members) - 1:
+                        self._untried[scope] = untried.intersection(
+                            c.label if c else m.name for m, c in members[i + 1 :]
+                        )
                         rotated = members[i + 1 :] + members[: i + 1]
                         self._deferred[scope] = [c.label if c else m.name for m, c in rotated]
                         if len(self._deferred) > 256:
-                            self._deferred.pop(next(iter(self._deferred)))
+                            expired = next(iter(self._deferred))
+                            self._deferred.pop(expired)
+                            self._untried.pop(expired, None)
                         raise
                     break
                 continue

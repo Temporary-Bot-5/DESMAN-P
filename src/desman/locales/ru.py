@@ -62,7 +62,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "Обновление",
     "Update the registry to the newest release tag, with rollback on failure.": "Обновить реестр до последнего тега выпуска с откатом при сбое.",
     "Use an existing PEM public-key file or a base64 public key.": "Укажите существующий PEM-файл открытого ключа или открытый ключ в base64.",
-    "Omitted lines: {count}.": "Пропущено строк: {count}.",
     "Files in {folder}:": "Файлы в {folder}:",
     "Model {scope} unavailable or limited until {until}.": "Модель {scope} недоступна или ограничена до {until}.",
     "Assignments": "Назначения",
@@ -1025,7 +1024,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Task {ref} is done.": "Задача {ref} выполнена.",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "Ответьте в поле под чатом или выберите там «Повторить с этим ответом», «Принять как есть» или «Отметить неудачу».",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "Решите здесь: /retry, /accept или /fail <ref> [--note ТЕКСТ], затем /resume {ref}.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "Решите здесь: /retry, /accept или /fail <ref> [--note ТЕКСТ]; после /retry или /accept задача продолжится.",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "Задача {ref}: шаг {steps} ждёт вас; остальное идёт дальше.",
         "Задача {ref}: шаги {steps} ждут вас; остальное идёт дальше.",

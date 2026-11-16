@@ -33,7 +33,6 @@ its windows (`/sessions`) take numbers.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from collections.abc import Callable
@@ -744,9 +743,10 @@ class Chat:
                 interlocutor,
             )
 
-        def resume_task(task_id: str) -> None:
-            assert models is not None
-            self._resume(task_id, config, models, interlocutor)
+        def resume_task(task_id: str) -> bool:
+            if models is not None:  # decisions are also available before models are configured
+                return self._resume(task_id, config, models, interlocutor)
+            return False
 
         def continue_task(pending: actions.Continuation) -> None:
             from desman.cli import continued  # the CLI imports the chat
@@ -854,7 +854,7 @@ class Chat:
                     self.store,
                     open_config(),
                     start_task=lambda *_: None,
-                    resume_task=lambda _: None,
+                    resume_task=lambda _: False,
                     session_id=lambda: self.session_id,
                     in_terminal=True,
                 ),
@@ -1199,15 +1199,16 @@ class Chat:
 
     def _resume(
         self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor | None
-    ) -> None:
+    ) -> bool:
         access = self._access(config)
         if access is None:
-            return
+            return False
         ref = self.store.short_id(task_id)
         self._event(t("Task {ref} continues.", ref=ref), task_id)
         if self.background_tasks:
-            return
+            return True
         self._work(task_id, ref, config, models, access, interlocutor)
+        return True
 
     def _access(self, config: Config) -> Access | None:
         try:
@@ -1264,8 +1265,8 @@ class Chat:
             actions.print_report(task_report(self.store, task_id))
             result = self.store.final_result(task_id)
             if result is not None:
-                # Cut keys from each string before json.dumps escapes quotes and backslashes.
-                shown = json.dumps(_redacted(result, config), ensure_ascii=False, indent=2)
+                # Redact every string before rendering the result for the person.
+                shown = actions.result_text(_redacted(result, config))
                 ui.out(Text(t("The result as it is:") + "\n" + shown))
             self._files(task_id, ref, workspace_root_for(self.store.conn))
         else:
@@ -1420,8 +1421,7 @@ class Chat:
             ui.note(
                 t(
                     "Decide here: /retry, /accept or /fail <ref> [--note TEXT], "
-                    "then /resume {ref}.",
-                    ref=ref,
+                    "the task continues after /retry or /accept.",
                 )
             )
         for line in suggestion_lines(report.suggestions):
@@ -1482,7 +1482,7 @@ class Chat:
                 self._event(
                     t("The model could not retell the result; here it is as it is:")
                     + "\n"
-                    + json.dumps(result, ensure_ascii=False, indent=2),
+                    + actions.result_text(_redacted(result, self._config())),
                     task_id,
                 )
         else:
@@ -1500,7 +1500,7 @@ class Chat:
                         else "\n"
                         + t("The result as it is:")
                         + "\n"
-                        + json.dumps(result, ensure_ascii=False, indent=2)
+                        + actions.result_text(_redacted(result, self._config()))
                     ),
                     task_id,
                 )
@@ -1810,7 +1810,7 @@ class Chat:
             if operation == "hide"
             else commands.TaskPauseArgs(all=True)
         )
-        context = commands.Context(self.store, open_config(), lambda *_: None, lambda _: None)
+        context = commands.Context(self.store, open_config(), lambda *_: None, lambda _: False)
         proposal = entry.handler(context, args)
         if isinstance(proposal, commands.Proposal):
             confirmed = self._confirmed(proposal, in_prompt=True)
@@ -1838,7 +1838,7 @@ class Chat:
                 self.store,
                 open_config(),
                 start_task=lambda *_: None,
-                resume_task=lambda _: None,
+                resume_task=lambda _: False,
                 session_id=lambda: self.session_id,
             )
             proposal = entry.handler(context, args)
@@ -1926,7 +1926,7 @@ class Chat:
                     self.store,
                     open_config(),
                     start_task=lambda *_: None,
-                    resume_task=lambda _: None,
+                    resume_task=lambda _: False,
                     session_id=lambda: self.session_id,
                 )
                 with ui.recording() as shown:

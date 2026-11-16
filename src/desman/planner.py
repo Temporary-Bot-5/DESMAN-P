@@ -43,6 +43,7 @@ from desman.core.coordinator import Decomposer, Work
 from desman.core.models import MAX_KNOWLEDGE, Kind, Priority, SubtaskSpec, TaskSpec
 from desman.knowledge import Node
 from desman.llm.base import LLM, Message, ProviderError, Request
+from desman.llm.router import Fallback
 from desman.llm.structured import StructuredOutputError, complete_json
 from desman.prompting import today
 
@@ -53,6 +54,8 @@ MAX_SUBTASKS = 8
 TEMPLATE_CRITERIA = "The result fully achieves the stated goal."
 
 CRITERIA_RULES = (
+    " Acceptance criteria state what the person needs. Never name particular sites, "
+    "domains, URL patterns or a count of sources unless the person’s goal names them."
     " Acceptance criteria are checked against the result and what the tools returned (web "
     "search, pages, files), so write only criteria such a check can confirm. Never require "
     "what a search may well not give: an exact time or seat on a date, a booking page, the "
@@ -314,6 +317,16 @@ def must_run(spec: TaskSpec) -> TaskSpec:
     )
 
 
+def _plan_reply(llm: LLM, request: Request, limit: int, heading: str) -> Plan:
+    # Planning holds no lease: a slow model may safely yield to untried models.
+    while True:
+        try:
+            return complete_json(llm, request, plan_schema(limit), heading=heading)
+        except ProviderError as error:
+            if not error.slow or not isinstance(llm, Fallback) or not llm.has_untried:
+                raise
+
+
 def plan(
     llm: LLM,
     goal: str,
@@ -336,7 +349,7 @@ def plan(
         ]
     )
     try:
-        reply = complete_json(llm, request, plan_schema(limit), heading=PLAN)
+        reply = _plan_reply(llm, request, limit, PLAN)
     except StructuredOutputError as e:
         # The problem only: the reply itself may echo anything (it is in the call log).
         return Planned(
@@ -411,7 +424,7 @@ def continuation(
         ],
     )
     try:
-        reply = complete_json(llm, request, plan_schema(limit), heading=CONTINUE)
+        reply = _plan_reply(llm, request, limit, CONTINUE)
     except StructuredOutputError as e:
         return Planned(template, "template", f"{type(e).__name__}: {e.problem}")
     except ProviderError as e:

@@ -118,8 +118,8 @@ class Context:
     start_task: Callable[[str, str, bool], None]
     """(title, goal, runs_code): plan a task of the session and run it; with runs_code it
     must run code (`planner.must_run`)."""
-    resume_task: Callable[[str], None]
-    """(task id): run the task further."""
+    resume_task: Callable[[str], bool]
+    """(task id): run or schedule further work; False if it could not resume."""
     session_id: Callable[[], str | None] = lambda: None
     """The chat's session now: for the operator's journal."""
 
@@ -1601,7 +1601,12 @@ def _decision(name: str) -> Callable[[Context, DecisionArgs | FailArgs], Proposa
 
         def apply() -> Outcome:
             decision = actions.apply_decision(ctx.store, pending, note, action)
-            actions.print_decision(decision)
+            resumed = (
+                ctx.resume_task(decision.sub.task_id)
+                if decision.task_status is TaskStatus.ACTIVE
+                else False
+            )
+            actions.print_decision(decision, resume_hint=not resumed)
             return Outcome(decision.as_json())
 
         lines = [f"[{sub.seq}] {actions.one_line(sub.description, 80)}: {sub.status} → {target}"]

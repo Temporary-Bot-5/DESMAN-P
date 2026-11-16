@@ -57,7 +57,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "更新",
     "Update the registry to the newest release tag, with rollback on failure.": "レジストリを最新のリリースタグに更新し、失敗時はロールバックします。",
     "Use an existing PEM public-key file or a base64 public key.": "既存の PEM 公開鍵ファイルまたは base64 公開鍵を指定してください。",
-    "Omitted lines: {count}.": "省略した行数：{count}。",
     "Files in {folder}:": "{folder} 内のファイル：",
     "Model {scope} unavailable or limited until {until}.": "モデル {scope} は {until} まで利用不可または制限されています。",
     "Assignments": "権限付与",
@@ -761,7 +760,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Task {ref} is done.": "タスク {ref} が完了しました。",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "チャットの下の欄で回答するか、そこで「この回答で再試行」「そのまま承認」「失敗として記録」を選んでください。",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "ここで決めてください：/retry、/accept または /fail <ref> [--note テキスト]、その後 /resume {ref}。",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "ここで決めてください：/retry、/accept または /fail <ref> [--note テキスト]。/retry または /accept の後、タスクが続行されます。",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "タスク {ref}：ステップ {steps} があなたを待っています。残りは進行中です。",
     ),

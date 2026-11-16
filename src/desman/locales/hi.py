@@ -57,7 +57,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "अपडेट",
     "Update the registry to the newest release tag, with rollback on failure.": "रजिस्ट्री को नवीनतम रिलीज़ टैग में अपडेट करें, विफल होने पर वापस करें।",
     "Use an existing PEM public-key file or a base64 public key.": "मौजूदा PEM सार्वजनिक कुंजी फ़ाइल या base64 सार्वजनिक कुंजी दें।",
-    "Omitted lines: {count}.": "छोड़ी गई पंक्तियाँ: {count}।",
     "Files in {folder}:": "{folder} में फ़ाइलें:",
     "Model {scope} unavailable or limited until {until}.": "मॉडल {scope}, {until} तक अनुपलब्ध या सीमित है।",
     "Assignments": "अधिकार आवंटन",
@@ -795,7 +794,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Task {ref} is done.": "कार्य {ref} पूरा हुआ।",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "चैट के नीचे वाले क्षेत्र में उत्तर दें, या वहीं «इस उत्तर के साथ फिर कोशिश करें», «जैसा है स्वीकार करें» या «विफल चिह्नित करें» चुनें।",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "यहीं तय करें: /retry, /accept या /fail <ref> [--note पाठ], फिर /resume {ref}।",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "यहीं तय करें: /retry, /accept या /fail <ref> [--note पाठ]; /retry या /accept के बाद कार्य जारी रहता है।",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "कार्य {ref}: चरण {steps} आपकी प्रतीक्षा कर रहा है; बाकी काम चलता रहेगा।",
         "कार्य {ref}: चरण {steps} आपकी प्रतीक्षा कर रहे हैं; बाकी काम चलता रहेगा।",
