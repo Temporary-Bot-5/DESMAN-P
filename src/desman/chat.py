@@ -2624,7 +2624,7 @@ def _render(message: Message) -> Text:
         return Text("› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
         return Text(message.text, style="muted")
-    return Text(message.text)
+    return Text(actions.plain_math(message.text))
 
 
 def _paused_until(report: TaskReport) -> str | None:

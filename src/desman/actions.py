@@ -99,7 +99,71 @@ def report_output(store: Store, report: TaskReport) -> dict[str, Any]:
     }
 
 
+def plain_math(text: str) -> str:
+    """Make simple LaTeX readable, preserving code spans and ordinary dollar prices."""
+
+    def convert(match: re.Match[str]) -> str:
+        value = match.group()
+        if value.startswith("`"):
+            return value
+        dollars = value.startswith("$")
+        inner = value[2:-2] if value.startswith(("$$", r"\(", r"\[")) else value[1:-1]
+        if dollars and not re.search(r"\\[A-Za-z]+|[=^_]|\d\s*[+*/×÷-]\s*\d", inner):
+            return value
+
+        def part(value: str) -> str:
+            return "(" + value + ")" if re.search(r"\s|[+−*/×÷-]", value.strip()) else value
+
+        for _ in range(8):
+            previous = inner
+            inner = re.sub(r"\\(?:text|mathrm|textbf)\{([^{}]*)\}", r"\1", inner)
+            inner = re.sub(
+                r"\\frac\{([^{}]*)\}\{([^{}]*)\}",
+                lambda m: part(m[1]) + "/" + part(m[2]),
+                inner,
+            )
+            inner = re.sub(r"\\sqrt\{([^{}]*)\}", lambda m: "√" + part(m[1]), inner)
+            if previous == inner:
+                break
+        symbols = {
+            "times": "×",
+            "cdot": "·",
+            "div": "÷",
+            "approx": "≈",
+            "le": "≤",
+            "leq": "≤",
+            "ge": "≥",
+            "geq": "≥",
+            "ne": "≠",
+            "neq": "≠",
+            "pm": "±",
+            "pi": "π",
+            "infty": "∞",
+            "rightarrow": "→",
+            "to": "→",
+            "degree": "°",
+        }
+        inner = re.sub(r"\\([A-Za-z]+)", lambda m: symbols.get(m[1], m[0]), inner)
+        inner = re.sub(r"\\[,; ]", " ", inner).replace(r"\%", "%")
+        superscripts = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+        inner = re.sub(
+            r"\^(?:\{([0-9])\}|([0-9]))", lambda m: (m[1] or m[2]).translate(superscripts), inner
+        )
+        return re.sub(r"[ \t]+", " ", inner).strip()
+
+    return re.sub(
+        r"```[\s\S]*?```|`[^`\n]*`|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\$\$[^$]*?\$\$|(?<!\$)\$[^$\n]+\$(?!\$)",
+        convert,
+        text,
+    )
+
+
 def result_text(result: Any) -> str:
+    """Render a result for people without changing its stored or JSON representation."""
+    return plain_math(_result_text(result))
+
+
+def _result_text(result: Any) -> str:
     """A result as the person reads it: its text when it has one, else indented key/value lines."""
     if isinstance(result, dict):
         inner = result.get("result") if result.get("type") == "result" else None

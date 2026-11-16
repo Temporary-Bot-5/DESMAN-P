@@ -239,6 +239,18 @@ def models(
             [(member(c, first, held=held), c) for c in choices],
             order=order if other or capacity else None,
             sticky=not other,
+            health=(
+                router.health_order(
+                    conn,
+                    buckets.clock,
+                    keep=choices[0].label
+                    if (router.preferred(current, role, kind) is not None or first is not None)
+                    and not other
+                    else None,
+                )
+                if model is None
+                else None
+            ),
             on_used=None if other else remember,
             label_for=actual_label,
             conn=conn,
