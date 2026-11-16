@@ -203,7 +203,8 @@ def test_what_waits_for_the_operator_is_shown_with_its_decisions(fake: FakeLLM) 
     assert "waits for you" in result.output
     assert "needs_human" in result.output and "Which dates? None were given." in result.output
     assert (
-        "Decide here: /retry, /accept or /fail" in result.output and "then /resume" in result.output
+        "Decide here: /retry, /accept or /fail" in result.output
+        and "continues after /retry or /accept" in result.output
     )
     assert "subtask waits for your decision" not in result.output  # retold: not again as a notice
     outcome = payload(calls(fake, RETELL)[0])
@@ -699,3 +700,23 @@ def test_retelling_uses_latest_message_even_when_task_goal_and_interface_are_eng
     system = retold.messages[0].content
     assert "person’s latest message" in system
     assert "only if the GOAL's language" in system
+
+
+def test_confirmed_answer_resumes_waiting_task(fake: FakeLLM) -> None:
+    def decision(_request: Request) -> str:
+        [(ref,)] = sqlite3.connect(db.default_db_path()).execute("SELECT id FROM subtasks")
+        return json.dumps(
+            {"type": "command", "name": "retry", "args": {"subtask": ref, "note": "Tomorrow"}}
+        )
+
+    fake.on(CHAT, TASK_TURN, decision)
+    fake.on("Plan task", PLAN).on(
+        "Execute subtask", json.dumps(RESULT), json.dumps({"text": "Complete answer\nSecond line"})
+    )
+    fake.on("Review subtask", '{"verdict":"escalate","feedback":"Which dates?"}', ACCEPT)
+    fake.on(RETELL, '{"text":"Which dates?"}', '{"text":"Complete answer"}')
+    result = chat("find flights", "Tomorrow", "y")
+    assert "Complete answer" in result.output
+    assert "Continue with: desman resume" not in result.output
+    assert len(calls(fake, "Execute subtask")) == 2
+    assert payload(calls(fake, RETELL)[-1])["status"] == "done"

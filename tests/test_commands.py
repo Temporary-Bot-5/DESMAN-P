@@ -381,13 +381,15 @@ def test_operator_decisions_from_the_chat(fake: FakeLLM) -> None:
     task_id, subtask_id = escalated_task()
     ref = f"{task_id[:8]}/0"
     fake.on(CHAT, asks("retry", subtask=ref, note="the key is fixed"))
+    fake.on("Execute subtask", '{"text":"Found"}').on("Review subtask", '{"verdict":"accept"}')
+    fake.on("Retell task", '{"text":"Found"}')
     result = chat("try that again", "y")
     assert "[0] fetch: needs_human → ready" in result.output
     assert "Note: the key is fixed" in result.output
     store = Store(db.open_db())
     try:
-        assert store.get_subtask(subtask_id).status is SubtaskStatus.READY
-        last = history(store.conn, task_id)[-1]
+        assert store.get_subtask(subtask_id).status is SubtaskStatus.DONE
+        last = next(e for e in history(store.conn, task_id) if e.action == "operator_retry")
         assert (last.actor, last.action) == ("human", "operator_retry")
         assert last.details["reason"] == "the key is fixed"
     finally:
@@ -421,11 +423,13 @@ def test_run_starts_a_task_of_the_session_after_yes(fake: FakeLLM) -> None:
 
 def test_resume_continues_a_task_after_yes(fake: FakeLLM) -> None:
     task_id, _ = escalated_task()
-    fake.on(CHAT, asks("retry", subtask=f"{task_id[:8]}/0"), asks("resume", task=task_id[:8]))
+    retried = CliRunner().invoke(cli, ["retry", f"{task_id[:8]}/0"])
+    assert retried.exit_code == 0, retried.output
+    fake.on(CHAT, asks("resume", task=task_id[:8]))
     fake.on("Execute subtask", '{"ok": true}')
     fake.on("Review subtask", '{"verdict": "accept"}')
     fake.on(RETELL, '{"text": "Done now."}')
-    result = chat("retry it", "y", "go on", "y")
+    result = chat("go on", "y")
     assert f"Continue task {task_id[:8]}" in result.output and "Done now." in result.output
 
 

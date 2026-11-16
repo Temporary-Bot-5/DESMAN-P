@@ -57,7 +57,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "Güncelleme",
     "Update the registry to the newest release tag, with rollback on failure.": "Kayıt sunucusunu en yeni sürüm etiketine güncelle; başarısızlıkta geri al.",
     "Use an existing PEM public-key file or a base64 public key.": "Mevcut bir PEM açık anahtar dosyası veya base64 açık anahtar kullanın.",
-    "Omitted lines: {count}.": "Atlanan satır sayısı: {count}.",
     "Files in {folder}:": "{folder} içindeki dosyalar:",
     "Model {scope} unavailable or limited until {until}.": "{scope} modeli {until} tarihine kadar kullanılamıyor veya sınırlı.",
     "Assignments": "Atamalar",
@@ -763,7 +762,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Task {ref} is done.": "{ref} görevi tamamlandı.",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "Sohbetin altındaki alanda yanıtlayın ya da orada «Bu yanıtla yeniden dene», «Olduğu gibi kabul et» veya «Başarısız olarak işaretle» seçin.",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "Burada karar verin: /retry, /accept veya /fail <ref> [--note METİN], sonra /resume {ref}.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "Burada karar verin: /retry, /accept veya /fail <ref> [--note METİN]; /retry veya /accept sonrasında görev devam eder.",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "Görev {ref}: {steps} adımı sizi bekliyor; geri kalanı sürüyor.",
     ),

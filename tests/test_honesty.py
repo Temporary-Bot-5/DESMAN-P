@@ -311,7 +311,7 @@ def test_code_the_task_never_wrote_is_not_shown_as_its_work(fake: FakeLLM) -> No
     result = chat("write me a calculator")
     assert "print(eval(input()))" not in result.output
     assert "did not produce, so it is not shown" in result.output
-    assert '"files_written"' in result.output  # the result as it is
+    assert "files_written:\n  - calc.py" in result.output  # readable result
     assert not any(role is Said.INTERLOCUTOR and "eval" in text for role, _, text in said())
 
 

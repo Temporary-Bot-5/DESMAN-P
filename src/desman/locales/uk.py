@@ -62,7 +62,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "Оновлення",
     "Update the registry to the newest release tag, with rollback on failure.": "Оновити реєстр до останнього випуску з відкатом у разі збою.",
     "Use an existing PEM public-key file or a base64 public key.": "Вкажіть наявний PEM-файл відкритого ключа або відкритий ключ у base64.",
-    "Omitted lines: {count}.": "Пропущено рядків: {count}.",
     "Files in {folder}:": "Файли в {folder}:",
     "Model {scope} unavailable or limited until {until}.": "Модель {scope} недоступна або обмежена до {until}.",
     "Assignments": "Призначення",
@@ -818,7 +817,7 @@ MESSAGES: dict[str, Forms] = {
     ),
     "Task {ref} is done.": "Задачу {ref} виконано.",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "Відповідайте в полі під чатом або виберіть там «Повторити з цією відповіддю», «Прийняти як є» чи «Позначити невдачу».",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "Вирішіть тут: /retry, /accept або /fail <ref> [--note ТЕКСТ], потім /resume {ref}.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "Вирішіть тут: /retry, /accept або /fail <ref> [--note ТЕКСТ]; після /retry або /accept завдання продовжиться.",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "Завдання {ref}: крок {steps} чекає на вас; решта триває.",
         "Завдання {ref}: кроки {steps} чекають на вас; решта триває.",

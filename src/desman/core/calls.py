@@ -261,8 +261,8 @@ def limits(headers: dict[str, str]) -> tuple[list[Limit], dict[str, str]]:
     for header, value in headers.items():
         name = header.lower().removeprefix("x-ratelimit-")
         kind, _, limit = name.partition("-")
-        if kind in ("limit", "remaining", "reset") and limit:
-            found.setdefault(limit, {})[kind] = value
+        if header.lower().startswith("x-ratelimit-") and kind in ("limit", "remaining", "reset"):
+            found.setdefault(limit or "requests", {})[kind] = value
         else:
             other[header] = value
     return [

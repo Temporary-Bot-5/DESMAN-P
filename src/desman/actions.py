@@ -112,7 +112,7 @@ def plain_math(text: str) -> str:
             return value
 
         if not dollars and not re.search(
-            r"\\(?:text|mathrm|textbf|frac|sqrt|times|cdot|div|approx|le|leq|ge|geq|ne|neq|pm|pi|infty|rightarrow|to|degree)(?![A-Za-z])|\^|\d\s*[+*/×÷-]\s*\d",
+            r"\\(?:text|mathrm|textbf|frac|sqrt|times|cdot|div|approx|le|leq|ge|geq|ne|neq|pm|pi|infty|rightarrow|to|degree|textdegree)(?![A-Za-z])|\^|\d\s*[+*/×÷-]\s*\d",
             inner,
         ):
             return value
@@ -120,6 +120,7 @@ def plain_math(text: str) -> str:
         def part(value: str) -> str:
             return "(" + value + ")" if re.search(r"\s|[+−*/×÷-]", value.strip()) else value
 
+        inner = re.sub(r"\^(?:\{\\circ\}|\\circ)(?![A-Za-z])", "°", inner)
         for _ in range(8):
             previous = inner
             inner = re.sub(r"\\(?:text|mathrm|textbf)\{([^{}]*)\}", r"\1", inner)
@@ -148,6 +149,7 @@ def plain_math(text: str) -> str:
             "rightarrow": "→",
             "to": "→",
             "degree": "°",
+            "textdegree": "°",
         }
         inner = re.sub(r"\\([A-Za-z]+)", lambda m: symbols.get(m[1], m[0]), inner)
         inner = re.sub(r"\\[,; ]", " ", inner).replace(r"\%", "%")
@@ -166,7 +168,19 @@ def plain_math(text: str) -> str:
 
 def result_text(result: Any) -> str:
     """Render a result for people without changing its stored or JSON representation."""
-    return plain_math(_result_text(result))
+    return re.sub("°{2,}", "°", plain_math(_result_text(result)))
+
+
+def _result_extras(result: dict[str, Any], prose_key: str) -> dict[str, Any]:
+    prose = result[prose_key]
+    return {
+        key: value
+        for key, value in result.items()
+        if key != prose_key
+        and key not in {"files_written", "written_files", "files"}
+        and not (key == "type" and isinstance(value, str) and len(value) <= 20)
+        and not (isinstance(value, str) and value in prose)
+    }
 
 
 def _result_text(result: Any) -> str:
@@ -185,7 +199,7 @@ def _result_text(result: Any) -> str:
             "output",
         ):
             if isinstance(result.get(key), str):
-                rest = {k: v for k, v in result.items() if k != key}
+                rest = _result_extras(result, key)
                 return str(result[key]) + ("\n" + _result_lines(rest) if rest else "")
         prose_key = next(
             (
@@ -214,7 +228,7 @@ def _result_text(result: Any) -> str:
             ):
                 prose_key = prose[0]
         if prose_key is not None:
-            rest = {key: value for key, value in result.items() if key != prose_key}
+            rest = _result_extras(result, prose_key)
             return str(result[prose_key]) + ("\n" + _result_lines(rest) if rest else "")
         if len(result) == 1 and isinstance(next(iter(result.values())), str):
             return str(next(iter(result.values())))
@@ -336,9 +350,7 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
         result = output["result"]
         lines = [] if result is None else result_text(result).splitlines()
         if lines:
-            click.echo("\n".join(lines[:40]))
-        if len(lines) > 40:
-            click.echo(t("Omitted lines: {count}.", count=len(lines) - 40))
+            click.echo("\n".join(lines))
         for path, text in result_file_texts(store, report):
             click.echo(t("{path}:", path=path))
             click.echo(text)
@@ -711,10 +723,12 @@ def apply_decision(store: Store, pending: Pending, note: str, action: str) -> De
     return Decision(sub, moved.status, store.task_status(sub.task_id), store.short_id(sub.task_id))
 
 
-def print_decision(decision: Decision) -> None:
+def print_decision(decision: Decision, *, resume_hint: bool = True) -> None:
     sub = decision.sub
     click.echo(f"[{sub.seq}] {short_description(sub.description)}: {sub.status} -> {decision.to}")
     if decision.task_status is TaskStatus.ACTIVE:
+        if not resume_hint:
+            return
         click.echo(
             t("Task is active again. Continue with: desman resume {ref}", ref=decision.short)
         )

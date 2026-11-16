@@ -70,6 +70,13 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
     assert "goal" not in executions[0][1]
     assert executions[1][1]["goal"] == "g"
     assert "person" in executions[1][1]["goal_note"]
+    for rule in (
+        "complete answer as Markdown in text",
+        "language",
+        "unless the goal asks for data",
+        "Never mention subtasks, parts or steps",
+    ):
+        assert rule in executions[1][1]["goal_note"]
     _, retry = executions[2]
     assert retry["subtask"] == "write" and retry["acceptance_criteria"] == "short"
     assert retry["inputs"] == {"tone": "dry"}

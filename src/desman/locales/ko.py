@@ -57,7 +57,6 @@ MESSAGES: dict[str, Forms] = {
     "Update": "업데이트",
     "Update the registry to the newest release tag, with rollback on failure.": "레지스트리를 최신 릴리스 태그로 업데이트하며 실패 시 롤백합니다.",
     "Use an existing PEM public-key file or a base64 public key.": "기존 PEM 공개 키 파일 또는 base64 공개 키를 사용하세요.",
-    "Omitted lines: {count}.": "생략된 줄 수: {count}.",
     "Files in {folder}:": "{folder}의 파일:",
     "Model {scope} unavailable or limited until {until}.": "모델 {scope}은(는) {until}까지 사용할 수 없거나 제한됩니다.",
     "Assignments": "권한 할당",
@@ -759,7 +758,7 @@ MESSAGES: dict[str, Forms] = {
     "Task {ref} started: {title} ({n} subtask).": ("작업 {ref} 시작: {title} (하위 작업 {n}개).",),
     "Task {ref} is done.": "작업 {ref}이(가) 완료되었습니다.",
     "Answer in the field below the chat, or choose Retry, Accept or Fail there.": "채팅 아래 칸에 답하거나, 거기서 「이 답변으로 재시도」, 「그대로 수락」, 「실패로 표시」 중 하나를 고르세요.",
-    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], then /resume {ref}.": "여기서 결정하세요: /retry, /accept 또는 /fail <ref> [--note 텍스트], 그다음 /resume {ref}.",
+    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], the task continues after /retry or /accept.": "여기서 결정하세요: /retry, /accept 또는 /fail <ref> [--note 텍스트]. /retry 또는 /accept 후 작업이 계속됩니다.",
     "Task {ref}: step {steps} waits for you; the rest goes on.": (
         "작업 {ref}: 단계 {steps}이(가) 당신을 기다립니다. 나머지는 계속 진행됩니다.",
     ),

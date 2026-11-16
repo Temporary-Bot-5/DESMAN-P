@@ -32,7 +32,7 @@ from desman.config import (
 from desman.core import calls, db, netlog
 from desman.i18n import t, tn
 from desman.llm import check
-from desman.llm.openai_compat import key_id
+from desman.llm.openai_compat import key_id, reset_in
 from desman.stdio import utf8_stream
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -827,6 +827,25 @@ def _key_names(config: Config) -> dict[str, str]:
     return names
 
 
+def _usage_reset(value: str | None, now: datetime | None = None) -> str:
+    if value is None:
+        return ""
+    try:
+        epoch = float(value)
+    except ValueError:
+        return value
+    if epoch <= 1e9:
+        return value
+    seconds = int(reset_in(value, now or datetime.now(UTC)) or 0)
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return (
+        (f"{hours}h" if hours else "")
+        + (f"{minutes}m" if minutes else "")
+        + (f"{seconds}s" if seconds or not (hours or minutes) else "")
+    )
+
+
 def usage_view(
     config: Config, rows: list[calls.KeyUsage], window: timedelta | None
 ) -> dict[str, Any]:
@@ -844,7 +863,7 @@ def usage_view(
                     "key": label,
                     "name": limit.name,
                     "left": f"{limit.remaining or '?'} / {limit.limit or '?'}",
-                    "reset": limit.reset or "",
+                    "reset": _usage_reset(limit.reset),
                     "limits_current": row.limits_current,
                     "exhausted_for_good": limit.exhausted_for_good and row.limits_current,
                 }
@@ -982,7 +1001,7 @@ def _print_limits(lines: list[Line]) -> None:
                 label if first else "",
                 limit.name,
                 Text(left, style="bad" if bad else row_style),
-                limit.reset or "",
+                _usage_reset(limit.reset),
                 style=row_style,
             )
             first = False

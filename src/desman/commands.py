@@ -123,6 +123,7 @@ class Context:
     session_id: Callable[[], str | None] = lambda: None
     """The chat's session now: for the operator's journal."""
 
+    background_tasks: bool = False
     in_terminal: bool = False
     temporary: bool = False
     """A temporary chat's call: it neither reads nor proposes the person's nodes."""
@@ -1601,7 +1602,9 @@ def _decision(name: str) -> Callable[[Context, DecisionArgs | FailArgs], Proposa
 
         def apply() -> Outcome:
             decision = actions.apply_decision(ctx.store, pending, note, action)
-            actions.print_decision(decision)
+            actions.print_decision(decision, resume_hint=False)
+            if decision.task_status is TaskStatus.ACTIVE and not ctx.background_tasks:
+                ctx.resume_task(decision.sub.task_id)
             return Outcome(decision.as_json())
 
         lines = [f"[{sub.seq}] {actions.one_line(sub.description, 80)}: {sub.status} → {target}"]

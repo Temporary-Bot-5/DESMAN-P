@@ -33,7 +33,6 @@ its windows (`/sessions`) take numbers.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from collections.abc import Callable
@@ -745,8 +744,8 @@ class Chat:
             )
 
         def resume_task(task_id: str) -> None:
-            assert models is not None
-            self._resume(task_id, config, models, interlocutor)
+            if models is not None:  # decisions are also available before models are configured
+                self._resume(task_id, config, models, interlocutor)
 
         def continue_task(pending: actions.Continuation) -> None:
             from desman.cli import continued  # the CLI imports the chat
@@ -787,6 +786,7 @@ class Chat:
             session_id=lambda: self.session_id,
             in_terminal=self.in_terminal,
             continue_task=continue_task,
+            background_tasks=self.background_tasks,
             temporary=self.temporary,
             node_author=node_author or (NodeAuthor.PERSON if typed else NodeAuthor.INTERLOCUTOR),
         )
@@ -1264,8 +1264,8 @@ class Chat:
             actions.print_report(task_report(self.store, task_id))
             result = self.store.final_result(task_id)
             if result is not None:
-                # Cut keys from each string before json.dumps escapes quotes and backslashes.
-                shown = json.dumps(_redacted(result, config), ensure_ascii=False, indent=2)
+                # Redact every string before rendering the result for the person.
+                shown = actions.result_text(_redacted(result, config))
                 ui.out(Text(t("The result as it is:") + "\n" + shown))
             self._files(task_id, ref, workspace_root_for(self.store.conn))
         else:
@@ -1420,8 +1420,7 @@ class Chat:
             ui.note(
                 t(
                     "Decide here: /retry, /accept or /fail <ref> [--note TEXT], "
-                    "then /resume {ref}.",
-                    ref=ref,
+                    "the task continues after /retry or /accept.",
                 )
             )
         for line in suggestion_lines(report.suggestions):
@@ -1482,7 +1481,7 @@ class Chat:
                 self._event(
                     t("The model could not retell the result; here it is as it is:")
                     + "\n"
-                    + json.dumps(result, ensure_ascii=False, indent=2),
+                    + actions.result_text(_redacted(result, self._config())),
                     task_id,
                 )
         else:
@@ -1500,7 +1499,7 @@ class Chat:
                         else "\n"
                         + t("The result as it is:")
                         + "\n"
-                        + json.dumps(result, ensure_ascii=False, indent=2)
+                        + actions.result_text(_redacted(result, self._config()))
                     ),
                     task_id,
                 )
