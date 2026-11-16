@@ -66,11 +66,12 @@ from pydantic import (
 )
 
 from desman import knowledge
-from desman.commands import for_model
+from desman.commands import CATALOG, for_model
 from desman.config import Behaviour
 from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.profile import MAX_NOTES, NOTE_CHARS, Note
 from desman.core.sessions import History, Kind, Message, Role
+from desman.core.states import SubtaskStatus
 from desman.i18n import CATALOGS
 from desman.llm import base
 from desman.llm.base import LLM, Request
@@ -186,7 +187,8 @@ PROFILE = (
 
 LOOKUP = (
     "A question about how DESMAN works, what it can do and how, or what a command does, is "
-    "answered from its knowledge tree, never from a guess. Its table of contents (a path "
+    "answered from its knowledge tree, never from a guess. A reply about how DESMAN works "
+    "without a lookup in this turn is wrong. Its table of contents (a path "
     'ending in "/" is a section holding more nodes; [plan] marks plans and decisions, not what '
     "DESMAN does now):\n"
     "{topics}\n"
@@ -486,6 +488,36 @@ class Retelling(BaseModel):
         return value.strip()[:300]
 
 
+def names_desman_commands(text: str) -> bool:
+    """Whether `text` names DESMAN's own commands or statuses explicitly: `desman X`, `/X`, a
+    code span holding a whole command of the catalog (`keys check`) or a status with an
+    underscore (`needs_human`). A single common word in a code span (`list`, `run`) and code
+    blocks do not count: they are often about the person's own code."""
+    names = {entry.name.casefold() for entry in CATALOG}
+    groups = {name.split()[0] for name in names}
+    statuses = {status.value for status in SubtaskStatus if "_" in status.value}
+    text = re.sub(r"```[\s\S]*?```", " ", text)
+    for span, command, slash in re.findall(
+        r"`([^`\n]+)`|\bdesman\s+(/?[\w-]+)|(?<![\w/.:])(/[\w-]+)", text, re.IGNORECASE
+    ):
+        if command or slash:
+            if (command or slash).casefold().lstrip("/") in groups:
+                return True
+            continue
+        words = span.strip().casefold().split()
+        if words and words[0] == "desman":
+            if len(words) > 1 and words[1].lstrip("/") in groups:
+                return True
+            continue
+        if words and words[0].startswith("/"):
+            words[0] = words[0][1:]
+        if len(words) == 1 and words[0] in statuses:
+            return True
+        if len(words) >= 2 and " ".join(words[:2]) in names:
+            return True
+    return False
+
+
 class Interlocutor:
     def __init__(
         self,
@@ -570,6 +602,33 @@ class Interlocutor:
         budget = HISTORY_TOKENS - (estimate_tokens(history.summary.text) if history.summary else 0)
         self.opened = []
         first = complete_json(self.llm, request, FirstTurn, heading=CHAT).root
+        if isinstance(first, (Reply, Clarify)) and names_desman_commands(
+            first.text if isinstance(first, Reply) else first.question
+        ):
+            correction = request.model_copy(
+                update={
+                    "messages": [
+                        *request.messages,
+                        base.Message(role="assistant", content=first.model_dump_json()),
+                        base.Message(
+                            role="user",
+                            content=f"{CHAT} (knowledge correction):\n"
+                            "You described DESMAN without reading its knowledge tree. "
+                            "Take a lookup turn now for the nodes holding the answer "
+                            "(DESMAN/ topics or Commands/GROUP).",
+                        ),
+                    ]
+                }
+            )
+            with contextlib.suppress(StructuredOutputError, base.ProviderError):
+                corrected = complete_json(self.llm, correction, FirstTurn, heading=CHAT).root
+                if isinstance(corrected, Lookup):
+                    first = corrected.model_copy(
+                        update={
+                            "profile": first.profile or corrected.profile,
+                            "node": first.node or corrected.node,
+                        }
+                    )
         if not isinstance(first, Lookup):
             return first, request
         found: dict[str, Any] = {}
