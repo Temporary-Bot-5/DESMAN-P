@@ -90,7 +90,7 @@ TOPICS: Final = (
         "DESMAN uses providers whose keys the person added. Only free tiers are chosen "
         "automatically; paid providers require explicit choice. Quotas change "
         "and every provider is treated as unreliable.\n"
-        "Auto spreads work across fitting free models by capacity. Repeated transient failures move models behind healthy ones for 15 minutes, until a success. "
+        "Auto spreads work over fitting free models. Repeated transient failures move models behind healthy ones for 15 minutes, until a success. "
         "Choosing a model for a role pins it first. Limits, outages, refused keys and small contexts move "
         "a call to the next model. Chat notes name the answering model and skipped reasons. Keys rotate. Limits "
         "are shared across workers and restarts; run, chat and planning wait up to 15 minutes for limits (see retries), without spending attempts. "
@@ -103,7 +103,7 @@ TOPICS: Final = (
         "See localmodels for downloads.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
         "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `desman keys list`, `desman keys check` (no tokens) "
-        "and `desman usage`. Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
+        "and `desman usage` (ends with totals). Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
     ),
     Topic(
         "modules",

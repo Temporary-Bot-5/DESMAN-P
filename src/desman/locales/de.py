@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "Gesamt: {calls}{failures}, {tokens_in:,} Eingabetokens, {tokens_out:,} Ausgabetokens, {providers}.",
+    " ({failed:,} failed, {limited:,} of them on limits)": " ({failed:,} fehlgeschlagen, davon {limited:,} durch Limits)",
+    "{n:,} call": ("{n:,} Aufruf", "{n:,} Aufrufe"),
+    "{n:,} provider": ("{n:,} Anbieter", "{n:,} Anbieter"),
     "Set up a search engine for the whole web: `desman search setup` (SearXNG, on this computer) or a Tavily key in `desman config`.": "Richten Sie eine Suchmaschine für das gesamte Web ein: `desman search setup` (SearXNG auf diesem Computer) oder einen Tavily-Schlüssel in `desman config`.",
     "Nothing changed. Confirm with: {command}": "Nichts geändert. Bestätigen mit: {command}",
     "Not configured": "Nicht konfiguriert",
