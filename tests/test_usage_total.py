@@ -21,7 +21,7 @@ def test_usage_total(capsys: pytest.CaptureFixture[str]) -> None:
     config_cli.print_usage(Config(), rows(), None, "all")
     text = " ".join(capsys.readouterr().out.split())
     assert (
-        "Total: 42 calls (3 failed, 1 limited), 120,345 tokens in, 8,910 tokens out, 2 providers."
+        "Total: 42 calls (3 failed, 1 of them on limits), 120,345 tokens in, 8,910 tokens out, 2 providers."
         in text
     )
     assert text.index("Total:") < text.index('"removed":')

@@ -16,7 +16,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "Łącznie: {calls}{failures}, {tokens_in:,} tokenów wejściowych, {tokens_out:,} wyjściowych, {providers}.",
-    " ({failed:,} failed, {limited:,} limited)": " (z błędem: {failed:,}, z limitem: {limited:,})",
+    " ({failed:,} failed, {limited:,} of them on limits)": " (z błędem: {failed:,}, w tym przez limity: {limited:,})",
     "{n:,} call": ("{n:,} wywołanie", "{n:,} wywołania", "{n:,} wywołań"),
     "{n:,} provider": ("{n:,} dostawca", "{n:,} dostawcy", "{n:,} dostawców"),
     "Set up a search engine for the whole web: `desman search setup` (SearXNG, on this computer) or a Tavily key in `desman config`.": "Skonfiguruj wyszukiwarkę całej sieci: `desman search setup` (SearXNG na tym komputerze) lub klucz Tavily w `desman config`.",

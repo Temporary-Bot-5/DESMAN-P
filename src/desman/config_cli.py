@@ -955,7 +955,7 @@ def print_usage(
     ui.out(table)
     totals = usage_totals(rows)
     failures = (
-        t(" ({failed:,} failed, {limited:,} limited)", **totals)
+        t(" ({failed:,} failed, {limited:,} of them on limits)", **totals)
         if totals["failed"] or totals["limited"]
         else ""
     )

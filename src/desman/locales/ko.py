@@ -11,7 +11,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "합계: {calls}{failures}, 입력 토큰 {tokens_in:,}개, 출력 토큰 {tokens_out:,}개, {providers}.",
-    " ({failed:,} failed, {limited:,} limited)": " (실패 {failed:,}회, 제한 {limited:,}회)",
+    " ({failed:,} failed, {limited:,} of them on limits)": " (실패 {failed:,}회, 그중 제한으로 {limited:,}회)",
     "{n:,} call": ("호출 {n:,}회",),
     "{n:,} provider": ("제공업체 {n:,}개",),
     "Set up a search engine for the whole web: `desman search setup` (SearXNG, on this computer) or a Tavily key in `desman config`.": "전체 웹 검색 엔진을 설정하세요: `desman search setup`(이 컴퓨터의 SearXNG) 또는 `desman config`에서 Tavily 키를 설정하세요.",
