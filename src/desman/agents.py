@@ -33,7 +33,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import datetime, tzinfo
 from typing import Annotated, Any, ClassVar, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
@@ -217,10 +217,13 @@ def llm_executor(
     by_kind: Mapping[Kind, tuple[LLM, LLM | None]] | None = None,
     format_final: bool = True,
     clock: Callable[[], datetime] | None = None,
+    tz: tzinfo | None = None,
 ) -> Executor:
     """`other` serves the attempts whose strategy is another model (if None, `llm` does).
     `by_kind`: the main and other models for subtasks of a kind; a kind not in it asks `llm`
-    and `other`. `format_final=False` preserves the network crew's data contracts."""
+    and `other`. `format_final=False` preserves the network crew's data contracts. `tz`: the
+    zone of the date models are told (None: this machine's; UTC for desman-global jobs, which
+    other nodes recheck)."""
 
     def execute(work: Work) -> Success | Failure:
         return _execute(
@@ -228,6 +231,7 @@ def llm_executor(
             *(by_kind or {}).get(work.subtask.kind, (llm, other)),
             clock=clock,
             format_final=format_final,
+            tz=tz,
         )
 
     return execute
@@ -240,6 +244,7 @@ def _execute(
     *,
     clock: Callable[[], datetime] | None = None,
     format_final: bool = True,
+    tz: tzinfo | None = None,
 ) -> Success | Failure:
     """One attempt of the executor, with the models of its subtask's kind."""
     context = work.context
@@ -299,7 +304,7 @@ def _execute(
         )
     if context.knowledge:
         system += KNOWLEDGE_INSTRUCTIONS
-    system += today(clock)
+    system += today(clock, tz=tz)
     request = _request(system, EXECUTE, prompt, temperature).model_copy(
         update={"avoid": work.unfit}
     )
@@ -454,6 +459,7 @@ def llm_reviewer(
     evidence: Callable[[Subtask], dict[str, Any]] | None = None,
     *,
     clock: Callable[[], datetime] | None = None,
+    tz: tzinfo | None = None,
 ) -> Reviewer:
     """`evidence` gives what a result can rest on (`core.effects.evidence`): with it, the
     reviewer checks the result's facts against it."""
@@ -464,7 +470,7 @@ def llm_reviewer(
             "acceptance_criteria": subtask.acceptance_criteria,
             "result": artifact,
         }
-        system = REVIEWER_SYSTEM + today(clock)
+        system = REVIEWER_SYSTEM + today(clock, tz=tz)
         if subtask.parent_id is not None and evidence is not None:
             prompt["part_of_split"] = True
         if evidence is not None:

@@ -644,13 +644,16 @@ def network_crew(
         by_kind=crew_models.kinds,
         clock=store.clock,
         format_final=False,
+        tz=UTC,  # another node rechecks: one date for both, wherever they are
     )
     return Crew(
         jobs.executor(store.conn, executor),
         jobs.reviewer(
             store.conn,
-            llm_reviewer(reviewer, evidence=functools.partial(evidence, store), clock=store.clock),
-            llm_reviewer(reviewer, clock=store.clock),
+            llm_reviewer(
+                reviewer, evidence=functools.partial(evidence, store), clock=store.clock, tz=UTC
+            ),
+            llm_reviewer(reviewer, clock=store.clock, tz=UTC),
         ),
         # The person's switches as they are at each tool call, not at the worker's start: a
         # permission turned off holds from the next call on (a config that fails: none on).
