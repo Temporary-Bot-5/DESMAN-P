@@ -95,7 +95,7 @@ def test_retry_with_a_note_reaches_the_next_attempt(store: Store, tmp_path: Path
         json.dumps(
             {
                 "routes": [
-                    {"match": "Execute", "steps": ['{"ok": 1}']},
+                    {"match": "Execute", "steps": ['{"text": "Done."}']},
                     {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
                 ]
             }

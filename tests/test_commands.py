@@ -412,7 +412,7 @@ def test_run_starts_a_task_of_the_session_after_yes(fake: FakeLLM) -> None:
     plan = {"subtasks": [{"description": "Find flights", "acceptance_criteria": "listed"}]}
     fake.on(CHAT, asks("run", goal="Find cheap flights to Lisbon", title="Flights"))
     fake.on("Plan task", json.dumps(plan))
-    fake.on("Execute subtask", '{"flights": ["TP 1351"]}')
+    fake.on("Execute subtask", '{"text": "Found TP 1351."}')
     fake.on("Review subtask", '{"verdict": "accept"}')
     fake.on(RETELL, '{"text": "Found TP 1351."}')
     result = chat("flights to Lisbon", "y")
@@ -426,7 +426,7 @@ def test_resume_continues_a_task_after_yes(fake: FakeLLM) -> None:
     retried = CliRunner().invoke(cli, ["retry", f"{task_id[:8]}/0"])
     assert retried.exit_code == 0, retried.output
     fake.on(CHAT, asks("resume", task=task_id[:8]))
-    fake.on("Execute subtask", '{"ok": true}')
+    fake.on("Execute subtask", '{"text": "Done."}')
     fake.on("Review subtask", '{"verdict": "accept"}')
     fake.on(RETELL, '{"text": "Done now."}')
     result = chat("go on", "y")
@@ -444,7 +444,7 @@ def test_worker_works_on_every_unfinished_task_after_yes(fake: FakeLLM) -> None:
     finally:
         store.conn.close()
     fake.on(CHAT, asks("worker"))
-    fake.on("Execute subtask", '{"ok": true}', repeat_last=True)
+    fake.on("Execute subtask", '{"text": "Done."}', repeat_last=True)
     fake.on("Review subtask", '{"verdict": "accept"}', repeat_last=True)
     fake.on(RETELL, '{"text": "One done."}', repeat_last=True)
     result = chat("do everything that waits", "y")
@@ -473,7 +473,7 @@ def test_worker_takes_the_most_urgent_first_and_says_what_it_leaves(
     finally:
         store.conn.close()
     fake.on(CHAT, asks("worker"))
-    fake.on("Execute subtask", '{"ok": true}', repeat_last=True)
+    fake.on("Execute subtask", '{"text": "Done."}', repeat_last=True)
     fake.on("Review subtask", '{"verdict": "accept"}', repeat_last=True)
     fake.on(RETELL, '{"text": "One done."}', repeat_last=True)
     result = chat("do everything that waits", "y")

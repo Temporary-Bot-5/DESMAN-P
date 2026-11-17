@@ -59,9 +59,7 @@ REPLIES: dict[str, list[dict[str, Any]]] = {
             ]
         }
     ],
-    TOOL_RESULTS: [
-        {"flight": "TP 1351, 12 Nov, 09:40", "price": "61 EUR", "source": FLIGHT["url"]}
-    ],
+    TOOL_RESULTS: [{"text": f"TP 1351, 12 Nov, 09:40, 61 EUR. Source: {FLIGHT['url']}"}],
     EXECUTE: [
         {
             "tool_calls": [

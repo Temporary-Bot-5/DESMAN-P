@@ -488,7 +488,7 @@ def test_typed_run_before_first_message_does_not_create_session(
 
     llm = FakeLLM()
     llm.on("Plan task", '{"subtasks": [{"description": "find", "acceptance_criteria": "found"}]}')
-    llm.on("Execute subtask", '{"ok": true}')
+    llm.on("Execute subtask", '{"text": "Done"}')
     llm.on("Review subtask", '{"verdict": "accept"}')
     llm.on(RETELL, '{"text": "Done now."}')
     monkeypatch.setattr(runs, "models", lambda *a, **kw: runs.Models(llm, None))

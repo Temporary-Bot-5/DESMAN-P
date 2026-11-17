@@ -440,7 +440,7 @@ def test_retry_sees_stale_files_sizes_and_writer_attempt_within_budget(
     task = store.create_task(one_step())
     coordinator = Coordinator(
         store,
-        llm_executor(fake),
+        llm_executor(fake, format_final=False),
         lambda sub, result: next(reviews),
         tools=Registry([WRITE_FILE]),
         access=ACCESS,

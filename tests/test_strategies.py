@@ -61,7 +61,7 @@ def run(store: Store, clock: FakeClock, main: FakeLLM, other: FakeLLM | None, **
     task_id = store.create_task(one_step())
     coordinator = Coordinator(
         store,
-        llm_executor(main, other),
+        llm_executor(main, other, format_final=False),
         llm_reviewer(main),
         sleep=clock.sleep,
         strategies=functools.partial(strategy_for, other_model=other is not None),
@@ -229,7 +229,9 @@ def test_a_coordinator_without_another_model_never_claims_a_switch(
     main.on("Review", REJECT, REJECT, REJECT, ACCEPT)
     task_id = store.create_task(one_step())
     # The defaults: no strategies given, no other LLM.
-    coordinator = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    coordinator = Coordinator(
+        store, llm_executor(main, format_final=False), llm_reviewer(main), sleep=clock.sleep
+    )
     assert coordinator.run(task_id).status is TaskStatus.DONE
     started = [
         e.details["strategy"] for e in history(store.conn, task_id) if e.action == "attempt_started"
@@ -248,7 +250,9 @@ def test_an_unusable_reply_is_feedback_for_the_next_attempt(store: Store, clock:
     main = FakeLLM().on("Execute", prose, prose, ServerError(status=503), '{"v": 1}')
     main.on("Review", ACCEPT)
     task_id = store.create_task(one_step())
-    coordinator = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    coordinator = Coordinator(
+        store, llm_executor(main, format_final=False), llm_reviewer(main), sleep=clock.sleep
+    )
     assert coordinator.run(task_id).status is TaskStatus.DONE
     second_try = json.loads(executions(main)[-1].prompt.partition(":\n")[2])
     # The interruption in between is not feedback; the unusable reply before it is.
@@ -289,7 +293,7 @@ def started(store: Store, task_id: str) -> list[tuple[int, str]]:
 def coordinator(store: Store, clock: FakeClock, main: FakeLLM, other: FakeLLM, **kw: Any) -> Any:
     return Coordinator(
         store,
-        llm_executor(main, other),
+        llm_executor(main, other, format_final=False),
         llm_reviewer(main),
         sleep=clock.sleep,
         strategies=functools.partial(strategy_for, other_model=True),
@@ -380,6 +384,8 @@ def test_with_one_model_a_refused_reply_claims_no_switch(store: Store, clock: Fa
 
     main = FakeLLM().on("Execute", ToolUseFailed(), '{"v": 1}').on("Review", ACCEPT)
     task_id = store.create_task(one_step())
-    c = Coordinator(store, llm_executor(main), llm_reviewer(main), sleep=clock.sleep)
+    c = Coordinator(
+        store, llm_executor(main, format_final=False), llm_reviewer(main), sleep=clock.sleep
+    )
     assert c.run(task_id).status is TaskStatus.DONE
     assert started(store, task_id) == [(1, "first"), (2, "feedback")]

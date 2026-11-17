@@ -639,7 +639,11 @@ def network_crew(
         raise click.ClickException(t("Cannot use the tool policy: {error}", error=e)) from e
     reviewer = crew_models.for_(calls.Role.REVIEWER)
     executor = llm_executor(
-        crew_models.llm, crew_models.other, by_kind=crew_models.kinds, clock=store.clock
+        crew_models.llm,
+        crew_models.other,
+        by_kind=crew_models.kinds,
+        clock=store.clock,
+        format_final=False,
     )
     return Crew(
         jobs.executor(store.conn, executor),

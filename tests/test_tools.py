@@ -269,7 +269,9 @@ def test_executor_writes_files_through_tool_calls(
     )
     task_id = store.create_task(one_step())
     root = tmp_path / "ws"
-    coordinator = Coordinator(store, llm_executor(llm), accept, workspaces=root, sleep=clock.sleep)
+    coordinator = Coordinator(
+        store, llm_executor(llm, format_final=False), accept, workspaces=root, sleep=clock.sleep
+    )
     assert coordinator.run(task_id).status is TaskStatus.DONE
     assert (root / task_id / "note.md").read_text(encoding="utf-8") == "hello"
     [sub] = store.list_subtasks(task_id)
@@ -318,7 +320,7 @@ def test_malformed_tool_calls_get_the_repair_request(
     )
     task_id = store.create_task(one_step())
     coordinator = Coordinator(
-        store, llm_executor(llm), accept, workspaces=tmp_path, sleep=clock.sleep
+        store, llm_executor(llm, format_final=False), accept, workspaces=tmp_path, sleep=clock.sleep
     )
     assert coordinator.run(task_id).status is TaskStatus.DONE
     assert llm.calls[1].prompt.startswith("Execute subtask (repair):")
@@ -340,7 +342,7 @@ def test_endless_tool_calls_fail_the_attempt(store: Store, tmp_path: Path) -> No
         heartbeat=no_heartbeat,
         tools=Toolbox(Workspace(tmp_path, claimed.task_id)),
     )
-    outcome = llm_executor(llm)(work)
+    outcome = llm_executor(llm, format_final=False)(work)
     assert isinstance(outcome, Failure) and outcome.kind is FailureKind.QUALITY
     assert "still calling tools" in outcome.reason
     assert len(llm.calls) == MAX_TOOL_ROUNDS + 1
@@ -366,7 +368,11 @@ def test_reviewer_gets_no_tools(store: Store, clock: FakeClock, tmp_path: Path) 
     llm = FakeLLM().on("Execute", '{"ok": 1}').on("Review", '{"verdict": "accept"}')
     task_id = store.create_task(one_step())
     Coordinator(
-        store, llm_executor(llm), llm_reviewer(llm), workspaces=tmp_path, sleep=clock.sleep
+        store,
+        llm_executor(llm, format_final=False),
+        llm_reviewer(llm),
+        workspaces=tmp_path,
+        sleep=clock.sleep,
     ).run(task_id)
     review = next(r for r in llm.calls if r.prompt.startswith("Review"))
     assert "tool" not in review.prompt and "tool_calls" not in review.messages[0].content

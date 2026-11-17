@@ -193,7 +193,7 @@ def test_run_works_through_the_planned_graph_in_order(tmp_path: Path) -> None:
 
 def test_run_tells_the_operator_when_the_template_is_used(tmp_path: Path) -> None:
     prose = garbage("prose").text
-    fake = script(tmp_path, [prose, prose], ['{"answer": 1}'])
+    fake = script(tmp_path, [prose, prose], ['{"text": "1"}'])
     result = desman("run", "the goal", "--fake-llm", fake, "--plan", "llm")
     assert result.exit_code == EXIT_DONE, result.output
     assert "Planning…" in result.output
@@ -202,7 +202,7 @@ def test_run_tells_the_operator_when_the_template_is_used(tmp_path: Path) -> Non
 
 
 def test_a_fake_run_uses_the_template_unless_asked(tmp_path: Path) -> None:
-    fake = script(tmp_path, [], ['{"answer": 1}'])  # no planner step: it must not be asked
+    fake = script(tmp_path, [], ['{"text": "1"}'])  # no planner step: it must not be asked
     result = desman("run", "the goal", "--fake-llm", fake, "--json")
     assert result.exit_code == EXIT_DONE, result.output
     assert json.loads(result.output)["plan"] == {"plan": "template"}

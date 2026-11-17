@@ -446,7 +446,7 @@ def test_roles_ask_their_own_models(store: Store, clock: FakeClock) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(sent(request))
-        return ok('{"verdict": "accept"}' if "Review" in seen[-1][2] else '{"v": 1}')
+        return ok('{"verdict": "accept"}' if "Review" in seen[-1][2] else '{"text": "done"}')
 
     models = run_models(store.conn, clock, handler)
     assert models.choice is not None and models.choice.label == "groq/openai/gpt-oss-20b"

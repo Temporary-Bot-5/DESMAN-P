@@ -27,7 +27,7 @@ from helpers import make_config
 PLAN = json.dumps(
     {"subtasks": [{"description": "Find flights", "acceptance_criteria": "Flights listed"}]}
 )
-RESULT = {"flights": ["TP 1351, 09:40, 61 EUR"]}
+RESULT = {"text": "TP 1351, 09:40, 61 EUR"}
 ACCEPT = '{"verdict": "accept"}'
 TASK_TURN = json.dumps(
     {"type": "task", "title": "Flights to Lisbon", "goal": "Find cheap flights to Lisbon"}

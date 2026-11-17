@@ -236,7 +236,7 @@ PLAN = json.dumps({"subtasks": [{"description": "Find flights", "acceptance_crit
 TURNS = {
     CHAT: json.dumps({"type": "task", "title": "Flights", "goal": "Find cheap flights"}),
     "Plan task": PLAN,
-    "Execute subtask": json.dumps({"flights": ["TP 1351"]}),
+    "Execute subtask": json.dumps({"text": "Flight TP 1351."}),
     "Review subtask": '{"verdict": "accept"}',
     RETELL: '{"text": "TP 1351."}',
 }

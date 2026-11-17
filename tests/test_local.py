@@ -325,7 +325,7 @@ def test_a_task_runs_on_a_local_model_alone(store: Store, clock: FakeClock) -> N
         body = json.loads(request.content)
         seen.append(f"{request.url.host}:{request.url.port} {body['model']}")
         prompt = body["messages"][-1]["content"]
-        return ok('{"verdict": "accept"}' if prompt.startswith("Review") else '{"v": 1}')
+        return ok('{"verdict": "accept"}' if prompt.startswith("Review") else '{"text": "Done."}')
 
     models = runs.models(
         make_config(settings=OLLAMA),
@@ -354,7 +354,7 @@ def test_when_the_cloud_is_limited_the_local_model_answers(store: Store, clock: 
         if request.url.host == "api.groq.com":
             return httpx.Response(429, headers={"retry-after": "3600"})
         prompt = json.loads(request.content)["messages"][-1]["content"]
-        return ok('{"verdict": "accept"}' if prompt.startswith("Review") else '{"v": 1}')
+        return ok('{"verdict": "accept"}' if prompt.startswith("Review") else '{"text": "Done."}')
 
     models = runs.models(
         make_config(api_keys={"GROQ_API_KEY": GROQ}, settings=OLLAMA),

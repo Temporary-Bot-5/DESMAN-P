@@ -145,7 +145,7 @@ def test_a_second_run_reuses_accepted_replies_unless_told_not_to(
     def handler(request: httpx.Request) -> httpx.Response:
         prompt = json.loads(request.content)["messages"][-1]["content"]
         sent.append(prompt.split(":")[0])
-        text = '{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}'
+        text = '{"verdict": "accept"}' if prompt.startswith("Review") else '{"text": "42"}'
         if prompt.startswith("Plan"):
             text = '{"subtasks": [{"description": "d", "acceptance_criteria": "c"}]}'
         return httpx.Response(

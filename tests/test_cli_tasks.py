@@ -26,6 +26,8 @@ def script(tmp_path: Path, execute: list[Any], review: list[Any] | None = None) 
     routes = [
         {"match": "Execute", "steps": execute, "repeat_last": False},
         {"match": "Review", "steps": review or [ACCEPT], "repeat_last": True},
+        # Legacy data fixtures exercise the best-effort fallback, preserving --json contracts.
+        {"match": "Format", "steps": [{"type": "rate_limit"}], "repeat_last": True},
     ]
     path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
     return path

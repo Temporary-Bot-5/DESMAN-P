@@ -84,7 +84,7 @@ def test_key_401_does_not_block_model(store: Store, clock: FakeClock) -> None:
 def finish(store: Store, content: dict[str, Any]) -> str:
     task = store.create_task(spec())
     llm = FakeLLM().on("Execute", json.dumps(content)).on("Review", '{"verdict":"accept"}')
-    Coordinator(store, llm_executor(llm), llm_reviewer(llm)).run(task)
+    Coordinator(store, llm_executor(llm, format_final=False), llm_reviewer(llm)).run(task)
     return task
 
 

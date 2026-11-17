@@ -156,7 +156,7 @@ def test_planned_tasks_take_the_tuned_retry_budgets(tmp_path: Any) -> None:
         json.dumps(
             {
                 "routes": [
-                    {"match": "Execute", "steps": ["{}"]},
+                    {"match": "Execute", "steps": ['{"text": "Done."}']},
                     {"match": "Review", "steps": ['{"verdict": "accept"}']},
                 ]
             }

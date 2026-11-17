@@ -274,7 +274,7 @@ def desman(*args: str | Path, input: str | None = None) -> Result:
 def fake_script(tmp_path: Path) -> Path:
     path = tmp_path / "script.json"
     routes = [
-        {"match": "Execute", "steps": ['{"x": 1}']},
+        {"match": "Execute", "steps": ['{"text": "done"}']},
         {"match": "Review", "steps": ['{"verdict": "accept"}']},
     ]
     path.write_text(json.dumps({"routes": routes}), encoding="utf-8")
