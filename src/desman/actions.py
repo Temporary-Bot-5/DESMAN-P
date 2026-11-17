@@ -38,6 +38,7 @@ from desman.core.store import StaleStateError, Store
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.i18n import t, tn
 from desman.llm import hub
+from desman.result_prose import prose_key, unwrap
 
 
 def open_existing(db_path: Path | None) -> Store:
@@ -176,7 +177,7 @@ def _result_extras(result: dict[str, Any], prose_key: str) -> dict[str, Any]:
     return {
         key: value
         for key, value in result.items()
-        if key != prose_key
+        if key not in {prose_key, "formatted_from"}
         and not (
             key in {"files_written", "written_files", "files"}
             and isinstance(value, list)
@@ -189,53 +190,12 @@ def _result_extras(result: dict[str, Any], prose_key: str) -> dict[str, Any]:
 
 def _result_text(result: Any) -> str:
     """A result as the person reads it: its text when it has one, else indented key/value lines."""
+    result = unwrap(result)
     if isinstance(result, dict):
-        inner = result.get("result") if result.get("type") == "result" else None
-        if inner is not None:
-            return _result_text(inner)
-        if result.get("type") == "result":
-            result = {key: value for key, value in result.items() if key != "type"}
-        for key in (
-            "content",
-            "text",
-            "answer",
-            "result",
-            "output",
-        ):
-            if isinstance(result.get(key), str):
-                rest = _result_extras(result, key)
-                return str(result[key]) + ("\n" + _result_lines(rest) if rest else "")
-        prose_key = next(
-            (
-                key
-                for key in (
-                    "response_text",
-                    "response",
-                    "message",
-                    "summary",
-                    "final_answer",
-                    "answer_text",
-                    "reply",
-                )
-                if isinstance(result.get(key), str)
-            ),
-            None,
-        )
-        if prose_key is None:
-            prose = [
-                key
-                for key, value in result.items()
-                if isinstance(value, str) and ("\n" in value or len(value) >= 80)
-            ]
-            if len(prose) == 1 and all(
-                isinstance(v, (str, int, float, bool, type(None))) for v in result.values()
-            ):
-                prose_key = prose[0]
-        if prose_key is not None:
-            rest = _result_extras(result, prose_key)
-            return str(result[prose_key]) + ("\n" + _result_lines(rest) if rest else "")
-        if len(result) == 1 and isinstance(next(iter(result.values())), str):
-            return str(next(iter(result.values())))
+        key = prose_key(result)
+        if key is not None:
+            rest = _result_extras(result, key)
+            return str(result[key]) + ("\n" + _result_lines(rest) if rest else "")
     return _result_lines(result)
 
 

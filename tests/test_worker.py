@@ -383,7 +383,7 @@ def write(path: Path, data: Any) -> Path:
 
 
 def fake_script(tmp_path: Path, latency: float = 0.0) -> Path:
-    reply = {"type": "reply", "text": '{"done": true}', "latency": latency}
+    reply = {"type": "reply", "text": '{"text": "Done."}', "latency": latency}
     routes = [
         {"match": "Execute", "steps": [reply], "repeat_last": True},
         {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},

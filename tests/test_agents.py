@@ -195,9 +195,9 @@ def test_unusable_verdict_is_an_interrupted_review(store: Store, clock: FakeCloc
         )
     )
     task_id = store.create_task(one_step())
-    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
-        task_id
-    )
+    result = Coordinator(
+        store, llm_executor(llm, format_final=False), llm_reviewer(llm), sleep=clock.sleep
+    ).run(task_id)
     assert result.status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
     assert (sub.attempts.quality, sub.attempts.transient) == (0, 2)  # the work was never redone
@@ -219,9 +219,9 @@ def test_non_finite_numbers_are_a_quality_failure(
         .on("Review", '{"verdict": "accept"}', repeat_last=True)
     )
     task_id = store.create_task(one_step())
-    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
-        task_id
-    )
+    result = Coordinator(
+        store, llm_executor(llm, format_final=False), llm_reviewer(llm), sleep=clock.sleep
+    ).run(task_id)
     assert result.status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
     assert sub.attempts.quality == 1
@@ -300,9 +300,9 @@ def test_repair_request_shows_the_reply_and_the_problem(store: Store, clock: Fak
         .on("Review", '{"verdict": "maybe", "feedback": 3}', '{"verdict": "accept"}')
     )
     task_id = store.create_task(one_step())
-    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
-        task_id
-    )
+    result = Coordinator(
+        store, llm_executor(llm, format_final=False), llm_reviewer(llm), sleep=clock.sleep
+    ).run(task_id)
     assert result.status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
     assert (sub.attempts.quality, sub.attempts.transient) == (0, 0)  # repaired in place

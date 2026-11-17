@@ -187,7 +187,7 @@ def test_agents_cannot_reach_the_policy_or_the_config(tmp_path: Path) -> None:
 
 def fake_script(tmp_path: Path) -> Path:
     routes = [
-        {"match": "Execute", "steps": ['{"ok": 1}']},
+        {"match": "Execute", "steps": ['{"text": "Done."}']},
         {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
     ]
     return write(tmp_path / "fake.json", json.dumps({"routes": routes}))

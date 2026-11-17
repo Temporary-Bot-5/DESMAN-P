@@ -264,7 +264,7 @@ def test_run_on_a_real_provider_logs_its_calls(mock_http: Callable[[Handler], No
 
     def handler(request: httpx.Request) -> httpx.Response:
         prompt = json.loads(request.content)["messages"][-1]["content"]
-        return reply('{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}')
+        return reply('{"verdict": "accept"}' if prompt.startswith("Review") else '{"text": "42"}')
 
     mock_http(handler)
     result = desman("run", "answer the question", "--plan", "template")
@@ -546,7 +546,7 @@ def test_running_on_a_paid_provider_says_so(mock_http: Callable[[Handler], None]
 
     def handler(request: httpx.Request) -> httpx.Response:
         prompt = json.loads(request.content)["messages"][-1]["content"]
-        return reply('{"verdict": "accept"}' if prompt.startswith("Review") else '{"answer": 42}')
+        return reply('{"verdict": "accept"}' if prompt.startswith("Review") else '{"text": "42"}')
 
     mock_http(handler)
     refused = desman("run", "g")
@@ -814,7 +814,7 @@ def test_a_server_blip_costs_the_subtask_nothing(
 ) -> None:
     ConfigManager(default_config_path()).save(make_config(api_keys={"GROQ_API_KEY": KEY_A}))
     monkeypatch.setattr(router, "_sleep", lambda seconds: None)
-    replies = iter([httpx.Response(503, text="overloaded"), reply('{"answer": 42}')])
+    replies = iter([httpx.Response(503, text="overloaded"), reply('{"text": "42"}')])
 
     def handler(request: httpx.Request) -> httpx.Response:
         prompt = json.loads(request.content)["messages"][-1]["content"]

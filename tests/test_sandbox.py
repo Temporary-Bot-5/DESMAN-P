@@ -401,7 +401,7 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     routes = [
-        {"match": "Execute", "steps": ['{"ok": 1}']},
+        {"match": "Execute", "steps": ['{"text": "done"}']},
         {"match": "Review", "steps": ['{"verdict": "accept"}'], "repeat_last": True},
     ]
     script = tmp_path / "fake.json"

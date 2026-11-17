@@ -262,7 +262,7 @@ def test_executor_only_sees_inventory_with_file_tools(
 
     ref = store.create_task(task())
     Workspace(tmp_path, ref).write("hello.py", "print(1)")
-    fake = FakeLLM('{"done":true}', repeat_last=True)
+    fake = FakeLLM('{"text":"done"}', repeat_last=True)
     reviews = iter(
         [Review(verdict=Verdict.RETRY, feedback="retry"), Review(verdict=Verdict.ACCEPT)]
     )

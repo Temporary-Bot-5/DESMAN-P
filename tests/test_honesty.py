@@ -30,7 +30,7 @@ from desman.core.store import Store
 from desman.core.tools import READ_FILE, WRITE_FILE, Permission, Registry, Tool
 from desman.core.workspace import Workspace, workspace_root_for
 from desman.interlocutor import CHAT, RETELL, NewTask, unbacked_code
-from desman.llm.fake import FakeLLM
+from desman.llm.fake import FakeLLM, RateLimit
 from desman.planner import Plan, Split, planner_system, splitter_system
 from desman.prompting import today
 from helpers import make_config
@@ -217,7 +217,9 @@ def test_the_executor_is_told_what_it_cannot_do(store: Store, tmp_path: Path) ->
             goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c")], tools=tools
         )
         task_id = store.create_task(spec)
-        Coordinator(store, llm_executor(fake), accept, workspaces=tmp_path).run(task_id)
+        Coordinator(store, llm_executor(fake, format_final=False), accept, workspaces=tmp_path).run(
+            task_id
+        )
     without, granted = (r.messages[0].content for r in fake.calls)
     assert HONEST in without and without.endswith(NO_TOOLS + today())
     assert HONEST in granted and NO_TOOLS not in granted
@@ -252,7 +254,7 @@ def test_a_task_turn_may_name_earlier_tasks_for_their_files() -> None:
 
 @pytest.fixture
 def fake(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
-    llm = FakeLLM()
+    llm = FakeLLM().on("Format", RateLimit(), repeat_last=True)
     monkeypatch.setattr(runs, "models", lambda config, conn, **_: runs.Models(llm, None))
     ConfigManager(default_config_path()).save(make_config(language="en", configured=True))
     return llm

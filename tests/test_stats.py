@@ -40,9 +40,9 @@ def script(tmp_path: Path, name: str, execute: list[Any], review: list[Any]) -> 
 def three_tasks(tmp_path: Path) -> None:
     """One done at once, one after the reviewer sent it back, one accepted by the operator
     after a refused key."""
-    first = script(tmp_path, "first", ['{"ok": 1}'], [ACCEPT])
+    first = script(tmp_path, "first", ['{"text": "First answer."}'], [ACCEPT])
     assert desman("run", "at once", "--fake-llm", first).exit_code == EXIT_DONE
-    second = script(tmp_path, "second", ['{"ok": 2}'], [RETRY, ACCEPT])
+    second = script(tmp_path, "second", ['{"text": "Second answer."}'], [RETRY, ACCEPT])
     assert desman("run", "sent back", "--fake-llm", second).exit_code == EXIT_DONE
     third = script(tmp_path, "third", [{"type": "rejected", "status": 401}], [ACCEPT])
     assert desman("run", "refused", "--fake-llm", third).exit_code == EXIT_NEEDS_HUMAN

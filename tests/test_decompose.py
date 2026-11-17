@@ -142,7 +142,7 @@ def one_step() -> TaskSpec:
 def coordinator(store: Store, clock: FakeClock, llm: FakeLLM, **kw: Any) -> Coordinator:
     return Coordinator(
         store,
-        llm_executor(llm),
+        llm_executor(llm, format_final=False),
         llm_reviewer(llm, lambda sub: evidence(store, sub)),
         decomposer=decomposer(llm),
         sleep=clock.sleep,
@@ -278,8 +278,8 @@ def test_without_a_decomposer_nothing_is_split(store: Store, clock: FakeClock) -
         FakeLLM().on("Execute", '{"v": 1}', repeat_last=True).on("Review", REJECT, repeat_last=True)
     )
     task_id = store.create_task(one_step())
-    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
-        task_id
-    )
+    result = Coordinator(
+        store, llm_executor(llm, format_final=False), llm_reviewer(llm), sleep=clock.sleep
+    ).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
     assert "decompose" not in [s for _, s in strategies(store, task_id)]
