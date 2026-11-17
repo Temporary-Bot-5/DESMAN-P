@@ -8,11 +8,12 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import FakeClock
-from desman.actions import result_text
+from desman.actions import result_file_texts, result_text
 from desman.agents import (
     EXECUTOR_SYSTEM,
     REVIEWER_EVIDENCE,
     REVIEWER_SYSTEM,
+    _final_text,
     llm_executor,
     llm_reviewer,
 )
@@ -21,9 +22,11 @@ from desman.compaction import summary_of
 from desman.core import calls, db
 from desman.core.coordinator import Coordinator
 from desman.core.models import SubtaskSpec, TaskSpec
-from desman.core.states import TaskStatus
+from desman.core.report import task_report
+from desman.core.states import Actor, TaskStatus
 from desman.core.store import Store
-from desman.llm.base import Completion, Request
+from desman.core.workspace import Workspace, workspace_root_for
+from desman.llm.base import Completion, Message, Request
 from desman.llm.fake import FakeLLM, RateLimit, Timeout
 from desman.llm.openai_compat import CallRecord
 from desman.result_prose import has_prose
@@ -61,7 +64,7 @@ def test_final_data_becomes_stored_markdown(store: Store, clock: FakeClock) -> N
         .on("Review", '{"verdict":"accept"}')
     )
     task = run_final(store, clock, llm)
-    assert store.final_result(task) == {"text": text}
+    assert store.final_result(task) == {"text": text, "formatted_from": DATA}
     assert result_text(store.final_result(task)) == text
     execute, follow, review = llm.calls
     payload = json.loads(follow.prompt.split(":\n", 1)[1])
@@ -77,13 +80,18 @@ def test_final_data_becomes_stored_markdown(store: Store, clock: FakeClock) -> N
     ):
         assert phrase in system
     assert "tools" not in payload
-    assert json.loads(review.prompt.split(":\n", 1)[1])["result"] == {"text": text}
+    assert json.loads(review.prompt.split(":\n", 1)[1])["result"] == {
+        "text": text,
+        "formatted_from": DATA,
+    }
 
 
 @pytest.mark.parametrize(
     "bad",
     [
-        "garbage",
+        "",
+        "[]",
+        '"JSON string"',
         '{"text":""}',
         '{"text":"  "}',
         '{"text":"Однопarentalные"}',
@@ -106,7 +114,12 @@ def test_failed_format_preserves_success(store: Store, clock: FakeClock, bad: An
 
 @pytest.mark.parametrize(
     "content",
-    [{"text": "Ready"}, {"summary": "Summary"}, {"type": "result", "result": {"answer": "Ready"}}],
+    [
+        {"text": "Ready"},
+        {"text": "Ready", "formatted_from": DATA},
+        {"summary": "Summary"},
+        {"type": "result", "result": {"answer": "Ready"}},
+    ],
 )
 def test_prose_needs_no_followup(store: Store, clock: FakeClock, content: dict[str, Any]) -> None:
     llm = FakeLLM().on("Execute", json.dumps(content)).on("Review", '{"verdict":"accept"}')
@@ -187,14 +200,16 @@ def test_quality_prompt_rules_are_narrow_and_always_check_totals() -> None:
         "does not exist",
         "specific versions or features",
         "from memory and may be outdated",
-        "common words in the language of the goal",
+        "common words in the language the answer is written in (the goal's, when given)",
         "Totals, sums, averages and ranges",
         "match them",
     ):
         assert phrase in EXECUTOR_SYSTEM
     assert "categorical claim" in REVIEWER_EVIDENCE
     assert "tools_available" in REVIEWER_EVIDENCE
-    assert "Do not judge this claim by memory" in REVIEWER_EVIDENCE
+    assert "no web lookup attempt at all for this subtask" in REVIEWER_EVIDENCE
+    assert "even failed or no engine" in REVIEWER_EVIDENCE
+    assert "keys, commands" in EXECUTOR_SYSTEM
     assert "own itemised" in REVIEWER_SYSTEM
     assert "name the mismatch" in REVIEWER_SYSTEM
 
@@ -242,12 +257,13 @@ def test_followup_is_journaled_as_executor_usage(store: Store, clock: FakeClock)
 
 
 def test_run_and_status_show_formatted_final_text(tmp_path: Path) -> None:
+    data = {"files_written": ["table.txt"], "rows": [{"value": 5}]}
     script = tmp_path / "answers.json"
     script.write_text(
         json.dumps(
             {
                 "routes": [
-                    {"match": "Execute", "steps": [json.dumps(DATA)]},
+                    {"match": "Execute", "steps": [json.dumps(data)]},
                     {"match": "Format", "steps": [json.dumps({"text": "## Menu\nTotal: 5"})]},
                     {"match": "Review", "steps": ['{"verdict":"accept"}']},
                 ]
@@ -259,11 +275,15 @@ def test_run_and_status_show_formatted_final_text(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["run", "Menu", "--fake-llm", str(script)])
     assert result.exit_code == 0, result.output
     assert "Total: 5" in result.output
+    assert "formatted_from:" not in result.output
     conn = db.open_db()
     try:
         task = conn.execute("SELECT id FROM tasks").fetchone()[0]
     finally:
         conn.close()
+    raw = runner.invoke(cli, ["status", task, "--json"])
+    assert '"formatted_from"' in raw.output
+    assert json.loads(raw.output)["result"]["formatted_from"]["rows"] == data["rows"]
     status = runner.invoke(cli, ["status", task])
     assert status.exit_code == 0, status.output
     assert "Total: 5" in status.output
@@ -278,6 +298,57 @@ def test_final_format_gets_one_structured_repair(store: Store, clock: FakeClock)
         .on("Review", '{"verdict":"accept"}')
     )
     task = run_final(store, clock, llm)
-    assert store.final_result(task) == {"text": "Total: 5"}
+    assert store.final_result(task) == {"text": "Total: 5", "formatted_from": DATA}
     assert llm.calls[2].prompt.startswith("Format final answer (repair):")
     assert llm.calls[2].messages[0] == llm.calls[1].messages[0]
+
+
+@pytest.mark.parametrize(
+    "reply", ["## Menu\nTotal: 5", "Short", '{"text":"Brand Однопarentalные"}']
+)
+def test_plain_and_copied_names_are_accepted(reply: str) -> None:
+    data = {"Однопarentalные": ["`Brand Однопarentalные`"], "total": 5}
+    llm = FakeLLM().on("Format", reply)
+    result = _final_text(
+        llm, "Menu", data, Request(messages=[Message(role="user", content="Answer")])
+    )
+    assert result["formatted_from"] == data
+    assert has_prose(result)
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.parametrize("inner", ["Prose", {"text": "Prose"}, {"type": "result", "text": "Prose"}])
+def test_envelope_detection_matches_rendering(inner: Any) -> None:
+    wrapped = {"type": "result", "result": {"type": "result", "result": inner}}
+    assert has_prose(wrapped)
+    assert result_text(wrapped) == "Prose"
+
+
+def test_only_exact_formatted_from_key_is_hidden() -> None:
+    assert (
+        result_text({"text": "Prose", "formatted_from": DATA, "formatted_from_other": 3})
+        == "Prose\nformatted_from_other: 3"
+    )
+
+
+def test_formatted_data_retains_written_files(store: Store, clock: FakeClock) -> None:
+    data = {"files_written": ["table.txt"], "rows": [{"value": 5}]}
+    text = "Complete answer. " * 80
+    llm = (
+        FakeLLM()
+        .on("Execute", json.dumps(data))
+        .on("Format", json.dumps({"text": text}))
+        .on("Review", '{"verdict":"accept"}')
+    )
+    task = run_final(store, clock, llm)
+    Workspace(workspace_root_for(store.conn), task).write("table.txt", b"value: 5")
+    store.note(
+        store.list_subtasks(task)[0].id,
+        Actor.EXECUTOR,
+        "tool_called",
+        {"tool": "write_file", "args": {"path": "table.txt"}, "ok": True},
+    )
+    assert result_file_texts(store, task_report(store, task)) == [("table.txt", "value: 5")]
+    result = store.final_result(task)
+    assert result is not None
+    assert result["formatted_from"]["rows"] == [{"value": 5}]

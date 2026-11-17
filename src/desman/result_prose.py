@@ -35,14 +35,17 @@ def prose_key(result: dict[str, Any]) -> str | None:
     return None
 
 
+def unwrap(result: Any) -> Any:
+    """Remove result envelopes consistently for detection and rendering."""
+    while isinstance(result, dict) and result.get("type") == "result":
+        if result.get("result") is not None:
+            result = result["result"]
+        else:
+            return {key: value for key, value in result.items() if key != "type"}
+    return result
+
+
 def has_prose(result: Any) -> bool:
     """Whether the renderer finds prose, including a wrapped result."""
-    if isinstance(result, str):
-        return True
-    if not isinstance(result, dict):
-        return False
-    if result.get("type") == "result":
-        if result.get("result") is not None:
-            return has_prose(result["result"])
-        result = {key: value for key, value in result.items() if key != "type"}
-    return prose_key(result) is not None
+    result = unwrap(result)
+    return isinstance(result, str) or (isinstance(result, dict) and prose_key(result) is not None)

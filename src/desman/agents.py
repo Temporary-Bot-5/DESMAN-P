@@ -34,7 +34,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Annotated, Any, Self, TypeVar
+from typing import Annotated, Any, ClassVar, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
 
@@ -87,7 +87,7 @@ ANSWER_QUALITY = (
     " Check claims that something does not exist, is not supported or was removed, and "
     "specific versions or features of software and products, with web tools when available. "
     "Without those tools, say plainly that this is from memory and may be outdated. "
-    "Write common words in the language of the goal; keep names, code, commands and terms "
+    "Write common words in the language the answer is written in (the goal's, when given); keep names, code, keys, commands and terms "
     "that have no common translation. Totals, sums, averages and ranges must be computed "
     "from the items you list and match them, or explain why they differ."
 )
@@ -160,9 +160,11 @@ REVIEWER_SYSTEM = (
     "numbers means retry: name the mismatch. Check this from the result alone."
 )
 REVIEWER_EVIDENCE = (
-    " If a categorical claim that a software feature or product does not exist or is "
-    "unsupported has no evidence while web tools were available (tools_available), "
-    "reply retry asking to check it with the web tools. Do not judge this claim by memory."
+    " For a categorical claim that a software feature or product does not exist or is "
+    "unsupported, made without evidence, reply retry only when web tools were available "
+    "(tools_available) and evidence shows no web lookup attempt at all for this subtask. "
+    "If lookups were attempted (even failed or no engine), a claim marked as from memory "
+    "is acceptable."
     " For a current figure (price, rate, salary), use the newest dated data found in "
     "evidence and state its date. If an older figure is used while a newer one is in "
     "evidence, reply retry naming the newer figure and its date."
@@ -171,7 +173,7 @@ REVIEWER_EVIDENCE = (
     "could not be read and the rest meets the criteria. You have no tools yourself."
     " Never decide from memory that something does not exist, is not released or is out of "
     "date: today may be after your training data; only the evidence counts. For a lookup "
-    "subtask with web tools available but no web_search/web_fetch results in evidence, "
+    "subtask with web tools available but no web lookup attempt in evidence, "
     "reply retry with feedback: search the web first. Never escalate for that omission."
     " Evidence may be newer than what you know. Never reject a fact as future, unreleased "
     "or outdated when the evidence shows it: only the evidence decides facts about the world."
@@ -374,9 +376,11 @@ class _FinalText(BaseModel):
 
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
+    allowed: ClassVar[set[str]] = set()
+
     @model_validator(mode="after")
     def _no_mixed_words(self) -> Self:
-        if mixed_script_words(self.text):
+        if any(word not in self.allowed for word in mixed_script_words(self.text, limit=None)):
             raise ValueError("Write mixed Latin/Cyrillic words in the language of the goal")
         return self
 
@@ -394,8 +398,25 @@ def _final_text(model: LLM, goal: str, result: dict[str, Any], original: Request
         {"goal": goal, "result": result},
         0.0,
     ).model_copy(update={"avoid": original.avoid})
+
+    class FinalText(_FinalText):
+        allowed: ClassVar[set[str]] = set(
+            re.findall(r"[^\W_]+", json.dumps(result, ensure_ascii=False))
+        )
+
+    def plain(text: str) -> FinalText | None:
+        try:
+            json.loads(text)
+        except ValueError:
+            try:
+                return FinalText(text=text)
+            except ValueError:
+                return None
+        return None
+
     try:
-        return complete_json(model, request, _FinalText, heading=heading).model_dump()
+        formatted = complete_json(model, request, FinalText, heading=heading, plain=plain)
+        return {"text": formatted.text, "formatted_from": result}
     except (ProviderError, StructuredOutputError):
         # A formatting failure must never turn completed work into a failed attempt.
         return result

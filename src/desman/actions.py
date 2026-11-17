@@ -38,7 +38,7 @@ from desman.core.store import StaleStateError, Store
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.i18n import t, tn
 from desman.llm import hub
-from desman.result_prose import prose_key
+from desman.result_prose import prose_key, unwrap
 
 
 def open_existing(db_path: Path | None) -> Store:
@@ -177,7 +177,7 @@ def _result_extras(result: dict[str, Any], prose_key: str) -> dict[str, Any]:
     return {
         key: value
         for key, value in result.items()
-        if key != prose_key
+        if key not in {prose_key, "formatted_from"}
         and not (
             key in {"files_written", "written_files", "files"}
             and isinstance(value, list)
@@ -190,12 +190,8 @@ def _result_extras(result: dict[str, Any], prose_key: str) -> dict[str, Any]:
 
 def _result_text(result: Any) -> str:
     """A result as the person reads it: its text when it has one, else indented key/value lines."""
+    result = unwrap(result)
     if isinstance(result, dict):
-        inner = result.get("result") if result.get("type") == "result" else None
-        if inner is not None:
-            return _result_text(inner)
-        if result.get("type") == "result":
-            result = {key: value for key, value in result.items() if key != "type"}
         key = prose_key(result)
         if key is not None:
             rest = _result_extras(result, key)
