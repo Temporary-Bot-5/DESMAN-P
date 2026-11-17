@@ -716,7 +716,13 @@ def _usage(ctx: Context, args: UsageArgs) -> Outcome:
     config_cli.print_usage(config, rows, config_cli.parse_window(args.since), args.since)
     config_cli.print_model_blocks()
     return Outcome(
-        [{k: v for k, v in r.items() if k != "key"} for r in config_cli.usage_json(config, rows)]
+        {
+            "totals": config_cli.usage_totals(rows),
+            "rows": [
+                {k: v for k, v in r.items() if k != "key"}
+                for r in config_cli.usage_json(config, rows)
+            ],
+        }
     )
 
 

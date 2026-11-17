@@ -634,3 +634,28 @@ def test_fail_without_reason_from_chat(fake: FakeLLM, note: str | None) -> None:
         assert history(store.conn, task_id)[-1].details["reason"] == "failed by operator"
     finally:
         store.conn.close()
+
+
+def test_usage_event_carries_window_totals(fake: FakeLLM, monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman import config_cli
+    from desman.core.calls import KeyUsage
+
+    rows = [
+        KeyUsage("groq", "old", 2, 1, 0, 100, 20, None, None, {}),
+        KeyUsage("nvidia", "other", 3, 0, 1, 200, 30, None, None, {}),
+    ]
+    monkeypatch.setattr(config_cli, "usage_since", lambda *args: rows)
+    fake.on(CHAT, asks("usage", since="all"))
+    result = chat("how much did I spend?")
+    assert "Total: 5 calls" in result.output
+    event = next(m for m in conversation() if m.kind is Kind.EVENT)
+    data = json.loads(event.text.split("\n", 1)[1])
+    assert data["totals"] == {
+        "calls": 5,
+        "failed": 1,
+        "limited": 1,
+        "prompt_tokens": 300,
+        "completion_tokens": 50,
+        "providers": 2,
+    }
+    assert len(data["rows"]) == 2 and "key" not in data["rows"][0]

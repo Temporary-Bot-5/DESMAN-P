@@ -89,7 +89,7 @@ TOPICS: Final = (
         "models, API keys, free tiers, limits and local models",
         "DESMAN uses providers whose keys the person added. Only free tiers are chosen "
         "automatically; paid providers require explicit choice. Quotas change "
-        "and every provider is treated as unreliable.\n"
+        "and every provider is unreliable.\n"
         "Auto spreads work across fitting free models by capacity. Repeated transient failures move models behind healthy ones for 15 minutes, until a success. "
         "Choosing a model for a role pins it first. Limits, outages, refused keys and small contexts move "
         "a call to the next model. Chat notes name the answering model and skipped reasons. Keys rotate. Limits "
@@ -98,12 +98,12 @@ TOPICS: Final = (
         "The selected key goes first.\n"
         "For one task (reviewer, decomposer, text, code, analysis) use `desman modules set ROLE --task REF --model PROVIDER/MODEL`; "
         "for one chat (interlocutor only) use `desman modules set ROLE --session ID --key PROVIDER:KEY`. "
-        "Auto inherits the role again. "
+        "Auto inherits it again. "
         "`desman modules` shows active tasks; `desman modules clear --task REF` resets choices.\n"
         "See localmodels for downloads.\n"
         "Keys enter only through a hidden field (`desman keys add PROVIDER`), never the chat, "
         "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `desman keys list`, `desman keys check` (no tokens) "
-        "and `desman usage`. Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
+        "and `desman usage` (ends with totals). Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
     ),
     Topic(
         "modules",

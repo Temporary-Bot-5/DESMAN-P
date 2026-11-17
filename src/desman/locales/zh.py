@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "总计：{calls}{failures}，输入 {tokens_in:,} 个词元，输出 {tokens_out:,} 个词元，{providers}。",
+    " ({failed:,} failed, {limited:,} limited)": "（{failed:,} 次失败，{limited:,} 次受限）",
+    "{n:,} call": ("{n:,} 次调用",),
+    "{n:,} provider": ("{n:,} 个提供商",),
     "Set up a search engine for the whole web: `desman search setup` (SearXNG, on this computer) or a Tavily key in `desman config`.": "请设置全网搜索引擎：`desman search setup`（此计算机上的 SearXNG），或在 `desman config` 中设置 Tavily 密钥。",
     "Nothing changed. Confirm with: {command}": "未作任何更改。请运行以下命令确认：{command}",
     "Not configured": "未配置",

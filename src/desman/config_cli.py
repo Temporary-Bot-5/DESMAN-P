@@ -819,6 +819,19 @@ def usage_json(config: Config, rows: list[calls.KeyUsage]) -> list[dict[str, Any
     return [{**asdict(u), "key": names.get(u.key_id or "", "removed key")} for u in rows]
 
 
+def usage_totals(rows: list[calls.KeyUsage]) -> dict[str, int]:
+    """Totals for the selected window, counting each active provider once."""
+    active = [u for u in rows if u.calls]
+    return {
+        "calls": sum(u.calls for u in active),
+        "failed": sum(u.failed for u in active),
+        "limited": sum(u.limited for u in active),
+        "prompt_tokens": sum(u.prompt_tokens for u in active),
+        "completion_tokens": sum(u.completion_tokens for u in active),
+        "providers": len({u.provider for u in active}),
+    }
+
+
 def _key_names(config: Config) -> dict[str, str]:
     names = {}
     for p in providers.CLOUD:
@@ -940,6 +953,22 @@ def print_usage(
             (u.last_at or "")[:16].replace("T", " "),
         )
     ui.out(table)
+    totals = usage_totals(rows)
+    failures = (
+        t(" ({failed:,} failed, {limited:,} limited)", **totals)
+        if totals["failed"] or totals["limited"]
+        else ""
+    )
+    ui.out(
+        t(
+            "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.",
+            calls=tn(totals["calls"], "{n:,} call", "{n:,} calls"),
+            failures=failures,
+            tokens_in=totals["prompt_tokens"],
+            tokens_out=totals["completion_tokens"],
+            providers=tn(totals["providers"], "{n:,} provider", "{n:,} providers"),
+        )
+    )
     if any(u is not None and u.key_id not in names for _, _, u in lines):
         ui.note(
             t(
