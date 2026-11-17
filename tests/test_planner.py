@@ -18,6 +18,8 @@ from desman.planner import (
     CRITERIA_RULES,
     MAX_SUBTASKS,
     PLAN,
+    PLANNER_RULES,
+    SPLITTER_RULES,
     SPLITTER_SYSTEM,
     TEMPLATE_CRITERIA,
     Split,
@@ -260,3 +262,11 @@ def test_planner_prompt_preserves_all_deliverables_and_language_exceptions() -> 
     assert "proper names" in PLANNER_SYSTEM and "another language" in PLANNER_SYSTEM
     assert "seed or supplied input" in PLANNER_SYSTEM
     assert "searching the web" in PLANNER_SYSTEM
+
+
+def test_file_saving_stays_with_the_content_producer() -> None:
+    assert "write_file in the subtask that produces their content" in PLANNER_RULES
+    assert "Saving files is never a separate subtask" in PLANNER_RULES
+    assert "final subtask writes any requested final files and gives the answer" in PLANNER_RULES
+    assert "write_file in the part that produces their content" in SPLITTER_RULES
+    assert "saving files is never a separate part" in SPLITTER_RULES

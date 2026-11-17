@@ -102,7 +102,11 @@ PLANNER_RULES = (
     "hold (translations into two languages, a table, a few examples) stay ONE subtask. "
     "Writing a program, its test and running them is ONE code subtask with runs_code that "
     "writes, runs and reports, never write / run / combine as separate subtasks. Reading "
-    "the files a subtask works on is never a separate subtask. Add a final subtask that "
+    "the files a subtask works on is never a separate subtask. "
+    "Save requested files with write_file in the subtask that produces their content. "
+    "Saving files is never a separate subtask. The final subtask writes any requested "
+    "final files and gives the answer. "
+    "Add a final subtask that "
     "combines only when earlier subtasks needed different tools or lookups; otherwise the "
     "last working subtask gives the final result itself. Reply with a single JSON object: "
     '{"subtasks": [{"description": "what to do", "acceptance_criteria": "how to tell it is '
@@ -443,7 +447,10 @@ SPLITTER_RULES = (
     "right. Each part is done by one model call that sees only that part's description, its "
     "acceptance criteria, the subtask's inputs and the results of the parts it depends on, so "
     "every description must make sense on its own. Afterwards the subtask's result is built "
-    "from the parts' results; the feedback says what went wrong so far. Reply with a single "
+    "from the parts' results; the feedback says what went wrong so far. "
+    "Save requested files with write_file in the part that produces their content; "
+    "saving files is never a separate part. "
+    "Reply with a single "
     'JSON object: {"subtasks": [{"description": "what to do", "acceptance_criteria": "how to '
     'tell it is done", "kind": "text" | "code" | "analysis", "depends_on": [indices of earlier '
     "parts, counting from 0]}]}."
