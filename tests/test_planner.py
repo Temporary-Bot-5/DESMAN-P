@@ -267,6 +267,8 @@ def test_planner_prompt_preserves_all_deliverables_and_language_exceptions() -> 
 def test_file_saving_stays_with_the_content_producer() -> None:
     assert "write_file in the subtask that produces their content" in PLANNER_RULES
     assert "Saving files is never a separate subtask" in PLANNER_RULES
-    assert "final subtask writes any requested final files and gives the answer" in PLANNER_RULES
+    assert (
+        "combining final subtask writes only the files whose content it produces" in PLANNER_RULES
+    )
     assert "write_file in the part that produces their content" in SPLITTER_RULES
     assert "saving files is never a separate part" in SPLITTER_RULES

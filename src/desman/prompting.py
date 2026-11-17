@@ -6,9 +6,8 @@ from datetime import UTC, datetime, tzinfo
 
 def today(clock: Callable[[], datetime] | None = None, *, tz: tzinfo | None = None) -> str:
     now = clock() if clock is not None else datetime.now(UTC)
-    local = now.astimezone(tz)
-    date = local.date()
-    offset = local.strftime("%z")
-    offset = f"{offset[:3]}:{offset[3:]}"
+    date = now.astimezone(tz).date()
+    # No UTC offset: it would tell every provider roughly where the person lives.
+    label = "UTC" if tz is UTC else "local date"
     weekdays = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    return f" Today is {weekdays[date.weekday()]}, {date.isoformat()} (local time, UTC{offset})."
+    return f" Today is {weekdays[date.weekday()]}, {date.isoformat()} ({label})."
