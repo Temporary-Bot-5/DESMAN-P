@@ -79,6 +79,7 @@ def test_run_json(tmp_path: Path) -> None:
     out = json.loads(result.output)  # nothing else on stdout
     assert out["run"]["status"] == "done" and out["run"]["paused_until"] is None
     assert out["task"]["status"] == "done"
+    assert "files" not in out
     [sub] = out["task"]["subtasks"]
     assert sub["status"] == "done" and "lease_token" not in sub
 

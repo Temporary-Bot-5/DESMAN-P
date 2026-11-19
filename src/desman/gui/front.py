@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import _thread
+import hashlib
 import io
 import json
+import sqlite3
 import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import Future
 from contextlib import contextmanager
 from html import escape
 from pathlib import Path
@@ -17,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from desman.gui.runners import Runners
 
+import click
 from pydantic import BaseModel, ConfigDict, ValidationError
 from rich.console import Console, RenderableType
 from rich.panel import Panel
@@ -24,6 +28,8 @@ from rich.text import Text
 
 from desman import providers, ui
 from desman.config import ConfigError, open_config
+from desman.i18n import t
+from desman.task_files import Given
 from desman.thread_output import redirect_stderr, redirect_stdout
 
 
@@ -34,6 +40,10 @@ class Answer(BaseModel):
     id: int
     value: Any = None
     cancel: bool = False
+
+
+def _file_id(file: Given) -> str:
+    return hashlib.sha256(file.name.encode()).hexdigest()
 
 
 class WebFront(ui.Front):
@@ -75,6 +85,8 @@ class WebFront(ui.Front):
         self._panel_quiet = False
         self.pending_choice: dict[str, str | None] | None = None
         self.settings_outcome: dict[str, Any] | None = None
+        self.apply_attachment: Callable[[Given | str], None] | None = None
+        self._attachment: tuple[Given | str, Future[None]] | None = None
 
     def session_changed(self, id: str) -> None:
         """Invalidate only a session; its transcript is read from SQLite by the page poll."""
@@ -167,6 +179,44 @@ class WebFront(ui.Front):
             self.condition.notify_all()
             return True
 
+    def _file_prompt(self) -> bool:
+        return (
+            self.apply_attachment is not None
+            and self.prompt is not None
+            and self.prompt["kind"] == "line"
+            and "/file" in self.prompt.get("commands", {})
+        )
+
+    def _pending_files(self) -> list[Given]:
+        if self.runners is not None and self.current is not None:
+            pending = self.runners.pending_files.get(self.current)
+            if pending is not None:
+                return pending.snapshot()
+        return []
+
+    def change_attachment(self, prompt_id: int, change: Given | str) -> None:
+        """Send one attachment edit to the chat thread without closing the input prompt."""
+        with self.condition:
+            if (
+                not self._file_prompt()
+                or self.prompt is None
+                or self.prompt["id"] != prompt_id
+                or self._attachment is not None
+                or self.ended
+            ):
+                raise click.ClickException(t("Attachments are unavailable in this chat right now."))
+            if isinstance(change, str):
+                file = next(
+                    (file for file in self._pending_files() if _file_id(file) == change), None
+                )
+                if file is None:
+                    raise click.ClickException(t("That file is no longer pending."))
+                change = file.name
+            reply: Future[None] = Future()
+            self._attachment = (change, reply)
+            self.condition.notify_all()
+        reply.result()
+
     def poll(self, after: int, timeout: float = 25, state: int | None = None) -> dict[str, Any]:
         """Return retained events and current state so reloads preserve prompts and progress."""
         with self.condition:
@@ -182,6 +232,11 @@ class WebFront(ui.Front):
                 "busy": self.busy
                 if self.runners is None
                 else bool(self.runners.status(self.current or "")["state"]),
+                "can_attach": self._file_prompt(),
+                "attached_files": [
+                    {"id": _file_id(file), "name": self.redact(file.name), "chars": file.chars}
+                    for file in self._pending_files()
+                ],
                 **self._session_poll(),
                 "ended": self.ended,
             }
@@ -189,8 +244,6 @@ class WebFront(ui.Front):
     def _session_poll(self) -> dict[str, Any]:
         if self.runners is None:
             return {}
-        import sqlite3
-
         from desman.chat import _render
         from desman.core.sessions import Sessions
 
@@ -374,9 +427,29 @@ class WebFront(ui.Front):
             try:
                 # Timed waits let Ctrl+C reach the main thread on Windows too.
                 due = self.clock() + 2
-                while self._answer is None:
+                while self._answer is None or self._attachment is not None:
                     if self.ended:
                         raise ui.Cancelled
+                    if self._attachment is not None:
+                        change, reply = self._attachment
+                        self._attachment = None
+                        assert self.apply_attachment is not None
+                        try:
+                            self.apply_attachment(change)
+                        except click.ClickException as error:
+                            reply.set_exception(error)
+                        except (sqlite3.Error, OSError):
+                            reply.set_exception(
+                                click.ClickException(t("Could not update attachments."))
+                            )
+                        else:
+                            reply.set_result(None)
+                        finally:
+                            if not reply.done():
+                                reply.set_exception(
+                                    click.ClickException(t("Could not update attachments."))
+                                )
+                        continue
                     self.condition.wait(
                         timeout=min(0.2, max(0, due - self.clock())) if kind == "line" else 0.2
                     )
@@ -397,6 +470,14 @@ class WebFront(ui.Front):
                     raise ui.Cancelled
                 return answer["value"]
             finally:
+                if self._attachment is not None:
+                    _, reply = self._attachment
+                    self._attachment = None
+                    reply.set_exception(
+                        click.ClickException(
+                            t("Attachments are unavailable in this chat right now.")
+                        )
+                    )
                 self.prompt = None
                 self._answer = None
                 self._input_recordings = ()

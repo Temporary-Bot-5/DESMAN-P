@@ -6,6 +6,7 @@ G.7b reports independent proposal check hand-ins alongside job events.
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import time
 from collections.abc import Callable
@@ -25,6 +26,7 @@ from desman import (
     proposals_cli,
     providers,
     runs,
+    task_files,
     ui,
 )
 from desman.actions import find_task, open_existing, print_report
@@ -51,6 +53,7 @@ from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+from desman.core.workspace import PathEscapeError, workspace_root_for
 from desman.global_cli import global_group
 from desman.i18n import t, tn
 from desman.info import print_project_info
@@ -329,6 +332,13 @@ def model_options(command: F) -> F:
     help="A task graph as JSON (TaskSpec: goal, priority, subtasks with depends_on).",
 )
 @click.option(
+    "--file",
+    "file",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Attach a text file to GOAL. Repeat for more files.",
+)
+@click.option(
     "--priority",
     type=click.Choice([p.name.lower() for p in Priority]),
     default=None,
@@ -355,6 +365,7 @@ def model_options(command: F) -> F:
 def run(
     goal: str | None,
     spec_path: Path | None,
+    file: tuple[Path, ...],
     priority: str | None,
     plan_mode: str | None,
     runs_code: bool,
@@ -377,8 +388,14 @@ def run(
         raise click.UsageError(t("give either GOAL or --spec, not both"))
     if spec_path is not None and plan_mode is not None:
         raise click.UsageError(t("--plan is for GOAL: a --spec is already a plan"))
+    if spec_path is not None and file:
+        raise click.UsageError(t("--file requires GOAL and cannot be used with --spec"))
     if goal is not None and not goal.strip():
         raise click.UsageError(t("GOAL is empty"))
+    try:
+        given = task_files.given_paths(file)
+    except task_files.GivenFileError as e:
+        raise click.ClickException(task_files.attachment_error(e)) from e
     spec = _load_spec(spec_path, db_path) if spec_path is not None else None
     level = None if priority is None else int(Priority[priority.upper()])
     source = _provider(fake_script, provider_name, model, as_json)  # fail fast
@@ -397,7 +414,7 @@ def run(
             by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
             planned = _plan(
                 models.for_(calls.Role.PLANNER),
-                goal,
+                goal + task_files.goal_note(given),
                 level,
                 by_model=by_model,
                 as_json=as_json,
@@ -410,7 +427,22 @@ def run(
         if runs_code:  # held to it whatever the plan, the template's too
             spec = must_run(spec)
         details = planned.details() if planned else None
-        task_id = store.create_task(spec, details=details)
+        placed: list[str] = []
+
+        def copy(conn: sqlite3.Connection, new_task: str) -> None:
+            placed.extend(task_files.place(workspace_root_for(conn), new_task, given))
+
+        try:
+            task_id = store.create_task(spec, details=details, also=copy if given else None)
+        except (OSError, PathEscapeError) as e:
+            if not given:
+                raise
+            raise click.ClickException(
+                t(
+                    "The attached files could not be saved. The task was not started: {error}",
+                    error=e,
+                )
+            ) from e
         if not as_json:
             click.echo(
                 tn(
@@ -420,8 +452,10 @@ def run(
                     id=task_id,
                 )
             )
+            if placed:
+                click.echo(t("Files attached: {files}", files=", ".join(placed)))
             sys.stdout.flush()  # visible before any work starts, even through a pipe
-        _drive(store, models, access, task_id, wait, lease_seconds, as_json, details)
+        _drive(store, models, access, task_id, wait, lease_seconds, as_json, details, files=placed)
     finally:
         store.conn.close()
 
@@ -1086,6 +1120,8 @@ def _drive(
     as_json: bool,
     plan_details: dict[str, Any] | None = None,
     then: Callable[[bool], tuple[str, Any]] | None = None,
+    *,
+    files: list[str] | None = None,
 ) -> None:
     """Run the task and report it. `then(as_json)` comes after the run: what it returns joins
     the JSON output as (key, data); without --json it prints, after the task's report."""
@@ -1108,6 +1144,8 @@ def _drive(
         if plan_details is not None:
             out["plan"] = plan_details
         out["task"] = report.model_dump(mode="json")
+        if files:
+            out["files"] = files
         if then is not None:
             key, data = then(True)
             out[key] = data

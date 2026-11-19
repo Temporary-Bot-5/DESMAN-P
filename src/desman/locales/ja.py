@@ -1743,4 +1743,38 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "はい", "no": "いいえ"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file を使うには GOAL が必要です。--spec とは併用できません",
+        "Attach a text file to GOAL. Repeat for more files.": "目標にテキストファイルを添付します。複数の場合はオプションを繰り返します。",
+        "Attach text files": "テキストファイルを添付",
+        "Attached for the next task: {file} ({n} character).": (
+            "次のタスク用に添付しました：{file}（{n} 文字）。",
+        ),
+        "Attachments are unavailable in this chat right now.": "現在、このチャットではファイルを添付できません。",
+        "Could not attach {file}: {reason}": "{file} を添付できませんでした：{reason}",
+        "Could not update attachments.": "添付ファイルを更新できませんでした。",
+        "Files attached: {files}": "添付ファイル：{files}",
+        "Files pending for the next task": "次のタスクに渡すファイル",
+        "Files pending for the next task: {files}": "次のタスクに渡すファイル：{files}",
+        "No files are pending.": "次のタスクに渡すファイルはありません。",
+        "Only you can attach local files. Use /file PATH.": "ローカルファイルを添付できるのはユーザーだけです。/file PATH を使用してください。",
+        "Pending files cleared.": "次のタスクに渡すファイルの一覧を消去しました。",
+        "Remove attachment: {file}": "添付ファイル {file} を外す",
+        "Removed pending file: {file}": "{file} を一覧から外しました。",
+        "Task {ref} received the attached files: {files}": "タスク {ref} が添付ファイルを受け取りました：{files}",
+        "That file is no longer pending.": "そのファイルはすでに一覧から外れています。",
+        "The attached files could not be saved. The task was not started: {error}": "添付ファイルを保存できなかったため、タスクを開始しませんでした：{error}",
+        "Your files are still pending.": "ファイルは次のタスクに渡す一覧に残っています。",
+        "attach with /file PATH, list with /file, or clear with /file clear": "/file PATH で添付、/file で一覧表示、/file clear で一覧を消去",
+        "it is not a regular file": "通常のファイルではありません",
+        "save it as UTF-8 text": "UTF-8 のテキストとして保存してください",
+        "the attached files together exceed {limit} bytes": "添付ファイルの合計が {limit} バイトを超えています",
+        "the file could not be read": "ファイルを読み込めませんでした",
+        "the file exceeds {limit} bytes": "ファイルが {limit} バイトを超えています",
+        "the file extension is not a supported text format": "ファイルの拡張子が対応するテキスト形式ではありません",
+        "the maximum number of attached files is {limit}": "添付できるファイルは {limit} 個までです",
+    }
+)
+
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)

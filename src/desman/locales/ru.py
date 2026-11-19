@@ -2161,4 +2161,40 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "да", "no": "нет"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "Для --file нужна цель GOAL. Использовать --file вместе с --spec нельзя",
+        "Attach a text file to GOAL. Repeat for more files.": "Приложить к цели текстовый файл. Для нескольких файлов укажите параметр несколько раз.",
+        "Attach text files": "Прикрепить текстовые файлы",
+        "Attached for the next task: {file} ({n} character).": (
+            "К следующей задаче прикреплён файл {file} ({n} символ)",
+            "К следующей задаче прикреплён файл {file} ({n} символа)",
+            "К следующей задаче прикреплён файл {file} ({n} символов)",
+        ),
+        "Attachments are unavailable in this chat right now.": "Сейчас в этом чате нельзя прикреплять файлы.",
+        "Could not attach {file}: {reason}": "Не удалось прикрепить {file}: {reason}",
+        "Could not update attachments.": "Не удалось обновить список вложений.",
+        "Files attached: {files}": "Прикреплены файлы: {files}",
+        "Files pending for the next task": "Файлы для следующей задачи",
+        "Files pending for the next task: {files}": "Файлы для следующей задачи: {files}",
+        "No files are pending.": "Нет файлов для следующей задачи.",
+        "Only you can attach local files. Use /file PATH.": "Локальные файлы можете добавить только вы. Используйте /file PATH.",
+        "Pending files cleared.": "Список файлов для следующей задачи очищен.",
+        "Remove attachment: {file}": "Убрать вложение {file}",
+        "Removed pending file: {file}": "Из списка убран файл {file}.",
+        "Task {ref} received the attached files: {files}": "Задача {ref} получила прикреплённые файлы: {files}",
+        "That file is no longer pending.": "Этого файла уже нет в списке.",
+        "The attached files could not be saved. The task was not started: {error}": "Не удалось сохранить вложения. Задача не запущена: {error}",
+        "Your files are still pending.": "Ваши файлы остались в списке для следующей задачи.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "прикрепить файл: /file PATH, посмотреть список: /file, очистить список: /file clear",
+        "it is not a regular file": "это не обычный файл",
+        "save it as UTF-8 text": "сохраните файл как текст в кодировке UTF-8",
+        "the attached files together exceed {limit} bytes": "суммарный размер вложений превышает {limit} байт",
+        "the file could not be read": "не удалось прочитать файл",
+        "the file exceeds {limit} bytes": "размер файла превышает {limit} байт",
+        "the file extension is not a supported text format": "расширение файла не относится к поддерживаемым текстовым форматам",
+        "the maximum number of attached files is {limit}": "можно прикрепить не более {limit} файлов",
+    }
+)
+
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)

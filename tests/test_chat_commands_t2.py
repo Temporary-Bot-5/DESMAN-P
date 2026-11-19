@@ -89,7 +89,11 @@ def test_each_catalog_field_is_reachable_from_click() -> None:
         ("global update --revert", "global update", {"action": "revert", "release": None}),
         ("global update --show 2", "global update", {"action": "show", "release": 2}),
         ("tuning --model planner=auto", "tuning", None),
-        ('run "two words"', "run", {"goal": "two words", "title": None, "runs_code": False}),
+        (
+            'run "two words"',
+            "run",
+            {"goal": "two words", "title": None, "runs_code": False, "file": []},
+        ),
     ],
 )
 def test_line_parser(line: str, name: str, data: dict[str, Any] | None) -> None:

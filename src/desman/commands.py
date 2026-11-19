@@ -50,6 +50,7 @@ from desman import (
     proposals_cli,
     protected_cli,
     providers,
+    task_files,
     tuning_cli,
     ui,
     wizard,
@@ -267,6 +268,9 @@ class RunArgs(Args):
     goal: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
     title: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
     runs_code: bool = False
+    file: list[Annotated[str, StringConstraints(min_length=1, max_length=4096)]] = Field(
+        default_factory=list, max_length=task_files.MAX_GIVEN_FILES
+    )
 
 
 class UsageArgs(Args):
@@ -2039,6 +2043,7 @@ CATALOG: tuple[Entry, ...] = (
         RunArgs,
         Kind.CHANGE,
         _run,
+        private=("file",),
     ),
     Entry(
         "resume",
@@ -2623,17 +2628,19 @@ def for_model(about: bool = True) -> str:
     lines = []
     for entry in CATALOG:
         # A command without arguments shows none: an empty "{}" ended up in replies.
-        signature = _signature(entry.args)
+        signature = _signature(entry.args, excluded=("file",) if entry.name == "run" else ())
         shown = entry.name if signature == "{}" else f"{entry.name} {signature}"
         lines.append(f"- {shown}: {entry.about}" if about else f"- {shown}")
     return "\n".join(lines)
 
 
-def _signature(args: type[Args]) -> str:
+def _signature(args: type[Args], excluded: tuple[str, ...] = ()) -> str:
     schema = args.model_json_schema()
     required = set(schema.get("required", []))
     parts = []
     for name, prop in schema.get("properties", {}).items():
+        if name in excluded:
+            continue
         parts.append(f'"{name}"{"" if name in required else "?"}: {_type(prop)}')
     return "{" + ", ".join(parts) + "}"
 
@@ -2812,7 +2819,10 @@ def parse_line(
                 if value:
                     entry = replace(entry, typed_confirm=False)
                 continue
-            if field_name in entry.args.model_fields:
+            if entry.name == "run" and name == "file":
+                if value:
+                    raw[field_name] = [str(path) for path in value]
+            elif field_name in entry.args.model_fields:
                 raw[field_name] = str(value) if isinstance(value, Path) else value
             elif supplied and not (
                 entry.name == "global update" and name in ("show", "apply_release", "revert")

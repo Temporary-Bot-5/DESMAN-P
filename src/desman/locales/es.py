@@ -1887,4 +1887,39 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "sí", "no": "no"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file requiere GOAL y no se puede usar con --spec",
+        "Attach a text file to GOAL. Repeat for more files.": "Adjunta un archivo de texto al objetivo. Repite la opción para adjuntar más archivos.",
+        "Attach text files": "Adjuntar archivos de texto",
+        "Attached for the next task: {file} ({n} character).": (
+            "Adjuntado para la próxima tarea: {file} ({n} carácter).",
+            "Adjuntado para la próxima tarea: {file} ({n} caracteres).",
+        ),
+        "Attachments are unavailable in this chat right now.": "Los archivos adjuntos no están disponibles en este chat en este momento.",
+        "Could not attach {file}: {reason}": "No se pudo adjuntar {file}: {reason}",
+        "Could not update attachments.": "No se pudieron actualizar los archivos adjuntos.",
+        "Files attached: {files}": "Archivos adjuntos: {files}",
+        "Files pending for the next task": "Archivos para la próxima tarea",
+        "Files pending for the next task: {files}": "Archivos para la próxima tarea: {files}",
+        "No files are pending.": "No hay archivos pendientes.",
+        "Only you can attach local files. Use /file PATH.": "Solo tú puedes adjuntar archivos locales. Usa /file PATH.",
+        "Pending files cleared.": "Se ha vaciado la lista de archivos pendientes.",
+        "Remove attachment: {file}": "Quitar el archivo adjunto {file}",
+        "Removed pending file: {file}": "Se quitó {file} de la lista.",
+        "Task {ref} received the attached files: {files}": "La tarea {ref} recibió los archivos adjuntos: {files}",
+        "That file is no longer pending.": "Este archivo ya no está pendiente.",
+        "The attached files could not be saved. The task was not started: {error}": "No se pudieron guardar los archivos adjuntos. La tarea no se inició: {error}",
+        "Your files are still pending.": "Tus archivos siguen pendientes.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "adjuntar con /file PATH, ver la lista con /file o vaciarla con /file clear",
+        "it is not a regular file": "no es un archivo regular",
+        "save it as UTF-8 text": "guárdalo como texto UTF-8",
+        "the attached files together exceed {limit} bytes": "los archivos adjuntos superan en conjunto los {limit} bytes",
+        "the file could not be read": "no se pudo leer el archivo",
+        "the file exceeds {limit} bytes": "el archivo supera los {limit} bytes",
+        "the file extension is not a supported text format": "la extensión del archivo no corresponde a un formato de texto admitido",
+        "the maximum number of attached files is {limit}": "puedes adjuntar hasta {limit} archivos",
+    }
+)
+
 CATALOG = Catalog("Español", plural, MESSAGES, CLICK, forms=2)

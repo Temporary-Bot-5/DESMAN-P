@@ -14,12 +14,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 from socket import socket
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import click
 from pydantic import ValidationError
 
-from desman import ui
+from desman import task_files, ui
 from desman.config import ConfigError, open_config
 from desman.core import db
 from desman.gui.front import WebFront
@@ -80,6 +80,14 @@ def strings() -> dict[str, str]:
         "every_task": t("for every task"),
         "delete_tasks": t("Delete all tasks"),
         "remove": t("Remove"),
+        "attach_files": t("Attach text files"),
+        "remove_attachment": t("Remove attachment: {file}"),
+        "attached_files": t("Files pending for the next task"),
+        "attachment_failed": t("Could not update attachments."),
+        "max_attachment_bytes": str(task_files.MAX_GIVEN_BYTES),
+        "attachment_too_large": task_files.attachment_error(
+            task_files.GivenFileError("the file is too large"), "{file}"
+        ),
         "restore": t("Restore"),
         "removed_modules": t("Removed modules"),
         "for_global": t("For DESMAN-Global"),
@@ -239,7 +247,13 @@ class Server:
         return f"http://127.0.0.1:{self.port}/?token={self.token}"
 
     def handle(
-        self, method: str, path: str, headers: Mapping[str, str], body: bytes = b""
+        self,
+        method: str,
+        path: str,
+        headers: Mapping[str, str],
+        body: bytes = b"",
+        *,
+        oversized: bool = False,
     ) -> Response:
         """Validate transport input before serving assets, state or human answers."""
         headers = {k.lower(): v for k, v in headers.items()}
@@ -274,6 +288,8 @@ class Server:
         if method == "POST":
             if headers.get("origin") != f"http://{host}":
                 return Response(403)
+            if url.path in {"/attach", "/detach"}:
+                return self._attachment(url.path, headers, body, oversized)
             if (
                 headers.get("content-type", "").split(";", 1)[0].strip().lower()
                 != "application/json"
@@ -384,10 +400,39 @@ class Server:
                 return self._json(self.front.poll(after, self.poll_timeout, state))
         return Response(404)
 
+    def _attachment(
+        self, route: str, headers: Mapping[str, str], body: bytes, oversized: bool
+    ) -> Response:
+        source: str | None = None
+        try:
+            if route == "/attach":
+                source = task_files.upload_name(
+                    unquote(headers.get("x-desman-filename", ""), errors="strict")
+                )
+                if oversized:
+                    raise task_files.GivenFileError("the file is too large")
+                change: task_files.Given | str = task_files.given_upload(source, body)
+            else:
+                if body or oversized:
+                    return Response(400 if not oversized else 413)
+                change = headers.get("x-desman-file", "")
+            prompt = int(headers.get("x-desman-prompt", ""))
+        except task_files.GivenFileError as e:
+            status = 413 if oversized or len(body) > task_files.MAX_GIVEN_BYTES else 400
+            error = task_files.attachment_error(e, source or None)
+            return self._json({"error": self.front.redact(error)}, status)
+        except (UnicodeError, ValueError):
+            return self._json({"error": t("Could not update attachments.")}, 400)
+        try:
+            self.front.change_attachment(prompt, change)
+        except click.ClickException as e:
+            return self._json({"error": self.front.redact(e.format_message())}, 409)
+        return self._json({})
+
     @staticmethod
-    def _json(data: object) -> Response:
+    def _json(data: object, status: int = 200) -> Response:
         return Response(
-            200,
+            status,
             json.dumps(data, ensure_ascii=False).encode("utf-8"),
             {"Content-Type": "application/json; charset=utf-8"},
         )
@@ -434,10 +479,16 @@ def http_server(app: Server) -> ThreadingHTTPServer:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = -1
+            attaching = self.command == "POST" and urlsplit(self.path).path == "/attach"
+            limit = task_files.MAX_GIVEN_BYTES if attaching else MAX_BODY
             if length < 0:
                 response = Response(400)
-            elif length > MAX_BODY:
-                response = Response(413)
+            elif length > limit:
+                response = (
+                    app.handle(self.command, self.path, dict(self.headers.items()), oversized=True)
+                    if attaching
+                    else Response(413)
+                )
             else:
                 response = app.handle(
                     self.command,

@@ -1755,4 +1755,38 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "예", "no": "아니요"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file에는 GOAL이 필요하며 --spec과 함께 사용할 수 없습니다",
+        "Attach a text file to GOAL. Repeat for more files.": "목표에 텍스트 파일을 첨부합니다. 여러 파일을 첨부하려면 옵션을 반복하세요.",
+        "Attach text files": "텍스트 파일 첨부",
+        "Attached for the next task: {file} ({n} character).": (
+            "다음 작업에 첨부됨: {file}({n}자).",
+        ),
+        "Attachments are unavailable in this chat right now.": "현재 이 채팅에서는 파일을 첨부할 수 없습니다.",
+        "Could not attach {file}: {reason}": "{file}을 첨부할 수 없습니다: {reason}",
+        "Could not update attachments.": "첨부 파일을 업데이트할 수 없습니다.",
+        "Files attached: {files}": "첨부 파일: {files}",
+        "Files pending for the next task": "다음 작업에 첨부할 파일",
+        "Files pending for the next task: {files}": "다음 작업에 첨부할 파일: {files}",
+        "No files are pending.": "다음 작업에 첨부할 파일이 없습니다.",
+        "Only you can attach local files. Use /file PATH.": "로컬 파일은 사용자만 첨부할 수 있습니다. /file PATH를 사용하세요.",
+        "Pending files cleared.": "첨부 대기 목록을 비웠습니다.",
+        "Remove attachment: {file}": "첨부 파일 {file} 제거",
+        "Removed pending file: {file}": "대기 목록에서 {file}을 제거했습니다.",
+        "Task {ref} received the attached files: {files}": "작업 {ref}에 첨부 파일이 전달되었습니다: {files}",
+        "That file is no longer pending.": "이 파일은 더 이상 대기 목록에 없습니다.",
+        "The attached files could not be saved. The task was not started: {error}": "첨부 파일을 저장할 수 없어 작업을 시작하지 않았습니다: {error}",
+        "Your files are still pending.": "첨부할 파일은 대기 목록에 남아 있습니다.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "/file PATH로 첨부, /file로 목록 보기, /file clear로 목록 비우기",
+        "it is not a regular file": "일반 파일이 아닙니다",
+        "save it as UTF-8 text": "UTF-8 텍스트로 저장하세요",
+        "the attached files together exceed {limit} bytes": "첨부 파일의 총 크기가 {limit}바이트를 초과합니다",
+        "the file could not be read": "파일을 읽을 수 없습니다",
+        "the file exceeds {limit} bytes": "파일 크기가 {limit}바이트를 초과합니다",
+        "the file extension is not a supported text format": "파일 확장자가 지원되는 텍스트 형식에 속하지 않습니다",
+        "the maximum number of attached files is {limit}": "파일은 최대 {limit}개까지 첨부할 수 있습니다",
+    }
+)
+
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)

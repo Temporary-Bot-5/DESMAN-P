@@ -64,6 +64,17 @@ TOPICS: Final = (
         "Retellings copy task code and use your latest message’s language.",
     ),
     Topic(
+        "attachments",
+        "giving a task your own text files from the CLI, terminal chat or page",
+        "Use `desman run --file PATH GOAL` (repeat --file for more), /file PATH in "
+        "terminal chat, or the paperclip in the page's chat. /file lists pending files and "
+        "/file clear drops them; the page can remove each attachment. The next task in that "
+        "chat gets them in input/ in its workspace. Up to 10 files, 2 MB each and 10 MB "
+        "together. Text formats include TXT, Markdown, CSV, JSON and source code. PDF and DOCX "
+        "are unsupported. The planner sees the paths and character counts. Workers read the "
+        "files as task material with read_file.",
+    ),
+    Topic(
         "retries",
         "what happens after a failed attempt; what waits for the person's decision",
         "A rejected or unusable attempt is retried differently: with the "

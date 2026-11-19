@@ -142,6 +142,7 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
         "/compact": t("summarise this session's older messages now"),
+        "/file": t("attach with /file PATH, list with /file, or clear with /file clear"),
         "/messages": t("read messages privately: /messages [NAME]"),
         "/profile": t("how the interlocutor talks to you and what it notes about you"),
         "/delete": t("delete this session from the list (after your yes)"),
@@ -197,6 +198,7 @@ class Chat:
             sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
         )
         self._pending_choice: choices.Choice | None = None
+        self.pending_files: dict[str, task_files.PendingFiles] = {}
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
         self.read = read or (
@@ -439,6 +441,7 @@ class Chat:
                     ui.note(t("{n} new in General Terminal (/terminal)", n=count))
 
     def _erase_session(self, session_id: str) -> None:
+        self.pending_files.pop(session_id, None)
         self.sessions.erase(session_id)
 
     def _erase(self) -> None:
@@ -476,6 +479,7 @@ class Chat:
             config.behaviour,
             self._own_nodes(config),
             clock=self.sessions.clock,
+            pending_files=self._pending_file_names(config),
         )
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
         if self.session_id is not None and not self.temporary:  # nothing kept, nothing summarised
@@ -653,6 +657,98 @@ class Chat:
         else:
             ui.out(_render(message))
 
+    def _pending_file_names(self, config: Config | None) -> str:
+        pending = self.pending_files.get(self.session_id or "")
+        names = task_files.given_names(pending.snapshot()) if pending is not None else ""
+        return providers.redact_keys(names, config)[0]
+
+    def _file_event(self, text: str, task_id: str | None = None) -> None:
+        """Record the attachment event, starting a session if needed."""
+        if self.in_terminal:
+            ui.note(text)
+            return
+        config = self._saved_config()
+        first = self.session_id is None
+        choice = self._pending_choice if first else None
+        message = self.sessions.add(
+            self.session_id,
+            Role.DESMAN,
+            providers.redact_keys(text, config)[0],
+            kind=Kind.EVENT,
+            task_id=task_id,
+            temporary=self.temporary,
+            initial_choice=choice,
+        )
+        self.session_id = message.session_id
+        if choice is not None:
+            self._drop_pending()
+        if first:
+            ui.session(self.session_id, self.temporary)
+        if self.turn_sink is not None:
+            self.turn_sink(self.session_id)
+        else:
+            ui.out(_render(message))
+
+    def attach_file(self, file: task_files.Given) -> None:
+        """Add a file explicitly supplied by the person and record its workspace name."""
+        if self.in_terminal:
+            raise click.ClickException(
+                t("{name} is not available in General Terminal", name="/file")
+            )
+        pending = self.pending_files.get(self.session_id or "")
+        if pending is None:
+            pending = task_files.PendingFiles()
+        try:
+            attached = pending.add(file)
+        except task_files.GivenFileError as e:
+            raise click.ClickException(task_files.attachment_error(e, file.source)) from e
+        try:
+            self._file_event(
+                tn(
+                    attached.chars,
+                    "Attached for the next task: {file} ({n} character).",
+                    "Attached for the next task: {file} ({n} characters).",
+                    file=attached.name,
+                ),
+            )
+        except BaseException:
+            pending.consume([attached])
+            raise
+        assert self.session_id is not None
+        self.pending_files[self.session_id] = pending
+
+    def remove_file(self, name: str) -> None:
+        pending = self.pending_files.get(self.session_id or "")
+        if pending is None or not pending.remove(name):
+            raise click.ClickException(t("That file is no longer pending."))
+        self._file_event(t("Removed pending file: {file}", file=name))
+
+    def _file_command(self, argument: str) -> None:
+        pending = self.pending_files.get(self.session_id or "")
+        if not argument or argument == "clear":
+            names = self._pending_file_names(self._saved_config())
+            if not names:
+                ui.note(t("No files are pending."))
+            elif argument == "clear":
+                assert pending is not None
+                pending.clear()
+                self._file_event(t("Pending files cleared."))
+            else:
+                ui.note(t("Files pending for the next task: {files}", files=names))
+            return
+        if len(argument) >= 2 and argument[0] in ('"', "'") and argument[-1] == argument[0]:
+            argument = argument[1:-1]
+        try:
+            try:
+                path = Path(argument).expanduser()
+            except RuntimeError as e:
+                raise task_files.GivenFileError("the file could not be read") from e
+            self.attach_file(task_files.given_file(path))
+        except task_files.GivenFileError as e:
+            ui.error(task_files.attachment_error(e, argument))
+        except click.ClickException as e:
+            ui.error(e.format_message())
+
     def _note(self, edits: list[ProfileEdit], config: Config, seen: list[Note]) -> None:
         """The interlocutor's edits of the profile, each shown as it is made. Its numbers are
         those of the notes it was shown (`seen`), whatever an earlier edit of the turn moved.
@@ -724,6 +820,16 @@ class Chat:
             )
             return
         command = commands.shown(entry, args)
+        attached: list[task_files.Given] = []
+        if isinstance(args, commands.RunArgs) and args.file:
+            if not typed:
+                ui.error(t("Only you can attach local files. Use /file PATH."))
+                return
+            try:
+                attached = task_files.given_paths([Path(path) for path in args.file])
+            except task_files.GivenFileError as e:
+                ui.error(task_files.attachment_error(e))
+                return
         kind = entry.kind_of(args)
         before = self._saved_config()
         if (
@@ -741,6 +847,7 @@ class Chat:
                 config,
                 models,
                 interlocutor,
+                attached=attached,
             )
 
         def resume_task(task_id: str) -> bool:
@@ -1069,12 +1176,21 @@ class Chat:
     # ── Tasks ────────────────────────────────────────────────────────────────
 
     def _task(
-        self, turn: NewTask, config: Config, models: runs.Models, interlocutor: Interlocutor | None
+        self,
+        turn: NewTask,
+        config: Config,
+        models: runs.Models,
+        interlocutor: Interlocutor | None,
+        *,
+        attached: list[task_files.Given] | None = None,
     ) -> None:
         access = self._access(config)
         if access is None:
             return
         root = workspace_root_for(self.store.conn)
+        pending = self.pending_files.get(self.session_id or "")
+        taken = pending.snapshot() if pending is not None else []
+        inputs = [*taken, *(attached or [])]
         given = [task_files.handover(root, source, ref) for source, ref in self._sources(turn)]
         for handover in given:
             if handover.left:
@@ -1086,7 +1202,7 @@ class Chat:
                         files=", ".join(f.path for f in handover.left),
                     )
                 )
-        goal = turn.goal
+        goal = turn.goal + task_files.goal_note(inputs)
         paths = [path for handover in given for path in handover.paths()]
         if paths:  # what the workers see is the goal: the files are named in it, by code
             goal += (
@@ -1118,12 +1234,15 @@ class Chat:
             )
         spec = must_run(planned.spec) if turn.runs_code else planned.spec
         copied: dict[str, list[str]] = {}
+        placed: list[str] = []
 
         def copy(_conn: sqlite3.Connection, new_task: str) -> None:
             # Inside the transaction that creates the task: no worker can claim its work
             # before the files its goal names are there, and a failed copy leaves no task.
             for handover in given:
                 copied[handover.ref] = task_files.hand_over(root, new_task, handover)
+            if inputs:
+                placed.extend(task_files.place(root, new_task, inputs))
             if self.sessions.reply_to is not None:
                 self.sessions.settle_turn(self.sessions.reply_to, task_id=new_task)
 
@@ -1134,15 +1253,29 @@ class Chat:
                 session_id=self.session_id,
                 also=copy,
             )
-        except (OSError, PathEscapeError) as e:
-            ui.error(
-                t(
-                    "The files of an earlier task could not be copied, so the task was not "
-                    "started: {error}",
-                    error=e,
+        except (OSError, PathEscapeError, sqlite3.Error, task_files.GivenFileError) as e:
+            if inputs:
+                ui.error(
+                    t(
+                        "The attached files could not be saved. The task was not started: {error}",
+                        error=e,
+                    )
                 )
-            )
+                if taken:
+                    ui.note(t("Your files are still pending."))
+            else:
+                if isinstance(e, sqlite3.Error):
+                    raise
+                ui.error(
+                    t(
+                        "The files of an earlier task could not be copied, so the task was not "
+                        "started: {error}",
+                        error=e,
+                    )
+                )
             return
+        if pending is not None:
+            pending.consume(taken)
         ref = self.store.short_id(task_id)
         if self.background_tasks:
             started = tn(
@@ -1161,6 +1294,12 @@ class Chat:
                 title=turn.title,
             )
         self._event(started, task_id)
+        if placed:
+            files = ", ".join(placed)
+            self._file_event(
+                t("Task {ref} received the attached files: {files}", ref=ref, files=files),
+                task_id,
+            )
         for source_ref, made in copied.items():
             if made:
                 self._event(
@@ -1716,6 +1855,8 @@ class Chat:
             self._delete()
         elif name == "/compact":
             self._compact_now()
+        elif name == "/file":
+            self._file_command(line[len(name) :].strip())
         elif name == "/messages":
             try:
                 body = protocol.InboxQuery(with_name=line.strip()[len(name) :].strip() or None)
@@ -2221,6 +2362,7 @@ class Chat:
             config.behaviour,
             self._own_nodes(config),
             clock=self.sessions.clock,
+            pending_files=self._pending_file_names(config),
         )
         placeholder = Message(
             seq=0,

@@ -1884,4 +1884,39 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "ja", "no": "nein"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file erfordert GOAL und lässt sich nicht mit --spec kombinieren",
+        "Attach a text file to GOAL. Repeat for more files.": "Eine Textdatei an das Ziel anhängen. Für weitere Dateien die Option wiederholen.",
+        "Attach text files": "Textdateien anhängen",
+        "Attached for the next task: {file} ({n} character).": (
+            "Für die nächste Aufgabe angehängt: {file} ({n} Zeichen).",
+            "Für die nächste Aufgabe angehängt: {file} ({n} Zeichen).",
+        ),
+        "Attachments are unavailable in this chat right now.": "In diesem Chat sind Anhänge gerade nicht verfügbar.",
+        "Could not attach {file}: {reason}": "{file} konnte nicht angehängt werden: {reason}",
+        "Could not update attachments.": "Die Anhänge konnten nicht aktualisiert werden.",
+        "Files attached: {files}": "Angehängte Dateien: {files}",
+        "Files pending for the next task": "Dateien für die nächste Aufgabe",
+        "Files pending for the next task: {files}": "Dateien für die nächste Aufgabe: {files}",
+        "No files are pending.": "Es sind keine Dateien für die nächste Aufgabe vorgemerkt.",
+        "Only you can attach local files. Use /file PATH.": "Nur Sie können lokale Dateien anhängen. Verwenden Sie /file PATH.",
+        "Pending files cleared.": "Die Liste der vorgemerkten Dateien wurde geleert.",
+        "Remove attachment: {file}": "Anhang {file} entfernen",
+        "Removed pending file: {file}": "Datei {file} aus der Liste entfernt.",
+        "Task {ref} received the attached files: {files}": "Aufgabe {ref} hat die Anhänge erhalten: {files}",
+        "That file is no longer pending.": "Diese Datei ist nicht mehr vorgemerkt.",
+        "The attached files could not be saved. The task was not started: {error}": "Die Anhänge konnten nicht gespeichert werden. Die Aufgabe wurde nicht gestartet: {error}",
+        "Your files are still pending.": "Ihre Dateien sind weiterhin vorgemerkt.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "mit /file PATH anhängen, mit /file auflisten, mit /file clear leeren",
+        "it is not a regular file": "es ist keine reguläre Datei",
+        "save it as UTF-8 text": "speichern Sie die Datei als UTF-8-Text",
+        "the attached files together exceed {limit} bytes": "die Anhänge überschreiten zusammen {limit} Byte",
+        "the file could not be read": "die Datei konnte nicht gelesen werden",
+        "the file exceeds {limit} bytes": "die Datei überschreitet {limit} Byte",
+        "the file extension is not a supported text format": "die Dateiendung gehört zu keinem unterstützten Textformat",
+        "the maximum number of attached files is {limit}": "es können höchstens {limit} Dateien angehängt werden",
+    }
+)
+
 CATALOG = Catalog("Deutsch", plural, MESSAGES, CLICK, forms=2)

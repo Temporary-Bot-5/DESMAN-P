@@ -10,6 +10,9 @@ let transcriptVersion = null;
 let ended = false;
 let sending = false;
 let lineOpen = false;
+let canAttach = false;
+let attaching = false;
+let attachmentList = "";
 let terminalOpen = false;
 // The person just sent a line: its output is shown even if they had scrolled up. Set before
 // the answer is posted (its output may come back first) and kept only for a few seconds.
@@ -261,9 +264,59 @@ async function post(path, body) {
   });
 }
 
+async function editAttachments(prompt, files, remove = null) {
+  if (!canAttach || attaching || sending || prompt !== promptId) return;
+  attaching = true;
+  updateActions();
+  const errors = [];
+  try {
+    for (const file of remove ? [null] : files) {
+      if (file && file.size > Number(words.max_attachment_bytes)) {
+        errors.push(words.attachment_too_large.replace("{file}", () => file.name));
+        continue;
+      }
+      const headers = {"X-Desman-Prompt": String(prompt)};
+      if (remove) headers["X-Desman-File"] = remove;
+      else headers["X-Desman-Filename"] = encodeURIComponent(file.name);
+      const response = await fetch(remove ? "/detach" : "/attach", {
+        method: "POST", headers, body: file,
+      });
+      if (!response.ok) {
+        const reply = await response.json().catch(() => ({}));
+        errors.push(reply.error || words.attachment_failed);
+      }
+    }
+  } catch {
+    errors.push(words.attachment_failed);
+  } finally {
+    attaching = false;
+    $("attachment-error").textContent = errors.join("\n");
+    updateActions();
+  }
+}
+
+function showAttachments(files, prompt) {
+  const list = $("attached-files");
+  const key = JSON.stringify([prompt, words.lang, files]);
+  if (key === attachmentList) return;
+  attachmentList = key;
+  list.replaceChildren();
+  list.hidden = !files.length;
+  list.setAttribute("aria-label", words.attached_files);
+  for (const file of files) {
+    const item = text("li", file.name, list);
+    const remove = button(item, "×", () => editAttachments(prompt, [], file.id));
+    remove.dataset.attachment = "true";
+    const label = words.remove_attachment.replace("{file}", () => file.name);
+    remove.title = label;
+    remove.setAttribute("aria-label", label);
+  }
+  updateActions();
+}
+
 // Windows reflect server prompts; only the server validates and applies answers.
 async function answer(p, value, cancel = false) {
-  if (sending) return;
+  if (sending || (attaching && p.kind === "line")) return;
   sending = true;
   try {
     const body = cancel ? {id: p.id, cancel: true} : {id: p.id, value};
@@ -299,6 +352,7 @@ function showPrompt(p, pending = false) {
     return;
   }
   if (p.id === shownId) return;
+  if (!pending) $("attachment-error").textContent = "";
   if (pending) pendingId = p.id; else promptId = p.id;
   const form = $(target);
   form.replaceChildren();
@@ -367,6 +421,24 @@ function showPrompt(p, pending = false) {
     send.title = words.send;
     send.setAttribute("aria-label", words.send);
     if (p.kind === "line") {
+      if (Object.hasOwn(p.commands || {}, "/file")) {
+        const picker = document.createElement("input");
+        picker.type = "file";
+        picker.multiple = true;
+        picker.hidden = true;
+        picker.setAttribute("aria-label", words.attach_files);
+        const attach = button(form, "📎", () => picker.click());
+        attach.dataset.attachment = "true";
+        attach.title = words.attach_files;
+        attach.setAttribute("aria-label", words.attach_files);
+        send.before(attach);
+        form.append(picker);
+        picker.onchange = () => {
+          const files = Array.from(picker.files);
+          picker.value = "";
+          void editAttachments(p.id, files);
+        };
+      }
       const suggestions = text("div", "", form);
       suggestions.id = "suggestions";
       const resize = () => {
@@ -493,8 +565,10 @@ async function poll() {
       if (data.turn?.state === "queued") {
         $("live").textContent = data.turn.reason || words.waiting_module.replace("{n}", data.turn.ahead);
       } else rich($("live"), live);
+      canAttach = !!data.can_attach;
       showPrompt(data.pending || null, true);
       showPrompt(data.prompt);
+      showAttachments(data.attached_files || [], data.prompt?.id);
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
       // Another chat opened: start at its latest message, wherever the last one was read.
@@ -549,6 +623,9 @@ function updateActions() {
     b.disabled = !lineOpen || (!!b.closest("#settings-window") && !!settingsPending);
     b.title = lineOpen ? (b.dataset.label || "") : words.wait;
   });
+  document.querySelectorAll("[data-attachment]").forEach(b => {
+    b.disabled = !canAttach || !lineOpen || attaching;
+  });
 }
 
 function actionButton(parent, label, value) {
@@ -559,7 +636,7 @@ function actionButton(parent, label, value) {
 }
 
 async function act(action) {
-  if (!action || !lineOpen || sending) return;
+  if (!action || !lineOpen || sending || attaching) return;
   sending = true;
   try {
     const response = await post("/action", action);
