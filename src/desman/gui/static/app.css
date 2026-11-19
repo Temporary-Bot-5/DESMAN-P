@@ -178,8 +178,7 @@ main { height: 100%; display: flex; flex-direction: column; padding: 1rem 1.4rem
 #prompt.line-prompt { display: flex; align-items: flex-end; gap: .5rem; overflow: visible; position: relative; }
 .line-prompt textarea { min-height: 0; line-height: 1.5rem; padding: 12px; resize: none; flex: 1; width: 0; }
 .line-prompt > button { margin: 0; width: 2.8rem; height: 2.8rem; padding: 0; flex: none; background: #00eeff; color: #101418; font-size: 1.4rem; }
-.line-prompt > button.attach { background: transparent; color: #00eeff; border: 1px solid #34444f; display: grid; place-items: center; }
-.line-prompt > button.attach:hover:not(:disabled) { border-color: #00eeff; background: #00eeff14; }
+.line-prompt > button.attach { display: grid; place-items: center; }
 .line-prompt > button.attach svg { width: 1.3rem; height: 1.3rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 #suggestions { position: absolute; bottom: calc(100% + .4rem); left: 0; right: 0; max-height: 20rem; overflow-y: auto; background: #161e24; border-radius: .5rem; box-shadow: 0 4px 20px #0008; z-index: 2; }
 #suggestions:empty { display: none; }
