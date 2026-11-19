@@ -278,7 +278,7 @@ TOPICS: Final = (
         "allowed free provider; keys stay here. `desman global quota PROVIDER` shows/changes "
         "quotas; `desman global undonate PROVIDER` withdraws it. "
         "`desman global leave` withdraws all; `desman global status` shows state. "
-        "Quotas count per UTC day and status shows the local reset time. "
+        "Status and quota show the local reset time for UTC-day quotas. "
         "`desman global lead STATE` (on/off, default on) allows an appointed node to plan "
         "and supervise a cluster with lent quotas while idle. Personal work or turning lead off stops renewal; another "
         "node takes over. Status shows its current role.\n"

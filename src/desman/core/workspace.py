@@ -149,12 +149,12 @@ class Workspace:
             raise FileNotFoundError(f"no file {path!r} in workspace")
         if target.stat().st_nlink > 1:
             raise PathEscapeError(f"{path!r} has other hard links")
-        return target.read_bytes()
+        return retry_sharing(target.read_bytes)
 
     def read(self, path: str) -> bytes:
         parts = check_path(path)
         if not SECURE:
-            return retry_sharing(lambda: self._read_portably(path, parts))
+            return self._read_portably(path, parts)
         with self._parent(parts, create=False) as parent:
             # O_NONBLOCK: a FIFO planted under this name must not hang the open.
             flags = os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _BINARY | _NONBLOCK

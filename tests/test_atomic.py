@@ -28,7 +28,9 @@ def test_replace_retries_only_windows_permission_errors(
         nonlocal attempts
         attempts += 1
         if attempts <= failures:
-            raise PermissionError("reader holds target")
+            error = PermissionError("reader holds target")
+            monkeypatch.setattr(error, "winerror", 32, raising=False)
+            raise error
         real_replace(src, dst)
 
     monkeypatch.setattr(atomic, "sys", SimpleNamespace(platform=platform))
@@ -76,7 +78,9 @@ def test_config_reads_retry_only_windows_permission_errors(
         if failure == "missing":
             raise FileNotFoundError(path)
         if failure == "persistent" or attempts <= 3:
-            raise PermissionError("replacement in progress")
+            error = PermissionError("replacement in progress")
+            monkeypatch.setattr(error, "winerror", 33, raising=False)
+            raise error
         return real_read(path, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read)
@@ -114,7 +118,9 @@ def test_adopting_config_retries_windows_sharing_violation(
         if path == old:
             attempts += 1
             if attempts == 1:
-                raise PermissionError("replacement in progress")
+                error = PermissionError("replacement in progress")
+                monkeypatch.setattr(error, "winerror", 33, raising=False)
+                raise error
         return real_read(path)
 
     monkeypatch.setattr(Path, "read_bytes", read)
@@ -125,3 +131,32 @@ def test_adopting_config_retries_windows_sharing_violation(
     assert clock.slept == pytest.approx(0.05)
     assert new.read_bytes() == payload
     assert not old.exists()
+
+
+@pytest.mark.parametrize("winerror", [None, 5, 32, 33, 65])
+def test_windows_retries_only_sharing_codes(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock, winerror: int | None
+) -> None:
+    error = PermissionError("operation denied")
+    if winerror is not None:
+        monkeypatch.setattr(error, "winerror", winerror, raising=False)
+    attempts = 0
+
+    def operation() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise error
+        return "ready"
+
+    monkeypatch.setattr(atomic, "sys", SimpleNamespace(platform="win32"))
+    if winerror in (5, 32, 33):
+        assert atomic.retry_sharing(operation, sleep=clock.sleep) == "ready"
+        assert attempts == 2
+        assert clock.slept == pytest.approx(0.05)
+    else:
+        with pytest.raises(PermissionError) as caught:
+            atomic.retry_sharing(operation, sleep=clock.sleep)
+        assert caught.value is error
+        assert attempts == 1
+        assert clock.slept == 0

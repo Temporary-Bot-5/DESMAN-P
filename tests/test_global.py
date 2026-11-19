@@ -31,7 +31,7 @@ from desman.config import (
 from desman.core import db, netlog
 from desman.interlocutor import CHAT
 from desman.llm.fake import FakeLLM
-from desman.net import sign
+from desman.net import jobs, sign
 from helpers import make_config
 from test_commands import asks, chat, journal
 from test_wizard import DONE, KEEP_PERMISSIONS, wizard
@@ -168,7 +168,7 @@ def test_status_says_it_is_off(monkeypatch: pytest.MonkeyPatch, clock: FakeClock
         "registry": None,
         "node": None,
         "donated": {},
-        "used_today": {},
+        "used_today": None,
         "resets_at": "2026-01-02T00:00:00+00:00",
         "lead": True,
         "cluster": None,
@@ -526,12 +526,17 @@ def test_quota_usage_and_reset_in_cli_and_chat(
                 "VALUES (?, ?, ?, 'model', 'hash', ?, 1)",
                 (db.to_iso(at), role, provider, tokens),
             )
+        assert jobs.hold_call(conn, saved(), "ollama", clock()) is not None
+        conn.execute(
+            "INSERT INTO quota_holds (provider, expires_at) VALUES (?, ?)",
+            ("ollama", db.to_iso(clock())),
+        )
     usage = {"calls": 2, "tokens": 100}
     resets_at = "2026-01-02T00:00:00+00:00"
     for command in (("status",), ("quota", "Ollama")):
         output = ok("global", *command).output
         assert output.count(f"Daily quotas reset at {reset} local time.") == 1
-        assert "Used today (calls/tokens): 2/100. Remaining: 98/99900." in output
+        assert "Used today (calls/tokens): 2/100. Remaining: 97/99900." in output
     status = json.loads(ok("global", "status", "--json").output)
     assert status["donated"] == {"ollama": LENT.model_dump()}
     assert status["used_today"] == {"ollama": usage}
@@ -544,7 +549,9 @@ def test_quota_usage_and_reset_in_cli_and_chat(
         "resets_at": resets_at,
     }
     fake.on(CHAT, asks("global status"), asks("global quota", provider="ollama"))
-    assert chat("status?", "when does Ollama reset?").exit_code == 0
+    result = chat("status?", "when does Ollama reset?")
+    assert result.exit_code == 0, result.output
+    assert result.output.count(f"Daily quotas reset at {reset} local time.") == 2
     events = [
         json.loads(event.text.split("\n", 1)[1])
         for event in conversation()
@@ -554,3 +561,32 @@ def test_quota_usage_and_reset_in_cli_and_chat(
     updated = json.loads(ok("global", "quota", "Ollama", "--calls", "1", "--json").output)
     assert updated == quota | {"changed": True, "quota": LENT.model_dump() | {"calls_per_day": 1}}
     assert "Remaining: 0/99900." in ok("global", "quota", "Ollama").output
+
+
+@pytest.mark.parametrize("database", ["missing", "mismatch", "unreadable"])
+def test_quota_and_status_omit_usage_without_a_usable_database(
+    database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured(settings=OLLAMA, network=Network(enabled=True, donated={"ollama": LENT}))
+    path = db.default_db_path()
+    if database == "mismatch":
+        with global_cli.journal(None) as conn:
+            conn.execute("DROP TABLE quota_holds")
+    elif database == "unreadable":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"not a database")
+
+    for command in (("quota", "Ollama"), ("status",)):
+        output = ok("global", *command).output
+        assert "100 calls and 100000 tokens a day" in output
+        assert "Used today" not in output
+        assert "Remaining" not in output
+        assert json.loads(ok("global", *command, "--json").output)["used_today"] is None
+    if database == "missing":
+        assert not path.exists()
+
+    def unexpected_database_access() -> Path:
+        pytest.fail("provider validation must happen before database access")
+
+    monkeypatch.setattr(db, "default_db_path", unexpected_database_access)
+    assert "is not lent" in refused("global", "quota", "nvidia")

@@ -69,9 +69,39 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _used_today(conn: sqlite3.Connection | None, provider: str, now: datetime) -> dict[str, int]:
-    calls, tokens = jobs.used_today(conn, provider, now) if conn is not None else (0, 0)
-    return {"calls": calls, "tokens": tokens}
+@dataclass(frozen=True)
+class QuotaUsage:
+    calls: int
+    tokens: int
+    held: int
+
+    def as_json(self) -> dict[str, int]:
+        return {"calls": self.calls, "tokens": self.tokens}
+
+
+@contextmanager
+def _usage_database() -> Iterator[sqlite3.Connection | None]:
+    """Read an existing, compatible database without creating or migrating it."""
+    path = db.default_db_path()
+    conn = None
+    try:
+        if path.is_file():
+            conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            if db.schema_version(conn) != db.SCHEMA_VERSION:
+                conn.close()
+                conn = None
+            else:
+                db.verify_schema(conn)
+    except (OSError, sqlite3.Error, db.SchemaMismatchError):
+        if conn is not None:
+            conn.close()
+        conn = None
+    try:
+        yield conn
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _reset_at(now: datetime) -> datetime:
@@ -86,7 +116,7 @@ class Status:
     node: str | None
     """The node key's fingerprint, if there is one."""
     donated: dict[str, Donation]
-    used_today: dict[str, dict[str, int]]
+    used_today: dict[str, QuotaUsage] | None
     now: datetime
     lead: bool = True
     cluster: dict[str, Any] | None = None
@@ -99,7 +129,11 @@ class Status:
             "registry": self.registry,
             "node": self.node,
             "donated": {name: d.model_dump() for name, d in self.donated.items()},
-            "used_today": self.used_today,
+            "used_today": (
+                None
+                if self.used_today is None
+                else {name: usage.as_json() for name, usage in self.used_today.items()}
+            ),
             "resets_at": _reset_at(self.now).isoformat(),
         }
 
@@ -108,14 +142,14 @@ class Status:
 class QuotaReport:
     provider: str
     quota: Donation
-    used_today: dict[str, int]
+    used_today: QuotaUsage | None
     now: datetime
 
     def as_json(self, changed: Lent | None = None) -> dict[str, Any]:
         data: dict[str, Any] = {
             "provider": self.provider,
             "quota": self.quota.model_dump(),
-            "used_today": self.used_today,
+            "used_today": None if self.used_today is None else self.used_today.as_json(),
             "resets_at": _reset_at(self.now).isoformat(),
         }
         if changed is not None:
@@ -123,9 +157,23 @@ class QuotaReport:
         return data
 
 
-def quota_report(conn: sqlite3.Connection, provider: str, quota: Donation) -> QuotaReport:
+def show_quota(
+    conn: sqlite3.Connection | None,
+    provider: str,
+    quota: Donation,
+    changed: Lent | None = None,
+    *,
+    as_json: bool = False,
+) -> dict[str, Any]:
     now = _utc_now()
-    return QuotaReport(provider, quota, _used_today(conn, provider, now), now)
+    usage = None if conn is None else QuotaUsage(*jobs.quota_usage(conn, provider, now))
+    found = QuotaReport(provider, quota, usage, now)
+    data = found.as_json(changed)
+    if as_json:
+        click.echo(json.dumps(data))
+    else:
+        print_quota(found, changed)
+    return data
 
 
 Entry = tuple[str, dict[str, Any]]
@@ -204,7 +252,11 @@ def status(
         registry=network.registry or net.DEFAULT_REGISTRY,
         node=node_fingerprint(key_path),
         donated=dict(network.donated),
-        used_today={name: _used_today(conn, name, now) for name in network.donated},
+        used_today=(
+            None
+            if conn is None
+            else {name: QuotaUsage(*jobs.quota_usage(conn, name, now)) for name in network.donated}
+        ),
         now=now,
         lead=network.lead,
         cluster=cluster.role(conn, now) if conn is not None and network.enabled else None,
@@ -693,13 +745,13 @@ def quota_text(donation: Donation) -> str:
     )
 
 
-def _usage_text(quota: Donation, used: dict[str, int]) -> str:
+def _usage_text(quota: Donation, used: QuotaUsage) -> str:
     return t(
         "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.",
-        calls=used["calls"],
-        tokens=used["tokens"],
-        calls_left=max(0, quota.calls_per_day - used["calls"]),
-        tokens_left=max(0, quota.tokens_per_day - used["tokens"]),
+        calls=used.calls,
+        tokens=used.tokens,
+        calls_left=max(0, quota.calls_per_day - used.calls - used.held),
+        tokens_left=max(0, quota.tokens_per_day - used.tokens),
     )
 
 
@@ -718,7 +770,8 @@ def print_quota(
         ui.out(f"{provider_name(found.provider)}: {quota_text(found.quota)}")
     else:
         print_lent(changed)
-    ui.out(_usage_text(found.quota, found.used_today))
+    if found.used_today is not None:
+        ui.out(_usage_text(found.quota, found.used_today))
     ui.note(_reset_text(found.now, tz))
 
 
@@ -739,9 +792,11 @@ def print_status(found: Status, *, tz: tzinfo | None = None) -> None:
     if found.cluster:
         table.add_row(cluster_text(found.cluster), "")
     for provider_id, donation in sorted(found.donated.items()):
+        details = quota_text(donation)
+        if found.used_today is not None:
+            details += "\n" + _usage_text(donation, found.used_today[provider_id])
         table.add_row(
-            Text(t("lent: {name}", name=provider_name(provider_id)), style="muted"),
-            quota_text(donation) + "\n" + _usage_text(donation, found.used_today[provider_id]),
+            Text(t("lent: {name}", name=provider_name(provider_id)), style="muted"), details
         )
     ui.out(table)
     if found.donated:
@@ -830,7 +885,7 @@ def print_lent(lent: Lent) -> None:
 def global_group(ctx: click.Context) -> None:
     """desman-global: whether this machine takes part, and what it lends."""
     if ctx.invoked_subcommand is None:
-        with journal(None) as conn:
+        with _usage_database() as conn:
             print_status(status(load_config().load(), conn=conn))
 
 
@@ -838,7 +893,7 @@ def global_group(ctx: click.Context) -> None:
 @json_option
 def status_command(as_json: bool) -> None:
     """Whether this machine takes part in desman-global, its key, what it lends."""
-    with journal(None) as conn:
+    with _usage_database() as conn:
         found = status(load_config().load(), conn=conn)
     if as_json:
         click.echo(json.dumps(found.as_json(), ensure_ascii=False, indent=2))
@@ -931,20 +986,16 @@ def undonate_command(provider: str, as_json: bool) -> None:
 def quota_command(provider: str, calls: int | None, tokens: int | None, as_json: bool) -> None:
     """Show or change the daily quota of PROVIDER, lent to desman-global."""
     manager = load_config()
-    changed = None
+    if calls is None and tokens is None:
+        config = manager.load()
+        lent = lent_provider(config, provider)
+        with _usage_database() as conn:
+            show_quota(conn, lent, config.network.donated[lent], as_json=as_json)
+        return
     with journal(None) as conn:
-        if calls is None and tokens is None:
-            config = manager.load()
-            lent = lent_provider(config, provider)
-            found = quota_report(conn, lent, config.network.donated[lent])
-        else:
-            changed = set_quota(manager, provider, calls, tokens, conn=conn)
-            assert changed.new is not None
-            found = quota_report(conn, changed.provider, changed.new)
-    if as_json:
-        click.echo(json.dumps(found.as_json(changed)))
-    else:
-        print_quota(found, changed)
+        changed = set_quota(manager, provider, calls, tokens, conn=conn)
+        assert changed.new is not None
+        show_quota(conn, changed.provider, changed.new, changed, as_json=as_json)
 
 
 @global_group.command("submit-proposal")

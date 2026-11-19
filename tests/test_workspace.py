@@ -427,7 +427,9 @@ def test_portable_read_retries_windows_sharing_violation(
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise PermissionError("replacement in progress")
+            error = PermissionError("replacement in progress")
+            monkeypatch.setattr(error, "winerror", 32, raising=False)
+            raise error
         return real_read(path)
 
     monkeypatch.setattr(Path, "read_bytes", read)
@@ -437,3 +439,24 @@ def test_portable_read_retries_windows_sharing_violation(
     assert space.read("answer") == b"ready"
     assert attempts == 2
     assert clock.slept == pytest.approx(0.05)
+
+
+def test_portable_read_does_not_retry_link_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    space = Workspace(tmp_path, "task")
+    space.write("answer", b"ready")
+    error = PermissionError("link check failed")
+    monkeypatch.setattr(error, "winerror", 32, raising=False)
+
+    def check(self: Workspace, parts: tuple[str, ...]) -> None:
+        raise error
+
+    monkeypatch.setattr(Workspace, "_check_no_links", check)
+    monkeypatch.setattr(ws_module, "SECURE", False)
+    monkeypatch.setattr(atomic, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(atomic, "time", SimpleNamespace(sleep=clock.sleep))
+    with pytest.raises(PermissionError) as caught:
+        space.read("answer")
+    assert caught.value is error
+    assert clock.slept == 0

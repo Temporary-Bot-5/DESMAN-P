@@ -21,13 +21,15 @@ def retry_sharing(
         for _ in range(40):
             try:
                 return operation()
-            except PermissionError:
+            except PermissionError as error:
+                if getattr(error, "winerror", None) not in (32, 33, 5):
+                    raise
                 wait(0.05)
     return operation()
 
 
 def read_text(path: Path, *, sleep: Callable[[float], None] | None = None) -> str:
-    """Read UTF-8 text, retrying Windows permission errors for up to two seconds."""
+    """Read UTF-8 text, retrying Windows sharing errors for up to two seconds."""
     return retry_sharing(lambda: path.read_text(encoding="utf-8"), sleep=sleep)
 
 
