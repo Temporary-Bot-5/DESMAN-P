@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "Waiting for Docker to start…": "Docker の起動を待っています…",
     "Once Docker Desktop is running, follow these steps.": "Docker Desktop が起動したら、以下の手順を実行してください。",
     "On Linux, bubblewrap runs generated code in a sandbox.": "Linux では、bubblewrap が生成されたコードをサンドボックス内で実行します。",
+    "Install bubblewrap now?": "今すぐ bubblewrap をインストールしますか？",
     "Install Docker now?": "今すぐ Docker をインストールしますか？",
     "Install Docker with `desman docker install`.": "`desman docker install` で Docker をインストールしてください。",
     "Install bubblewrap": "bubblewrap をインストールする",

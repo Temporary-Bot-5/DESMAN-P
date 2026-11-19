@@ -18,7 +18,10 @@ import click
 
 from desman import ui
 from desman.config_cli import json_option
+from desman.core.sandbox import find_docker, windows_program_files
 from desman.i18n import t
+
+docker_executable = find_docker
 
 INSTALL_COMMAND = "desman docker install --yes"
 DESKTOP_ROOT = "https://docs.docker.com/desktop/setup/install/"
@@ -83,11 +86,18 @@ def _desktop_license() -> str:
     )
 
 
-def _linux_packages(os_release: Mapping[str, str]) -> tuple[list[str], str, list[str]] | None:
-    families = {os_release.get("ID", ""), *os_release.get("ID_LIKE", "").split()}
+def _linux_packages(
+    os_release: Mapping[str, str],
+) -> tuple[list[str], str | None, list[str]] | None:
+    distro = os_release.get("ID", "")
+    families = {distro, *os_release.get("ID_LIKE", "").split()}
+    if distro == "fedora":
+        return ["dnf", "install", "-y"], "moby-engine", []
+    if distro in {"rhel", "rocky", "almalinux", "centos"} or families & {"rhel", "centos"}:
+        return ["dnf", "install", "-y"], None, []
     if families & {"debian", "ubuntu"}:
         return ["apt-get", "install", "-y"], "docker.io", ["apt-get", "update"]
-    if families & {"fedora", "rhel"}:
+    if "fedora" in families:
         return ["dnf", "install", "-y"], "moby-engine", []
     if "arch" in families:
         return ["pacman", "-S", "--needed", "--noconfirm"], "docker", []
@@ -160,35 +170,34 @@ def plan(
         return result
 
     sudo = [] if user == "root" else ["sudo"]
-    if _group_access_needed(docker_state):
-        _add_docker_group(result, sudo, user)
-        result.after.extend(next_steps)
-        return result
-
     packages = _linux_packages(os_release)
     needs_engine = not installed and not ready
     needs_bwrap = not docker_state["bwrap"]
-    if packages is None and needs_engine:
+    engine = packages[1] if packages is not None else None
+    if needs_engine and engine is None:
         result.link = ENGINE_LINK
-        return result
 
-    if packages is not None and (needs_engine or needs_bwrap):
-        install, engine, update = packages
+    names = [engine] if needs_engine and engine is not None else []
+    if needs_bwrap and packages is not None:
+        names.append("bubblewrap")
+    if packages is not None and names:
+        install, _, update = packages
         if update:
             result.steps.append(Step([*sudo, *update], t("Update the package list")))
-        names = [engine] if needs_engine else []
-        if needs_bwrap:
-            names.append("bubblewrap")
-        description = t("Install the Docker packages") if needs_engine else t("Install bubblewrap")
+        description = (
+            t("Install the Docker packages") if needs_engine and engine else t("Install bubblewrap")
+        )
         result.steps.append(Step([*sudo, *install, *names], description))
         result.download = t("varies by distribution")
 
-    if needs_engine:
+    if needs_engine and engine is not None:
         result.steps.append(
             Step([*sudo, "systemctl", "enable", "--now", "docker"], t("Enable and start Docker"))
         )
         _add_docker_group(result, sudo, user)
-    elif not ready:
+    elif _group_access_needed(docker_state):
+        _add_docker_group(result, sudo, user)
+    elif installed and not ready:
         result.steps.append(Step([*sudo, "systemctl", "start", "docker"], t("Start Docker")))
     if result.steps:
         result.needs_admin = True
@@ -201,6 +210,8 @@ def _group_access_needed(state: Status) -> bool:
 
 
 def _add_docker_group(installation: Plan, sudo: list[str], user: str) -> None:
+    if user == "root":
+        return
     installation.steps.append(
         Step([*sudo, "usermod", "-aG", "docker", user], t("Add the user to the docker group"))
     )
@@ -239,25 +250,6 @@ def _probe(argv: list[str], *, timeout: float = 5) -> tuple[str | None, str | No
     if result.returncode == 0:
         return (result.stdout or "").strip(), None
     return None, (result.stderr or result.stdout or "").strip() or None
-
-
-def _program_files() -> str:
-    return os.environ.get("PROGRAMW6432") or os.environ.get("PROGRAMFILES", r"C:\Program Files")
-
-
-def docker_executable() -> str | None:
-    """Find the CLI, including Docker Desktop before the current PATH is refreshed."""
-    executable = shutil.which("docker")
-    if executable is not None:
-        return executable
-    bundled: str | None = None
-    if sys.platform == "win32":
-        bundled = ntpath.join(
-            _program_files(), "Docker", "Docker", "resources", "bin", "docker.exe"
-        )
-    elif sys.platform == "darwin":
-        bundled = "/Applications/Docker.app/Contents/Resources/bin/docker"
-    return bundled if bundled is not None and os.path.isfile(bundled) else None
 
 
 def docker_status(*, display: bool = True) -> Status:
@@ -300,10 +292,11 @@ def current_plan(state: Status | None = None) -> Plan:
             import pwd
 
             uid = os.getuid()
+            packages = _linux_packages(release)
             if uid == 0:
                 user = "root"
             elif _group_access_needed(state) or (
-                not state["installed"] and not state["available"] and _linux_packages(release)
+                not state["installed"] and not state["available"] and packages and packages[1]
             ):
                 with contextlib.suppress(KeyError):
                     user = pwd.getpwuid(uid).pw_name
@@ -317,7 +310,7 @@ def current_plan(state: Status | None = None) -> Plan:
         release,
         user,
         state,
-        program_files=_program_files(),
+        program_files=windows_program_files(),
     )
 
 
@@ -341,6 +334,13 @@ def apply_plan(
                 t("{description} failed: {error}", description=step.description, error=str(exc))
             ) from exc
         if result.returncode:
+            if (
+                installation.windows
+                and step.argv[:2] == ["winget", "install"]
+                and os.path.isfile(installation.steps[-1].argv[0])
+            ):
+                ui.note(t("Windows may ask you to restart."))
+                continue
             raise click.ClickException(
                 t(
                     "{description} failed (exit {code})",
@@ -378,6 +378,7 @@ def _desktop_status(sleep: Callable[[float], None], clock: Callable[[], float]) 
         info, problem = _probe([executable, "info"], timeout=max(0.001, min(5, deadline - clock())))
         state.update({"installed": True, "available": info is not None, "problem": problem})
         if state["available"]:
+            state["version"] = _probe([executable, "--version"])[0]
             break
     return state
 
@@ -396,7 +397,7 @@ def status(as_json: bool) -> None:
     """Show Docker installation and daemon status."""
     result = docker_status(display=not as_json)
     if as_json:
-        click.echo(json.dumps(result))
+        click.echo(json.dumps(result, ensure_ascii=False))
 
 
 @docker.command()

@@ -12,7 +12,6 @@ take part in desman-global (Y/N).
 from __future__ import annotations
 
 import json
-import shutil
 from unittest.mock import patch
 
 from click.testing import CliRunner, Result
@@ -21,9 +20,10 @@ from desman import providers
 from desman import wizard as setup_wizard
 from desman.cli import cli
 from desman.config import ConfigManager, Permissions, default_config_path
+from desman.core.sandbox import find_docker
 from helpers import flat_keys, make_config
 
-DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + (shutil.which("docker") is not None))
+DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + (find_docker() is not None))
 KEEP_PERMISSIONS = ("", "", "", "")
 KEEP_PERSONAL = ("", "", "")  # personalisation as it was; how it talks: not set up now;
 # desman-global as it was (off)
@@ -32,7 +32,7 @@ KEEP_PERSONAL = ("", "", "")  # personalisation as it was; how it talks: not set
 def menu(provider_id: str) -> str:
     items = (
         [p.id for p in providers.PROVIDERS]
-        + (["search_setup"] if shutil.which("docker") is not None else [])
+        + (["search_setup"] if find_docker() is not None else [])
         + [p.id for p in providers.SERVICES]
     )
     return str(1 + items.index(provider_id))

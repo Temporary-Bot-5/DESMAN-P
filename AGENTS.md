@@ -356,7 +356,10 @@ preemption, self-improvement or network features before their phase).
 - Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
   (confirmation, `--yes` skips it), `inbox` in a terminal, and `keys add` (the hidden key;
   `--stdin` for scripts) may
-  prompt. A key is never accepted as a command-line argument.
+  prompt. `docker install --yes` runs the system's installers attached to the terminal, so
+  their own questions (sudo's password, Windows' UAC, winget/Homebrew) reach the person
+  (ADR 0013); without `--yes` it only prints the plan. A key is never accepted as a
+  command-line argument.
 
 ## Code Style & Conventions (ADR 0001)
 

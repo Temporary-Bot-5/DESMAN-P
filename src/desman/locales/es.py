@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "Waiting for Docker to start…": "Esperando a que Docker se inicie…",
     "Once Docker Desktop is running, follow these steps.": "Cuando Docker Desktop esté en ejecución, sigue estos pasos.",
     "On Linux, bubblewrap runs generated code in a sandbox.": "En Linux, bubblewrap ejecuta el código generado en un entorno aislado.",
+    "Install bubblewrap now?": "¿Instalar bubblewrap ahora?",
     "Install Docker now?": "¿Instalar Docker ahora?",
     "Install Docker with `desman docker install`.": "Instala Docker con `desman docker install`.",
     "Install bubblewrap": "Instalar bubblewrap",

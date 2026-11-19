@@ -6,6 +6,7 @@ import subprocess
 from types import SimpleNamespace
 from typing import NamedTuple
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -13,6 +14,7 @@ from conftest import FakeClock
 from desman import docker_cli, providers, sandbox_cli, searxng, ui, wizard
 from desman.cli import cli
 from desman.config import ConfigManager, open_config
+from desman.core import sandbox
 from desman.docker_cli import Plan, Status, plan
 from test_wizard import KEEP_PERMISSIONS, KEEP_PERSONAL
 
@@ -84,7 +86,7 @@ def test_desktop_plans(platform: str, install: list[str], start: list[str], url:
             ["sudo apt-get update"],
         ),
         ({"ID": "fedora"}, "dnf install -y moby-engine", []),
-        ({"ID": "centos", "ID_LIKE": "rhel fedora"}, "dnf install -y moby-engine", []),
+        ({"ID": "nobara", "ID_LIKE": "fedora"}, "dnf install -y moby-engine", []),
         ({"ID": "arch"}, "pacman -S --needed --noconfirm docker", []),
         (
             {"ID": "opensuse-tumbleweed", "ID_LIKE": "opensuse suse"},
@@ -111,6 +113,15 @@ def test_linux_packages(
     assert "desman sandbox setup" not in lines
 
 
+@pytest.mark.parametrize("distro", ["rhel", "rocky", "almalinux", "centos"])
+@pytest.mark.parametrize("bwrap", [True, False])
+def test_rhel_family_uses_manual_docker_install(distro: str, bwrap: bool) -> None:
+    release = {"ID": distro, "ID_LIKE": "rhel centos fedora"}
+    installation = plan("linux", available_tool, release, "person", state(bwrap=bwrap))
+    assert installation.link == docker_cli.ENGINE_LINK
+    assert argv(installation) == ([] if bwrap else [["sudo", "dnf", "install", "-y", "bubblewrap"]])
+
+
 def test_unknown_linux_has_link_and_no_steps() -> None:
     installation = plan("linux", available_tool, {"ID": "other"}, "person", state(bwrap=False))
     assert argv(installation) == []
@@ -123,8 +134,9 @@ def test_root_does_not_use_sudo() -> None:
         ["apt-get", "update"],
         ["apt-get", "install", "-y", "docker.io"],
         ["systemctl", "enable", "--now", "docker"],
-        ["usermod", "-aG", "docker", "root"],
     ]
+    assert not installation.notices
+    assert all("Log out" not in note for note in installation.after)
 
 
 @pytest.mark.parametrize(
@@ -197,7 +209,7 @@ class Machine:
                 argv,
                 0 if self.ready else 1,
                 "info" if self.ready else "",
-                None if self.ready else "daemon unavailable",
+                None if self.ready else "daemon unavailable é",
             )
         if argv == ["docker", "--version"]:
             return subprocess.CompletedProcess(argv, 0, "Docker version 29.0.0")
@@ -245,12 +257,14 @@ def test_status_json(machine: Machine, ready: bool) -> None:
     machine.ready = ready
     result = CliRunner().invoke(cli, ["docker", "status", "--json"])
     assert result.exit_code == 0, result.output
+    if not ready:
+        assert "daemon unavailable é" in result.output
     assert json.loads(result.output) == {
         "installed": True,
         "available": ready,
         "version": "Docker version 29.0.0",
         "bwrap": None,
-        "problem": None if ready else "daemon unavailable",
+        "problem": None if ready else "daemon unavailable é",
     }
 
 
@@ -335,13 +349,15 @@ def test_docker_step_in_configuration(
 def test_desktop_binary_before_path_refresh(
     monkeypatch: pytest.MonkeyPatch, platform: str, bundled: str
 ) -> None:
-    monkeypatch.setattr(docker_cli, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(sandbox, "sys", SimpleNamespace(platform=platform))
     monkeypatch.setattr(shutil, "which", lambda _: None)
-    monkeypatch.setattr(docker_cli, "_program_files", lambda: r"D:\Apps")
+    monkeypatch.setattr(sandbox, "windows_program_files", lambda: r"D:\Apps")
+    monkeypatch.setattr(sandbox, "_find_prlimit", lambda: None)
     monkeypatch.setattr(
-        docker_cli, "os", SimpleNamespace(path=SimpleNamespace(isfile=lambda path: path == bundled))
+        sandbox, "os", SimpleNamespace(path=SimpleNamespace(isfile=lambda path: path == bundled))
     )
     assert docker_cli.docker_executable() == bundled
+    assert sandbox.Sandbox().docker == bundled
 
 
 def test_linux_status_reports_bwrap_and_probe_timeout(
@@ -394,11 +410,12 @@ def test_debian_with_docker_installs_bubblewrap_after_update(ready: bool) -> Non
 
 
 @pytest.mark.parametrize("user", ["person", "root"])
+@pytest.mark.parametrize("bwrap", [True, False])
 def test_linux_permission_denied_repairs_group_membership(
-    monkeypatch: pytest.MonkeyPatch, user: str
+    monkeypatch: pytest.MonkeyPatch, user: str, bwrap: bool
 ) -> None:
     monkeypatch.setattr(docker_cli, "sys", SimpleNamespace(platform="linux"))
-    monkeypatch.setattr(shutil, "which", available_tool)
+    monkeypatch.setattr(shutil, "which", lambda name: name if bwrap or name != "bwrap" else None)
     error = "permission denied while trying to connect to the Docker daemon socket"
 
     def process(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
@@ -411,9 +428,16 @@ def test_linux_permission_denied_repairs_group_membership(
     assert status["problem"] == error
     installation = plan("linux", available_tool, {"ID": "debian"}, user, status)
     sudo = [] if user == "root" else ["sudo"]
-    assert argv(installation) == [[*sudo, "usermod", "-aG", "docker", user]]
-    assert any("administrator rights" in note for note in installation.notices)
-    assert any("Log out and back in" in note for note in installation.after)
+    expected = (
+        []
+        if bwrap
+        else [[*sudo, "apt-get", "update"], [*sudo, "apt-get", "install", "-y", "bubblewrap"]]
+    )
+    if user != "root":
+        expected.append([*sudo, "usermod", "-aG", "docker", user])
+    assert argv(installation) == expected
+    assert any("administrator rights" in note for note in installation.notices) == (user != "root")
+    assert any("Log out and back in" in note for note in installation.after) == (user != "root")
 
 
 def test_linux_wizard_offers_bubblewrap_when_docker_is_ready(
@@ -440,7 +464,54 @@ def test_linux_wizard_offers_bubblewrap_when_docker_is_ready(
     monkeypatch.setattr(ui, "confirm", confirm)
     monkeypatch.setattr(docker_cli, "apply_plan", apply)
     wizard.run_section(open_config(), "docker")
-    assert confirmed == ["Install Docker now?"]
+    assert confirmed == ["Install bubblewrap now?"]
     assert len(applied) == 1
     assert argv(applied[0])[-1][-4:] == ["apt-get", "install", "-y", "bubblewrap"]
     assert "On Linux, bubblewrap runs generated code" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("desktop_exists", [True, False])
+def test_nonzero_winget_exit_checks_for_desktop(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], desktop_exists: bool
+) -> None:
+    installation = plan("win32", available_tool, {}, "", state())
+    calls: list[Call] = []
+
+    def process(
+        argv: list[str], *, timeout: float | None = None, detached: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(Call(argv, timeout, detached))
+        return subprocess.CompletedProcess(argv, 17 if argv == WINGET else 0)
+
+    monkeypatch.setattr(docker_cli, "_process", process)
+    monkeypatch.setattr(
+        docker_cli,
+        "os",
+        SimpleNamespace(
+            path=SimpleNamespace(isfile=lambda path: desktop_exists and path == WINDOWS_START[0])
+        ),
+    )
+    monkeypatch.setattr(docker_cli, "_desktop_status", lambda *_: state(installed=True, ready=True))
+    if desktop_exists:
+        assert docker_cli.apply_plan(installation)["available"]
+        assert calls == [Call(WINGET, None, False), Call(WINDOWS_START, None, True)]
+        assert "Windows may ask you to restart." in capsys.readouterr().out
+    else:
+        with pytest.raises(click.ClickException, match="Install Docker Desktop failed"):
+            docker_cli.apply_plan(installation)
+        assert calls == [Call(WINGET, None, False)]
+
+
+def test_waiting_for_desktop_reports_version_when_cli_appears(
+    monkeypatch: pytest.MonkeyPatch, machine: Machine, clock: FakeClock
+) -> None:
+    installation = plan("darwin", available_tool, {}, "", state())
+    installation.steps = installation.steps[1:]
+
+    def sleep(seconds: float) -> None:
+        clock.sleep(seconds)
+        machine.installed = True
+
+    result = docker_cli.apply_plan(installation, sleep=sleep, clock=lambda: clock().timestamp())
+    assert result["available"]
+    assert result["version"] == "Docker version 29.0.0"

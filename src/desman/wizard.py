@@ -11,7 +11,6 @@ saved until the end; leaving with Ctrl+C or Esc saves nothing.
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
 import sys
 from collections.abc import Callable
@@ -33,6 +32,7 @@ from desman.config import (
     Permissions,
 )
 from desman.core import search
+from desman.core.sandbox import find_docker
 from desman.i18n import t, tn
 from desman.providers import Provider
 
@@ -248,7 +248,7 @@ def _providers_menu(s: _Session) -> None:
             (t("Models for local servers"), providers.HUB),
         ):
             choices.append(ui.Heading(title))
-            if group is providers.SEARCH and shutil.which("docker") is not None:
+            if group is providers.SEARCH and find_docker() is not None:
                 choices.append(
                     ui.Choice(t("Set up SearXNG on this computer (Docker)"), "search_setup")
                 )
@@ -537,7 +537,8 @@ def _docker(s: _Session) -> None:
         else:
             ui.note(t("Docker lets DESMAN search the whole web through local SearXNG."))
         docker_cli.show_plan(installation, include_after=False)
-        if not installation.steps or not ui.confirm(t("Install Docker now?"), default=False):
+        question = t("Install bubblewrap now?") if state["available"] else t("Install Docker now?")
+        if not installation.steps or not ui.confirm(question, default=False):
             return
         if not docker_cli.apply_plan(installation)["available"]:
             return
@@ -550,7 +551,7 @@ def _docker(s: _Session) -> None:
         from desman.sandbox_cli import offer_setup
 
         try:
-            offer_setup(Sandbox(docker=docker_cli.docker_executable()))
+            offer_setup(Sandbox())
         except click.ClickException as exc:
             ui.warn(str(exc))
     if not state["available"]:
