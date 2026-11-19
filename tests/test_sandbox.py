@@ -19,7 +19,7 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import FakeClock
-from desman import runs as runs_module
+from desman import cli as cli_module
 from desman.agents import llm_executor
 from desman.cli import EXIT_DONE, cli
 from desman.config import ConfigManager, default_config_path
@@ -35,7 +35,7 @@ from desman.core.workspace import PathEscapeError, Workspace
 from desman.llm.fake import FakeLLM
 from helpers import make_config
 
-PROBLEM = Sandbox().unavailable()
+PROBLEM = Sandbox().unavailable() if sys.platform.startswith("linux") else "Linux only"
 if PROBLEM is not None and os.environ.get("DESMAN_REQUIRE_SANDBOX"):  # set in CI
     raise RuntimeError(f"DESMAN_REQUIRE_SANDBOX is set, but there is no sandbox: {PROBLEM}")
 confined = pytest.mark.skipif(PROBLEM is not None, reason=f"no sandbox here: {PROBLEM}")
@@ -214,12 +214,12 @@ def test_output_is_cut_keeping_the_start_and_the_end(ws: Workspace) -> None:
 
 
 def missing() -> Sandbox:
-    return Sandbox(bwrap="/nonexistent/bwrap")
+    return Sandbox(bwrap="/nonexistent/bwrap", docker="")
 
 
 def test_without_a_working_bwrap_nothing_runs(ws: Workspace, tmp_path: Path) -> None:
-    if sys.platform == "win32":
-        with pytest.raises(SandboxUnavailable, match="the sandbox needs Linux"):
+    if not sys.platform.startswith("linux"):
+        with pytest.raises(SandboxUnavailable, match="Docker is not installed"):
             missing().run(["touch", "x"], ws.root)
         assert ws.files() == []
         return
@@ -253,8 +253,8 @@ def test_a_timeout_asked_for_is_never_longer_than_the_limit(ws: Workspace) -> No
 def test_without_bwrap_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("desman.core.sandbox.shutil.which", lambda name: None)
     expected = (
-        "the sandbox needs Linux (bubblewrap)"
-        if sys.platform == "win32"
+        "Docker is not installed or is not on PATH."  # ADR 0012: Docker where bwrap is not
+        if not sys.platform.startswith("linux")
         else "bubblewrap (bwrap) is not installed"
     )
     assert Sandbox().unavailable() == expected
@@ -318,7 +318,7 @@ def test_run_command_needs_a_working_sandbox(ws: Workspace) -> None:
     [(action, details)] = entries
     assert (
         action == "tool_refused"
-        and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
+        and ("cannot be started" if sys.platform.startswith("linux") else "Docker is not installed")
         in details["reason"]
     )
 
@@ -406,7 +406,7 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
     ]
     script = tmp_path / "fake.json"
     script.write_text(json.dumps({"routes": routes}), encoding="utf-8")
-    monkeypatch.setattr(runs_module, "Sandbox", missing)
+    monkeypatch.setattr(cli_module, "Sandbox", missing)
     warning = "shell_execution is on, but there is no sandbox to run commands in"
 
     def desman_run() -> str:
@@ -421,6 +421,6 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
     output = desman_run()
     assert (
         warning in output
-        and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
+        and ("cannot be started" if sys.platform.startswith("linux") else "Docker is not installed")
         in output
     )

@@ -70,6 +70,7 @@ from desman.core.nodes import Author as NodeAuthor
 from desman.core.policy import Access
 from desman.core.profile import NOTE_CHARS, Author, Note, Profile, ProfileFull
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report
+from desman.core.sandbox import Sandbox
 from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -1184,7 +1185,8 @@ class Chat:
         *,
         attached: list[task_files.Given] | None = None,
     ) -> None:
-        access = self._access(config)
+        sandbox = Sandbox()
+        access = self._access(config, sandbox)
         if access is None:
             return
         root = workspace_root_for(self.store.conn)
@@ -1313,7 +1315,7 @@ class Chat:
                 )
         if self.background_tasks:
             return
-        self._work(task_id, ref, config, models, access, interlocutor)
+        self._work(task_id, ref, config, models, access, interlocutor, sandbox)
 
     def _sources(self, turn: NewTask) -> list[tuple[str, str]]:
         """The tasks of `turn.files_from` (id and short ref) that are this session's own; the
@@ -1339,20 +1341,21 @@ class Chat:
     def _resume(
         self, task_id: str, config: Config, models: runs.Models, interlocutor: Interlocutor | None
     ) -> bool:
-        access = self._access(config)
+        sandbox = Sandbox()
+        access = self._access(config, sandbox)
         if access is None:
             return False
         ref = self.store.short_id(task_id)
         self._event(t("Task {ref} continues.", ref=ref), task_id)
         if self.background_tasks:
             return True
-        self._work(task_id, ref, config, models, access, interlocutor)
+        self._work(task_id, ref, config, models, access, interlocutor, sandbox)
         return True
 
-    def _access(self, config: Config) -> Access | None:
+    def _access(self, config: Config, sandbox: Sandbox) -> Access | None:
         try:
             runs.guard(self.store)
-            return runs.executor_access(config)
+            return runs.executor_access(config, sandbox=sandbox)
         except click.ClickException as e:
             ui.error(e.message)
             return None
@@ -1365,6 +1368,7 @@ class Chat:
         models: runs.Models,
         access: Access,
         interlocutor: Interlocutor | None,
+        sandbox: Sandbox,
     ) -> None:
         """Run the task while the chat waits, then retell how it went."""
         try:
@@ -1379,6 +1383,7 @@ class Chat:
                     models,
                     config=config,
                     access=access,
+                    sandbox=sandbox,
                     http=self._http,
                     watch=progress.refresh,
                 ).run(

@@ -567,6 +567,7 @@ def test_cli_confirmations_are_explicit_in_catalog() -> None:
         "global share",
         "global submit-proposal",
         "search setup",
+        "sandbox setup",
         "search remove",
     }
     assert {entry.name for entry in commands.CATALOG if entry.typed_confirm} == confirming

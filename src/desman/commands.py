@@ -1931,7 +1931,43 @@ def _search_change(action: str) -> Handler:
     return handle
 
 
+def _sandbox_status(ctx: Context, args: NoArgs) -> Outcome:
+    from desman.sandbox_cli import sandbox_status
+
+    return Outcome(dict(sandbox_status(display=False)))
+
+
+def _sandbox_setup(ctx: Context, args: NoArgs) -> Outcome | Proposal:
+    from desman.core.sandbox import Sandbox
+    from desman.sandbox_cli import prepare_setup, setup_image
+
+    box = Sandbox()
+    question = prepare_setup(box)
+    if question is None:
+        return Outcome({"installed": False})
+
+    def apply() -> Outcome:
+        return Outcome({"installed": setup_image(box)})
+
+    return Proposal([question], apply)
+
+
 CATALOG: tuple[Entry, ...] = (
+    Entry(
+        "sandbox status",
+        "Check the code sandbox.",
+        NoArgs,
+        Kind.READ,
+        _sandbox_status,
+    ),
+    Entry(
+        "sandbox setup",
+        "Install the pinned code sandbox image.",
+        NoArgs,
+        Kind.CHANGE,
+        _sandbox_setup,
+        typed_confirm=True,
+    ),
     Entry(
         "search setup",
         "Set up local SearXNG with Docker (about 100 MB).",
@@ -2815,7 +2851,10 @@ def parse_line(
         for name, value in ctx.params.items():
             field_name = mapping.get(name, name)
             supplied = ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
-            if entry.name in {"config reset", "search setup", "search remove"} and name == "yes":
+            if (
+                entry.name in {"config reset", "search setup", "search remove", "sandbox setup"}
+                and name == "yes"
+            ):
                 if value:
                     entry = replace(entry, typed_confirm=False)
                 continue

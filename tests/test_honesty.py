@@ -134,6 +134,22 @@ def test_a_result_handed_in_without_running_the_code_is_not_a_result(
     assert check_history(store.conn, task_id) == []
 
 
+def test_no_tool_hint_never_tells_a_runs_code_subtask_to_skip_running(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    """T.6t: 'give the result directly' would only cost attempts: the result needs a run."""
+    fake = FakeLLM().on("Execute", '{"type": "error", "reason": "no tool"}', repeat_last=True)
+    task_id = store.create_task(runs_code())
+    run = coordinator(store, llm_executor(fake), tmp_path, clock, [], Permission.SHELL)
+    run.run(task_id)
+    feedbacks = [r for r in store.audit_log(task_id) if r["action"] == "execution_failed"]
+    assert feedbacks  # the error was fed back with the tools offered
+    for entry in feedbacks:
+        reason = json.loads(entry["details_json"]).get("reason", "")
+        assert "tools offered in this attempt" in reason
+        assert "give the result directly" not in reason
+
+
 def test_a_subtask_that_runs_code_is_never_split(
     store: Store, clock: FakeClock, tmp_path: Path
 ) -> None:

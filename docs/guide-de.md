@@ -30,9 +30,11 @@ bei Bedarf.
     der Betreiber kann sie nicht lesen, **außer bei einer Beschwerde**. Wenn Sie eine Nachricht
     melden, erhält er deren Text;
   - wie bei jeder Website die IP-Adresse, von der aus der Server kontaktiert wird.
-- **Unter Windows wird kein Code ausgeführt.** Die DESMAN-Agenten starten Programme nur in einer
-  abgeschotteten Umgebung (Sandbox), die nur unter Linux verfügbar ist. Unter Windows schreibt
-  DESMAN Code, führt ihn zur Prüfung aber nicht aus und weist darauf hin.
+- **Code unter Windows ausführen.** Installieren und starten Sie Docker Desktop im Modus für
+  Linux-Container. Führen Sie dann `desman sandbox setup --yes` aus, um den Download des Images
+  zu bestätigen. In den DESMAN-Einstellungen können Sie die Berechtigung zur Codeausführung
+  (`shell_execution`) aktivieren. Ohne Sandbox kann DESMAN Code schreiben und bittet beim
+  Ausführen um Hilfe.
 
 ## 1. Installation
 
