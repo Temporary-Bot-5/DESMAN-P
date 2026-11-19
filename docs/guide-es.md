@@ -1,0 +1,217 @@
+# DESMAN(P): guía para participantes en la prueba
+
+Gracias por ayudarnos. Aquí explicamos cómo instalar DESMAN, qué probar y cómo informar de un
+problema. Puedes empezar por las secciones 1–3 y consultar el resto cuando lo necesites.
+
+## 0. Lee esto primero
+
+- **Es un prototipo.** Puede cerrarse de golpe, quedarse bloqueado, dar respuestas extrañas y
+  perder trabajo sin terminar. No le confíes nada importante ni le encargues tareas que no puedas
+  repetir. Los problemas que encuentres son el resultado principal de la prueba. Informa de todos
+  ellos (sección 7).
+- **Tus claves se quedan contigo.** La clave de acceso a un modelo (clave de API) se guarda solo
+  en un archivo de tu equipo y solo tú puedes verla. No se envía a la red DESMAN, al propietario,
+  a ningún modelo ni al historial del chat. A la red solo llega la *huella* de la clave, una
+  cadena corta que permite distinguirla de otras sin poder recuperarla.
+- **Solo tú activas la red.** Hasta que pulses **Unirse** (sección 5), DESMAN no se comunica con
+  el servidor del propietario. Tus tareas, chats y archivos siempre se quedan en tu equipo. Las
+  solicitudes solo van a los proveedores de los modelos cuyas claves añadiste.
+- **Qué ve el operador (propietario del servidor) si te unes a la red:**
+  - tu nodo: la huella de su clave, cuándo se conectó por última vez, qué modelos prestaste y con
+    qué cuota diaria (proveedor, modelo y huella de la clave, nunca la clave);
+  - el trabajo que hizo tu equipo para la red y su resultado;
+  - los informes de problemas que enviaste, con el texto exacto de la ventana de confirmación
+    (sección 7);
+  - en la mensajería, tu nombre y quién escribe a quién y cuándo. Los mensajes están cifrados y el
+    operador no puede leerlos, **salvo si hay una reclamación**. Si denuncias un mensaje, el
+    operador recibe el texto;
+  - como cualquier sitio web, el servidor ve la dirección IP desde la que se accede.
+- **El código no se ejecuta en Windows.** Los agentes de DESMAN solo ejecutan programas en un
+  entorno aislado, disponible únicamente en Linux. En Windows, DESMAN escribe código, avisa de que
+  no puede ejecutarlo y no lo comprueba de esa forma.
+
+## 1. Instalación
+
+El propietario te enviará el enlace a la página con los botones de instalación. Necesitas
+internet, pero no permisos de administrador.
+
+### Windows
+
+1. Pulsa **Windows** en la página. Se descargará `install.bat`. Si el navegador pregunta si
+   quieres quedarte con el archivo, elige «Conservar».
+2. Abre Descargas y haz doble clic en `install.bat`. Si aparece la ventana azul «Windows protegió
+   su PC», pulsa «Más información» → «Ejecutar de todas formas».
+3. Se abrirá una ventana negra. El instalador te pedirá permiso para instalar lo necesario (uv,
+   Python y Git si falta). Escribe `y` y pulsa Intro. Tardará unos minutos.
+4. Al terminar se abrirá la página de DESMAN en el navegador y aparecerá un acceso directo
+   **DESMAN** en el escritorio. Úsalo para abrir el programa en adelante.
+
+### Linux
+
+1. Pulsa **Linux** en la página y copia el comando que aparece.
+2. Abre un terminal, pega el comando (Ctrl+Mayús+V) y pulsa Intro.
+3. Si falta Git, el instalador mostrará el comando para instalarlo. Ejecútalo y repite el paso 2.
+4. Responde `y` a las preguntas. Al final se abrirá un navegador y **DESMAN** aparecerá en el menú
+   de aplicaciones y en el escritorio. Si el escritorio pide permiso para abrir el acceso directo,
+   concédeselo.
+
+Encontrarás más detalles en [install.md](install.md).
+
+## 2. Primer inicio y clave de acceso
+
+DESMAN usa modelos que funcionan por internet. Para acceder necesitas una clave gratuita, algo
+parecido a una contraseña para el programa. La primera vez se abre la configuración
+automáticamente.
+
+1. En **Idioma** elige «Español» o tu idioma.
+2. **Clave.** Lo más sencillo es empezar con uno de estos servicios. Ambos son gratuitos y solo
+   necesitas una cuenta:
+   - **Groq** — https://console.groq.com/keys (inicia sesión, elige «Create API Key» y copia la
+     clave).
+   - **Google AI Studio** — https://aistudio.google.com/apikey (entra con tu cuenta de Google,
+     elige «Create API key» y copia la clave).
+
+   Pega la clave en el campo correspondiente de la configuración. Es normal que no se vean los
+   caracteres. Puedes añadir claves de varios proveedores. Cuando alcanzas el límite de una,
+   DESMAN pasa a otra. **Nunca pegues una clave en el chat**. Usa solo el campo para claves.
+3. **Permisos.** Al principio todos están desactivados. Para la prueba puedes activar
+   «usar la red más allá de los proveedores de modelos» para que los agentes lean páginas
+   públicas. Deja el resto desactivado salvo que el propietario te indique otra cosa.
+4. **desman-global** es la última pregunta. Puedes elegir «ahora no» y unirte más adelante
+   (sección 5).
+
+Los límites gratuitos son bajos y pueden cambiar. Si DESMAN dice que alcanzaste un límite, el
+trabajo seguirá cuando se renueve, normalmente al cabo de un minuto y a veces de un día. Si pasa
+más de una hora sin respuesta, avisa (sección 7).
+
+## 3. Cómo usarlo
+
+DESMAN se abre como una página del navegador:
+
+- **A la izquierda**, los chats. Abajo están **Ajustes**, **Informar de un problema** y
+  **Mensajería**.
+- **En el centro**, el chat. Escribe con tus propias palabras lo que necesitas.
+- **A la derecha**, **Tareas** (qué está haciendo DESMAN) y **Módulos** (qué modelos están
+  trabajando).
+
+DESMAN responde enseguida a una pregunta sencilla. Una petición más amplia («escribe…»,
+«prepara…», «averigua…») se convierte en una *tarea*. DESMAN planifica los pasos, los ejecuta, los
+comprueba y te cuenta el resultado en el chat. Los archivos quedan en una carpeta propia de la
+tarea y DESMAN te dice dónde está.
+
+Si falla un paso, DESMAN te pregunta qué hacer. Debajo del chat aparecen
+**Reintentar con esta respuesta**, **Aceptar tal cual** y **Marcar como fallida**. También puedes
+explicar con tus palabras qué debe corregir.
+
+Los cambios en DESMAN (ajustes, permisos y claves) solo se hacen cuando pulsas «Sí» en una ventana
+aparte. Si aparece sin que la esperes, pulsa «No».
+
+Escribe `/` en el chat para ver los comandos. `/help` abre la ayuda y `/new` inicia un chat nuevo.
+También puedes preguntar directamente a DESMAN cómo se hace algo.
+
+## 4. Qué probar
+
+Úsalo como más te convenga. Para empezar:
+
+1. Haz una pregunta sencilla, como «¿qué sabes hacer?» o «¿cómo te configuro?».
+2. Pide un texto, por ejemplo «escribe una carta a mis vecinos sobre la reunión del sábado» o
+   «planea un viaje de dos días a Granada».
+3. Pide código, por ejemplo «escribe un programa en Python que cuente las palabras de un texto».
+   En Linux, si activas «ejecutar comandos de shell», DESMAN también lo ejecutará.
+4. Continúa una tarea con «ahora añade…».
+5. Cierra la ventana a mitad de una tarea y vuelve a abrirla con el acceso directo. La tarea
+   debería continuar.
+6. Pide un cambio con tus propias palabras, como «responde de forma breve». Debería aparecer una
+   ventana de confirmación.
+7. Únete a la red (sección 5) y escribe a otro participante (sección 6).
+
+Anota o recuerda todo lo que te parezca raro, confuso o lento. Eso también cuenta como problema.
+
+## 5. La red desman-global
+
+desman-global conecta los equipos de los participantes. Tu equipo puede hacer pequeñas partes de
+tareas ajenas con los modelos que hayas *prestado*. Para las tareas grandes, la red reúne los
+equipos libres en grupos. Tus tareas tienen prioridad y las ajenas solo se ejecutan cuando tu
+DESMAN está libre.
+
+**Para unirte:**
+
+1. **Ajustes** → **desman-global**.
+2. En **Registro** pega la dirección del servidor que te dará el propietario. Empieza por
+   `https://`.
+3. Pulsa **Unirse**. Aparecerá la huella de tu nodo.
+
+**Para prestar un modelo** (opcional), elige un modelo en ese mismo apartado, fija
+**Llamadas al día** y **Tokens al día** y pulsa **Prestar**. Puedes retirarlo con **Recuperar**.
+Por ahora solo se pueden prestar modelos *locales* (Ollama, en tu equipo). Las condiciones de las
+claves gratuitas en la nube prohíben usarlas para trabajar para otras personas. Tus claves siempre
+se quedan en tu equipo. Tu DESMAN hace la llamada y entrega a la red solo el resultado.
+
+**Para salir**, pulsa **Salir** en ese mismo apartado. La red dejará de recibir datos de tu equipo
+al instante.
+
+La red funciona mientras la página de DESMAN está abierta. Si no puede acceder al servidor, DESMAN
+sigue funcionando por su cuenta y vuelve a intentarlo más tarde.
+
+## 6. Mensajería
+
+Los participantes pueden escribirse. Los mensajes se cifran. El operador ve quién escribe a quién
+y cuándo, pero no puede leer el texto.
+
+1. **Nombre.** Escribe `/global name tu_nombre` en el chat. Usa entre 3 y 32 caracteres: letras
+   latinas minúsculas, números, `_` y `-`. Los demás verán ese nombre.
+2. **Contacto.** Solo puedes escribir a alguien si también está de acuerdo. Envía
+   `/global contact add nombre`. La otra persona acepta con el mismo comando y tu nombre.
+3. **Escribir.** Usa `/global send nombre "el mensaje"`. Si el texto tiene varias palabras, ponlo
+   entre comillas rectas `"`, también en los comandos siguientes.
+4. **Leer.** Pulsa **Mensajería** a la izquierda o usa `/messages` o `/messages nombre`.
+5. **Bloquear.** Usa `/global block nombre` sin que se avise a la otra persona. Desbloquéala con
+   `/global unblock nombre`.
+6. **Denunciar.** Usa `/global complain nombre "qué pasó"`. Para enseñar al operador un mensaje
+   concreto, añade `--message NÚMERO`. El número se muestra al leer los mensajes.
+   **El operador recibirá el texto de ese mensaje**.
+
+DESMAN nunca ejecuta como tareas los mensajes de otras personas. Sus enlaces y archivos no ponen
+en marcha nada. Si pierdes el archivo de la clave del nodo, por ejemplo al desinstalarlo por
+completo, perderás los mensajes.
+
+## 7. Cómo informar de un problema
+
+Para enviar un informe debes estar conectado a la red (sección 5).
+
+1. Pulsa **Informar de un problema** abajo a la izquierda.
+2. Explica qué hiciste, qué esperabas y qué pasó. Por ejemplo, «pedí una carta y la tarea lleva 20
+   minutos atascada en el paso 2 de 3».
+3. Verás el **texto exacto** que recibirá el operador, con tu descripción y las versiones del
+   programa y el sistema. Léelo y pulsa «Sí».
+
+Las claves no se incluyen en los informes. Si DESMAN detecta una clave tuya en el texto, cancela
+el envío. Tampoco se envían chats, datos del perfil ni archivos. Para adjuntar el historial de una
+tarea concreta, escribe `/global report "descripción" --task NÚMERO`. La ventana muestra
+exactamente qué se añadirá.
+
+Si no puedes enviarlo porque la red no conecta o el programa no abre, escribe al propietario por
+el medio habitual y adjunta una captura de pantalla si puedes.
+
+## 8. Actualizaciones
+
+Las actualizaciones se instalan con tu permiso. Cuando el propietario te avise de una nueva
+versión, conéctate a la red (sección 5). Usa `/global update --show` para verla y
+`/global update --apply NÚMERO` para instalarla. DESMAN te muestra los cambios y te pide
+confirmación. Después de instalarla, cierra y vuelve a abrir DESMAN. Si aparece un aviso sobre
+«archivos protegidos», escribe `/protected approve` y confirma para aceptar la nueva versión de
+las reglas. Para volver a la versión anterior, usa `/global update --revert`.
+
+## 9. Desinstalación
+
+- **Windows:** cierra DESMAN, pulsa Win+R, pega
+  `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` y pulsa Intro.
+- **Linux:** cierra DESMAN y ejecuta `sh ~/.local/share/desman-app/install/install.sh --uninstall`
+  en un terminal.
+
+Se elimina el programa y se conservan los ajustes, las claves y el historial por si lo instalas de
+nuevo. Para borrarlo todo, incluidas claves e historial, añade `-Purge` en Windows o `--purge` en
+Linux. DESMAN te muestra qué borrará y vuelve a pedirte confirmación.
+
+Puedes revocar las claves que creaste en los sitios de los proveedores (mismos enlaces que en la
+sección 2).
