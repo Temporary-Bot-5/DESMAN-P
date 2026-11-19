@@ -74,7 +74,7 @@ TOPICS: Final = (
         "are unsupported. The planner sees the paths and character counts. Workers read the "
         "files as task material with read_file. Code reads long files in parts and does the "
         "same for long linked pages when web access is enabled. It schedules notes for each "
-        "part, then combines them.",
+        "part, then combines them. Code checks quotes against the relevant text or notes.",
     ),
     Topic(
         "retries",

@@ -42,11 +42,12 @@ from pydantic import BaseModel
 
 from desman.core.context import (
     CHARS_PER_TOKEN,
-    DIGEST_CHARS,
     Knowledge,
+    evidence_shares,
     fair_shares,
     fit_knowledge,
     given,
+    is_document_combine,
     truncate,
 )
 from desman.core.models import Subtask
@@ -78,7 +79,7 @@ def evidence(
     what the latest execution returned, plus earlier web lookups of this same subtask
     marked earlier_attempt. A document part's inputs are kept whole. Latest results take
     the remaining budget first; older lookups share what remains, newest execution first.
-    Document digests use the same separate character cap as in the executor context.
+    Document notes use the same separate allowance as in the executor context.
     In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
     shows its tool and its result. Files successfully written in that execution also show
@@ -122,12 +123,14 @@ def evidence(
         items += [("file", file) for file in files]
     texts = [_evidence_text(kind, item) for kind, item in items]
     digests = [kind == "dependency" and item.digest is not None for kind, item in items]
-    shares = fair_shares(
-        [0 if digest else len(text) for digest, text in zip(digests, texts, strict=True)], budget
+    combine = is_document_combine(subtask)
+    shares, used_evidence = evidence_shares(
+        [len(text) for text in texts],
+        budget,
+        document_notes=[combine and kind == "dependency" for kind, _ in items],
+        digests=digests,
     )
     for (kind, item), text, chars, digest in zip(items, texts, shares, digests, strict=True):
-        if digest:
-            chars = DIGEST_CHARS
         whole = chars >= len(text)
         content: Any = json.loads(text) if whole else truncate(text, chars)
         if kind == "inputs":
@@ -156,7 +159,7 @@ def evidence(
                     "truncated": not whole,
                 }
             )
-    used = used_inputs + sum(shares) + sum(len(node.text) for node in nodes)
+    used = used_inputs + used_evidence + sum(len(node.text) for node in nodes)
     out["tool_results"].extend(
         earlier_lookups(store, subtask, execution, max(0, budget_tokens * CHARS_PER_TOKEN - used))
     )

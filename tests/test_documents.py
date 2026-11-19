@@ -159,6 +159,7 @@ def test_document_digests_precede_and_feed_the_planners_graph(
     for doc, index, count in zip((book, extra), indices, (part_count, 3), strict=True):
         parts = covered(index)
         assert len(parts) == count
+        assert all("no more than about 2500 characters" in sub.description for sub in parts)
         assert "".join(sub.inputs["text"] for sub in parts) == doc.text
         assert [sub.inputs["part"] for sub in parts] == list(range(1, count + 1))
         assert all(
@@ -240,11 +241,14 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
     file.write_bytes(text.encode())
     seen_parts: dict[int, str] = {}
     reviewed_parts: set[int] = set()
+    combine_attempts = 0
+    invented = "Вдали стоял высокий замок."
     goal = "Describe the setting"
-    digest = "Notes. " * 2271 + "End"
-    assert len(digest) == 15_900
+    digest = "Notes. " * 2271 + f'End: "{QUOTE}"'
+    assert len(digest) > 15_900
 
     def execute(request: Request) -> str:
+        nonlocal combine_attempts
         data = payload(request)
         inputs = data["inputs"]
         if "text" in inputs:
@@ -261,12 +265,15 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         if data["subtask"].startswith("Combine"):
             assert goal in data["task_goal"]
             assert len(data["results_of_dependencies"]) == 5
+            combine_attempts += 1
+            if combine_attempts == 1:
+                return json.dumps({"text": f'Invented: "{invented}"'})
             return json.dumps({"text": digest})
         [dep] = data["results_of_dependencies"]
         assert dep["result"] == {"text": digest}
         assert dep["digest"] is True and not dep["truncated"]
         assert "input/setting.txt were read in parts by code" in data["documents_read"]
-        return '{"text":"The setting is on a riverbank."}'
+        return json.dumps({"text": f'The setting is on a riverbank: "{QUOTE}"'})
 
     def review(request: Request) -> str:
         data = payload(request)
@@ -285,6 +292,7 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
             reviewed_parts.add(inputs["part"])
         else:
             assert rule not in request.messages[0].content
+        assert invented not in data["result"]["text"]
         if data["subtask"] == "Write the answer":
             [dep] = data["evidence"]["results_of_dependencies"]
             assert dep["result"] == {"text": digest} and dep["digest"] is True
@@ -304,12 +312,18 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         "run", goal, "--file", file, "--plan", "llm", "--fake-llm", script(tmp_path, [])
     )
     assert result.exit_code == 0, (result.output, result.exception)
+    assert combine_attempts == 2
     assert reviewed_parts == set(seen_parts) == set(range(1, 6))
     assert "".join(seen_parts[i] for i in range(1, 6)) == text
     with closing(db.open_db()) as conn:
-        [created] = [
-            entry for entry in history(conn, only_task()) if entry.action == "task_created"
+        entries = history(conn, only_task())
+        [created] = [entry for entry in entries if entry.action == "task_created"]
+        [rejected] = [
+            entry
+            for entry in entries
+            if entry.action == "verdict" and entry.details["verdict"] == "retry"
         ]
+        assert f"«{invented}»" in rejected.details["feedback"]
         assert created.details["documents"] == [
             {"path": "input/setting.txt", "chars": len(text), "parts": 5}
         ]

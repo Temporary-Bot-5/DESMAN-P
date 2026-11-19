@@ -38,6 +38,7 @@ from typing import Annotated, Any, ClassVar, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
 
+from desman.core.context import DependencyResult, is_document_combine
 from desman.core.coordinator import (
     Executor,
     Failure,
@@ -55,6 +56,7 @@ from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
 from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 from desman.prompting import today
+from desman.quotes import missing, quotes, string_values
 from desman.result_prose import has_prose
 
 T = TypeVar("T", bound=BaseModel)
@@ -477,15 +479,52 @@ def mixed_script_words(value: Any, *, limit: int | None = 5) -> list[str]:
     return list(dict.fromkeys(texts))[:limit]
 
 
+def _quote_feedback(
+    subtask: Subtask,
+    artifact: dict[str, Any] | None,
+    shown: list[dict[str, Any]],
+    dependencies: Callable[[str], list[DependencyResult]] | None,
+) -> str | None:
+    part = subtask.inputs.get("text") if "document" in subtask.inputs else None
+    combine = is_document_combine(subtask)
+    if not (isinstance(part, str) or combine or any(note.get("digest") for note in shown)):
+        return None
+    fragments = [quote for value in string_values(artifact) for quote in quotes(value)]
+    if not fragments:
+        return None
+    if isinstance(part, str):
+        sources = [part]
+        location = "the part's text"
+    else:
+        notes = (
+            [dep.content for dep in dependencies(subtask.id) if combine or dep.digest is not None]
+            if dependencies is not None
+            else [note.get("result") for note in shown if combine or note.get("digest")]
+        )
+        sources = list(string_values(notes))
+        location = "the notes you were given"
+    absent = missing(dict.fromkeys(fragments), sources)
+    if not absent:
+        return None
+    listed = ", ".join(f"«{quote}»" for quote in absent[:10])
+    return (
+        f"These quotes are not found word for word in {location}: {listed}. "
+        "Copy quotes exactly from there (keep its spelling and punctuation), "
+        "or drop them; never write a quote from memory."
+    )
+
+
 def llm_reviewer(
     llm: LLM,
     evidence: Callable[[Subtask], dict[str, Any]] | None = None,
     *,
+    dependencies: Callable[[str], list[DependencyResult]] | None = None,
     clock: Callable[[], datetime] | None = None,
     tz: tzinfo | None = None,
 ) -> Reviewer:
     """`evidence` gives what a result can rest on (`core.effects.evidence`): with it, the
-    reviewer checks the result's facts against it."""
+    reviewer checks the result's facts against it. `dependencies` gives the full accepted
+    notes for code to check quotes, even if some evidence was trimmed for the model."""
 
     def review(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
         prompt: dict[str, Any] = {
@@ -521,6 +560,13 @@ def llm_reviewer(
                     "An unaddressed part means retry: name the missing part "
                     "in feedback (including requested values, dates and sources)."
                 )
+        if feedback := _quote_feedback(
+            subtask,
+            artifact,
+            prompt.get("evidence", {}).get("results_of_dependencies", []),
+            dependencies,
+        ):
+            return Review(verdict=Verdict.RETRY, feedback=feedback)
         allowed = set(
             re.findall(
                 r"[^\W_]+",

@@ -1,0 +1,38 @@
+"""Quote extraction and matching for document review."""
+
+import pytest
+
+from desman.quotes import missing, normalize, quotes
+
+
+def test_extracts_all_four_styles_in_order() -> None:
+    assert quotes(
+        '« a long quotation » „third quotation“ “another quotation” "last quotation" «short»'
+    ) == [
+        "a long quotation",
+        "third quotation",
+        "another quotation",
+        "last quotation",
+    ]
+
+
+def test_normalizes_spelling_and_typography() -> None:
+    assert normalize(" «ЁЖ —–‑- идёт\n к е́ли!» ") == "еж - идет к ели"
+
+
+@pytest.mark.parametrize(
+    ("quote", "sources", "found"),
+    [
+        ("а на деле выходим — волки", ["а на деле выходим -- волки"], True),
+        ("жестки на ощупь", ['"жестка на ощупь"'], False),
+        ("На берегу стоял… Вдали был лес", ["На берегу стоял дом.", "Вдали был лес."], True),
+        ("На берегу стоял... Вдали был лес", ["На берегу стоял дом."], False),
+        (
+            "Томск — город удивительный, не сибирский, а европейский",
+            ["В Томске грязно. А на деле выходим -- волки."],
+            False,
+        ),
+    ],
+)
+def test_matches_verbatim_fragments(quote: str, sources: list[str], found: bool) -> None:
+    assert missing([quote], sources) == ([] if found else [quote])

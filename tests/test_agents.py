@@ -11,8 +11,8 @@ from pydantic import ValidationError
 
 from conftest import FakeClock
 from desman.agents import llm_executor, llm_reviewer
-from desman.core.context import build_context
-from desman.core.coordinator import Coordinator, Failure, Review, Success, Work
+from desman.core.context import DIGEST_CHARS, DependencyResult, build_context
+from desman.core.coordinator import Coordinator, Failure, Review, Success, Verdict, Work
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
@@ -492,3 +492,77 @@ def test_split_review_without_evidence_has_no_unexplained_flag(store: Store) -> 
     llm = FakeLLM().on("Review", '{"verdict": "accept"}')
     llm_reviewer(llm)(subtask.model_copy(update={"parent_id": "parent"}), {"text": "part"})
     assert "part_of_split" not in payload(llm.calls[0].prompt)[1]
+
+
+@pytest.mark.parametrize(
+    ("inputs", "notes", "accepted", "location"),
+    [
+        ({"document": "book.txt", "text": "На берегу стоял дом."}, [], False, "the part's text"),
+        ({"document": "book.txt", "text": "Вдали был большой лес."}, [], True, ""),
+        (
+            {"document": "book.txt"},
+            [{"result": {"text": "На берегу стоял дом."}}],
+            False,
+            "the notes you were given",
+        ),
+        ({"document": "book.txt"}, [{"result": {"text": "«Вдали был большой лес.»"}}], True, ""),
+        (
+            {},
+            [
+                {"digest": True, "result": {"text": "На берегу стоял дом."}},
+                {"result": {"text": "Вдали был большой лес."}},
+            ],
+            False,
+            "the notes you were given",
+        ),
+        ({}, [{"digest": True, "result": {"text": "«Вдали был большой лес.»"}}], True, ""),
+        ({}, [{"result": {"text": "На берегу стоял дом."}}], True, ""),
+    ],
+)
+def test_document_quote_review(
+    store: Store,
+    inputs: dict[str, Any],
+    notes: list[dict[str, Any]],
+    accepted: bool,
+    location: str,
+) -> None:
+    task_id = store.create_task(one_step())
+    [subtask] = store.list_subtasks(task_id)
+    subtask = subtask.model_copy(update={"inputs": inputs})
+    model = FakeLLM()
+    if accepted:
+        model.on("Review", '{"verdict": "accept"}')
+    review = llm_reviewer(model, evidence=lambda _: {"results_of_dependencies": notes})(
+        subtask, {"sections": [{"notes": ['A quote: "Вдали был большой лес."']}]}
+    )
+    if accepted:
+        assert review == Review(verdict=Verdict.ACCEPT)
+        assert len(model.calls) == 1
+    else:
+        assert isinstance(review, Review) and review.verdict is Verdict.RETRY
+        assert f"in {location}: «Вдали был большой лес.»" in review.feedback
+        assert model.calls == []
+
+
+def test_document_quote_review_checks_full_accepted_notes(store: Store) -> None:
+    task_id = store.create_task(one_step())
+    [subtask] = store.list_subtasks(task_id)
+    model = FakeLLM().on("Review", '{"verdict": "accept"}')
+    fragment = "Вдали был большой лес."
+    digest = DependencyResult(
+        subtask_id="digest",
+        description="Document notes",
+        content={"text": "я" * DIGEST_CHARS + fragment},
+        digest="book.txt",
+    )
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {
+            "results_of_dependencies": [
+                {"digest": True, "result": "Truncated text", "truncated": True}
+            ]
+        },
+        dependencies=lambda _: [digest],
+    )
+    assert reviewer(subtask, {"text": f"«{fragment}»"}) == Review(verdict=Verdict.ACCEPT)
+    assert len(model.calls) == 1

@@ -748,6 +748,7 @@ def _coordinator(
         llm_reviewer(
             models.for_(calls.Role.REVIEWER),
             evidence=functools.partial(evidence, store, knowledge=knowledge),
+            dependencies=store.dependency_results,
             clock=store.clock,
         ),
         owner=current_owner(),
