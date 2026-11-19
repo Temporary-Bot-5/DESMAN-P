@@ -335,13 +335,17 @@ def _execute(
         if calls is None:
             if is_error_report(reply.root) and tools and not called:
                 names = ", ".join(str(tool["name"]) for tool in tools)
+                yourself = (
+                    ""  # its result counts only after run_command: never suggest skipping it
+                    if work.subtask.runs_code
+                    else " If you can do the subtask yourself (e.g. arithmetic or writing), "
+                    "give the result directly. No tool is needed for that."
+                )
                 return Failure(
                     kind=FailureKind.QUALITY,
                     reason=(
                         f"{_error_reason(reply.root)} (tools offered in this attempt: "
-                        f'{names}; when needed, call them with {{"tool_calls": [...]}}). '
-                        "If you can do the subtask yourself (e.g. arithmetic or writing), "
-                        "give the result directly. No tool is needed for that."
+                        f'{names}; when needed, call them with {{"tool_calls": [...]}}).' + yourself
                     ),
                 )
             content = reply.root
