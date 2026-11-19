@@ -68,6 +68,14 @@ def test_every_guide_has_the_same_sections_and_commands(language: str) -> None:
 
     assert [shape(line) for line in _named(language)] == [shape(line) for line in _named("en")]
 
+    def literal(name: str) -> set[str]:
+        """Code that is not a chat command: install paths, uninstall commands, answers."""
+        text = (DOCS / f"guide-{name}.md").read_text(encoding="utf-8")
+        spans = re.findall(r"`([^`]*)`", text)
+        return {PLACEHOLDER.sub(r"\1 1", span) for span in spans if not span.startswith("/")}
+
+    assert literal("en") <= literal(language)
+
 
 @pytest.mark.parametrize("language", LANGUAGES)
 def test_every_command_in_the_guide_exists(language: str) -> None:

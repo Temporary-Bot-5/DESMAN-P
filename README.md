@@ -23,10 +23,10 @@ gradually improve its own components under human supervision.
 
 ## Install
 
-For Linux and Windows, use the [installers and installation guide](docs/install.md). Test participants: see the
-[participants' guide](docs/guide-en.md) (also in every language of the program: `docs/guide-<code>.md`).
+For Linux and Windows, use the [installers and installation guide](docs/install.md).
 They install Python, create shortcuts and open the interface. Updates use signed releases
-through `desman global update`.
+through `desman global update`. Test participants: see the [participants' guide](docs/guide-en.md)
+(also in every language of the program: `docs/guide-<code>.md`).
 
 On Linux:
 
