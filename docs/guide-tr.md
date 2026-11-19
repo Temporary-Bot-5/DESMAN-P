@@ -25,9 +25,10 @@ gerektiğinde bakabilirsiniz.
   - mesajlaşmada adınız ve kimin kime ne zaman yazdığı. Mesajlar şifrelidir ve operatör içeriği
     okuyamaz. **Şikâyet durumunda** bildirdiğiniz mesajın metni operatöre gider;
   - her web sitesinde olduğu gibi, bağlantının geldiği IP adresi.
-- **Windows'ta kod çalıştırılmaz.** DESMAN'ın ajanları programları yalnızca Linux'ta bulunan,
-  “korumalı alan” denen yalıtılmış ortamda çalıştırır. Windows'ta DESMAN kod yazar ve kodu
-  çalıştırarak kontrol etmediğini belirtir.
+- **Windows'ta kod çalıştırma.** Docker Desktop'ı kurup Linux kapsayıcıları modunda başlatın.
+  İmajın indirilmesini onaylamak için `desman sandbox setup --yes` komutunu çalıştırın.
+  Kod çalıştırma iznini (`shell_execution`) DESMAN ayarlarından etkinleştirebilirsiniz.
+  DESMAN korumalı alan olmadan da kod yazabilir ve kodu çalıştırmak için yardım ister.
 
 ## 1. Kurulum
 

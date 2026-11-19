@@ -26,9 +26,10 @@ problema. Puedes empezar por las secciones 1–3 y consultar el resto cuando lo 
     operador no puede leerlos, **salvo si hay una reclamación**. Si denuncias un mensaje, el
     operador recibe el texto;
   - como cualquier sitio web, el servidor ve la dirección IP desde la que se accede.
-- **El código no se ejecuta en Windows.** Los agentes de DESMAN solo ejecutan programas en un
-  entorno aislado, disponible únicamente en Linux. En Windows, DESMAN escribe código, avisa de que
-  no puede ejecutarlo y no lo comprueba de esa forma.
+- **Ejecutar código en Windows.** Instala e inicia Docker Desktop en modo de contenedores Linux
+  y ejecuta `desman sandbox setup --yes` para autorizar la descarga de la imagen. Puedes habilitar
+  el permiso para ejecutar código (`shell_execution`) en la configuración de DESMAN. Sin un
+  entorno aislado, DESMAN puede escribir código y te pedirá ayuda para ejecutarlo.
 
 ## 1. Instalación
 
