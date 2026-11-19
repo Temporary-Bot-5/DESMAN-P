@@ -31,6 +31,7 @@
   `desman sandbox setup --yes` を実行してイメージのダウンロードを許可します。
   コードの実行権限（`shell_execution`）は DESMAN の設定で有効にできます。
   サンドボックスがなくても DESMAN はコードを書けますが、実行にはユーザーの助けを求めます。
+  Docker Desktop をインストールするには、セットアップウィザードの Docker セクションを使うか、`desman docker install --yes` を実行してください。
 
 ## 1. インストール
 

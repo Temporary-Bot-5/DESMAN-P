@@ -30,6 +30,7 @@ zgłaszać problemy. Zacznij od rozdziałów 1–3, a do reszty zajrzyj w razie 
   zatwierdzić pobranie obrazu. W ustawieniach DESMAN możesz włączyć uprawnienie do uruchamiania
   kodu (`shell_execution`). Bez piaskownicy DESMAN może napisać kod i poprosi o pomoc przy
   jego uruchomieniu.
+  Aby zainstalować Docker Desktop, skorzystaj z sekcji Docker w kreatorze konfiguracji lub uruchom `desman docker install --yes`.
 
 ## 1. Instalacja
 

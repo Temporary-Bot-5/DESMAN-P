@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import json
 import shutil
+from unittest.mock import patch
 
 from click.testing import CliRunner, Result
 
 from desman import providers
+from desman import wizard as setup_wizard
 from desman.cli import cli
 from desman.config import ConfigManager, Permissions, default_config_path
 from helpers import flat_keys, make_config
@@ -37,7 +39,8 @@ def menu(provider_id: str) -> str:
 
 
 def wizard(*answers: str) -> Result:
-    return CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
+    with patch.object(setup_wizard, "_docker"):
+        return CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
 
 
 def saved() -> ConfigManager:
@@ -162,9 +165,10 @@ def test_leaving_midway_saves_nothing() -> None:
 
 
 def test_first_run_of_bare_desman_opens_the_wizard() -> None:
-    result = CliRunner().invoke(
-        cli, [], input="\n".join(["1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL]) + "\n"
-    )
+    with patch.object(setup_wizard, "_docker"):
+        result = CliRunner().invoke(
+            cli, [], input="\n".join(["1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL]) + "\n"
+        )
     assert result.exit_code == 0, result.output
     assert json.loads(default_config_path().read_text(encoding="utf-8"))["configured"]
     assert "Decentralized Self-Evolving Modular Agents Network" in result.output

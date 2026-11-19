@@ -155,8 +155,8 @@ TOPICS: Final = (
         "own folder (always allowed; nothing outside it, no links); run_command "
         "(shell_execution), which runs code only in a sandbox with no network, a cleared "
         "environment and limits of time and memory, and is offered only when the "
-        "sandbox is available. Linux uses bubblewrap. Elsewhere install Docker Desktop "
-        "in Linux-container mode and run `desman sandbox setup --yes`. "
+        "sandbox is available. Linux uses bubblewrap. Elsewhere run Docker Desktop in "
+        "Linux-container mode and use `desman sandbox setup --yes`. "
         "web_search and web_fetch (network_access): reading public pages "
         "only, results marked untrusted; web_search asks Wikipedia, Stack Overflow, arXiv and "
         "GitHub, and the whole web only through the person's SearXNG server or a Tavily "
@@ -171,7 +171,8 @@ TOPICS: Final = (
         "search",
         "set up and manage whole-web search",
         "`desman search setup` previews installing local SearXNG through Docker (about "
-        "100 MB). Docker must be installed and running; the wizard offers setup under Web search. "
+        "100 MB). `desman docker install` previews installation or startup; --yes runs the plan. "
+        "The wizard offers Docker and, once ready, the sandbox image and SearXNG where applicable. On Linux it can offer bubblewrap alone. "
         "The container is bound to 127.0.0.1, starting at a free port from 8888; --port chooses "
         "one; --yes confirms setup. The wizard asks and preserves choices if setup fails. The URL is saved only after a JSON search answers. "
         "`desman search status` shows the container (unknown without Docker), URL and search health (--json for scripts); `desman search start` and `desman search stop` control "

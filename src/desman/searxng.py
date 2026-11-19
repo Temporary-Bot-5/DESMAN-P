@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import secrets
-import shutil
 import socket
 import subprocess
 import time
@@ -16,6 +15,7 @@ import click
 from desman import ui
 from desman.config import ConfigManager
 from desman.core import search
+from desman.docker_cli import docker_executable
 from desman.i18n import t
 
 IMAGE = "searxng/searxng:2026.11.15-2d500cb6b"
@@ -26,7 +26,7 @@ def docker(args: list[str], timeout: float = 60) -> str:
     """One bounded subprocess boundary; tests replace this helper."""
     try:
         result = subprocess.run(
-            ["docker", *args],
+            [docker_executable() or "docker", *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -44,10 +44,10 @@ def docker(args: list[str], timeout: float = 60) -> str:
 
 
 def available() -> None:
-    if shutil.which("docker") is None:
+    if docker_executable() is None:
         raise click.ClickException(
             t(
-                "Install Docker from https://docs.docker.com/get-docker/ and start it, or use Tavily in `desman config`."
+                "Install or start Docker with `desman docker install`, or use Tavily in `desman config`."
             )
         )
     try:
@@ -57,7 +57,7 @@ def available() -> None:
             str(e)
             + "\n"
             + t(
-                "Install Docker from https://docs.docker.com/get-docker/ and start it, or use Tavily in `desman config`."
+                "Install or start Docker with `desman docker install`, or use Tavily in `desman config`."
             )
         ) from e
 

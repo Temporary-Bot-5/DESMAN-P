@@ -31,6 +31,7 @@ un problème. Commencez par les sections 1 à 3 et consultez le reste au besoin.
   puis exécutez `desman sandbox setup --yes` pour autoriser le téléchargement de l’image. Vous
   pouvez activer l’autorisation d’exécuter du code (`shell_execution`) dans les paramètres de
   DESMAN. Sans bac à sable, DESMAN peut écrire du code et vous demandera de l’aide pour l’exécuter.
+  Pour installer Docker Desktop, utilisez la section Docker de l’assistant de configuration ou lancez `desman docker install --yes`.
 
 ## 1. Installation
 

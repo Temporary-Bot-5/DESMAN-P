@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
@@ -472,7 +473,10 @@ class QuotaArgs(DonateArgs):
 
 class ConfigArgs(Args):
     section: (
-        Literal["providers", "permissions", "personalize", "behaviour", "network", "roles"] | None
+        Literal[
+            "providers", "docker", "permissions", "personalize", "behaviour", "network", "roles"
+        ]
+        | None
     ) = Field(None, description="one section of the setup wizard; none: the whole wizard")
 
 
@@ -1860,6 +1864,8 @@ def _config(ctx: Context, args: ConfigArgs) -> Proposal:
 
     if args.section == "providers":
         line = t("Open the setup wizard at its model providers: their keys and settings.")
+    elif args.section == "docker":
+        line = t("Open the Docker section of the setup wizard.")
     elif args.section == "permissions":
         line = t("Open the setup wizard at the agents' permissions.")
     elif args.section == "personalize":
@@ -1952,7 +1958,48 @@ def _sandbox_setup(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     return Proposal([question], apply)
 
 
+def _docker_status(ctx: Context, args: NoArgs) -> Outcome:
+    from desman.docker_cli import docker_status
+
+    return Outcome(dict(docker_status(display=False)))
+
+
+def _docker_install(ctx: Context, args: NoArgs) -> Outcome | Proposal:
+    from desman import docker_cli
+
+    installation = docker_cli.current_plan()
+    if not installation.steps:
+        return Outcome({"installed": False, "plan": installation.lines()})
+
+    def apply() -> Outcome:
+        if not (sys.stdin and sys.stdin.isatty() and sys.stdout and sys.stdout.isatty()):
+            ui.note(
+                t("Nothing changed. Confirm with: {command}", command=docker_cli.INSTALL_COMMAND)
+            )
+            return Outcome({"installed": False, "run_yourself": docker_cli.INSTALL_COMMAND})
+        state = docker_cli.apply_plan(installation)
+        return Outcome(dict(state))
+
+    return Proposal(installation.lines(), apply)
+
+
 CATALOG: tuple[Entry, ...] = (
+    Entry(
+        "docker status",
+        "Check Docker and its daemon.",
+        NoArgs,
+        Kind.READ,
+        _docker_status,
+        aliases=("docker",),
+    ),
+    Entry(
+        "docker install",
+        "Install or start Docker after showing the plan.",
+        NoArgs,
+        Kind.CHANGE,
+        _docker_install,
+        typed_confirm=True,
+    ),
     Entry(
         "sandbox status",
         "Check the code sandbox.",
@@ -2560,7 +2607,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "config",
         "Open the setup wizard, or one section of it (providers: keys and settings; "
-        "permissions; personalize; behaviour; roles: model and key preferences; network: desman-global), for the person to fill in; only when they ask to set DESMAN up or to "
+        "docker: installation; permissions; personalize; behaviour; roles: model and key preferences; network: desman-global), for the person to fill in; only when they ask to set DESMAN up or to "
         "change settings. To show providers, keys or settings use keys list or config show.",
         ConfigArgs,
         Kind.INPUT,
@@ -2852,7 +2899,14 @@ def parse_line(
             field_name = mapping.get(name, name)
             supplied = ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
             if (
-                entry.name in {"config reset", "search setup", "search remove", "sandbox setup"}
+                entry.name
+                in {
+                    "config reset",
+                    "search setup",
+                    "search remove",
+                    "sandbox setup",
+                    "docker install",
+                }
                 and name == "yes"
             ):
                 if value:

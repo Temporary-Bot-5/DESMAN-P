@@ -2,8 +2,8 @@
 
 Language, then a provider menu that stays open until "Done": pick a provider, add or remove
 its keys (several per provider are fine) or change its settings, pick the next one. Its role
-settings menu chooses the model and key each role asks first. Then the
-permissions, then personalisation: whether the interlocutor may study the conversation and keep
+settings menu chooses the model and key each role asks first. Then the Docker offer,
+permissions, and personalisation: whether the interlocutor may study the conversation and keep
 notes about the person, and how it talks (`Config.behaviour`), which holds either way. Last,
 whether this machine takes part in desman-global (off unless the person says yes). Nothing is
 saved until the end; leaving with Ctrl+C or Esc saves nothing.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -100,6 +101,7 @@ def run(manager: ConfigManager) -> None:
     session = _Session(config, manager)
 
     _providers_menu(session)
+    _docker(session)
     config.permissions = _permissions(config.permissions)
     config.personalize = ask_personalize(config.personalize)
     if ui.confirm(t("Set up how the interlocutor talks to you?"), default=False):
@@ -117,7 +119,7 @@ def run(manager: ConfigManager) -> None:
     ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
 
 
-SECTIONS = ("providers", "permissions", "personalize", "behaviour", "network", "roles")
+SECTIONS = ("providers", "docker", "permissions", "personalize", "behaviour", "network", "roles")
 """Parts of the wizard that can be opened on their own (from the chat, ADR 0003 §3)."""
 
 
@@ -127,6 +129,11 @@ def run_section(manager: ConfigManager, section: str) -> None:
     config = manager.load().model_copy(deep=True)
     if section == "providers":
         _providers_menu(_Session(config, manager))
+    elif section == "docker":
+        before = config.settings.get("SEARXNG_URL")
+        _docker(_Session(config, manager))
+        if config.settings.get("SEARXNG_URL") == before:
+            return
     elif section == "permissions":
         config.permissions = _permissions(config.permissions)
     elif section == "personalize":
@@ -254,14 +261,7 @@ def _providers_menu(s: _Session) -> None:
         if picked is None:
             return
         if picked == "search_setup":
-            from desman import searxng
-
-            if ui.confirm(searxng.consent()):
-                assert s.manager is not None
-                try:
-                    s.config.settings["SEARXNG_URL"] = searxng.setup(s.manager, save_url=False)
-                except click.ClickException as e:
-                    ui.warn(str(e))
+            _offer_searxng(s)
             continue
         if picked == "roles":
             ask_roles(s.config)
@@ -508,6 +508,53 @@ def _check_searxng(url: str) -> None:
         ui.ok(t("SearXNG answers: web search works."))
     else:
         ui.warn(t("SearXNG at {url} cannot be used yet: {problem}", url=url, problem=problem))
+
+
+def _offer_searxng(s: _Session) -> None:
+    from desman import searxng
+
+    if ui.confirm(searxng.consent()):
+        assert s.manager is not None
+        try:
+            s.config.settings["SEARXNG_URL"] = searxng.setup(s.manager, save_url=False)
+        except click.ClickException as exc:
+            ui.warn(str(exc))
+
+
+def _docker(s: _Session) -> None:
+    from desman import docker_cli
+
+    state = docker_cli.docker_status(display=False)
+    try:
+        installation = docker_cli.current_plan(state)
+        if not installation.steps and not installation.link:
+            return
+        ui.section(t("Docker"))
+        if sys.platform in ("win32", "darwin"):
+            ui.note(t("Docker lets DESMAN check generated code by running it in a sandbox."))
+        if state["available"]:
+            ui.note(t("On Linux, bubblewrap runs generated code in a sandbox."))
+        else:
+            ui.note(t("Docker lets DESMAN search the whole web through local SearXNG."))
+        docker_cli.show_plan(installation, include_after=False)
+        if not installation.steps or not ui.confirm(t("Install Docker now?"), default=False):
+            return
+        if not docker_cli.apply_plan(installation)["available"]:
+            return
+    except click.ClickException as exc:
+        ui.warn(str(exc))
+        return
+
+    if not sys.platform.startswith("linux"):
+        from desman.core.sandbox import Sandbox
+        from desman.sandbox_cli import offer_setup
+
+        try:
+            offer_setup(Sandbox(docker=docker_cli.docker_executable()))
+        except click.ClickException as exc:
+            ui.warn(str(exc))
+    if not state["available"]:
+        _offer_searxng(s)
 
 
 def _permissions(current: Permissions) -> Permissions:

@@ -35,6 +35,7 @@ bei Bedarf.
   zu bestätigen. In den DESMAN-Einstellungen können Sie die Berechtigung zur Codeausführung
   (`shell_execution`) aktivieren. Ohne Sandbox kann DESMAN Code schreiben und bittet beim
   Ausführen um Hilfe.
+  Zur Installation von Docker Desktop nutzen Sie den Abschnitt „Docker“ im Einrichtungsassistenten oder führen Sie `desman docker install --yes` aus.
 
 ## 1. Installation
 

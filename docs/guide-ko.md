@@ -26,6 +26,7 @@
   `desman sandbox setup --yes`를 실행해 이미지 다운로드를 승인하세요.
   DESMAN 설정에서 코드 실행 권한(`shell_execution`)을 켤 수 있습니다.
   샌드박스가 없어도 DESMAN은 코드를 작성할 수 있으며, 실행할 때는 도움을 요청합니다.
+  Docker Desktop을 설치하려면 설정 마법사의 Docker 섹션을 이용하거나 `desman docker install --yes`를 실행하세요.
 
 ## 1. 설치
 
