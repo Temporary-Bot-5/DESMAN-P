@@ -117,6 +117,7 @@ INTERLOCUTOR_SYSTEM = (
     f"{MAX_FILES_FROM}); the workers then get copies of its files. Give "
     '"runs_code": true when the work must run code or a command and tell what came of it '
     "(testing a program, a crash test, measuring): it is then done only if it really ran. "
+    "A request to work on the pending_files is a task turn; DESMAN attaches them automatically. "
     "Work is always a task turn, never a command: the person asked for it already. A "
     "request for current information (prices, news, weather, latest versions, anything "
     "found online) is a task turn too: its workers search the web; never reply that you "
@@ -528,8 +529,10 @@ class Interlocutor:
         nodes: tuple[knowledge.Node, ...] | None = None,
         *,
         clock: Callable[[], datetime] | None = None,
+        pending_files: str = "",
     ) -> None:
         self.clock = clock
+        self.pending_files = pending_files
         self.llm = llm
         self.language = language
         """A language code of `i18n.CATALOGS`: the person's language."""
@@ -680,6 +683,8 @@ class Interlocutor:
     def build_request(self, history: History) -> Request:
         """The initial chat request, also used by the operator's context inspection."""
         payload = self._profile()
+        if self.pending_files:
+            payload["pending_files"] = self.pending_files
         budget = HISTORY_TOKENS
         if history.summary is not None:
             payload["summary_of_earlier_conversation"] = history.summary.text

@@ -1800,4 +1800,38 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "evet", "no": "hayır"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file için GOAL gerekir ve --spec ile birlikte kullanılamaz",
+        "Attach a text file to GOAL. Repeat for more files.": "Hedefe bir metin dosyası ekleyin. Daha fazla dosya için seçeneği yineleyin.",
+        "Attach text files": "Metin dosyaları ekle",
+        "Attached for the next task: {file} ({n} character).": (
+            "Sonraki görev için eklendi: {file} ({n} karakter).",
+        ),
+        "Attachments are unavailable in this chat right now.": "Şu anda bu sohbete dosya eklenemiyor.",
+        "Could not attach {file}: {reason}": "{file} eklenemedi: {reason}",
+        "Could not update attachments.": "Ekler güncellenemedi.",
+        "Files attached: {files}": "Eklenen dosyalar: {files}",
+        "Files pending for the next task": "Sonraki görev için bekleyen dosyalar",
+        "Files pending for the next task: {files}": "Sonraki görev için bekleyen dosyalar: {files}",
+        "No files are pending.": "Bekleyen dosya yok.",
+        "Only you can attach local files. Use /file PATH.": "Yerel dosyaları yalnızca siz ekleyebilirsiniz. /file PATH yazın.",
+        "Pending files cleared.": "Bekleyen dosyaların listesi temizlendi.",
+        "Remove attachment: {file}": "{file} ekini kaldır",
+        "Removed pending file: {file}": "{file} bekleme listesinden kaldırıldı.",
+        "Task {ref} received the attached files: {files}": "{ref} görevi ekli dosyaları aldı: {files}",
+        "That file is no longer pending.": "Bu dosya artık beklemiyor.",
+        "The attached files could not be saved. The task was not started: {error}": "Ekli dosyalar kaydedilemedi. Görev başlatılmadı: {error}",
+        "Your files are still pending.": "Dosyalarınız sıradaki görev için bekliyor.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "/file PATH ile ekle, /file ile listele veya /file clear ile temizle",
+        "it is not a regular file": "normal bir dosya değil",
+        "save it as UTF-8 text": "dosyayı UTF-8 metin olarak kaydedin",
+        "the attached files together exceed {limit} bytes": "ekler toplamda {limit} baytı aşıyor",
+        "the file could not be read": "dosya okunamadı",
+        "the file exceeds {limit} bytes": "dosya {limit} baytı aşıyor",
+        "the file extension is not a supported text format": "dosya uzantısı desteklenen bir metin biçimine ait değil",
+        "the maximum number of attached files is {limit}": "en fazla {limit} dosya eklenebilir",
+    }
+)
+
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)

@@ -17,7 +17,7 @@ import click
 from rich.console import RenderableType
 from rich.text import Text
 
-from desman import commands, providers, runs, ui
+from desman import commands, providers, runs, task_files, ui
 from desman.chat import Chat, run_turn
 from desman.config import ConfigError, open_config
 from desman.core import db
@@ -253,6 +253,7 @@ class Runners:
         self.active = 0
         self.closed = False
         self.summary_failures: dict[str, dict[str, int]] = {}
+        self.pending_files: dict[str, task_files.PendingFiles] = {}
         front.runners = self
         front.database = path
 
@@ -339,6 +340,7 @@ class Runners:
                 runner.front = sink
             # One context per session lifetime, never shared with the dispatcher.
             chat = self.factory(sessions)
+            chat.pending_files = self.pending_files
             chat.session_id, chat.temporary = runner.session_id, runner.temporary
             chat.turn_sink = sink.changed
             with self.condition:
@@ -588,9 +590,20 @@ class PageChat(Chat):
     def __init__(self, sessions: Sessions, runners: Runners, **options: Any) -> None:
         super().__init__(sessions, background_tasks=True, **options)
         self.runners = runners
+        self.pending_files = runners.pending_files
         self.dispatch_turn = self.dispatch
+        runners.front.apply_attachment = self._apply_attachment
+
+    def _apply_attachment(self, change: task_files.Given | str) -> None:
+        if isinstance(change, task_files.Given):
+            self.attach_file(change)
+        else:
+            self.remove_file(change)
+        if self.session_id is not None:
+            self.runners.front.session_changed(self.session_id)
 
     def _erase_session(self, session_id: str) -> None:
+        self.pending_files.pop(session_id, None)
         if not self.runners.defer_erase(session_id):
             super()._erase_session(session_id)
 

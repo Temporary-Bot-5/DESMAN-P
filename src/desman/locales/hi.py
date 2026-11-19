@@ -1888,4 +1888,39 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "हाँ", "no": "नहीं"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file के लिए GOAL ज़रूरी है और इसे --spec के साथ इस्तेमाल नहीं किया जा सकता",
+        "Attach a text file to GOAL. Repeat for more files.": "लक्ष्य के साथ टेक्स्ट फ़ाइल जोड़ें। और फ़ाइलें जोड़ने के लिए विकल्प दोहराएँ।",
+        "Attach text files": "टेक्स्ट फ़ाइलें जोड़ें",
+        "Attached for the next task: {file} ({n} character).": (
+            "अगले काम के लिए जोड़ी गई फ़ाइल: {file} ({n} वर्ण)।",
+            "अगले काम के लिए जोड़ी गई फ़ाइल: {file} ({n} वर्ण)।",
+        ),
+        "Attachments are unavailable in this chat right now.": "इस चैट में अभी फ़ाइलें जोड़ने की सुविधा उपलब्ध नहीं है।",
+        "Could not attach {file}: {reason}": "{file} नहीं जोड़ी जा सकी: {reason}",
+        "Could not update attachments.": "संलग्न फ़ाइलें अपडेट नहीं की जा सकीं।",
+        "Files attached: {files}": "संलग्न फ़ाइलें: {files}",
+        "Files pending for the next task": "अगले काम के लिए फ़ाइलें",
+        "Files pending for the next task: {files}": "अगले काम के लिए फ़ाइलें: {files}",
+        "No files are pending.": "अगले काम के लिए कोई फ़ाइल नहीं है।",
+        "Only you can attach local files. Use /file PATH.": "स्थानीय फ़ाइलें सिर्फ़ आप जोड़ सकते हैं। /file PATH का इस्तेमाल करें।",
+        "Pending files cleared.": "अगले काम की फ़ाइलों की सूची साफ़ कर दी गई।",
+        "Remove attachment: {file}": "संलग्न फ़ाइल {file} हटाएँ",
+        "Removed pending file: {file}": "{file} को सूची से हटा दिया गया।",
+        "Task {ref} received the attached files: {files}": "काम {ref} को संलग्न फ़ाइलें मिल गईं: {files}",
+        "That file is no longer pending.": "वह फ़ाइल अब सूची में नहीं है।",
+        "The attached files could not be saved. The task was not started: {error}": "संलग्न फ़ाइलें सहेजी नहीं जा सकीं। काम शुरू नहीं हुआ: {error}",
+        "Your files are still pending.": "आपकी फ़ाइलें अब भी अगले काम की सूची में हैं।",
+        "attach with /file PATH, list with /file, or clear with /file clear": "जोड़ने के लिए /file PATH, सूची देखने के लिए /file, सूची साफ़ करने के लिए /file clear",
+        "it is not a regular file": "यह एक सामान्य फ़ाइल नहीं है",
+        "save it as UTF-8 text": "इसे UTF-8 टेक्स्ट के रूप में सहेजें",
+        "the attached files together exceed {limit} bytes": "संलग्न फ़ाइलों का कुल आकार {limit} बाइट से अधिक है",
+        "the file could not be read": "फ़ाइल पढ़ी नहीं जा सकी",
+        "the file exceeds {limit} bytes": "फ़ाइल का आकार {limit} बाइट से अधिक है",
+        "the file extension is not a supported text format": "फ़ाइल का एक्सटेंशन किसी समर्थित टेक्स्ट फ़ॉर्मैट का नहीं है",
+        "the maximum number of attached files is {limit}": "ज़्यादा से ज़्यादा {limit} फ़ाइलें जोड़ी जा सकती हैं",
+    }
+)
+
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)

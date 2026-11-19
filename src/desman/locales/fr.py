@@ -1904,4 +1904,39 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "oui", "no": "non"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file exige un objectif GOAL et ne peut pas être utilisé avec --spec",
+        "Attach a text file to GOAL. Repeat for more files.": "Joindre un fichier texte à l’objectif. Répétez l’option pour joindre plusieurs fichiers.",
+        "Attach text files": "Joindre des fichiers texte",
+        "Attached for the next task: {file} ({n} character).": (
+            "Fichier joint pour la prochaine tâche : {file} ({n} caractère).",
+            "Fichier joint pour la prochaine tâche : {file} ({n} caractères).",
+        ),
+        "Attachments are unavailable in this chat right now.": "Les pièces jointes sont temporairement indisponibles dans cette conversation.",
+        "Could not attach {file}: {reason}": "Impossible de joindre {file} : {reason}",
+        "Could not update attachments.": "Impossible de mettre à jour les pièces jointes.",
+        "Files attached: {files}": "Fichiers joints : {files}",
+        "Files pending for the next task": "Fichiers pour la prochaine tâche",
+        "Files pending for the next task: {files}": "Fichiers pour la prochaine tâche : {files}",
+        "No files are pending.": "Aucun fichier en attente.",
+        "Only you can attach local files. Use /file PATH.": "Vous seul pouvez joindre des fichiers locaux. Utilisez /file PATH.",
+        "Pending files cleared.": "La liste des fichiers en attente a été vidée.",
+        "Remove attachment: {file}": "Retirer la pièce jointe {file}",
+        "Removed pending file: {file}": "Fichier {file} retiré de la liste.",
+        "Task {ref} received the attached files: {files}": "La tâche {ref} a reçu les fichiers joints : {files}",
+        "That file is no longer pending.": "Ce fichier n’est plus en attente.",
+        "The attached files could not be saved. The task was not started: {error}": "Impossible d’enregistrer les pièces jointes. La tâche n’a pas été lancée : {error}",
+        "Your files are still pending.": "Vos fichiers sont toujours en attente.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "joindre avec /file PATH, lister avec /file ou vider la liste avec /file clear",
+        "it is not a regular file": "ce n’est pas un fichier ordinaire",
+        "save it as UTF-8 text": "enregistrez le fichier sous forme de texte UTF-8",
+        "the attached files together exceed {limit} bytes": "la taille totale des pièces jointes dépasse {limit} octets",
+        "the file could not be read": "le fichier n’a pas pu être lu",
+        "the file exceeds {limit} bytes": "le fichier dépasse {limit} octets",
+        "the file extension is not a supported text format": "l’extension du fichier ne correspond à aucun format texte pris en charge",
+        "the maximum number of attached files is {limit}": "vous pouvez joindre au plus {limit} fichiers",
+    }
+)
+
 CATALOG = Catalog("Français", plural, MESSAGES, CLICK, forms=2)

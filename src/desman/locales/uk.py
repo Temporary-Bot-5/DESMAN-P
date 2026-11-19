@@ -1933,4 +1933,40 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "так", "no": "ні"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "Для --file потрібна ціль GOAL. Поєднувати --file з --spec не можна",
+        "Attach a text file to GOAL. Repeat for more files.": "Додати текстовий файл до цілі. Для кількох файлів укажіть параметр кілька разів.",
+        "Attach text files": "Прикріпити текстові файли",
+        "Attached for the next task: {file} ({n} character).": (
+            "До наступного завдання прикріплено файл {file} ({n} символ)",
+            "До наступного завдання прикріплено файл {file} ({n} символи)",
+            "До наступного завдання прикріплено файл {file} ({n} символів)",
+        ),
+        "Attachments are unavailable in this chat right now.": "Зараз у цьому чаті не можна прикріплювати файли.",
+        "Could not attach {file}: {reason}": "Не вдалося прикріпити {file}: {reason}",
+        "Could not update attachments.": "Не вдалося оновити вкладення.",
+        "Files attached: {files}": "Прикріплені файли: {files}",
+        "Files pending for the next task": "Файли для наступного завдання",
+        "Files pending for the next task: {files}": "Файли для наступного завдання: {files}",
+        "No files are pending.": "Немає файлів для наступного завдання.",
+        "Only you can attach local files. Use /file PATH.": "Локальні файли можете додати лише ви. Скористайтеся /file PATH.",
+        "Pending files cleared.": "Список файлів для наступного завдання очищено.",
+        "Remove attachment: {file}": "Вилучити вкладення {file}",
+        "Removed pending file: {file}": "Зі списку вилучено файл {file}.",
+        "Task {ref} received the attached files: {files}": "Завдання {ref} отримало прикріплені файли: {files}",
+        "That file is no longer pending.": "Цього файла вже немає у списку.",
+        "The attached files could not be saved. The task was not started: {error}": "Не вдалося зберегти вкладення. Завдання не розпочато: {error}",
+        "Your files are still pending.": "Ваші файли залишилися у списку для наступного завдання.",
+        "attach with /file PATH, list with /file, or clear with /file clear": "прикріпити файл: /file PATH, переглянути список: /file, очистити список: /file clear",
+        "it is not a regular file": "це не звичайний файл",
+        "save it as UTF-8 text": "збережіть файл як текст у кодуванні UTF-8",
+        "the attached files together exceed {limit} bytes": "загальний розмір вкладень перевищує {limit} байтів",
+        "the file could not be read": "не вдалося прочитати файл",
+        "the file exceeds {limit} bytes": "розмір файла перевищує {limit} байтів",
+        "the file extension is not a supported text format": "розширення файла не належить до підтримуваних текстових форматів",
+        "the maximum number of attached files is {limit}": "можна прикріпити не більше ніж {limit} файлів",
+    }
+)
+
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)

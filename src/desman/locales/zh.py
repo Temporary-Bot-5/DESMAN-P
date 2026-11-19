@@ -1727,4 +1727,38 @@ MESSAGES.update(
 
 MESSAGES.update({"yes": "是", "no": "否"})
 
+MESSAGES.update(
+    {
+        "--file requires GOAL and cannot be used with --spec": "--file 需要指定目标 GOAL，且不能与 --spec 一起使用",
+        "Attach a text file to GOAL. Repeat for more files.": "为目标附加文本文件。可重复使用此选项以附加多个文件。",
+        "Attach text files": "附加文本文件",
+        "Attached for the next task: {file} ({n} character).": (
+            "已为下一个任务附加 {file}（{n} 个字符）。",
+        ),
+        "Attachments are unavailable in this chat right now.": "当前无法在此聊天中附加文件。",
+        "Could not attach {file}: {reason}": "无法附加 {file}：{reason}",
+        "Could not update attachments.": "无法更新附件。",
+        "Files attached: {files}": "已附加文件：{files}",
+        "Files pending for the next task": "下一个任务的待用文件",
+        "Files pending for the next task: {files}": "下一个任务的待用文件：{files}",
+        "No files are pending.": "没有待用文件。",
+        "Only you can attach local files. Use /file PATH.": "只有你可以附加本地文件。请使用 /file PATH。",
+        "Pending files cleared.": "已清空待用文件列表。",
+        "Remove attachment: {file}": "移除附件 {file}",
+        "Removed pending file: {file}": "已从待用列表中移除 {file}。",
+        "Task {ref} received the attached files: {files}": "任务 {ref} 已收到附件：{files}",
+        "That file is no longer pending.": "此文件已不在待用列表中。",
+        "The attached files could not be saved. The task was not started: {error}": "无法保存附件，任务未启动：{error}",
+        "Your files are still pending.": "你的文件仍在待用列表中。",
+        "attach with /file PATH, list with /file, or clear with /file clear": "用 /file PATH 附加文件，用 /file 查看列表，用 /file clear 清空列表",
+        "it is not a regular file": "不是普通文件",
+        "save it as UTF-8 text": "请将文件保存为 UTF-8 文本",
+        "the attached files together exceed {limit} bytes": "所有附件的总大小超过 {limit} 字节",
+        "the file could not be read": "无法读取文件",
+        "the file exceeds {limit} bytes": "文件大小超过 {limit} 字节",
+        "the file extension is not a supported text format": "文件扩展名不属于支持的文本格式",
+        "the maximum number of attached files is {limit}": "最多可附加 {limit} 个文件",
+    }
+)
+
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)

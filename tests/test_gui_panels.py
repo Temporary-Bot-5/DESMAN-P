@@ -432,6 +432,7 @@ def test_stored_transcript_follows_new_output(tmp_path: Path) -> None:
         'const assert = require("node:assert/strict");\n'
         "let after = 0, state = 0, transcriptVersion = null, ended = false;\n"
         "let followUntil = 0, shownSession = null, currentSession = null, waitingData = null;\n"
+        "let canAttach = false; const showAttachments = () => {};\n"
         "const words = {};\n"
         "const node = () => ({textContent: '', hidden: false, replaceChildren() {}});\n"
         "const nodes = {status: node(), live: node(), stop: node(), prompt: node()};\n"
