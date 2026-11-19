@@ -60,6 +60,7 @@ from desman.config import (
     Config,
     ConfigError,
     ConfigManager,
+    Donation,
     ModelChoices,
     RegistryUrl,
     Tuning,
@@ -1324,20 +1325,24 @@ def _global_quota(ctx: Context, args: QuotaArgs) -> Outcome | Proposal:
     config = ctx.config()
     lent = global_cli.lent_provider(config, args.provider)
     old = config.network.donated[lent]
+
+    def report(quota: Donation, changed: global_cli.Lent | None = None) -> Outcome:
+        found = global_cli.quota_report(ctx.store.conn, lent, quota)
+        global_cli.print_quota(found, changed)
+        return Outcome(found.as_json(changed))
+
     if args.calls is None and args.tokens is None:
-        ui.out(f"{global_cli.provider_name(lent)}: {global_cli.quota_text(old)}")
-        return Outcome({"provider": lent, "quota": old.model_dump()})
+        return report(old)
     new = global_cli.donation(old, args.calls, args.tokens)
     if new == old:
-        ui.note(t("Nothing changed."))
-        return _lent_outcome(global_cli.Lent(lent, old, new))
+        return report(new, global_cli.Lent(lent, old, new))
 
     def apply() -> Outcome:
         done = global_cli.set_quota(
             ctx.manager, args.provider, args.calls, args.tokens, conn=ctx.store.conn
         )
-        global_cli.print_lent(done)
-        return _lent_outcome(done)
+        assert done.new is not None
+        return report(done.new, done)
 
     line = t(
         "{name}: {old} → {new}",
@@ -2305,7 +2310,7 @@ CATALOG: tuple[Entry, ...] = (
         "global status",
         "Whether this machine takes part in desman-global (the opt-in network of DESMANs), "
         "its node key's fingerprint, the registry, and which model providers it lends with "
-        "their daily quotas.",
+        "their daily quotas, usage and UTC reset time.",
         NoArgs,
         Kind.READ,
         _global_status,
@@ -2446,7 +2451,8 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "global quota",
-        "Without calls/tokens: show a lent provider's daily quota. With them: change it (the "
+        "Without calls/tokens: show a lent provider's daily quota, usage and UTC reset time. "
+        "With them: change it (the "
         "person confirms).",
         QuotaArgs,
         _quota_kind,

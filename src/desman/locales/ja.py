@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.": "本日の使用量（呼び出し/トークン）: {calls}/{tokens}。残り: {calls_left}/{tokens_left}。",
+    "Daily quotas reset at {when} local time.": "日次クォータは現地時刻の {when} にリセットされます。",
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "合計: {calls}{failures}、入力 {tokens_in:,} トークン、出力 {tokens_out:,} トークン、{providers}。",
     " ({failed:,} failed, {limited:,} of them on limits)": "（失敗 {failed:,}、うち制限による {limited:,}）",
     "{n:,} call": ("{n:,} 回の呼び出し",),

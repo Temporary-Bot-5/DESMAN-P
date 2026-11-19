@@ -26,7 +26,7 @@ import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Final
@@ -45,7 +45,7 @@ from desman.core import report as task_reports
 from desman.core import stats as task_stats
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
-from desman.net import cluster, node, protocol, sign
+from desman.net import cluster, jobs, node, protocol, sign
 from desman.providers import Provider
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -69,6 +69,15 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _used_today(conn: sqlite3.Connection | None, provider: str, now: datetime) -> dict[str, int]:
+    calls, tokens = jobs.used_today(conn, provider, now) if conn is not None else (0, 0)
+    return {"calls": calls, "tokens": tokens}
+
+
+def _reset_at(now: datetime) -> datetime:
+    return jobs.day_start(now) + timedelta(days=1)
+
+
 @dataclass(frozen=True)
 class Status:
     enabled: bool
@@ -77,6 +86,8 @@ class Status:
     node: str | None
     """The node key's fingerprint, if there is one."""
     donated: dict[str, Donation]
+    used_today: dict[str, dict[str, int]]
+    now: datetime
     lead: bool = True
     cluster: dict[str, Any] | None = None
 
@@ -88,7 +99,33 @@ class Status:
             "registry": self.registry,
             "node": self.node,
             "donated": {name: d.model_dump() for name, d in self.donated.items()},
+            "used_today": self.used_today,
+            "resets_at": _reset_at(self.now).isoformat(),
         }
+
+
+@dataclass(frozen=True)
+class QuotaReport:
+    provider: str
+    quota: Donation
+    used_today: dict[str, int]
+    now: datetime
+
+    def as_json(self, changed: Lent | None = None) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "provider": self.provider,
+            "quota": self.quota.model_dump(),
+            "used_today": self.used_today,
+            "resets_at": _reset_at(self.now).isoformat(),
+        }
+        if changed is not None:
+            data["changed"] = changed.changed
+        return data
+
+
+def quota_report(conn: sqlite3.Connection, provider: str, quota: Donation) -> QuotaReport:
+    now = _utc_now()
+    return QuotaReport(provider, quota, _used_today(conn, provider, now), now)
 
 
 Entry = tuple[str, dict[str, Any]]
@@ -161,13 +198,16 @@ def status(
     config: Config, key_path: Path | None = None, *, conn: sqlite3.Connection | None = None
 ) -> Status:
     network = config.network
+    now = _utc_now()
     return Status(
         enabled=network.enabled,
         registry=network.registry or net.DEFAULT_REGISTRY,
         node=node_fingerprint(key_path),
         donated=dict(network.donated),
+        used_today={name: _used_today(conn, name, now) for name in network.donated},
+        now=now,
         lead=network.lead,
-        cluster=cluster.role(conn, _utc_now()) if conn is not None and network.enabled else None,
+        cluster=cluster.role(conn, now) if conn is not None and network.enabled else None,
     )
 
 
@@ -653,6 +693,35 @@ def quota_text(donation: Donation) -> str:
     )
 
 
+def _usage_text(quota: Donation, used: dict[str, int]) -> str:
+    return t(
+        "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.",
+        calls=used["calls"],
+        tokens=used["tokens"],
+        calls_left=max(0, quota.calls_per_day - used["calls"]),
+        tokens_left=max(0, quota.tokens_per_day - used["tokens"]),
+    )
+
+
+def _reset_text(now: datetime, tz: tzinfo | None) -> str:
+    reset = _reset_at(now).astimezone(tz)
+    when = reset.strftime(
+        "%H:%M" if reset.date() == now.astimezone(tz).date() else "%Y-%m-%d %H:%M"
+    )
+    return t("Daily quotas reset at {when} local time.", when=when)
+
+
+def print_quota(
+    found: QuotaReport, changed: Lent | None = None, *, tz: tzinfo | None = None
+) -> None:
+    if changed is None:
+        ui.out(f"{provider_name(found.provider)}: {quota_text(found.quota)}")
+    else:
+        print_lent(changed)
+    ui.out(_usage_text(found.quota, found.used_today))
+    ui.note(_reset_text(found.now, tz))
+
+
 def provider_name(provider_id: str) -> str:
     try:
         return providers.find(provider_id).name
@@ -660,7 +729,7 @@ def provider_name(provider_id: str) -> str:
         return provider_id
 
 
-def print_status(found: Status) -> None:
+def print_status(found: Status, *, tz: tzinfo | None = None) -> None:
     table = ui.table("", "", title=t("desman-global"))
     table.show_header = False
     table.add_row(Text(t("taking part"), style="muted"), t("yes") if found.enabled else t("no"))
@@ -672,9 +741,11 @@ def print_status(found: Status) -> None:
     for provider_id, donation in sorted(found.donated.items()):
         table.add_row(
             Text(t("lent: {name}", name=provider_name(provider_id)), style="muted"),
-            quota_text(donation),
+            quota_text(donation) + "\n" + _usage_text(donation, found.used_today[provider_id]),
         )
     ui.out(table)
+    if found.donated:
+        ui.note(_reset_text(found.now, tz))
     if found.enabled:
         ui.note(
             t(
@@ -860,20 +931,20 @@ def undonate_command(provider: str, as_json: bool) -> None:
 def quota_command(provider: str, calls: int | None, tokens: int | None, as_json: bool) -> None:
     """Show or change the daily quota of PROVIDER, lent to desman-global."""
     manager = load_config()
-    if calls is None and tokens is None:
-        config = manager.load()
-        lent = lent_provider(config, provider)
-        donation = config.network.donated[lent]
-        if as_json:
-            click.echo(json.dumps({"provider": lent, "quota": donation.model_dump()}))
+    changed = None
+    with journal(None) as conn:
+        if calls is None and tokens is None:
+            config = manager.load()
+            lent = lent_provider(config, provider)
+            found = quota_report(conn, lent, config.network.donated[lent])
         else:
-            ui.out(f"{provider_name(lent)}: {quota_text(donation)}")
-        return
-    changed = set_quota(manager, provider, calls, tokens)
+            changed = set_quota(manager, provider, calls, tokens, conn=conn)
+            assert changed.new is not None
+            found = quota_report(conn, changed.provider, changed.new)
     if as_json:
-        click.echo(_lent_json(changed))
+        click.echo(json.dumps(found.as_json(changed)))
     else:
-        print_lent(changed)
+        print_quota(found, changed)
 
 
 @global_group.command("submit-proposal")

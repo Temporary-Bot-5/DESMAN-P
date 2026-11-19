@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.": "आज का उपयोग (कॉल/टोकन): {calls}/{tokens}। शेष: {calls_left}/{tokens_left}।",
+    "Daily quotas reset at {when} local time.": "दैनिक कोटा स्थानीय समयानुसार {when} पर रीसेट होता है।",
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "कुल: {calls}{failures}, {tokens_in:,} इनपुट टोकन, {tokens_out:,} आउटपुट टोकन, {providers}।",
     " ({failed:,} failed, {limited:,} of them on limits)": " ({failed:,} विफल, जिनमें से {limited:,} सीमा के कारण)",
     "{n:,} call": ("{n:,} कॉल", "{n:,} कॉल"),

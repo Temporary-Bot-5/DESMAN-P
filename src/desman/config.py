@@ -26,7 +26,7 @@ from pydantic import (
 )
 
 from desman.core import filelock
-from desman.core.atomic import replace_file
+from desman.core.atomic import read_text, replace_file, retry_sharing
 from desman.tuning_limits import PAGE_TUNING_BOUNDS
 from desman.tuning_limits import TUNING_BOUNDS as WORKFLOW_TUNING_BOUNDS
 
@@ -77,7 +77,7 @@ def open_config() -> ConfigManager:
 
 def adopt_config(old: Path, new: Path) -> None:
     """Move `old` to `new` (0600). A config already at `new` wins and `old` is left alone."""
-    data = old.read_bytes()
+    data = retry_sharing(old.read_bytes)
     try:
         fd = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
     except FileExistsError:  # created meanwhile, e.g. by another `desman`
@@ -406,7 +406,7 @@ class ConfigManager:
         """The saved config; an unconfigured one when there is no file. Raises ConfigError
         when the file cannot be read, is not JSON or does not fit the schema."""
         try:
-            text = self.config_path.read_text(encoding="utf-8")
+            text = read_text(self.config_path)
         except FileNotFoundError:
             return Config()
         except (OSError, UnicodeDecodeError) as e:
@@ -497,7 +497,7 @@ class ConfigManager:
     def snapshot(self) -> str | None:
         """The file's text as it is now (None if there is no file), to detect later changes."""
         try:
-            return self.config_path.read_text(encoding="utf-8")
+            return read_text(self.config_path)
         except FileNotFoundError:
             return None
 

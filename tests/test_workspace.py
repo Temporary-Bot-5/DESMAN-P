@@ -8,11 +8,13 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from conftest import FakeClock
+from desman.core import atomic
 from desman.core import workspace as ws_module
 from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
@@ -411,3 +413,27 @@ def test_workspaces_live_next_to_the_store_database(clock: FakeClock, tmp_path: 
         conn.close()
     assert (tmp_path / "jobs" / "workspaces" / task_id / "x.txt").is_file()
     assert not (default_workspace_root() / task_id).exists()
+
+
+def test_portable_read_retries_windows_sharing_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    space = Workspace(tmp_path, "task")
+    space.write("answer", b"ready")
+    real_read = Path.read_bytes
+    attempts = 0
+
+    def read(path: Path) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("replacement in progress")
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(ws_module, "SECURE", False)
+    monkeypatch.setattr(atomic, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(atomic, "time", SimpleNamespace(sleep=clock.sleep))
+    assert space.read("answer") == b"ready"
+    assert attempts == 2
+    assert clock.slept == pytest.approx(0.05)

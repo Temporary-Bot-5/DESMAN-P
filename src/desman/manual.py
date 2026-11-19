@@ -273,14 +273,14 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "desman-global is off until `desman global join` (--registry URL if unknown). "
-        "Joining creates node.key; only its fingerprint is shown. "
-        "`desman global donate PROVIDER --calls N --tokens N` lends a local or allowed free "
-        "provider, never paid; keys stay here. `desman global quota PROVIDER` shows/changes "
-        "quotas; `desman global undonate PROVIDER` takes it back. "
-        "`desman global leave` withdraws everything; `desman global status` shows state. "
+        "Off until `desman global join` (--registry URL if unknown); shows only the new node.key "
+        "fingerprint. `desman global donate PROVIDER --calls N --tokens N` lends a local or "
+        "allowed free provider; keys stay here. `desman global quota PROVIDER` shows/changes "
+        "quotas; `desman global undonate PROVIDER` withdraws it. "
+        "`desman global leave` withdraws all; `desman global status` shows state. "
+        "Quotas count per UTC day and status shows the local reset time. "
         "`desman global lead STATE` (on/off, default on) allows an appointed node to plan "
-        "and supervise a cluster with lent modules and quotas, only while idle. Personal work stops operator renewal. Off stops renewal; another "
+        "and supervise a cluster with lent quotas while idle. Personal work or turning lead off stops renewal; another "
         "node takes over. Status shows its current role.\n"
         "`desman worker` registers and fetches revocations. Jobs need a fresh root-signed "
         "trust list. Owner timers update releases; changed/unknown schemas need consent. "
