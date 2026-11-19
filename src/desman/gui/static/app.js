@@ -65,6 +65,18 @@ function rich(target, html) {
   linkify(target);
 }
 
+// A line icon in the text colour, so it matches the other buttons (an emoji has its own colours).
+function clipIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9");
+  svg.append(path);
+  return svg;
+}
+
 function button(parent, label, action) {
   const b = text("button", label, parent);
   b.type = "button";
@@ -427,7 +439,9 @@ function showPrompt(p, pending = false) {
         picker.multiple = true;
         picker.hidden = true;
         picker.setAttribute("aria-label", words.attach_files);
-        const attach = button(form, "📎", () => picker.click());
+        const attach = button(form, "", () => picker.click());
+        attach.classList.add("attach");
+        attach.append(clipIcon());
         attach.dataset.attachment = "true";
         attach.title = words.attach_files;
         attach.setAttribute("aria-label", words.attach_files);
