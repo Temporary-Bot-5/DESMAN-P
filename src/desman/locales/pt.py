@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.": "Usado hoje (chamadas/tokens): {calls}/{tokens}. Restante: {calls_left}/{tokens_left}.",
+    "Daily quotas reset at {when} local time.": "As cotas diárias são renovadas às {when} (hora local).",
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "Total: {calls}{failures}, {tokens_in:,} tokens de entrada, {tokens_out:,} de saída, {providers}.",
     " ({failed:,} failed, {limited:,} of them on limits)": " ({failed:,} falhas, {limited:,} delas por limites)",
     "{n:,} call": ("{n:,} chamada", "{n:,} chamadas"),

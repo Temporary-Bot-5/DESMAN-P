@@ -1324,20 +1324,21 @@ def _global_quota(ctx: Context, args: QuotaArgs) -> Outcome | Proposal:
     config = ctx.config()
     lent = global_cli.lent_provider(config, args.provider)
     old = config.network.donated[lent]
+
     if args.calls is None and args.tokens is None:
-        ui.out(f"{global_cli.provider_name(lent)}: {global_cli.quota_text(old)}")
-        return Outcome({"provider": lent, "quota": old.model_dump()})
+        return Outcome(global_cli.show_quota(ctx.store.conn, lent, old))
     new = global_cli.donation(old, args.calls, args.tokens)
     if new == old:
-        ui.note(t("Nothing changed."))
-        return _lent_outcome(global_cli.Lent(lent, old, new))
+        return Outcome(
+            global_cli.show_quota(ctx.store.conn, lent, new, global_cli.Lent(lent, old, new))
+        )
 
     def apply() -> Outcome:
         done = global_cli.set_quota(
             ctx.manager, args.provider, args.calls, args.tokens, conn=ctx.store.conn
         )
-        global_cli.print_lent(done)
-        return _lent_outcome(done)
+        assert done.new is not None
+        return Outcome(global_cli.show_quota(ctx.store.conn, done.provider, done.new, done))
 
     line = t(
         "{name}: {old} → {new}",
@@ -2305,7 +2306,8 @@ CATALOG: tuple[Entry, ...] = (
         "global status",
         "Whether this machine takes part in desman-global (the opt-in network of DESMANs), "
         "its node key's fingerprint, the registry, and which model providers it lends with "
-        "their daily quotas.",
+        "their daily quotas and usage. The quota day starts at UTC midnight. The person's "
+        "screen already shows the reset in local time. Do not convert it.",
         NoArgs,
         Kind.READ,
         _global_status,
@@ -2446,8 +2448,9 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "global quota",
-        "Without calls/tokens: show a lent provider's daily quota. With them: change it (the "
-        "person confirms).",
+        "Without calls/tokens: show a lent provider's daily quota and usage. "
+        "With them: change it (the person confirms). The quota day starts at UTC midnight. "
+        "The person's screen already shows the reset in local time. Do not convert it.",
         QuotaArgs,
         _quota_kind,
         _global_quota,

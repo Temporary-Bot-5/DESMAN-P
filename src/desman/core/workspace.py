@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Final
 
 from desman.core import db
-from desman.core.atomic import replace_file
+from desman.core.atomic import replace_file, retry_sharing
 
 WORKSPACES_DIR: Final = "workspaces"
 _TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -142,16 +142,19 @@ class Workspace:
                 raise
         return "/".join(parts)
 
+    def _read_portably(self, path: str, parts: tuple[str, ...]) -> bytes:
+        self._check_no_links(parts)
+        target = self.root.joinpath(*parts)
+        if not target.is_file():
+            raise FileNotFoundError(f"no file {path!r} in workspace")
+        if target.stat().st_nlink > 1:
+            raise PathEscapeError(f"{path!r} has other hard links")
+        return retry_sharing(target.read_bytes)
+
     def read(self, path: str) -> bytes:
         parts = check_path(path)
         if not SECURE:
-            self._check_no_links(parts)
-            target = self.root.joinpath(*parts)
-            if not target.is_file():
-                raise FileNotFoundError(f"no file {path!r} in workspace")
-            if target.stat().st_nlink > 1:
-                raise PathEscapeError(f"{path!r} has other hard links")
-            return target.read_bytes()
+            return self._read_portably(path, parts)
         with self._parent(parts, create=False) as parent:
             # O_NONBLOCK: a FIFO planted under this name must not hang the open.
             flags = os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _BINARY | _NONBLOCK

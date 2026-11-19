@@ -15,6 +15,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.": "Використано сьогодні (виклики/токени): {calls}/{tokens}. Залишилося: {calls_left}/{tokens_left}.",
+    "Daily quotas reset at {when} local time.": "Добові квоти оновлюються о {when} за місцевим часом.",
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "Разом: {calls}{failures}, {tokens_in:,} вхідних токенів, {tokens_out:,} вихідних, {providers}.",
     " ({failed:,} failed, {limited:,} of them on limits)": " (з помилкою: {failed:,}, з них через ліміти: {limited:,})",
     "{n:,} call": ("{n:,} виклик", "{n:,} виклики", "{n:,} викликів"),

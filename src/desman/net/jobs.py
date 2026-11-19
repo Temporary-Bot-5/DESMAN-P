@@ -291,25 +291,24 @@ def day_start(now: datetime) -> datetime:
 
 def used_today(conn: sqlite3.Connection, provider: str, now: datetime) -> tuple[int, int]:
     """Calls and tokens jobs from the network spent today on `provider`'s models."""
+    calls, tokens, _ = quota_usage(conn, provider, now)
+    return calls, tokens
+
+
+def quota_usage(conn: sqlite3.Connection, provider: str, now: datetime) -> tuple[int, int, int]:
+    """Return logged calls, logged tokens and outstanding call holds in one snapshot.
+
+    A hold that spans midnight counts against the new day until the call finishes.
+    """
     row = conn.execute(
-        """SELECT count(*), COALESCE(SUM(m.prompt_tokens + m.completion_tokens), 0)
+        """SELECT count(*), COALESCE(SUM(m.prompt_tokens + m.completion_tokens), 0),
+                  (SELECT count(*) FROM quota_holds WHERE provider = ? AND expires_at > ?)
            FROM model_calls m LEFT JOIN tasks t ON t.id = m.task_id
            WHERE (t.origin = 'network' OR m.role = 'network_planner')
              AND m.provider = ? AND m.at >= ?""",
-        (provider, db.to_iso(day_start(now))),
+        (provider, db.to_iso(now), provider, db.to_iso(day_start(now))),
     ).fetchone()
-    return int(row[0]), int(row[1])
-
-
-def _held_calls(conn: sqlite3.Connection, provider: str, now: datetime) -> int:
-    """Calls being made, all counted against today: one taken before midnight is logged when it
-    ends, maybe today. The quota errs on the side of the person who lent it: right after
-    midnight a call still out may keep a job waiting, never let one through past the limit."""
-    row = conn.execute(
-        "SELECT count(*) FROM quota_holds WHERE provider = ? AND expires_at > ?",
-        (provider, db.to_iso(now)),
-    ).fetchone()
-    return int(row[0])
+    return int(row[0]), int(row[1]), int(row[2])
 
 
 def quota_left(conn: sqlite3.Connection, config: Config, provider: str, now: datetime) -> bool:
@@ -317,9 +316,8 @@ def quota_left(conn: sqlite3.Connection, config: Config, provider: str, now: dat
     donation = config.network.donated.get(provider)
     if donation is None:
         return False
-    calls, tokens = used_today(conn, provider, now)
-    calls += _held_calls(conn, provider, now)
-    return calls < donation.calls_per_day and tokens < donation.tokens_per_day
+    calls, tokens, held = quota_usage(conn, provider, now)
+    return calls + held < donation.calls_per_day and tokens < donation.tokens_per_day
 
 
 def hold_call(conn: sqlite3.Connection, config: Config, provider: str, now: datetime) -> int | None:

@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.": "오늘 사용량(호출/토큰): {calls}/{tokens}. 남은 양: {calls_left}/{tokens_left}.",
+    "Daily quotas reset at {when} local time.": "일일 할당량은 현지 시간 {when}에 초기화됩니다.",
     "Total: {calls}{failures}, {tokens_in:,} tokens in, {tokens_out:,} tokens out, {providers}.": "합계: {calls}{failures}, 입력 토큰 {tokens_in:,}개, 출력 토큰 {tokens_out:,}개, {providers}.",
     " ({failed:,} failed, {limited:,} of them on limits)": " (실패 {failed:,}회, 그중 제한으로 {limited:,}회)",
     "{n:,} call": ("호출 {n:,}회",),
