@@ -983,6 +983,9 @@ class Store:
         """
         rows = self.conn.execute(
             """SELECT dep.id, dep.description,
+                      CASE WHEN json_type(dep.inputs_json, '$.digest') = 'true'
+                             AND json_type(dep.inputs_json, '$.document') = 'text'
+                           THEN json_extract(dep.inputs_json, '$.document') END AS digest,
                       (SELECT a.content_json FROM artifacts a
                        WHERE a.subtask_id = dep.id AND a.attempt = dep.accepted_attempt)
                       AS content_json
@@ -996,6 +999,7 @@ class Store:
                 subtask_id=r["id"],
                 description=r["description"],
                 content=json.loads(r["content_json"]) if r["content_json"] else None,
+                digest=r["digest"],
             )
             for r in rows
         ]

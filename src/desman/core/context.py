@@ -7,7 +7,8 @@ Free models have small context windows, so dependency results are fitted into a 
 The budget is shared fairly: results smaller than their share are passed whole, and whatever they
 leave over goes to the larger ones, which are truncated with an explicit marker. The budget
 covers the results only (descriptions are short and fixed). Tokens are estimated as
-characters / 4, which is close enough for budgeting.
+characters / 4, which is close enough for budgeting. Document digests use a separate
+per-result character cap.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from desman.core.retry import Strategy, strategy_for
 
 CHARS_PER_TOKEN: Final = 4
 DEFAULT_BUDGET_TOKENS: Final = 4000
+DIGEST_CHARS: Final = 40_000
 
 
 class DependencyResult(BaseModel):
@@ -34,6 +36,8 @@ class DependencyResult(BaseModel):
     description: str
     content: dict[str, Any] | None
     """None when the operator accepted the subtask without any artifact."""
+    digest: str | None = None
+    """The document path when this dependency is a top digest."""
 
 
 class DependencyContext(BaseModel):
@@ -44,6 +48,7 @@ class DependencyContext(BaseModel):
     content: Any
     """The result itself, or a text preview of it when `truncated`."""
     truncated: bool = False
+    digest: str | None = None
 
 
 class KnowledgeText(BaseModel):
@@ -151,7 +156,7 @@ def estimate_tokens(text: str) -> int:
 def fit_dependencies(
     results: list[DependencyResult], budget_tokens: int = DEFAULT_BUDGET_TOKENS
 ) -> list[DependencyContext]:
-    """Fit dependency results into `budget_tokens`, keeping their order."""
+    """Fit ordinary results into `budget_tokens` and cap digests separately, keeping order."""
     return fit(results, [], budget_tokens)[0]
 
 
@@ -162,32 +167,28 @@ def fit(
 ) -> tuple[list[DependencyContext], list[KnowledgeText]]:
     """Fit dependency results and knowledge texts into one budget, keeping their order. The
     knowledge is material, the results are the work itself: it gets at most half the budget,
-    and the results whatever it leaves."""
+    and ordinary results get whatever it leaves. Each digest has its own character cap."""
     budget = budget_tokens * CHARS_PER_TOKEN
     nodes = fit_knowledge(knowledge, budget // 2)
     rendered = [_render(r.content) for r in results]
     allowance = fair_shares(
-        [len(text) for text in rendered], budget - sum(len(n.text) for n in nodes)
+        [len(text) if r.digest is None else 0 for r, text in zip(results, rendered, strict=True)],
+        budget - sum(len(n.text) for n in nodes),
     )
     fitted = []
     for result, text, chars in zip(results, rendered, allowance, strict=True):
-        if chars >= len(text):
-            fitted.append(
-                DependencyContext(
-                    subtask_id=result.subtask_id,
-                    description=result.description,
-                    content=result.content,
-                )
+        if result.digest is not None:
+            chars = DIGEST_CHARS
+        whole = chars >= len(text)
+        fitted.append(
+            DependencyContext(
+                subtask_id=result.subtask_id,
+                description=result.description,
+                content=result.content if whole else truncate(text, chars),
+                truncated=not whole,
+                digest=result.digest,
             )
-        else:
-            fitted.append(
-                DependencyContext(
-                    subtask_id=result.subtask_id,
-                    description=result.description,
-                    content=truncate(text, chars),
-                    truncated=True,
-                )
-            )
+        )
     return fitted, nodes
 
 

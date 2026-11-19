@@ -42,6 +42,7 @@ from pydantic import BaseModel
 
 from desman.core.context import (
     CHARS_PER_TOKEN,
+    DIGEST_CHARS,
     Knowledge,
     fair_shares,
     fit_knowledge,
@@ -77,6 +78,7 @@ def evidence(
     what the latest execution returned, plus earlier web lookups of this same subtask
     marked earlier_attempt. A document part's inputs are kept whole. Latest results take
     the remaining budget first; older lookups share what remains, newest execution first.
+    Document digests use the same separate character cap as in the executor context.
     In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
     shows its tool and its result. Files successfully written in that execution also show
@@ -119,15 +121,25 @@ def evidence(
         out["written_files"] = []
         items += [("file", file) for file in files]
     texts = [_evidence_text(kind, item) for kind, item in items]
-    shares = fair_shares([len(text) for text in texts], budget)
-    for (kind, item), text, chars in zip(items, texts, shares, strict=True):
+    digests = [kind == "dependency" and item.digest is not None for kind, item in items]
+    shares = fair_shares(
+        [0 if digest else len(text) for digest, text in zip(digests, texts, strict=True)], budget
+    )
+    for (kind, item), text, chars, digest in zip(items, texts, shares, digests, strict=True):
+        if digest:
+            chars = DIGEST_CHARS
         whole = chars >= len(text)
         content: Any = json.loads(text) if whole else truncate(text, chars)
         if kind == "inputs":
             out["inputs"] = content
         elif kind == "dependency":
             out["results_of_dependencies"].append(
-                {"subtask": item.description, "result": content, "truncated": not whole}
+                {
+                    "subtask": item.description,
+                    "result": content,
+                    "truncated": not whole,
+                    **({"digest": True} if digest else {}),
+                }
             )
         elif kind == "file":
             out["written_files"].append(

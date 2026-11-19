@@ -256,7 +256,12 @@ def _execute(
         "acceptance_criteria": context.acceptance_criteria,
         "inputs": context.inputs,
         "results_of_dependencies": [
-            {"subtask": d.description, "result": d.content, "truncated": d.truncated}
+            {
+                "subtask": d.description,
+                "result": d.content,
+                "truncated": d.truncated,
+                **({"digest": True} if d.digest is not None else {}),
+            }
             for d in context.dependencies
         ],
         "checkpoint": context.checkpoint,
@@ -273,6 +278,13 @@ def _execute(
         )
     elif "document" in context.inputs and context.goal is not None:
         prompt["task_goal"] = context.goal
+    paths = [d.digest for d in context.dependencies if d.digest is not None]
+    if paths:
+        prompt["documents_read"] = (
+            f"The document(s) {', '.join(paths)} were read in parts by code; their notes are in "
+            "results_of_dependencies (marked digest). Work from those notes. Do not read the "
+            "document whole again; read_file on it only to check one detail, if at all."
+        )
     if context.knowledge:
         prompt["knowledge"] = [node.model_dump(exclude_defaults=True) for node in context.knowledge]
     if context.earlier_lookups and context.strategy is not Strategy.COMBINE:
@@ -493,6 +505,11 @@ def llm_reviewer(
         if evidence is not None:
             prompt["evidence"] = dict(evidence(subtask))
             system += REVIEWER_EVIDENCE
+            if any(d.get("digest") for d in prompt["evidence"].get("results_of_dependencies", [])):
+                system += (
+                    " The result rests on the document digest notes in the dependency evidence, "
+                    "which count as having read the source and are what you check quotes against."
+                )
             if "goal" in prompt["evidence"]:
                 prompt["goal"] = prompt["evidence"].pop("goal")
                 prompt["goal_note"] = (

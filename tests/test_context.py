@@ -9,8 +9,11 @@ import pytest
 from conftest import FakeClock
 from desman.core.context import (
     CHARS_PER_TOKEN,
+    DEFAULT_BUDGET_TOKENS,
+    DIGEST_CHARS,
     DependencyResult,
     _render,
+    build_context,
     estimate_tokens,
     fair_shares,
     fit_dependencies,
@@ -71,6 +74,29 @@ def test_large_result_is_truncated_and_small_kept() -> None:
 def test_estimate_tokens_rounds_up() -> None:
     assert estimate_tokens("") == 0
     assert estimate_tokens("abcde") == 2
+
+
+@pytest.mark.parametrize("size", [15_900, 50_000])
+def test_digest_has_a_separate_cap(store: Store, size: int) -> None:
+    task_id = store.create_task(diamond())
+    subtask = store.list_subtasks(task_id)[-1]
+    notes = DependencyResult(
+        subtask_id="digest",
+        description="Document notes",
+        content={"text": "я" * size},
+        digest="input/book.txt",
+    )
+    ordinary = result("other", {"text": "x" * 20_000})
+    context = build_context(subtask, [notes, ordinary], None, budget_tokens=DEFAULT_BUDGET_TOKENS)
+    digest, other = context.dependencies
+    assert digest.digest == "input/book.txt"
+    if size < DIGEST_CHARS:
+        assert digest.content == notes.content and not digest.truncated
+    else:
+        assert digest.truncated and len(digest.content) == DIGEST_CHARS
+        assert digest.content.endswith(f"…[truncated, {len(_render(notes.content))} chars in full]")
+    assert other == fit_dependencies([ordinary])[0]
+    assert other.truncated
 
 
 # ── Through the store and the coordinator ────────────────────────────────────

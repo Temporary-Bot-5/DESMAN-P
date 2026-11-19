@@ -144,7 +144,14 @@ def test_document_digests_precede_and_feed_the_planners_graph(
         sub = spec.subtasks[index]
         assert sub.kind is Kind.ANALYSIS
         if not sub.depends_on:
+            assert "digest" not in sub.inputs
             return [sub]
+        if index in indices:
+            assert sub.inputs["digest"] is True
+            assert "no more than about 12000 characters" in sub.description
+        else:
+            assert "digest" not in sub.inputs
+            assert "no more than about 8000 characters" in sub.description
         assert 2 <= len(sub.depends_on) <= documents.GROUP
         assert sub.depends_on == sorted(sub.depends_on)
         return [part for dep in sub.depends_on for part in covered(dep)]
@@ -234,7 +241,8 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
     seen_parts: dict[int, str] = {}
     reviewed_parts: set[int] = set()
     goal = "Describe the setting"
-    digest = "Digest covering all five chapters"
+    digest = "Notes. " * 2271 + "End"
+    assert len(digest) == 15_900
 
     def execute(request: Request) -> str:
         data = payload(request)
@@ -254,9 +262,10 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
             assert goal in data["task_goal"]
             assert len(data["results_of_dependencies"]) == 5
             return json.dumps({"text": digest})
-        assert [dep["result"] for dep in data["results_of_dependencies"]] == [{"text": digest}]
-        if data["subtask"] == "Collect provisional answer":
-            return json.dumps({"text": digest})
+        [dep] = data["results_of_dependencies"]
+        assert dep["result"] == {"text": digest}
+        assert dep["digest"] is True and not dep["truncated"]
+        assert "input/setting.txt were read in parts by code" in data["documents_read"]
         return '{"text":"The setting is on a riverbank."}'
 
     def review(request: Request) -> str:
@@ -276,11 +285,14 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
             reviewed_parts.add(inputs["part"])
         else:
             assert rule not in request.messages[0].content
+        if data["subtask"] == "Write the answer":
+            [dep] = data["evidence"]["results_of_dependencies"]
+            assert dep["result"] == {"text": digest} and dep["digest"] is True
+            assert "what you check quotes against" in request.messages[0].content
         return '{"verdict":"accept"}'
 
     planned = {
         "subtasks": [
-            {"description": "Collect provisional answer", "acceptance_criteria": "Accurate"},
             {"description": "Write the answer", "acceptance_criteria": "Complete"},
         ]
     }
@@ -303,6 +315,7 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         ]
     [request] = [call for call in fake.calls if call.prompt.startswith(PLAN)]
     assert "is read in parts by code" in request.prompt and QUOTE not in request.prompt
+    assert "never a subtask to read the file" in request.prompt
 
 
 def test_chat_task_splits_its_long_attachment(

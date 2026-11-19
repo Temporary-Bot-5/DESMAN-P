@@ -68,6 +68,7 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
     executions = [payload(r.prompt) for r in llm.calls if r.prompt.startswith("Execute")]
     assert [h for h, _ in executions] == ["Execute subtask"] * 3
     assert "goal" not in executions[0][1]
+    assert all("documents_read" not in body for _, body in executions)
     assert executions[1][1]["goal"] == "g"
     assert "person" in executions[1][1]["goal_note"]
     for rule in (
@@ -92,6 +93,39 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
     }
     assert all("part_of_split" not in body for _, body in reviews)
     assert all(r.messages[0].role == "system" for r in llm.calls)
+
+
+def test_executor_uses_document_digest_notes(store: Store, clock: FakeClock) -> None:
+    llm = FakeLLM().on("Execute", '{"text":"Notes"}', '{"text":"Answer"}')
+    spec = TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(
+                description="Combine notes",
+                acceptance_criteria="Complete",
+                inputs={"document": "input/book.txt", "digest": True},
+            ),
+            SubtaskSpec(description="Answer", acceptance_criteria="Clear", depends_on=[0]),
+        ],
+    )
+    task_id = store.create_task(spec)
+    reviewer = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    status = Coordinator(store, llm_executor(llm), llm_reviewer(reviewer), sleep=clock.sleep).run(
+        task_id
+    )
+    assert status.status is TaskStatus.DONE
+    _, first = payload(llm.calls[0].prompt)
+    _, final = payload(llm.calls[1].prompt)
+    assert "documents_read" not in first
+    assert "input/book.txt were read in parts by code" in final["documents_read"]
+    assert final["results_of_dependencies"] == [
+        {
+            "subtask": "Combine notes",
+            "result": {"text": "Notes"},
+            "truncated": False,
+            "digest": True,
+        }
+    ]
 
 
 def test_the_reviewer_checks_facts_against_the_evidence(store: Store) -> None:
