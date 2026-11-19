@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+from collections.abc import Sequence
 from contextlib import closing, suppress
 from pathlib import Path
 from urllib.parse import quote
@@ -331,12 +332,18 @@ def test_chat_keeps_files_when_creation_fails(
     real_place = task_files.place
     writes = 0
 
-    def fail_once(root: Path, task: str, given: list[task_files.Given]) -> list[str]:
+    def fail_once(
+        root: Path,
+        task: str,
+        given: list[task_files.Given],
+        *,
+        prefetched: Sequence[task_files.Given] = (),
+    ) -> list[str]:
         nonlocal writes
         writes += 1
         if writes == 1:
             raise OSError("disk full")
-        return real_place(root, task, given)
+        return real_place(root, task, given, prefetched=prefetched)
 
     monkeypatch.setattr(task_files, "place", fail_once)
     result = CliRunner().invoke(

@@ -271,6 +271,8 @@ def _execute(
             "of the goal, rather than a data structure unless the goal asks for data. "
             "Never mention subtasks, parts or steps (such as subtask 0) in the answer."
         )
+    elif "document" in context.inputs and context.goal is not None:
+        prompt["task_goal"] = context.goal
     if context.knowledge:
         prompt["knowledge"] = [node.model_dump(exclude_defaults=True) for node in context.knowledge]
     if context.earlier_lookups and context.strategy is not Strategy.COMBINE:
@@ -482,6 +484,12 @@ def llm_reviewer(
         system = REVIEWER_SYSTEM + today(clock, tz=tz)
         if subtask.parent_id is not None and evidence is not None:
             prompt["part_of_split"] = True
+        if "document" in subtask.inputs and "text" in subtask.inputs:
+            system += (
+                " When the inputs hold the text the subtask notes (a part of a document), "
+                "check every quote and fact of the result against that text: a quote not "
+                "found word for word there means retry."
+            )
         if evidence is not None:
             prompt["evidence"] = dict(evidence(subtask))
             system += REVIEWER_EVIDENCE

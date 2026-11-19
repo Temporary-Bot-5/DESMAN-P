@@ -277,7 +277,7 @@ def test_terminal_task_commands_use_code_report_without_retelling(
     monkeypatch.setattr("desman.chat.workspace_root_for", lambda conn: tmp_path)
     original_work = Chat._work
 
-    def work(self: Chat, task_id: str, *args: object) -> None:
+    def work(self: Chat, task_id: str, *args: object, **kwargs: object) -> None:
         Workspace(tmp_path, task_id).write("answer.txt", "task file")
         original_work(self, task_id, *args)  # type: ignore[arg-type]
 

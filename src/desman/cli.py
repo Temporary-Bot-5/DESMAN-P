@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from desman import (
     __version__,
     actions,
+    documents,
     i18n,
     knowledge,
     proposals_cli,
@@ -54,6 +55,7 @@ from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
+from desman.core.web import Web
 from desman.core.workspace import PathEscapeError, workspace_root_for
 from desman.docker_cli import docker
 from desman.global_cli import global_group
@@ -415,12 +417,20 @@ def run(
         runs.guard(store)  # before any model is asked
         models = _attach(source, store, cache=not no_cache, as_json=as_json)
         planned: Planned | None = None
+        fetched = documents.Prefetched([], [])
+        docs: list[documents.Document] = []
+        reader = None
         if spec is None:
             assert goal is not None
+            reader = runs.document_web(goal, _config_or_default(), store, access)
+            if reader is not None:
+                fetched = documents.prefetch(goal, reader, allowed=True)
+            inputs = given + fetched.given
+            docs = documents.attached(inputs)
             by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
             planned = _plan(
                 models.for_(calls.Role.PLANNER),
-                goal + task_files.goal_note(given),
+                goal + task_files.goal_note(inputs) + documents.goal_note(docs),
                 level,
                 by_model=by_model,
                 as_json=as_json,
@@ -432,16 +442,29 @@ def run(
             spec = spec.model_copy(update={"priority": level})
         if runs_code:  # held to it whatever the plan, the template's too
             spec = must_run(spec)
-        details = planned.details() if planned else None
+        if planned is not None:
+            spec = documents.in_parts(spec, docs)
+        plan_details = planned.details() if planned else None
+        details = (
+            {**plan_details, **documents.audit_details(docs, fetched)}
+            if plan_details is not None
+            else None
+        )
         placed: list[str] = []
 
         def copy(conn: sqlite3.Connection, new_task: str) -> None:
-            placed.extend(task_files.place(workspace_root_for(conn), new_task, given))
+            placed.extend(
+                task_files.place(
+                    workspace_root_for(conn), new_task, given, prefetched=fetched.given
+                )
+            )
 
         try:
-            task_id = store.create_task(spec, details=details, also=copy if given else None)
+            task_id = store.create_task(
+                spec, details=details, also=copy if given or fetched.given else None
+            )
         except (OSError, PathEscapeError) as e:
-            if not given:
+            if not given and not fetched.given:
                 raise
             raise click.ClickException(
                 t(
@@ -458,8 +481,9 @@ def run(
                     id=task_id,
                 )
             )
-            if placed:
-                click.echo(t("Files attached: {files}", files=", ".join(placed)))
+            if given:
+                click.echo(t("Files attached: {files}", files=", ".join(placed[: len(given)])))
+            runs.note_prefetched(fetched)
             sys.stdout.flush()  # visible before any work starts, even through a pipe
         _drive(
             store,
@@ -469,9 +493,10 @@ def run(
             wait,
             lease_seconds,
             as_json,
-            details,
+            plan_details,
             sandbox=sandbox,
             files=placed,
+            document_reader=reader,
         )
     finally:
         store.conn.close()
@@ -1150,11 +1175,18 @@ def _drive(
     *,
     sandbox: Sandbox,
     files: list[str] | None = None,
+    document_reader: Web | None = None,
 ) -> None:
     """Run the task and report it. `then(as_json)` comes after the run: what it returns joins
     the JSON output as (key, data); without --json it prints, after the task's report."""
     coordinator = runs.coordinator(
-        store, models, access, load_config().load(), lease_seconds=lease_seconds, sandbox=sandbox
+        store,
+        models,
+        access,
+        load_config().load(),
+        lease_seconds=lease_seconds,
+        sandbox=sandbox,
+        document_reader=document_reader,
     )
     try:
         result = coordinator.run(

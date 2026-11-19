@@ -72,7 +72,9 @@ TOPICS: Final = (
         "chat gets them in input/ in its workspace. Up to 10 files, 2 MB each and 10 MB "
         "together. Text formats include TXT, Markdown, CSV, JSON and source code. PDF and DOCX "
         "are unsupported. The planner sees the paths and character counts. Workers read the "
-        "files as task material with read_file.",
+        "files as task material with read_file. Code reads long files in parts and does the "
+        "same for long linked pages when web access is enabled. It schedules notes for each "
+        "part, then combines them.",
     ),
     Topic(
         "retries",

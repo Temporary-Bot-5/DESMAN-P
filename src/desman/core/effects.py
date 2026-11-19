@@ -75,8 +75,9 @@ def evidence(
     """What the result under review can rest on: the subtask's inputs, the accepted results of
     its dependencies, the knowledge tree's nodes it was given (looked up by `knowledge`), and
     what the latest execution returned, plus earlier web lookups of this same subtask
-    marked earlier_attempt. Latest results take budget first; older lookups share what
-    remains, newest execution first. In call order within each execution, fitted to
+    marked earlier_attempt. A document part's inputs are kept whole. Latest results take
+    the remaining budget first; older lookups share what remains, newest execution first.
+    In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
     shows its tool and its result. Files successfully written in that execution also show
     their current workspace text (or an unreadable/binary note), sharing the same budget."""
@@ -85,22 +86,32 @@ def evidence(
     dependencies = store.dependency_results(subtask.id)
     budget = budget_tokens * CHARS_PER_TOKEN
     out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
-    goal = store.final_goal(subtask)
-    if goal is not None:
+    goal, is_final = store.subtask_goal(subtask)
+    if is_final:
         out["goal"] = goal
+    elif "document" in subtask.inputs:
+        out["task_goal"] = goal
     offered = store.conn.execute(
         "SELECT details_json FROM audit_log WHERE subtask_id = ? "
         "AND action = 'attempt_started' ORDER BY seq DESC LIMIT 1",
         (subtask.id,),
     ).fetchone()
     out["tools_available"] = json.loads(offered[0]).get("tools", []) if offered else []
+    used_inputs = 0
+    if "document" in subtask.inputs and "text" in subtask.inputs:
+        # A document review must be able to check even the last quote against its source.
+        out["inputs"] = subtask.inputs
+        used_inputs = len(_evidence_text("inputs", subtask.inputs))
+        budget = max(0, budget - used_inputs)
     # What the executor was given of the knowledge tree, within at most half the budget, as
     # it got it (`context.fit`): the rest is for what the work itself rests on.
     nodes = fit_knowledge(given(knowledge, subtask.knowledge)[0], budget // 2)
     if nodes:
         out["knowledge"] = [node.model_dump(exclude_defaults=True) for node in nodes]
         budget -= sum(len(node.text) for node in nodes)
-    items: list[tuple[str, Any]] = [("inputs", subtask.inputs)] if subtask.inputs else []
+    items: list[tuple[str, Any]] = []
+    if subtask.inputs and not used_inputs:
+        items.append(("inputs", subtask.inputs))
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
     files = _written_files(rows, workspace, store, subtask)
@@ -133,7 +144,7 @@ def evidence(
                     "truncated": not whole,
                 }
             )
-    used = sum(shares) + sum(len(node.text) for node in nodes)
+    used = used_inputs + sum(shares) + sum(len(node.text) for node in nodes)
     out["tool_results"].extend(
         earlier_lookups(store, subtask, execution, max(0, budget_tokens * CHARS_PER_TOKEN - used))
     )

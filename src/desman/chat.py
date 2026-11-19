@@ -51,6 +51,7 @@ from desman import (
     commands,
     compaction,
     config_cli,
+    documents,
     i18n,
     knowledge,
     messenger_cli,
@@ -75,6 +76,7 @@ from desman.core.search import client
 from desman.core.sessions import History, Kind, Message, Role, SessionInfo, Sessions
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
+from desman.core.web import Web
 from desman.core.workspace import PathEscapeError, workspace_root_for
 from desman.i18n import t, tn
 from desman.interlocutor import (
@@ -1204,7 +1206,15 @@ class Chat:
                         files=", ".join(f.path for f in handover.left),
                     )
                 )
-        goal = turn.goal + task_files.goal_note(inputs)
+        reader = runs.document_web(turn.goal, config, self.store, access, self._http)
+        fetched = (
+            documents.prefetch(turn.goal, reader, allowed=True)
+            if reader is not None
+            else documents.Prefetched([], [])
+        )
+        all_inputs = inputs + fetched.given
+        docs = documents.attached(all_inputs)
+        goal = turn.goal + task_files.goal_note(all_inputs) + documents.goal_note(docs)
         paths = [path for handover in given for path in handover.paths()]
         if paths:  # what the workers see is the goal: the files are named in it, by code
             goal += (
@@ -1235,6 +1245,7 @@ class Chat:
                 )
             )
         spec = must_run(planned.spec) if turn.runs_code else planned.spec
+        spec = documents.in_parts(runs.tuned_spec(spec, config.tuning), docs)
         copied: dict[str, list[str]] = {}
         placed: list[str] = []
 
@@ -1243,20 +1254,24 @@ class Chat:
             # before the files its goal names are there, and a failed copy leaves no task.
             for handover in given:
                 copied[handover.ref] = task_files.hand_over(root, new_task, handover)
-            if inputs:
-                placed.extend(task_files.place(root, new_task, inputs))
+            if all_inputs:
+                placed.extend(task_files.place(root, new_task, inputs, prefetched=fetched.given))
             if self.sessions.reply_to is not None:
                 self.sessions.settle_turn(self.sessions.reply_to, task_id=new_task)
 
         try:
             task_id = self.store.create_task(
-                runs.tuned_spec(spec, config.tuning),
-                details={**planned.details(), "title": turn.title},
+                spec,
+                details={
+                    **planned.details(),
+                    "title": turn.title,
+                    **documents.audit_details(docs, fetched),
+                },
                 session_id=self.session_id,
                 also=copy,
             )
         except (OSError, PathEscapeError, sqlite3.Error, task_files.GivenFileError) as e:
-            if inputs:
+            if all_inputs:
                 ui.error(
                     t(
                         "The attached files could not be saved. The task was not started: {error}",
@@ -1276,12 +1291,13 @@ class Chat:
                     )
                 )
             return
+        runs.note_prefetched(fetched)
         if pending is not None:
             pending.consume(taken)
         ref = self.store.short_id(task_id)
         if self.background_tasks:
             started = tn(
-                len(planned.spec.subtasks),
+                len(spec.subtasks),
                 "Task {ref} started: {title} ({n} subtask). I will tell you here when it is done.",
                 "Task {ref} started: {title} ({n} subtasks). I will tell you here when it is done.",
                 ref=ref,
@@ -1289,15 +1305,15 @@ class Chat:
             )
         else:
             started = tn(
-                len(planned.spec.subtasks),
+                len(spec.subtasks),
                 "Task {ref} started: {title} ({n} subtask).",
                 "Task {ref} started: {title} ({n} subtasks).",
                 ref=ref,
                 title=turn.title,
             )
         self._event(started, task_id)
-        if placed:
-            files = ", ".join(placed)
+        if inputs:
+            files = ", ".join(placed[: len(inputs)])
             self._file_event(
                 t("Task {ref} received the attached files: {files}", ref=ref, files=files),
                 task_id,
@@ -1315,7 +1331,9 @@ class Chat:
                 )
         if self.background_tasks:
             return
-        self._work(task_id, ref, config, models, access, interlocutor, sandbox)
+        self._work(
+            task_id, ref, config, models, access, interlocutor, sandbox, document_reader=reader
+        )
 
     def _sources(self, turn: NewTask) -> list[tuple[str, str]]:
         """The tasks of `turn.files_from` (id and short ref) that are this session's own; the
@@ -1369,6 +1387,8 @@ class Chat:
         access: Access,
         interlocutor: Interlocutor | None,
         sandbox: Sandbox,
+        *,
+        document_reader: Web | None = None,
     ) -> None:
         """Run the task while the chat waits, then retell how it went."""
         try:
@@ -1386,6 +1406,7 @@ class Chat:
                     sandbox=sandbox,
                     http=self._http,
                     watch=progress.refresh,
+                    document_reader=document_reader,
                 ).run(
                     task_id,
                     short_pause_seconds=provider_wait.PROVIDER_WAIT,

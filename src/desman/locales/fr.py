@@ -10,6 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Saved the page {url} ({chars} characters) to read it in parts.": "La page {url} ({chars} caractères) a été enregistrée pour être lue par sections.",
     "Accept the Docker Desktop agreement in its window if prompted.": "Acceptez les conditions de Docker Desktop dans sa fenêtre si vous y êtes invité.",
     "Add the user to the docker group": "Ajouter l’utilisateur au groupe docker",
     "Administrator rights are required.": "Des droits d’administration sont nécessaires.",
