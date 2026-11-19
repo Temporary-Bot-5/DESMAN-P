@@ -68,7 +68,10 @@ MAX_TOOL_ROUNDS = 8
 MAX_CALLS_PER_ROUND = 10
 
 HONEST = (
-    " Never report what only doing something could tell you, unless a tool did it in this "
+    " Give the result directly for arithmetic, other calculations, writing, explaining, "
+    "translating or reasoning about what you were given. You only need tools to observe or "
+    "change something outside your reply (files, running code, the web). "
+    "Never report an external observation or action unless a tool did it in this "
     "attempt and you report what it returned: what running code or a command prints, what a "
     "file holds, what a page says, that something was saved or works. Without the tool for "
     'it, reply {"type": "error", "reason": "..."} naming what is missing.'
@@ -115,7 +118,7 @@ EXECUTOR_SYSTEM_COMBINE = (
 UNREADABLE_SOURCE = " When a named source cannot be read (including a page needing JavaScript, captcha or bot protection), use search results/snippets of that source or another official source, and say plainly what could not be read. The reading attempt counts: such an answer is acceptable when the rest meets the criteria. A site blocking automated access is an unreadable page, never a reason to fail the whole subtask; report the block and move on."
 TOOLS_INSTRUCTIONS = (
     UNREADABLE_SOURCE
-    + ' You cannot touch files or anything else yourself: use the tools listed under "tools". '
+    + ' For external observations or actions, use the tools listed under "tools". '
     "To call them, reply instead of the result with "
     '{"tool_calls": [{"tool": "name", "args": {...}}, ...]}; you will get their results and '
     "continue. Files you write stay in the task's workspace, where later subtasks can read them; "
@@ -336,7 +339,9 @@ def _execute(
                     kind=FailureKind.QUALITY,
                     reason=(
                         f"{_error_reason(reply.root)} (tools offered in this attempt: "
-                        f'{names}; call them with {{"tool_calls": [...]}})'
+                        f'{names}; when needed, call them with {{"tool_calls": [...]}}). '
+                        "If you can do the subtask yourself (e.g. arithmetic or writing), "
+                        "give the result directly. No tool is needed for that."
                     ),
                 )
             content = reply.root
