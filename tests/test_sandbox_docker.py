@@ -260,7 +260,10 @@ def test_docker_uses_container_state(
         stderr: int,
     ) -> subprocess.Popen[bytes]:
         assert argv[0] == "docker-test"
-        script = f"import sys; print({message!r}, file=sys.stderr); sys.exit({client_code})"
+        script = (  # bytes: a Linux container never writes \r\n, whatever the host
+            f"import sys; sys.stderr.buffer.write({(message + chr(10)).encode()!r}); "
+            f"sys.exit({client_code})"
+        )
         return popen([sys.executable, "-c", script], stdin=stdin, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(subprocess, "Popen", fake_client)
