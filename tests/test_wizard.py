@@ -12,16 +12,18 @@ take part in desman-global (Y/N).
 from __future__ import annotations
 
 import json
-import shutil
+from unittest.mock import patch
 
 from click.testing import CliRunner, Result
 
 from desman import providers
+from desman import wizard as setup_wizard
 from desman.cli import cli
 from desman.config import ConfigManager, Permissions, default_config_path
+from desman.core.sandbox import find_docker
 from helpers import flat_keys, make_config
 
-DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + (shutil.which("docker") is not None))
+DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + (find_docker() is not None))
 KEEP_PERMISSIONS = ("", "", "", "")
 KEEP_PERSONAL = ("", "", "")  # personalisation as it was; how it talks: not set up now;
 # desman-global as it was (off)
@@ -30,14 +32,15 @@ KEEP_PERSONAL = ("", "", "")  # personalisation as it was; how it talks: not set
 def menu(provider_id: str) -> str:
     items = (
         [p.id for p in providers.PROVIDERS]
-        + (["search_setup"] if shutil.which("docker") is not None else [])
+        + (["search_setup"] if find_docker() is not None else [])
         + [p.id for p in providers.SERVICES]
     )
     return str(1 + items.index(provider_id))
 
 
 def wizard(*answers: str) -> Result:
-    return CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
+    with patch.object(setup_wizard, "_docker"):
+        return CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
 
 
 def saved() -> ConfigManager:
@@ -162,9 +165,10 @@ def test_leaving_midway_saves_nothing() -> None:
 
 
 def test_first_run_of_bare_desman_opens_the_wizard() -> None:
-    result = CliRunner().invoke(
-        cli, [], input="\n".join(["1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL]) + "\n"
-    )
+    with patch.object(setup_wizard, "_docker"):
+        result = CliRunner().invoke(
+            cli, [], input="\n".join(["1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL]) + "\n"
+        )
     assert result.exit_code == 0, result.output
     assert json.loads(default_config_path().read_text(encoding="utf-8"))["configured"]
     assert "Decentralized Self-Evolving Modular Agents Network" in result.output

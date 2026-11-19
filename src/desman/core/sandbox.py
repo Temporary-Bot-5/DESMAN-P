@@ -47,6 +47,7 @@ import datetime as dt
 import importlib.metadata
 import importlib.util
 import io
+import ntpath
 import os
 import re
 import selectors
@@ -146,6 +147,25 @@ class Outcome:
     stderr_cut: bool = False
 
 
+def windows_program_files() -> str:
+    return os.environ.get("PROGRAMW6432") or os.environ.get("PROGRAMFILES", r"C:\Program Files")
+
+
+def find_docker() -> str | None:
+    """Find the CLI, including Docker Desktop before the current PATH is refreshed."""
+    executable = shutil.which("docker")
+    if executable is not None:
+        return executable
+    bundled: str | None = None
+    if sys.platform == "win32":
+        bundled = ntpath.join(
+            windows_program_files(), "Docker", "Docker", "resources", "bin", "docker.exe"
+        )
+    elif sys.platform == "darwin":
+        bundled = "/Applications/Docker.app/Contents/Resources/bin/docker"
+    return bundled if bundled is not None and os.path.isfile(bundled) else None
+
+
 class Sandbox:
     """Runs confined commands. Caches availability and retries transient Docker probe failures."""
 
@@ -166,9 +186,7 @@ class Sandbox:
         self.platform = sys.platform if platform is None else platform
         self.backend = "bwrap" if self.platform.startswith("linux") else "docker"
         self.docker = (
-            docker
-            if docker is not None
-            else (shutil.which("docker") if self.backend == "docker" else None)
+            docker if docker is not None else (find_docker() if self.backend == "docker" else None)
         )
         self._docker_runner = docker_runner if docker_runner is not None else _docker_run
         self.image_present: bool | None = None

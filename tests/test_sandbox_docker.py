@@ -461,7 +461,7 @@ def test_executor_access_hints(
     out = capsys.readouterr().out.replace("\n", " ")
     assert expected in out
     assert ("desman sandbox setup" in out) is setup_hint
-    assert ("https://docs.docker.com/get-docker/" in out) is install_link
+    assert ("desman docker install" in out) is install_link
 
 
 @pytest.fixture(scope="module")

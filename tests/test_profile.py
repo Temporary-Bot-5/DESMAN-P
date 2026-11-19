@@ -406,10 +406,10 @@ def test_how_it_talks_is_changed_in_profile_and_in_the_wizard(fake: FakeLLM) -> 
     )
     assert ("operator_behaviour", {"changed": ["length", "tone", "custom"]}) in journal()
     # The wizard: language, providers Done, permissions, then personalisation and how it talks.
-    done = str(len(providers.PROVIDERS + providers.SERVICES) + 2)
-    answers = ["1", done, "", "", "", "", "n", "y", "2", "", "", "-", ""]  # desman-global: off
-    wizard = CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")
-    assert wizard.exit_code == 0, wizard.output
+    from test_wizard import DONE, KEEP_PERMISSIONS, wizard
+
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "n", "y", "2", "", "", "-", "")
+    assert result.exit_code == 0, result.output
     config = saved()
     assert config.personalize is False
     assert (config.behaviour.length, config.behaviour.tone, config.behaviour.custom) == (

@@ -568,6 +568,7 @@ def test_cli_confirmations_are_explicit_in_catalog() -> None:
         "global submit-proposal",
         "search setup",
         "sandbox setup",
+        "docker install",
         "search remove",
     }
     assert {entry.name for entry in commands.CATALOG if entry.typed_confirm} == confirming
@@ -726,3 +727,87 @@ def test_typed_search_keeps_cli_consent(
     Chat(sessions)._typed(f"search {action}" + (" --yes" if yes else ""))
     assert bool(seen) is not yes
     assert applied == ([action] if yes else [])
+
+
+@pytest.mark.parametrize("has_terminal", [True, False])
+def test_docker_catalog_proposal_and_terminal_gate(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, has_terminal: bool
+) -> None:
+    from types import SimpleNamespace
+
+    from desman import docker_cli
+
+    parsed = commands.parse_line("docker install", None)
+    assert parsed is not None
+    entry, args = parsed
+    assert entry.typed_confirm
+    installation = docker_cli.Plan(steps=[docker_cli.Step(["open", "-a", "Docker"], "Start")])
+    ready = docker_cli.Status(
+        installed=True, available=True, version=None, bwrap=None, problem=None
+    )
+    applied: list[docker_cli.Plan] = []
+
+    def apply(selected: docker_cli.Plan) -> docker_cli.Status:
+        applied.append(selected)
+        return ready
+
+    tty = SimpleNamespace(isatty=lambda: has_terminal)
+    monkeypatch.setattr(commands, "sys", SimpleNamespace(stdin=tty, stdout=tty))
+    monkeypatch.setattr(docker_cli, "current_plan", lambda: installation)
+    monkeypatch.setattr(docker_cli, "apply_plan", apply)
+    ctx = commands.Context(Store(sessions.conn), open_config(), lambda *a: None, lambda *a: False)
+    proposal = entry.handler(ctx, args)
+    assert isinstance(proposal, commands.Proposal)
+    assert "open -a Docker" in proposal.lines
+    outcome = proposal.apply()
+    assert applied == ([installation] if has_terminal else [])
+    assert outcome.data == (
+        ready
+        if has_terminal
+        else {"installed": False, "run_yourself": "desman docker install --yes"}
+    )
+
+    installation.steps.clear()
+    assert isinstance(entry.handler(ctx, args), commands.Outcome)
+
+
+def test_typed_docker_yes_skips_extra_confirmation(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from types import SimpleNamespace
+
+    from desman import docker_cli
+
+    def unexpected(*args: Any) -> Any:
+        pytest.fail("A typed --yes in the GUI must neither confirm again nor run the installer")
+
+    tty = SimpleNamespace(isatty=lambda: False)
+    monkeypatch.setattr(commands, "sys", SimpleNamespace(stdin=tty, stdout=tty))
+    monkeypatch.setattr(Chat, "_confirmed", unexpected)
+    monkeypatch.setattr(docker_cli, "apply_plan", unexpected)
+    monkeypatch.setattr(
+        docker_cli,
+        "current_plan",
+        lambda: docker_cli.Plan(steps=[docker_cli.Step(["open", "-a", "Docker"], "Start")]),
+    )
+    Chat(sessions)._typed("docker install --yes")
+    assert "desman docker install --yes" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["docker status", "docker install"])
+def test_docker_catalog_outcome_is_silent(
+    sessions: Sessions,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    from desman import docker_cli
+
+    monkeypatch.setattr(docker_cli, "docker_executable", lambda: None)
+    monkeypatch.setattr(docker_cli, "current_plan", lambda: docker_cli.Plan(ready=True))
+    parsed = commands.parse_line(command, None)
+    assert parsed is not None
+    entry, args = parsed
+    ctx = commands.Context(Store(sessions.conn), open_config(), lambda *a: None, lambda *a: False)
+    assert isinstance(entry.handler(ctx, args), commands.Outcome)
+    assert capsys.readouterr() == ("", "")

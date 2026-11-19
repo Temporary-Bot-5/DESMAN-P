@@ -32,6 +32,7 @@ the rest when you need it.
   run `desman sandbox setup --yes` to authorize the image download. You can enable permission
   to run code (`shell_execution`) in DESMAN's settings. Without a sandbox, DESMAN can write
   code and will ask for help running it.
+  To install Docker Desktop, use the Docker section of the setup wizard or run `desman docker install --yes`.
 
 ## 1. Installation
 

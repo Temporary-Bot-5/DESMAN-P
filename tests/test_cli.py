@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from desman import __version__, config, providers
+from desman import __version__, config
 from desman.cli import cli
 from desman.config import (
     CONFIG_DIR_ENV,
@@ -236,10 +236,9 @@ def test_home_config_moves_into_the_checkout(
     assert manager.load().permissions.shell_execution
     if os.name == "posix":
         assert stat.S_IMODE(new.stat().st_mode) == 0o600
-    done = len(providers.PROVIDERS + providers.SERVICES) + 2
-    result = CliRunner().invoke(
-        cli, ["config"], input=f"1\n{done}\n\n\n\n\n\n\n\n"
-    )  # en, Done, keep
+    from test_wizard import DONE, KEEP_PERMISSIONS, KEEP_PERSONAL, wizard
+
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL, "")
     assert result.exit_code == 0, result.output
     assert flat_keys(open_config().load()) == {"GROQ_API_KEY": "gsk_old"}
 

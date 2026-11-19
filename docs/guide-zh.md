@@ -24,6 +24,7 @@
 - **在 Windows 上运行代码。** 安装 Docker Desktop 并以 Linux 容器模式启动，
   然后运行 `desman sandbox setup --yes` 以授权下载镜像。你可以在 DESMAN 的设置中开启
   运行代码的权限（`shell_execution`）。没有沙箱时，DESMAN 仍可编写代码，并会请你帮忙运行。
+  要安装 Docker Desktop，请使用设置向导中的 Docker 部分，或运行 `desman docker install --yes`。
 
 ## 1. 安装
 

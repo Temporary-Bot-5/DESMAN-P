@@ -69,8 +69,8 @@ def test_setup_writes_settings_and_fixed_argv(
 
 
 def test_no_docker_changes_nothing(manager: ConfigManager, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda name: None)
-    with pytest.raises(click.ClickException, match="Install Docker"):
+    monkeypatch.setattr(searxng, "find_docker", lambda: None)
+    with pytest.raises(click.ClickException, match="desman docker install"):
         searxng.setup(manager)
     assert not manager.config_path.exists()
     assert not (manager.config_path.parent / "searxng").exists()
@@ -232,6 +232,7 @@ def test_docker_helper_reports_failure_and_uses_no_shell(monkeypatch: pytest.Mon
         return subprocess.CompletedProcess(args, 1, "", "daemon unavailable")
 
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(searxng, "find_docker", lambda: "docker")
     with pytest.raises(click.ClickException, match="daemon unavailable"):
         searxng.docker(["info"])
     assert seen == [["docker", "info"]]
@@ -271,7 +272,7 @@ def test_daemon_failure_does_not_write_settings(
         raise click.ClickException("daemon unavailable")
 
     monkeypatch.setattr(searxng, "docker", unavailable)
-    with pytest.raises(click.ClickException, match="get-docker"):
+    with pytest.raises(click.ClickException, match="desman docker install"):
         searxng.setup(manager)
     assert not (manager.config_path.parent / "searxng").exists()
 

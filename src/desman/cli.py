@@ -55,6 +55,7 @@ from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
 from desman.core.workspace import PathEscapeError, workspace_root_for
+from desman.docker_cli import docker
 from desman.global_cli import global_group
 from desman.i18n import t, tn
 from desman.info import print_project_info
@@ -228,6 +229,7 @@ cli.add_command(modules)
 cli.add_command(models)
 cli.add_command(search)
 cli.add_command(sandbox)
+cli.add_command(docker)
 cli.add_command(protected_group, name="protected")
 cli.add_command(nodes_group, name="nodes")
 cli.add_command(proposals_group, name="proposals")

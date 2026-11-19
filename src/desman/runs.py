@@ -507,7 +507,7 @@ def executor_access(
             if sandbox.image_present is False:
                 ui.warn(t("Set up the Docker sandbox with `desman sandbox setup`."), stderr=stderr)
             elif sandbox.backend == "docker" and not sandbox.docker:
-                ui.warn("https://docs.docker.com/get-docker/", stderr=stderr)
+                ui.warn(t("Install Docker with `desman docker install`."), stderr=stderr)
     if permissions.network_access and not providers.search_engines(config):
         ui.warn(
             t(
