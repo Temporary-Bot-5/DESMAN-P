@@ -28,9 +28,10 @@ the rest when you need it.
     the operator can't read them — **except when there is a complaint**: if you complain
     about a message, its text goes to the operator;
   - like any website, the server sees the address it is contacted from (IP).
-- **Code doesn't run on Windows.** DESMAN's agents run programs only in a "sandbox", and the
-  sandbox exists only on Linux. On Windows DESMAN writes code but doesn't check it by running
-  it, and says so.
+- **Running code on Windows.** Install and start Docker Desktop in Linux containers mode, then
+  run `desman sandbox setup --yes` to authorize the image download. You can enable permission
+  to run code (`shell_execution`) in DESMAN's settings. Without a sandbox, DESMAN can write
+  code and will ask for help running it.
 
 ## 1. Installation
 

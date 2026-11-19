@@ -25,9 +25,11 @@ zgłaszać problemy. Zacznij od rozdziałów 1–3, a do reszty zajrzyj w razie 
     operator ich nie przeczyta, **chyba że wpłynie skarga**. Jeśli zgłosisz konkretną wiadomość,
     operator otrzyma jej treść;
   - adres IP, z którego nastąpiło połączenie, tak jak w przypadku każdej strony.
-- **Kod nie jest uruchamiany w Windows.** Agenci DESMAN uruchamiają programy wyłącznie w
-  odizolowanym środowisku, tzw. piaskownicy, dostępnej tylko w systemie Linux. W Windows DESMAN
-  pisze kod i informuje, że nie sprawdził go przez uruchomienie.
+- **Uruchamianie kodu w systemie Windows.** Zainstaluj i uruchom Docker Desktop w trybie
+  kontenerów linuksowych, a następnie wykonaj polecenie `desman sandbox setup --yes`, aby
+  zatwierdzić pobranie obrazu. W ustawieniach DESMAN możesz włączyć uprawnienie do uruchamiania
+  kodu (`shell_execution`). Bez piaskownicy DESMAN może napisać kod i poprosi o pomoc przy
+  jego uruchomieniu.
 
 ## 1. Instalacja
 
