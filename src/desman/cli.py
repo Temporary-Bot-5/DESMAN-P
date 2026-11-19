@@ -47,6 +47,7 @@ from desman.core.coordinator import DEFAULT_POLL_SECONDS, Coordinator, RunResult
 from desman.core.models import Kind, Origin, Priority, TaskSpec
 from desman.core.policy import Access
 from desman.core.report import InboxWatch, TaskReport, inbox, task_report
+from desman.core.sandbox import Sandbox
 from desman.core.sessions import Sessions
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.stats import collect
@@ -384,7 +385,8 @@ def run(
     spec = _load_spec(spec_path, db_path) if spec_path is not None else None
     level = None if priority is None else int(Priority[priority.upper()])
     source = _provider(fake_script, provider_name, model, as_json)  # fail fast
-    access = _executor_access(as_json)
+    sandbox = Sandbox()
+    access = _executor_access(as_json, sandbox)
     path = db_path or db.default_db_path()
     try:
         store = Store(db.open_db(path))
@@ -423,7 +425,9 @@ def run(
                 )
             )
             sys.stdout.flush()  # visible before any work starts, even through a pipe
-        _drive(store, models, access, task_id, wait, lease_seconds, as_json, details)
+        _drive(
+            store, models, access, task_id, wait, lease_seconds, as_json, details, sandbox=sandbox
+        )
     finally:
         store.conn.close()
 
@@ -451,7 +455,8 @@ def resume(
     `run`.
     """
     source = _provider(fake_script, provider_name, model, as_json)
-    access = _executor_access(as_json)
+    sandbox = Sandbox()
+    access = _executor_access(as_json, sandbox)
     store = open_existing(db_path)
     try:
         runs.guard(store)  # before any model is asked
@@ -463,7 +468,7 @@ def resume(
             )
         models = _attach(source, store, cache=not no_cache, as_json=as_json)
         store.resume_task(task_id)  # only once the models are there: a failed resume stays paused
-        _drive(store, models, access, task_id, wait, lease_seconds, as_json)
+        _drive(store, models, access, task_id, wait, lease_seconds, as_json, sandbox=sandbox)
     finally:
         store.conn.close()
 
@@ -504,7 +509,8 @@ def worker(
     another worker, or `resume`, takes its subtask back.
     """
     source = _provider(fake_script, provider_name, model, as_json)
-    access = _executor_access(as_json)
+    sandbox = Sandbox()
+    access = _executor_access(as_json, sandbox)
     store = open_existing(db_path)
     interrupted = False
     try:
@@ -527,7 +533,13 @@ def worker(
             cache=not no_cache,
         )
         coordinator = runs.coordinator(
-            store, models, access, config, lease_seconds=lease_seconds, network=crew
+            store,
+            models,
+            access,
+            config,
+            lease_seconds=lease_seconds,
+            network=crew,
+            sandbox=sandbox,
         )
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)
@@ -919,7 +931,8 @@ def analyze(
     """
     start = proposals_cli.since_of(since)
     source = _provider(fake_script, provider_name, model, as_json)  # fail fast
-    access = _executor_access(as_json)
+    sandbox = Sandbox()
+    access = _executor_access(as_json, sandbox)
     path = db_path or db.default_db_path()
     try:
         store = Store(db.open_db(path))
@@ -955,6 +968,7 @@ def analyze(
             lease_seconds,
             as_json,
             then=then,
+            sandbox=sandbox,
         )
     finally:
         store.conn.close()
@@ -1074,8 +1088,8 @@ def _first_for(models: runs.Models, kind: Kind) -> router.Choice | None:
     return choices[0] if choices else None
 
 
-def _executor_access(as_json: bool) -> Access:
-    return runs.executor_access(load_config().load(), stderr=as_json)
+def _executor_access(as_json: bool, sandbox: Sandbox) -> Access:
+    return runs.executor_access(load_config().load(), stderr=as_json, sandbox=sandbox)
 
 
 def _drive(
@@ -1088,11 +1102,13 @@ def _drive(
     as_json: bool,
     plan_details: dict[str, Any] | None = None,
     then: Callable[[bool], tuple[str, Any]] | None = None,
+    *,
+    sandbox: Sandbox,
 ) -> None:
     """Run the task and report it. `then(as_json)` comes after the run: what it returns joins
     the JSON output as (key, data); without --json it prints, after the task's report."""
     coordinator = runs.coordinator(
-        store, models, access, load_config().load(), lease_seconds=lease_seconds
+        store, models, access, load_config().load(), lease_seconds=lease_seconds, sandbox=sandbox
     )
     try:
         result = coordinator.run(

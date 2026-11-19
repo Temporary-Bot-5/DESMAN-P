@@ -18,10 +18,11 @@ from typing import IO
 import pytest
 from click.testing import CliRunner
 
-from desman import sandbox_cli, ui, wizard
+from desman import runs, sandbox_cli, ui, wizard
 from desman.cli import cli
 from desman.commands import Context, Kind, NoArgs, Proposal, find
-from desman.config import ConfigManager, Permissions, default_config_path
+from desman.commands import Outcome as CommandOutcome
+from desman.config import Config, ConfigManager, Permissions, default_config_path
 from desman.core import sandbox
 from desman.core.sandbox import (
     DOCKER_IMAGE,
@@ -32,13 +33,16 @@ from desman.core.sandbox import (
     SandboxUnavailable,
 )
 from desman.core.store import Store
+from desman.llm.fake import FakeLLM
 
 
 class Docker:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
+        self.timeouts: list[float] = []
         self.answers: dict[str, tuple[int, str, str]] = {
             "info": (0, "linux\n", ""),
+            "{{.SystemTime}}": (0, "2020-01-02T14:00:00.123456789+02:00\n", ""),
             "manifest": (1, "", "registry unavailable"),
         }
 
@@ -46,7 +50,11 @@ class Docker:
         assert argv[0] == "docker-test"
         assert timeout > 0
         self.calls.append(argv[1:])
-        return subprocess.CompletedProcess(argv, *self.answers.get(argv[1], (0, "", "")))
+        self.timeouts.append(timeout)
+        if argv[1] == "pull":
+            self.answers["image"] = (0, "", "")
+        key = argv[-1] if argv[-1] == "{{.SystemTime}}" else argv[1]
+        return subprocess.CompletedProcess(argv, *self.answers.get(key, (0, "", "")))
 
     def sandbox(self, **limits: int) -> Sandbox:
         return Sandbox(
@@ -72,7 +80,8 @@ def test_docker_argv(platform: str, tmp_path: Path) -> None:
         return [argv[i + 1] for i, arg in enumerate(argv) if arg == flag]
 
     assert argv[:2] == ["docker-test", "run"]
-    assert {"--rm", "--read-only", "-i"} <= set(argv)
+    assert {"--init", "--read-only", "-i"} <= set(argv)
+    assert "--rm" not in argv
     assert values("--pull") == ["never"]
     assert values("--network") == ["none"]
     assert values("--cap-drop") == ["ALL"]
@@ -155,40 +164,93 @@ def test_unresponsive_docker_daemon() -> None:
     assert (box.unavailable() or "").startswith("Docker daemon did not answer")
 
 
-def test_sweep_and_empty_probe() -> None:
+@pytest.mark.parametrize("timeout", [5, 120])
+def test_sweep_and_empty_probe(timeout: int) -> None:
     docker = Docker()
-    now = dt.datetime.now(dt.UTC)
-    old = (now - dt.timedelta(seconds=121)).strftime("%Y-%m-%d %H:%M:%S %z UTC")
-    young = (now - dt.timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S %z UTC")
+    now = dt.datetime(2020, 1, 2, 12, tzinfo=dt.UTC)
+    age = max(Limits().timeout, timeout) + 600
+    old = (now - dt.timedelta(seconds=age + 1)).strftime("%Y-%m-%d %H:%M:%S %z UTC")
+    young = (now - dt.timedelta(seconds=age - 1)).strftime("%Y-%m-%d %H:%M:%S %z UTC")
     docker.answers["ps"] = (
         0,
         f"111111111111\t{old}\n222222222222\t{young}\n--bad\t{old}\n333333333333\tunknown\n",
         "",
     )
-    assert docker.sandbox().unavailable() is None
-    _, image, listing, remove, run = docker.calls
+    assert docker.sandbox(timeout=timeout).unavailable() is None
+    _, image, clock, listing, remove, run, cleanup = docker.calls
     assert image == ["image", "inspect", DOCKER_IMAGE]
+    assert clock == ["info", "--format", "{{.SystemTime}}"]
     assert listing[:5] == ["ps", "-a", "--filter", "label=" + DOCKER_LABEL, "--format"]
     assert remove == ["rm", "-f", "111111111111"]
-    assert re.fullmatch(r"desman-sbx-[a-f0-9]{32}", run[run.index("--name") + 1])
+    name = run[run.index("--name") + 1]
+    assert re.fullmatch(r"desman-sbx-[a-f0-9]{32}", name)
     assert DOCKER_IMAGE in run and run[-1] == "true"
+    assert docker.timeouts[-2] == 60.0
+    assert cleanup == ["rm", "-f", name]
+
+
+def test_sweep_ignores_host_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    class HostClock(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> HostClock:
+            return cls(2099, 1, 2, 12, tzinfo=tz)
+
+    monkeypatch.setattr(dt, "datetime", HostClock)
+    docker = Docker()
+    docker.answers["ps"] = (0, "111111111111\t2020-01-02 11:59:30 +0000 UTC\n", "")
+    assert docker.sandbox().unavailable() is None
+    assert ["rm", "-f", "111111111111"] not in docker.calls
+
+
+@pytest.mark.parametrize("failing_command", ["info", "run"])
+def test_probe_retries_transient_failure(failing_command: str) -> None:
+    docker = Docker()
+    now = 0.0
+    failing = True
+
+    def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if failing and argv[1] == failing_command:
+            if failing_command == "run":
+                assert timeout == 60.0
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return subprocess.CompletedProcess(argv, 1, "", "cannot connect")
+        return docker.run(argv, timeout)
+
+    box = Sandbox(platform="darwin", docker="docker-test", docker_runner=run, monotonic=lambda: now)
+    reason = box.unavailable()
+    assert reason is not None
+    failing = False
+    now = 59
+    assert box.unavailable() == reason
+    now = 60
+    assert box.unavailable() is None
+    checked = docker.calls[:]
+    now = 180
+    assert box.unavailable() is None
+    assert docker.calls == checked
 
 
 @pytest.mark.parametrize(
-    ("code", "message"),
+    ("client_code", "message", "state", "exit_code"),
     [
-        (125, "daemon is unavailable"),
-        (1, "Unable to find image"),
-        (1, "failed to connect to the docker API"),
+        (125, "daemon is unavailable", (1, "", "no such container"), None),
+        (1, "bind failed", (0, "0001-01-01T00:00:00Z 0", ""), None),
+        (125, "program error", (0, "2020-01-02T12:00:00Z 125", ""), 125),
+        (1, "docker: x", (0, "2020-01-02T12:00:00Z 1", ""), 1),
+        (125, "client detached", (0, "2020-01-02T12:00:00Z 137", ""), 137),
     ],
 )
-def test_docker_failure_is_not_program_failure(
-    code: int,
+def test_docker_uses_container_state(
+    client_code: int,
     message: str,
+    state: tuple[int, str, str],
+    exit_code: int | None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     popen = subprocess.Popen
+    docker = Docker()
+    docker.answers["inspect"] = state
 
     def fake_client(
         argv: list[str],
@@ -198,12 +260,19 @@ def test_docker_failure_is_not_program_failure(
         stderr: int,
     ) -> subprocess.Popen[bytes]:
         assert argv[0] == "docker-test"
-        script = f"import sys; print({message!r}, file=sys.stderr); sys.exit({code})"
+        script = f"import sys; print({message!r}, file=sys.stderr); sys.exit({client_code})"
         return popen([sys.executable, "-c", script], stdin=stdin, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(subprocess, "Popen", fake_client)
-    with pytest.raises(SandboxUnavailable, match=message):
-        Docker().sandbox(stderr_chars=2).run(["nothing"], tmp_path)
+    box = docker.sandbox()
+    if exit_code is None:
+        with pytest.raises(SandboxUnavailable, match=message):
+            box.run(["nothing"], tmp_path)
+    else:
+        assert box.run(["nothing"], tmp_path) == Outcome(exit_code, "", message + "\n")
+    inspect, cleanup = docker.calls[-2:]
+    assert inspect[:3] == ["inspect", "--format", "{{.State.StartedAt}} {{.State.ExitCode}}"]
+    assert cleanup == ["rm", "-f", inspect[-1]]
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
@@ -265,9 +334,16 @@ def test_cli_status_setup_and_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
         "image": DOCKER_IMAGE,
         "image_present": True,
     }
-    decline = CliRunner().invoke(cli, ["sandbox", "setup"], input="n\n")
+    docker.calls.clear()
+    installed = CliRunner().invoke(cli, ["sandbox", "setup", "--yes"])
+    assert installed.exit_code == 0 and "Image present" in installed.output
+    assert [call[0] for call in docker.calls] == ["info", "image"]
+
+    docker.answers["image"] = (1, "", "No such image")
+    decline = CliRunner().invoke(cli, ["sandbox", "setup"])
     assert decline.exit_code == 0, decline.output
     assert "about 45 MB" in decline.output
+    assert "Nothing changed. Confirm with: desman sandbox setup --yes" in decline.output
     assert not any(call[0] == "pull" for call in docker.calls)
     manifest = {"OCIManifest": {"layers": [{"size": 36_000_000}, {"size": 3_000_000}]}}
     docker.answers["manifest"] = (0, json.dumps([manifest]), "")
@@ -275,7 +351,7 @@ def test_cli_status_setup_and_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     assert confirm.exit_code == 0, confirm.output
     assert "about 39 MB" in confirm.output
     assert ["pull", DOCKER_IMAGE] in docker.calls
-    assert DOCKER_IMAGE in docker.calls[-1] and docker.calls[-1][-1] == "true"
+    assert DOCKER_IMAGE in docker.calls[-2] and docker.calls[-2][-1] == "true"
     status_entry = find("sandbox status")
     setup_entry = find("sandbox setup")
     assert status_entry is not None and status_entry.kind is Kind.READ
@@ -297,10 +373,19 @@ def test_cli_linux_setup_and_status(monkeypatch: pytest.MonkeyPatch) -> None:
     assert data["image"] is None and data["image_present"] is None
 
 
-def test_catalog_waits_for_confirmation(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_catalog_waits_for_confirmation(
+    store: Store, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     docker = Docker()
+    monkeypatch.setattr(sandbox_cli, "Sandbox", docker.sandbox)
     monkeypatch.setattr(sandbox, "Sandbox", docker.sandbox)
     context = Context(store, ConfigManager(default_config_path()), lambda *_: None, lambda _: False)
+    status = find("sandbox status")
+    assert status is not None
+    result = status.handler(context, NoArgs())
+    assert isinstance(result, CommandOutcome) and result.data["image_present"] is True
+    assert capsys.readouterr().out == ""
+    docker.answers["image"] = (1, "", "No such image")
     entry = find("sandbox setup")
     assert entry is not None
     proposal = entry.handler(context, NoArgs())
@@ -321,12 +406,59 @@ def test_wizard_offers_setup_when_granting_shell(monkeypatch: pytest.MonkeyPatch
         return False
 
     monkeypatch.setattr(ui, "confirm", decline)
+    assert wizard._permissions(Permissions()).shell_execution
+    assert not offered
+    assert [call[0] for call in docker.calls] == ["info", "image"]
+    docker.answers["image"] = (1, "", "No such image")
     saved = wizard._permissions(Permissions())
     assert saved.shell_execution
     assert len(offered) == 1 and "45 MB" in offered[0]
     assert not any(call[0] == "pull" for call in docker.calls)
     assert wizard._permissions(saved).shell_execution
     assert len(offered) == 1
+
+
+def test_run_shares_sandbox_probe(store: Store) -> None:
+    docker = Docker()
+    box = docker.sandbox()
+    config = Config(permissions=Permissions(shell_execution=True))
+    access = runs.executor_access(config, sandbox=box)
+    coordinator = runs.coordinator(store, runs.Models(FakeLLM(), None), access, config, sandbox=box)
+    tool = coordinator.tools.get("run_command") if coordinator.tools else None
+    assert tool is not None and tool.ready() is None
+    assert sum(call[0] == "run" for call in docker.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected", "setup_hint", "install_link"),
+    [
+        ("absent", "Docker is not installed", False, True),
+        ("windows", "switch Docker Desktop to Linux containers", False, False),
+        ("image", "The sandbox image is missing", True, False),
+    ],
+)
+def test_executor_access_hints(
+    failure: str,
+    expected: str,
+    setup_hint: bool,
+    install_link: bool,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    docker = Docker()
+    if failure == "windows":
+        docker.answers["info"] = (0, "windows", "")
+    if failure == "image":
+        docker.answers["image"] = (1, "", "No such image")
+    box = Sandbox(
+        platform="darwin",
+        docker="" if failure == "absent" else "docker-test",
+        docker_runner=docker.run,
+    )
+    runs.executor_access(Config(permissions=Permissions(shell_execution=True)), sandbox=box)
+    out = capsys.readouterr().out.replace("\n", " ")
+    assert expected in out
+    assert ("desman sandbox setup" in out) is setup_hint
+    assert ("https://docs.docker.com/get-docker/" in out) is install_link
 
 
 @pytest.fixture(scope="module")
@@ -353,6 +485,17 @@ def test_real_docker_hello_and_workspace(real_docker: Sandbox, tmp_path: Path) -
     )
     assert result == Outcome(0, "hello\n", "")
     assert (tmp_path / "answer").read_text() == "42"
+
+
+@pytest.mark.parametrize(("code", "message"), [(125, "program error"), (1, "docker: x")])
+def test_real_docker_program_exit(
+    real_docker: Sandbox, tmp_path: Path, code: int, message: str
+) -> None:
+    result = real_docker.run(
+        ["python3", "-c", f"import sys; print({message!r}, file=sys.stderr); sys.exit({code})"],
+        tmp_path,
+    )
+    assert result == Outcome(code, "", message + "\n")
 
 
 def test_real_docker_ignores_environment_injected_by_docker(

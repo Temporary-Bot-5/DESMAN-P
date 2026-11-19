@@ -484,14 +484,16 @@ def label(llm: LLM) -> str:
     return str(getattr(llm, "label", llm.name))
 
 
-def executor_access(config: Config, *, stderr: bool = False) -> Access:
+def executor_access(
+    config: Config, *, stderr: bool = False, sandbox: Sandbox | None = None
+) -> Access:
     """What the executor's tools may do: the tool policy within the human's permissions. Warns
     about switches that are on but cannot work, and about admin_rights at every run."""
     permissions = config.permissions
     if permissions.admin_rights:  # at every run, not only when it was turned on
         ui.warn(t("admin_rights is on: agents may act with elevated privileges."), stderr=stderr)
     if permissions.shell_execution:
-        sandbox = Sandbox()
+        sandbox = Sandbox() if sandbox is None else sandbox
         problem = sandbox.unavailable()
         if problem is not None:  # the switch alone would look like commands can run
             ui.warn(
@@ -502,8 +504,10 @@ def executor_access(config: Config, *, stderr: bool = False) -> Access:
                 ),
                 stderr=stderr,
             )
-            if sandbox.backend == "docker":
+            if sandbox.image_present is False:
                 ui.warn(t("Set up the Docker sandbox with `desman sandbox setup`."), stderr=stderr)
+            elif sandbox.backend == "docker" and not sandbox.docker:
+                ui.warn("https://docs.docker.com/get-docker/", stderr=stderr)
     if permissions.network_access and not providers.search_engines(config):
         ui.warn(
             t(
@@ -578,6 +582,7 @@ def coordinator(
     http: httpx.Client | None = None,
     watch: Callable[[], None] | None = None,
     network: Crew | None = None,
+    sandbox: Sandbox | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
     # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
@@ -588,6 +593,7 @@ def coordinator(
         models,
         access=access,
         tools=builtin_registry(
+            sandbox,
             web=web(config, store, http),
             # Without the person's token: see `core.tools.suggest_model_tool`.
             models=lambda ref: hub.inspect(ref, http),

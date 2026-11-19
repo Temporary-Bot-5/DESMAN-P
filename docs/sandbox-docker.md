@@ -3,7 +3,8 @@
 1. Install and start Docker Desktop. In PowerShell, run
    `docker info --format '{{.OSType}}'` and check that it prints `linux`.
    If it prints `windows`, switch Docker Desktop to Linux containers.
-2. Run `desman sandbox setup` and confirm the download. Run
+2. Run `desman sandbox setup` to see the download size, then run
+   `desman sandbox setup --yes` to download the image. Run
    `desman sandbox status --json` and check for `"backend": "docker"`,
    `"available": true` and `"image_present": true`.
 3. Enable `shell_execution` in `desman config` or with

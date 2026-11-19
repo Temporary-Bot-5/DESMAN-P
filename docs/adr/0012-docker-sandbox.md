@@ -24,8 +24,8 @@ and macOS, and a Linux container gives the same kind of isolation bubblewrap giv
 2. **The image is pinned:** an official `python:3.12-slim` image by its `sha256` digest, written
    in `sandbox.py` (a protected file; a new digest is a reviewed commit). The container never
    pulls (`--pull never`). The image is fetched only by the person: `desman sandbox setup`
-   (shows the size, asks "yes", `--yes` for scripts; also offered by the wizard where Docker is
-   the backend). `desman sandbox status` says which backend is used and why it is or is not
+   (shows the size, downloads with `--yes`; the wizard can offer a confirmation when the
+   image is missing). `desman sandbox status` says which backend is used and why it is or is not
    available. Both have catalog entries for the chat (setup: a window).
 3. **What the container gets:** `--network none`, `--read-only` root file system, `--cap-drop
    ALL`, `--security-opt no-new-privileges`, an unprivileged user, `--pids-limit`, `--memory`
@@ -34,10 +34,13 @@ and macOS, and a Linux container gives the same kind of isolation bubblewrap giv
    and `HOME`) and nothing else of the machine; only the fixed environment the bwrap backend sets
    (`-e` per variable; the docker CLI's own environment never reaches the container). pytest and
    its pure-Python runtime packages are bound read-only under `/opt/desman/python` as in the bwrap
-   backend. Every container has a random name and the label `desman.sandbox`.
+   backend. Every container has a random name, the label `desman.sandbox`, and an init process
+   to reap child processes.
 4. **Timeout and leftovers:** killing the `docker` client does not stop a container, so a timeout
-   (or Ctrl+C) runs `docker kill NAME`; `--rm` removes it. A crash of DESMAN can still leave one
-   running: the probe removes `desman.sandbox` containers older than the longest timeout.
+   (or Ctrl+C) runs `docker kill NAME`. After a normal client exit, container inspection reports
+   whether it started and gives the program exit code. Cleanup always attempts `docker rm -f NAME`.
+   The probe uses the daemon clock to remove leftover containers after the larger of the default
+   and configured timeouts plus ten minutes.
    Output is read by threads (pipes cannot be `select`ed on Windows), with the same head/tail
    limits.
 5. **Availability is checked, not assumed:** `docker` on PATH, the daemon answers, the server runs
@@ -52,7 +55,7 @@ and macOS, and a Linux container gives the same kind of isolation bubblewrap giv
 ## Consequences
 
 - Windows/macOS participants can run code once they install Docker Desktop and run `desman
-  sandbox setup`; without it nothing changes from today (code does not run, they are told why
+  sandbox setup --yes`; without it nothing changes from today (code does not run, they are told why
   and how to enable it).
 - The isolation boundary on those platforms is Docker's (a Linux VM under Docker Desktop), not
   bubblewrap's. The person's files outside the workspace and the configuration are not mounted.

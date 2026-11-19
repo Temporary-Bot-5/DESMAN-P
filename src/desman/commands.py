@@ -1930,7 +1930,7 @@ def _search_change(action: str) -> Handler:
 def _sandbox_status(ctx: Context, args: NoArgs) -> Outcome:
     from desman.sandbox_cli import sandbox_status
 
-    return Outcome(dict(sandbox_status()))
+    return Outcome(dict(sandbox_status(display=False)))
 
 
 def _sandbox_setup(ctx: Context, args: NoArgs) -> Outcome | Proposal:
@@ -1940,7 +1940,7 @@ def _sandbox_setup(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     box = Sandbox()
     question = prepare_setup(box)
     if question is None:
-        return Outcome({"installed": setup_image(box)})
+        return Outcome({"installed": False})
 
     def apply() -> Outcome:
         return Outcome({"installed": setup_image(box)})

@@ -114,6 +114,10 @@ class SandboxUnavailable(RuntimeError):
     """The sandbox cannot run here: no command runs at all."""
 
 
+class _DockerDaemonUnavailable(SandboxUnavailable):
+    """A Docker daemon that may recover after startup or a restart."""
+
+
 @dataclass(frozen=True)
 class Limits:
     timeout: float = 60.0
@@ -143,7 +147,7 @@ class Outcome:
 
 
 class Sandbox:
-    """Runs confined commands. The selected backend is probed once per instance."""
+    """Runs confined commands. Caches availability and retries transient Docker probe failures."""
 
     def __init__(
         self,
@@ -154,6 +158,7 @@ class Sandbox:
         docker: str | None = None,
         platform: str | None = None,
         docker_runner: DockerRunner | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.limits = limits if limits is not None else Limits()
         self.bwrap = bwrap if bwrap is not None else shutil.which("bwrap")
@@ -169,11 +174,19 @@ class Sandbox:
         self.image_present: bool | None = None
         self._problem: str | None = None
         self._checked = False
+        self._monotonic = monotonic
+        self._retry_at: float | None = None
 
     def unavailable(self) -> str | None:
         """Why no command can run here, or None if the sandbox works."""
+        if self._retry_at is not None and self._monotonic() >= self._retry_at:
+            return self.reprobe()
         if not self._checked:
-            self._problem = self._probe() if self.backend == "bwrap" else self._probe_docker()
+            try:
+                self._problem = self._probe() if self.backend == "bwrap" else self._probe_docker()
+            except _DockerDaemonUnavailable as exc:
+                self._problem = str(exc)
+                self._retry_at = self._monotonic() + 60.0
             self._checked = True
         return self._problem
 
@@ -181,6 +194,7 @@ class Sandbox:
         """Refresh availability after the operator changes the sandbox setup."""
         self._checked = False
         self.image_present = None
+        self._retry_at = None
         return self.unavailable()
 
     def run(
@@ -200,13 +214,16 @@ class Sandbox:
             limits = _with(limits, min(timeout, limits.timeout))
         if self.backend == "docker":
             name = _DOCKER_NAME + uuid.uuid4().hex
-            return _execute_docker(
-                self._docker_argv(command, workdir, name),
-                stdin,
-                limits,
-                lambda: self._stop_docker(name),
-                lambda: self._remove_docker(name),
-            )
+            try:
+                return _execute_docker(
+                    self._docker_argv(command, workdir, name),
+                    stdin,
+                    limits,
+                    lambda: self._stop_docker(name),
+                    lambda: self._docker_exit(name),
+                )
+            finally:
+                self._remove_docker(name)
         return _execute(self._argv(command, workdir), stdin, limits)
 
     def _argv(self, command: Sequence[str], workdir: Path) -> list[str]:
@@ -322,14 +339,22 @@ class Sandbox:
             raise SandboxUnavailable(str(exc)) from exc
 
     def docker_problem(self) -> str | None:
+        try:
+            return self._docker_problem()
+        except _DockerDaemonUnavailable as exc:
+            return str(exc)
+
+    def _docker_problem(self) -> str | None:
         if not self.docker:
             return "Docker is not installed or is not on PATH."
         try:
             result = self.docker_command(["info", "--format", "{{.OSType}}"])
         except SandboxUnavailable as exc:
-            return f"Docker daemon did not answer: {exc}"
+            raise _DockerDaemonUnavailable(f"Docker daemon did not answer: {exc}") from exc
         if result.returncode:
-            return f"Docker daemon did not answer: {_docker_detail(result)}"
+            raise _DockerDaemonUnavailable(
+                f"Docker daemon did not answer: {_docker_detail(result)}"
+            )
         if result.stdout.strip() != "linux":
             return "Docker runs Windows containers: switch Docker Desktop to Linux containers."
         return None
@@ -345,7 +370,7 @@ class Sandbox:
         argv = [
             self.docker,
             "run",
-            "--rm",
+            "--init",
             "--pull",
             "never",
             "--name",
@@ -401,15 +426,18 @@ class Sandbox:
             *command,
         ]
 
+    def docker_image_present(self) -> bool:
+        image = self.docker_command(["image", "inspect", DOCKER_IMAGE])
+        if image.returncode and "no such image" not in image.stderr.lower():
+            raise _DockerDaemonUnavailable(_docker_detail(image))
+        return image.returncode == 0
+
     def _probe_docker(self) -> str | None:
-        problem = self.docker_problem()
+        problem = self._docker_problem()
         if problem is not None:
             return problem
         try:
-            image = self.docker_command(["image", "inspect", DOCKER_IMAGE])
-            if image.returncode and "no such image" not in image.stderr.lower():
-                raise SandboxUnavailable(_docker_detail(image))
-            self.image_present = image.returncode == 0
+            self.image_present = self.docker_image_present()
             if not self.image_present:
                 return "The sandbox image is missing. Run `desman sandbox setup`."
             self._sweep_docker()
@@ -417,20 +445,40 @@ class Sandbox:
                 name = _DOCKER_NAME + uuid.uuid4().hex
                 try:
                     result = self.docker_command(
-                        self._docker_argv(["true"], Path(empty), name)[1:], timeout=10.0
+                        self._docker_argv(["true"], Path(empty), name)[1:], timeout=60.0
                     )
                 except (SandboxUnavailable, KeyboardInterrupt):
                     self._stop_docker(name)
-                    self._remove_docker(name)
                     raise
+                finally:
+                    self._remove_docker(name)
             if result.returncode:
-                self._remove_docker(name)
-                return f"Docker cannot create a sandbox here: {_docker_detail(result)}"
+                problem = self._docker_problem()
+                return problem or f"Docker cannot create a sandbox here: {_docker_detail(result)}"
+        except _DockerDaemonUnavailable:
+            raise
         except SandboxUnavailable as exc:
-            return f"Docker cannot create a sandbox here: {exc}"
+            message = f"Docker cannot create a sandbox here: {exc}"
+            if isinstance(exc.__cause__, subprocess.TimeoutExpired):
+                raise _DockerDaemonUnavailable(message) from exc
+            return message
         return None
 
     def _sweep_docker(self) -> None:
+        clock = self.docker_command(["info", "--format", "{{.SystemTime}}"])
+        if clock.returncode:
+            raise _DockerDaemonUnavailable(_docker_detail(clock))
+        # datetime uses microseconds. Truncate Docker's fractional seconds before parsing.
+        timestamp = re.sub(r"(\.\d{6})\d+", r"\1", clock.stdout.strip())
+        try:
+            now = dt.datetime.fromisoformat(timestamp)
+            if now.tzinfo is None:
+                raise ValueError
+        except ValueError as exc:
+            raise SandboxUnavailable(
+                f"Docker reported an invalid system time: {timestamp}"
+            ) from exc
+        cutoff = now - dt.timedelta(seconds=max(Limits().timeout, self.limits.timeout) + 600)
         result = self.docker_command(
             [
                 "ps",
@@ -442,22 +490,37 @@ class Sandbox:
             ]
         )
         if result.returncode:
-            raise SandboxUnavailable(_docker_detail(result))
-        cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=self.limits.timeout + 60)
+            raise _DockerDaemonUnavailable(_docker_detail(result))
         for line in result.stdout.splitlines():
             container, _, created = line.partition("	")
             if not re.fullmatch(r"[a-f0-9]{12,64}", container):
                 continue
             try:
                 # Docker's CreatedAt includes a numeric offset and a trailing zone name.
-                timestamp = dt.datetime.strptime(
+                created_at = dt.datetime.strptime(
                     " ".join(created.split()[:3]), "%Y-%m-%d %H:%M:%S %z"
                 )
             except ValueError:
                 continue
-            if timestamp < cutoff:
+            if created_at < cutoff:
                 # A worker or the daemon may have removed it since the listing.
                 self.docker_command(["rm", "-f", container])
+
+    def _docker_exit(self, name: str) -> int | None:
+        result = self.docker_command(
+            ["inspect", "--format", "{{.State.StartedAt}} {{.State.ExitCode}}", name]
+        )
+        if result.returncode:
+            return None
+        started, _, code = result.stdout.strip().partition(" ")
+        if started == "0001-01-01T00:00:00Z":
+            return None
+        try:
+            if started:
+                return int(code)
+        except ValueError:
+            pass
+        raise SandboxUnavailable("Docker returned an invalid container state.")
 
     def _stop_docker(self, name: str) -> None:
         with contextlib.suppress(SandboxUnavailable):
@@ -584,7 +647,7 @@ def _execute_docker(
     stdin: str,
     limits: Limits,
     stop: Callable[[], None],
-    remove: Callable[[], None],
+    inspect_exit: Callable[[], int | None],
 ) -> Outcome:
     stdout = _Head(limits.stdout_chars)
     stderr = _Tail(limits.stderr_chars)
@@ -611,13 +674,12 @@ def _execute_docker(
             for reader in readers:
                 reader.start()
             try:
-                code = process.wait(timeout=limits.timeout)
+                client_code = process.wait(timeout=limits.timeout)
                 for reader in readers:
                     reader.join()
                 complete = True
             except subprocess.TimeoutExpired:
                 timed_out = True
-                code = None
         finally:
             if not complete:
                 try:
@@ -626,28 +688,19 @@ def _execute_docker(
                     with contextlib.suppress(ProcessLookupError):
                         process.kill()
                     process.wait()
-                    remove()
                 for reader in readers:
                     if reader.ident is not None:
                         reader.join()
             process.stdout.close()
             process.stderr.close()
-    detail = diagnostic.text().strip()
-    if code == 125 or (
-        code
-        and detail.lower().startswith(
-            (
-                "docker: ",
-                "error response from daemon:",
-                "unable to find image",
-                "cannot connect to the docker daemon",
-                "error during connect:",
-                "failed to connect to the docker api",
-                "permission denied while trying to connect to the docker api",
+    code = None
+    if not timed_out:
+        code = inspect_exit()
+        if code is None:
+            raise SandboxUnavailable(
+                diagnostic.text().strip()
+                or f"Docker exited with code {client_code} before starting"
             )
-        )
-    ):
-        raise SandboxUnavailable(detail or f"Docker exited with code {code}")
     return Outcome(
         exit_code=None if code is None else _exit_code(code),
         stdout=stdout.text(),
@@ -701,10 +754,10 @@ def _collect(
 
 def _kill(process: subprocess.Popen[bytes]) -> None:
     with contextlib.suppress(ProcessLookupError):
-        if sys.platform != "win32":
-            os.killpg(process.pid, signal.SIGKILL)
-        else:
+        if sys.platform == "win32":
             process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 def _exit_code(code: int) -> int:

@@ -66,20 +66,38 @@ def _image_size(box: Sandbox) -> int:
     return 45
 
 
-def prepare_setup(box: Sandbox) -> str | None:
-    """Return the question used by the CLI, wizard and chat; None on bubblewrap."""
+def _needs_image(box: Sandbox) -> bool:
     if box.backend == "bwrap":
-        return None
+        ui.note(t("On Linux the sandbox uses bubblewrap. No image is needed."))
+        return False
     problem = box.docker_problem()
     if problem is not None:
         raise click.ClickException(t("The sandbox is unavailable: {reason}", reason=problem))
+    try:
+        present = box.docker_image_present()
+    except SandboxUnavailable as exc:
+        raise click.ClickException(t("Docker failed: {error}", error=str(exc))) from exc
+    if present:
+        ui.note(
+            t(
+                "Pinned sandbox image: {image} ({state})",
+                image=DOCKER_IMAGE,
+                state=t("Image present"),
+            )
+        )
+    return not present
+
+
+def prepare_setup(box: Sandbox) -> str | None:
+    """Describe the download when the pinned image is needed."""
+    if not _needs_image(box):
+        return None
     return t("Download the pinned sandbox image (about {size} MB)?", size=_image_size(box))
 
 
 def setup_image(box: Sandbox) -> bool:
     """Apply an operator's confirmed setup and report the result."""
-    if box.backend == "bwrap":
-        ui.note(t("On Linux the sandbox uses bubblewrap. No image is needed."))
+    if not _needs_image(box):
         return False
     try:
         result = box.docker_command(["pull", DOCKER_IMAGE], timeout=600)
@@ -96,13 +114,9 @@ def setup_image(box: Sandbox) -> bool:
     return True
 
 
-def offer_setup(box: Sandbox, *, yes: bool = False) -> None:
+def offer_setup(box: Sandbox) -> None:
     question = prepare_setup(box)
-    if question is None:
-        setup_image(box)
-    elif yes or ui.confirm(question):
-        if yes:
-            ui.note(question)
+    if question is not None and ui.confirm(question):
         setup_image(box)
 
 
@@ -124,4 +138,12 @@ def status(as_json: bool) -> None:
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def setup(yes: bool) -> None:
     """Install the pinned sandbox image if Docker is used."""
-    offer_setup(Sandbox(), yes=yes)
+    box = Sandbox()
+    question = prepare_setup(box)
+    if question is None:
+        return
+    ui.note(question)
+    if yes:
+        setup_image(box)
+    else:
+        ui.note(t("Nothing changed. Confirm with: {command}", command="desman sandbox setup --yes"))

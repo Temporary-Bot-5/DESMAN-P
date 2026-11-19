@@ -135,9 +135,8 @@ TOPICS: Final = (
     Topic(
         "permissions",
         "what agents may do, their tools, the sandbox and the web",
-        "Each tool requires the role to be allowed to use it "
-        "(a policy file that people change in the source, never an agent), and the person's "
-        "switch for what it needs is on. The switches are network_access, shell_execution, "
+        "Agents act only through tools. Each tool requires permission for the role "
+        "(set by people in the source policy), and the person's switch for that tool must be on. The switches are network_access, shell_execution, "
         "fs_outside_access and admin_rights; all are off until the person turns them on "
         "(`desman permissions`, or the setup wizard). Only the person sets them; in the chat "
         "a change is confirmed in a window.\n"
@@ -146,7 +145,7 @@ TOPICS: Final = (
         "(shell_execution), which runs code only in a sandbox with no network, a cleared "
         "environment and limits of time and memory, and is offered only when the "
         "sandbox is available. Linux uses bubblewrap. Elsewhere install Docker Desktop "
-        "in Linux-container mode and run `desman sandbox setup`. "
+        "in Linux-container mode and run `desman sandbox setup --yes`. "
         "web_search and web_fetch (network_access): reading public pages "
         "only, results marked untrusted; web_search asks Wikipedia, Stack Overflow, arXiv and "
         "GitHub, and the whole web only through the person's SearXNG server or a Tavily "
