@@ -491,7 +491,8 @@ def executor_access(config: Config, *, stderr: bool = False) -> Access:
     if permissions.admin_rights:  # at every run, not only when it was turned on
         ui.warn(t("admin_rights is on: agents may act with elevated privileges."), stderr=stderr)
     if permissions.shell_execution:
-        problem = Sandbox().unavailable()
+        sandbox = Sandbox()
+        problem = sandbox.unavailable()
         if problem is not None:  # the switch alone would look like commands can run
             ui.warn(
                 t(
@@ -501,6 +502,8 @@ def executor_access(config: Config, *, stderr: bool = False) -> Access:
                 ),
                 stderr=stderr,
             )
+            if sandbox.backend == "docker":
+                ui.warn(t("Set up the Docker sandbox with `desman sandbox setup`."), stderr=stderr)
     if permissions.network_access and not providers.search_engines(config):
         ui.warn(
             t(

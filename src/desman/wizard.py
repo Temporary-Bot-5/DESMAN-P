@@ -524,6 +524,16 @@ def _permissions(current: Permissions) -> Permissions:
         [ui.Choice(labels[name], name) for name in names],
         checked={name for name in names if getattr(current, name)},
     )
+    if "shell_execution" in granted and not current.shell_execution:
+        from desman.core.sandbox import Sandbox
+        from desman.sandbox_cli import offer_setup
+
+        box = Sandbox()
+        if box.backend == "docker":
+            try:
+                offer_setup(box)
+            except click.ClickException as exc:
+                ui.warn(str(exc))
     return Permissions(**{name: name in granted for name in names})
 
 

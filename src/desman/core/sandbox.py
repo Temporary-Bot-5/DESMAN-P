@@ -1,7 +1,9 @@
 """Sandbox for generated code (ROADMAP 3.3; B5, second part).
 
 The old prototype ran generated code with the network and the whole file system in reach. Here
-a command runs only inside bubblewrap (`bwrap`), and never without it:
+a command runs inside bubblewrap (`bwrap`) on Linux, or Docker elsewhere (ADR 0012).
+
+Bubblewrap provides:
 
 - every namespace is new (`--unshare-all`): no network (only a loopback of its own), no other
   processes, no IPC; it cannot make namespaces of its own (`--disable-userns`) and has no
@@ -39,24 +41,61 @@ files is not); `/usr` is readable (system files only, nothing of the person's).
 from __future__ import annotations
 
 import contextlib
+import csv
 import dataclasses
+import datetime as dt
 import importlib.metadata
 import importlib.util
+import io
 import os
+import re
 import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
-from collections.abc import Callable, Sequence
+import uuid
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Final
 
+DOCKER_IMAGE: Final = (
+    "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+)
+DOCKER_LABEL: Final = "desman.sandbox=1"
+_DOCKER_TIMEOUT: Final = 5.0
+_DOCKER_NAME: Final = "desman-sbx-"
+_PYTHON_PATH: Final = "/opt/desman/python"
+DockerRunner = Callable[[list[str], float], subprocess.CompletedProcess[str]]
+
 MOUNT_POINT: Final = "/workspace"
 SANDBOX_PATH: Final = "/usr/local/bin:/usr/bin:/bin"
+_DOCKER_ENV: Final = {
+    "PATH": SANDBOX_PATH,
+    "HOME": MOUNT_POINT,
+    "TMPDIR": "/tmp",
+    "LANG": "C.UTF-8",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_ADDOPTS": "-p no:cacheprovider",
+    "PYTHONPATH": _PYTHON_PATH,
+}
+# Docker also supplies image defaults and can inject client proxy credentials.
+# Start with isolated Python, then replace it with the command and just the fixed environment.
+_DOCKER_EXEC: Final = f"""\
+import os
+import sys
+
+command = sys.argv[1:]
+try:
+    os.execvpe(command[0], command, {{key: os.environ[key] for key in {tuple(_DOCKER_ENV)!r}}})
+except OSError as error:
+    print(error, file=sys.stderr)
+    sys.exit(127 if isinstance(error, FileNotFoundError) else 126)
+"""
 _SYSTEM_LINKS: Final = ("/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
 """Top-level directories that are links into /usr on a merged-/usr system, or real
 directories (bound read-only) on an older one."""
@@ -104,8 +143,7 @@ class Outcome:
 
 
 class Sandbox:
-    """Runs commands confined by bubblewrap. Whether it works here is checked once, on first
-    use, by starting an empty sandbox."""
+    """Runs confined commands. The selected backend is probed once per instance."""
 
     def __init__(
         self,
@@ -113,19 +151,37 @@ class Sandbox:
         *,
         bwrap: str | None = None,
         prlimit: str | None = None,
+        docker: str | None = None,
+        platform: str | None = None,
+        docker_runner: DockerRunner | None = None,
     ) -> None:
         self.limits = limits if limits is not None else Limits()
         self.bwrap = bwrap if bwrap is not None else shutil.which("bwrap")
         self.prlimit = prlimit if prlimit is not None else _find_prlimit()
+        self.platform = sys.platform if platform is None else platform
+        self.backend = "bwrap" if self.platform.startswith("linux") else "docker"
+        self.docker = (
+            docker
+            if docker is not None
+            else (shutil.which("docker") if self.backend == "docker" else None)
+        )
+        self._docker_runner = docker_runner if docker_runner is not None else _docker_run
+        self.image_present: bool | None = None
         self._problem: str | None = None
         self._checked = False
 
     def unavailable(self) -> str | None:
         """Why no command can run here, or None if the sandbox works."""
         if not self._checked:
-            self._problem = self._probe()
+            self._problem = self._probe() if self.backend == "bwrap" else self._probe_docker()
             self._checked = True
         return self._problem
+
+    def reprobe(self) -> str | None:
+        """Refresh availability after the operator changes the sandbox setup."""
+        self._checked = False
+        self.image_present = None
+        return self.unavailable()
 
     def run(
         self,
@@ -142,6 +198,15 @@ class Sandbox:
         limits = self.limits
         if timeout is not None:
             limits = _with(limits, min(timeout, limits.timeout))
+        if self.backend == "docker":
+            name = _DOCKER_NAME + uuid.uuid4().hex
+            return _execute_docker(
+                self._docker_argv(command, workdir, name),
+                stdin,
+                limits,
+                lambda: self._stop_docker(name),
+                lambda: self._remove_docker(name),
+            )
         return _execute(self._argv(command, workdir), stdin, limits)
 
     def _argv(self, command: Sequence[str], workdir: Path) -> list[str]:
@@ -206,24 +271,8 @@ class Sandbox:
         for name in _SYSTEM_FILES:
             argv += ["--ro-bind-try", name, name]
         argv += ["--setenv", "PYTHONPATH", "/opt/desman/python"]
-        for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
-            spec = importlib.util.find_spec(name)
-            if spec is None or spec.origin is None:
-                continue
-            package = spec.submodule_search_locations is not None
-            source = Path(spec.origin).parent if package else Path(spec.origin)
-            target = name if package else name + ".py"
-            argv += ["--ro-bind", str(source), "/opt/desman/python/" + target]
-        for name in ("pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
-            try:
-                distribution = importlib.metadata.distribution(name)
-            except importlib.metadata.PackageNotFoundError:
-                continue
-            for file in distribution.files or ():
-                if file.parts[0].endswith(".dist-info"):
-                    source = Path(str(distribution.locate_file(file.parts[0])))
-                    argv += ["--ro-bind", str(source), "/opt/desman/python/" + source.name]
-                    break
+        for source, target in _pytest_mounts():
+            argv += ["--ro-bind", str(source), target]
         argv += [
             "--proc",
             "/proc",
@@ -247,8 +296,6 @@ class Sandbox:
         return argv
 
     def _probe(self) -> str | None:
-        if not sys.platform.startswith("linux"):
-            return "the sandbox needs Linux (bubblewrap)"
         if self.bwrap is None:
             return "bubblewrap (bwrap) is not installed"
         if self.prlimit is None:
@@ -262,6 +309,210 @@ class Sandbox:
             detail = outcome.stderr.strip() or f"exit code {outcome.exit_code}"
             return f"bwrap cannot create a sandbox here: {detail}"
         return None
+
+    def docker_command(
+        self, args: list[str], timeout: float = _DOCKER_TIMEOUT
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a DESMAN-owned Docker command with fixed arguments."""
+        if not self.docker:
+            raise SandboxUnavailable("Docker is not installed or is not on PATH.")
+        try:
+            return self._docker_runner([self.docker, *args], timeout)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise SandboxUnavailable(str(exc)) from exc
+
+    def docker_problem(self) -> str | None:
+        if not self.docker:
+            return "Docker is not installed or is not on PATH."
+        try:
+            result = self.docker_command(["info", "--format", "{{.OSType}}"])
+        except SandboxUnavailable as exc:
+            return f"Docker daemon did not answer: {exc}"
+        if result.returncode:
+            return f"Docker daemon did not answer: {_docker_detail(result)}"
+        if result.stdout.strip() != "linux":
+            return "Docker runs Windows containers: switch Docker Desktop to Linux containers."
+        return None
+
+    def _docker_argv(self, command: Sequence[str], workdir: Path, name: str) -> list[str]:
+        assert self.docker
+        limits = self.limits
+        cpu = max(1, limits.cpu_seconds)
+        if self.platform == "win32" or sys.platform == "win32":
+            user = "65534:65534"
+        else:
+            user = f"{os.getuid()}:{os.getgid()}"
+        argv = [
+            self.docker,
+            "run",
+            "--rm",
+            "--pull",
+            "never",
+            "--name",
+            name,
+            "--label",
+            DOCKER_LABEL,
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--user",
+            user,
+            "--pids-limit",
+            str(limits.processes),
+            "--memory",
+            str(limits.memory_bytes),
+            "--memory-swap",
+            str(limits.memory_bytes),
+            "--cpus",
+            "1",
+            "--ulimit",
+            f"cpu={cpu}:{cpu + 1}",
+            "--ulimit",
+            f"fsize={limits.file_bytes}",
+            "--ulimit",
+            f"nofile={limits.open_files}",
+            "--ulimit",
+            "core=0",
+            "--tmpfs",
+            f"/tmp:size={limits.tmp_bytes}",
+            "--mount",
+            _docker_mount(workdir, MOUNT_POINT),
+            "-w",
+            MOUNT_POINT,
+            "-i",
+        ]
+        for key, value in _DOCKER_ENV.items():
+            argv += ["-e", f"{key}={value}"]
+        for source, target in _pytest_mounts():
+            argv += ["--mount", _docker_mount(source, target, readonly=True)]
+        return [
+            *argv,
+            "--entrypoint",
+            "/usr/local/bin/python3",
+            DOCKER_IMAGE,
+            "-I",
+            "-B",
+            "-c",
+            _DOCKER_EXEC,
+            *command,
+        ]
+
+    def _probe_docker(self) -> str | None:
+        problem = self.docker_problem()
+        if problem is not None:
+            return problem
+        try:
+            image = self.docker_command(["image", "inspect", DOCKER_IMAGE])
+            if image.returncode and "no such image" not in image.stderr.lower():
+                raise SandboxUnavailable(_docker_detail(image))
+            self.image_present = image.returncode == 0
+            if not self.image_present:
+                return "The sandbox image is missing. Run `desman sandbox setup`."
+            self._sweep_docker()
+            with tempfile.TemporaryDirectory(prefix="desman-probe-") as empty:
+                name = _DOCKER_NAME + uuid.uuid4().hex
+                try:
+                    result = self.docker_command(
+                        self._docker_argv(["true"], Path(empty), name)[1:], timeout=10.0
+                    )
+                except (SandboxUnavailable, KeyboardInterrupt):
+                    self._stop_docker(name)
+                    self._remove_docker(name)
+                    raise
+            if result.returncode:
+                self._remove_docker(name)
+                return f"Docker cannot create a sandbox here: {_docker_detail(result)}"
+        except SandboxUnavailable as exc:
+            return f"Docker cannot create a sandbox here: {exc}"
+        return None
+
+    def _sweep_docker(self) -> None:
+        result = self.docker_command(
+            [
+                "ps",
+                "-a",
+                "--filter",
+                "label=" + DOCKER_LABEL,
+                "--format",
+                "{{.ID}}	{{.CreatedAt}}",
+            ]
+        )
+        if result.returncode:
+            raise SandboxUnavailable(_docker_detail(result))
+        cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=self.limits.timeout + 60)
+        for line in result.stdout.splitlines():
+            container, _, created = line.partition("	")
+            if not re.fullmatch(r"[a-f0-9]{12,64}", container):
+                continue
+            try:
+                # Docker's CreatedAt includes a numeric offset and a trailing zone name.
+                timestamp = dt.datetime.strptime(
+                    " ".join(created.split()[:3]), "%Y-%m-%d %H:%M:%S %z"
+                )
+            except ValueError:
+                continue
+            if timestamp < cutoff:
+                # A worker or the daemon may have removed it since the listing.
+                self.docker_command(["rm", "-f", container])
+
+    def _stop_docker(self, name: str) -> None:
+        with contextlib.suppress(SandboxUnavailable):
+            self.docker_command(["kill", name])
+
+    def _remove_docker(self, name: str) -> None:
+        with contextlib.suppress(SandboxUnavailable):
+            self.docker_command(["rm", "-f", name])
+
+
+def _docker_run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _docker_detail(result: subprocess.CompletedProcess[str]) -> str:
+    return result.stderr.strip() or f"exit code {result.returncode}"
+
+
+def _docker_mount(source: Path, target: str, *, readonly: bool = False) -> str:
+    # --mount parses CSV, including Windows drive letters and commas in host paths.
+    fields = ["type=bind", f"source={source.absolute()}", f"target={target}"]
+    if readonly:
+        fields.append("readonly")
+    output = io.StringIO()
+    csv.writer(output).writerow(fields)
+    return output.getvalue().removesuffix("\r\n")
+
+
+def _pytest_mounts() -> Iterator[tuple[Path, str]]:
+    for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
+        spec = importlib.util.find_spec(name)
+        if spec is None or spec.origin is None:
+            continue
+        package = spec.submodule_search_locations is not None
+        source = Path(spec.origin).parent if package else Path(spec.origin)
+        target = name if package else name + ".py"
+        yield source, _PYTHON_PATH + "/" + target
+    for name in ("pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
+        try:
+            distribution = importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        for file in distribution.files or ():
+            if file.parts[0].endswith(".dist-info"):
+                source = Path(str(distribution.locate_file(file.parts[0])))
+                yield source, _PYTHON_PATH + "/" + source.name
+                break
 
 
 def _with(limits: Limits, timeout: float) -> Limits:
@@ -326,6 +577,91 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
         stdout_cut=stdout.cut,
         stderr_cut=stderr.cut,
     )
+
+
+def _execute_docker(
+    argv: list[str],
+    stdin: str,
+    limits: Limits,
+    stop: Callable[[], None],
+    remove: Callable[[], None],
+) -> Outcome:
+    stdout = _Head(limits.stdout_chars)
+    stderr = _Tail(limits.stderr_chars)
+    diagnostic = _Tail(2_000)
+    with tempfile.TemporaryFile() as given:
+        given.write(stdin.encode("utf-8"))
+        given.seek(0)
+        try:
+            process = subprocess.Popen(
+                argv,
+                stdin=given,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise SandboxUnavailable(f"Docker cannot be started: {exc}") from exc
+        assert process.stdout is not None and process.stderr is not None
+        readers = [
+            threading.Thread(target=_read_docker, args=(process.stdout, stdout)),
+            threading.Thread(target=_read_docker, args=(process.stderr, stderr, diagnostic)),
+        ]
+        complete = timed_out = False
+        try:
+            for reader in readers:
+                reader.start()
+            try:
+                code = process.wait(timeout=limits.timeout)
+                for reader in readers:
+                    reader.join()
+                complete = True
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                code = None
+        finally:
+            if not complete:
+                try:
+                    stop()
+                finally:
+                    with contextlib.suppress(ProcessLookupError):
+                        process.kill()
+                    process.wait()
+                    remove()
+                for reader in readers:
+                    if reader.ident is not None:
+                        reader.join()
+            process.stdout.close()
+            process.stderr.close()
+    detail = diagnostic.text().strip()
+    if code == 125 or (
+        code
+        and detail.lower().startswith(
+            (
+                "docker: ",
+                "error response from daemon:",
+                "unable to find image",
+                "cannot connect to the docker daemon",
+                "error during connect:",
+                "failed to connect to the docker api",
+                "permission denied while trying to connect to the docker api",
+            )
+        )
+    ):
+        raise SandboxUnavailable(detail or f"Docker exited with code {code}")
+    return Outcome(
+        exit_code=None if code is None else _exit_code(code),
+        stdout=stdout.text(),
+        stderr=stderr.text(),
+        timed_out=timed_out,
+        stdout_cut=stdout.cut,
+        stderr_cut=stderr.cut,
+    )
+
+
+def _read_docker(stream: IO[bytes], *buffers: _Head) -> None:
+    while chunk := stream.read(_READ_CHUNK):
+        for buffer in buffers:
+            buffer.add(chunk)
 
 
 def _collect(

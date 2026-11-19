@@ -35,7 +35,7 @@ from desman.core.workspace import PathEscapeError, Workspace
 from desman.llm.fake import FakeLLM
 from helpers import make_config
 
-PROBLEM = Sandbox().unavailable()
+PROBLEM = Sandbox().unavailable() if sys.platform.startswith("linux") else "Linux only"
 if PROBLEM is not None and os.environ.get("DESMAN_REQUIRE_SANDBOX"):  # set in CI
     raise RuntimeError(f"DESMAN_REQUIRE_SANDBOX is set, but there is no sandbox: {PROBLEM}")
 confined = pytest.mark.skipif(PROBLEM is not None, reason=f"no sandbox here: {PROBLEM}")
@@ -214,12 +214,12 @@ def test_output_is_cut_keeping_the_start_and_the_end(ws: Workspace) -> None:
 
 
 def missing() -> Sandbox:
-    return Sandbox(bwrap="/nonexistent/bwrap")
+    return Sandbox(bwrap="/nonexistent/bwrap", docker="")
 
 
 def test_without_a_working_bwrap_nothing_runs(ws: Workspace, tmp_path: Path) -> None:
-    if sys.platform == "win32":
-        with pytest.raises(SandboxUnavailable, match="the sandbox needs Linux"):
+    if not sys.platform.startswith("linux"):
+        with pytest.raises(SandboxUnavailable, match="Docker is not installed"):
             missing().run(["touch", "x"], ws.root)
         assert ws.files() == []
         return
@@ -318,7 +318,7 @@ def test_run_command_needs_a_working_sandbox(ws: Workspace) -> None:
     [(action, details)] = entries
     assert (
         action == "tool_refused"
-        and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
+        and ("cannot be started" if sys.platform.startswith("linux") else "Docker is not installed")
         in details["reason"]
     )
 
@@ -421,6 +421,6 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
     output = desman_run()
     assert (
         warning in output
-        and ("the sandbox needs Linux" if sys.platform == "win32" else "cannot be started")
+        and ("cannot be started" if sys.platform.startswith("linux") else "Docker is not installed")
         in output
     )

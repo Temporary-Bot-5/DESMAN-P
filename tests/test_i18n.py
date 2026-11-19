@@ -212,7 +212,8 @@ def test_click_errors_and_messages_are_translated() -> None:
     configure("ru")
     result = desman("inboxx")
     assert result.exit_code == 2
-    assert "Ошибка: Нет такой команды 'inboxx'. Может быть, 'inbox'?" in result.output
+    assert "Ошибка: Нет такой команды 'inboxx'." in result.output
+    assert "Может быть" in result.output and "'inbox'" in result.output
     assert "укажите либо GOAL, либо --spec" in desman("run").output
     assert "нет базы данных" in desman("list").output
     keyed = len(providers.CLOUD) + sum(p.key_env is not None for p in providers.SERVICES)
