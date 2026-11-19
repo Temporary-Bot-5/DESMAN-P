@@ -316,9 +316,10 @@ def test_site_assets_and_languages() -> None:
     assert "install.ps1" not in html
     assert "MIT" not in html
     assert "On Windows the agents do not run code because there is no sandbox." in html
-    assert "На Windows агенты не запускают код: там нет песочницы." in html
-    assert 'data-en="Install"' in html
-    assert 'data-ru="Установите"' in html
+    words = (ROOT / "site/i18n.js").read_text(encoding="utf-8")
+    assert "На Windows агенты не запускают код: там нет песочницы." in words
+    assert 'data-i18n="step1">Install<' in html
+    assert '"step1": "Установите"' in words
     assert "navigator.language" in (ROOT / "site/app.js").read_text(encoding="utf-8")
     css = (ROOT / "site/style.css").read_text(encoding="utf-8")
     assert "@import" not in css and "url(" not in css
