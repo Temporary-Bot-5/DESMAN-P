@@ -351,6 +351,41 @@ def test_the_executor_may_say_it_cannot_do_the_work(store: Store, clock: FakeClo
     assert '"type": "error"' in llm.calls[0].messages[0].content  # the way out is offered
 
 
+def test_arithmetic_can_finish_without_calling_offered_tools(
+    store: Store, clock: FakeClock
+) -> None:
+    llm = (
+        FakeLLM()
+        .on(
+            "Execute",
+            '{"type": "error", "reason": "No tool for arithmetic operations provided."}',
+            '{"text": "5"}',
+        )
+        .on("Review", '{"verdict": "accept"}')
+    )
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Sum 2 and 3",
+            subtasks=[SubtaskSpec(description="Sum 2 and 3", acceptance_criteria="Says 5")],
+        )
+    )
+    result = Coordinator(store, llm_executor(llm), llm_reviewer(llm), sleep=clock.sleep).run(
+        task_id
+    )
+
+    assert result.status is TaskStatus.DONE
+    first, second, review = llm.calls
+    assert "Give the result directly for arithmetic" in first.messages[0].content
+    assert "read_file" in [tool["name"] for tool in payload(first.prompt)[1]["tools"]]
+    retry = payload(second.prompt)[1]
+    assert retry["attempt"] == 2
+    feedback = retry["feedback_on_previous_attempt"]
+    assert "tools offered in this attempt:" in feedback
+    assert "read_file" in feedback
+    assert "give the result directly. No tool is needed" in feedback
+    assert payload(review.prompt)[1]["result"] == {"text": "5"}
+
+
 def test_an_error_report_is_not_cached(store: Store, tmp_path: Path) -> None:
     # A source that was down for one task may be up for the next one asking the same.
     fake = FakeLLM('{"type": "error", "reason": "down"}', '{"ok": 1}', '{"ok": 2}')
