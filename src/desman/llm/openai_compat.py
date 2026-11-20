@@ -371,7 +371,10 @@ class OpenAICompatible:
     def _error(self, response: httpx.Response) -> ProviderError:
         status = response.status_code
         message = self._redact(_message(response))
-        if status == 413 and "request too large" in message.lower():
+        if (status == 413 and "request too large" in message.lower()) or (
+            status in (400, 413) and _CONTEXT_WORDS.search(message)
+        ):
+            # Too big for this model's context: another model may take it (never permanent).
             return RequestTooLarge(self.name, status, message)
         if status == 429 and _zero_limit(response):
             # A limit of 0 never resets: the account has no access to this API or model yet
@@ -607,6 +610,15 @@ def _duration(text: str) -> float | None:
         return None
     scale = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
     return sum(float(n) * scale[u] for n, u in parts)
+
+
+_CONTEXT_WORDS = re.compile(
+    r"exceed_context_size|exceeds the available context|context_length_exceeded|"
+    r"maximum context length|context length|context window|prompt is too long|too many tokens",
+    re.IGNORECASE,
+)
+"""How servers say a request is bigger than the model's context (llama.cpp, Ollama, vLLM,
+OpenAI-compatible APIs)."""
 
 
 def _zero_limit(response: httpx.Response) -> bool:

@@ -190,6 +190,8 @@ def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:
     """The long documents a planned subtask works from (ADR 0014): a quote must come from them
     even when the notes that carried it are several steps away."""
     paths = subtask.inputs.get("read_in_parts")
+    if isinstance(subtask.inputs.get("document"), str) and "text" not in subtask.inputs:
+        paths = [subtask.inputs["document"]]  # a combine: its quotes come from the document too
     if not isinstance(paths, list):
         return []
     texts = []

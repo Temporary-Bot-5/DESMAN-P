@@ -615,3 +615,23 @@ def test_a_step_far_below_the_notes_still_quotes_only_the_document(store: Store)
     assert reviewer(subtask, {"text": "Цитата: «На берегу стоял дом.»"}) == Review(
         verdict=Verdict.ACCEPT
     )
+
+
+def test_a_combine_may_quote_the_document_more_exactly_than_its_notes(store: Store) -> None:
+    # Found live (L.2): the combine quoted the text itself; the notes had a looser copy.
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    subtask = subtask.model_copy(update={"inputs": {"document": "input/book.txt"}})
+    notes = DependencyResult(
+        subtask_id="part", description="Make notes on part 1", content={"text": "«мука дешёвая»"}
+    )
+    model = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {"results_of_dependencies": [{"result": notes.content}]},
+        dependencies=lambda _: [notes],
+        quote_evidence=lambda _: ["Пшеничная мука здесь дешевая: 30 -- 40 коп. за пуд."],
+    )
+    exact = "Пшеничная мука здесь дешевая: 30 -- 40 коп. за пуд"
+    assert reviewer(subtask, {"text": f"«{exact}»"}) == Review(verdict=Verdict.ACCEPT)
+    invented = reviewer(subtask, {"text": "«Мука здесь дорогая и плохая»"})
+    assert isinstance(invented, Review) and invented.verdict is Verdict.RETRY

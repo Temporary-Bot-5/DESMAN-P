@@ -512,6 +512,10 @@ def _quote_feedback(
         )
         sources = list(string_values(results))
         location = "the notes you were given"
+        if combine and quote_evidence is not None:
+            # A quote the notes carried a little differently is still right if the document
+            # has it word for word.
+            sources.extend(string_values(quote_evidence(subtask)))
         if not combine:
             additional = (
                 quote_evidence(subtask)

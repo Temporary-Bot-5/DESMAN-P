@@ -495,3 +495,26 @@ def test_quote_sources_include_the_documents_a_planned_subtask_works_from(store:
     [subtask] = store.list_subtasks(task_id)
     sources = quote_sources(store, subtask, knowledge=None, context_budget_tokens=1000)
     assert sources == ["Вдали был лес."]
+
+
+def test_quote_sources_of_a_combine_include_its_document(store: Store) -> None:
+    from desman.core.effects import quote_sources
+    from desman.core.workspace import workspace_root_for
+
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(
+                    description="combine",
+                    acceptance_criteria="c",
+                    inputs={"document": "input/b.txt"},
+                )
+            ],
+        )
+    )
+    Workspace(workspace_root_for(store.conn), task_id).write("input/b.txt", "Текст книги.")
+    [subtask] = store.list_subtasks(task_id)
+    assert quote_sources(store, subtask, knowledge=None, context_budget_tokens=1000) == [
+        "Текст книги."
+    ]
