@@ -1291,7 +1291,6 @@ class Chat:
                     )
                 )
             return
-        runs.note_prefetched(fetched)
         if pending is not None:
             pending.consume(taken)
         ref = self.store.short_id(task_id)
@@ -1312,6 +1311,8 @@ class Chat:
                 title=turn.title,
             )
         self._event(started, task_id)
+        for notice in runs.prefetch_notices(fetched):
+            self._event(notice, task_id)
         if inputs:
             files = ", ".join(placed[: len(inputs)])
             self._file_event(

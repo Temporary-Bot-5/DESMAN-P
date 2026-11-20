@@ -512,9 +512,17 @@ def test_split_review_without_evidence_has_no_unexplained_flag(store: Store) -> 
                 {"digest": True, "result": {"text": "На берегу стоял дом."}},
                 {"result": {"text": "Вдали был большой лес."}},
             ],
-            False,
-            "the notes you were given",
+            True,
+            "",
         ),
+        (
+            {},
+            [{"digest": True, "result": {"text": "На берегу стоял дом."}}],
+            False,
+            "the evidence you were given",
+        ),
+        ({}, [{"digest": True, "result": None}], True, ""),
+        ({"document": "book.txt"}, [{"result": None}], True, ""),
         ({}, [{"digest": True, "result": {"text": "«Вдали был большой лес.»"}}], True, ""),
         ({}, [{"result": {"text": "На берегу стоял дом."}}], True, ""),
     ],
@@ -565,4 +573,21 @@ def test_document_quote_review_checks_full_accepted_notes(store: Store) -> None:
         dependencies=lambda _: [digest],
     )
     assert reviewer(subtask, {"text": f"«{fragment}»"}) == Review(verdict=Verdict.ACCEPT)
+    assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize("source", ["tool", "knowledge", "inputs", "goal"])
+def test_digest_dependant_can_quote_other_evidence(store: Store, source: str) -> None:
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    model = FakeLLM().on("Review", '{"verdict":"accept"}')
+    fragment = "The original wording matters."
+    shown = {"results_of_dependencies": [{"digest": True, "result": {"text": "Digest notes."}}]}
+    evidence: dict[str, Any] = dict(shown)
+    if source == "inputs":
+        subtask = subtask.model_copy(update={"inputs": {"instruction": fragment}})
+    if source == "goal":
+        evidence["goal"] = f"Discuss this phrase: {fragment}"
+    outputs: list[object] = [{"content": fragment}] if source in {"tool", "knowledge"} else []
+    review = llm_reviewer(model, evidence=lambda _: evidence, quote_evidence=lambda _: outputs)
+    assert review(subtask, {"text": f'"{fragment}"'}) == Review(verdict=Verdict.ACCEPT)
     assert len(model.calls) == 1

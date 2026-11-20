@@ -367,7 +367,7 @@ def listing(root: Path, task_id: str) -> list[File]:
         return []
     found = []
     for path in workspace.files():
-        if not is_work_file(path):
+        if path.startswith(("web/", "input/web-")) or not is_work_file(path):
             continue
         try:
             found.append(File(path, workspace.size(path)))

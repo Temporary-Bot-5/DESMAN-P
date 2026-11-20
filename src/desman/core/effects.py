@@ -166,6 +166,26 @@ def evidence(
     return out
 
 
+def quote_sources(
+    store: Store,
+    subtask: Subtask,
+    *,
+    knowledge: Knowledge | None,
+    context_budget_tokens: int,
+) -> list[object]:
+    """Tool outputs from this execution and the knowledge supplied to its executor."""
+    execution = store.executions(subtask.id) - 1
+    outputs = [
+        ToolResult.model_validate_json(row["result_json"]).output
+        for row in store.effects(subtask.id, execution)
+        if row["state"] == "done"
+    ]
+    nodes = fit_knowledge(
+        given(knowledge, subtask.knowledge)[0], context_budget_tokens * CHARS_PER_TOKEN // 2
+    )
+    return [*outputs, *(node.text for node in nodes)]
+
+
 def _written_files(
     rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
 ) -> list[dict[str, str]]:

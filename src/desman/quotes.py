@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Iterator
 
-_QUOTE = re.compile(r'«([^»]*)»|“([^”]*)”|„([^“]*)“|"([^"]*)"')
+_QUOTE = re.compile(r'«([^»]*)»|“([^”]*)”|„([^“]*)“|(?<![^\s(\[])"(?=\S)([^"\r\n{}`]+)"')
+_CODE_START = re.compile(r"[`{\[]")
+_JSON = json.JSONDecoder()
 _TRANSLATION = str.maketrans({"ё": "е", "\u0301": None, **dict.fromkeys('«»“”„"‘’‚‹›')})
 
 
@@ -25,11 +28,39 @@ def string_values(value: object) -> Iterator[str]:
 
 def quotes(text: str) -> list[str]:
     """Return quoted fragments of at least twelve characters, in text order."""
-    fragments = (
-        next(group for group in match.groups() if group is not None).strip()
-        for match in _QUOTE.finditer(text)
-    )
-    return [fragment for fragment in fragments if len(fragment) >= 12]
+    code = iter(_code_spans(text))
+    start, end = next(code, (len(text), len(text)))
+    fragments = []
+    for match in _QUOTE.finditer(text):
+        if match[4] is not None:
+            while end <= match.start():
+                start, end = next(code, (len(text), len(text)))
+            if start < match.end() or (match.end() < len(text) and not _edge(text[match.end()])):
+                continue
+        fragment = next(group for group in match.groups() if group is not None).strip()
+        if len(fragment) >= 12:
+            fragments.append(fragment)
+    return fragments
+
+
+def _code_spans(text: str) -> Iterator[tuple[int, int]]:
+    end = 0
+    for match in _CODE_START.finditer(text):
+        start = match.start()
+        if start < end:
+            continue
+        if match[0] == "`":
+            fence = "```" if text.startswith("```", start) else "`"
+            close = text.find(fence, start + len(fence))
+            if close < 0:
+                continue
+            end = close + len(fence)
+        else:
+            try:
+                _, end = _JSON.raw_decode(text, start)
+            except (ValueError, RecursionError):
+                continue
+        yield start, end
 
 
 def normalize(s: str) -> str:

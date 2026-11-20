@@ -484,12 +484,14 @@ def mixed_script_words(value: Any, *, limit: int | None = 5) -> list[str]:
 def _quote_feedback(
     subtask: Subtask,
     artifact: dict[str, Any] | None,
-    shown: list[dict[str, Any]],
+    shown: dict[str, Any],
     dependencies: Callable[[str], list[DependencyResult]] | None,
+    quote_evidence: Callable[[Subtask], list[object]] | None,
 ) -> str | None:
     part = subtask.inputs.get("text") if "document" in subtask.inputs else None
     combine = is_document_combine(subtask)
-    if not (isinstance(part, str) or combine or any(note.get("digest") for note in shown)):
+    notes = shown.get("results_of_dependencies", [])
+    if not (isinstance(part, str) or combine or any(note.get("digest") for note in notes)):
         return None
     fragments = [quote for value in string_values(artifact) for quote in quotes(value)]
     if not fragments:
@@ -498,13 +500,25 @@ def _quote_feedback(
         sources = [part]
         location = "the part's text"
     else:
-        notes = (
-            [dep.content for dep in dependencies(subtask.id) if combine or dep.digest is not None]
+        results = (
+            [dep.content for dep in dependencies(subtask.id)]
             if dependencies is not None
-            else [note.get("result") for note in shown if combine or note.get("digest")]
+            else [note.get("result") for note in notes]
         )
-        sources = list(string_values(notes))
+        sources = list(string_values(results))
         location = "the notes you were given"
+        if not combine:
+            additional = (
+                quote_evidence(subtask)
+                if quote_evidence is not None
+                else [shown.get("tool_results"), shown.get("knowledge")]
+            )
+            sources.extend(string_values([subtask.inputs, additional]))
+            if any(source.strip() for source in sources):
+                sources.extend(string_values(shown.get("goal", shown.get("task_goal"))))
+            location = "the evidence you were given"
+    if not any(source.strip() for source in sources):
+        return None
     absent = missing(dict.fromkeys(fragments), sources)
     if not absent:
         return None
@@ -521,6 +535,7 @@ def llm_reviewer(
     evidence: Callable[[Subtask], dict[str, Any]] | None = None,
     *,
     dependencies: Callable[[str], list[DependencyResult]] | None = None,
+    quote_evidence: Callable[[Subtask], list[object]] | None = None,
     clock: Callable[[], datetime] | None = None,
     tz: tzinfo | None = None,
 ) -> Reviewer:
@@ -543,13 +558,19 @@ def llm_reviewer(
                 "check every quote and fact of the result against that text: a quote not "
                 "found word for word there means retry."
             )
+        shown = evidence(subtask) if evidence is not None else {}
         if evidence is not None:
-            prompt["evidence"] = dict(evidence(subtask))
+            prompt["evidence"] = dict(shown)
             system += REVIEWER_EVIDENCE
-            if any(d.get("digest") for d in prompt["evidence"].get("results_of_dependencies", [])):
+            if is_document_combine(subtask):
+                system += " Check each quote against the dependency notes."
+            elif any(
+                d.get("digest") for d in prompt["evidence"].get("results_of_dependencies", [])
+            ):
                 system += (
-                    " The result rests on the document digest notes in the dependency evidence, "
-                    "which count as having read the source and are what you check quotes against."
+                    " The document digest notes count as having read the source. Check quotes "
+                    "against the relevant dependency notes, tool results, knowledge, inputs, "
+                    "or the person's request."
                 )
             if "goal" in prompt["evidence"]:
                 prompt["goal"] = prompt["evidence"].pop("goal")
@@ -565,8 +586,9 @@ def llm_reviewer(
         if feedback := _quote_feedback(
             subtask,
             artifact,
-            prompt.get("evidence", {}).get("results_of_dependencies", []),
+            shown,
             dependencies,
+            quote_evidence,
         ):
             return Review(verdict=Verdict.RETRY, feedback=feedback)
         allowed = set(

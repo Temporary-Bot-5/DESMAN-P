@@ -24,7 +24,7 @@ from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
 from desman.core.coordinator import Coordinator, Crew, Executor, Labels, Outcome, Work
-from desman.core.effects import evidence
+from desman.core.effects import evidence, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
@@ -562,7 +562,7 @@ def document_web(
     goal: str, config: Config, store: Store, access: Access, http: httpx.Client | None = None
 ) -> Web | None:
     """Prefetch only when the executor could use the registered fetch tool."""
-    if not documents.urls(goal):
+    if not documents.reading_urls(goal):
         return None
     fetch = builtin_registry().get("web_fetch")
     if fetch is None or access.refusal(fetch) is not None:
@@ -570,16 +570,16 @@ def document_web(
     return web(config, store, http)
 
 
-def note_prefetched(fetched: documents.Prefetched) -> None:
+def prefetch_notices(fetched: documents.Prefetched) -> list[str]:
     chars = {item["url"]: item.get("chars") for item in fetched.details}
-    for file in fetched.given:
-        ui.note(
-            t(
-                "Saved the page {url} ({chars} characters) to read it in parts.",
-                url=file.source,
-                chars=chars[file.source],
-            )
+    return [
+        t(
+            "Saved the page {url} ({chars} characters) to read it in parts.",
+            url=file.source,
+            chars=chars[file.source],
         )
+        for file in fetched.given
+    ]
 
 
 def task_tree(conn: sqlite3.Connection, personalize: bool) -> tuple[knowledge.Node, ...]:
@@ -749,6 +749,12 @@ def _coordinator(
             models.for_(calls.Role.REVIEWER),
             evidence=functools.partial(evidence, store, knowledge=knowledge),
             dependencies=store.dependency_results,
+            quote_evidence=functools.partial(
+                quote_sources,
+                store,
+                knowledge=knowledge,
+                context_budget_tokens=tuned(tuning, "context_tokens"),
+            ),
             clock=store.clock,
         ),
         owner=current_owner(),

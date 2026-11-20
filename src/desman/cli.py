@@ -483,7 +483,8 @@ def run(
             )
             if given:
                 click.echo(t("Files attached: {files}", files=", ".join(placed[: len(given)])))
-            runs.note_prefetched(fetched)
+            for notice in runs.prefetch_notices(fetched):
+                ui.note(notice)
             sys.stdout.flush()  # visible before any work starts, even through a pipe
         _drive(
             store,

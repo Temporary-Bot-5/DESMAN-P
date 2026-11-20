@@ -64,13 +64,14 @@ def test_split_invariants() -> None:
 
 
 @pytest.mark.parametrize(
-    "heading", ["# Глава 3", "ГЛАВА III", "Chapter 3", "Part II", "Часть 2", "РАЗДЕЛ"]
+    "heading",
+    ["# Глава 3", "Глава 3", "ГЛАВА III", "Chapter 12: The End", "Part II", "Часть 2", "РАЗДЕЛ"],
 )
 def test_section_title_carries_through_paragraph_sentence_and_hard_cuts(heading: str) -> None:
     first = "До главы идёт предисловие.\r\n\r\n"
     section = heading + "\r\n\r\nАбзац.\r\n\r\n" + "Длинное предложение! " + "ы" * 36
     text = first + section
-    parts = documents.split(text, 32)
+    parts = documents.split(text, 33)
     assert parts[0] == documents.Part(0, len(first), None)
     assert parts[1].start == len(first)
     assert all(part.title == heading.removeprefix("# ") for part in parts[1:])
@@ -208,7 +209,7 @@ def test_prefetch_checks_the_role_policy_as_well_as_the_switch(
     no_fetch_policy = Policy(roles={Role.EXECUTOR: RolePolicy(tools=["web_search"])})
     only_search = Access(no_fetch_policy, Role.EXECUTOR, [Permission.NETWORK])
     for access in (denied, only_search):
-        assert runs.document_web(LONG_URL, Config(), store, access) is None
+        assert runs.document_web(f"Read {LONG_URL}", Config(), store, access) is None
 
 
 def test_prefetched_file_has_its_own_byte_limit_and_does_not_count_as_an_attachment(
@@ -216,7 +217,7 @@ def test_prefetched_file_has_its_own_byte_limit_and_does_not_count_as_an_attachm
 ) -> None:
     monkeypatch.setattr(task_files, "MAX_GIVEN_BYTES", 29_000)
     site = Site({LONG_URL: text_page("ю" * 28_000)})
-    fetched = documents.prefetch(LONG_URL, Web(fetcher=fetcher(site)), allowed=True)
+    fetched = documents.prefetch(f"Read {LONG_URL}", Web(fetcher=fetcher(site)), allowed=True)
     [file] = fetched.given
     assert len(file.text.encode()) <= task_files.MAX_GIVEN_BYTES
     assert not file.text.endswith("�")
@@ -243,6 +244,9 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
     reviewed_parts: set[int] = set()
     combine_attempts = 0
     invented = "Вдали стоял высокий замок."
+    brief = tmp_path / "brief.txt"
+    brief_quote = "На тропинке лежал камень."
+    brief.write_bytes(brief_quote.encode())
     goal = "Describe the setting"
     digest = "Notes. " * 2271 + f'End: "{QUOTE}"'
     assert len(digest) > 15_900
@@ -273,7 +277,7 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         assert dep["result"] == {"text": digest}
         assert dep["digest"] is True and not dep["truncated"]
         assert "input/setting.txt were read in parts by code" in data["documents_read"]
-        return json.dumps({"text": f'The setting is on a riverbank: "{QUOTE}"'})
+        return tool_calls(("read_file", {"path": "input/brief.txt"}))
 
     def review(request: Request) -> str:
         data = payload(request)
@@ -296,7 +300,8 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         if data["subtask"] == "Write the answer":
             [dep] = data["evidence"]["results_of_dependencies"]
             assert dep["result"] == {"text": digest} and dep["digest"] is True
-            assert "what you check quotes against" in request.messages[0].content
+            assert "against the relevant dependency notes" in request.messages[0].content
+            assert brief_quote in data["result"]["text"]
         return '{"verdict":"accept"}'
 
     planned = {
@@ -305,11 +310,26 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         ]
     }
     fake = FakeLLM().on(PLAN, json.dumps(planned))
-    fake.on("Execute subtask (tool results)", json.dumps({"text": f'Part 1: "{QUOTE}"'}))
+
+    def after_read(request: Request) -> str:
+        if brief_quote in request.prompt:
+            return json.dumps({"text": f'The riverbank: "{QUOTE}" The path: "{brief_quote}"'})
+        return json.dumps({"text": f'Part 1: "{QUOTE}"'})
+
+    fake.on("Execute subtask (tool results)", after_read, repeat_last=True)
     fake.on("Execute", execute, repeat_last=True).on("Review", review, repeat_last=True)
     monkeypatch.setattr(FakeLLM, "from_file", lambda *args, **kwargs: fake)
     result = desman(
-        "run", goal, "--file", file, "--plan", "llm", "--fake-llm", script(tmp_path, [])
+        "run",
+        goal,
+        "--file",
+        file,
+        "--file",
+        brief,
+        "--plan",
+        "llm",
+        "--fake-llm",
+        script(tmp_path, []),
     )
     assert result.exit_code == 0, (result.output, result.exception)
     assert combine_attempts == 2
@@ -379,6 +399,7 @@ def test_cli_prefetch_saves_only_the_long_page_and_audits_all_attempts(
         ]
         assert created.details["documents"][0]["path"] == "input/web-example.org.txt"
         assert list(workspace.files()) == ["input/web-example.org.txt"]
+        assert not task_files.listing(workspace_root_for(conn), task)
     assert len(site.requests) == 3
 
 
@@ -466,3 +487,71 @@ def test_a_part_names_the_headings_that_start_inside_it() -> None:
         start, end = sub.inputs["chars"]
         for heading in sub.inputs.get("headings", []):
             assert f"\n{heading}\n" in (text * 6)[start:end]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Part in the story he left.",
+        "Chapter discusses many things",
+        "Part IIIrd",
+        "Chapter 12th",
+        "-- СТОЙТЕ",
+        "- СТОЙТЕ",
+        "— СТОЙТЕ",
+        "СТОЙТЕ!",
+        "КТО ТАМ?",
+        "КАК БЫ…",
+    ],
+)
+def test_prose_and_shouted_dialogue_are_not_headings(line: str) -> None:
+    assert documents._headings(f"Beginning.\n\n{line}\n\nEnd.") == ([], [])
+
+
+def test_urls_keep_balanced_parentheses() -> None:
+    url = "https://en.wikipedia.org/wiki/Python_(programming_language)"
+    assert documents.urls(f"Read ({url}).") == [url]
+    assert documents.urls(f"Read {url}.") == [url]
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "Please summarize",
+        "Проанализируйте",
+        "阅读",
+        "要約",
+        "요약",
+        "पढ़ें",
+        "Résume",
+        "Analiza",
+        "Resuma",
+        "Übersetze",
+        "Streść",
+        "Özetle",
+        "Підсумуй",
+    ],
+)
+def test_reading_intent_recognizes_direct_requests(verb: str) -> None:
+    assert documents.reading_urls(f"{verb} {LONG_URL}") == [LONG_URL]
+
+
+def test_prefetch_ignores_urls_mentioned_without_reading_intent() -> None:
+    site = Site({LONG_URL: text_page(chapters())})
+    web = Web(fetcher=fetcher(site))
+    for goal in (f"Save this link: {LONG_URL}", f"Do not read {LONG_URL}", LONG_URL):
+        assert documents.prefetch(goal, web, allowed=True) == documents.Prefetched([], [])
+    assert not site.requests
+
+
+def test_saved_pages_are_omitted_from_task_outputs_and_handover(tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path, "source")
+    workspace.write("input/web-example.org.txt", "prefetched source")
+    workspace.write("web/example.org.txt", "fetched source")
+    workspace.write("answer.md", "answer")
+    assert [file.path for file in task_files.listing(tmp_path, "source")] == ["answer.md"]
+    assert [item["path"] for item in task_files.for_retelling(tmp_path, "source")] == ["answer.md"]
+    handover = task_files.handover(tmp_path, "source", "abcdef")
+    assert handover.paths() == ["from-abcdef/answer.md"]
+    assert task_files.hand_over(tmp_path, "next", handover) == handover.paths()
+    assert list(Workspace(tmp_path, "next").files()) == handover.paths()

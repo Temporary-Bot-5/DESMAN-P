@@ -64,3 +64,25 @@ def test_replies_quoted_without_the_authors_words_between_them() -> None:
     ]
     changed = "Парня ненадежного послали! Неповоротливый, как баба, ветра испугался."
     assert missing([changed], source) == [changed]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'A 12" board goes next to a 14" board.',
+        '{"description": "a lengthy JSON string", "other": 1}',
+        '`print( "a lengthy code string" )`',
+        '"a quote with\na line break"',
+        '"a quote with {braces}"',
+        '"a quote with a `backtick"',
+        'word"no opening boundary"',
+        '"no closing boundary"word',
+        '" leading whitespace"',
+    ],
+)
+def test_ascii_non_quotes_are_ignored(text: str) -> None:
+    assert quotes(text) == []
+
+
+def test_ascii_prose_quote_with_boundaries() -> None:
+    assert quotes('He said ("a real quoted phrase"), then left.') == ["a real quoted phrase"]
