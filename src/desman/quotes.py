@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable, Iterator
 
 _QUOTE = re.compile(r'«([^»]*)»|“([^”]*)”|„([^“]*)“|"([^"]*)"')
@@ -46,10 +47,22 @@ def _edge(char: str) -> bool:
     return char.isspace() or unicodedata.category(char).startswith("P")
 
 
+def _script(text: str) -> str | None:
+    """The writing system most of the letters of `text` belong to (LATIN, CYRILLIC, ...)."""
+    scripts = Counter(
+        unicodedata.name(char, "?").split(" ")[0] for char in text[:20_000] if char.isalpha()
+    )
+    return scripts.most_common(1)[0][0] if scripts else None
+
+
 def missing(result_quotes: Iterable[str], sources: Iterable[str]) -> list[str]:
-    normalized = [normalize(source) for source in sources]
+    texts = list(sources)
+    normalized = [normalize(source) for source in texts]
+    script = _script("".join(texts))
     absent = []
     for quote in result_quotes:
+        if script is not None and _script(quote) not in (script, None):
+            continue  # a title or term given in another language, not a quote from the text
         pieces = [normalize(piece) for piece in re.split(r"…|\.{3,}", quote)]
         substantial = [piece for piece in pieces if len(piece) >= 8]
         if not substantial or any(

@@ -30,8 +30,9 @@ PART: Final = (
     "Keep the notes compact: no more than about {limit} characters."
 )
 PART_CRITERIA: Final = (
-    "The notes cover what this part says on the goal; every quote appears word for "
-    "word in the part's text; nothing is stated that the part does not say."
+    "The notes are on this part and the goal; every quote appears word for word in the part's "
+    "text; nothing is stated that the part does not say. Notes are a summary: leaving out minor "
+    "details is not a fault, and the size limit is a maximum."
 )
 COMBINE: Final = (
     "Combine the notes on parts {a}–{b} of the document {path} (results of "
@@ -40,8 +41,9 @@ COMBINE: Final = (
     "never facts. Keep the notes compact: no more than about {limit} characters in all."
 )
 COMBINE_CRITERIA: Final = (
-    "Every fact and quote of the given notes that bears on the goal is kept, unchanged, with its "
-    "part; nothing is added that the notes do not say."
+    "The main facts and every quote of the given notes that bear on the goal are kept, unchanged, "
+    "with their part; nothing is added that the notes do not say. The size limit is a maximum: "
+    "shorter is fine, and a part whose notes say nothing on the goal may be left out."
 )
 GOAL_NOTE: Final = (
     "{path} ({n} characters) is read in parts by code: subtasks made before yours note what "

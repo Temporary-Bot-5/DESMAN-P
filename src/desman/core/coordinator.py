@@ -493,6 +493,9 @@ class Coordinator:
                     and self.decomposer is not None
                     and subtask.parent_id is None
                     and not subtask.runs_code
+                    # Parts of a long document and their combines are cut by code (ADR 0014):
+                    # splitting them again only muddles which part a note is from.
+                    and "document" not in subtask.inputs
                 )
                 strategy = crew.strategies(attempt, split=can_split, **avoid)
             tools = self._toolbox(subtask, journal, heartbeat, crew.access)

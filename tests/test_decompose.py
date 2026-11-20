@@ -283,3 +283,23 @@ def test_without_a_decomposer_nothing_is_split(store: Store, clock: FakeClock) -
     ).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
     assert "decompose" not in [s for _, s in strategies(store, task_id)]
+
+
+def test_a_part_of_a_long_document_is_never_split(store: Store, clock: FakeClock) -> None:
+    # Found live (L.2): a part's notes split into "quotes" and "facts" muddled which part a
+    # note came from, and its combine then asked for a part that did not exist.
+    llm = (
+        FakeLLM()
+        .on("Execute", '{"v": 1}', repeat_last=True)
+        .on("Review", *[REJECT] * 5, ACCEPT, repeat_last=True)
+        .on(SPLIT, split_reply("a", "b"))
+    )
+    spec = one_step()
+    part = spec.subtasks[0].model_copy(update={"inputs": {"document": "input/a.txt", "part": 1}})
+    task_id = store.create_task(
+        spec.model_copy(update={"subtasks": [part], "retry": RetryPolicy(max_attempts=6)})
+    )
+    assert coordinator(store, clock, llm).run(task_id).status is TaskStatus.DONE
+    assert len(store.list_subtasks(task_id)) == 1
+    assert "decompose" not in [s for _, s in strategies(store, task_id)]
+    assert not any(r.prompt.startswith(SPLIT) for r in llm.calls)

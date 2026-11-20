@@ -36,3 +36,11 @@ def test_normalizes_spelling_and_typography() -> None:
 )
 def test_matches_verbatim_fragments(quote: str, sources: list[str], found: bool) -> None:
     assert missing([quote], sources) == ([] if found else [quote])
+
+
+def test_a_title_in_another_language_is_not_a_quote_to_check() -> None:
+    source = ["Из Сибири. Отчего у вас в Сибири так холодно? -- Богу так угодно!"]
+    assert missing(["From Siberia, travel notes"], source) == []
+    assert missing(["Отчего у вас в Сибири так жарко"], source) == [
+        "Отчего у вас в Сибири так жарко"
+    ]
