@@ -146,26 +146,23 @@ TOPICS: Final = (
     Topic(
         "permissions",
         "what agents may do, their tools, the sandbox and the web",
-        "Agents act only through tools. Each tool requires permission for the role "
-        "(set by people in the source policy), and the person's switch for that tool must be on. The switches are network_access, shell_execution, "
-        "fs_outside_access and admin_rights; all are off until the person turns them on "
-        "(`desman permissions`, or the setup wizard). Only the person sets them; in the chat "
-        "a change is confirmed in a window.\n"
-        "Only the executor has tools now: reading, writing and listing files in its task's "
-        "own folder (always allowed; nothing outside it, no links); run_command "
-        "(shell_execution), which runs code only in a sandbox with no network, a cleared "
-        "environment and limits of time and memory, and is offered only when the "
-        "sandbox is available. Linux uses bubblewrap. Elsewhere run Docker Desktop in "
-        "Linux-container mode and use `desman sandbox setup --yes`. "
-        "web_search and web_fetch (network_access): reading public pages "
-        "only, results marked untrusted; web_search asks Wikipedia, Stack Overflow, arXiv and "
-        "GitHub, and the whole web only through the person's SearXNG server or a Tavily "
-        "key). If missing whole-web setup stops work, the subtask waits without spending a retry: "
-        "use desman search setup (local SearXNG) or a Tavily key in desman config, then retry. suggest_model "
-        "only records a suggestion for the person; read_node, which reads DESMAN's knowledge "
-        "tree (always allowed). Every tool call is recorded, and a refused "
-        "one too, with the reason. The planner, the reviewer and the interlocutor have no "
-        "tools. admin_rights is for test machines: while it is on, every run warns.",
+        "Agents act through tools allowed by the role policy and the person's switches. "
+        "network_access, shell_execution, fs_outside_access and admin_rights default to off. "
+        "Set them with `desman permissions` or the setup wizard. Chat changes require confirmation.\n"
+        "Only the executor has tools. It can always read, write and list files in its task "
+        "folder, without following links. run_command needs shell_execution and an available "
+        "sandbox with no network, a cleared environment and time and memory limits. Linux uses "
+        "bubblewrap. Windows and macOS prefer Docker Desktop in Linux-container mode. "
+        "`desman sandbox setup --yes` prepares the sandbox. Without Docker, WebAssembly runs "
+        "Python scripts, snippets and pytest, without packages requiring C extensions. "
+        "web_search and web_fetch (network_access) read public pages and mark results untrusted. "
+        "Search covers Wikipedia, Stack Overflow, arXiv and GitHub. Whole-web search needs local "
+        "SearXNG (`desman search setup`) or a Tavily key in `desman config`. If missing search setup "
+        "blocks work, the subtask waits without spending a retry. Set it up and retry. "
+        "suggest_model records a suggestion for the person. read_node reads the knowledge tree "
+        "and is always allowed. Every tool call and refusal is recorded, including the reason "
+        "for refusal. The planner, reviewer and interlocutor have no tools. admin_rights is for "
+        "test machines and warns on every run.",
     ),
     Topic(
         "search",

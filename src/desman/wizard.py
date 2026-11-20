@@ -577,7 +577,7 @@ def _permissions(current: Permissions) -> Permissions:
         from desman.sandbox_cli import offer_setup
 
         box = Sandbox()
-        if box.backend == "docker":
+        if box.backend in ("docker", "wasi"):
             try:
                 offer_setup(box)
             except click.ClickException as exc:

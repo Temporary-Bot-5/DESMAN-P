@@ -1,7 +1,8 @@
 """Sandbox for generated code (ROADMAP 3.3; B5, second part).
 
 The old prototype ran generated code with the network and the whole file system in reach. Here
-a command runs inside bubblewrap (`bwrap`) on Linux, or Docker elsewhere (ADR 0012).
+a command runs inside bubblewrap (`bwrap`) on Linux, or Docker or WebAssembly on Windows
+and macOS (ADRs 0012 and 0013).
 
 Bubblewrap provides:
 
@@ -44,6 +45,7 @@ import contextlib
 import csv
 import dataclasses
 import datetime as dt
+import hashlib
 import importlib.metadata
 import importlib.util
 import io
@@ -53,17 +55,26 @@ import re
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import IO, Final
 
+import httpx
+from pydantic import BaseModel
+
+from desman.core.db import default_db_path
+
+_WINDOWS_PROCESS_GROUP: Final = 0x00000200  # CREATE_NEW_PROCESS_GROUP
 DOCKER_IMAGE: Final = (
     "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
 )
@@ -89,6 +100,7 @@ _DOCKER_ENV: Final = {
 _DOCKER_EXEC: Final = f"""\
 import os
 import sys
+import sysconfig
 
 command = sys.argv[1:]
 try:
@@ -178,16 +190,21 @@ class Sandbox:
         docker: str | None = None,
         platform: str | None = None,
         docker_runner: DockerRunner | None = None,
+        wasi_dir: Path | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.limits = limits if limits is not None else Limits()
         self.bwrap = bwrap if bwrap is not None else shutil.which("bwrap")
         self.prlimit = prlimit if prlimit is not None else _find_prlimit()
         self.platform = sys.platform if platform is None else platform
-        self.backend = "bwrap" if self.platform.startswith("linux") else "docker"
-        self.docker = (
-            docker if docker is not None else (find_docker() if self.backend == "docker" else None)
+        self.docker = docker
+        if self.docker is None and not self.platform.startswith("linux"):
+            self.docker = find_docker()
+        self.wasi_dir = (
+            wasi_dir if wasi_dir is not None else default_db_path().parent / "wasi" / _WASI_PIN
         )
+        self._backend: str | None = None
+        self._docker_issue: str | None = None
         self._docker_runner = docker_runner if docker_runner is not None else _docker_run
         self.image_present: bool | None = None
         self._problem: str | None = None
@@ -195,13 +212,46 @@ class Sandbox:
         self._monotonic = monotonic
         self._retry_at: float | None = None
 
+    @property
+    def backend(self) -> str:
+        if self._backend is None:
+            if self.platform.startswith("linux"):
+                self._backend = "bwrap"
+            else:
+                self._docker_issue = self.docker_problem()
+                self._backend = (
+                    "wasi"
+                    if self._docker_issue is not None and self.platform in ("win32", "darwin")
+                    else "docker"
+                )
+        return self._backend
+
+    @property
+    def wasi_present(self) -> bool:
+        return _wasi_files(self.wasi_dir) and (self.wasi_dir / "ok").is_file()
+
+    def _probe_wasi(self) -> str | None:
+        if self.wasi_present and wasi_runtime():
+            return None
+        return (
+            f"{self._docker_issue} "
+            "Run `desman docker install` or set up WebAssembly with `desman sandbox setup`."
+        )
+
     def unavailable(self) -> str | None:
         """Why no command can run here, or None if the sandbox works."""
         if self._retry_at is not None and self._monotonic() >= self._retry_at:
             return self.reprobe()
         if not self._checked:
             try:
-                self._problem = self._probe() if self.backend == "bwrap" else self._probe_docker()
+                if self.backend == "bwrap":
+                    self._problem = self._probe()
+                elif self.backend == "wasi":
+                    self._problem = self._probe_wasi()
+                    if self.docker or self._problem is not None:
+                        self._retry_at = self._monotonic() + 60.0
+                else:
+                    self._problem = self._probe_docker()
             except _DockerDaemonUnavailable as exc:
                 self._problem = str(exc)
                 self._retry_at = self._monotonic() + 60.0
@@ -211,6 +261,7 @@ class Sandbox:
     def reprobe(self) -> str | None:
         """Refresh availability after the operator changes the sandbox setup."""
         self._checked = False
+        self._backend = None
         self.image_present = None
         self._retry_at = None
         return self.unavailable()
@@ -242,6 +293,8 @@ class Sandbox:
                 )
             finally:
                 self._remove_docker(name)
+        if self.backend == "wasi":
+            return _execute_wasi(command, workdir, stdin, limits, self.wasi_dir)
         return _execute(self._argv(command, workdir), stdin, limits)
 
     def _argv(self, command: Sequence[str], workdir: Path) -> list[str]:
@@ -357,6 +410,8 @@ class Sandbox:
             raise SandboxUnavailable(str(exc)) from exc
 
     def docker_problem(self) -> str | None:
+        if self._backend is not None:
+            return self._docker_issue
         try:
             return self._docker_problem()
         except _DockerDaemonUnavailable as exc:
@@ -451,9 +506,8 @@ class Sandbox:
         return image.returncode == 0
 
     def _probe_docker(self) -> str | None:
-        problem = self._docker_problem()
-        if problem is not None:
-            return problem
+        if self._docker_issue is not None:
+            return self._docker_issue
         try:
             self.image_present = self.docker_image_present()
             if not self.image_present:
@@ -684,8 +738,8 @@ def _execute_docker(
             raise SandboxUnavailable(f"Docker cannot be started: {exc}") from exc
         assert process.stdout is not None and process.stderr is not None
         readers = [
-            threading.Thread(target=_read_docker, args=(process.stdout, stdout)),
-            threading.Thread(target=_read_docker, args=(process.stderr, stderr, diagnostic)),
+            threading.Thread(target=_read_output, args=(process.stdout, stdout)),
+            threading.Thread(target=_read_output, args=(process.stderr, stderr, diagnostic)),
         ]
         complete = timed_out = False
         try:
@@ -729,7 +783,7 @@ def _execute_docker(
     )
 
 
-def _read_docker(stream: IO[bytes], *buffers: _Head) -> None:
+def _read_output(stream: IO[bytes], *buffers: _Head) -> None:
     while chunk := stream.read(_READ_CHUNK):
         for buffer in buffers:
             buffer.add(chunk)
@@ -821,3 +875,311 @@ class _Tail(_Head):
             self.cut = True
             text = text[-self.limit :]
         return text
+
+
+# ADR 0013. Change the install ID whenever the runtime or any wheel changes.
+_WASI_PIN = "python-3.15.2-sdk33-pytest-9.2.0"
+_WASI_ARCHIVES = (
+    (
+        "https://github.com/brettcannon/cpython-wasi-build/releases/download/v3.15.2/python-3.15.2-wasi_sdk-33.zip",
+        "b8a63559c56760bbdc310dedb74fd69d10bcbafae26b705bea0ad353ad256888",
+        "py",
+    ),
+    (
+        "https://files.pythonhosted.org/packages/51/39/1f5d8c8877a0fa327db959c19341d4be61660de1ab6b7391f9eb805bcd67/pytest-9.2.0-py3-none-any.whl",
+        "07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588",
+        "site",
+    ),
+    (
+        "https://files.pythonhosted.org/packages/40/9e/2b38731e0fc536806f16490e1a12d7f0dc2a1235aa8cc07bcc75416a7daa/pluggy-1.7.0-py3-none-any.whl",
+        "7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec",
+        "site",
+    ),
+    (
+        "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl",
+        "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7",
+        "site",
+    ),
+    (
+        "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+        "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+        "site",
+    ),
+    (
+        "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl",
+        "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+        "site",
+    ),
+)
+
+
+def wasi_runtime() -> bool:
+    try:
+        import wasmtime  # noqa: F401
+    except (ImportError, OSError, RuntimeError):
+        return False
+    return True
+
+
+def _wasi_files(root: Path) -> bool:
+    return (
+        (root / "py/python.wasm").is_file()
+        and (root / "py/lib").is_dir()
+        and all(
+            (root / "site" / name).is_dir()
+            for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "pygments")
+        )
+    )
+
+
+_WASI_DOWNLOAD_LIMIT: Final = 64 * 2**20
+
+
+def _download_wasi(url: str) -> bytes:
+    data = bytearray()
+    with httpx.stream(
+        "GET", url, headers={"Accept-Encoding": "identity"}, follow_redirects=True, timeout=60.0
+    ) as response:
+        response.raise_for_status()
+        for chunk in response.iter_raw(chunk_size=64 * 1024):
+            if len(data) + len(chunk) > _WASI_DOWNLOAD_LIMIT:
+                raise SandboxUnavailable("The WebAssembly sandbox download exceeds the size limit.")
+            data.extend(chunk)
+    return bytes(data)
+
+
+def _unpack_wasi(data: bytes, destination: Path) -> None:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for entry in archive.infolist():
+            name = entry.orig_filename
+            parts = name.removesuffix("/").split("/")
+            if (
+                "\\" in name
+                or "\x00" in name
+                or any(
+                    part in ("", ".", "..")
+                    or ":" in part
+                    or part.endswith((" ", "."))
+                    or PureWindowsPath(part).is_reserved()
+                    for part in parts
+                )
+                or stat.S_ISLNK(entry.external_attr >> 16)
+            ):
+                raise SandboxUnavailable(f"Unsafe sandbox archive entry: {name!r}")
+            target = destination.joinpath(*parts)
+            if entry.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(entry) as source, target.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+
+
+def install_wasi(root: Path, *, download: Callable[[str], bytes] | None = None) -> bool:
+    """Verify each download and publish the entire installation in a single rename."""
+    if _wasi_files(root) and (root / "ok").is_file():
+        return False
+    fetch = _download_wasi if download is None else download
+    try:
+        root.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".setup-", dir=root.parent) as scratch:
+            stage = Path(scratch) / "install"
+            for url, digest, folder in _WASI_ARCHIVES:
+                data = fetch(url)
+                if hashlib.sha256(data).hexdigest() != digest:
+                    raise SandboxUnavailable(f"SHA-256 mismatch for {url.rsplit('/', 1)[-1]}")
+                _unpack_wasi(data, stage / folder)
+            if not _wasi_files(stage):
+                raise SandboxUnavailable("The WebAssembly sandbox download is incomplete.")
+            (stage / "ok").touch()
+            try:
+                stage.rename(root)
+            except OSError:
+                if _wasi_files(root) and (root / "ok").is_file():
+                    return False  # another setup finished first
+                raise
+    except (OSError, httpx.HTTPError, zipfile.BadZipFile) as exc:
+        raise SandboxUnavailable(str(exc)) from exc
+    return True
+
+
+_WASI_PYTEST_ARGS = (
+    "-p",
+    "no:cacheprovider",
+    "--capture=sys",
+    "-p",
+    "no:faulthandler",
+    "-p",
+    "no:logging",
+)
+_WASI_UNSUPPORTED = (
+    "Only python and python -m pytest run in this sandbox (WebAssembly); "
+    "use python FILE.py, python -c CODE, or python -m pytest. "
+    "Packages with C code are not available."
+)
+
+
+def _wasi_argv(command: Sequence[str]) -> list[str] | None:
+    if len(command) < 2 or command[0] not in ("python", "python3"):
+        return None
+    start = f"import os; os.chdir({MOUNT_POINT!r}); "
+    match list(command[1:]):
+        case ["-m", "pytest", *args]:
+            source = (
+                f"{start}import sys, pytest; sys.exit(pytest.main({[*args, *_WASI_PYTEST_ARGS]!r}))"
+            )
+            return ["python", "-c", source]
+        case ["-c", code, *args]:
+            # Compile the original source on its own, preserving future imports and line numbers.
+            return ["python", "-c", f"{start}exec(compile({code!r}, '<string>', 'exec'))", *args]
+        case [file, *args] if file.endswith(".py") and not file.startswith("-"):
+            source = (
+                f"{start}import runpy, sys; "
+                f"sys.argv = {[file, *args]!r}; "
+                "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0]))); "
+                "runpy.run_path(sys.argv[0], run_name='__main__')"
+            )
+            return ["python", "-c", source]
+        case _:
+            return None
+
+
+class _WasiSpec(BaseModel):
+    argv: list[str]
+    workdir: Path
+    root: Path
+    timeout: float
+    memory_bytes: int
+    stdin: Path
+    stdout: Path
+    stderr: Path
+    result: Path
+
+
+class _WasiResult(BaseModel):
+    exit_code: int | None = None
+    trap: str = ""
+    error: str | None = None
+
+
+def _wasi_runner_command(spec: Path) -> list[str]:
+    source = Path(__file__).resolve().parents[2]
+    installed_paths = {Path(sysconfig.get_path(name)).resolve() for name in ("purelib", "platlib")}
+    runner = "desman.core.wasi_runner"
+    if source in installed_paths:
+        return [sys.executable, "-I", "-m", runner, str(spec)]
+    # Isolated mode ignores PYTHONPATH. Explicitly load this checkout in source/editable runs.
+    bootstrap = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(sys.argv.pop(1), run_name='__main__')"
+    return [sys.executable, "-I", "-c", bootstrap, str(source), runner, str(spec)]
+
+
+def _wasi_output_over_limit(path: Path, chars: int, limits: Limits) -> bool:
+    # Leave headroom for ordinary output truncation before terminating a writer.
+    cap = min(limits.file_bytes, 4 * chars + 64 * 1024)
+    return path.stat().st_size > cap
+
+
+def _wait_wasi(
+    process: subprocess.Popen[bytes], spec: _WasiSpec, limits: Limits
+) -> tuple[bool, bool, bool]:
+    deadline = time.monotonic() + limits.timeout + 2.0
+    while True:
+        left = max(0.0, deadline - time.monotonic())
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=min(left, 0.2))
+        stdout_cut = _wasi_output_over_limit(spec.stdout, limits.stdout_chars, limits)
+        stderr_cut = _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits)
+        timed_out = process.returncode is None and time.monotonic() >= deadline
+        if process.returncode is not None or timed_out or stdout_cut or stderr_cut:
+            return timed_out, stdout_cut, stderr_cut
+
+
+def _execute_wasi(
+    command: Sequence[str], workdir: Path, stdin: str, limits: Limits, root: Path
+) -> Outcome:
+    argv = _wasi_argv(command)
+    if argv is None:
+        return Outcome(2, "", _WASI_UNSUPPORTED)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="desman-wasi-") as directory:
+            scratch = Path(directory)
+            spec = _WasiSpec(
+                argv=argv,
+                workdir=workdir.resolve(),
+                root=root.resolve(),
+                timeout=limits.timeout,
+                memory_bytes=limits.memory_bytes,
+                stdin=scratch / "stdin",
+                stdout=scratch / "stdout",
+                stderr=scratch / "stderr",
+                result=scratch / "result.json",
+            )
+            spec.stdin.write_bytes(stdin.encode("utf-8"))
+            spec.stdout.touch()
+            spec.stderr.touch()
+            config = scratch / "spec.json"
+            config.write_text(spec.model_dump_json(), encoding="utf-8")
+            return _run_wasi_child(config, spec, limits)
+    except (OSError, ValueError) as exc:
+        raise SandboxUnavailable(f"Cannot start the WebAssembly sandbox: {exc}") from exc
+
+
+def _run_wasi_child(config: Path, spec: _WasiSpec, limits: Limits) -> Outcome:
+    windows = sys.platform == "win32"
+    env = (
+        {
+            name: os.environ[name]
+            for name in ("SYSTEMROOT", "TEMP", "TMP", "PATH")
+            if name in os.environ
+        }
+        if windows
+        else {}
+    )
+    # This child runs DESMAN's trusted runner. Generated code executes only inside Wasmtime.
+    with subprocess.Popen(
+        _wasi_runner_command(config),
+        cwd=config.parent,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=not windows,
+        creationflags=_WINDOWS_PROCESS_GROUP if windows else 0,
+    ) as process:
+        try:
+            timed_out, stdout_cut, stderr_cut = _wait_wasi(process, spec, limits)
+        finally:
+            if process.returncode is None:
+                _kill(process)
+                process.wait()
+        if timed_out:
+            result = _WasiResult()
+        elif stdout_cut or stderr_cut:
+            result = _WasiResult(exit_code=1, trap="WebAssembly sandbox output limit exceeded.\n")
+        elif process.returncode != 0:
+            raise SandboxUnavailable(
+                f"The WebAssembly runner exited with code {process.returncode}."
+            )
+        else:
+            result = _WasiResult.model_validate_json(spec.result.read_bytes())
+            if result.error is not None:
+                raise SandboxUnavailable(f"Cannot start the WebAssembly sandbox: {result.error}")
+
+    stdout, stderr = _Head(limits.stdout_chars), _Tail(limits.stderr_chars)
+    with spec.stdout.open("rb") as stream:
+        stdout.add(stream.read(4 * limits.stdout_chars + 1))
+    with spec.stderr.open("rb") as stream:
+        size = stream.seek(0, os.SEEK_END)
+        stream.seek(max(0, size - 4 * limits.stderr_chars - 1))
+        stderr.add(stream.read())
+    if result.trap:
+        stderr.add(result.trap.encode("utf-8"))
+    return Outcome(
+        result.exit_code,
+        stdout.text(),
+        stderr.text(),
+        result.exit_code is None,
+        stdout_cut or stdout.cut,
+        stderr_cut or stderr.cut,
+    )

@@ -30,6 +30,7 @@
   запуск коду (`shell_execution`) можна ввімкнути в налаштуваннях DESMAN. Без пісочниці DESMAN
   може написати код, а для його запуску попросить допомоги.
   Щоб установити Docker Desktop, скористайтеся розділом Docker майстра налаштування або виконайте `desman docker install --yes`.
+  Якщо Docker недоступний у Windows або macOS, виконайте `desman sandbox setup --yes`, щоб налаштувати пісочницю WebAssembly для Python і pytest.
 
 ## 1. Встановлення
 

@@ -471,8 +471,9 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         name="run_command",
         description="Run a program in an isolated sandbox: the task's workspace is the "
         "working directory (/workspace, writable; files written there stay for later subtasks), "
-        "the system's programs (python3, sh, ...) are read-only, there is no network and no "
-        "other files. Time, memory, file size and processes are limited. Returns {exit_code, "
+        "with no network or access to host files outside the sandbox's mounts. Time and memory "
+        "are limited. The WebAssembly backend runs only python FILE.py, python -c CODE, and "
+        "python -m pytest, without packages requiring C extensions. Returns {exit_code, "
         "stdout, stderr}; timed_out: true when it was killed (exit_code null), stdout_cut / "
         "stderr_cut when output was cut (the start of stdout and the end of stderr are kept). "
         "An exit code of 128+N means killed by signal N. python3 -m pytest is available; "

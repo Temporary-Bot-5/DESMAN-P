@@ -129,10 +129,12 @@ def test_docker_argv(platform: str, tmp_path: Path) -> None:
     ]
 
 
-def test_backend_selection_and_docker_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_backend_selection_and_docker_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(shutil, "which", lambda _: None)
     assert Sandbox(platform="linux", docker="docker-test").backend == "bwrap"
-    assert Sandbox(platform="darwin").unavailable() == "Docker is not installed or is not on PATH."
+    box = Sandbox(platform="darwin", docker="", wasi_dir=tmp_path)
+    assert box.backend == "wasi"
+    assert (box.unavailable() or "").startswith("Docker is not installed or is not on PATH.")
 
 
 @pytest.mark.parametrize(
@@ -435,8 +437,8 @@ def test_run_shares_sandbox_probe(store: Store) -> None:
 @pytest.mark.parametrize(
     ("failure", "expected", "setup_hint", "install_link"),
     [
-        ("absent", "Docker is not installed", False, True),
-        ("windows", "switch Docker Desktop to Linux containers", False, False),
+        ("absent", "Docker is not installed", True, True),
+        ("windows", "switch Docker Desktop to Linux containers", True, True),
         ("image", "The sandbox image is missing", True, False),
     ],
 )
