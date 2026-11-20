@@ -252,12 +252,12 @@ def test_a_timeout_asked_for_is_never_longer_than_the_limit(ws: Workspace) -> No
 
 def test_without_bwrap_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("desman.core.sandbox.shutil.which", lambda name: None)
-    expected = (
-        "Docker is not installed or is not on PATH."  # ADR 0012: Docker where bwrap is not
-        if not sys.platform.startswith("linux")
-        else "bubblewrap (bwrap) is not installed"
-    )
-    assert Sandbox().unavailable() == expected
+    sandbox = Sandbox(docker="")
+    reason = sandbox.unavailable() or ""
+    if sys.platform.startswith("linux"):
+        assert reason == "bubblewrap (bwrap) is not installed"
+    else:
+        assert "Docker is not installed" in reason
 
 
 # ── The run_command tool ────────────────────────────────────────────────────

@@ -13,8 +13,9 @@ from click.testing import CliRunner
 from conftest import FakeClock
 from desman import docker_cli, providers, sandbox_cli, searxng, ui, wizard
 from desman.cli import cli
-from desman.config import ConfigManager, open_config
+from desman.config import Config, ConfigManager, open_config
 from desman.core import sandbox
+from desman.core.sandbox import Sandbox
 from desman.docker_cli import Plan, Status, plan
 from test_wizard import KEEP_PERMISSIONS, KEEP_PERSONAL
 
@@ -300,13 +301,24 @@ def test_docker_step_in_configuration(
 
     offers: list[str] = []
 
-    def setup(manager: ConfigManager, *, save_url: bool) -> str:
+    def setup(manager: ConfigManager, *, save_url: bool, staged: Config, force_native: bool) -> str:
+        assert not force_native
         assert not save_url
         assert not manager.load().settings.get("SEARXNG_URL")
         offers.append("search")
+        staged.settings["SEARXNG_URL"] = "http://127.0.0.1:8888"
         return "http://127.0.0.1:8888"
 
+    def probe(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        assert args[1] == "info" and machine.ready
+        return subprocess.CompletedProcess(args, 0, "linux 2020-01-02T12:00:00Z", "")
+
     monkeypatch.setattr(wizard, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(
+        sandbox,
+        "Sandbox",
+        lambda: Sandbox(platform="darwin", docker="docker", docker_runner=probe),
+    )
     monkeypatch.setattr(sandbox_cli, "offer_setup", lambda _: offers.append("sandbox"))
     monkeypatch.setattr(searxng, "setup", setup)
     answers.extend([*KEEP_PERMISSIONS, *KEEP_PERSONAL, ""])

@@ -44,6 +44,7 @@ from desman.llm.openai_compat import key_id
 from desman.net import jobs
 from desman.net.node import capabilities
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
+from desman.searxng import ensure_native, uses_docker
 
 PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3, "chat_turns": 4}
 
@@ -552,7 +553,17 @@ def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
     engines: list[SearchEngine] = []
     for p in providers.search_engines(config):
         if p.id == "searxng":
-            engines.append(SearXNG(config.settings["SEARXNG_URL"], http))
+            url = config.settings["SEARXNG_URL"]
+            if uses_docker(config):
+                engines.append(SearXNG(url, http))
+            else:
+                engines.append(
+                    SearXNG(
+                        url,
+                        http,
+                        before_search=functools.partial(ensure_native, url, clock=store.clock),
+                    )
+                )
         elif p.id == "tavily" and p.key_env is not None:
             engines.append(Tavily([k.value for k in config.keys(p.key_env)], http))
     return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))

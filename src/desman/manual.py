@@ -148,37 +148,35 @@ TOPICS: Final = (
     Topic(
         "permissions",
         "what agents may do, their tools, the sandbox and the web",
-        "Agents act only through tools. Each tool requires permission for the role "
-        "(set by people in the source policy), and the person's switch for that tool must be on. The switches are network_access, shell_execution, "
-        "fs_outside_access and admin_rights; all are off until the person turns them on "
-        "(`desman permissions`, or the setup wizard). Only the person sets them; in the chat "
-        "a change is confirmed in a window.\n"
-        "Only the executor has tools now: reading, writing and listing files in its task's "
-        "own folder (always allowed; nothing outside it, no links); run_command "
-        "(shell_execution), which runs code only in a sandbox with no network, a cleared "
-        "environment and limits of time and memory, and is offered only when the "
-        "sandbox is available. Linux uses bubblewrap. Elsewhere run Docker Desktop in "
-        "Linux-container mode and use `desman sandbox setup --yes`. "
-        "web_search and web_fetch (network_access): reading public pages "
-        "only, results marked untrusted; web_search asks Wikipedia, Stack Overflow, arXiv and "
-        "GitHub, and the whole web only through the person's SearXNG server or a Tavily "
-        "key). If missing whole-web setup stops work, the subtask waits without spending a retry: "
-        "use desman search setup (local SearXNG) or a Tavily key in desman config, then retry. suggest_model "
-        "only records a suggestion for the person; read_node, which reads DESMAN's knowledge "
-        "tree (always allowed). Every tool call is recorded, and a refused "
-        "one too, with the reason. The planner, the reviewer and the interlocutor have no "
-        "tools. admin_rights is for test machines: while it is on, every run warns.",
+        "Agents act through tools allowed by the role policy and the person's switches. "
+        "network_access, shell_execution, fs_outside_access and admin_rights default to off. "
+        "Set them with `desman permissions` or the setup wizard. Chat changes require confirmation.\n"
+        "Only the executor has tools. It can always read, write and list files in its task "
+        "folder, without following links. run_command needs shell_execution and an available "
+        "sandbox with no network, a cleared environment and time and memory limits. Linux uses "
+        "bubblewrap. Windows and macOS prefer Docker Desktop in Linux-container mode. "
+        "`desman sandbox setup --yes` prepares the sandbox. Without Docker, WebAssembly runs "
+        "Python scripts, snippets, pytest and unittest, without packages requiring C extensions. "
+        "web_search and web_fetch (network_access) read public pages and mark results untrusted. "
+        "Search covers Wikipedia, Stack Overflow, arXiv and GitHub. Whole-web search needs local "
+        "SearXNG (`desman search setup`) or a Tavily key in `desman config`. If missing search setup "
+        "blocks work, the subtask waits without spending a retry. Set it up and retry. "
+        "suggest_model records a suggestion for the person. read_node reads the knowledge tree "
+        "and is always allowed. Every tool call and refusal is recorded, including the reason "
+        "for refusal. The planner, reviewer and interlocutor have no tools. admin_rights is for "
+        "test machines and warns on every run.",
     ),
     Topic(
         "search",
         "set up and manage whole-web search",
-        "`desman search setup` previews installing local SearXNG through Docker (about "
-        "100 MB). `desman docker install` previews installation or startup; --yes runs the plan. "
-        "The wizard offers Docker and, once ready, the sandbox image and SearXNG where applicable. On Linux it can offer bubblewrap alone. "
-        "The container is bound to 127.0.0.1, starting at a free port from 8888; --port chooses "
-        "one; --yes confirms setup. The wizard asks and preserves choices if setup fails. The URL is saved only after a JSON search answers. "
-        "`desman search status` shows the container (unknown without Docker), URL and search health (--json for scripts); `desman search start` and `desman search stop` control "
-        "it; `desman search remove` previews removal; --yes confirms it, keeping settings. "
+        "`desman search setup` previews local SearXNG. Start Docker if it is installed. "
+        "Without Docker, or with --native (also an option in the wizard), setup uses a Python virtual environment. "
+        "DESMAN starts the Python service when needed. "
+        "SearXNG binds to 127.0.0.1 on a free port from 8888; --port chooses one and --yes confirms setup. "
+        "The URL is saved after a JSON search answers. `desman search status` shows the installation "
+        "type, commit, URL and health (--json for scripts). `desman search start` and `desman search stop` "
+        "control local services. `desman search remove` previews removing both local installs; --yes confirms it. "
+        "Docker settings are kept. "
         "`desman keys list` shows its URL and `desman keys check PROVIDER` with searxng checks searches. "
         "Tavily with a key is the alternative; an existing SearXNG URL can be set in the wizard.",
     ),

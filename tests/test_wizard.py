@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner, Result
 
 from desman import providers
@@ -144,7 +145,10 @@ def test_declining_privacy_adds_no_key() -> None:
     assert "No cloud key yet" in result.output
 
 
-def test_permissions_and_the_admin_warning() -> None:
+def test_permissions_and_the_admin_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Shell on offers the sandbox's setup: on Windows CI (no Docker) that is a WebAssembly
+    # download question, which this test does not answer.
+    monkeypatch.setattr("desman.sandbox_cli.prepare_setup", lambda box: None)
     result = wizard(
         "2", DONE, "y", "", "", "y", *KEEP_PERSONAL
     )  # Russian; admin_rights and shell on
