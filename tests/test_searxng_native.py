@@ -10,6 +10,9 @@ import os
 import runpy
 import subprocess
 import tarfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +25,7 @@ from conftest import FakeClock
 from desman import _searxng_service, cli, manual, runs, searxng
 from desman import searxng_native as native
 from desman.config import ConfigManager
-from desman.core import db, search
+from desman.core import db, filelock, search
 from desman.core.store import Store
 
 URL = "http://127.0.0.1:8888"
@@ -145,6 +148,17 @@ def test_setup_preserves_secret_and_reinstalls_pin(
     assert native.commit(folder) == native.COMMIT
     assert json.loads(settings.read_text(encoding="utf-8")) == data
     monkeypatch.setenv("SECRET_FOR_TEST", "should not be passed")
+    for key in (
+        "HTTP_PROXY",
+        "https_proxy",
+        "no_proxy",
+        "ALL_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+    ):
+        monkeypatch.setenv(key, "test-value")
+        assert native.environment(folder)[key] == "test-value"
     env = native.environment(folder)
     assert "SECRET_FOR_TEST" not in env
     assert env["SEARXNG_SETTINGS_PATH"] == str(settings)
@@ -321,6 +335,7 @@ def test_native_cli_status_start_stop_remove(
     monkeypatch.setattr(native, "start", lambda path: calls.append("start"))
     monkeypatch.setattr(native, "stop", lambda path: calls.append("stop"))
     monkeypatch.setattr(native, "running", lambda path: calls[-1:] == ["start"])
+    monkeypatch.setattr(searxng, "find_docker", lambda: None)
     monkeypatch.setattr(searxng, "available", lambda: pytest.fail("Docker is not needed"))
     monkeypatch.setattr(search, "check_searxng", lambda url, http: None)
     runner = CliRunner()
@@ -374,3 +389,129 @@ def test_configured_docker_url_takes_precedence(
         assert [engine.name for engine in runs.web(manager.load(), Store(conn), http).engines] == [
             "searxng"
         ]
+
+
+def test_extract_requires_safe_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delattr(tarfile, "data_filter", raising=False)
+    target = tmp_path / "src"
+    with pytest.raises(click.ClickException, match="Python 3.11.4"):
+        native.extract(tmp_path / "archive", target)
+    assert not target.exists()
+
+
+def test_concurrent_searches_wait_for_start_and_restart_after_stop(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    configure(folder)
+    starting = threading.Event()
+    contended = threading.Event()
+    ready = threading.Event()
+    starts: list[Path] = []
+    lock = filelock.lock
+
+    def observed_lock(fd: int, *, blocking: bool) -> None:
+        try:
+            lock(fd, blocking=blocking)
+        except BlockingIOError:
+            contended.set()
+            raise
+
+    def start(path: Path) -> None:
+        starts.append(path)
+        ready.set()
+        starting.set()
+        assert contended.wait(5)
+
+    monkeypatch.setattr(filelock, "lock", observed_lock)
+    monkeypatch.setattr(native, "start", start)
+    monkeypatch.setattr(native, "running", lambda path: ready.is_set())
+    monkeypatch.setattr(native, "listening", lambda address: ready.is_set())
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(searxng.ensure_native, URL, clock=clock)
+        assert starting.wait(5)
+        second = workers.submit(searxng.ensure_native, URL, clock=clock)
+        assert first.result(timeout=5)
+        assert second.result(timeout=5)
+    assert starts == [folder]
+    ready.clear()
+    assert searxng.ensure_native(URL, clock=clock)
+    assert starts == [folder, folder]
+
+
+@pytest.mark.parametrize("unexpected", [False, True])
+def test_watcher_exits_if_activation_becomes_unreadable(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, unexpected: bool
+) -> None:
+    configure(folder)
+    reads = []
+
+    def read(path: Path, *, encoding: str) -> str:
+        reads.append(path)
+        if len(reads) == 1:
+            return "token"
+        if unexpected:
+            raise ValueError("bad activation")
+        raise PermissionError("pending delete")
+
+    class ExitService(Exception):
+        pass
+
+    def exit_service(code: int) -> None:
+        assert code == 0
+        raise ExitService
+
+    class InlineThread:
+        def __init__(self, *, target: Any, daemon: bool) -> None:
+            self.target = target
+
+        def start(self) -> None:
+            self.target()
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(threading, "Thread", InlineThread)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(os, "_exit", exit_service)
+    with pytest.raises(ExitService):
+        _searxng_service.main(folder, "token")
+    assert reads == [folder / "activation"] * (2 if unexpected else 4)
+
+
+def test_docker_takeover_stops_native_and_remove_cleans_both(
+    folder: Path, manager: ConfigManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure(folder)
+    events: list[str] = []
+    monkeypatch.setattr(searxng, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "available", lambda **kwargs: None)
+    monkeypatch.setattr(native, "stop", lambda path, **kw: events.append("native stop"))
+
+    def setup_docker(*args: Any) -> str:
+        events.append("docker setup")
+        return URL
+
+    monkeypatch.setattr(searxng, "_setup_docker", setup_docker)
+    monkeypatch.setattr(searxng, "inspect", lambda: {"State": {"Status": "running"}})
+    monkeypatch.setattr(searxng, "docker", lambda args: events.append(args[0]))
+    searxng.setup(manager)
+    assert searxng.uses_docker(manager.load())
+    searxng.operate(manager, "stop")
+    assert manager.load().settings["SEARXNG_URL"] == URL
+    searxng.operate(manager, "remove")
+    assert events == ["native stop", "docker setup", "native stop", "stop", "native stop", "rm"]
+    assert not folder.exists()
+    assert not manager.load().settings
+
+
+def test_status_with_native_install_and_external_url(
+    folder: Path, manager: ConfigManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure(folder)
+    with manager.edit() as config:
+        config.settings["SEARXNG_URL"] = "https://search.example.com"
+    monkeypatch.setattr(searxng, "find_docker", lambda: None)
+    monkeypatch.setattr(search, "check_searxng", lambda url, http: None)
+    result = searxng.status(manager, display=False)
+    assert result["kind"] == "external"
+    assert result["url"] == "https://search.example.com"
+    assert result["commit"] is None
+    assert result["answers"]

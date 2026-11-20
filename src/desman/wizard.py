@@ -257,13 +257,14 @@ def _providers_menu(s: _Session) -> None:
         choices.append(ui.Choice(t("Models and keys for roles"), "roles"))
         if not docker_present:
             choices.append(setup_search)
+        choices.append(ui.Choice(t("Set up local SearXNG as a Python program"), "search_native"))
         picked = ui.select(
             t("Pick a provider to add keys or change settings"), choices, default=last
         )
         if picked is None:
             return
-        if picked == "search_setup":
-            _offer_searxng(s)
+        if picked in ("search_setup", "search_native"):
+            _offer_searxng(s, force_native=picked == "search_native")
             continue
         if picked == "roles":
             ask_roles(s.config)
@@ -512,13 +513,13 @@ def _check_searxng(url: str) -> None:
         ui.warn(t("SearXNG at {url} cannot be used yet: {problem}", url=url, problem=problem))
 
 
-def _offer_searxng(s: _Session) -> None:
+def _offer_searxng(s: _Session, *, force_native: bool = False) -> None:
     from desman import searxng
 
-    if ui.confirm(searxng.consent()):
+    if ui.confirm(searxng.consent(force_native)):
         assert s.manager is not None
         try:
-            searxng.setup(s.manager, save_url=False, staged=s.config)
+            searxng.setup(s.manager, save_url=False, staged=s.config, force_native=force_native)
         except click.ClickException as exc:
             ui.warn(str(exc))
 

@@ -30,7 +30,6 @@ IMAGE = "searxng/searxng:2026.11.15-2d500cb6b"
 CONTAINER = "desman-searxng"
 DOCKER_URL = "SEARXNG_DOCKER_URL"
 START_RETRY_SECONDS = 600
-_started: set[tuple[Path, str]] = set()
 
 
 def docker(args: list[str], timeout: float = 60) -> str:
@@ -54,7 +53,7 @@ def docker(args: list[str], timeout: float = 60) -> str:
     return result.stdout.strip()
 
 
-def available() -> None:
+def available(*, timeout: float = 5) -> None:
     if find_docker() is None:
         raise click.ClickException(
             t(
@@ -62,7 +61,7 @@ def available() -> None:
             )
         )
     try:
-        docker(["info"], timeout=5)
+        docker(["info"], timeout=timeout)
     except click.ClickException as e:
         raise click.ClickException(
             str(e)
@@ -100,20 +99,31 @@ def setup(
     port: int | None = None,
     *,
     sleep: Callable[[float], None] = time.sleep,
+    force_native: bool = False,
     save_url: bool = True,
     staged: Config | None = None,
 ) -> str:
-    try:
-        available()
-    except click.ClickException:
-        use_docker = False
+    use_docker = not force_native and find_docker() is not None
+    folder = native.directory()
+    if use_docker:
         try:
-            url = native.setup(native.directory(), port, free_port, sleep=sleep)
+            available(timeout=60)
+        except click.ClickException as exc:
+            raise click.ClickException(f"{exc}\n{_docker_setup_hint()}") from exc
+        if _native_installed(folder):
+            with native.locked(folder):
+                native.stop(folder, sleep=sleep)
+                url = _setup_docker(manager, port, sleep)
+        else:
+            url = _setup_docker(manager, port, sleep)
+    else:
+        config = staged if staged is not None else manager.load()
+        if not force_native and config.settings.get(DOCKER_URL):
+            raise click.ClickException(_docker_setup_hint())
+        try:
+            url = native.setup(folder, port, free_port, sleep=sleep)
         except (OSError, httpx.HTTPError, subprocess.TimeoutExpired, tarfile.TarError) as e:
             raise click.ClickException(t("Native SearXNG failed: {error}", error=str(e))) from e
-    else:
-        use_docker = True
-        url = _setup_docker(manager, port, sleep)
     if staged is not None:
         _save_url(staged, url, use_docker)
     elif save_url:
@@ -123,12 +133,16 @@ def setup(
     return url
 
 
+def _docker_setup_hint() -> str:
+    return t("Start Docker and run setup again, or use `desman search setup --native`.")
+
+
 def _save_url(config: Config, url: str, use_docker: bool) -> None:
     config.settings["SEARXNG_URL"] = url
     if use_docker:
         config.settings[DOCKER_URL] = url
-    else:
-        config.settings.pop(DOCKER_URL, None)
+    elif config.settings.get(DOCKER_URL) == url:
+        config.settings.pop(DOCKER_URL)
 
 
 def uses_docker(config: Config) -> bool:
@@ -190,12 +204,6 @@ def _setup_docker(manager: ConfigManager, port: int | None, sleep: Callable[[flo
             for m in existing.get("Mounts", [])
         )
     )
-    if reuse:
-        local = native.directory()
-        reuse = not (
-            native.url(local) == f"http://127.0.0.1:{ports[0]['HostPort']}"
-            and native.running(local)
-        )
     if reuse:
         chosen = int(ports[0]["HostPort"])
         docker(["restart", CONTAINER])
@@ -262,12 +270,10 @@ def ensure_native(url: str, *, clock: Callable[[], datetime]) -> bool:
         address = url.rstrip("/")
         if not native.commit(folder) or native.url(folder) != address:
             return True
-        if native.running(folder) and native.listening(address):
-            return True
-        if (folder, address) in _started:
-            return False
         failed = folder / "start-failed"
-        with native.locked(folder):
+        with native.locked(folder, timeout=40):
+            if not native.commit(folder) or native.url(folder) != address:
+                return False
             if native.running(folder) and native.listening(address):
                 return True
             try:
@@ -282,7 +288,6 @@ def ensure_native(url: str, *, clock: Callable[[], datetime]) -> bool:
             except (click.ClickException, OSError, ValueError):
                 failed.write_text(str(clock().timestamp()), encoding="ascii")
                 raise
-            _started.add((folder, address))
             failed.unlink(missing_ok=True)
         return True
     except (click.ClickException, OSError, ValueError) as exc:
@@ -290,19 +295,26 @@ def ensure_native(url: str, *, clock: Callable[[], datetime]) -> bool:
         return False
 
 
-def _installation(config: Config, folder: Path) -> tuple[bool, dict[str, Any] | None]:
-    configured = config.settings.get("SEARXNG_URL", "")
-    installed = not uses_docker(config) and (native.commit(folder) or (folder / "src").is_dir())
-    if installed and (not configured or native.url(folder) == configured.rstrip("/")):
-        return True, None
-    try:
-        available()
-        container = inspect()
-    except click.ClickException:
-        if installed:
-            return True, None
-        raise
-    return bool(installed and container is None), container
+def _native_installed(folder: Path) -> bool:
+    return bool(native.commit(folder) or (folder / "src").is_dir())
+
+
+def _uses_native(config: Config, folder: Path) -> bool:
+    configured = config.settings.get("SEARXNG_URL", "").rstrip("/")
+    return (
+        not uses_docker(config)
+        and _native_installed(folder)
+        and (not configured or native.url(folder) == configured)
+    )
+
+
+def _container_urls(container: dict[str, Any] | None) -> set[str]:
+    bindings = container.get("HostConfig", {}).get("PortBindings", {}) if container else {}
+    return {
+        f"http://127.0.0.1:{p['HostPort']}"
+        for p in bindings.get("8080/tcp") or []
+        if p.get("HostIp") == "127.0.0.1"
+    }
 
 
 def status(manager: ConfigManager, *, display: bool = True) -> dict[str, object]:
@@ -310,11 +322,24 @@ def status(manager: ConfigManager, *, display: bool = True) -> dict[str, object]
     url = config.settings.get("SEARXNG_URL", "")
     folder = native.directory()
     unknown = False
-    try:
-        use_native, container = _installation(config, folder)
-    except click.ClickException:
-        unknown = True
-        use_native, container = False, None
+    use_native = _uses_native(config, folder)
+    container = None
+    if not use_native:
+        try:
+            available()
+            container = inspect()
+        except click.ClickException:
+            unknown = True
+    kind = "native" if use_native else "docker"
+    if (
+        not use_native
+        and url
+        and not uses_docker(config)
+        and url.rstrip("/") not in _container_urls(container)
+    ):
+        kind = "external"
+        container = None
+        unknown = False
     if use_native:
         url = native.url(folder)
         commit = native.commit(folder)
@@ -333,8 +358,10 @@ def status(manager: ConfigManager, *, display: bool = True) -> dict[str, object]
         else:
             with search.client() as http:
                 problem = search.check_searxng(url, http)
+    if kind == "external":
+        running = problem is None
     result = {
-        "kind": "native" if use_native else "docker",
+        "kind": kind,
         "running": running,
         "commit": commit,
         "container": "unknown" if unknown else state,
@@ -347,13 +374,15 @@ def status(manager: ConfigManager, *, display: bool = True) -> dict[str, object]
     ui.note(
         t(
             "SearXNG installation: {kind}, commit {commit}",
-            kind=result["kind"],
+            kind={"docker": t("Docker"), "native": t("Python program"), "external": t("external")}[
+                kind
+            ],
             commit=commit or t("Not configured"),
         )
     )
     if use_native:
         ui.note(t("SearXNG service running: {running}", running=t("yes") if running else t("no")))
-    else:
+    elif kind == "docker":
         ui.note(t("SearXNG container: {state}", state=result["container"] or t("Not configured")))
     if url:
         ui.note(t("SearXNG: {url}", url=url))
@@ -369,48 +398,66 @@ def status(manager: ConfigManager, *, display: bool = True) -> dict[str, object]
 def operate(manager: ConfigManager, action: str) -> None:
     config = manager.load()
     folder = native.directory()
-    use_native, existing = _installation(config, folder)
-    if use_native:
-        try:
-            with native.locked(folder):
-                if action == "start":
-                    native.start(folder)
-                else:
-                    native.stop(folder)
-                    if action == "remove":
-                        owned_url = native.url(folder)
-                        shutil.rmtree(folder)
-                        _clear_url(manager, {owned_url} if owned_url else set())
-        except OSError as exc:
-            raise click.ClickException(t("Native SearXNG failed: {error}", error=str(exc))) from exc
-    elif action == "remove":
-        bindings = existing.get("HostConfig", {}).get("PortBindings", {}) if existing else {}
-        ports = bindings.get("8080/tcp") or []
-        owned_urls = {
-            f"http://127.0.0.1:{p['HostPort']}" for p in ports if p.get("HostIp") == "127.0.0.1"
-        }
-        if existing:
-            docker(["rm", "-f", "-v", CONTAINER])
-        _clear_url(manager, owned_urls)
+    use_native = _uses_native(config, folder)
+    if action == "start":
+        if use_native:
+            _operate_native(folder, action)
+        else:
+            available()
+            docker(["start", CONTAINER])
     else:
-        docker([action, CONTAINER])
+        if _native_installed(folder):
+            owned_url = _operate_native(folder, action)
+            if owned_url and not uses_docker(config):
+                _clear_url(manager, {owned_url})
+        if find_docker() is not None or config.settings.get(DOCKER_URL):
+            available()
+            existing = inspect()
+            if action == "remove":
+                if existing:
+                    docker(["rm", "-f", "-v", CONTAINER])
+                urls = _container_urls(existing)
+                if saved := config.settings.get(DOCKER_URL):
+                    urls.add(saved)
+                _clear_url(manager, urls, clear_docker=True)
+            elif existing:
+                docker(["stop", CONTAINER])
     ui.ok(t("Done."))
 
 
-def _clear_url(manager: ConfigManager, owned_urls: set[str]) -> None:
+def _operate_native(folder: Path, action: str) -> str:
+    try:
+        with native.locked(folder):
+            if action == "start":
+                native.start(folder)
+            else:
+                native.stop(folder)
+                if action == "remove":
+                    owned_url = native.url(folder)
+                    shutil.rmtree(folder)
+                    return owned_url
+    except OSError as exc:
+        raise click.ClickException(t("Native SearXNG failed: {error}", error=str(exc))) from exc
+    return ""
+
+
+def _clear_url(manager: ConfigManager, owned_urls: set[str], *, clear_docker: bool = False) -> None:
     with manager.edit() as config:
         url = config.settings.get("SEARXNG_URL", "")
         if url.rstrip("/") in owned_urls:
             config.settings.pop("SEARXNG_URL", None)
+        if clear_docker:
             config.settings.pop(DOCKER_URL, None)
 
 
-def consent() -> str:
-    plan = t(
-        "Set up local SearXNG? Uses Docker (about 100 MB) when available, "
-        "or downloads {size} bytes of source and installs Python dependencies in a virtual environment.",
-        size=native.SIZE,
-    )
+def consent(force_native: bool = False) -> str:
+    if force_native or find_docker() is None:
+        plan = t(
+            "Set up local SearXNG as a Python program? Downloads {size} bytes of source and installs dependencies in a virtual environment.",
+            size=native.SIZE,
+        )
+    else:
+        return t("Set up local SearXNG with Docker (about 100 MB)?")
     if sys.platform in ("win32", "darwin"):
         plan += " " + t(
             "SearXNG officially supports Linux only. Native setup worked in our Windows test. "

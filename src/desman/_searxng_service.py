@@ -16,15 +16,19 @@ def main(folder: Path, token: str) -> None:
     activation = folder / "activation"
 
     def active() -> bool:
-        try:
-            return activation.read_text(encoding="ascii") == token
-        except FileNotFoundError:
-            return False
+        for _ in range(3):
+            try:
+                return activation.read_text(encoding="ascii") == token
+            except OSError:
+                time.sleep(0.1)
+        return False
 
     def watch() -> None:
-        while active():
-            time.sleep(0.1)
-        os._exit(0)
+        try:
+            while active():
+                time.sleep(0.1)
+        finally:
+            os._exit(0)
 
     with (folder / "service.lock").open("a+b") as handle:
         lock(handle.fileno())

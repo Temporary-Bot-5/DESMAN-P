@@ -16,14 +16,22 @@ def search() -> None:
 
 @search.command()
 @click.option("--port", type=click.IntRange(1, 65535))
+@click.option("--native", is_flag=True, help="Use the Python program.")
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
-def setup(port: int | None, yes: bool) -> None:
+def setup(port: int | None, native: bool, yes: bool) -> None:
     """Set up local SearXNG."""
-    ui.note(searxng.consent())
+    ui.note(searxng.consent(native))
     if yes:
-        searxng.setup(load_config(), port)
+        searxng.setup(load_config(), port, force_native=native)
     else:
-        ui.note(t("Nothing changed. Confirm with: {command}", command="desman search setup --yes"))
+        flag = " --native" if native else ""
+        port_flag = f" --port {port}" if port is not None else ""
+        ui.note(
+            t(
+                "Nothing changed. Confirm with: {command}",
+                command=f"desman search setup{flag}{port_flag} --yes",
+            )
+        )
 
 
 @search.command()

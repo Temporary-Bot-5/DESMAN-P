@@ -300,7 +300,8 @@ def test_docker_step_in_configuration(
 
     offers: list[str] = []
 
-    def setup(manager: ConfigManager, *, save_url: bool, staged: Config) -> str:
+    def setup(manager: ConfigManager, *, save_url: bool, staged: Config, force_native: bool) -> str:
+        assert not force_native
         assert not save_url
         assert not manager.load().settings.get("SEARXNG_URL")
         offers.append("search")

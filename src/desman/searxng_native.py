@@ -70,7 +70,19 @@ def python(folder: Path) -> Path:
 
 
 def environment(folder: Path) -> dict[str, str]:
-    allowed = {"PATH", "HOME", "USERPROFILE", "LANG"}
+    allowed = {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "LANG",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+    }
     if _platform() == "win32":
         allowed.update(("SYSTEMROOT", "TEMP", "TMP"))
     env = {key: value for key, value in os.environ.items() if key.upper() in allowed}
@@ -104,6 +116,10 @@ def download(target: Path, http: httpx.Client) -> None:
 
 
 def extract(archive: Path, target: Path) -> None:
+    if not hasattr(tarfile, "data_filter"):
+        raise click.ClickException(
+            t("Native SearXNG needs Python 3.11.4 or newer for safe extraction.")
+        )
     root = f"searxng-{COMMIT}/"
     target.mkdir()
     with tarfile.open(archive, "r:gz") as source:
@@ -163,16 +179,22 @@ def url(folder: Path) -> str:
 
 
 @contextmanager
-def locked(folder: Path) -> Iterator[None]:
+def locked(folder: Path, *, timeout: float = 0) -> Iterator[None]:
     folder.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Keep the command lock outside the removable install directory.
     with folder.with_suffix(".lock").open("a+b") as handle:
-        try:
-            filelock.lock(handle.fileno(), blocking=False)
-        except BlockingIOError as exc:
-            raise click.ClickException(
-                t("Another native SearXNG operation is in progress.")
-            ) from exc
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                filelock.lock(handle.fileno(), blocking=False)
+                break
+            except BlockingIOError as exc:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise click.ClickException(
+                        t("Another native SearXNG operation is in progress.")
+                    ) from exc
+                time.sleep(min(0.05, remaining))
         try:
             yield
         finally:
