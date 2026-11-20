@@ -66,7 +66,34 @@ def missing(result_quotes: Iterable[str], sources: Iterable[str]) -> list[str]:
         pieces = [normalize(piece) for piece in re.split(r"…|\.{3,}", quote)]
         substantial = [piece for piece in pieces if len(piece) >= 8]
         if not substantial or any(
-            not any(piece in source for source in normalized) for piece in substantial
+            not any(piece in source or _dialogue(piece, source) for source in normalized)
+            for piece in substantial
         ):
             absent.append(quote)
     return absent
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+DIALOGUE_GAP = 150
+"""Most characters between two sentences of one quote: the author's words between replies."""
+
+
+def _dialogue(piece: str, source: str) -> bool:
+    """A quote of replies with the author's words between them left out, as quotes of dialogue
+    are usually written: every sentence word for word, in order, each close to the one before."""
+    sentences = [normalize(s) for s in _SENTENCE_END.split(piece)]
+    sentences = [s for s in sentences if s]
+    if len(sentences) < 2:
+        return False
+    start = source.find(sentences[0])
+    while start >= 0:
+        end = start + len(sentences[0])
+        for sentence in sentences[1:]:
+            found = source.find(sentence, end)
+            if found < 0 or found - end > DIALOGUE_GAP:
+                break
+            end = found + len(sentence)
+        else:
+            return True
+        start = source.find(sentences[0], start + 1)
+    return False
