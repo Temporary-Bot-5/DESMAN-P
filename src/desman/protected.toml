@@ -12,7 +12,7 @@
 "policy.toml" = "e1d97b1816a6ac8b7a61e8242d152eb654dff28b31d54685c82b4d71b8f82565"
 "core/policy.py" = "f05e222d40b3ec68582960f9095fd826a90f0edccd907d8fec8441957f6223da"
 # The reviewer (and the executor it judges).
-"agents.py" = "e1389e74c6c0f022e3c0001c6dad4e5b4c538cee8862be820a977891324e3a99"
+"agents.py" = "76e4fa46e108e5116cde67cfc94cd295ad22482099b594c6041e391ccde5b193"
 # Security rules: the sandbox for generated code, the workspace guard for files.
 "core/sandbox.py" = "72ab37b1e6a042db3b4bd54b3f167aa9dc8ee024d0b5ec3947f182c7d7c8f15c"
 "core/wasi_runner.py" = "2eacfce0b36e6d6d6ace74806cdd7f8f4df3fa0bbb66b01c9a1ab22084aba6aa"

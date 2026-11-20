@@ -365,6 +365,9 @@ def _execute(
                     ),
                 )
             content = reply.root
+            part = work.subtask.inputs.get("text") if "document" in work.subtask.inputs else None
+            if isinstance(part, str) and not is_error_report(content):
+                content = _verbatim_notes(model, request, content, part)
             if (
                 format_final
                 and context.final_goal is not None
@@ -533,6 +536,10 @@ def _quote_feedback(
     absent = missing(dict.fromkeys(fragments), sources)
     if not absent:
         return None
+    return _quote_message(absent, sources, location)
+
+
+def _quote_message(absent: list[str], sources: list[str], location: str) -> str:
     listed = ", ".join(f"«{quote}»" for quote in absent[:10])
     shown_text = [
         f"«{quote[:60]}…» — the text there reads: «{passage}»"
@@ -545,6 +552,60 @@ def _quote_feedback(
         "Copy quotes exactly from there (keep its spelling and punctuation, even old word "
         "forms), or drop them; never write a quote from memory."
     )
+
+
+def _absent_quotes(content: object, text: str) -> list[str]:
+    fragments = [quote for value in string_values(content) for quote in quotes(value)]
+    return missing(dict.fromkeys(fragments), [text]) if fragments else []
+
+
+def _unquote(content: Any, absent: list[str]) -> Any:
+    """Take the quote marks off fragments that are not word for word: they stay as the notes'
+    own words, and no later step may present them as quotes."""
+    if isinstance(content, str):
+        for quote in absent:
+            for opening, closing in (("«", "»"), ("“", "”"), ("„", "“"), ('"', '"')):
+                pattern = (
+                    re.escape(opening) + r"\s*" + re.escape(quote) + r"\s*" + re.escape(closing)
+                )
+                content = re.sub(pattern, quote.replace("\\", "\\\\"), content)
+        return content
+    if isinstance(content, dict):
+        return {key: _unquote(value, absent) for key, value in content.items()}
+    if isinstance(content, list):
+        return [_unquote(value, absent) for value in content]
+    return content
+
+
+def _verbatim_notes(model: LLM, request: Request, content: Any, text: str) -> Any:
+    """Notes on a part of a long document (ADR 0014): code checks their quotes against the
+    part at once, asks for one correction within the attempt (showing what the text says), and
+    unquotes whatever is still not word for word, so one misquote does not cost the attempt."""
+    absent = _absent_quotes(content, text)
+    if not absent:
+        return content
+    repair = request.model_copy(
+        update={
+            "messages": [
+                *request.messages,
+                Message(role="assistant", content=json.dumps(content, ensure_ascii=False)),
+                Message(
+                    role="user",
+                    content=f"{EXECUTE} (quote check):\n"
+                    + _quote_message(absent, [text], "the part's text")
+                    + " Reply with the whole corrected result, without tool calls.",
+                ),
+            ]
+        }
+    )
+    try:
+        fixed = complete_json(model, repair, _Result, heading=EXECUTE, plain=_plain_result)
+        if fixed.calls() is None and not is_error_report(fixed.root):
+            content = fixed.root
+    except (ProviderError, StructuredOutputError):
+        pass
+    absent = _absent_quotes(content, text)
+    return _unquote(content, absent) if absent else content
 
 
 def llm_reviewer(
