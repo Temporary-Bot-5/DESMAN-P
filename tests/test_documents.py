@@ -435,3 +435,16 @@ def test_parts_are_never_a_bare_heading_when_paragraphs_are_single_line_breaks()
 def test_a_short_shouted_reply_is_not_a_heading() -> None:
     text = "Начало.\n\n-- А!\n\nПродолжение.\n"
     assert documents._headings(text) == ([], [])
+
+
+def test_the_planner_is_not_told_to_read_a_long_document_with_read_file() -> None:
+    # Found live (L.2): "Read them with read_file" next to "never a subtask to read the file";
+    # the planner planned "Read the input file …" and nothing that answered the goal.
+    book = task_files.Given("book.txt", "а" * 40_000, 40_000, "book.txt")
+    brief = task_files.Given("brief.txt", "b" * 100, 100, "brief.txt")
+    note = documents.files_note([book, brief], documents.attached([book, brief]))
+    assert "read in parts by code" in note
+    assert "brief.txt" in note.split("read in parts")[0]
+    assert "book.txt" not in note.split("read in parts")[0].split("Read them with")[0]
+    only_long = documents.files_note([book], documents.attached([book]))
+    assert "read_file" not in only_long

@@ -430,7 +430,7 @@ def run(
             by_model = plan_mode == "llm" or (plan_mode is None and fake_script is None)
             planned = _plan(
                 models.for_(calls.Role.PLANNER),
-                goal + task_files.goal_note(inputs) + documents.goal_note(docs),
+                goal + documents.files_note(inputs, docs),
                 level,
                 by_model=by_model,
                 as_json=as_json,

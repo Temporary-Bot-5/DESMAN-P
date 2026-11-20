@@ -224,6 +224,13 @@ def in_parts(spec: TaskSpec, documents: Sequence[Document]) -> TaskSpec:
     )
 
 
+def files_note(given: list[task_files.Given], documents: Sequence[Document]) -> str:
+    """What the planner is told about the task's files: the short ones are read with
+    read_file, the long ones are read in parts by code (never "read them with read_file")."""
+    long = {doc.path for doc in documents if len(doc.text) > LONG_CHARS}
+    return task_files.goal_note(given, skip=long) + goal_note(documents)
+
+
 def goal_note(documents: Sequence[Document]) -> str:
     return "".join(
         "\n\n" + GOAL_NOTE.format(path=doc.path, n=len(doc.text))

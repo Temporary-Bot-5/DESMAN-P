@@ -23,7 +23,7 @@ import codecs
 import os
 import stat
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from threading import Lock
@@ -292,10 +292,12 @@ def given_names(given: list[Given]) -> str:
     return ", ".join(file.name for file in given)
 
 
-def goal_note(given: list[Given]) -> str:
-    if not given:
+def goal_note(given: list[Given], *, skip: Collection[str] = ()) -> str:
+    """Name the given files for the planner; `skip` are files read by code (long documents)."""
+    shown = [file for file in named(given) if file.name not in skip]
+    if not shown:
         return ""
-    files = ", ".join(f"{file.name} ({_size_text(file.chars)} characters)" for file in named(given))
+    files = ", ".join(f"{file.name} ({_size_text(file.chars)} characters)" for file in shown)
     return (
         "\n\nThe person gave files for this task; they are in its workspace: "
         f"{files}. Read them with read_file. "

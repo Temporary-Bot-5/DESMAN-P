@@ -1214,7 +1214,7 @@ class Chat:
         )
         all_inputs = inputs + fetched.given
         docs = documents.attached(all_inputs)
-        goal = turn.goal + task_files.goal_note(all_inputs) + documents.goal_note(docs)
+        goal = turn.goal + documents.files_note(all_inputs, docs)
         paths = [path for handover in given for path in handover.paths()]
         if paths:  # what the workers see is the goal: the files are named in it, by code
             goal += (
