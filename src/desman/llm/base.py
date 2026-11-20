@@ -201,4 +201,9 @@ class ProviderUnavailable(ProviderError):
 
 
 class RequestTooLarge(ProviderRejected):
-    """The request exceeds a provider's token ceiling; another model may take it."""
+    """The request exceeds a provider's token ceiling; another model may take it. When no other
+    model could, the attempt failed, not the subtask: the next one avoids this model (it is
+    kept as unfit for the task), so a too-small model never sends work to the person."""
+
+    kind = FailureKind.QUALITY
+    unfit_model = True

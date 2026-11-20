@@ -50,7 +50,9 @@ COMBINE: Final = (
     "document's headings (chapter, section), never by part numbers. Keep quotes word for word "
     "with their heading; when there are too many for the size, keep the ones that best show "
     "each heading, at least one per heading that has any. Shorten wording; drop repetitions, "
-    "never main facts. Keep the notes compact: no more than about {limit} characters in all."
+    "never main facts. Keep the notes compact: no more than about {limit} characters in all. "
+    "Only parts {a}–{b} are yours: the other parts are combined by other subtasks, so never "
+    "ask for them or report them missing."
 )
 COMBINE_CRITERIA: Final = (
     "The main facts of the given notes that bear on the goal are kept with their heading, and "

@@ -36,7 +36,7 @@ def task() -> TaskSpec:
     return TaskSpec(goal="g", subtasks=[SubtaskSpec(description="work", acceptance_criteria="c")])
 
 
-def test_provider_413_is_permanent_and_falls_back_without_repeating(store: Store) -> None:
+def test_provider_413_fails_the_attempt_and_falls_back_without_repeating(store: Store) -> None:
     seen: list[Request] = []
 
     class Oversized:
@@ -50,18 +50,20 @@ def test_provider_413_is_permanent_and_falls_back_without_repeating(store: Store
     chain = router.Fallback([(backed, None)])
     with pytest.raises(RequestTooLarge) as caught:
         chain.complete(REQUEST)
-    assert caught.value.kind is FailureKind.PERMANENT
+    # L.2 live run: a too-small last model fails the attempt, never the subtask at once.
+    assert caught.value.kind is FailureKind.QUALITY and caught.value.unfit_model
     assert len(seen) == 1
     assert chain.last_call.skipped[0].reason == "context"
     assert router.Fallback([(backed, None), (FakeLLM("ok"), None)]).complete(REQUEST).text == "ok"
     assert len(seen) == 2
-    # Real coordinator classifies the last model's 413 without retrying the work.
+    # With no model big enough, each attempt fails once (no backoff), then the person decides.
     ref = store.create_task(task())
     report = Coordinator(
         store, llm_executor(backed), lambda *_: Review(verdict=Verdict.ACCEPT)
     ).run(ref)
     assert report.status is TaskStatus.NEEDS_HUMAN
-    assert len(seen) == 3
+    attempts = len(seen) - 2
+    assert attempts == task().retry.max_attempts
 
 
 @pytest.mark.parametrize(
