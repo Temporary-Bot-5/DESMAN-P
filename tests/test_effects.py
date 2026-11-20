@@ -473,3 +473,25 @@ def test_retry_sees_stale_files_sizes_and_writer_attempt_within_budget(
         files=inventory,
     )
     assert called == [40]
+
+
+def test_quote_sources_include_the_documents_a_planned_subtask_works_from(store: Store) -> None:
+    from desman.core.effects import quote_sources
+    from desman.core.workspace import workspace_root_for
+
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(
+                    description="answer",
+                    acceptance_criteria="c",
+                    inputs={"read_in_parts": ["input/book.txt", "input/gone.txt", "../x"]},
+                )
+            ],
+        )
+    )
+    Workspace(workspace_root_for(store.conn), task_id).write("input/book.txt", "Вдали был лес.")
+    [subtask] = store.list_subtasks(task_id)
+    sources = quote_sources(store, subtask, knowledge=None, context_budget_tokens=1000)
+    assert sources == ["Вдали был лес."]

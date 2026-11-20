@@ -137,9 +137,13 @@ def test_document_digests_precede_and_feed_the_planners_graph(
     indices = spec.subtasks[-2].depends_on
     assert len(indices) == 2
     assert spec.subtasks[-1].depends_on == [len(spec.subtasks) - 2]
-    assert spec.subtasks[-1].model_dump(exclude={"depends_on"}) == base.subtasks[-1].model_dump(
-        exclude={"depends_on"}
-    )
+    assert spec.subtasks[-1].model_dump(exclude={"depends_on", "inputs"}) == base.subtasks[
+        -1
+    ].model_dump(exclude={"depends_on", "inputs"})
+    assert spec.subtasks[-1].inputs == {
+        **base.subtasks[-1].inputs,
+        documents.READ_IN_PARTS: ["input/book.txt", "input/extra.txt"],
+    }
 
     def covered(index: int) -> list[SubtaskSpec]:
         sub = spec.subtasks[index]
@@ -555,3 +559,15 @@ def test_saved_pages_are_omitted_from_task_outputs_and_handover(tmp_path: Path) 
     assert handover.paths() == ["from-abcdef/answer.md"]
     assert task_files.hand_over(tmp_path, "next", handover) == handover.paths()
     assert list(Workspace(tmp_path, "next").files()) == handover.paths()
+
+
+def test_every_planned_subtask_names_the_documents_it_works_from() -> None:
+    book = documents.Document("input/book.txt", "а" * (3 * documents.PART_CHARS))
+    short = documents.Document("input/brief.txt", "b" * 100)
+    spec = documents.in_parts(plan_spec(), [book, short])
+    planned = [sub for sub in spec.subtasks if "document" not in sub.inputs]
+    assert len(planned) == len(plan_spec().subtasks)
+    assert all(sub.inputs[documents.READ_IN_PARTS] == ["input/book.txt"] for sub in planned)
+    assert all(
+        documents.READ_IN_PARTS not in sub.inputs for sub in spec.subtasks if sub not in planned
+    )

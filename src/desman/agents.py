@@ -491,7 +491,12 @@ def _quote_feedback(
     part = subtask.inputs.get("text") if "document" in subtask.inputs else None
     combine = is_document_combine(subtask)
     notes = shown.get("results_of_dependencies", [])
-    if not (isinstance(part, str) or combine or any(note.get("digest") for note in notes)):
+    if not (
+        isinstance(part, str)
+        or combine
+        or any(note.get("digest") for note in notes)
+        or subtask.inputs.get("read_in_parts")  # downstream of a document's notes (ADR 0014)
+    ):
         return None
     fragments = [quote for value in string_values(artifact) for quote in quotes(value)]
     if not fragments:

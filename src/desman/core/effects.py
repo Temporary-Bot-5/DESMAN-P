@@ -183,7 +183,24 @@ def quote_sources(
     nodes = fit_knowledge(
         given(knowledge, subtask.knowledge)[0], context_budget_tokens * CHARS_PER_TOKEN // 2
     )
-    return [*outputs, *(node.text for node in nodes)]
+    return [*outputs, *(node.text for node in nodes), *_documents_read_in_parts(store, subtask)]
+
+
+def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:
+    """The long documents a planned subtask works from (ADR 0014): a quote must come from them
+    even when the notes that carried it are several steps away."""
+    paths = subtask.inputs.get("read_in_parts")
+    if not isinstance(paths, list):
+        return []
+    texts = []
+    workspace = Workspace(workspace_root_for(store.conn), subtask.task_id)
+    for path in paths:
+        if isinstance(path, str):
+            try:
+                texts.append(workspace.read_text(path))
+            except (OSError, UnicodeError, PathEscapeError):
+                continue
+    return texts
 
 
 def _written_files(

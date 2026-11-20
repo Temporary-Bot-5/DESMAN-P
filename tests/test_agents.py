@@ -591,3 +591,27 @@ def test_digest_dependant_can_quote_other_evidence(store: Store, source: str) ->
     review = llm_reviewer(model, evidence=lambda _: evidence, quote_evidence=lambda _: outputs)
     assert review(subtask, {"text": f'"{fragment}"'}) == Review(verdict=Verdict.ACCEPT)
     assert len(model.calls) == 1
+
+
+def test_a_step_far_below_the_notes_still_quotes_only_the_document(store: Store) -> None:
+    # Found live (L.2): "write chapters 4–6" depended on "group the notes", not on the notes
+    # themselves; its «quotes» were descriptions («Отражение простоты …») and nobody checked.
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    subtask = subtask.model_copy(update={"inputs": {"read_in_parts": ["input/book.txt"]}})
+    document = "Вдали был большой лес. На берегу стоял дом."
+    grouped = DependencyResult(
+        subtask_id="group", description="Group notes", content={"text": "Глава IV: дом."}
+    )
+    model = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {"results_of_dependencies": [{"result": {"text": "Глава IV: дом."}}]},
+        dependencies=lambda _: [grouped],
+        quote_evidence=lambda _: [document],
+    )
+    made_up = reviewer(subtask, {"text": "Цитата: «Отражение простоты и уюта быта.»"})
+    assert isinstance(made_up, Review) and made_up.verdict is Verdict.RETRY
+    assert "«Отражение простоты и уюта быта.»" in made_up.feedback and model.calls == []
+    assert reviewer(subtask, {"text": "Цитата: «На берегу стоял дом.»"}) == Review(
+        verdict=Verdict.ACCEPT
+    )
