@@ -518,3 +518,14 @@ def test_quote_sources_of_a_combine_include_its_document(store: Store) -> None:
     assert quote_sources(store, subtask, knowledge=None, context_budget_tokens=1000) == [
         "Текст книги."
     ]
+
+
+def test_a_file_a_model_wrote_is_no_source_for_quotes() -> None:
+    # Found live (L.2): a combine saved its notes to a file; the next one read it back and the
+    # file's (altered) quotes counted as evidence.
+    from desman.core.effects import _model_written
+
+    assert _model_written("read_file", {"path": "notes.txt", "content": "Живется скучно."})
+    assert not _model_written("read_file", {"path": "input/book.txt", "content": "текст"})
+    assert not _model_written("read_file", {"path": "web/page.txt", "content": "текст"})
+    assert not _model_written("web_fetch", {"text": "страница"})

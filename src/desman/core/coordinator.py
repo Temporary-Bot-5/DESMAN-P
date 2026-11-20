@@ -624,7 +624,11 @@ class Coordinator:
                 subtask.id, Actor.EXECUTOR, action, {**details, "execution": journal.execution}
             )
 
-        granted = self.store.tools(subtask.task_id) is Tools.GRANTED
+        # A part of a long document and its combines work from their inputs and dependencies
+        # only (ADR 0014): with tools, notes went to a file no check reads (L.2 live run).
+        granted = (
+            self.store.tools(subtask.task_id) is Tools.GRANTED and "document" not in subtask.inputs
+        )
         return Toolbox(
             Workspace(self.workspaces, subtask.task_id),
             self.tools if granted else Registry(),

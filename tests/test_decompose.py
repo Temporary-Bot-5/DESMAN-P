@@ -17,6 +17,7 @@ from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import StaleStateError, Store
+from desman.core.tools import READ_FILE, Registry
 from desman.llm.fake import FakeLLM, garbage
 from desman.planner import MAX_PARTS, SPLIT, decomposer
 
@@ -303,3 +304,15 @@ def test_a_part_of_a_long_document_is_never_split(store: Store, clock: FakeClock
     assert len(store.list_subtasks(task_id)) == 1
     assert "decompose" not in [s for _, s in strategies(store, task_id)]
     assert not any(r.prompt.startswith(SPLIT) for r in llm.calls)
+
+
+def test_a_part_of_a_long_document_is_offered_no_tools(store: Store, clock: FakeClock) -> None:
+    # Found live (L.2): a combine wrote its notes to a file, where no quote check reads them.
+    llm = FakeLLM().on("Execute", '{"v": 1}', repeat_last=True).on("Review", ACCEPT)
+    spec = one_step()
+    part = spec.subtasks[0].model_copy(update={"inputs": {"document": "input/a.txt", "part": 1}})
+    task_id = store.create_task(spec.model_copy(update={"subtasks": [part]}))
+    tools = Registry([READ_FILE])  # an ordinary subtask is offered read_file with it
+    assert coordinator(store, clock, llm, tools=tools).run(task_id).status is TaskStatus.DONE
+    [execute] = [r for r in llm.calls if r.prompt.startswith("Execute")]
+    assert "read_file" not in json.dumps([m.content for m in execute.messages])

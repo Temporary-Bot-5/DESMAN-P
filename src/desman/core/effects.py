@@ -176,14 +176,27 @@ def quote_sources(
     """Tool outputs from this execution and the knowledge supplied to its executor."""
     execution = store.executions(subtask.id) - 1
     outputs = [
-        ToolResult.model_validate_json(row["result_json"]).output
+        output
         for row in store.effects(subtask.id, execution)
         if row["state"] == "done"
+        and not _model_written(
+            row["tool"], output := ToolResult.model_validate_json(row["result_json"]).output
+        )
     ]
     nodes = fit_knowledge(
         given(knowledge, subtask.knowledge)[0], context_budget_tokens * CHARS_PER_TOKEN // 2
     )
     return [*outputs, *(node.text for node in nodes), *_documents_read_in_parts(store, subtask)]
+
+
+def _model_written(tool: str, output: object) -> bool:
+    """A file a model wrote in the workspace is no source for a quote (L.2 live run: a combine
+    saved its notes to a file, the next one read it back and its quotes passed). The person's
+    files and fetched pages are under input/ and web/."""
+    if tool != "read_file" or not isinstance(output, dict):
+        return False
+    path = output.get("path")
+    return not (isinstance(path, str) and path.startswith(("input/", "web/")))
 
 
 def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:

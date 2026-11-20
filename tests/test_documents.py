@@ -264,11 +264,8 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
             start, end = inputs["chars"]
             assert inputs["text"] == text[start:end] and QUOTE in inputs["text"]
             seen_parts[inputs["part"]] = inputs["text"]
-            if inputs["part"] == 1:
-                return tool_calls(
-                    ("read_file", {"path": "input/setting.txt", "offset": 0}),
-                    ("read_file", {"path": "input/setting.txt", "offset": 8000}),
-                )
+            # A part is offered no tools: its text is in the inputs (L.2 live run).
+            assert "tools" not in data
             return json.dumps({"text": f'Part {inputs["part"]}: "{QUOTE}"'})
         if data["subtask"].startswith("Combine"):
             assert goal in data["task_goal"]
@@ -293,10 +290,6 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
             assert quote == QUOTE and quote in inputs["text"]
             assert inputs["text"] == seen_parts[inputs["part"]]
             assert goal in data["evidence"]["task_goal"]
-            if inputs["part"] == 1:
-                tool_results = data["evidence"]["tool_results"]
-                assert len(tool_results) == 2
-                assert any(result["truncated"] for result in tool_results)
             reviewed_parts.add(inputs["part"])
         else:
             assert rule not in request.messages[0].content
