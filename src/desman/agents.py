@@ -56,7 +56,7 @@ from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
 from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 from desman.prompting import today
-from desman.quotes import missing, quotes, string_values
+from desman.quotes import missing, nearest, quotes, string_values
 from desman.result_prose import has_prose
 
 T = TypeVar("T", bound=BaseModel)
@@ -532,10 +532,16 @@ def _quote_feedback(
     if not absent:
         return None
     listed = ", ".join(f"«{quote}»" for quote in absent[:10])
+    shown_text = [
+        f"«{quote[:60]}…» — the text there reads: «{passage}»"
+        for quote in absent[:5]
+        if (passage := nearest(quote, sources)) is not None
+    ]
+    there = (" Compare: " + "; ".join(shown_text) + ".") if shown_text else ""
     return (
-        f"These quotes are not found word for word in {location}: {listed}. "
-        "Copy quotes exactly from there (keep its spelling and punctuation), "
-        "or drop them; never write a quote from memory."
+        f"These quotes are not found word for word in {location}: {listed}.{there} "
+        "Copy quotes exactly from there (keep its spelling and punctuation, even old word "
+        "forms), or drop them; never write a quote from memory."
     )
 
 

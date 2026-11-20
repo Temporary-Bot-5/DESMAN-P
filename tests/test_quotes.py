@@ -2,7 +2,7 @@
 
 import pytest
 
-from desman.quotes import missing, normalize, quotes
+from desman.quotes import missing, nearest, normalize, quotes
 
 
 def test_extracts_all_four_styles_in_order() -> None:
@@ -86,3 +86,13 @@ def test_ascii_non_quotes_are_ignored(text: str) -> None:
 
 def test_ascii_prose_quote_with_boundaries() -> None:
     assert quotes('He said ("a real quoted phrase"), then left.') == ["a real quoted phrase"]
+
+
+def test_nearest_shows_what_the_text_really_says() -> None:
+    # Found live (L.2): models kept writing "по нему" for Chekhov's "по нем" five times running.
+    text = "Мутные валы со злобой хлещут по нем и тотчас же отскакивают назад, точно им гадко."
+    quote = "Мутные валы со злобой хлещут по нему и тотчас же отскакивают назад"
+    assert missing([quote], [text]) == [quote]
+    found = nearest(quote, [text])
+    assert found is not None and found.startswith("Мутные валы со злобой хлещут по нем и")
+    assert nearest("Совсем другие слова здесь стоят", [text]) is None

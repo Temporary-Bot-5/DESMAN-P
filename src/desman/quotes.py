@@ -128,3 +128,20 @@ def _dialogue(piece: str, source: str) -> bool:
             return True
         start = source.find(sentences[0], start + 1)
     return False
+
+
+def nearest(quote: str, sources: Iterable[str], *, extra: int = 40) -> str | None:
+    """Where the text has the passage a quote that is not word for word seems to copy: found by
+    its first words (any spacing, punctuation and case between them), so the model can see
+    what the text really says ("по нем", not "по нему")."""
+    words = re.findall(r"\w+", quote)
+    for count in (5, 4, 3):
+        if len(words) < count:
+            continue
+        pattern = re.compile(r"\W+".join(map(re.escape, words[:count])), re.IGNORECASE)
+        for source in sources:
+            found = pattern.search(source)
+            if found is not None:
+                passage = source[found.start() : found.start() + len(quote) + extra]
+                return " ".join(passage.split())
+    return None
