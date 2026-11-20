@@ -68,14 +68,14 @@ def test_split_invariants() -> None:
 )
 def test_section_title_carries_through_paragraph_sentence_and_hard_cuts(heading: str) -> None:
     first = "До главы идёт предисловие.\r\n\r\n"
-    section = heading + "\r\n\r\nАбзац.\r\n\r\n" + "Предложение! " + "ы" * 36
+    section = heading + "\r\n\r\nАбзац.\r\n\r\n" + "Длинное предложение! " + "ы" * 36
     text = first + section
     parts = documents.split(text, 32)
     assert parts[0] == documents.Part(0, len(first), None)
     assert parts[1].start == len(first)
     assert all(part.title == heading.removeprefix("# ") for part in parts[1:])
     assert text[parts[1].start : parts[1].end].endswith("Абзац.\r\n\r\n")
-    assert text[parts[2].start : parts[2].end].endswith("Предложение!")
+    assert text[parts[2].start : parts[2].end].endswith("Длинное предложение!")
 
 
 def test_small_russian_chapters_begin_at_their_heading() -> None:
@@ -419,3 +419,19 @@ def test_web_fetch_still_returns_text_when_the_workspace_cannot_be_written(
     result = box.call(ToolCall(tool="web_fetch", args={"url": LONG_URL}))
     assert result.ok and text.startswith(result.output["content"])
     assert "saved" not in result.output
+
+
+def test_parts_are_never_a_bare_heading_when_paragraphs_are_single_line_breaks() -> None:
+    # Found live (Chekhov, lib.ru): paragraphs are "\n   -- …" with no blank line, so the only
+    # blank line of a chapter follows its heading; parts of three characters were made.
+    body = "".join(f"   -- Реплика номер {n}, и ещё немного слов.\n" for n in range(60))
+    text = "".join(f"{title}\n\n{body}\n" for title in ("I", "II", "III"))
+    parts = documents.split(text, 1000)
+    assert all(part.end - part.start >= 250 for part in parts[:-1])
+    assert all(text[part.end - 1] == "\n" for part in parts[:-1])
+    assert [p.start for p in parts if text[p.start : p.start + 3] in ("I\n\n", "II\n", "III")]
+
+
+def test_a_short_shouted_reply_is_not_a_heading() -> None:
+    text = "Начало.\n\n-- А!\n\nПродолжение.\n"
+    assert documents._headings(text) == ([], [])

@@ -56,6 +56,7 @@ _ROMAN_NUMBER = r"(?=[IVXLCDM])M*(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?
 _CHAPTER = re.compile(rf"(?:глава|chapter|part|часть)\s+(?:\d+|{_ROMAN_NUMBER})\b.*", re.IGNORECASE)
 _ROMAN = re.compile(rf"{_ROMAN_NUMBER}\.?")
 _PARAGRAPH = re.compile(r"\n(?:[ \t]*\r?\n)+")
+_LINE = re.compile(r"\n")
 _SENTENCE = re.compile(r"[.!?…](?=\s)")
 _URL = re.compile(r'\bhttps?://[^\s<>"«»]+', re.IGNORECASE)
 
@@ -83,6 +84,7 @@ def _headings(text: str) -> tuple[list[int], list[str]]:
             or (
                 len(title) <= 60
                 and title.isupper()
+                and sum(char.isalpha() for char in title) >= 2  # not a reply such as "-- А!"
                 and (i == 0 or not lines[i - 1].strip())
                 and (i + 1 == len(lines) or not lines[i + 1].strip())
             )
@@ -98,6 +100,7 @@ def _split(text: str, target: int, max_parts: int) -> list[Part]:
         raise ValueError("part size must be positive")
     headings, titles = _headings(text)
     paragraphs = [match.end() for match in _PARAGRAPH.finditer(text)]
+    lines = [match.end() for match in _LINE.finditer(text)]
     sentences = [match.end() for match in _SENTENCE.finditer(text)]
     parts: list[Part] = []
     start = 0
@@ -109,9 +112,17 @@ def _split(text: str, target: int, max_parts: int) -> list[Part]:
         if limit < len(text):
             # Leave enough capacity for the remaining parts even when a boundary is early.
             earliest = max(start + 1, len(text) - (max_parts - len(parts) - 1) * target)
-            for boundaries in (headings, paragraphs, sentences):
+            # A part is never just a heading or a scrap: a heading may end it after a quarter of
+            # the size, any other boundary after half (texts whose paragraphs are single line
+            # breaks have no blank line but the one after each heading).
+            for boundaries, least in (
+                (headings, target // 4),
+                (paragraphs, target // 2),
+                (lines, target // 2),
+                (sentences, target // 2),
+            ):
                 candidate = bisect_right(boundaries, limit)
-                if candidate and boundaries[candidate - 1] >= earliest:
+                if candidate and boundaries[candidate - 1] >= max(earliest, start + least):
                     end = boundaries[candidate - 1]
                     break
         parts.append(Part(start, end, title))
