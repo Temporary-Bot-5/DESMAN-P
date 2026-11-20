@@ -45,13 +45,12 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Task files live in workspaces/TASK next to the database; the "
-        "executor uses tools only there. The "
-        "chat lists its files and folder. Chat skips repeated file text, kept as untrusted data. Chat and run/status show written UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). When "
-        'a request builds on an earlier task in the same chat ("test it", "change '
-        'that file"), the new task gets copies of those files, in from-TASK/ in its folder; '
-        "originals stay. On retries it sees work files and "
-        "rewrites stale demonstration files.\n"
+        "The executor uses tools in workspaces/TASK next to the database. Chat lists files and the "
+        "folder, skips repeated text and treats it as untrusted. Chat and run/status show written "
+        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). A follow-up task in the same chat "
+        "gets copies in from-TASK/; "
+        "originals stay. Retries and interrupted runs can continue from saved tool results. "
+        "Retries also see work files and rewrite stale demonstration files.\n"
         "Code needs the "
         "run_command tool, shell_execution (`desman "
         "permissions`) and a sandbox. Code subtasks are marked by the "
@@ -100,9 +99,9 @@ TOPICS: Final = (
     Topic(
         "providers",
         "models, API keys, free tiers, limits and local models",
-        "DESMAN uses providers whose keys the person added. Only free tiers are chosen "
-        "automatically; paid providers require explicit choice. Quotas change "
-        "and every provider is treated as unreliable.\n"
+        "Longer requests give models more time to answer. DESMAN uses configured providers. "
+        "Auto chooses free tiers; paid providers require explicit choice. Quotas change "
+        "and providers may fail.\n"
         "Auto spreads work over fitting free models. Repeated transient failures move models behind healthy ones for 15 minutes, until a success. "
         "Choosing a model for a role pins it first. Limits, outages, refused keys and small contexts move "
         "a call to the next model. Chat notes name the answering model and skipped reasons. Keys rotate. Limits "

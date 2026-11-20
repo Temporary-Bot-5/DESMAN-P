@@ -317,12 +317,15 @@ def test_a_provider_failure_mid_execution_does_not_repeat_the_effect(
         sleep=clock.sleep,
     )
     assert coordinator.run(task_id).status is TaskStatus.DONE
-    assert ran == [7]  # the rerun got the same call from the cache and replayed it
+    assert ran == [7]  # the resumed prompt already has the finished result
     assert len(fake.calls) == 3
-    assert [action for action, _ in tool_entries(store, task_id)] == [
-        "tool_called",
-        "tool_replayed",
-    ]
+    assert [action for action, _ in tool_entries(store, task_id)] == ["tool_called"]
+    resumed = json.loads(fake.calls[-1].prompt.split(":\n", 1)[1])
+    [prior] = resumed["Already done by earlier attempts"]
+    assert prior["tool"] == "bump" and '"n": 7' in prior["args"]
+    assert json.loads(Workspace(tmp_path, task_id).read_text(prior["file"]))["output"] == {
+        "runs": 1
+    }
     assert check_history(store.conn, task_id) == []
 
 

@@ -98,6 +98,7 @@ class Context(BaseModel):
     knowledge: list[KnowledgeText] = []
     """What the planner chose of the knowledge tree for this subtask."""
     workspace_files: list[dict[str, Any]] = []
+    earlier_results: list[dict[str, Any]] = []
     earlier_lookups: list[dict[str, Any]] = []
     feedback: Feedback | None = None
     attempt: int = 1
@@ -117,13 +118,21 @@ def build_context(
     goal: str | None = None,
     final_goal: str | None = None,
     earlier: Callable[[int], list[dict[str, Any]]] | None = None,
+    continuation: Callable[[int], list[dict[str, Any]]] | None = None,
     files: Callable[[int], list[dict[str, Any]]] | None = None,
 ) -> Context:
     """`strategy` defaults to the one the attempt number picks. Dependency results and
     `knowledge` share the budget."""
     attempt = subtask.attempts.quality + 1
     inventory = files(budget_tokens * CHARS_PER_TOKEN // 4) if files and attempt > 1 else []
-    reserved = estimate_tokens(json.dumps(inventory, ensure_ascii=False)) if inventory else 0
+    previous = (
+        continuation(min(3_000, budget_tokens * CHARS_PER_TOKEN // 4)) if continuation else []
+    )
+    reserved = (
+        estimate_tokens(json.dumps(inventory + previous, ensure_ascii=False))
+        if inventory or previous
+        else 0
+    )
     fitted, nodes = fit(
         dependencies,
         knowledge or [],
@@ -139,13 +148,19 @@ def build_context(
         checkpoint=subtask.checkpoint,
         dependencies=fitted,
         workspace_files=inventory,
+        earlier_results=previous,
         knowledge=nodes,
         feedback=feedback,
         attempt=attempt,
         strategy=strategy or strategy_for(attempt),
     )
 
-    if earlier is not None and attempt >= 2 and context.strategy is not Strategy.COMBINE:
+    if (
+        earlier is not None
+        and not previous
+        and attempt >= 2
+        and context.strategy is not Strategy.COMBINE
+    ):
         # Account for the entire rendered context before adding older web material.
         used = len(json.dumps(context.model_dump(mode="json"), ensure_ascii=False))
         context = context.model_copy(

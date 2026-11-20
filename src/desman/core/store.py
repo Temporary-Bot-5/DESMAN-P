@@ -1340,22 +1340,47 @@ class Store:
         ).fetchall()
 
     def start_effect(
-        self, subtask_id: str, lease: str, execution: int, ordinal: int, tool: str, key: str
+        self,
+        subtask_id: str,
+        lease: str,
+        execution: int,
+        ordinal: int,
+        tool: str,
+        key: str,
+        *,
+        continuation: dict[str, str] | None = None,
     ) -> None:
         """Record the intent to make call `ordinal` while the lease is still held. The calls the
         journal had from `ordinal` on belonged to a run that went differently: they are dropped
-        (the audit keeps them)."""
+        (successful results remain available for continuation)."""
         with db.transaction(self.conn):
             self._hold(subtask_id, lease)
+            self.conn.execute(
+                """INSERT INTO discarded_effects
+                   SELECT subtask_id, execution, ordinal, tool, result_json, finished_at,
+                          continuation_json
+                   FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal >= ?
+                   AND state = 'done' AND json_extract(result_json, '$.ok') = 1""",
+                (subtask_id, execution, ordinal),
+            )
             self.conn.execute(
                 "DELETE FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal >= ?",
                 (subtask_id, execution, ordinal),
             )
             self.conn.execute(
                 """INSERT INTO effects (subtask_id, execution, ordinal, tool, key, lease_token,
-                                        state, started_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'started', ?)""",
-                (subtask_id, execution, ordinal, tool, key, lease, self._now()),
+                                        state, started_at, continuation_json)
+                   VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?)""",
+                (
+                    subtask_id,
+                    execution,
+                    ordinal,
+                    tool,
+                    key,
+                    lease,
+                    self._now(),
+                    json.dumps(continuation) if continuation is not None else None,
+                ),
             )
 
     def adopt_effect(self, subtask_id: str, lease: str, execution: int, ordinal: int) -> None:

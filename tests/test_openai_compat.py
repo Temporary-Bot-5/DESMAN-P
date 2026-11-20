@@ -932,3 +932,43 @@ def test_a_request_bigger_than_the_context_goes_to_another_model(message: str) -
     llm, _ = client(lambda request: httpx.Response(400, json={"error": {"message": message}}))
     with pytest.raises(RequestTooLarge):
         llm.complete(REQUEST)
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "base", "baseline", "per_thousand", "cap"),
+    [
+        ("nvidia", 120, 4000, 10, 300),
+        ("llama.cpp", 240, 2000, 30, 900),
+    ],
+)
+def test_timeouts_scale_with_prompt_and_cap(
+    provider_id: str, base: int, baseline: int, per_thousand: int, cap: int, clock: FakeClock
+) -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        assert request.extensions["timeout"]["read"] == expected
+        clock.advance(expected + 1 if must_timeout else expected - 1)
+        return reply()
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+        llm = OpenAICompatible(
+            provider_id,
+            "https://models.invalid/v1",
+            [KEY_A],
+            "model",
+            client=client,
+            timeout=base,
+            local=provider_id == "llama.cpp",
+            monotonic=lambda: clock().timestamp(),
+        )
+        for tokens, expected, must_timeout in (
+            (baseline, base, False),
+            (baseline + 1000, base + per_thousand, False),
+            (150_000, cap, True),
+        ):
+            request = Request(messages=[Message(role="user", content="x" * (3 * tokens))])
+            assert llm.call_timeout(request) == expected
+            if must_timeout:
+                with pytest.raises(ProviderTimeout, match=str(cap)):
+                    llm.complete(request)
+            else:
+                assert llm.complete(request).text == '{"ok": true}'

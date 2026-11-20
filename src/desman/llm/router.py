@@ -424,6 +424,7 @@ def connect(
     choice: Choice,
     *,
     first_key: str | None = None,
+    timeout_cap: float | None = None,
     on_call: Callable[[CallRecord], None] | None = None,
     client: httpx.Client | None = None,
 ) -> OpenAICompatible:
@@ -439,11 +440,13 @@ def connect(
         choice.model,
         client=client,
         timeout=chosen.timeout,
+        timeout_cap=timeout_cap,
         on_call=on_call,
         auth=chosen.auth,
         send_temperature=chosen.send_temperature,
         max_tokens=chosen.max_tokens,
         paid=chosen.paid,
+        local=chosen.local,
         context=choice.known.context
         if choice.known
         else _local_context(config, chosen, choice.model),
@@ -509,11 +512,23 @@ class LastCall:
     skipped: tuple[SkippedModel, ...] = ()
 
 
+def _request_limit(choice: Choice, conn: sqlite3.Connection | None) -> int | None:
+    ceiling = request_ceiling(choice, conn)
+    # A guessed context for an uncatalogued cloud model is not a known limit.
+    if (
+        not choice.provider.local
+        and choice.known is None
+        and not any(known.id == choice.model for known in catalog.models_of(choice.provider))
+    ):
+        return ceiling
+    return min(ceiling, choice.spec.context) if ceiling is not None else choice.spec.context
+
+
 class Fallback:
     """One role's models: a call goes to the first one that can take it.
 
-    A model the task found unfit (`Request.avoid`) is skipped, and so is one whose context is
-    too small for the request (unless that leaves none: then the rest are tried all the same).
+    A model with a known context or request ceiling too small for the request is skipped.
+    Among fitting models, those the task found unfit (`Request.avoid`) go unused when possible.
     A provider error moves the call to the next model, except a quality one: that is the
     model's own answer, judged by the retry policy (which may switch models for the next
     attempt). A model unable to answer such a request at all (`ProviderError.unfit_model`:
@@ -609,57 +624,39 @@ class Fallback:
             health_changed = healthy_choices != before_health
             health_members = iter(m for c in healthy_choices for m in ordered_members if m[1] == c)
             ordered_members = [m if m[1] is None else next(health_members) for m in ordered_members]
-        fit = [
-            (llm, choice)
-            for llm, choice in ordered_members
-            if (choice is None or not among(choice.label, request.avoid))
-            and (choice.label if choice is not None else llm.name) not in self._unfit
-        ]
-        fit = fit or ordered_members
-        # An uncatalogued cloud model has a conservative guessed context, not a measured
-        # limit. Give the person's choice a chance instead of skipping it on that guess.
-        large = [
-            m
-            for m in fit
-            if m[1] is None
-            or m[1].spec.context >= need
-            or (
-                m[1].known is None
-                and not any(known.id == m[1].model for known in catalog.models_of(m[1].provider))
-            )
-        ]
-        ceilings = {
-            choice.label: request_ceiling(choice, self.conn)
+        limits = {
+            choice.label: _request_limit(choice, self.conn)
             for _, choice in self.members
             if choice is not None
         }
-        members = [
-            m
-            for m in (large or fit)
-            if m[1] is None or (ceiling := ceilings[m[1].label]) is None or ceiling >= need
+        large = [
+            (llm, choice)
+            for llm, choice in ordered_members
+            if choice is None or (limit := limits[choice.label]) is None or limit >= need
         ]
+        fit = [
+            (llm, choice)
+            for llm, choice in large
+            if (choice is None or not among(choice.label, request.avoid))
+            and (choice.label if choice is not None else llm.name) not in self._unfit
+        ]
+        members = fit or large
         for llm, choice in self.members:
             if (llm, choice) not in members:
+                limit = limits[choice.label] if choice is not None else None
                 skipped.append(
                     SkippedModel(
                         llm.name if choice is None else choice.label,
-                        "context" if (llm, choice) in fit else "unfit",
+                        "context" if limit is not None and limit < need else "unfit",
                         needed=need,
-                        context=min(
-                            choice.spec.context,
-                            ceilings[choice.label] or choice.spec.context,
-                        )
-                        if choice
-                        else None,
+                        context=limit,
                     )
                 )
         untried = self._untried.pop(scope, {c.label if c else m.name for m, c in members})
         errors: list[ProviderError] = []
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
-            largest = max(
-                ceilings[choice.label] or 0 for _, choice in (large or fit) if choice is not None
-            )
+            largest = max((limit for limit in limits.values() if limit is not None), default=0)
             raise ProviderRejected(
                 self.name,
                 413,

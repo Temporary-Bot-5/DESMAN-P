@@ -14,8 +14,8 @@ A later run of the same execution walks the journal along with its own calls. As
 number N is the same tool with the same arguments as row N, the stored result is returned and
 nothing runs: the workspace is already in the state the replayed calls left it in. Reads are
 replayed too: run now, they would see the files as the whole interrupted run left them, not as
-they were at that point. The first call that differs ends the replay; the rows from there on
-belonged to a run that went another way and are replaced, and every call after it runs for real.
+they were at that point. The first call that differs ends the replay. Later calls run for real, while successful
+results from the replaced rows stay available for continuation.
 
 An executor that saved a checkpoint resumes from it and skips the calls made before it, so the
 replay starts at the number of calls the journal had at that checkpoint (`Store.effect_cursor`).
@@ -28,7 +28,7 @@ is a new one and runs).
 An execution ends when the executor hands in something to judge (`Store.executions`): a new
 attempt after a rejection starts a new journal, since the model is then meant to act again.
 Results are kept in the database because a replay must return them (including what a read
-returned); arguments are not (only their hash), so what a call writes is not copied there.
+returned). Call identity uses the arguments’ hash. Bounded summaries keep only the sizes of private fields.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ from desman.core.context import (
 )
 from desman.core.models import Subtask
 from desman.core.store import Store
-from desman.core.tools import Replayed, Tool, ToolResult
+from desman.core.tools import Replayed, Tool, ToolResult, summarize
 from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
 
 INTERRUPTED: Final = (
@@ -323,7 +323,9 @@ class Effects:
         """How many calls the execution has made so far (saved with a checkpoint)."""
         return self._next
 
-    def begin(self, tool: Tool[Any], args: BaseModel) -> Replayed | None:
+    def begin(
+        self, tool: Tool[Any], args: BaseModel, *, archive: str | None = None
+    ) -> Replayed | None:
         # A previous call that crashed stays started in the journal: interrupted, for a rerun.
         self._running = None
         ordinal = self._next
@@ -333,7 +335,16 @@ class Effects:
         if past is None or past["key"] != key:
             self._replaying = False
             self.store.start_effect(
-                self.subtask_id, self.lease, self.execution, ordinal, tool.name, key
+                self.subtask_id,
+                self.lease,
+                self.execution,
+                ordinal,
+                tool.name,
+                key,
+                continuation={
+                    "args": short_args(args.model_dump(mode="json"), tool.private),
+                    **({"archive": archive} if archive is not None else {}),
+                },
             )
             self._running = ordinal
             return None
@@ -410,7 +421,7 @@ def workspace_files(
     for path in workspace.files():
         if chars <= 0:
             break
-        if not is_work_file(path):
+        if not is_work_file(path) or path.startswith(TOOL_RESULTS_DIR):
             continue
         try:
             item: dict[str, Any] = {"path": path, "size": workspace.size(path)}
@@ -424,3 +435,114 @@ def workspace_files(
         out.append(item)
         chars -= cost
     return out
+
+
+TOOL_RESULTS_DIR: Final = ".tool-results/"
+
+
+def short_args(args: dict[str, Any], private: frozenset[str]) -> str:
+    text = json.dumps(summarize(args, private), ensure_ascii=False, sort_keys=True)
+    return truncate(text, 120) if len(text) > 120 else text
+
+
+def tool_result_file(workspace: Workspace, tool: str, result: dict[str, Any]) -> str | None:
+    """A tool's own output file contains the payload, so it needs no duplicate."""
+    output = result.get("output")
+    if not result["ok"] or not isinstance(output, dict):
+        return None
+    field = {"web_fetch": "saved", "write_file": "path"}.get(tool)
+    path = output.get(field) if field else None
+    if not isinstance(path, str):
+        return None
+    try:
+        workspace.size(path)
+    except (OSError, PathEscapeError):
+        return None
+    return path
+
+
+def archive_result(
+    workspace: Workspace, path: str, tool: str, result: dict[str, Any], body: str
+) -> str | None:
+    existing = tool_result_file(workspace, tool, result)
+    if existing is not None:
+        return existing
+    try:
+        return workspace.write(path, body)
+    except (OSError, PathEscapeError):
+        return None
+
+
+def outcome(tool: str, result: dict[str, Any], size: int) -> str:
+    if not result["ok"]:
+        return f"error ({size} JSON chars)"
+    output = result.get("output")
+    if tool == "read_file" and isinstance(output, dict):
+        content = output.get("content")
+        offset = output.get("offset", 0)
+        if isinstance(content, str) and isinstance(offset, int):
+            end = offset + len(content)
+            more = (
+                f"; continue at offset {output['next_offset']}" if "next_offset" in output else ""
+            )
+            return f"ok; read characters [{offset}, {end}){more}"
+    return f"ok ({size} JSON chars)"
+
+
+def earlier_results(
+    journal: Effects, subtask: Subtask, workspace: Workspace, chars: int
+) -> list[dict[str, Any]]:
+    """Newest successful calls, including those from an interrupted current execution."""
+    items: list[dict[str, Any]] = []
+    if chars < 2:
+        return items
+    chars -= 2  # JSON list brackets
+    rows = journal.store.conn.execute(
+        """SELECT execution, ordinal, tool, result_json, finished_at, continuation_json, 1 AS active
+           FROM effects WHERE subtask_id = ? AND state = 'done'
+           UNION ALL
+           SELECT execution, ordinal, tool, result_json, finished_at, continuation_json, 0 AS active
+           FROM discarded_effects WHERE subtask_id = ?
+           ORDER BY execution DESC, finished_at DESC, active DESC, ordinal DESC""",
+        (subtask.id, subtask.id),
+    )
+    for row in rows:
+        tool = row["tool"]
+        result = ToolResult.model_validate_json(row["result_json"])
+        if not result.ok:
+            continue
+        payload = {
+            "tool": tool,
+            **result.model_copy(update={"at": timestamp(row["finished_at"])}).model_dump(
+                exclude_none=True
+            ),
+        }
+        body = json.dumps(payload, ensure_ascii=False)
+        meta = json.loads(row["continuation_json"] or "{}")
+        args = meta.get("args")
+        if args is None and isinstance(result.output, dict):
+            args = short_args(
+                {k: result.output[k] for k in ("path", "url", "offset") if k in result.output},
+                frozenset(),
+            )
+        existing = tool_result_file(workspace, tool, payload)
+        archive = meta.get("archive")
+        if archive is None:
+            digest = hashlib.sha256(row["result_json"].encode()).hexdigest()[:16]
+            archive = f"{TOOL_RESULTS_DIR}{subtask.seq}-e{row['execution']}-{row['ordinal']}-{digest}.json"
+        item = {
+            "tool": tool,
+            "args": args,
+            "outcome": outcome(tool, payload, len(body)),
+            "file": existing or archive,
+        }
+        cost = len(json.dumps(item, ensure_ascii=False)) + 2
+        if cost > chars:
+            continue
+        if existing is None and archive_result(workspace, archive, tool, payload, body) != archive:
+            continue
+        items.append(item)
+        chars -= cost
+        if len(items) == 20:
+            break
+    return items

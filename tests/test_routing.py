@@ -30,6 +30,7 @@ from desman.llm.base import (
     LLM,
     GenerationFailed,
     Message,
+    ProviderRejected,
     ProviderTimeout,
     ProviderUnavailable,
     QuotaExhausted,
@@ -264,9 +265,11 @@ def test_a_model_too_small_for_the_request_is_skipped() -> None:
     long = Request(messages=[Message(role="user", content="x" * 30_000)], max_tokens=500)
     assert lineup.complete(long).text == "big"
     assert tiny.calls == []
-    # When no model is large enough, each is tried all the same.
-    only = router.Fallback([(FakeLLM("tried", name="cloudflare"), small)])
-    assert only.complete(long).text == "tried"
+    # A known undersized context cannot receive the request.
+    only = router.Fallback([(tiny, small)])
+    with pytest.raises(ProviderRejected, match="largest available request ceiling"):
+        only.complete(long)
+    assert not tiny.calls
 
 
 def test_an_accepted_reply_is_kept_by_the_model_that_wrote_it(store: Store) -> None:
@@ -880,7 +883,6 @@ def test_request_too_large_moves_to_next_model_without_backoff() -> None:
 
 def test_all_ceilings_too_small_never_send_known_impossible_request() -> None:
     from desman.core.retry import FailureKind
-    from desman.llm.base import ProviderRejected
 
     groq = router.Choice(providers.find("groq"), "openai/gpt-oss-20b")
     fake = FakeLLM("must not be sent")

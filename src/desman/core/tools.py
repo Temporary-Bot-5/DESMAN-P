@@ -72,7 +72,7 @@ A = TypeVar("A", bound=BaseModel)
 
 MAX_READ_CHARS: Final = 8_000
 """Text returned by `read_file` (≈2000 tokens); the rest is cut with a marker: free models have
-small contexts, and every round of tool results stays in the conversation."""
+small contexts."""
 MAX_WRITE_CHARS: Final = 1_000_000
 MAX_LISTED_FILES: Final = 500
 AUDIT_TEXT: Final = 200
@@ -180,7 +180,9 @@ class Replayed:
 class Journal(Protocol):
     """Where a Toolbox records its calls (core/effects.py)."""
 
-    def begin(self, tool: Tool[Any], args: BaseModel) -> Replayed | None:
+    def begin(
+        self, tool: Tool[Any], args: BaseModel, *, archive: str | None = None
+    ) -> Replayed | None:
         """Before running a call: what to return instead of running it, or None to run it
         (the intent is then recorded). Raises StaleStateError if the lease is lost."""
         ...
@@ -236,7 +238,7 @@ class Toolbox:
         """The tools to offer a model: only those it may use."""
         return [tool.spec() for tool in self.available()]
 
-    def call(self, call: ToolCall) -> ToolResult:
+    def call(self, call: ToolCall, *, archive: str | None = None) -> ToolResult:
         tool = self.registry.get(call.tool)
         private = tool.private if tool is not None else frozenset()
         summary = {"tool": call.tool, "args": summarize(call.args, private)}
@@ -264,7 +266,7 @@ class Toolbox:
             summary["elevated"] = True  # admin_rights is on: every such action stands out
         journal = self.journal
         if journal is not None:
-            replayed = journal.begin(tool, args)
+            replayed = journal.begin(tool, args, archive=archive)
             if replayed is not None:
                 if replayed.interrupted:
                     summary["interrupted"] = True

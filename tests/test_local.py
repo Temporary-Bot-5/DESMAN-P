@@ -399,11 +399,11 @@ def test_a_slow_model_gets_a_lease_and_review_reservation_that_outlast_its_step(
 
     models, coordinator = build(make_config(api_keys={"GROQ_API_KEY": GROQ}, settings=OLLAMA))
     # Two calls (a request and its repair), each with its waits, and a margin.
-    assert models.step_seconds == 2 * (providers.LOCAL_TIMEOUT + 30) + 30
+    assert models.step_seconds == runs.step_seconds(900)
     assert coordinator.lease_seconds == models.step_seconds
     assert coordinator.review_seconds == models.step_seconds
     models, coordinator = build(make_config(api_keys={"GROQ_API_KEY": GROQ}))
-    assert coordinator.lease_seconds == DEFAULT_LEASE_SECONDS  # already long enough
+    assert coordinator.lease_seconds == max(DEFAULT_LEASE_SECONDS, runs.step_seconds(300))
     assert coordinator.review_seconds == models.step_seconds > DEFAULT_REVIEW_SECONDS
     fake = runs.summarizer(store, runs.Models(FakeLLM(), None))
     assert fake.review_seconds == DEFAULT_REVIEW_SECONDS

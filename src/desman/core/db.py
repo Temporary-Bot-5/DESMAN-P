@@ -794,6 +794,20 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     );
     DELETE FROM rate_buckets WHERE scope LIKE 'unavailable:%';
     """,
+    # 50: bounded call descriptions and archive names for executor continuation.
+    """
+    ALTER TABLE effects ADD COLUMN continuation_json TEXT;
+    CREATE TABLE discarded_effects (
+        subtask_id TEXT NOT NULL REFERENCES subtasks(id) ON DELETE CASCADE,
+        execution INTEGER NOT NULL,
+        ordinal INTEGER NOT NULL,
+        tool TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        finished_at TEXT NOT NULL,
+        continuation_json TEXT
+    );
+    CREATE INDEX discarded_effects_subtask ON discarded_effects(subtask_id);
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

@@ -162,7 +162,10 @@ def test_retry_receives_earlier_lookups_within_remaining_budget(
     assert '"earlier_lookups"' in llm.calls[0].prompt
     assert "only for what they lack" in llm.calls[0].messages[0].content
     combined = seen[1].model_copy(
-        update={"context": seen[1].context.model_copy(update={"strategy": Strategy.COMBINE})}
+        update={
+            "context": seen[1].context.model_copy(update={"strategy": Strategy.COMBINE}),
+            "heartbeat": lambda _: None,
+        }
     )
     other = FakeLLM('{"answer":"combined"}')
     llm_executor(other)(combined)
