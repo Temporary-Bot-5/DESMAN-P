@@ -448,3 +448,21 @@ def test_the_planner_is_not_told_to_read_a_long_document_with_read_file() -> Non
     assert "book.txt" not in note.split("read in parts")[0].split("Read them with")[0]
     only_long = documents.files_note([book], documents.attached([book]))
     assert "read_file" not in only_long
+
+
+def test_a_part_names_the_headings_that_start_inside_it() -> None:
+    # Found live (L.2): notes keyed "Part 3" became "Chapter 3" in the answer; chapter VI, which
+    # began inside a part, was never named. Code tells each part which headings it holds.
+    chapter = "Абзац текста главы, и ещё немного слов.\n" * 40
+    text = "".join(f"{title}\n\n{chapter}\n" for title in ("I", "II", "III", "IV"))
+    spec = documents.in_parts(plan_spec(), [documents.Document("input/a.txt", text * 6)])
+    parts = [sub for sub in spec.subtasks if "part" in sub.inputs]
+    assert all("Never number parts as chapters" in sub.description for sub in parts)
+    named = [
+        h for sub in parts for h in [sub.inputs.get("section"), *sub.inputs.get("headings", [])]
+    ]
+    assert {"I", "II", "III", "IV"} <= set(named)
+    for sub in parts:
+        start, end = sub.inputs["chars"]
+        for heading in sub.inputs.get("headings", []):
+            assert f"\n{heading}\n" in (text * 6)[start:end]

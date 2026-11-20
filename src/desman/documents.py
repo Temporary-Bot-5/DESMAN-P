@@ -29,6 +29,9 @@ PART: Final = (
     "word, each with where in the part it is. A quote is one unbroken piece of the text with "
     "its own word forms; mark anything left out inside it with …, never join pieces silently. "
     "If the part says nothing on the goal, say so. "
+    "Mark every note with the document's own heading (chapter, section) it falls under: the "
+    "part begins under the heading in `section` (if any), and each heading in `headings` starts "
+    "inside the part's text — notes after it fall under it. Never number parts as chapters. "
     "Keep the notes compact: no more than about {limit} characters."
 )
 PART_CRITERIA: Final = (
@@ -39,7 +42,8 @@ PART_CRITERIA: Final = (
 COMBINE: Final = (
     "Combine the notes on parts {a}–{b} of the document {path} (results of "
     "dependencies) into one set of notes on the goal, in the document's order. Keep quotes word "
-    "for word with the part they come from. Shorten wording, keep every quote; drop repetitions, "
+    "for word with the part and the document's heading (chapter, section) they come from; "
+    "group the notes by those headings, never by part numbers. Shorten wording, keep every quote; drop repetitions, "
     "never facts. Keep the notes compact: no more than about {limit} characters in all."
 )
 COMBINE_CRITERIA: Final = (
@@ -152,6 +156,7 @@ def _parts(text: str) -> list[Part]:
 
 def _digest(subtasks: list[SubtaskSpec], document: Document) -> int:
     parts = _parts(document.text)
+    positions, titles = _headings(document.text)
     level = []
     for i, part in enumerate(parts, 1):
         inputs = {
@@ -166,6 +171,13 @@ def _digest(subtasks: list[SubtaskSpec], document: Document) -> int:
         if part.title is not None:
             inputs["section"] = part.title
             section = f" under the heading {part.title}"
+        inside = [
+            title
+            for position, title in zip(positions, titles, strict=True)
+            if part.start < position < part.end
+        ]
+        if inside:  # the part's own heading line at its start is `section`, not one of these
+            inputs["headings"] = inside
         level.append((len(subtasks), i, i))
         subtasks.append(
             SubtaskSpec(
