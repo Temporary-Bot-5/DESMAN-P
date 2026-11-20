@@ -158,7 +158,9 @@ def test_setup_preserves_secret_and_reinstalls_pin(
         "REQUESTS_CA_BUNDLE",
     ):
         monkeypatch.setenv(key, "test-value")
-        assert native.environment(folder)[key] == "test-value"
+        # Windows keeps environment names in upper case.
+        passed = {name.upper(): value for name, value in native.environment(folder).items()}
+        assert passed[key.upper()] == "test-value"
     env = native.environment(folder)
     assert "SECRET_FOR_TEST" not in env
     assert env["SEARXNG_SETTINGS_PATH"] == str(settings)
