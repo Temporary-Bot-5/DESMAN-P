@@ -510,7 +510,9 @@ def _quote_feedback(
             if dependencies is not None
             else [note.get("result") for note in notes]
         )
-        sources = list(string_values(results))
+        # From notes only what they quoted (checked where it was written): a paraphrase in
+        # the notes must not become a quote one step later (L.2 live run).
+        sources = [fragment for value in string_values(results) for fragment in quotes(value)]
         location = "the notes you were given"
         if combine and quote_evidence is not None:
             # A quote the notes carried a little differently is still right if the document

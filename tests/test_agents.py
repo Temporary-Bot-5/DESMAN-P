@@ -501,7 +501,7 @@ def test_split_review_without_evidence_has_no_unexplained_flag(store: Store) -> 
         ({"document": "book.txt", "text": "Вдали был большой лес."}, [], True, ""),
         (
             {"document": "book.txt"},
-            [{"result": {"text": "На берегу стоял дом."}}],
+            [{"result": {"text": "«На берегу стоял дом.»"}}],
             False,
             "the notes you were given",
         ),
@@ -517,7 +517,7 @@ def test_split_review_without_evidence_has_no_unexplained_flag(store: Store) -> 
         ),
         (
             {},
-            [{"digest": True, "result": {"text": "На берегу стоял дом."}}],
+            [{"digest": True, "result": {"text": "«На берегу стоял дом.»"}}],
             False,
             "the evidence you were given",
         ),
@@ -635,3 +635,26 @@ def test_a_combine_may_quote_the_document_more_exactly_than_its_notes(store: Sto
     assert reviewer(subtask, {"text": f"«{exact}»"}) == Review(verdict=Verdict.ACCEPT)
     invented = reviewer(subtask, {"text": "«Мука здесь дорогая и плохая»"})
     assert isinstance(invented, Review) and invented.verdict is Verdict.RETRY
+
+
+def test_a_paraphrase_in_the_notes_does_not_become_a_quote(store: Store) -> None:
+    # Found live (L.2): notes said "Река темнеет, валы беспорядочны" in their own words; the next
+    # step put it in quotes and code found the words in the notes, so a false quote passed.
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    subtask = subtask.model_copy(update={"inputs": {"read_in_parts": ["input/book.txt"]}})
+    notes = DependencyResult(
+        subtask_id="digest",
+        description="Combine",
+        content={"text": "Глава VI: река темнеет, валы беспорядочны. «На берегу стоял дом.»"},
+        digest="input/book.txt",
+    )
+    model = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {"results_of_dependencies": [{"digest": True, "result": notes.content}]},
+        dependencies=lambda _: [notes],
+        quote_evidence=lambda _: ["Вдали был лес. На берегу стоял дом."],
+    )
+    paraphrase = reviewer(subtask, {"text": "«Река темнеет, валы беспорядочны»"})
+    assert isinstance(paraphrase, Review) and paraphrase.verdict is Verdict.RETRY
+    assert reviewer(subtask, {"text": "«На берегу стоял дом.»"}) == Review(verdict=Verdict.ACCEPT)
