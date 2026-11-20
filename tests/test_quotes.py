@@ -96,3 +96,11 @@ def test_nearest_shows_what_the_text_really_says() -> None:
     found = nearest(quote, [text])
     assert found is not None and found.startswith("Мутные валы со злобой хлещут по нем и")
     assert nearest("Совсем другие слова здесь стоят", [text]) is None
+
+
+def test_a_translated_quote_is_not_skipped_as_a_title() -> None:
+    # Found live (L.2): notes quoted Chekhov in English and the check let them through.
+    source = ["Спрос на художество здесь большой, но бог не дает художников."]
+    translated = "The demand for art here is great, but God gives no artists"
+    assert missing([translated], source) == [translated]
+    assert missing(["From Siberia"], source) == []

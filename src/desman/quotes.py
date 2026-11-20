@@ -86,13 +86,22 @@ def _script(text: str) -> str | None:
     return scripts.most_common(1)[0][0] if scripts else None
 
 
+TITLE_WORDS = 4
+"""A fragment in another script this short is a title or term; a longer one is a translated
+quote, which is never word for word (L.2 live run: notes quoted Chekhov in English)."""
+
+
 def missing(result_quotes: Iterable[str], sources: Iterable[str]) -> list[str]:
     texts = list(sources)
     normalized = [normalize(source) for source in texts]
     script = _script("".join(texts))
     absent = []
     for quote in result_quotes:
-        if script is not None and _script(quote) not in (script, None):
+        if (
+            script is not None
+            and _script(quote) not in (script, None)
+            and len(re.findall(r"\w+", quote)) <= TITLE_WORDS
+        ):
             continue  # a title or term given in another language, not a quote from the text
         pieces = [normalize(piece) for piece in re.split(r"…|\.{3,}", quote)]
         substantial = [piece for piece in pieces if len(piece) >= 8]
