@@ -14,11 +14,13 @@ dependencies = [
     "rich>=13.7",
     "questionary>=2.0",
     "prompt_toolkit>=3.0",  # questionary's own base; the chat's line uses it directly
+    "wasmtime>=50,<51; sys_platform == 'win32' or sys_platform == 'darwin'",  # ADR 0013
     "cryptography>=42",  # Ed25519 signatures of desman-global (ADR 0004)
 ]
 
 [project.optional-dependencies]
 dev = [
+    "wasmtime>=50,<51",  # ADR 0013: exercise WASI on Linux too
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.10",

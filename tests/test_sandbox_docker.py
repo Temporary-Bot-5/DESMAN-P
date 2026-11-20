@@ -41,8 +41,7 @@ class Docker:
         self.calls: list[list[str]] = []
         self.timeouts: list[float] = []
         self.answers: dict[str, tuple[int, str, str]] = {
-            "info": (0, "linux\n", ""),
-            "{{.SystemTime}}": (0, "2020-01-02T14:00:00.123456789+02:00\n", ""),
+            "info": (0, "linux 2020-01-02T14:00:00.123456789+02:00\n", ""),
             "manifest": (1, "", "registry unavailable"),
         }
 
@@ -53,8 +52,7 @@ class Docker:
         self.timeouts.append(timeout)
         if argv[1] == "pull":
             self.answers["image"] = (0, "", "")
-        key = argv[-1] if argv[-1] == "{{.SystemTime}}" else argv[1]
-        return subprocess.CompletedProcess(argv, *self.answers.get(key, (0, "", "")))
+        return subprocess.CompletedProcess(argv, *self.answers.get(argv[1], (0, "", "")))
 
     def sandbox(self, **limits: int) -> Sandbox:
         return Sandbox(
@@ -129,10 +127,12 @@ def test_docker_argv(platform: str, tmp_path: Path) -> None:
     ]
 
 
-def test_backend_selection_and_docker_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_backend_selection_and_docker_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(shutil, "which", lambda _: None)
     assert Sandbox(platform="linux", docker="docker-test").backend == "bwrap"
-    assert Sandbox(platform="darwin").unavailable() == "Docker is not installed or is not on PATH."
+    box = Sandbox(platform="darwin", docker="", wasi_dir=tmp_path)
+    assert box.backend == "wasi"
+    assert (box.unavailable() or "").startswith("Docker is not installed or is not on PATH.")
 
 
 @pytest.mark.parametrize(
@@ -177,9 +177,9 @@ def test_sweep_and_empty_probe(timeout: int) -> None:
         "",
     )
     assert docker.sandbox(timeout=timeout).unavailable() is None
-    _, image, clock, listing, remove, run, cleanup = docker.calls
+    info, image, listing, remove, run, cleanup = docker.calls
     assert image == ["image", "inspect", DOCKER_IMAGE]
-    assert clock == ["info", "--format", "{{.SystemTime}}"]
+    assert info == ["info", "--format", "{{.OSType}} {{.SystemTime}}"]
     assert listing[:5] == ["ps", "-a", "--filter", "label=" + DOCKER_LABEL, "--format"]
     assert remove == ["rm", "-f", "111111111111"]
     name = run[run.index("--name") + 1]
@@ -435,8 +435,8 @@ def test_run_shares_sandbox_probe(store: Store) -> None:
 @pytest.mark.parametrize(
     ("failure", "expected", "setup_hint", "install_link"),
     [
-        ("absent", "Docker is not installed", False, True),
-        ("windows", "switch Docker Desktop to Linux containers", False, False),
+        ("absent", "Docker is not installed", True, True),
+        ("windows", "switch Docker Desktop to Linux containers", True, True),
         ("image", "The sandbox image is missing", True, False),
     ],
 )

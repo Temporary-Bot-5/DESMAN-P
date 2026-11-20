@@ -1946,7 +1946,7 @@ def _sandbox_status(ctx: Context, args: NoArgs) -> Outcome:
 
 def _sandbox_setup(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     from desman.core.sandbox import Sandbox
-    from desman.sandbox_cli import prepare_setup, setup_image
+    from desman.sandbox_cli import apply_setup, prepare_setup
 
     box = Sandbox()
     question = prepare_setup(box)
@@ -1954,7 +1954,7 @@ def _sandbox_setup(ctx: Context, args: NoArgs) -> Outcome | Proposal:
         return Outcome({"installed": False})
 
     def apply() -> Outcome:
-        return Outcome({"installed": setup_image(box)})
+        return Outcome({"installed": apply_setup(box)})
 
     return Proposal([question], apply)
 
@@ -2010,7 +2010,7 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "sandbox setup",
-        "Install the pinned code sandbox image.",
+        "Install the pinned files for the code sandbox.",
         NoArgs,
         Kind.CHANGE,
         _sandbox_setup,

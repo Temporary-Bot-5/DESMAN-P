@@ -1,13 +1,19 @@
 """Inspect and prepare the sandbox used to run generated code."""
 
 import json
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import click
 
 from desman import ui
 from desman.config_cli import json_option
-from desman.core.sandbox import DOCKER_IMAGE, Sandbox, SandboxUnavailable
+from desman.core.sandbox import (
+    DOCKER_IMAGE,
+    Sandbox,
+    SandboxUnavailable,
+    install_wasi,
+    wasi_runtime,
+)
 from desman.i18n import t
 
 
@@ -17,6 +23,7 @@ class Status(TypedDict):
     reason: str | None
     image: str | None
     image_present: bool | None
+    wasi_present: NotRequired[bool]
 
 
 def sandbox_status(*, display: bool = True) -> Status:
@@ -30,6 +37,8 @@ def sandbox_status(*, display: bool = True) -> Status:
         image=DOCKER_IMAGE if box.backend == "docker" else None,
         image_present=present,
     )
+    if box.backend == "wasi":
+        result["wasi_present"] = box.wasi_present
     if display:
         ui.note(t("Sandbox backend: {backend}", backend=box.backend))
         if reason is None:
@@ -43,7 +52,17 @@ def sandbox_status(*, display: bool = True) -> Status:
                 None: t("Image status unknown"),
             }[present]
             ui.note(t("Pinned sandbox image: {image} ({state})", image=DOCKER_IMAGE, state=state))
+        if box.backend == "wasi":
+            _show_wasi_files(result["wasi_present"])
     return result
+
+
+def _show_wasi_files(present: bool) -> None:
+    ui.note(
+        t("WebAssembly sandbox files are present.")
+        if present
+        else t("WebAssembly sandbox files are missing.")
+    )
 
 
 def _image_size(box: Sandbox) -> int:
@@ -89,14 +108,35 @@ def _needs_image(box: Sandbox) -> bool:
 
 
 def prepare_setup(box: Sandbox) -> str | None:
-    """Describe the download when the pinned image is needed."""
+    """Describe the download when the selected backend needs setup."""
+    if box.backend == "wasi":
+        if not wasi_runtime():
+            raise click.ClickException(t("The WebAssembly runtime (wasmtime) could not be loaded."))
+        if box.wasi_present:
+            _show_wasi_files(True)
+            return None
+        return t(
+            "Download the pinned WebAssembly sandbox files (about 24 MB download, 52 MB on disk)?"
+        )
     if not _needs_image(box):
         return None
     return t("Download the pinned sandbox image (about {size} MB)?", size=_image_size(box))
 
 
-def setup_image(box: Sandbox) -> bool:
+def apply_setup(box: Sandbox) -> bool:
     """Apply an operator's confirmed setup and report the result."""
+    if box.backend == "wasi":
+        if not wasi_runtime():
+            raise click.ClickException(t("The WebAssembly runtime (wasmtime) could not be loaded."))
+        try:
+            installed = install_wasi(box.wasi_dir)
+        except SandboxUnavailable as exc:
+            raise click.ClickException(
+                t("WebAssembly sandbox setup failed: {error}", error=str(exc))
+            ) from exc
+        box.reprobe()
+        ui.ok(t("WebAssembly sandbox files are present."))
+        return installed
     if not _needs_image(box):
         return False
     try:
@@ -117,7 +157,7 @@ def setup_image(box: Sandbox) -> bool:
 def offer_setup(box: Sandbox) -> None:
     question = prepare_setup(box)
     if question is not None and ui.confirm(question):
-        setup_image(box)
+        apply_setup(box)
 
 
 @click.group()
@@ -137,13 +177,13 @@ def status(as_json: bool) -> None:
 @sandbox.command()
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def setup(yes: bool) -> None:
-    """Install the pinned sandbox image if Docker is used."""
+    """Install the pinned files for the code sandbox."""
     box = Sandbox()
     question = prepare_setup(box)
     if question is None:
         return
     ui.note(question)
     if yes:
-        setup_image(box)
+        apply_setup(box)
     else:
         ui.note(t("Nothing changed. Confirm with: {command}", command="desman sandbox setup --yes"))

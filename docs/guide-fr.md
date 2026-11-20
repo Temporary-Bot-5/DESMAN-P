@@ -32,6 +32,7 @@ un problème. Commencez par les sections 1 à 3 et consultez le reste au besoin.
   pouvez activer l’autorisation d’exécuter du code (`shell_execution`) dans les paramètres de
   DESMAN. Sans bac à sable, DESMAN peut écrire du code et vous demandera de l’aide pour l’exécuter.
   Pour installer Docker Desktop, utilisez la section Docker de l’assistant de configuration ou lancez `desman docker install --yes`.
+  Sans Docker sur Windows ou macOS, exécutez `desman sandbox setup --yes` pour configurer le bac à sable WebAssembly pour Python et pytest.
 
 ## 1. Installation
 

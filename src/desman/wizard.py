@@ -554,11 +554,20 @@ def _docker(s: _Session) -> None:
         from desman.sandbox_cli import offer_setup
 
         try:
-            offer_setup(Sandbox())
+            box = Sandbox()
+            if box.backend == "docker" and box.docker_problem() is None:
+                offer_setup(box)
+            else:
+                _docker_sandbox_later()
         except click.ClickException as exc:
             ui.warn(str(exc))
     if not state["available"]:
         _offer_searxng(s)
+
+
+def _docker_sandbox_later() -> None:
+    ui.note(t("Once Docker Desktop is running, follow these steps."))
+    ui.note(t("For the sandbox, run `desman sandbox setup --yes`."))
 
 
 def _permissions(current: Permissions) -> Permissions:
@@ -580,7 +589,12 @@ def _permissions(current: Permissions) -> Permissions:
         from desman.sandbox_cli import offer_setup
 
         box = Sandbox()
-        if box.backend == "docker":
+        if box.backend in ("docker", "wasi"):
+            if box.docker and (box.docker_problem() or "").startswith(
+                "Docker daemon did not answer"
+            ):
+                ui.warn(t("Docker is installed, but the daemon did not answer."))
+                _docker_sandbox_later()
             try:
                 offer_setup(box)
             except click.ClickException as exc:
