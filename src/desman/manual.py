@@ -167,13 +167,14 @@ TOPICS: Final = (
     Topic(
         "search",
         "set up and manage whole-web search",
-        "`desman search setup` previews installing local SearXNG through Docker (about "
-        "100 MB). `desman docker install` previews installation or startup; --yes runs the plan. "
-        "The wizard offers Docker and, once ready, the sandbox image and SearXNG where applicable. On Linux it can offer bubblewrap alone. "
-        "The container is bound to 127.0.0.1, starting at a free port from 8888; --port chooses "
-        "one; --yes confirms setup. The wizard asks and preserves choices if setup fails. The URL is saved only after a JSON search answers. "
-        "`desman search status` shows the container (unknown without Docker), URL and search health (--json for scripts); `desman search start` and `desman search stop` control "
-        "it; `desman search remove` previews removal; --yes confirms it, keeping settings. "
+        "`desman search setup` previews local SearXNG. Start Docker if it is installed. "
+        "Without Docker, or with --native (also an option in the wizard), setup uses a Python virtual environment. "
+        "DESMAN starts the Python service when needed. "
+        "SearXNG binds to 127.0.0.1 on a free port from 8888; --port chooses one and --yes confirms setup. "
+        "The URL is saved after a JSON search answers. `desman search status` shows the installation "
+        "type, commit, URL and health (--json for scripts). `desman search start` and `desman search stop` "
+        "control local services. `desman search remove` previews removing both local installs; --yes confirms it. "
+        "Docker settings are kept. "
         "`desman keys list` shows its URL and `desman keys check PROVIDER` with searxng checks searches. "
         "Tavily with a key is the alternative; an existing SearXNG URL can be set in the wizard.",
     ),

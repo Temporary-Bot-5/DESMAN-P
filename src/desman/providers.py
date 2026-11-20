@@ -64,6 +64,8 @@ class Provider:
     # others with it. Set only by a person who read the free tier's terms on serving third
     # parties, with the link and the date in a comment. Never for a paid provider.
     donatable: bool = False
+    # Provider-managed settings excluded from the wizard and config display.
+    internal_settings: tuple[str, ...] = ()
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -334,6 +336,7 @@ SEARCH = (
         "SearXNG",
         "https://docs.searxng.org",
         settings=(Setting("SEARXNG_URL", "URL"),),
+        internal_settings=("SEARXNG_DOCKER_URL",),
         search=True,
     ),
     Provider(
@@ -493,6 +496,7 @@ def describe(config: Config) -> dict[str, Any]:
     """The config with every secret masked: what `desman config show` prints."""
     every = PROVIDERS + SERVICES
     known = {p.key_env for p in every} | {s.env for p in every for s in p.settings}
+    known.update(env for p in every for env in p.internal_settings)
     rows = []
     for p in every:
         row: dict[str, Any] = {

@@ -13,7 +13,7 @@ from click.testing import CliRunner
 from conftest import FakeClock
 from desman import docker_cli, providers, sandbox_cli, searxng, ui, wizard
 from desman.cli import cli
-from desman.config import ConfigManager, open_config
+from desman.config import Config, ConfigManager, open_config
 from desman.core import sandbox
 from desman.core.sandbox import Sandbox
 from desman.docker_cli import Plan, Status, plan
@@ -301,10 +301,12 @@ def test_docker_step_in_configuration(
 
     offers: list[str] = []
 
-    def setup(manager: ConfigManager, *, save_url: bool) -> str:
+    def setup(manager: ConfigManager, *, save_url: bool, staged: Config, force_native: bool) -> str:
+        assert not force_native
         assert not save_url
         assert not manager.load().settings.get("SEARXNG_URL")
         offers.append("search")
+        staged.settings["SEARXNG_URL"] = "http://127.0.0.1:8888"
         return "http://127.0.0.1:8888"
 
     def probe(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:

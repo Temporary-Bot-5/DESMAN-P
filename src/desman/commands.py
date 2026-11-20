@@ -1900,6 +1900,7 @@ _KEYED = [p.id for p in providers.CLOUD + providers.SERVICES if p.key_env is not
 
 
 class SearchSetupArgs(Args):
+    native: bool = False
     port: int | None = Field(default=None, ge=1, le=65535)
 
 
@@ -1919,19 +1920,19 @@ def _search_change(action: str) -> Handler:
 
         def apply() -> Outcome:
             if action == "setup":
-                searxng.setup(ctx.manager, args.port)
+                searxng.setup(ctx.manager, args.port, force_native=args.native)
             else:
                 searxng.operate(ctx.manager, action)
             return Outcome({"action": action})
 
         if action == "setup":
-            line = searxng.consent()
+            line = searxng.consent(args.native)
         elif action == "start":
-            line = t("Start the local SearXNG container.")
+            line = t("Start local SearXNG.")
         elif action == "stop":
-            line = t("Stop the local SearXNG container.")
+            line = t("Stop local SearXNG.")
         else:
-            line = t("Remove the local SearXNG container?")
+            line = t("Remove local SearXNG?")
         return Proposal([line], apply)
 
     return handle
@@ -2017,7 +2018,7 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "search setup",
-        "Set up local SearXNG with Docker (about 100 MB).",
+        "Set up local SearXNG. Set native=true to use Python even with Docker installed.",
         SearchSetupArgs,
         Kind.CHANGE,
         _search_change("setup"),
@@ -2028,7 +2029,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry("search stop", "Stop local SearXNG.", NoArgs, Kind.CHANGE, _search_change("stop")),
     Entry(
         "search remove",
-        "Remove local SearXNG; keep settings.",
+        "Remove local SearXNG.",
         SearchRemoveArgs,
         Kind.CHANGE,
         _search_change("remove"),
