@@ -41,8 +41,7 @@ class Docker:
         self.calls: list[list[str]] = []
         self.timeouts: list[float] = []
         self.answers: dict[str, tuple[int, str, str]] = {
-            "info": (0, "linux\n", ""),
-            "{{.SystemTime}}": (0, "2020-01-02T14:00:00.123456789+02:00\n", ""),
+            "info": (0, "linux 2020-01-02T14:00:00.123456789+02:00\n", ""),
             "manifest": (1, "", "registry unavailable"),
         }
 
@@ -53,8 +52,7 @@ class Docker:
         self.timeouts.append(timeout)
         if argv[1] == "pull":
             self.answers["image"] = (0, "", "")
-        key = argv[-1] if argv[-1] == "{{.SystemTime}}" else argv[1]
-        return subprocess.CompletedProcess(argv, *self.answers.get(key, (0, "", "")))
+        return subprocess.CompletedProcess(argv, *self.answers.get(argv[1], (0, "", "")))
 
     def sandbox(self, **limits: int) -> Sandbox:
         return Sandbox(
@@ -179,9 +177,9 @@ def test_sweep_and_empty_probe(timeout: int) -> None:
         "",
     )
     assert docker.sandbox(timeout=timeout).unavailable() is None
-    _, image, clock, listing, remove, run, cleanup = docker.calls
+    info, image, listing, remove, run, cleanup = docker.calls
     assert image == ["image", "inspect", DOCKER_IMAGE]
-    assert clock == ["info", "--format", "{{.SystemTime}}"]
+    assert info == ["info", "--format", "{{.OSType}} {{.SystemTime}}"]
     assert listing[:5] == ["ps", "-a", "--filter", "label=" + DOCKER_LABEL, "--format"]
     assert remove == ["rm", "-f", "111111111111"]
     name = run[run.index("--name") + 1]

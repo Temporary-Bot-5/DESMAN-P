@@ -72,6 +72,7 @@ from typing import IO, Final
 import httpx
 from pydantic import BaseModel
 
+from desman.core import filelock
 from desman.core.db import default_db_path
 
 _WINDOWS_PROCESS_GROUP: Final = 0x00000200  # CREATE_NEW_PROCESS_GROUP
@@ -100,7 +101,6 @@ _DOCKER_ENV: Final = {
 _DOCKER_EXEC: Final = f"""\
 import os
 import sys
-import sysconfig
 
 command = sys.argv[1:]
 try:
@@ -205,6 +205,8 @@ class Sandbox:
         )
         self._backend: str | None = None
         self._docker_issue: str | None = None
+        self._docker_checked_at: float | None = None
+        self._docker_time = ""
         self._docker_runner = docker_runner if docker_runner is not None else _docker_run
         self.image_present: bool | None = None
         self._problem: str | None = None
@@ -218,10 +220,10 @@ class Sandbox:
             if self.platform.startswith("linux"):
                 self._backend = "bwrap"
             else:
-                self._docker_issue = self.docker_problem()
+                problem = self.docker_problem()
                 self._backend = (
                     "wasi"
-                    if self._docker_issue is not None and self.platform in ("win32", "darwin")
+                    if problem is not None and self.platform in ("win32", "darwin")
                     else "docker"
                 )
         return self._backend
@@ -255,6 +257,17 @@ class Sandbox:
             except _DockerDaemonUnavailable as exc:
                 self._problem = str(exc)
                 self._retry_at = self._monotonic() + 60.0
+            if (
+                self._problem is not None
+                and self.backend == "docker"
+                and self.platform in ("win32", "darwin")
+                and self.wasi_present
+                and wasi_runtime()
+            ):
+                self._backend = "wasi"
+                self._problem = None
+                self.image_present = None
+                self._retry_at = self._monotonic() + 60.0
             self._checked = True
         return self._problem
 
@@ -262,6 +275,7 @@ class Sandbox:
         """Refresh availability after the operator changes the sandbox setup."""
         self._checked = False
         self._backend = None
+        self._docker_checked_at = None
         self.image_present = None
         self._retry_at = None
         return self.unavailable()
@@ -410,25 +424,27 @@ class Sandbox:
             raise SandboxUnavailable(str(exc)) from exc
 
     def docker_problem(self) -> str | None:
-        if self._backend is not None:
-            return self._docker_issue
-        try:
-            return self._docker_problem()
-        except _DockerDaemonUnavailable as exc:
-            return str(exc)
+        if self._docker_checked_at is None or self._monotonic() - self._docker_checked_at >= 60:
+            try:
+                self._docker_issue = self._docker_problem()
+            except _DockerDaemonUnavailable as exc:
+                self._docker_issue = str(exc)
+            self._docker_checked_at = self._monotonic()
+        return self._docker_issue
 
     def _docker_problem(self) -> str | None:
         if not self.docker:
             return "Docker is not installed or is not on PATH."
         try:
-            result = self.docker_command(["info", "--format", "{{.OSType}}"])
+            result = self.docker_command(["info", "--format", "{{.OSType}} {{.SystemTime}}"])
         except SandboxUnavailable as exc:
             raise _DockerDaemonUnavailable(f"Docker daemon did not answer: {exc}") from exc
         if result.returncode:
             raise _DockerDaemonUnavailable(
                 f"Docker daemon did not answer: {_docker_detail(result)}"
             )
-        if result.stdout.strip() != "linux":
+        os_type, _, self._docker_time = result.stdout.strip().partition(" ")
+        if os_type != "linux":
             return "Docker runs Windows containers: switch Docker Desktop to Linux containers."
         return None
 
@@ -525,8 +541,7 @@ class Sandbox:
                 finally:
                     self._remove_docker(name)
             if result.returncode:
-                problem = self._docker_problem()
-                return problem or f"Docker cannot create a sandbox here: {_docker_detail(result)}"
+                return f"Docker cannot create a sandbox here: {_docker_detail(result)}"
         except _DockerDaemonUnavailable:
             raise
         except SandboxUnavailable as exc:
@@ -537,11 +552,8 @@ class Sandbox:
         return None
 
     def _sweep_docker(self) -> None:
-        clock = self.docker_command(["info", "--format", "{{.SystemTime}}"])
-        if clock.returncode:
-            raise _DockerDaemonUnavailable(_docker_detail(clock))
         # datetime uses microseconds. Truncate Docker's fractional seconds before parsing.
-        timestamp = re.sub(r"(\.\d{6})\d+", r"\1", clock.stdout.strip())
+        timestamp = re.sub(r"(\.\d{6})\d+", r"\1", self._docker_time)
         try:
             now = dt.datetime.fromisoformat(timestamp)
             if now.tzinfo is None:
@@ -991,16 +1003,41 @@ def install_wasi(root: Path, *, download: Callable[[str], bytes] | None = None) 
                 _unpack_wasi(data, stage / folder)
             if not _wasi_files(stage):
                 raise SandboxUnavailable("The WebAssembly sandbox download is incomplete.")
+            _warm_wasi_cache(stage)
             (stage / "ok").touch()
-            try:
-                stage.rename(root)
-            except OSError:
-                if _wasi_files(root) and (root / "ok").is_file():
-                    return False  # another setup finished first
-                raise
+            # Serialize publication so simultaneous repairs cannot displace a completed install.
+            with (root.parent / f".{root.name}.lock").open("a+b") as lock:
+                filelock.lock(lock.fileno())
+                try:
+                    if _wasi_files(root) and (root / "ok").is_file():
+                        return False
+                    broken = root.with_name(f".{root.name}.broken-{uuid.uuid4().hex}")
+                    if os.path.lexists(root):
+                        root.rename(broken)
+                    try:
+                        stage.rename(root)
+                    except OSError:
+                        if os.path.lexists(broken):
+                            broken.rename(root)
+                        raise
+                finally:
+                    filelock.unlock(lock.fileno())
+            if broken.is_dir() and not broken.is_symlink():
+                shutil.rmtree(broken)
+            else:
+                broken.unlink(missing_ok=True)
     except (OSError, httpx.HTTPError, zipfile.BadZipFile) as exc:
         raise SandboxUnavailable(str(exc)) from exc
     return True
+
+
+def _warm_wasi_cache(root: Path) -> None:
+    try:
+        from desman.core.wasi_runner import warm_cache
+
+        warm_cache(root)
+    except (ImportError, RuntimeError) as exc:
+        raise SandboxUnavailable(f"Cannot prepare the WebAssembly sandbox: {exc}") from exc
 
 
 _WASI_PYTEST_ARGS = (
@@ -1013,8 +1050,8 @@ _WASI_PYTEST_ARGS = (
     "no:logging",
 )
 _WASI_UNSUPPORTED = (
-    "Only python and python -m pytest run in this sandbox (WebAssembly); "
-    "use python FILE.py, python -c CODE, or python -m pytest. "
+    "Only Python scripts, snippets, pytest and unittest run in this sandbox (WebAssembly); "
+    "use python FILE.py, python -c CODE, python -m pytest, or python -m unittest. "
     "Packages with C code are not available."
 )
 
@@ -1023,12 +1060,27 @@ def _wasi_argv(command: Sequence[str]) -> list[str] | None:
     if len(command) < 2 or command[0] not in ("python", "python3"):
         return None
     start = f"import os; os.chdir({MOUNT_POINT!r}); "
-    match list(command[1:]):
+    index = 1
+    while index < len(command):
+        flag = command[index]
+        if flag in ("-u", "-B", "-E", "-s", "-I") or (flag.startswith("-X") and flag != "-X"):
+            index += 1
+        elif flag in ("-X", "-W"):
+            index += 2
+        else:
+            break
+    match list(command[index:]):
         case ["-m", "pytest", *args]:
             source = (
                 f"{start}import sys, pytest; sys.exit(pytest.main({[*args, *_WASI_PYTEST_ARGS]!r}))"
             )
             return ["python", "-c", source]
+        case ["-m", "unittest", *args]:
+            source = (
+                f"{start}import runpy; "
+                "runpy.run_module('unittest', run_name='__main__', alter_sys=True)"
+            )
+            return ["python", "-c", source, *args]
         case ["-c", code, *args]:
             # Compile the original source on its own, preserving future imports and line numbers.
             return ["python", "-c", f"{start}exec(compile({code!r}, '<string>', 'exec'))", *args]
@@ -1054,6 +1106,7 @@ class _WasiSpec(BaseModel):
     stdout: Path
     stderr: Path
     result: Path
+    ready: Path
 
 
 class _WasiResult(BaseModel):
@@ -1079,19 +1132,105 @@ def _wasi_output_over_limit(path: Path, chars: int, limits: Limits) -> bool:
     return path.stat().st_size > cap
 
 
+def _workspace_files(root: Path) -> Iterator[tuple[Path, os.stat_result]]:
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with (
+            contextlib.suppress(FileNotFoundError, NotADirectoryError, PermissionError),
+            os.scandir(directory) as entries,
+        ):
+            for entry in entries:
+                with contextlib.suppress(FileNotFoundError):
+                    info = entry.stat(follow_symlinks=False)
+                    if getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                        continue
+                    path = Path(entry.path)
+                    if stat.S_ISDIR(info.st_mode):
+                        pending.append(path)
+                    elif stat.S_ISREG(info.st_mode):
+                        yield path, info
+
+
+def _file_version(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def _wasi_files_over_limit(
+    workdir: Path, before: dict[Path, tuple[int, int, int, int]], cap: int
+) -> bool:
+    total = 0
+    for path, info in _workspace_files(workdir):
+        if before.get(path) != _file_version(info):
+            total += info.st_size
+            if info.st_size > cap or total > 4 * cap:
+                return True
+    return False
+
+
 def _wait_wasi(
-    process: subprocess.Popen[bytes], spec: _WasiSpec, limits: Limits
-) -> tuple[bool, bool, bool]:
-    deadline = time.monotonic() + limits.timeout + 2.0
+    process: subprocess.Popen[bytes],
+    spec: _WasiSpec,
+    limits: Limits,
+    before: dict[Path, tuple[int, int, int, int]],
+) -> _WasiResult:
+    deadline = time.monotonic() + 180.0
+    ready = False
+    next_scan = time.monotonic()
     while True:
-        left = max(0.0, deadline - time.monotonic())
         with contextlib.suppress(subprocess.TimeoutExpired):
-            process.wait(timeout=min(left, 0.2))
-        stdout_cut = _wasi_output_over_limit(spec.stdout, limits.stdout_chars, limits)
-        stderr_cut = _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits)
-        timed_out = process.returncode is None and time.monotonic() >= deadline
-        if process.returncode is not None or timed_out or stdout_cut or stderr_cut:
-            return timed_out, stdout_cut, stderr_cut
+            process.wait(timeout=min(0.2, max(0.0, deadline - time.monotonic())))
+        now = time.monotonic()
+        if not ready and spec.ready.is_file():
+            ready = True
+            deadline = now + limits.timeout + 2.0
+        if process.returncode is not None or (ready and now >= next_scan):
+            if _wasi_files_over_limit(spec.workdir, before, limits.file_bytes):
+                return _WasiResult(
+                    exit_code=1, trap="WebAssembly sandbox file size limit exceeded.\n"
+                )
+            next_scan = now + 0.5
+        if process.returncode is not None:
+            return _wasi_exit_result(process.returncode, spec)
+        if now >= deadline:
+            note = "" if ready else "Timed out loading the WebAssembly sandbox.\n"
+            return _WasiResult(trap=note)
+        if _wasi_output_over_limit(
+            spec.stdout, limits.stdout_chars, limits
+        ) or _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits):
+            # A large final write can reach the files just before the runner exits.
+            # Give teardown one polling interval before terminating an active writer.
+            try:
+                process.wait(timeout=min(0.2, deadline - now))
+            except subprocess.TimeoutExpired:
+                if process.poll() is None:
+                    _kill(process)
+                    code = process.wait()
+                    if sys.platform == "win32":
+                        killed = code == 1
+                    else:
+                        killed = code == -signal.SIGKILL
+                    if killed:
+                        return _WasiResult(
+                            exit_code=1, trap="WebAssembly sandbox output limit exceeded.\n"
+                        )
+
+
+def _wasi_exit_result(code: int, spec: _WasiSpec) -> _WasiResult:
+    detail = f"exit code {code}"
+    if code == 0:
+        try:
+            result = _WasiResult.model_validate_json(spec.result.read_bytes())
+        except (OSError, ValueError) as exc:
+            detail = str(exc)
+        else:
+            if result.error is None:
+                return result
+            detail = result.error
+    return _WasiResult(
+        exit_code=_exit_code(code) if code < 0 else 1,
+        trap=f"the WebAssembly runner stopped: {detail}\n",
+    )
 
 
 def _execute_wasi(
@@ -1102,7 +1241,9 @@ def _execute_wasi(
         return Outcome(2, "", _WASI_UNSUPPORTED)
 
     try:
-        with tempfile.TemporaryDirectory(prefix="desman-wasi-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="desman-wasi-", ignore_cleanup_errors=True
+        ) as directory:
             scratch = Path(directory)
             spec = _WasiSpec(
                 argv=argv,
@@ -1114,6 +1255,7 @@ def _execute_wasi(
                 stdout=scratch / "stdout",
                 stderr=scratch / "stderr",
                 result=scratch / "result.json",
+                ready=scratch / "ready",
             )
             spec.stdin.write_bytes(stdin.encode("utf-8"))
             spec.stdout.touch()
@@ -1136,6 +1278,7 @@ def _run_wasi_child(config: Path, spec: _WasiSpec, limits: Limits) -> Outcome:
         if windows
         else {}
     )
+    before = {path: _file_version(info) for path, info in _workspace_files(spec.workdir)}
     # This child runs DESMAN's trusted runner. Generated code executes only inside Wasmtime.
     with subprocess.Popen(
         _wasi_runner_command(config),
@@ -1148,24 +1291,14 @@ def _run_wasi_child(config: Path, spec: _WasiSpec, limits: Limits) -> Outcome:
         creationflags=_WINDOWS_PROCESS_GROUP if windows else 0,
     ) as process:
         try:
-            timed_out, stdout_cut, stderr_cut = _wait_wasi(process, spec, limits)
+            result = _wait_wasi(process, spec, limits, before)
         finally:
             if process.returncode is None:
                 _kill(process)
                 process.wait()
-        if timed_out:
-            result = _WasiResult()
-        elif stdout_cut or stderr_cut:
-            result = _WasiResult(exit_code=1, trap="WebAssembly sandbox output limit exceeded.\n")
-        elif process.returncode != 0:
-            raise SandboxUnavailable(
-                f"The WebAssembly runner exited with code {process.returncode}."
-            )
-        else:
-            result = _WasiResult.model_validate_json(spec.result.read_bytes())
-            if result.error is not None:
-                raise SandboxUnavailable(f"Cannot start the WebAssembly sandbox: {result.error}")
 
+    stdout_cut = _wasi_output_over_limit(spec.stdout, limits.stdout_chars, limits)
+    stderr_cut = _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits)
     stdout, stderr = _Head(limits.stdout_chars), _Tail(limits.stderr_chars)
     with spec.stdout.open("rb") as stream:
         stdout.add(stream.read(4 * limits.stdout_chars + 1))

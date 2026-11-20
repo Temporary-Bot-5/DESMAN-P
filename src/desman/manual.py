@@ -154,7 +154,7 @@ TOPICS: Final = (
         "sandbox with no network, a cleared environment and time and memory limits. Linux uses "
         "bubblewrap. Windows and macOS prefer Docker Desktop in Linux-container mode. "
         "`desman sandbox setup --yes` prepares the sandbox. Without Docker, WebAssembly runs "
-        "Python scripts, snippets and pytest, without packages requiring C extensions. "
+        "Python scripts, snippets, pytest and unittest, without packages requiring C extensions. "
         "web_search and web_fetch (network_access) read public pages and mark results untrusted. "
         "Search covers Wikipedia, Stack Overflow, arXiv and GitHub. Whole-web search needs local "
         "SearXNG (`desman search setup`) or a Tavily key in `desman config`. If missing search setup "

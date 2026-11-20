@@ -12,17 +12,32 @@ from pathlib import Path
 import wasmtime
 
 from desman.core.atomic import replace_file
-from desman.core.sandbox import MOUNT_POINT, _WasiResult, _WasiSpec
+from desman.core.sandbox import MOUNT_POINT, SandboxUnavailable, _WasiResult, _WasiSpec
+
+
+def _engine() -> wasmtime.Engine:
+    config = wasmtime.Config()
+    config.epoch_interruption = True
+    return wasmtime.Engine(config)
 
 
 def _run(spec: _WasiSpec) -> _WasiResult:
-    config = wasmtime.Config()
-    config.epoch_interruption = True
-    with wasmtime.Engine(config) as engine, _wasi_module(engine, spec.root) as module:
+    with _engine() as engine, _wasi_module(engine, spec.root) as module:
+        spec.ready.touch()
         return _start(engine, module, spec)
 
 
-def _wasi_module(engine: wasmtime.Engine, root: Path) -> wasmtime.Module:
+def warm_cache(root: Path) -> None:
+    try:
+        with _engine() as engine, _wasi_module(engine, root, require_cache=True):
+            pass
+    except wasmtime.WasmtimeError as exc:
+        raise SandboxUnavailable(f"Cannot prepare the WebAssembly sandbox: {exc}") from exc
+
+
+def _wasi_module(
+    engine: wasmtime.Engine, root: Path, *, require_cache: bool = False
+) -> wasmtime.Module:
     # Wasmtime deserialization trusts native code. This cache is written only by DESMAN
     # in its runtime directory, which is outside the guest's preopened workspace.
     cache = root / f"wasmtime-{importlib.metadata.version('wasmtime')}" / "python.cwasm"
@@ -30,12 +45,16 @@ def _wasi_module(engine: wasmtime.Engine, root: Path) -> wasmtime.Module:
         with contextlib.suppress(OSError, wasmtime.WasmtimeError):
             return wasmtime.Module.deserialize_file(engine, str(cache))
     module = wasmtime.Module.from_file(engine, root / "py/python.wasm")
-    with contextlib.suppress(OSError):
+    try:
         cache.parent.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=cache.parent) as scratch:
             temporary = Path(scratch) / cache.name
             temporary.write_bytes(module.serialize())
             replace_file(temporary, cache)
+    except OSError:
+        if require_cache:
+            module.close()
+            raise
     return module
 
 
