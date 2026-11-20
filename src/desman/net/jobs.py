@@ -46,8 +46,9 @@ from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, TaskSpec,
 from desman.core.retry import RetryPolicy
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
+from desman.core.tools import TOOL_RESULTS_DIR
 from desman.core.workspace import PathEscapeError, Workspace
-from desman.llm.base import LLM, Completion, QuotaExhausted, Request
+from desman.llm.base import LLM, Completion, QuotaExhausted, Request, limit_model_calls
 from desman.net import protocol, sign
 
 EXECUTE_RETRY: Final = RetryPolicy(max_attempts=2, max_transient=3)
@@ -254,7 +255,33 @@ def replay(conn: sqlite3.Connection, task_id: str) -> dict[str, Any] | None:
     return {"output": body.output, "files": {f.path: f.text for f in body.files}}
 
 
-def executor(conn: sqlite3.Connection, executor: Executor) -> Executor:
+@contextmanager
+def model_deadline(
+    conn: sqlite3.Connection, task_id: str, clock: Callable[[], datetime]
+) -> Iterator[None]:
+    def lease_end() -> str | None:
+        row = conn.execute(
+            "SELECT expires_at FROM network_work WHERE task_id = ? AND state = 'working'",
+            (task_id,),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    if lease_end() is None:
+        yield
+        return
+
+    def remaining() -> float:
+        # Model call observers can renew the registry lease between members.
+        end = lease_end()
+        return (db.parse_iso(end) - clock()).total_seconds() - 30 if end else 0
+
+    with limit_model_calls(remaining):
+        yield
+
+
+def executor(
+    conn: sqlite3.Connection, executor: Executor, *, clock: Callable[[], datetime]
+) -> Executor:
     """The network crew's executor: a recheck hands in the other node's result untouched (the
     work is the review); a job to do goes to `executor`."""
 
@@ -262,20 +289,23 @@ def executor(conn: sqlite3.Connection, executor: Executor) -> Executor:
         content = replay(conn, work.subtask.task_id)
         if content is not None:
             return Success(content=content)
-        return executor(work)
+        with model_deadline(conn, work.subtask.task_id, clock):
+            return executor(work)
 
     return run
 
 
-def reviewer(conn: sqlite3.Connection, own: Reviewer, recheck: Reviewer) -> Reviewer:
+def reviewer(
+    conn: sqlite3.Connection, own: Reviewer, recheck: Reviewer, *, clock: Callable[[], datetime]
+) -> Reviewer:
     """`own` (with the evidence of this node's tool calls) for a job this node did; `recheck`
     (without: they stayed with the node that did the work) for another node's result."""
 
     def review(subtask: Subtask, artifact: dict[str, Any] | None) -> Any:
         found = held_by_task(conn, subtask.task_id)
-        if found is not None and found.stage == RECHECK:
-            return recheck(subtask, artifact)
-        return own(subtask, artifact)
+        with model_deadline(conn, subtask.task_id, clock):
+            judge = recheck if found is not None and found.stage == RECHECK else own
+            return judge(subtask, artifact)
 
     return review
 
@@ -465,6 +495,8 @@ def _result(store: Store, held: Held, workspaces: Path) -> protocol.Result:
     files: list[protocol.ResultFile] = []
     space = Workspace(workspaces, held.task_id)
     for path in space.files():
+        if path.startswith(TOOL_RESULTS_DIR):
+            continue
         if len(files) >= MAX_FILES:
             break
         try:

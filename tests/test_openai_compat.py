@@ -972,3 +972,22 @@ def test_timeouts_scale_with_prompt_and_cap(
                     llm.complete(request)
             else:
                 assert llm.complete(request).text == '{"ok": true}'
+
+
+@pytest.mark.parametrize(("network_cap", "expected"), [(None, 600), (270, 270)])
+def test_provider_base_timeout_above_default_cap(network_cap: int | None, expected: int) -> None:
+    llm = OpenAICompatible(
+        "test",
+        "https://example.invalid",
+        [KEY_A],
+        "model",
+        timeout=600,
+        timeout_cap=network_cap,
+    )
+    try:
+        assert llm.max_timeout == expected
+        assert (
+            llm.call_timeout(Request(messages=[Message(role="user", content="short")])) == expected
+        )
+    finally:
+        llm.client.close()

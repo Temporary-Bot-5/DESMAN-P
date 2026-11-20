@@ -61,7 +61,7 @@ from desman.core.web import (
     Web,
     WebError,
 )
-from desman.core.workspace import MAX_NAME_BYTES, PathEscapeError, Workspace
+from desman.core.workspace import MAX_NAME_BYTES, PathEscapeError, Workspace, check_path
 from desman.llm import hub
 from desman.llm.tool_calls import ToolCall as ToolCall
 from desman.llm.tool_calls import normalize_tool_calls as normalize_tool_calls
@@ -69,6 +69,13 @@ from desman.llm.tool_calls import normalize_tool_calls as normalize_tool_calls
 __all__ = ["Access", "Permission"]  # re-exported: tools are declared with a Permission
 
 A = TypeVar("A", bound=BaseModel)
+
+TOOL_RESULTS_DIR: Final = ".tool-results/"
+
+
+def untrusted_file(path: str) -> bool:
+    return path.lower().startswith((TOOL_RESULTS_DIR, "web/", "input/web-"))
+
 
 MAX_READ_CHARS: Final = 8_000
 """Text returned by `read_file` (≈2000 tokens); the rest is cut with a marker: free models have
@@ -367,14 +374,16 @@ def _read_file(args: ReadFileArgs, workspace: Workspace) -> dict[str, Any]:
         text = workspace.read_text(args.path)
     except UnicodeDecodeError as e:
         raise ToolError(f"{args.path!r} is not a UTF-8 text file") from e
+    trust = {"untrusted": UNTRUSTED} if untrusted_file("/".join(check_path(args.path))) else {}
     if args.offset == 0 and len(text) <= MAX_READ_CHARS:
-        return {"path": args.path, "content": text}
+        return {"path": args.path, "content": text, **trust}
     end = args.offset + MAX_READ_CHARS
     read: dict[str, Any] = {
         "path": args.path,
         "content": text[args.offset : end],
         "offset": args.offset,
         "chars": len(text),
+        **trust,
     }
     if end < len(text):
         read["truncated"] = True

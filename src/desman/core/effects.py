@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -52,7 +54,14 @@ from desman.core.context import (
 )
 from desman.core.models import Subtask
 from desman.core.store import Store
-from desman.core.tools import Replayed, Tool, ToolResult, summarize
+from desman.core.tools import (
+    TOOL_RESULTS_DIR,
+    Replayed,
+    Tool,
+    ToolResult,
+    summarize,
+    untrusted_file,
+)
 from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
 
 INTERRUPTED: Final = (
@@ -66,6 +75,35 @@ EVIDENCE_TOKENS: Final = 4000
 """What a reviewer gets of the evidence, at most (shared fairly between its items)."""
 
 
+def _latest_start(store: Store, subtask: Subtask) -> dict[str, Any]:
+    offered = store.conn.execute(
+        "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+        "AND action = 'attempt_started' ORDER BY seq DESC LIMIT 1",
+        (subtask.id,),
+    ).fetchone()
+    return dict(json.loads(offered[0])) if offered else {}
+
+
+def _selected_rows(
+    store: Store, subtask: Subtask, current: list[sqlite3.Row], start: dict[str, Any]
+) -> list[sqlite3.Row]:
+    """Resolve the rows actually shown to the executor, including a diverged replay."""
+    refs = {tuple(ref) for ref in start.get("continuation", [])}
+    if not refs:
+        return []
+    refs.difference_update(_effect_ref(row) for row in current if row["state"] == "done")
+    earlier = []
+    if refs:
+        for row in _continuation_rows(store, subtask.id):
+            ref = _effect_ref(row)
+            if ref in refs:
+                earlier.append(row)
+                refs.remove(ref)
+                if not refs:
+                    break
+    return earlier
+
+
 def evidence(
     store: Store,
     subtask: Subtask,
@@ -76,9 +114,9 @@ def evidence(
 ) -> dict[str, Any]:
     """What the result under review can rest on: the subtask's inputs, the accepted results of
     its dependencies, the knowledge tree's nodes it was given (looked up by `knowledge`), and
-    what the latest execution returned, plus earlier web lookups of this same subtask
-    marked earlier_attempt. A document part's inputs are kept whole. Latest results take
-    the remaining budget first; older lookups share what remains, newest execution first.
+    what the latest execution returned, including prior tool results its executor was shown.
+    Other earlier web lookups share the remaining budget. A document part's inputs are kept
+    whole.
     Document notes use the same separate allowance as in the executor context.
     In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
@@ -94,12 +132,9 @@ def evidence(
         out["goal"] = goal
     elif "document" in subtask.inputs:
         out["task_goal"] = goal
-    offered = store.conn.execute(
-        "SELECT details_json FROM audit_log WHERE subtask_id = ? "
-        "AND action = 'attempt_started' ORDER BY seq DESC LIMIT 1",
-        (subtask.id,),
-    ).fetchone()
-    out["tools_available"] = json.loads(offered[0]).get("tools", []) if offered else []
+    start = _latest_start(store, subtask)
+    out["tools_available"] = start.get("tools", [])
+    earlier_rows = _selected_rows(store, subtask, rows, start)
     used_inputs = 0
     if "document" in subtask.inputs and "text" in subtask.inputs:
         # A document review must be able to check even the last quote against its source.
@@ -117,7 +152,8 @@ def evidence(
         items.append(("inputs", subtask.inputs))
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
-    files = _written_files(rows, workspace, store, subtask)
+    items += [("earlier_call", row) for row in earlier_rows]
+    files = _written_files([*rows, *earlier_rows], workspace, store, subtask)
     if files:
         out["written_files"] = []
         items += [("file", file) for file in files]
@@ -148,7 +184,9 @@ def evidence(
             out["written_files"].append(
                 {"path": item["path"], "content": content, "truncated": not whole}
             )
-        elif item["state"] != "done":  # cut off midway: what it returned is unknown
+        elif (
+            kind == "call" and item["state"] != "done"
+        ):  # cut off midway: what it returned is unknown
             out["tool_results"].append({"tool": item["tool"], "result": None, "finished": False})
         else:
             out["tool_results"].append(
@@ -157,11 +195,22 @@ def evidence(
                     "at": timestamp(item["finished_at"]),
                     "result": content,
                     "truncated": not whole,
+                    **(
+                        {"earlier_attempt": True, "untrusted": True}
+                        if kind == "earlier_call"
+                        else {}
+                    ),
                 }
             )
     used = used_inputs + used_evidence + sum(len(node.text) for node in nodes)
     out["tool_results"].extend(
-        earlier_lookups(store, subtask, execution, max(0, budget_tokens * CHARS_PER_TOKEN - used))
+        earlier_lookups(
+            store,
+            subtask,
+            execution,
+            max(0, budget_tokens * CHARS_PER_TOKEN - used),
+            exclude={_effect_ref(row) for row in earlier_rows},
+        )
     )
     return out
 
@@ -173,11 +222,13 @@ def quote_sources(
     knowledge: Knowledge | None,
     context_budget_tokens: int,
 ) -> list[object]:
-    """Tool outputs from this execution and the knowledge supplied to its executor."""
+    """Full tool outputs and knowledge supplied to the executor, for quote checks."""
     execution = store.executions(subtask.id) - 1
+    rows = store.effects(subtask.id, execution) if execution >= 0 else []
+    earlier = _selected_rows(store, subtask, rows, _latest_start(store, subtask))
     outputs = [
         output
-        for row in store.effects(subtask.id, execution)
+        for row in [*rows, *earlier]
         if row["state"] == "done"
         and not _model_written(
             row["tool"], output := ToolResult.model_validate_json(row["result_json"]).output
@@ -258,14 +309,21 @@ def timestamp(value: str | None) -> str | None:
 
 
 def earlier_lookups(
-    store: Store, subtask: Subtask, before: int, chars: int
+    store: Store,
+    subtask: Subtask,
+    before: int,
+    chars: int,
+    *,
+    exclude: set[EffectRef] | None = None,
 ) -> list[dict[str, Any]]:
     """Finished web results before `before`, newest execution first, shared fairly."""
     rows = [
         row
         for execution in range(before - 1, -1, -1)
         for row in store.effects(subtask.id, execution)
-        if row["tool"] in ("web_search", "web_fetch") and row["state"] == "done"
+        if row["tool"] in ("web_search", "web_fetch")
+        and row["state"] == "done"
+        and (exclude is None or _effect_ref(row) not in exclude)
     ]
     texts = [str(row["result_json"]) for row in rows]
     shares = fair_shares([len(text) for text in texts], chars)
@@ -437,7 +495,27 @@ def workspace_files(
     return out
 
 
-TOOL_RESULTS_DIR: Final = ".tool-results/"
+EffectRef = tuple[int, int, str, str]
+
+
+def _effect_ref(row: sqlite3.Row) -> EffectRef:
+    identity = (row["tool"], row["result_json"], row["continuation_json"])
+    digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:16]
+    return row["execution"], row["ordinal"], row["finished_at"], digest
+
+
+def _continuation_rows(store: Store, subtask_id: str) -> Iterator[sqlite3.Row]:
+    return iter(
+        store.conn.execute(
+            """SELECT execution, ordinal, tool, result_json, finished_at, continuation_json, 'done' AS state, 1 AS active
+           FROM effects WHERE subtask_id = ? AND state = 'done'
+           UNION ALL
+           SELECT execution, ordinal, tool, result_json, finished_at, continuation_json, 'done' AS state, 0 AS active
+           FROM discarded_effects WHERE subtask_id = ?
+           ORDER BY execution DESC, finished_at DESC, active DESC, ordinal DESC""",
+            (subtask_id, subtask_id),
+        )
+    )
 
 
 def short_args(args: dict[str, Any], private: frozenset[str]) -> str:
@@ -490,24 +568,21 @@ def outcome(tool: str, result: dict[str, Any], size: int) -> str:
 
 
 def earlier_results(
-    journal: Effects, subtask: Subtask, workspace: Workspace, chars: int
+    journal: Effects,
+    subtask: Subtask,
+    workspace: Workspace,
+    chars: int,
+    selected: list[EffectRef] | None = None,
 ) -> list[dict[str, Any]]:
     """Newest successful calls, including those from an interrupted current execution."""
     items: list[dict[str, Any]] = []
     if chars < 2:
         return items
     chars -= 2  # JSON list brackets
-    rows = journal.store.conn.execute(
-        """SELECT execution, ordinal, tool, result_json, finished_at, continuation_json, 1 AS active
-           FROM effects WHERE subtask_id = ? AND state = 'done'
-           UNION ALL
-           SELECT execution, ordinal, tool, result_json, finished_at, continuation_json, 0 AS active
-           FROM discarded_effects WHERE subtask_id = ?
-           ORDER BY execution DESC, finished_at DESC, active DESC, ordinal DESC""",
-        (subtask.id, subtask.id),
-    )
-    for row in rows:
+    for row in _continuation_rows(journal.store, subtask.id):
         tool = row["tool"]
+        if subtask.runs_code and tool == "run_command":
+            continue
         result = ToolResult.model_validate_json(row["result_json"])
         if not result.ok:
             continue
@@ -528,13 +603,17 @@ def earlier_results(
         existing = tool_result_file(workspace, tool, payload)
         archive = meta.get("archive")
         if archive is None:
-            digest = hashlib.sha256(row["result_json"].encode()).hexdigest()[:16]
-            archive = f"{TOOL_RESULTS_DIR}{subtask.seq}-e{row['execution']}-{row['ordinal']}-{digest}.json"
+            digest = _effect_ref(row)[-1]
+            archive = (
+                f"{TOOL_RESULTS_DIR}{subtask.seq}-e{row['execution']}"
+                f"-r0-{row['ordinal']}-{digest}.json"
+            )
         item = {
             "tool": tool,
             "args": args,
             "outcome": outcome(tool, payload, len(body)),
             "file": existing or archive,
+            **({"untrusted": True} if untrusted_file(existing or archive) else {}),
         }
         cost = len(json.dumps(item, ensure_ascii=False)) + 2
         if cost > chars:
@@ -542,6 +621,8 @@ def earlier_results(
         if existing is None and archive_result(workspace, archive, tool, payload, body) != archive:
             continue
         items.append(item)
+        if selected is not None:
+            selected.append(_effect_ref(row))
         chars -= cost
         if len(items) == 20:
             break

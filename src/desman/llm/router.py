@@ -51,6 +51,7 @@ from desman.llm.base import (
     Request,
     RequestTooLarge,
     among,
+    time_for_call,
     unfit_seen,
 )
 from desman.llm.limiter import Busy
@@ -130,6 +131,7 @@ class Choice:
     """What is known of a local model (its context, from the settings); None: the catalog's."""
 
     memory_risk: bool = field(default=False, compare=False)
+    advisory_context: bool = field(default=False, compare=False)
 
     @property
     def spec(self) -> catalog.Model:
@@ -169,6 +171,7 @@ def lineup(
                 catalog.local_model(
                     name, p.context(config) or (16384 if p.id == "ollama" else None)
                 ),
+                advisory_context=p.context_env not in config.settings or p.context(config) is None,
             )
         return local_choices[identity]
 
@@ -401,9 +404,12 @@ def _choice(config: Config, p: Provider, model: str) -> Choice:
         from desman.local_models import ollama_context
 
         context, risk = ollama_context(config, model)
-        return Choice(p, model, catalog.local_model(model, context), risk)
+        advisory = p.context_env not in config.settings or p.context(config) is None
+        return Choice(p, model, catalog.local_model(model, context), risk, advisory)
     if p.local:
-        return Choice(p, model, catalog.local_model(model, _local_context(config, p, model)))
+        configured = p.context(config)
+        advisory = p.context_env not in config.settings or configured is None
+        return Choice(p, model, catalog.local_model(model, configured), advisory_context=advisory)
     return Choice(p, model)
 
 
@@ -514,7 +520,9 @@ class LastCall:
 
 def _request_limit(choice: Choice, conn: sqlite3.Connection | None) -> int | None:
     ceiling = request_ceiling(choice, conn)
-    # A guessed context for an uncatalogued cloud model is not a known limit.
+    # Local defaults and uncatalogued cloud contexts are estimates.
+    if choice.advisory_context or (choice.provider.local and choice.known is None):
+        return ceiling
     if (
         not choice.provider.local
         and choice.known is None
@@ -634,6 +642,9 @@ class Fallback:
             for llm, choice in ordered_members
             if choice is None or (limit := limits[choice.label]) is None or limit >= need
         ]
+        if large and all(choice is not None and choice.spec.context < need for _, choice in large):
+            # The remaining contexts are advisory. Start with the largest estimate.
+            large.sort(key=lambda member: member[1].spec.context if member[1] else 0, reverse=True)
         fit = [
             (llm, choice)
             for llm, choice in large
@@ -665,6 +676,8 @@ class Fallback:
             )
         failed_over = False
         for i, (llm, choice) in enumerate(members):
+            self._call = LastCall(skipped=tuple(skipped))
+            time_for_call(self.name)
             label = llm.name if choice is None else choice.label
             untried.discard(label)
             if self.on_used is not None:
@@ -830,5 +843,7 @@ class Backoff:
                 else:
                     delay = min(MAX_DELAY, BASE_DELAY * 2 ** (attempt - 1))
                     delay *= 0.5 + self.jitter() / 2
+            if delay >= time_for_call(self.name):
+                raise ProviderTimeout(self.name, 0)
             (self.sleep or _sleep)(delay)
         raise AssertionError("unreachable")  # pragma: no cover

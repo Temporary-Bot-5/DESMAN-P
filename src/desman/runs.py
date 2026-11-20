@@ -172,7 +172,7 @@ def models(
                 on_call=recorder,
                 client=client,
             )
-            timeouts.append(api.max_timeout)
+            timeouts.append(min(api.timeout, api.max_timeout))
             paced: LLM
             server = None
             if choice.provider.local:  # paced by the machine, not by a rate
@@ -703,13 +703,14 @@ def network_crew(
         tz=UTC,  # another node rechecks: one date for both, wherever they are
     )
     return Crew(
-        jobs.executor(store.conn, executor),
+        jobs.executor(store.conn, executor, clock=store.clock),
         jobs.reviewer(
             store.conn,
             llm_reviewer(
                 reviewer, evidence=functools.partial(evidence, store), clock=store.clock, tz=UTC
             ),
             llm_reviewer(reviewer, clock=store.clock, tz=UTC),
+            clock=store.clock,
         ),
         # The person's switches as they are at each tool call, not at the worker's start: a
         # permission turned off holds from the next call on (a config that fails: none on).

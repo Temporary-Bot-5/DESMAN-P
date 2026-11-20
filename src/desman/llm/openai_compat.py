@@ -48,6 +48,8 @@ from desman.llm.base import (
     Request,
     RequestTooLarge,
     Usage,
+    before_model_call,
+    time_for_call,
 )
 from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 
@@ -120,7 +122,7 @@ class OpenAICompatible:
         self.model = model
         self.timeout = timeout
         self.local = local
-        cap = LOCAL_TIMEOUT_CAP if local else CLOUD_TIMEOUT_CAP
+        cap = max(timeout, LOCAL_TIMEOUT_CAP if local else CLOUD_TIMEOUT_CAP)
         self.max_timeout = min(cap, timeout_cap) if timeout_cap is not None else cap
         self.client = client or httpx.Client(timeout=timeout)
         self.on_call = on_call
@@ -156,6 +158,7 @@ class OpenAICompatible:
         )
 
     def complete(self, request: Request) -> Completion:
+        time_for_call(self.name)
         timeout = self.call_timeout(request)
         model = request.model or self.model
         body: dict[str, Any] = {
@@ -211,8 +214,9 @@ class OpenAICompatible:
                 continue
             if self.pace is not None:
                 self.pace()  # request bucket limits apply to every key, outside key rotation
+            available = before_model_call(self.name, timeout)
             try:
-                return self._attempt(i, model, body, prompt_hash, timeout)
+                return self._attempt(i, model, body, prompt_hash, available)
             except ProviderRejected as e:
                 if e.status not in (401, 402, 403) and not account_unavailable(e):
                     raise

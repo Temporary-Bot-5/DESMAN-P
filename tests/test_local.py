@@ -399,12 +399,14 @@ def test_a_slow_model_gets_a_lease_and_review_reservation_that_outlast_its_step(
 
     models, coordinator = build(make_config(api_keys={"GROQ_API_KEY": GROQ}, settings=OLLAMA))
     # Two calls (a request and its repair), each with its waits, and a margin.
-    assert models.step_seconds == runs.step_seconds(900)
+    assert models.step_seconds == runs.step_seconds(240)
     assert coordinator.lease_seconds == models.step_seconds
     assert coordinator.review_seconds == models.step_seconds
     models, coordinator = build(make_config(api_keys={"GROQ_API_KEY": GROQ}))
-    assert coordinator.lease_seconds == max(DEFAULT_LEASE_SECONDS, runs.step_seconds(300))
-    assert coordinator.review_seconds == models.step_seconds > DEFAULT_REVIEW_SECONDS
+    assert coordinator.lease_seconds == max(
+        DEFAULT_LEASE_SECONDS, runs.step_seconds(providers.find("groq").timeout)
+    )
+    assert coordinator.review_seconds == max(DEFAULT_REVIEW_SECONDS, models.step_seconds)
     fake = runs.summarizer(store, runs.Models(FakeLLM(), None))
     assert fake.review_seconds == DEFAULT_REVIEW_SECONDS
 
@@ -479,3 +481,30 @@ def test_keys_check_words_local_problems_in_the_persons_language(
     assert "не запущен по адресу http://localhost:11434/v1" in result.output
     [row] = json.loads(desman("keys", "check", "--json").output)
     assert row["detail"].startswith("not running at")  # --json stays English
+
+
+@pytest.mark.parametrize(("provider", "setting"), [("ollama", "OLLAMA"), ("llamacpp", "LLAMA_CPP")])
+def test_local_default_context_is_advisory(provider: str, setting: str) -> None:
+    request = Request(messages=[Message(role="user", content="x" * 60_000)])
+    fake = FakeLLM("done")
+    settings = {f"{setting}_MODEL": "model"}
+    [default] = router.lineup(make_config(settings=settings), Role.EXECUTOR, provider)
+    assert router.estimated_tokens(request) > default.spec.context
+    assert router.Fallback([(fake, default)]).complete(request).text == "done"
+
+    settings[f"{setting}_CONTEXT"] = "4096"
+    [configured] = router.lineup(make_config(settings=settings), Role.EXECUTOR, provider)
+    with pytest.raises(ProviderRejected, match="ceiling is 4096"):
+        router.Fallback([(fake, configured)]).complete(request)
+    assert len(fake.calls) == 1
+
+
+def test_oversized_request_tries_largest_advisory_context_first() -> None:
+    config = make_config(settings={**OLLAMA, "LLAMA_CPP_MODEL": "model"})
+    [small] = router.lineup(config, Role.EXECUTOR, "llamacpp")
+    [large] = router.lineup(config, Role.EXECUTOR, "ollama")
+    assert small.spec.context < large.spec.context
+    first, second = FakeLLM(), FakeLLM("done")
+    request = Request(messages=[Message(role="user", content="x" * 60_000)])
+    assert router.Fallback([(first, small), (second, large)]).complete(request).text == "done"
+    assert not first.calls

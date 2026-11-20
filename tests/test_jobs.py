@@ -28,9 +28,9 @@ from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.core.tools import builtin_registry
 from desman.llm import limiter, router
-from desman.llm.base import Message, QuotaExhausted, Request
+from desman.llm.base import Message, ProviderTimeout, QuotaExhausted, Request
 from desman.llm.fake import FakeLLM
-from desman.llm.openai_compat import CallRecord
+from desman.llm.openai_compat import CallRecord, OpenAICompatible
 from desman.net import jobs, node, protocol, sign
 from desman.net.node import Change, Node
 from desman.registry import admin, store, work
@@ -1062,3 +1062,48 @@ def test_without_a_fresh_trust_list_nothing_is_lent_until_the_person_signs_one(
     taken = a.poll()
     assert taken is not None and taken.change is Change.WORK_TAKEN
     assert a.held()[0]["job"] == job_id
+
+
+def test_lent_fallback_shares_remaining_registry_lease(
+    machine: Callable[[str, FakeLLM], Machine],
+    add_job: Callable[..., str],
+    clock: FakeClock,
+) -> None:
+    add_job()
+    worker = machine("a", doer())
+    worker.poll()
+    [held] = jobs.holding(worker.conn)
+    jobs.extended(worker.conn, held.lease, clock() + timedelta(seconds=330))
+
+    timeouts = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"]["read"])
+        if len(timeouts) == 1:
+            clock.advance(200)
+            return httpx.Response(503)
+        clock.advance(100)
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+        members = [
+            (
+                OpenAICompatible(
+                    name,
+                    "https://example.invalid",
+                    ["key"],
+                    "model",
+                    client=client,
+                    timeout=600,
+                    timeout_cap=270,
+                    monotonic=lambda: clock().timestamp(),
+                ),
+                None,
+            )
+            for name in ("first", "second", "third")
+        ]
+        with jobs.model_deadline(worker.conn, held.task_id, clock), pytest.raises(ProviderTimeout):
+            router.Fallback(members).complete(
+                Request(messages=[Message(role="user", content="hi")])
+            )
+    assert timeouts == [270, 100]

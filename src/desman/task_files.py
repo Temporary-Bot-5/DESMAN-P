@@ -30,7 +30,7 @@ from threading import Lock
 from typing import Any
 
 from desman.core.context import CHARS_PER_TOKEN
-from desman.core.effects import TOOL_RESULTS_DIR
+from desman.core.tools import TOOL_RESULTS_DIR
 from desman.core.workspace import MAX_NAME_BYTES, PathEscapeError, Workspace, is_work_file
 from desman.i18n import t
 

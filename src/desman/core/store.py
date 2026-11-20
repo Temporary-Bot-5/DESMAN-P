@@ -1049,6 +1049,7 @@ class Store:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         checkpoint: dict[str, Any] | None = None,
         effects: int | None = None,
+        only_extend: bool = False,
     ) -> Subtask:
         """Extend the lease and, optionally, save a checkpoint in the same update. `effects` is
         how many tool calls the execution's journal had at the checkpoint (`effect_cursor`).
@@ -1057,7 +1058,8 @@ class Store:
         just passed and nobody has requeued the subtask yet. Once it was requeued or reclaimed,
         raises StaleStateError: the executor must stop and drop its work.
         """
-        sets = ["lease_until = ?", "updated_at = ?"]
+        deadline = "max(lease_until, ?)" if only_extend else "?"
+        sets = [f"lease_until = {deadline}", "updated_at = ?"]
         if checkpoint is not None:
             sets.append("checkpoint_json = ?")
         with db.transaction(self.conn):
@@ -1268,6 +1270,18 @@ class Store:
             )
         return token
 
+    def extend_review(self, subtask_id: str, token: str, seconds: int) -> None:
+        """Ensure this reservation covers a call, without shortening it or changing its token."""
+        with db.transaction(self.conn):
+            until = db.to_iso(self.clock() + timedelta(seconds=seconds))
+            updated = self.conn.execute(
+                """UPDATE subtasks SET review_until = max(review_until, ?)
+                   WHERE id = ? AND status = 'review' AND review_token = ?""",
+                (until, subtask_id, token),
+            )
+            if updated.rowcount != 1:
+                self._raise_stale(subtask_id, S.REVIEW, S.REVIEW, None, self._now(), review=token)
+
     def release_review(self, subtask_id: str, token: str) -> None:
         """End the reservation `token` of a review that was not finished (e.g. interrupted);
         a reservation taken over meanwhile is not touched."""
@@ -1313,6 +1327,16 @@ class Store:
         row = self.conn.execute(
             f"SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND {_EXECUTION_ENDED}",
             (subtask_id,),
+        ).fetchone()
+        count: int = row[0]
+        return count
+
+    def execution_starts(self, subtask_id: str, execution: int) -> int:
+        """Number of recorded starts for this execution, including interrupted invocations."""
+        row = self.conn.execute(
+            """SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
+               AND json_extract(details_json, '$.execution') = ?""",
+            (subtask_id, execution),
         ).fetchone()
         count: int = row[0]
         return count
