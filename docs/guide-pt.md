@@ -30,6 +30,7 @@ problemas. Comece pelas seções 1–3 e consulte as demais quando precisar.
   a permissão para executar código (`shell_execution`) nas configurações do DESMAN. Sem um
   ambiente isolado, o DESMAN pode escrever código e pedirá ajuda para executá-lo.
   Para instalar o Docker Desktop, use a seção Docker do assistente de configuração ou execute `desman docker install --yes`.
+  Se o Docker estiver indisponível no Windows ou macOS, execute `desman sandbox setup --yes` para configurar a sandbox WebAssembly para Python e pytest.
 
 ## 1. Instalação
 

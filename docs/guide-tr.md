@@ -30,6 +30,7 @@ gerektiğinde bakabilirsiniz.
   Kod çalıştırma iznini (`shell_execution`) DESMAN ayarlarından etkinleştirebilirsiniz.
   DESMAN korumalı alan olmadan da kod yazabilir ve kodu çalıştırmak için yardım ister.
   Docker Desktop’ı kurmak için kurulum sihirbazındaki Docker bölümünü kullanın veya `desman docker install --yes` komutunu çalıştırın.
+  Windows veya macOS’ta Docker kullanılamıyorsa Python ve pytest için WebAssembly korumalı alanını `desman sandbox setup --yes` ile kurun.
 
 ## 1. Kurulum
 
