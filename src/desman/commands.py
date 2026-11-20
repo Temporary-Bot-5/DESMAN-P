@@ -1927,11 +1927,11 @@ def _search_change(action: str) -> Handler:
         if action == "setup":
             line = searxng.consent()
         elif action == "start":
-            line = t("Start the local SearXNG container.")
+            line = t("Start local SearXNG.")
         elif action == "stop":
-            line = t("Stop the local SearXNG container.")
+            line = t("Stop local SearXNG.")
         else:
-            line = t("Remove the local SearXNG container?")
+            line = t("Remove local SearXNG?")
         return Proposal([line], apply)
 
     return handle
@@ -2017,7 +2017,7 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "search setup",
-        "Set up local SearXNG with Docker (about 100 MB).",
+        "Set up local SearXNG with Docker or Python.",
         SearchSetupArgs,
         Kind.CHANGE,
         _search_change("setup"),
@@ -2028,7 +2028,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry("search stop", "Stop local SearXNG.", NoArgs, Kind.CHANGE, _search_change("stop")),
     Entry(
         "search remove",
-        "Remove local SearXNG; keep settings.",
+        "Remove local SearXNG.",
         SearchRemoveArgs,
         Kind.CHANGE,
         _search_change("remove"),

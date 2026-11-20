@@ -16,7 +16,7 @@ meant for people, which they refuse to robots.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Final
 from urllib.parse import urlsplit
 
@@ -92,13 +92,18 @@ class SearXNG:
 
     name = "searxng"
 
-    def __init__(self, url: str, http: httpx.Client) -> None:
+    def __init__(
+        self, url: str, http: httpx.Client, *, before_search: Callable[[], bool] | None = None
+    ) -> None:
         self.url = url.rstrip("/")
         self.http = http
+        self.before_search = before_search
 
     def search(
         self, query: str, max_results: int, language: str | None = None
     ) -> list[SearchResult]:
+        if self.before_search is not None and not self.before_search():
+            raise WebError("SearXNG cannot be reached")
         response = _send(
             self.http,
             "SearXNG",

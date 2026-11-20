@@ -14,9 +14,9 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-from desman import commands, searxng, ui
+from desman import commands, searxng, searxng_native, ui
 from desman.cli import cli
-from desman.config import ConfigManager
+from desman.config import Config, ConfigManager
 from desman.core import search
 
 
@@ -68,11 +68,11 @@ def test_setup_writes_settings_and_fixed_argv(
     assert manager.load().settings["SEARXNG_URL"] == "http://127.0.0.1:8888"
 
 
-def test_no_docker_changes_nothing(manager: ConfigManager, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_docker_uses_native(manager: ConfigManager, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(searxng, "find_docker", lambda: None)
-    with pytest.raises(click.ClickException, match="desman docker install"):
-        searxng.setup(manager)
-    assert not manager.config_path.exists()
+    monkeypatch.setattr(searxng_native, "setup", lambda *args, **kwargs: "http://127.0.0.1:8889")
+    assert searxng.setup(manager) == "http://127.0.0.1:8889"
+    assert manager.load().settings["SEARXNG_URL"].endswith(":8889")
     assert not (manager.config_path.parent / "searxng").exists()
 
 
@@ -199,8 +199,11 @@ def test_wizard_setup_uses_staged_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
     seen: list[bool] = []
 
-    def setup(manager: ConfigManager, port: int | None = None, *, save_url: bool = True) -> str:
+    def setup(
+        manager: ConfigManager, port: int | None = None, *, save_url: bool = True, staged: Config
+    ) -> str:
         seen.append(save_url)
+        staged.settings["SEARXNG_URL"] = "http://127.0.0.1:8889"
         return "http://127.0.0.1:8889"
 
     monkeypatch.setattr(searxng, "setup", setup)
@@ -265,15 +268,16 @@ def test_setup_repairs_settings_and_retains_secret(
     assert "json" in repaired["search"]["formats"]
 
 
-def test_daemon_failure_does_not_write_settings(
+def test_daemon_failure_falls_back_to_native(
     manager: ConfigManager, calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def unavailable(args: list[str], timeout: float = 60) -> str:
         raise click.ClickException("daemon unavailable")
 
     monkeypatch.setattr(searxng, "docker", unavailable)
-    with pytest.raises(click.ClickException, match="desman docker install"):
-        searxng.setup(manager)
+    monkeypatch.setattr(searxng_native, "setup", lambda *args, **kwargs: "http://127.0.0.1:8889")
+    assert searxng.setup(manager).endswith(":8889")
+    assert manager.load().settings["SEARXNG_URL"].endswith(":8889")
     assert not (manager.config_path.parent / "searxng").exists()
 
 
@@ -372,6 +376,9 @@ def test_status_readable_and_json(
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data == {
+        "kind": "docker",
+        "running": True,
+        "commit": None,
         "container": "running",
         "url": url,
         "answers": bool(url and not problem),
@@ -445,14 +452,14 @@ def test_wizard_setup_failure_keeps_staged_choices(monkeypatch: pytest.MonkeyPat
     assert session.config.settings["SEARXNG_URL"] == "https://previous.example.com"
 
 
-def test_wizard_hides_setup_without_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wizard_offers_setup_without_docker(monkeypatch: pytest.MonkeyPatch) -> None:
     from desman import wizard
     from desman.config import Config
 
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
     def select(title: str, choices: list[Any], **kwargs: Any) -> None:
-        assert not any(getattr(c, "value", None) == "search_setup" for c in choices)
+        assert any(getattr(c, "value", None) == "search_setup" for c in choices)
         assert any(getattr(getattr(c, "value", None), "id", None) == "searxng" for c in choices)
 
     monkeypatch.setattr(ui, "select", select)

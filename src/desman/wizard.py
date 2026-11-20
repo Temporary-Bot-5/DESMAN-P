@@ -130,9 +130,9 @@ def run_section(manager: ConfigManager, section: str) -> None:
     if section == "providers":
         _providers_menu(_Session(config, manager))
     elif section == "docker":
-        before = config.settings.get("SEARXNG_URL")
+        before = config.settings.copy()
         _docker(_Session(config, manager))
-        if config.settings.get("SEARXNG_URL") == before:
+        if config.settings == before:
             return
     elif section == "permissions":
         config.permissions = _permissions(config.permissions)
@@ -240,6 +240,8 @@ def _providers_menu(s: _Session) -> None:
         # Same order as providers.PROVIDERS (free, paid, local), then the search engines, so
         # the numbers stay stable.
         choices: list[ui.Choice | ui.Heading] = []
+        docker_present = find_docker() is not None
+        setup_search = ui.Choice(t("Set up local SearXNG"), "search_setup")
         for title, group in (
             (t("Free tier"), providers.FREE),
             (t("Paid: billed per use"), providers.PAID),
@@ -248,13 +250,13 @@ def _providers_menu(s: _Session) -> None:
             (t("Models for local servers"), providers.HUB),
         ):
             choices.append(ui.Heading(title))
-            if group is providers.SEARCH and find_docker() is not None:
-                choices.append(
-                    ui.Choice(t("Set up SearXNG on this computer (Docker)"), "search_setup")
-                )
+            if group is providers.SEARCH and docker_present:
+                choices.append(setup_search)
             choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
         choices.append(ui.Choice(t("Done — continue"), None))
         choices.append(ui.Choice(t("Models and keys for roles"), "roles"))
+        if not docker_present:
+            choices.append(setup_search)
         picked = ui.select(
             t("Pick a provider to add keys or change settings"), choices, default=last
         )
@@ -516,7 +518,7 @@ def _offer_searxng(s: _Session) -> None:
     if ui.confirm(searxng.consent()):
         assert s.manager is not None
         try:
-            s.config.settings["SEARXNG_URL"] = searxng.setup(s.manager, save_url=False)
+            searxng.setup(s.manager, save_url=False, staged=s.config)
         except click.ClickException as exc:
             ui.warn(str(exc))
 

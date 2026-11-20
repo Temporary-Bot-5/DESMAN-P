@@ -18,18 +18,18 @@ def search() -> None:
 @click.option("--port", type=click.IntRange(1, 65535))
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def setup(port: int | None, yes: bool) -> None:
-    """Set up SearXNG with Docker (about 100 MB)."""
+    """Set up local SearXNG."""
+    ui.note(searxng.consent())
     if yes:
         searxng.setup(load_config(), port)
     else:
-        ui.note(searxng.consent())
         ui.note(t("Nothing changed. Confirm with: {command}", command="desman search setup --yes"))
 
 
 @search.command()
 @json_option
 def status(as_json: bool) -> None:
-    """Show SearXNG's container and check its search API."""
+    """Show the local SearXNG installation and check its search API."""
     result = searxng.status(load_config(), display=not as_json)
     if as_json:
         click.echo(json.dumps(result, ensure_ascii=False))
@@ -37,22 +37,22 @@ def status(as_json: bool) -> None:
 
 @search.command()
 def start() -> None:
-    """Start the local SearXNG container."""
+    """Start local SearXNG."""
     searxng.operate(load_config(), "start")
 
 
 @search.command()
 def stop() -> None:
-    """Stop the local SearXNG container."""
+    """Stop local SearXNG."""
     searxng.operate(load_config(), "stop")
 
 
 @search.command()
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def remove(yes: bool) -> None:
-    """Remove the SearXNG container; keep its settings."""
+    """Remove local SearXNG."""
     if yes:
         searxng.operate(load_config(), "remove")
     else:
-        ui.note(t("Remove the local SearXNG container?"))
+        ui.note(t("Remove local SearXNG?"))
         ui.note(t("Nothing changed. Confirm with: {command}", command="desman search remove --yes"))
