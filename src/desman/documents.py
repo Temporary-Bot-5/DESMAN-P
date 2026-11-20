@@ -34,22 +34,29 @@ PART: Final = (
     "inside the part's text — notes after it fall under it. Never number parts as chapters. "
     "Keep the notes compact: no more than about {limit} characters."
 )
+QUOTES_CHECKED: Final = (
+    "Code has already checked every quote against the source (a quote may be part of a "
+    "sentence and may mark omissions with …): do not judge whether quotes are word for word."
+)
 PART_CRITERIA: Final = (
-    "The notes are on this part and the goal; every quote appears word for word in the part's "
-    "text; nothing is stated that the part does not say. Notes are a summary: leaving out minor "
-    "details is not a fault, and the size limit is a maximum."
+    "The notes are on this part and the goal; nothing is stated that the part does not say. "
+    "Notes are a summary: leaving out minor details is not a fault, the size limit is a "
+    "maximum, and a note near a heading line placed under the neighbouring heading is not a "
+    "fault. " + QUOTES_CHECKED
 )
 COMBINE: Final = (
     "Combine the notes on parts {a}–{b} of the document {path} (results of "
-    "dependencies) into one set of notes on the goal, in the document's order. Keep quotes word "
-    "for word with the part and the document's heading (chapter, section) they come from; "
-    "group the notes by those headings, never by part numbers. Shorten wording, keep every quote; drop repetitions, "
-    "never facts. Keep the notes compact: no more than about {limit} characters in all."
+    "dependencies) into one set of notes on the goal, in the document's order, grouped by the "
+    "document's headings (chapter, section), never by part numbers. Keep quotes word for word "
+    "with their heading; when there are too many for the size, keep the ones that best show "
+    "each heading, at least one per heading that has any. Shorten wording; drop repetitions, "
+    "never main facts. Keep the notes compact: no more than about {limit} characters in all."
 )
 COMBINE_CRITERIA: Final = (
-    "The main facts and every quote of the given notes that bear on the goal are kept, unchanged, "
-    "with their part; nothing is added that the notes do not say. The size limit is a maximum: "
-    "shorter is fine, and a part whose notes say nothing on the goal may be left out."
+    "The main facts of the given notes that bear on the goal are kept with their heading, and "
+    "every heading with quotes keeps at least one; nothing is added that the notes do not say. "
+    "The size limit is a maximum: shorter is fine, and a part whose notes say nothing on the "
+    "goal may be left out. " + QUOTES_CHECKED
 )
 GOAL_NOTE: Final = (
     "{path} ({n} characters) is read in parts by code: subtasks made before yours note what "
