@@ -115,7 +115,7 @@ def test_workspace_and_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert argv[argv.index("--size") + 1] == "300"
     assert argv[-12:] == [
         "--",
-        "prlimit",
+        "/usr/bin/prlimit",
         "--nproc=32",
         "--as=100",
         "--fsize=200",
@@ -180,7 +180,7 @@ def test_install_verifies_pin_and_runs_ordered_steps(
     install, packages, user, marker = calls[1:5]
     assert install[:3] == ["--import", WSL_DISTRO, str(box.wsl_dir / "root")]
     assert packages[7:] == [
-        "apk",
+        "/sbin/apk",
         "add",
         "--no-cache",
         "python3",
@@ -188,21 +188,21 @@ def test_install_verifies_pin_and_runs_ordered_steps(
         "bubblewrap",
         "util-linux-misc",
     ]
-    assert user[7:] == ["adduser", "-D", "-H", "-s", "/bin/sh", "sandbox"]
+    assert user[7:] == ["/usr/sbin/adduser", "-D", "-H", "-s", "/bin/sh", "sandbox"]
     assert "/etc/desman-sandbox" in marker[9] and marker[-1].startswith(f"{WSL_PIN} ")
     probe = calls[-1]
     assert probe[:4] == ["-d", WSL_DISTRO, "-u", "sandbox"] and probe[-1] == "true"
     assert not sandbox.install_wsl(box, download=lambda _: pytest.fail("downloaded twice"))
 
 
-@pytest.mark.parametrize("step", ["apk", "adduser", "sh", "/bin/busybox"])
+@pytest.mark.parametrize("step", ["/sbin/apk", "/usr/sbin/adduser", "/bin/sh", "/bin/busybox"])
 def test_failed_setup_reports_step_and_unregisters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
     wsl = Wsl(fail=step)
     box = wsl.box(tmp_path)
     monkeypatch.setattr(sandbox, "_WSL_SHA256", hashlib.sha256(TAR).hexdigest())
-    label = "could not start" if step == "/bin/busybox" else f"{step} failed"
+    label = "could not start" if step == "/bin/busybox" else f"{step.rsplit('/', 1)[-1]} failed"
     with pytest.raises(SandboxUnavailable, match=f"{label}.*failed step"):
         sandbox.install_wsl(box, download=lambda _: TAR)
     assert wsl.calls[-1][0][1:] == ["--unregister", WSL_DISTRO]

@@ -436,7 +436,7 @@ class Sandbox:
             "--chdir",
             MOUNT_POINT,
             "--",
-            "prlimit",
+            "/usr/bin/prlimit",
             f"--nproc={limits.processes}",
             f"--as={limits.memory_bytes}",
             f"--fsize={limits.file_bytes}",
@@ -983,7 +983,7 @@ def install_wsl(box: Sandbox, *, download: Callable[[str], bytes] | None = None)
                 base = ["-d", WSL_DISTRO, "-u", "root", "--cd", "/", "--exec"]
                 for step in (
                     [
-                        "apk",
+                        "/sbin/apk",
                         "add",
                         "--no-cache",
                         "python3",
@@ -991,10 +991,16 @@ def install_wsl(box: Sandbox, *, download: Callable[[str], bytes] | None = None)
                         "bubblewrap",
                         "util-linux-misc",
                     ],
-                    ["adduser", "-D", "-H", "-s", "/bin/sh", "sandbox"],
-                    ["sh", "-c", _WSL_MARKER, "sh", f"{WSL_PIN} {dt.date.today().isoformat()}"],
+                    ["/usr/sbin/adduser", "-D", "-H", "-s", "/bin/sh", "sandbox"],
+                    [
+                        "/bin/sh",
+                        "-c",
+                        _WSL_MARKER,
+                        "sh",
+                        f"{WSL_PIN} {dt.date.today().isoformat()}",
+                    ],
                 ):
-                    _check_wsl(box, [*base, *step], 600, step=step[0])
+                    _check_wsl(box, [*base, *step], 600, step=step[0].rsplit("/", 1)[-1])
                 if problem := box.wsl_problem():
                     raise SandboxUnavailable(problem)
             except (SandboxUnavailable, KeyboardInterrupt):
