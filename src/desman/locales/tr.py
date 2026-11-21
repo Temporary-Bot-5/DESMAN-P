@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Linux için Windows Alt Sistemini kullan.",
+    "WSL sandbox distribution {pin} is present.": "WSL korumalı alan dağıtımı {pin} mevcut.",
+    "WSL sandbox distribution {pin} is missing.": "WSL korumalı alan dağıtımı {pin} eksik.",
+    "WSL sandbox setup requires Windows.": "WSL korumalı alanını kurmak için Windows gerekir.",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "WSL etkinleştirilsin mi? Windows yönetici yetkisi isteyebilir ve yeniden başlatma gerekir.",
+    "WSL sandbox setup failed: {error}": "WSL korumalı alanı kurulamadı: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "WSL korumalı alanı kurulsun mu (yaklaşık 4 MB indirme, diskte 60 MB)? Paketleri kurmak için bir kez internet erişimi gerekir.",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Windows'u yeniden başlatın ve `desman sandbox setup --wsl --yes` komutunu çalıştırın.",
+    "WSL sandbox removal requires Windows.": "WSL korumalı alanını kaldırmak için Windows gerekir.",
+    "WSL sandbox removal failed: {error}": "WSL korumalı alanı kaldırılamadı: {error}",
+    "The WSL sandbox has been removed.": "WSL korumalı alanı kaldırıldı.",
+    "Remove the WSL sandbox distribution and its files?": "WSL korumalı alan dağıtımı ve dosyaları kaldırılsın mı?",
+    "Use --wsl to select the WSL sandbox.": "WSL korumalı alanını seçmek için --wsl kullanın.",
+    "Remove the WSL sandbox distribution.": "WSL korumalı alan dağıtımını kaldır.",
     "on": "açık",
     "Borrowing takes effect after `desman global join`.": "Ödünç alma, `desman global join` komutundan sonra etkinleşir.",
     "SearXNG quotas count searches only.": "SearXNG kotaları yalnızca arama sayısını hesaba katar.",

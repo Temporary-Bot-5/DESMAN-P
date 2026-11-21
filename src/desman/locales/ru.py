@@ -15,6 +15,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Использовать подсистему Windows для Linux.",
+    "WSL sandbox distribution {pin} is present.": "Дистрибутив песочницы WSL {pin} установлен.",
+    "WSL sandbox distribution {pin} is missing.": "Дистрибутив песочницы WSL {pin} не установлен.",
+    "WSL sandbox setup requires Windows.": "Для настройки песочницы WSL требуется Windows.",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "Включить WSL? Windows может запросить права администратора и потребует перезагрузку.",
+    "WSL sandbox setup failed: {error}": "Не удалось настроить песочницу WSL: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "Настроить песочницу WSL (около 4 МБ для загрузки и 60 МБ на диске)? Для установки пакетов один раз понадобится интернет.",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Перезагрузите Windows и выполните `desman sandbox setup --wsl --yes`.",
+    "WSL sandbox removal requires Windows.": "Для удаления песочницы WSL требуется Windows.",
+    "WSL sandbox removal failed: {error}": "Не удалось удалить песочницу WSL: {error}",
+    "The WSL sandbox has been removed.": "Песочница WSL удалена.",
+    "Remove the WSL sandbox distribution and its files?": "Удалить дистрибутив песочницы WSL и его файлы?",
+    "Use --wsl to select the WSL sandbox.": "Выберите песочницу WSL с помощью --wsl.",
+    "Remove the WSL sandbox distribution.": "Удалить дистрибутив песочницы WSL.",
     "on": "включён",
     "Borrowing takes effect after `desman global join`.": "Заимствование начнёт действовать после команды `desman global join`.",
     "SearXNG quotas count searches only.": "В квотах SearXNG учитываются только поисковые запросы.",

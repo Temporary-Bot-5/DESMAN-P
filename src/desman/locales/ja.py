@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Windows Subsystem for Linux を使用する。",
+    "WSL sandbox distribution {pin} is present.": "WSL サンドボックスのディストリビューション {pin} が見つかりました。",
+    "WSL sandbox distribution {pin} is missing.": "WSL サンドボックスのディストリビューション {pin} が見つかりません。",
+    "WSL sandbox setup requires Windows.": "WSL サンドボックスのセットアップには Windows が必要です。",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "WSL を有効にしますか？ Windows が管理者権限を求める場合があり、再起動が必要です。",
+    "WSL sandbox setup failed: {error}": "WSL サンドボックスのセットアップに失敗しました: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "WSL サンドボックスをセットアップしますか（ダウンロード約 4 MB、ディスク容量約 60 MB）？ パッケージのインストール時に一度インターネット接続が必要です。",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Windows を再起動し、`desman sandbox setup --wsl --yes` を実行してください。",
+    "WSL sandbox removal requires Windows.": "WSL サンドボックスの削除には Windows が必要です。",
+    "WSL sandbox removal failed: {error}": "WSL サンドボックスの削除に失敗しました: {error}",
+    "The WSL sandbox has been removed.": "WSL サンドボックスを削除しました。",
+    "Remove the WSL sandbox distribution and its files?": "WSL サンドボックスのディストリビューションとそのファイルを削除しますか？",
+    "Use --wsl to select the WSL sandbox.": "--wsl で WSL サンドボックスを指定してください。",
+    "Remove the WSL sandbox distribution.": "WSL サンドボックスのディストリビューションを削除する。",
     "on": "オン",
     "Borrowing takes effect after `desman global join`.": "借り受けは `desman global join` の実行後に有効になります。",
     "SearXNG quotas count searches only.": "SearXNG の割り当ては検索回数のみを数えます。",

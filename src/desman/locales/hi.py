@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Linux के लिए Windows सबसिस्टम इस्तेमाल करें।",
+    "WSL sandbox distribution {pin} is present.": "WSL सैंडबॉक्स वितरण {pin} मौजूद है।",
+    "WSL sandbox distribution {pin} is missing.": "WSL सैंडबॉक्स वितरण {pin} मौजूद नहीं है।",
+    "WSL sandbox setup requires Windows.": "WSL सैंडबॉक्स सेट करने के लिए Windows चाहिए।",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "WSL चालू करें? Windows व्यवस्थापक अधिकार माँग सकता है और उसे फिर से शुरू करना होगा।",
+    "WSL sandbox setup failed: {error}": "WSL सैंडबॉक्स सेट नहीं हो सका: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "WSL सैंडबॉक्स सेट करें (लगभग 4 MB डाउनलोड और डिस्क पर 60 MB)? पैकेज इंस्टॉल करने के लिए एक बार इंटरनेट कनेक्शन चाहिए।",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Windows फिर से शुरू करें और फिर `desman sandbox setup --wsl --yes` चलाएँ।",
+    "WSL sandbox removal requires Windows.": "WSL सैंडबॉक्स हटाने के लिए Windows चाहिए।",
+    "WSL sandbox removal failed: {error}": "WSL सैंडबॉक्स हटाया नहीं जा सका: {error}",
+    "The WSL sandbox has been removed.": "WSL सैंडबॉक्स हटा दिया गया है।",
+    "Remove the WSL sandbox distribution and its files?": "WSL सैंडबॉक्स वितरण और उसकी फ़ाइलें हटाएँ?",
+    "Use --wsl to select the WSL sandbox.": "WSL सैंडबॉक्स चुनने के लिए --wsl का इस्तेमाल करें।",
+    "Remove the WSL sandbox distribution.": "WSL सैंडबॉक्स वितरण हटाएँ।",
     "on": "चालू",
     "Borrowing takes effect after `desman global join`.": "उधार लेना `desman global join` चलाने के बाद प्रभावी होगा।",
     "SearXNG quotas count searches only.": "SearXNG के कोटे में केवल खोजों की गिनती होती है।",

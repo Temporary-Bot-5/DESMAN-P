@@ -15,6 +15,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Użyj podsystemu Windows dla systemu Linux.",
+    "WSL sandbox distribution {pin} is present.": "Dystrybucja piaskownicy WSL {pin} jest obecna.",
+    "WSL sandbox distribution {pin} is missing.": "Brakuje dystrybucji piaskownicy WSL {pin}.",
+    "WSL sandbox setup requires Windows.": "Konfiguracja piaskownicy WSL wymaga systemu Windows.",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "Włączyć WSL? Windows może poprosić o uprawnienia administratora i wymaga ponownego uruchomienia.",
+    "WSL sandbox setup failed: {error}": "Nie udało się skonfigurować piaskownicy WSL: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "Skonfigurować piaskownicę WSL (około 4 MB do pobrania i 60 MB na dysku)? Instalacja pakietów wymaga jednorazowego dostępu do internetu.",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Uruchom ponownie Windows, a potem wykonaj `desman sandbox setup --wsl --yes`.",
+    "WSL sandbox removal requires Windows.": "Usunięcie piaskownicy WSL wymaga systemu Windows.",
+    "WSL sandbox removal failed: {error}": "Nie udało się usunąć piaskownicy WSL: {error}",
+    "The WSL sandbox has been removed.": "Piaskownica WSL została usunięta.",
+    "Remove the WSL sandbox distribution and its files?": "Usunąć dystrybucję piaskownicy WSL i jej pliki?",
+    "Use --wsl to select the WSL sandbox.": "Użyj --wsl, aby wybrać piaskownicę WSL.",
+    "Remove the WSL sandbox distribution.": "Usuń dystrybucję piaskownicy WSL.",
     "on": "włączone",
     "Borrowing takes effect after `desman global join`.": "Wypożyczanie zacznie działać po wykonaniu `desman global join`.",
     "SearXNG quotas count searches only.": "Limity SearXNG obejmują tylko liczbę wyszukiwań.",

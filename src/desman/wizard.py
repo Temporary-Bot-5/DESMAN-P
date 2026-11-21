@@ -555,7 +555,7 @@ def _docker(s: _Session) -> None:
 
         try:
             box = Sandbox()
-            if box.backend == "docker" and box.docker_problem() is None:
+            if box.docker_problem() is None or box.wsl_usable():
                 offer_setup(box)
             else:
                 _docker_sandbox_later()
@@ -589,7 +589,7 @@ def _permissions(current: Permissions) -> Permissions:
         from desman.sandbox_cli import offer_setup
 
         box = Sandbox()
-        if box.backend in ("docker", "wasi"):
+        if not box.platform.startswith("linux"):
             if box.docker and (box.docker_problem() or "").startswith(
                 "Docker daemon did not answer"
             ):

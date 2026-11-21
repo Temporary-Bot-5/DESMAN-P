@@ -20,7 +20,7 @@ from click.testing import CliRunner
 
 from desman import runs, sandbox_cli, ui, wizard
 from desman.cli import cli
-from desman.commands import Context, Kind, NoArgs, Proposal, find
+from desman.commands import Context, Kind, NoArgs, Proposal, SandboxSetupArgs, find
 from desman.commands import Outcome as CommandOutcome
 from desman.config import Config, ConfigManager, Permissions, default_config_path
 from desman.core import sandbox
@@ -56,7 +56,7 @@ class Docker:
 
     def sandbox(self, **limits: int) -> Sandbox:
         return Sandbox(
-            Limits(**limits), platform="win32", docker="docker-test", docker_runner=self.run
+            Limits(**limits), platform="win32", docker="docker-test", docker_runner=self.run, wsl=""
         )
 
 
@@ -336,6 +336,8 @@ def test_cli_status_setup_and_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
         "reason": None,
         "image": DOCKER_IMAGE,
         "image_present": True,
+        "wsl_present": False,
+        "wsl_pin": sandbox.WSL_PIN,
     }
     docker.calls.clear()
     installed = CliRunner().invoke(cli, ["sandbox", "setup", "--yes"])
@@ -391,7 +393,7 @@ def test_catalog_waits_for_confirmation(
     docker.answers["image"] = (1, "", "No such image")
     entry = find("sandbox setup")
     assert entry is not None
-    proposal = entry.handler(context, NoArgs())
+    proposal = entry.handler(context, SandboxSetupArgs())
     assert isinstance(proposal, Proposal) and "45 MB" in proposal.lines[0]
     assert not any(call[0] == "pull" for call in docker.calls)
     assert proposal.apply().data == {"installed": True}
@@ -467,7 +469,7 @@ def test_executor_access_hints(
 @pytest.fixture(scope="module")
 def real_docker() -> Sandbox:
     # Exercise the Docker backend even on Linux, whose default is bubblewrap.
-    box = Sandbox(platform="win32" if sys.platform == "win32" else "darwin")
+    box = Sandbox(platform="win32" if sys.platform == "win32" else "darwin", wsl="")
     reason = box.unavailable()
     if reason is not None:
         if os.environ.get("DESMAN_DOCKER_TESTS") == "1":

@@ -1,6 +1,7 @@
 """Docker plans and operator commands, with a fake subprocess boundary."""
 
 import json
+import os
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -365,9 +366,7 @@ def test_desktop_binary_before_path_refresh(
     monkeypatch.setattr(shutil, "which", lambda _: None)
     monkeypatch.setattr(sandbox, "windows_program_files", lambda: r"D:\Apps")
     monkeypatch.setattr(sandbox, "_find_prlimit", lambda: None)
-    monkeypatch.setattr(
-        sandbox, "os", SimpleNamespace(path=SimpleNamespace(isfile=lambda path: path == bundled))
-    )
+    monkeypatch.setattr(os.path, "isfile", lambda path: path == bundled)
     assert docker_cli.docker_executable() == bundled
     assert sandbox.Sandbox().docker == bundled
 

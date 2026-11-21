@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Usar el subsistema de Windows para Linux.",
+    "WSL sandbox distribution {pin} is present.": "La distribución {pin} de la zona aislada WSL está presente.",
+    "WSL sandbox distribution {pin} is missing.": "Falta la distribución {pin} de la zona aislada WSL.",
+    "WSL sandbox setup requires Windows.": "La configuración de la zona aislada WSL requiere Windows.",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "¿Activar WSL? Windows puede pedir permisos de administrador y necesita reiniciarse.",
+    "WSL sandbox setup failed: {error}": "No se pudo configurar la zona aislada WSL: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "¿Configurar la zona aislada WSL (unos 4 MB de descarga y 60 MB en disco)? Se requiere acceso a Internet una vez para instalar los paquetes.",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Reinicia Windows y ejecuta `desman sandbox setup --wsl --yes`.",
+    "WSL sandbox removal requires Windows.": "La eliminación de la zona aislada WSL requiere Windows.",
+    "WSL sandbox removal failed: {error}": "No se pudo eliminar la zona aislada WSL: {error}",
+    "The WSL sandbox has been removed.": "Se eliminó la zona aislada WSL.",
+    "Remove the WSL sandbox distribution and its files?": "¿Eliminar la distribución de la zona aislada WSL y sus archivos?",
+    "Use --wsl to select the WSL sandbox.": "Usa --wsl para seleccionar la zona aislada WSL.",
+    "Remove the WSL sandbox distribution.": "Eliminar la distribución de la zona aislada WSL.",
     "on": "activado",
     "Borrowing takes effect after `desman global join`.": "El préstamo se activa después de ejecutar `desman global join`.",
     "SearXNG quotas count searches only.": "Las cuotas de SearXNG solo cuentan las búsquedas.",

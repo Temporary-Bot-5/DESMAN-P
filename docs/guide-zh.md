@@ -25,7 +25,7 @@
   然后运行 `desman sandbox setup --yes` 以授权下载镜像。你可以在 DESMAN 的设置中开启
   运行代码的权限（`shell_execution`）。没有沙箱时，DESMAN 仍可编写代码，并会请你帮忙运行。
   要安装 Docker Desktop，请使用设置向导中的 Docker 部分，或运行 `desman docker install --yes`。
-  如果 Windows 或 macOS 上无法使用 Docker，请运行 `desman sandbox setup --yes`，为 Python 和 pytest 配置 WebAssembly 沙箱。
+  没有 Docker 时，如果 Windows 上可用 WSL2，`desman sandbox setup --yes` 会配置 WSL 沙箱；其他情况下会为 Python 和 pytest 配置 WebAssembly 沙箱。
 
 ## 1. 安装
 

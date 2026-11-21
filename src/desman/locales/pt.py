@@ -10,6 +10,20 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Use the Windows Subsystem for Linux.": "Usar o Subsistema do Windows para Linux.",
+    "WSL sandbox distribution {pin} is present.": "A distribuição {pin} da sandbox WSL está presente.",
+    "WSL sandbox distribution {pin} is missing.": "A distribuição {pin} da sandbox WSL está ausente.",
+    "WSL sandbox setup requires Windows.": "A configuração da sandbox WSL requer Windows.",
+    "Enable WSL? Windows may ask for administrator rights and needs a restart.": "Ativar o WSL? O Windows pode pedir privilégios de administrador e precisa ser reiniciado.",
+    "WSL sandbox setup failed: {error}": "Falha ao configurar a sandbox WSL: {error}",
+    "Set up the WSL sandbox (about 4 MB download, 60 MB on disk)? Installing its packages needs internet access once.": "Configurar a sandbox WSL (cerca de 4 MB para baixar e 60 MB em disco)? A instalação dos pacotes requer acesso à internet uma vez.",
+    "Restart Windows, then run `desman sandbox setup --wsl --yes`.": "Reinicie o Windows e execute `desman sandbox setup --wsl --yes`.",
+    "WSL sandbox removal requires Windows.": "A remoção da sandbox WSL requer Windows.",
+    "WSL sandbox removal failed: {error}": "Falha ao remover a sandbox WSL: {error}",
+    "The WSL sandbox has been removed.": "A sandbox WSL foi removida.",
+    "Remove the WSL sandbox distribution and its files?": "Remover a distribuição da sandbox WSL e seus arquivos?",
+    "Use --wsl to select the WSL sandbox.": "Use --wsl para selecionar a sandbox WSL.",
+    "Remove the WSL sandbox distribution.": "Remover a distribuição da sandbox WSL.",
     "on": "ativado",
     "Borrowing takes effect after `desman global join`.": "O empréstimo passa a valer após executar `desman global join`.",
     "SearXNG quotas count searches only.": "As cotas do SearXNG contam apenas as pesquisas.",

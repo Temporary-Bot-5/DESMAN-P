@@ -29,7 +29,7 @@
   कोड चलाने की अनुमति (`shell_execution`) चालू कर सकते हैं। सैंडबॉक्स के बिना DESMAN कोड लिख सकता
   है और उसे चलाने के लिए आपसे मदद माँगेगा।
   Docker Desktop इंस्टॉल करने के लिए सेटअप विज़ार्ड के Docker अनुभाग का उपयोग करें या `desman docker install --yes` चलाएँ।
-  Windows या macOS पर Docker उपलब्ध न हो तो Python और pytest के लिए WebAssembly सैंडबॉक्स सेट करने हेतु `desman sandbox setup --yes` चलाएँ।
+  Docker उपलब्ध न होने पर `desman sandbox setup --yes` Windows में WSL2 उपलब्ध होने पर WSL सैंडबॉक्स सेट करता है। अन्य मामलों में यह Python और pytest के लिए WebAssembly सैंडबॉक्स सेट करता है।
 
 ## 1. इंस्टॉलेशन
 

@@ -441,7 +441,7 @@ CLI (`run/status/resume/list-tasks/audit/setup/config`). 15 тестов про�
   - [x] **T.6u Установка Docker из мастера.** `desman docker [status]|install [--yes]`: без `--yes` — план (команды для этой ОС, права администратора, размер, перезагрузка, лицензия Docker Desktop); с `--yes` выполняет его (winget на Windows, Homebrew на macOS, пакет дистрибутива и bubblewrap на Linux). Мастер предлагает шаг «Docker», когда его нет; после «да» — образ песочницы и SearXNG.
   - [x] **T.6v SearXNG без Docker.** Нет Docker — `search setup` ставит SearXNG как Python-программу (архив по коммиту и SHA-256, свой venv, заглушка `pwd` на Windows), DESMAN запускает его, когда нужен поиск.
   - [x] **T.6w Песочница в WebAssembly.** Третий бэкенд `wasi`: CPython для WASI под `wasmtime`, только `python` и `pytest`, без сети и процессов; на Windows и macOS, когда нет Docker.
-  - [ ] **T.6x Песочница в WSL.** На Windows с WSL2: свой маленький дистрибутив и bubblewrap внутри, как на Linux; порядок на Windows — Docker, WSL, WASI.
+  - [x] **T.6x Песочница в WSL.** На Windows с WSL2: свой маленький дистрибутив и bubblewrap внутри, как на Linux; порядок на Windows — Docker, WSL, WASI.
   - [ ] **T.6y Изоляция средствами Windows (исследование).** AppContainer: оценка и прототип вне продукта; бэкендом — только после своего ADR и независимого ревью.
 - [ ] **T.7 Тест.** Около 10 участников; итог — список найденных проблем и задачи по ним.
 
