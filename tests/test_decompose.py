@@ -383,3 +383,37 @@ def test_a_combine_repairs_its_quotes_from_the_notes_and_the_document(
     [subtask] = store.list_subtasks(task_id)
     assert subtask.attempts.quality == 0
     assert "крапивное семя" in notes_of(store, task_id)
+
+
+def test_a_combines_repair_shows_the_text_even_when_its_notes_carry_it_too(
+    store: Store, clock: FakeClock, tmp_path: Any
+) -> None:
+    # Review of L.2b: the passage sat in a note and in the document, nearest() saw two matches
+    # and the "the text there reads" hint was dropped.
+    from desman.core.workspace import Workspace
+
+    text = "Он свободен, как и осмеянное им крапивное семя."
+    part = SubtaskSpec(
+        description="Make notes on part 1",
+        acceptance_criteria="c",
+        inputs={"document": "input/a.txt", "part": 1, "text": text},
+    )
+    combine = SubtaskSpec(
+        description="Combine the notes",
+        acceptance_criteria="c",
+        inputs={"document": "input/a.txt"},
+        depends_on=[0],
+    )
+    task_id = store.create_task(TaskSpec(goal="g", subtasks=[part, combine]))
+    Workspace(tmp_path, task_id).write("input/a.txt", text)
+    note = '{"text": "VII: «Он свободен, как и осмеянное им крапивное семя»"}'
+    wrong = '{"text": "VII: «Он свободен, как и осмеянное им крапивным семенем»"}'
+    llm = FakeLLM().on("Execute", note, wrong, note).on("Review", ACCEPT, repeat_last=True)
+    assert (
+        coordinator(store, clock, llm, workspaces=tmp_path).run(task_id).status is TaskStatus.DONE
+    )
+    repair = [r for r in llm.calls if "(quote check)" in r.messages[-1].content][0]
+    assert "the text there reads: «Он свободен, как и осмеянное им крапивное семя" in (
+        repair.messages[-1].content
+    )
+    assert "the notes you were given" in repair.messages[-1].content

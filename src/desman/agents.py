@@ -396,8 +396,12 @@ def _execute(
                     ),
                 )
             content = reply.root
-            sources = _note_sources(work)
-            if sources is not None and not is_error_report(content):
+            if (
+                "document" in work.subtask.inputs
+                and not is_error_report(content)
+                and any(quotes(value) for value in string_values(content))
+                and (sources := _note_sources(work)) is not None
+            ):  # the document is read only when there are quotes to check
                 content = _verbatim_notes(model, request, content, *sources)
             if (
                 format_final
@@ -743,12 +747,15 @@ def _quote_feedback(
     return _quote_message(absent, sources, location)
 
 
-def _quote_message(absent: list[str], sources: list[str], location: str) -> str:
+def _quote_message(
+    absent: list[str], sources: list[str], location: str, hints: list[str] | None = None
+) -> str:
+    """`hints`: where to look up what the text really says (default: the sources)."""
     listed = ", ".join(f"«{quote}»" for quote in absent[:10])
     shown_text = [
         f"«{quote[:60]}{'…' if len(quote) > 60 else ''}» — the text there reads: «{passage}»"
         for quote in absent[:5]
-        if (passage := nearest(quote, sources)) is not None
+        if (passage := nearest(quote, sources if hints is None else hints)) is not None
     ]
     there = (" Compare: " + "; ".join(shown_text) + ".") if shown_text else ""
     return (
@@ -781,17 +788,20 @@ def _unquote(content: Any, absent: list[str]) -> Any:
     return content
 
 
-def _note_sources(work: Work) -> tuple[list[str], str] | None:
+def _note_sources(work: Work) -> tuple[list[str], str, list[str]] | None:
     """What the quotes of a long document's notes must come from (ADR 0014): a part's text; for
-    a combine, the quotes its notes carried and the document itself."""
+    a combine, the quotes its notes carried and the document itself. Also where to show the
+    model what the text really says: the document when it was read (one match there, not one
+    in the notes and one in the document), else the notes' quotes."""
     inputs = work.subtask.inputs
     if "document" not in inputs:
         return None
     if isinstance(inputs.get("text"), str):
-        return [inputs["text"]], "the part's text"
+        return [inputs["text"]], "the part's text", [inputs["text"]]
     carried = [
         fragment
         for dependency in work.context.dependencies
+        if not dependency.truncated  # a cut preview holds broken quotes; the document has them
         for value in string_values(dependency.content)
         for fragment in quotes(value)
     ]
@@ -800,11 +810,17 @@ def _note_sources(work: Work) -> tuple[list[str], str] | None:
     except (OSError, UnicodeError, PathEscapeError):
         document = []
     sources = carried + document
-    return (sources, "the notes you were given or the document") if sources else None
+    # A combine sees only its notes (no tools): it copies from them, with the text shown to it.
+    return (sources, "the notes you were given", document or carried) if sources else None
 
 
 def _verbatim_notes(
-    model: LLM, request: Request, content: Any, sources: list[str], location: str
+    model: LLM,
+    request: Request,
+    content: Any,
+    sources: list[str],
+    location: str,
+    hints: list[str] | None = None,
 ) -> Any:
     """Notes on a long document (ADR 0014): code checks their quotes at once, asks for one
     correction within the attempt (showing what the text says), and unquotes whatever is still
@@ -820,7 +836,7 @@ def _verbatim_notes(
                 Message(
                     role="user",
                     content=f"{EXECUTE} (quote check):\n"
-                    + _quote_message(absent, sources, location)
+                    + _quote_message(absent, sources, location, hints)
                     + " Reply with the whole corrected result, without tool calls.",
                 ),
             ]
