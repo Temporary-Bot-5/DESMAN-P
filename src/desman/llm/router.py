@@ -479,6 +479,11 @@ REPLY_TOKENS = 1_024
 """Room left for the reply when a request sets no max_tokens."""
 
 
+ESTIMATE_SLACK = 2.0
+"""How far over a model's known capacity an estimate may be and the model still be tried: the
+estimate counts characters, not tokens."""
+
+
 def estimated_tokens(request: Request) -> int:
     chars = sum(len(m.content) for m in request.messages)
     return chars // CHARS_PER_TOKEN + (request.max_tokens or REPLY_TOKENS)
@@ -654,13 +659,15 @@ class Fallback:
         if large:
             large.sort(key=lambda m: max(0, need - m[1].spec.context) if m[1] is not None else 0)
         elif sized:
-            # The token estimate is rough. Give the largest remaining capacity a try.
+            # The token estimate is rough: a request just over the largest capacity gets a try
+            # there; one far over it would only be refused (or cut) by the model.
             largest = max(limits[choice.label] or 0 for _, choice in sized if choice is not None)
-            large = [
-                (llm, choice)
-                for llm, choice in sized
-                if choice is not None and limits[choice.label] == largest
-            ]
+            if need <= largest * ESTIMATE_SLACK:
+                large = [
+                    (llm, choice)
+                    for llm, choice in sized
+                    if choice is not None and limits[choice.label] == largest
+                ]
         fit = [
             (llm, choice)
             for llm, choice in large
@@ -686,7 +693,17 @@ class Fallback:
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
             self._untried.pop(scope, None)
-            raise RequestTooLarge(self.name, 413, f"no model can take {need} tokens")
+            if not sized:
+                raise RequestTooLarge(self.name, 413, f"no model can take {need} tokens")
+            largest = max(
+                (limits[choice.label] or 0 for _, choice in sized if choice is not None), default=0
+            )
+            raise RequestTooLarge(
+                self.name,
+                413,
+                f"request needs {need} tokens; largest available request ceiling is {largest}. "
+                "Choose a model with a larger request ceiling or reduce the task context.",
+            )
         failed_over = False
         for i, (llm, choice) in enumerate(members):
             self._call = LastCall(skipped=tuple(skipped))

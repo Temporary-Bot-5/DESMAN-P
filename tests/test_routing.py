@@ -308,13 +308,13 @@ def test_context_overestimate_tries_largest_until_provider_refuses() -> None:
     assert not tiny.calls
     with pytest.raises(RequestTooLarge, match="actual provider refusal"):
         lineup.complete(request)
-    assert lineup.complete(request).text == "small answer"
-    assert len(big.calls) == 2
-    with pytest.raises(RequestTooLarge, match="actual provider refusal"):
+    # The refusal is remembered; the small model is more than ESTIMATE_SLACK under the estimate,
+    # so it is not tried either (a model far too small would only refuse or cut the request).
+    with pytest.raises(RequestTooLarge, match="largest available request ceiling is 2000"):
         lineup.complete(request)
-    with pytest.raises(RequestTooLarge, match="no model can take"):
-        lineup.complete(request)
-    assert len(tiny.calls) == 2
+    assert len(big.calls) == 2 and not tiny.calls
+    smaller = Request(messages=[Message(role="user", content="x" * 2_400)])
+    assert lineup.complete(smaller).text == "small answer"
 
 
 def test_an_accepted_reply_is_kept_by_the_model_that_wrote_it(store: Store) -> None:
