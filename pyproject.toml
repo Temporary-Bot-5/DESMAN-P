@@ -45,6 +45,8 @@ desman = ["policy.toml", "protected.toml", "net/root.pub", "gui/static/*", "gui/
 target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
+# Research prototypes (outside the product, run by hand on another OS): not linted.
+extend-exclude = ["research"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "W", "B", "SIM", "PLW1514"]
