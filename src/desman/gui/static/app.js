@@ -969,6 +969,17 @@ let moduleSnapshot = {modules: [], roles: [], interlocutor: null};
 const moduleEditors = new Map();
 
 function moduleCard(parent, m, placement = "modules") {
+  if (m.provider === "searxng") {
+    const card = text("article", "", parent);
+    card.className = "module-card";
+    card.dataset.search = m.label;
+    const box = text("div", "", card); box.className = "module-box";
+    const info = text("div", "", box); info.className = "module-info";
+    text("strong", m.label, info).className = "module-model";
+    const facts = text("dl", "", card); facts.className = "module-facts";
+    text("dd", m.usage, facts).className = "module-usage wide";
+    return card;
+  }
   const identity = `${placement}:${m.scope}:${m.scope_id}:${m.role}${placement === "modules" ? `:${m.section}:${m.module_source}:${m.model}` : ""}`;
   const card = text("article", "", parent);
   card.className = "module-card";

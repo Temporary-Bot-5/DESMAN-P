@@ -11,7 +11,7 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, Self
 
 import click
 from pydantic import (
@@ -23,6 +23,8 @@ from pydantic import (
     StrictStr,
     StringConstraints,
     ValidationError,
+    field_validator,
+    model_validator,
 )
 
 from desman.core import filelock
@@ -94,7 +96,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -248,7 +250,14 @@ class Donation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     calls_per_day: StrictInt = _quota("calls_per_day")
-    tokens_per_day: StrictInt = _quota("tokens_per_day")
+    tokens_per_day: StrictInt = Field(ge=0, le=DONATION_BOUNDS["tokens_per_day"][1])
+
+    @field_validator("tokens_per_day")
+    @classmethod
+    def token_quota(cls, value: int) -> int:
+        if 0 < value < DONATION_BOUNDS["tokens_per_day"][0]:
+            raise ValueError("token quota is below the minimum")
+        return value
 
 
 class Network(BaseModel):
@@ -260,10 +269,21 @@ class Network(BaseModel):
 
     enabled: StrictBool = False
     lead: StrictBool = True
+    borrow_search: StrictBool = False
     registry: RegistryUrl | None = None
     """None: the address DESMAN ships with (`net.DEFAULT_REGISTRY`)."""
     donated: dict[str, Donation] = Field(default_factory=dict)
     """By provider id."""
+
+    @model_validator(mode="after")
+    def donation_quotas(self) -> Self:
+        for provider, donation in self.donated.items():
+            if provider == "searxng":
+                # Configs saved before search had a calls-only quota may contain tokens.
+                self.donated[provider] = donation.model_copy(update={"tokens_per_day": 0})
+            elif donation.tokens_per_day == 0:
+                raise ValueError("model donations need a token quota")
+        return self
 
     def is_set(self) -> bool:
         return self != Network()
@@ -283,7 +303,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[9] = 9
+    schema_version: Literal[10] = 10
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -337,6 +357,10 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     4: `tuning` (empty: DESMAN's defaults).
     5: `network` (desman-global off).
     6: per-role key preferences and the interlocutor’s model.
+    7: background worker count.
+    8: page turns.
+    9: cluster leadership.
+    10: opt-in borrowed search; SearXNG donations count calls only.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -388,6 +412,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
 
     if version == 8:
         version = 9  # cluster leadership defaults on within the opt-in network
+
+    if version == 9:
+        version = 10  # borrowing search defaults off
 
     data["schema_version"] = version
     return data

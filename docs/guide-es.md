@@ -132,6 +132,8 @@ Anota o recuerda todo lo que te parezca raro, confuso o lento. Eso también cuen
 
 ## 5. La red desman-global
 
+Usa `desman global donate searxng --calls N` para prestar búsquedas de SearXNG gestionado y `desman global search on|off` para habilitar o deshabilitar el préstamo cuando no tienes un buscador web.
+
 desman-global conecta los equipos de los participantes. Tu equipo puede hacer pequeñas partes de
 tareas ajenas con los modelos que hayas *prestado*. Para las tareas grandes, la red reúne los
 equipos libres en grupos. Tus tareas tienen prioridad y las ajenas solo se ejecutan cuando tu

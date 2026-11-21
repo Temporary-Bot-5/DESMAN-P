@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "开启",
+    "Borrowing takes effect after `desman global join`.": "执行 `desman global join` 后，借用才会生效。",
+    "SearXNG quotas count searches only.": "SearXNG 配额仅计算搜索次数。",
+    "Borrow web search": "借用网页搜索",
+    "Set up local SearXNG with `desman search setup` before lending it.": "出借前请先使用 `desman search setup` 设置本地 SearXNG。",
+    "{calls} searches a day": "每日 {calls} 次搜索",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "今日已使用 {calls} 次搜索，剩余 {calls_left} 次。",
+    "Show or change whether this node borrows web search.": "查看或更改此节点是否借用网页搜索。",
     "Saved the page {url} ({chars} characters) to read it in parts.": "已保存页面 {url}（{chars} 个字符），以便分段阅读。",
     "Another native SearXNG operation is in progress.": "另一个原生 SearXNG 操作正在进行。",
     "Native SearXNG failed: {error}": "原生 SearXNG 失败：{error}",
@@ -1231,7 +1239,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "还不知道注册中心的地址：请提供一个，`desman global join --registry URL`。",
     "Not now: desman-global stays off.": "暂不：desman-global 保持关闭。",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "在你自己选择之前，什么都不会借出：`desman global donate PROVIDER`。",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "`desman worker` 运行期间，本节点会向注册中心注册、报告存活并获取吊销列表；目前不发送其他任何内容。`desman global leave` 收回一切。",
     "In touch with the desman-global registry {url}.": "已与 desman-global 注册中心 {url} 保持联系。",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "无法连接 desman-global 注册中心（{error}）；{seconds} 秒后重试。您自己的工作照常进行。",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global 注册中心拒绝了本节点（{error}）；{seconds} 秒后重试。通常是时钟不准导致的。",

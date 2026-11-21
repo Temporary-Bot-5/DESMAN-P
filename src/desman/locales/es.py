@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "activado",
+    "Borrowing takes effect after `desman global join`.": "El préstamo se activa después de ejecutar `desman global join`.",
+    "SearXNG quotas count searches only.": "Las cuotas de SearXNG solo cuentan las búsquedas.",
+    "Borrow web search": "Tomar prestada la búsqueda web",
+    "Set up local SearXNG with `desman search setup` before lending it.": "Configura SearXNG local con `desman search setup` antes de prestarlo.",
+    "{calls} searches a day": "{calls} búsquedas al día",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "Búsquedas usadas hoy: {calls}. Restantes: {calls_left}.",
+    "Show or change whether this node borrows web search.": "Muestra o cambia si este nodo toma prestada la búsqueda web.",
     "Saved the page {url} ({chars} characters) to read it in parts.": "Se guardó la página {url} ({chars} caracteres) para leerla por partes.",
     "Another native SearXNG operation is in progress.": "Hay otra operación de SearXNG nativo en curso.",
     "Native SearXNG failed: {error}": "Error de SearXNG nativo: {error}",
@@ -1307,7 +1315,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "Aún no se conoce la dirección del registro: indique una, `desman global join --registry URL`.",
     "Not now: desman-global stays off.": "Ahora no: desman-global sigue desactivado.",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "No se presta nada hasta que usted lo elija: `desman global donate PROVIDER`.",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "Mientras `desman worker` se ejecuta, este nodo se registra en el registro, avisa de que sigue vivo y descarga las revocaciones; nada más se envía todavía. `desman global leave` lo retira todo.",
     "In touch with the desman-global registry {url}.": "En contacto con el registro de desman-global {url}.",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "No se puede contactar con el registro de desman-global ({error}); se reintentará en {seconds} s. Su propio trabajo continúa.",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "El registro de desman-global rechazó este nodo ({error}); se reintentará en {seconds} s. La causa habitual es un reloj desajustado.",

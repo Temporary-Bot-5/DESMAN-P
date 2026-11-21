@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "açık",
+    "Borrowing takes effect after `desman global join`.": "Ödünç alma, `desman global join` komutundan sonra etkinleşir.",
+    "SearXNG quotas count searches only.": "SearXNG kotaları yalnızca arama sayısını hesaba katar.",
+    "Borrow web search": "Web aramasını ödünç al",
+    "Set up local SearXNG with `desman search setup` before lending it.": "Ödünç vermeden önce `desman search setup` ile yerel SearXNG'yi kurun.",
+    "{calls} searches a day": "Günde {calls} arama",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "Bugün yapılan arama: {calls}. Kalan: {calls_left}.",
+    "Show or change whether this node borrows web search.": "Bu düğümün web aramasını ödünç alma ayarını gösterin veya değiştirin.",
     "Saved the page {url} ({chars} characters) to read it in parts.": "{url} sayfası ({chars} karakter) parça parça okunmak üzere kaydedildi.",
     "Another native SearXNG operation is in progress.": "Başka bir yerel SearXNG işlemi devam ediyor.",
     "Native SearXNG failed: {error}": "Yerel SearXNG başarısız oldu: {error}",
@@ -1243,7 +1251,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "Henüz bilinen bir kayıt adresi yok: bir tane verin, `desman global join --registry URL`.",
     "Not now: desman-global stays off.": "Şimdi değil: desman-global kapalı kalıyor.",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "Siz seçene kadar hiçbir şey ödünç verilmez: `desman global donate PROVIDER`.",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "`desman worker` çalıştığı sürece bu düğüm kayıt sunucusuna kaydolur, hayatta olduğunu bildirir ve iptal listesini alır; henüz başka bir şey gönderilmez. `desman global leave` her şeyi geri alır.",
     "In touch with the desman-global registry {url}.": "desman-global kayıt sunucusu {url} ile bağlantı var.",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "desman-global kayıt sunucusuna ulaşılamıyor ({error}); {seconds} sn sonra yeniden denenecek. Kendi işiniz sürüyor.",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global kayıt sunucusu bu düğümü reddetti ({error}); {seconds} sn sonra yeniden denenecek. Genellikle sebep yanlış ayarlı bir saattir.",

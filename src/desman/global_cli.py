@@ -36,16 +36,16 @@ import httpx
 from pydantic import BaseModel
 from rich.text import Text
 
-from desman import applying, bench, net, providers, ui
+from desman import applying, bench, net, providers, searxng, ui
 from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
-from desman.core import db, netlog
+from desman.core import db, netlog, operator
 from desman.core import proposals as stored_proposals
 from desman.core import report as task_reports
 from desman.core import stats as task_stats
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
-from desman.net import cluster, jobs, node, protocol, sign
+from desman.net import cluster, jobs, node, protocol, search_lend, sign
 from desman.providers import Provider
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -75,8 +75,18 @@ class QuotaUsage:
     tokens: int
     held: int
 
-    def as_json(self) -> dict[str, int]:
-        return {"calls": self.calls, "tokens": self.tokens}
+    def as_json(self, provider: str = "") -> dict[str, int]:
+        data = {"calls": self.calls}
+        if provider != protocol.SEARCH_PROVIDER:
+            data["tokens"] = self.tokens
+        return data
+
+
+def quota_json(quota: Donation, provider: str) -> dict[str, int]:
+    data = {"calls_per_day": quota.calls_per_day}
+    if provider != protocol.SEARCH_PROVIDER:
+        data["tokens_per_day"] = quota.tokens_per_day
+    return data
 
 
 @contextmanager
@@ -119,20 +129,22 @@ class Status:
     used_today: dict[str, QuotaUsage] | None
     now: datetime
     lead: bool = True
+    borrow_search: bool = False
     cluster: dict[str, Any] | None = None
 
     def as_json(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
             "lead": self.lead,
+            "borrow_search": self.borrow_search,
             "cluster": self.cluster,
             "registry": self.registry,
             "node": self.node,
-            "donated": {name: d.model_dump() for name, d in self.donated.items()},
+            "donated": {name: quota_json(d, name) for name, d in self.donated.items()},
             "used_today": (
                 None
                 if self.used_today is None
-                else {name: usage.as_json() for name, usage in self.used_today.items()}
+                else {name: usage.as_json(name) for name, usage in self.used_today.items()}
             ),
             "resets_at": _reset_at(self.now).isoformat(),
         }
@@ -148,13 +160,21 @@ class QuotaReport:
     def as_json(self, changed: Lent | None = None) -> dict[str, Any]:
         data: dict[str, Any] = {
             "provider": self.provider,
-            "quota": self.quota.model_dump(),
-            "used_today": None if self.used_today is None else self.used_today.as_json(),
+            "quota": quota_json(self.quota, self.provider),
+            "used_today": None
+            if self.used_today is None
+            else self.used_today.as_json(self.provider),
             "resets_at": _reset_at(self.now).isoformat(),
         }
         if changed is not None:
             data["changed"] = changed.changed
         return data
+
+
+def _quota_usage(conn: sqlite3.Connection, provider: str, now: datetime) -> QuotaUsage:
+    if provider == protocol.SEARCH_PROVIDER:
+        return QuotaUsage(search_lend.used_today(conn, now), 0, 0)
+    return QuotaUsage(*jobs.quota_usage(conn, provider, now))
 
 
 def show_quota(
@@ -166,7 +186,7 @@ def show_quota(
     as_json: bool = False,
 ) -> dict[str, Any]:
     now = _utc_now()
-    usage = None if conn is None else QuotaUsage(*jobs.quota_usage(conn, provider, now))
+    usage = None if conn is None else _quota_usage(conn, provider, now)
     found = QuotaReport(provider, quota, usage, now)
     data = found.as_json(changed)
     if as_json:
@@ -196,18 +216,26 @@ def journal(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
         opened.close()
 
 
-def commit(conn: sqlite3.Connection, entries: list[Entry], save: Callable[[], None]) -> None:
+def commit(
+    conn: sqlite3.Connection,
+    entries: list[Entry],
+    save: Callable[[], None],
+    *,
+    journal_borrow: bool = False,
+) -> None:
     """Save the config and journal its change together: the entries are written in the
     transaction the config is saved in, so a save that fails journals nothing."""
     with db.transaction(conn):
         for action, details in entries:
             netlog.write(conn, action, details)
+            if journal_borrow and action == "borrow_search":
+                operator.write(conn, action, details)
         save()
 
 
 @contextmanager
 def _change(
-    manager: ConfigManager, conn: sqlite3.Connection | None
+    manager: ConfigManager, conn: sqlite3.Connection | None, *, journal_borrow: bool = False
 ) -> Iterator[tuple[Config, list[Entry]]]:
     """The config to change and the entries that say how, saved and journaled together under
     the config's lock: two commands at once journal in the order they saved. Nothing is saved
@@ -217,7 +245,7 @@ def _change(
         entries: list[Entry] = []
         yield config, entries
         if entries:
-            commit(db_conn, entries, lambda: manager.save(config))
+            commit(db_conn, entries, lambda: manager.save(config), journal_borrow=journal_borrow)
 
 
 def node_fingerprint(key_path: Path | None = None) -> str | None:
@@ -255,10 +283,11 @@ def status(
         used_today=(
             None
             if conn is None
-            else {name: QuotaUsage(*jobs.quota_usage(conn, name, now)) for name in network.donated}
+            else {name: _quota_usage(conn, name, now) for name in network.donated}
         ),
         now=now,
         lead=network.lead,
+        borrow_search=network.borrow_search,
         cluster=cluster.role(conn, now) if conn is not None and network.enabled else None,
     )
 
@@ -270,6 +299,25 @@ def set_lead(manager: ConfigManager, on: bool, *, conn: sqlite3.Connection | Non
             config.network.lead = on
             entries.append(("lead", {"on": on}))
     return on
+
+
+def borrow_search(
+    manager: ConfigManager, on: bool | None = None, *, conn: sqlite3.Connection | None = None
+) -> bool:
+    if on is None:
+        return manager.load().network.borrow_search
+    with _change(manager, conn, journal_borrow=conn is None) as (config, entries):
+        if config.network.borrow_search != on:
+            config.network.borrow_search = on
+            entries.append(("borrow_search", {"on": on}))
+    return on
+
+
+def search_text(on: bool, *, joined: bool = True) -> str:
+    state = t("Borrow web search") + ": " + (t("on") if on else t("off"))
+    if on and not joined:
+        state += "\n" + t("Borrowing takes effect after `desman global join`.")
+    return state
 
 
 def cluster_text(details: dict[str, Any] | None) -> str:
@@ -615,14 +663,26 @@ def leave(
         return farewell(left, conn=db_conn, transport=transport, key_path=key_path)
 
 
+def _donation_provider(name: str) -> Provider:
+    if name.strip().lower() == protocol.SEARCH_PROVIDER:
+        return providers.find_keyed(name)
+    return providers.find(name)
+
+
 def donatable(config: Config, name: str) -> Provider:
     """The provider `name` names, if the person may lend it now; otherwise why not."""
     if not config.network.enabled:
         raise click.ClickException(t("desman-global is off: join it first (`desman global join`)."))
     try:
-        provider = providers.find(name)
+        provider = _donation_provider(name)
     except providers.UnknownProvider as e:
         raise click.ClickException(str(e)) from e
+    if provider.id == protocol.SEARCH_PROVIDER:
+        if not searxng.managed_search(config):
+            raise click.ClickException(
+                t("Set up local SearXNG with `desman search setup` before lending it.")
+            )
+        return provider
     if provider.paid:
         raise click.ClickException(
             t("{name} is a paid provider: it is never lent.", name=provider.name)
@@ -641,13 +701,19 @@ def donatable(config: Config, name: str) -> Provider:
     return provider
 
 
-def donation(base: Donation, calls: int | None, tokens: int | None) -> Donation:
+def donation(base: Donation, calls: int | None, tokens: int | None, provider: str = "") -> Donation:
     data = base.model_dump()
     if calls is not None:
         data["calls_per_day"] = calls
-    if tokens is not None:
+    if provider == protocol.SEARCH_PROVIDER:
+        if tokens is not None:
+            raise click.ClickException(t("SearXNG quotas count searches only."))
+        data["tokens_per_day"] = 0
+    elif tokens is not None:
         data["tokens_per_day"] = tokens
     try:
+        if provider != protocol.SEARCH_PROVIDER and data["tokens_per_day"] == 0:
+            raise ValueError("model donations need a token quota")
         return Donation.model_validate(data)
     except ValueError:
         raise click.ClickException(
@@ -680,7 +746,7 @@ def donate(
     with _change(manager, conn) as (config, entries):
         provider = donatable(config, name)
         old = config.network.donated.get(provider.id)
-        new = donation(old or DEFAULT_DONATION, calls, tokens)
+        new = donation(old or DEFAULT_DONATION, calls, tokens, provider.id)
         config.network.donated[provider.id] = new
         if old != new:
             action = "donated" if old is None else "quota"
@@ -691,7 +757,7 @@ def donate(
 def lent_provider(config: Config, name: str) -> str:
     """The id of a provider that is lent now, named any way `providers.find` takes."""
     try:
-        provider = providers.find(name)
+        provider = _donation_provider(name)
     except providers.UnknownProvider as e:
         raise click.ClickException(str(e)) from e
     if provider.id not in config.network.donated:
@@ -711,7 +777,7 @@ def set_quota(
     with _change(manager, conn) as (config, entries):
         lent = lent_provider(config, name)
         old = config.network.donated[lent]
-        new = donation(old, calls, tokens)
+        new = donation(old, calls, tokens, lent)
         config.network.donated[lent] = new
         if old != new:
             entries.append(("quota", {"provider": lent, **new.model_dump()}))
@@ -737,7 +803,9 @@ def left_json(left: Left | None) -> dict[str, Any]:
 # ── Output ───────────────────────────────────────────────────────────────────
 
 
-def quota_text(donation: Donation) -> str:
+def quota_text(donation: Donation, provider: str = "") -> str:
+    if provider == protocol.SEARCH_PROVIDER:
+        return t("{calls} searches a day", calls=donation.calls_per_day)
     return t(
         "{calls} calls and {tokens} tokens a day",
         calls=donation.calls_per_day,
@@ -745,7 +813,13 @@ def quota_text(donation: Donation) -> str:
     )
 
 
-def _usage_text(quota: Donation, used: QuotaUsage) -> str:
+def _usage_text(quota: Donation, used: QuotaUsage, provider: str = "") -> str:
+    if provider == protocol.SEARCH_PROVIDER:
+        return t(
+            "Searches used today: {calls}. Remaining: {calls_left}.",
+            calls=used.calls,
+            calls_left=max(0, quota.calls_per_day - used.calls),
+        )
     return t(
         "Used today (calls/tokens): {calls}/{tokens}. Remaining: {calls_left}/{tokens_left}.",
         calls=used.calls,
@@ -767,17 +841,17 @@ def print_quota(
     found: QuotaReport, changed: Lent | None = None, *, tz: tzinfo | None = None
 ) -> None:
     if changed is None:
-        ui.out(f"{provider_name(found.provider)}: {quota_text(found.quota)}")
+        ui.out(f"{provider_name(found.provider)}: {quota_text(found.quota, found.provider)}")
     else:
         print_lent(changed)
     if found.used_today is not None:
-        ui.out(_usage_text(found.quota, found.used_today))
+        ui.out(_usage_text(found.quota, found.used_today, found.provider))
     ui.note(_reset_text(found.now, tz))
 
 
 def provider_name(provider_id: str) -> str:
     try:
-        return providers.find(provider_id).name
+        return _donation_provider(provider_id).name
     except providers.UnknownProvider:
         return provider_id
 
@@ -789,27 +863,20 @@ def print_status(found: Status, *, tz: tzinfo | None = None) -> None:
     table.add_row(Text(t("registry"), style="muted"), found.registry or t("not known yet"))
     table.add_row(Text(t("node key"), style="muted"), found.node or t("none yet"))
     table.add_row(t("Lead clusters"), t("yes") if found.lead else t("off"))
+    table.add_row(t("Borrow web search"), t("on") if found.borrow_search else t("off"))
     if found.cluster:
         table.add_row(cluster_text(found.cluster), "")
     for provider_id, donation in sorted(found.donated.items()):
-        details = quota_text(donation)
+        details = quota_text(donation, provider_id)
         if found.used_today is not None:
-            details += "\n" + _usage_text(donation, found.used_today[provider_id])
+            details += "\n" + _usage_text(donation, found.used_today[provider_id], provider_id)
         table.add_row(
             Text(t("lent: {name}", name=provider_name(provider_id)), style="muted"), details
         )
     ui.out(table)
     if found.donated:
         ui.note(_reset_text(found.now, tz))
-    if found.enabled:
-        ui.note(
-            t(
-                "While `desman worker` runs, this node registers with the registry, says it "
-                "is alive and fetches the revocations; nothing else is sent yet. "
-                "`desman global leave` takes everything back."
-            )
-        )
-    else:
+    if not found.enabled:
         ui.note(
             t(
                 "Off: nothing leaves this machine for desman-global. `desman global join` "
@@ -865,14 +932,14 @@ def print_lent(lent: Lent) -> None:
     elif lent.new is None:
         ui.ok(t("{name} is not lent any more.", name=name))
     elif lent.old is None:
-        ui.ok(t("{name} lent: {quota}.", name=name, quota=quota_text(lent.new)))
+        ui.ok(t("{name} lent: {quota}.", name=name, quota=quota_text(lent.new, lent.provider)))
     else:
         ui.ok(
             t(
                 "{name}: {old} → {new}",
                 name=name,
-                old=quota_text(lent.old),
-                new=quota_text(lent.new),
+                old=quota_text(lent.old, lent.provider),
+                new=quota_text(lent.new, lent.provider),
             )
         )
 
@@ -939,7 +1006,7 @@ def _lent_json(lent: Lent) -> str:
         {
             "provider": lent.provider,
             "changed": lent.changed,
-            "quota": None if lent.new is None else lent.new.model_dump(),
+            "quota": None if lent.new is None else quota_json(lent.new, lent.provider),
         }
     )
 
@@ -950,6 +1017,15 @@ def lead_command(state: str) -> None:
     """Allow this node to lead clusters with the modules lent."""
     set_lead(load_config(), state == "on")
     ui.ok(t("Lead clusters") + ": " + (t("yes") if state == "on" else t("off")))
+
+
+@global_group.command("search")
+@click.argument("state", type=click.Choice(["on", "off"]), required=False)
+def search_command(state: str | None) -> None:
+    """Show or change whether this node borrows web search."""
+    manager = load_config()
+    on = borrow_search(manager, None if state is None else state == "on")
+    ui.out(search_text(on, joined=manager.load().network.enabled))
 
 
 @global_group.command("donate")

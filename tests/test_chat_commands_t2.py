@@ -23,6 +23,7 @@ from desman.core.retry import FailureKind
 from desman.core.sessions import Kind, Role, Sessions
 from desman.core.states import Actor, SubtaskStatus
 from desman.core.store import Store
+from desman.interlocutor import Command
 
 
 @pytest.fixture
@@ -811,3 +812,22 @@ def test_docker_catalog_outcome_is_silent(
     ctx = commands.Context(Store(sessions.conn), open_config(), lambda *a: None, lambda *a: False)
     assert isinstance(entry.handler(ctx, args), commands.Outcome)
     assert capsys.readouterr() == ("", "")
+
+
+def test_confirmed_global_search_journals_one_change(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = open_config()
+    chat = Chat(sessions)
+    chat.session_id = sessions.add(None, Role.USER, "enable borrowed search").session_id
+    monkeypatch.setattr(ui, "confirm", lambda *args, **kwargs: True)
+    chat._command(
+        Command(type="command", name="global search", args={"state": "on"}),
+        manager.load(),
+        None,
+        None,
+    )
+    assert manager.load().network.borrow_search
+    decision, change = operator.entries(sessions.conn)
+    assert decision.action == "operator_command"
+    assert change.action == "operator_network" and change.details == {"changed": ["borrow_search"]}

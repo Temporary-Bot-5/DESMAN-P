@@ -128,6 +128,8 @@ Anote ou lembre-se de tudo que parecer estranho, confuso ou lento. Isso também 
 
 ## 5. A rede desman-global
 
+Use `desman global donate searxng --calls N` para emprestar pesquisas do SearXNG gerenciado e `desman global search on|off` para ativar ou desativar o empréstimo se você não tiver um buscador web.
+
 A desman-global liga os computadores dos participantes. Seu computador pode fazer pequenas partes
 de tarefas alheias com os modelos que você *emprestou*. Para tarefas grandes, a rede reúne
 computadores livres em grupos. Suas tarefas sempre têm prioridade. O trabalho de outras pessoas só

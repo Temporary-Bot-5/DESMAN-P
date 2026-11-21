@@ -13,6 +13,7 @@ import tarfile
 import time
 from collections.abc import Callable
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -305,6 +306,19 @@ def _uses_native(config: Config, folder: Path) -> bool:
         not uses_docker(config)
         and _native_installed(folder)
         and (not configured or native.url(folder) == configured)
+    )
+
+
+def engine(config: Config, http: httpx.Client, clock: Callable[[], datetime]) -> search.SearXNG:
+    url = config.settings["SEARXNG_URL"]
+    before_search = None if uses_docker(config) else partial(ensure_native, url, clock=clock)
+    return search.SearXNG(url, http, before_search=before_search)
+
+
+def managed_search(config: Config) -> bool:
+    """Whether the configured URL belongs to a DESMAN-managed installation."""
+    return bool(config.settings.get("SEARXNG_URL")) and (
+        uses_docker(config) or _uses_native(config, native.directory())
     )
 
 

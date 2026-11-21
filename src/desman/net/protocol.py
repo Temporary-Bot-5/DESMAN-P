@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     AfterValidator,
@@ -44,6 +46,14 @@ PROPOSALS: Final = "/v1/proposals"
 CLUSTERS_MINE: Final = "/v1/clusters/mine"
 CLUSTER_RECORDS: Final = "/v1/clusters/records"
 
+SEARCH_ASK: Final = "/v1/search/ask"
+SEARCH_WAIT: Final = 30
+SEARCH_SKIPPED: Final = "the lending node could not run this search"
+SEARCH_NEXT: Final = "/v1/search/next"
+SEARCH_ANSWER: Final = "/v1/search/answer"
+SEARCH_STATE: Final = "/v1/search/"
+SEARCH_PROVIDER: Final = "searxng"
+
 MAX_BODY: Final = 256 * 1024
 MAX_RESULT_BYTES: Final = 160 * 1024
 """A result's text and files together, as JSON strings with every non-ASCII character escaped
@@ -71,6 +81,14 @@ class Capability(BaseModel):
     """The API key's fingerprint; None for a local model (the person's own hardware)."""
     calls_per_day: int = Field(ge=0, le=10_000_000)
     tokens_per_day: int = Field(ge=0, le=10_000_000_000)
+
+    @model_validator(mode="after")
+    def _search_quota(self) -> Capability:
+        if self.provider == SEARCH_PROVIDER and (
+            self.model is not None or self.key is not None or self.tokens_per_day != 0
+        ):
+            raise ValueError("search lends only calls")
+        return self
 
 
 def _distinct(capabilities: list[Capability]) -> None:
@@ -864,3 +882,77 @@ class Complain(MessengerBody):
 
 class ComplaintReceived(MessengerBody):
     id: str
+
+
+def _search_query(query: str) -> str:
+    if any(unicodedata.category(char) == "Cc" for char in query):
+        raise ValueError("search query contains a control character")
+    query = query.strip()
+    if not 1 <= len(query) <= 300:
+        raise ValueError("search query must have 1–300 characters")
+    return query
+
+
+def _search_url(url: str) -> str:
+    if any(char.isspace() or unicodedata.category(char) == "Cc" for char in url):
+        raise ValueError("search hit URL contains whitespace or a control character")
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("search hit URL must use HTTP or HTTPS")
+    return url
+
+
+class SearchAsk(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    query: Annotated[str, AfterValidator(_search_query)]
+    count: int = Field(default=8, ge=1, le=10)
+
+
+class SearchAsked(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: LeaseToken
+    wait_seconds: int = Field(ge=1, le=60)
+
+
+class SearchJob(SearchAsk):
+    id: LeaseToken
+    expires_in: float = Field(gt=0, le=SEARCH_WAIT)
+
+
+class SearchJobs(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    jobs: list[SearchJob] = Field(max_length=4)
+
+
+class SearchPoll(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    limit: int = Field(ge=1, le=4)
+
+
+class SearchHit(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    title: str = Field(max_length=300)
+    url: Annotated[str, StringConstraints(max_length=2000), AfterValidator(_search_url)]
+    snippet: str = Field(max_length=1000)
+
+
+class SearchAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: LeaseToken
+    hits: list[SearchHit] = Field(max_length=10)
+    error: str | None = Field(default=None, max_length=200)
+
+
+class SearchState(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: LeaseToken
+    state: Literal["waiting", "answered", "expired", "gone"]
+    hits: list[SearchHit] | None = Field(default=None, max_length=10)
+    error: str | None = Field(default=None, max_length=200)

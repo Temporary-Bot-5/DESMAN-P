@@ -457,6 +457,10 @@ class LeadArgs(Args):
     state: Literal["on", "off"]
 
 
+class BorrowSearchArgs(Args):
+    state: Literal["on", "off"] | None = None
+
+
 class DonateArgs(Args):
     provider: ProviderName
     calls: Calls | None = Field(None, description="calls a day")
@@ -1244,7 +1248,7 @@ def _global_leave(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 
 
 def _lent_outcome(lent: global_cli.Lent) -> Outcome:
-    quota = None if lent.new is None else lent.new.model_dump()
+    quota = None if lent.new is None else global_cli.quota_json(lent.new, lent.provider)
     return Outcome({"provider": lent.provider, "changed": lent.changed, "quota": quota})
 
 
@@ -1258,11 +1262,30 @@ def _global_lead(ctx: Context, args: LeadArgs) -> Proposal:
     )
 
 
+def _borrow_search_kind(args: BorrowSearchArgs) -> Kind:
+    return Kind.READ if args.state is None else Kind.CHANGE
+
+
+def _global_search(ctx: Context, args: BorrowSearchArgs) -> Outcome | Proposal:
+    def apply() -> Outcome:
+        state = None if args.state is None else args.state == "on"
+        on = global_cli.borrow_search(ctx.manager, state, conn=ctx.store.conn)
+        joined = ctx.manager.load().network.enabled
+        ui.out(global_cli.search_text(on, joined=joined))
+        return Outcome({"borrow_search": on, "effective_after_join": on and not joined})
+
+    if args.state is None:
+        return apply()
+    return Proposal([global_cli.search_text(args.state == "on")], apply)
+
+
 def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
     config = ctx.config()
     provider = global_cli.donatable(config, args.provider)
     old = config.network.donated.get(provider.id)
-    new = global_cli.donation(old or global_cli.DEFAULT_DONATION, args.calls, args.tokens)
+    new = global_cli.donation(
+        old or global_cli.DEFAULT_DONATION, args.calls, args.tokens, provider.id
+    )
     if old == new:
         ui.note(t("Nothing changed."))
         return _lent_outcome(global_cli.Lent(provider.id, old, new))
@@ -1274,7 +1297,7 @@ def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
         global_cli.print_lent(lent)
         return _lent_outcome(lent)
 
-    quota = global_cli.quota_text(new)
+    quota = global_cli.quota_text(new, provider.id)
     if old is None:
         lines = [t("Lend {name} to desman-global: {quota}.", name=provider.name, quota=quota)]
     else:
@@ -1282,11 +1305,15 @@ def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
             t(
                 "{name}: {old} → {new}",
                 name=provider.name,
-                old=global_cli.quota_text(old),
+                old=global_cli.quota_text(old, provider.id),
                 new=quota,
             )
         ]
-    warnings = [t("Others' tasks will use it, up to the quota; its key stays on this machine.")]
+    warnings = (
+        []
+        if provider.id == protocol.SEARCH_PROVIDER
+        else [t("Others' tasks will use it, up to the quota; its key stays on this machine.")]
+    )
     return Proposal(lines, apply, warnings)
 
 
@@ -1335,7 +1362,7 @@ def _global_quota(ctx: Context, args: QuotaArgs) -> Outcome | Proposal:
 
     if args.calls is None and args.tokens is None:
         return Outcome(global_cli.show_quota(ctx.store.conn, lent, old))
-    new = global_cli.donation(old, args.calls, args.tokens)
+    new = global_cli.donation(old, args.calls, args.tokens, lent)
     if new == old:
         return Outcome(
             global_cli.show_quota(ctx.store.conn, lent, new, global_cli.Lent(lent, old, new))
@@ -1351,8 +1378,8 @@ def _global_quota(ctx: Context, args: QuotaArgs) -> Outcome | Proposal:
     line = t(
         "{name}: {old} → {new}",
         name=global_cli.provider_name(lent),
-        old=global_cli.quota_text(old),
-        new=global_cli.quota_text(new),
+        old=global_cli.quota_text(old, lent),
+        new=global_cli.quota_text(new, lent),
     )
     return Proposal([line], apply)
 
@@ -2520,8 +2547,17 @@ CATALOG: tuple[Entry, ...] = (
         _global_lead,
     ),
     Entry(
+        "global search",
+        "Show whether this node borrows whole-web search, or change it (on/off, default off). "
+        "A change requires confirmation. Borrowing is used only without SearXNG and Tavily.",
+        BorrowSearchArgs,
+        _borrow_search_kind,
+        _global_search,
+    ),
+    Entry(
         "global donate",
-        "Lend a model provider of this machine to desman-global with a daily quota of calls "
+        "Lend managed SearXNG with a daily search quota, or lend a model provider of this machine "
+        "to desman-global with a daily quota of calls "
         "and tokens (its key never leaves the machine; a local server, or a free provider whose "
         "terms allow it; never a paid one). Only when the person asks. The person confirms.",
         DonateArgs,
@@ -2800,7 +2836,7 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
     if old.network != new.network:  # which parts, by name; quotas are not secret
         parts = [
             n
-            for n in ("enabled", "registry", "lead")
+            for n in ("enabled", "registry", "lead", "borrow_search")
             if getattr(old.network, n) != getattr(new.network, n)
         ]
         parts += [

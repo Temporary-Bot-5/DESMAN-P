@@ -30,7 +30,7 @@ from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import RetryPolicy, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
-from desman.core.search import SearXNG, Tavily, client, open_sources
+from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
@@ -41,10 +41,11 @@ from desman.llm.base import LLM, Completion, RateLimited, Request
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
-from desman.net import jobs
+from desman.net import jobs, protocol
 from desman.net.node import EXTEND_WHEN, capabilities
+from desman.net.search_lend import Lent, borrower_identity
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
-from desman.searxng import ensure_native, uses_docker
+from desman.searxng import engine as searxng_engine
 
 PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3, "chat_turns": 4}
 
@@ -517,7 +518,11 @@ def executor_access(
                 ui.warn(t("Set up the Docker sandbox with `desman sandbox setup`."), stderr=stderr)
             elif sandbox.backend == "docker" and not sandbox.docker:
                 ui.warn(t("Install Docker with `desman docker install`."), stderr=stderr)
-    if permissions.network_access and not providers.search_engines(config):
+    if (
+        permissions.network_access
+        and not providers.search_engines(config)
+        and borrower_identity(config) is None
+    ):
         ui.warn(
             t(
                 "network_access is on, but no engine for the whole web is set up: web_search "
@@ -553,7 +558,13 @@ def blocked(changes: list[protected.Change]) -> str:
     )
 
 
-def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
+def web(
+    config: Config,
+    store: Store,
+    http: httpx.Client | None = None,
+    *,
+    load: Callable[[], Config] | None = None,
+) -> Web:
     """The web tools' view of the config: the open sources, the engines the human set up (in
     `providers.SEARCH` order), the cache. The engines share `http`; a new client without it
     (a one-task process), so a long-lived caller passes its own and closes it."""
@@ -561,19 +572,11 @@ def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
     engines: list[SearchEngine] = []
     for p in providers.search_engines(config):
         if p.id == "searxng":
-            url = config.settings["SEARXNG_URL"]
-            if uses_docker(config):
-                engines.append(SearXNG(url, http))
-            else:
-                engines.append(
-                    SearXNG(
-                        url,
-                        http,
-                        before_search=functools.partial(ensure_native, url, clock=store.clock),
-                    )
-                )
+            engines.append(searxng_engine(config, http, store.clock))
         elif p.id == "tavily" and p.key_env is not None:
             engines.append(Tavily([k.value for k in config.keys(p.key_env)], http))
+    if not engines and (lent := Lent.from_config(config, store.conn, http, store.clock, load=load)):
+        engines.append(lent)
     return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 
@@ -627,6 +630,7 @@ def coordinator(
     network: Crew | None = None,
     sandbox: Sandbox | None = None,
     document_reader: Web | None = None,
+    load: Callable[[], Config] | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
     # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
@@ -638,7 +642,9 @@ def coordinator(
         access=access,
         tools=builtin_registry(
             sandbox,
-            web=document_reader if document_reader is not None else web(config, store, http),
+            web=document_reader
+            if document_reader is not None
+            else web(config, store, http, load=load),
             # Without the person's token: see `core.tools.suggest_model_tool`.
             models=lambda ref: hub.inspect(ref, http),
             knowledge=tree,
@@ -668,7 +674,7 @@ def network_crew(
     fake: its scripts count every call)."""
     if net.registry(config) is None:
         return None
-    lent = {c.provider for c in capabilities(config)}
+    lent = {c.provider for c in capabilities(config) if c.provider != protocol.SEARCH_PROVIDER}
     if not lent:
         return None
     lent_models = given

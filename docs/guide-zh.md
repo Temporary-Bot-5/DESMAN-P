@@ -111,6 +111,8 @@ DESMAN 窗口实际上是浏览器里的一个页面：
 
 ## 5. desman-global 网络
 
+使用 `desman global donate searxng --calls N` 出借托管的 SearXNG 搜索。没有网页搜索引擎时，可用 `desman global search on|off` 开启或关闭借用。
+
 desman-global 把参与者的电脑连在一起。你的电脑可以用你*出借*的模型做别人任务中的一小部分。
 遇到大任务，网络会把空闲的电脑组成“集群”。你自己的任务始终优先，
 只有当你的 DESMAN 空闲时才会做别人的工作。

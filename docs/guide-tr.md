@@ -124,6 +124,8 @@ Tuhaf, anlaşılmaz veya yavaş gelen şeyleri hatırlayın ya da not alın. Bun
 
 ## 5. desman-global ağı
 
+`desman global donate searxng --calls N` ile yönetilen SearXNG aramasını ödünç verin. Kendi web arama motorunuz yoksa `desman global search on|off` ile ödünç almayı açın veya kapatın.
+
 desman-global katılımcıların bilgisayarlarını birbirine bağlar. Bilgisayarınız *ödünç verdiğiniz*
 modellerle başkalarının görevlerinin küçük bölümlerini yapabilir. Ağ, büyük görevler için boş
 bilgisayarları gruplar hâlinde toplar. Sizin görevleriniz her zaman önceliklidir. Başkalarının

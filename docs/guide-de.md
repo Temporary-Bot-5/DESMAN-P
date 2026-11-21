@@ -143,6 +143,8 @@ Merken oder notieren Sie sich alles, was seltsam, unklar oder langsam war. Auch 
 
 ## 5. Das Netzwerk desman-global
 
+Mit `desman global donate searxng --calls N` verleihen Sie die verwaltete SearXNG-Suche. Ohne eigene Websuche schaltet `desman global search on|off` das Ausleihen ein oder aus.
+
 desman-global verbindet die Rechner der Teilnehmenden. Ihr Rechner kann mit Ihren *verliehenen*
 Modellen kleine Teile fremder Aufgaben erledigen. Für große Aufgaben fasst das Netzwerk freie
 Rechner zu Gruppen zusammen. Ihre Aufgaben haben Vorrang. Fremde Arbeit läuft nur, wenn Ihr DESMAN

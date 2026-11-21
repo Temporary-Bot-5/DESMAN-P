@@ -309,7 +309,8 @@ def claim(
     has seen as a replay, G.6b), and never rechecks the work of its own owner. Nothing is
     lent while the registry holds no fresh trust list (G.6c): every node would refuse it."""
     expire(conn, now)
-    if not (jobs and caller.capabilities) and not proposals:
+    jobs = jobs and any(c.provider != protocol.SEARCH_PROVIDER for c in caller.capabilities)
+    if not jobs and not proposals:
         return None
     moment = db.to_iso(now)
     with db.transaction(conn):
@@ -346,8 +347,6 @@ def claim(
                 offered = checks.lend(conn, caller, now)
                 if offered is not None:
                     return offered
-                continue
-            if not caller.capabilities:
                 continue
             found = _job(row)
             lent_before = conn.execute(

@@ -119,6 +119,8 @@ DESMAN이 단계를 계획하고 실행하고 확인한 뒤 채팅에서 결과�
 
 ## 5. desman-global 네트워크
 
+`desman global donate searxng --calls N`으로 관리형 SearXNG 검색을 빌려줍니다. 자체 웹 검색 엔진이 없으면 `desman global search on|off`로 검색 빌리기를 켜거나 끕니다.
+
 desman-global은 참가자의 컴퓨터를 연결합니다. 내 컴퓨터는 내가 *빌려준* 모델로 다른 사람의 작업
 일부를 처리할 수 있습니다. 큰 작업에는 네트워크가 쉬고 있는 컴퓨터를 묶어 그룹을 만듭니다. 내
 작업이 항상 우선이며, 내 DESMAN이 쉬는 동안에만 다른 사람의 작업을 처리합니다.

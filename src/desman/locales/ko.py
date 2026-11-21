@@ -10,6 +10,14 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "켜짐",
+    "Borrowing takes effect after `desman global join`.": "`desman global join`을 실행한 후에 검색 빌리기가 적용됩니다.",
+    "SearXNG quotas count searches only.": "SearXNG 할당량은 검색 횟수만 계산합니다.",
+    "Borrow web search": "웹 검색 빌리기",
+    "Set up local SearXNG with `desman search setup` before lending it.": "빌려주기 전에 `desman search setup`으로 로컬 SearXNG를 설정하세요.",
+    "{calls} searches a day": "하루 검색 {calls}회",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "오늘 사용한 검색: {calls}회. 남은 횟수: {calls_left}회.",
+    "Show or change whether this node borrows web search.": "이 노드의 웹 검색 빌리기 설정을 표시하거나 변경합니다.",
     "Saved the page {url} ({chars} characters) to read it in parts.": "페이지 {url}({chars}자)를 나누어 읽기 위해 저장했습니다.",
     "Another native SearXNG operation is in progress.": "다른 네이티브 SearXNG 작업이 진행 중입니다.",
     "Native SearXNG failed: {error}": "네이티브 SearXNG 실패: {error}",
@@ -1239,7 +1247,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "아직 알려진 레지스트리 주소가 없습니다: `desman global join --registry URL`로 지정하세요.",
     "Not now: desman-global stays off.": "지금은 아님: desman-global은 꺼진 상태로 유지됩니다.",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "직접 고르기 전에는 아무것도 빌려주지 않습니다: `desman global donate PROVIDER`.",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "`desman worker`가 실행되는 동안 이 노드는 레지스트리에 등록하고, 살아 있음을 알리며, 폐기 목록을 가져옵니다. 그 밖에는 아직 아무것도 보내지 않습니다. `desman global leave`로 모두 회수합니다.",
     "In touch with the desman-global registry {url}.": "desman-global 레지스트리 {url}와 연결되어 있습니다.",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "desman-global 레지스트리에 연결할 수 없습니다({error}). {seconds}초 후 다시 시도합니다. 내 작업은 계속 진행됩니다.",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global 레지스트리가 이 노드를 거부했습니다({error}). {seconds}초 후 다시 시도합니다. 보통 시계가 맞지 않는 것이 원인입니다.",
