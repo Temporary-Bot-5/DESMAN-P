@@ -66,6 +66,7 @@ def _code_spans(text: str) -> Iterator[tuple[int, int]]:
 def normalize(s: str) -> str:
     text = s.casefold().translate(_TRANSLATION)
     text = " ".join(re.sub(r"[—–‑-]+", "-", text).split())
+    text = re.sub(r" ?- ?", "-", text)  # "30 -- 40" and "30–40" are one way of writing it
     start, end = 0, len(text)
     while start < end and _edge(text[start]):
         start += 1
