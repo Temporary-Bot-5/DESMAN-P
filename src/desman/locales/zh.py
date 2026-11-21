@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "对于 Ollama，还需把上下文（OLLAMA_CONTEXT）设为至少 {context}。",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model} 只有在上下文至少 {context} 个 token（Ollama 请设置 OLLAMA_CONTEXT）且其服务器在运行时才能作为主控模块。",
     "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "没有可用于主控模块的模型：需要为此标记的模型的密钥（{models}），或由你用 `desman tuning --model master=PROVIDER/MODEL` 指定的、上下文至少 {context} 个 token 的本地模型。",
     "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} 不能作为主控模块：只有为此标记的模型（{models}）或本地模型可以。该选择会保留，但永远不会被调用。",
     "--master is for GOAL, without --spec or --plan": "--master 只用于 GOAL，不能与 --spec 或 --plan 一起使用",

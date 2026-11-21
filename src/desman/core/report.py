@@ -32,8 +32,9 @@ class SubtaskReport(BaseModel):
     part_of: int | None = None
     """For a part of a split subtask (ROADMAP 2.9b): the subtask's seq."""
     kind: Kind = Kind.TEXT
-    master: bool = False
     """What sort of work it is: its executor's model is picked by it (ROADMAP 4.5)."""
+    master: bool = False
+    """A master subtask (ADR 0015): its executor's model is the master's instead."""
     knowledge: list[str] = Field(default_factory=list)
     """The knowledge tree's paths it was given (ADR 0009)."""
     lease_owner: str | None

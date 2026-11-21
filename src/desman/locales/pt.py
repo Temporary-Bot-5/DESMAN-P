@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "Para o Ollama, defina também o contexto (OLLAMA_CONTEXT) com pelo menos {context}.",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model} só pode ser o módulo mestre com um contexto de pelo menos {context} tokens (no Ollama, defina OLLAMA_CONTEXT) e o servidor em execução.",
     "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Nenhum modelo pronto para um módulo mestre: é preciso uma chave para um modelo marcado para isso ({models}) ou um modelo local com contexto de pelo menos {context} tokens que você indique com `desman tuning --model master=PROVIDER/MODEL`.",
     "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} não pode ser o módulo mestre: só pode sê-lo um modelo marcado para isso ({models}) ou um modelo local. A escolha fica guardada, mas ele nunca é consultado.",
     "--master is for GOAL, without --spec or --plan": "--master é só para GOAL, sem --spec nem --plan",

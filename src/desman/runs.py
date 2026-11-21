@@ -81,6 +81,8 @@ class Master:
     choice: router.Choice | None = None
     problem: str | None = None
     """Why none may (`router.NoProvider`)."""
+    other_choice: router.Choice | None = None
+    """The model an "other model" attempt of the master asks first (None: there is none)."""
 
 
 @dataclass(frozen=True)
@@ -462,7 +464,10 @@ def models(
                 main = scoped(calls.Role.EXECUTOR, catalog.MASTER, base=cfg)
                 assert main is not None
                 other = scoped(calls.Role.EXECUTOR, catalog.MASTER, other=True, base=cfg)
-                found[identity] = Master((main, other), masters[0])
+                others = router.other_lineup(masters) if other is not None else []
+                found[identity] = Master(
+                    (main, other), masters[0], other_choice=others[0] if others else None
+                )
         return found[identity]
 
     # Never for desman-global (ADR 0015, decision 6).
@@ -800,7 +805,7 @@ def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Co
 NO_MASTER = (
     "no model qualified for a master module is ready: add a key of a provider whose model the "
     "catalog marks for it, or name a local model with `desman tuning --model master=...`; then "
-    "retry the subtask"
+    "retry the subtask (a worker or the page sees a new key once it restarts)"
 )
 """Why a master subtask waits for the person when nobody can be its master (audit, English)."""
 

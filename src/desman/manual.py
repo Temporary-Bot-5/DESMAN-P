@@ -53,7 +53,7 @@ TOPICS: Final = (
         "only with --provider), or a local model with a context of at least 32768 tokens that "
         "the person names with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). Without one, "
         "--master says so and starts nothing. If the master keeps failing, its subtask is split "
-        "and the parts go to the ordinary models. Long attached documents are still read in "
+        "and the parts go to the ordinary models (not with --runs-code: then it waits for you). Long attached documents are still read in "
         "parts by the small models first. The person chooses the mode; DESMAN never switches to "
         "it by itself. The chat cannot start a master task yet.",
     ),

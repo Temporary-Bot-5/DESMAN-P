@@ -228,7 +228,11 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
             ):
                 continue
             models = [m for m in candidates if m.startswith(provider.id + "/")]
-            if not provider.local and role != catalog.MASTER:  # only qualified ones for it
+            if role == catalog.MASTER and not provider.local:
+                # The marked ones, paid included: the person may name one (asked only with
+                # --provider, `router._master_lineup`).
+                models = [provider.id + "/" + m.id for m in catalog.models_of(provider) if m.master]
+            elif not provider.local:
                 models = list(
                     dict.fromkeys(
                         [*(provider.id + "/" + m.id for m in catalog.models_of(provider)), *models]
@@ -236,6 +240,8 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
                 )
             if provider.id == "ollama":
                 models = list(dict.fromkeys([*models, *("ollama/" + m.name for m in installed)]))
+            if role == catalog.MASTER and not models:
+                continue  # nothing of this provider can be the master
             available.append(
                 {"id": provider.id, "name": provider.name, "models": models, "keys": provider_keys}
             )
@@ -434,6 +440,16 @@ def print_change(old: Tuning, new: Tuning, config: Config) -> None:
                     "or a local model can. It is kept, but never asked.",
                     model=label,
                     models=", ".join(router.master_models()),
+                )
+            )
+            continue
+        if role == catalog.MASTER and providers.find(label.split("/", 1)[0]).local:
+            ui.warn(
+                t(
+                    "{model} can be the master module only with a context of at least {context} "
+                    "tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.",
+                    model=label,
+                    context=catalog.MASTER_LOCAL_CONTEXT,
                 )
             )
             continue

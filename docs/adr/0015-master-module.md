@@ -61,7 +61,9 @@ already does for a subtask.**
    feedback, rephrase, the other master model (another provider, if one is qualified and
    ready), and then **decompose**: the parts of a split master subtask are ordinary subtasks
    (`master` off) worked by the cluster's models, and the master's own failure becomes
-   ordinary DESMAN work instead of a dead end.
+   ordinary DESMAN work instead of a dead end. A subtask that must run code (`--runs-code`)
+   is never split, so with it a failing master waits for the person instead. A continuation
+   of a master task (`task extend`, `task redo`) is planned for the cluster until M.2.
 5. **The master uses the cluster.** Long documents (ADR 0014) are still read in parts by the
    cluster: the master subtask depends on their digests like any planned subtask. M.2 lets the
    master delegate on its own: a result `{"type": "delegate", ...}` with subtasks for the

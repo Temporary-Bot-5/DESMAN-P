@@ -265,6 +265,15 @@ def _master_lineup(
         if qualified(config, c, named=named) and (provider is not None or not c.provider.paid)
     ]
     if not masters:
+        local_note = (
+            " "
+            + t(
+                "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.",
+                context=catalog.MASTER_LOCAL_CONTEXT,
+            )
+            if providers.find("ollama").model(config)
+            else ""
+        )
         raise NoProvider(
             t(
                 "No model ready for a master module: it takes a key for a model marked for it "
@@ -273,6 +282,7 @@ def _master_lineup(
                 models=", ".join(master_models()),
                 context=catalog.MASTER_LOCAL_CONTEXT,
             )
+            + local_note
         )
     return masters
 

@@ -425,17 +425,9 @@ def run(
         raise click.ClickException(str(e)) from e
     try:
         runs.guard(store)  # before any model is asked
-        models = _attach(source, store, cache=not no_cache, as_json=as_json)
+        models = _attach(source, store, cache=not no_cache, as_json=as_json, master=master)
         if master and models.master is None and models.choice is not None:
             raise click.ClickException(models.no_master or t("No model ready for a master module."))
-        if master and models.master_choice is not None and not as_json:
-            ui.note(
-                t(
-                    "Master module: {provider} · {model}",
-                    provider=models.master_choice.provider.name,
-                    model=models.master_choice.model,
-                )
-            )
         planned: Planned | None = None
         fetched = documents.Prefetched([], [])
         docs: list[documents.Document] = []
@@ -1097,9 +1089,11 @@ def _attach(
     cache: bool,
     as_json: bool,
     read_tuning: Callable[[], Tuning] | None = None,
+    master: bool = False,
 ) -> runs.Models:
     """The run's models (`runs.models`: a lineup per role), said to the operator. The fake is
-    not wrapped: its scripts test the retry policy and count every call."""
+    not wrapped: its scripts test the retry policy and count every call. `master`: the run's
+    work is one master subtask, so its models are said instead of the executor's."""
     if source.fake is not None:
         return runs.Models(source.fake, None)
     config = load_config().load()
@@ -1117,7 +1111,17 @@ def _attach(
     choice = models.choice
     if as_json or choice is None:
         return models
-    if choice.provider.key_env is None:
+    found = models.find_master() if master and models.find_master is not None else None
+    if found is not None and found.choice is not None:
+        choice = found.choice
+        ui.note(
+            t(
+                "Master module: {provider} · {model}",
+                provider=choice.provider.name,
+                model=choice.model,
+            )
+        )
+    elif choice.provider.key_env is None:
         url = choice.provider.endpoint(config)
         ui.note(
             t(
@@ -1152,10 +1156,10 @@ def _attach(
                 model=reviewer.model,
             )
         )
-    code = _first_for(models, Kind.CODE)
+    code = None if found else _first_for(models, Kind.CODE)
     if code is not None and code.label != choice.label:
         ui.note(t("Code by {provider} · {model}", provider=code.provider.name, model=code.model))
-    analysis = _first_for(models, Kind.ANALYSIS)
+    analysis = None if found else _first_for(models, Kind.ANALYSIS)
     if analysis is not None and analysis.label != choice.label:
         ui.note(
             t(
@@ -1167,12 +1171,13 @@ def _attach(
     if choice.provider.paid:
         ui.warn(t("{name} is a paid provider: every call is billed.", name=choice.provider.name))
         ui.warn(providers.untested_note())
-    if models.other_choice is not None:
+    other = found.other_choice if found is not None else models.other_choice
+    if other is not None:
         ui.note(
             t(
                 "Retries may also use {provider} · {model}",
-                provider=models.other_choice.provider.name,
-                model=models.other_choice.model,
+                provider=other.provider.name,
+                model=other.model,
             )
         )
     return models

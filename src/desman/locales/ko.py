@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "Ollama는 컨텍스트(OLLAMA_CONTEXT)도 {context} 이상으로 설정하세요.",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model}은(는) 컨텍스트가 {context} 토큰 이상(Ollama는 OLLAMA_CONTEXT 설정)이고 서버가 실행 중일 때만 마스터 모듈이 될 수 있습니다.",
     "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "마스터 모듈에 쓸 모델이 없습니다: 이를 위해 표시된 모델({models})의 키나, `desman tuning --model master=PROVIDER/MODEL`로 지정한 컨텍스트 {context} 토큰 이상의 로컬 모델이 필요합니다.",
     "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model}은(는) 마스터 모듈이 될 수 없습니다: 이를 위해 표시된 모델({models})이나 로컬 모델만 가능합니다. 선택은 저장되지만 이 모델은 호출되지 않습니다.",
     "--master is for GOAL, without --spec or --plan": "--master는 GOAL에만 쓰며 --spec이나 --plan과 함께 쓸 수 없습니다",

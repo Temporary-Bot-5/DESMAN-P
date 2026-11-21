@@ -404,3 +404,18 @@ def test_tuning_warns_that_an_unqualified_master_is_never_asked() -> None:
     assert result.exit_code == 0, result.output
     assert "cannot be the master module" in result.output
     assert "nvidia/nvidia/nemotron-3-ultra-550b-a55b" in result.output
+
+
+def test_the_master_row_offers_only_models_that_can_be_master() -> None:
+    from desman import tuning_cli
+
+    config = make_config(api_keys={"GROQ_API_KEY": GROQ, "NVIDIA_API_KEY": NVIDIA})
+    [row] = [r for r in tuning_cli.role_rows(config) if r["role"] == "master"]
+    offered = [m for p in row["providers"] for m in p["models"]]
+    assert ULTRA in offered and not any(m.startswith("groq/") for m in offered)
+
+
+def test_the_no_master_message_tells_an_ollama_user_about_its_context() -> None:
+    config = make_config(settings={"OLLAMA_MODEL": "qwen3:32b"})
+    with pytest.raises(router.NoProvider, match="OLLAMA_CONTEXT"):
+        router.lineup(config, Role.EXECUTOR, kind=catalog.MASTER)
