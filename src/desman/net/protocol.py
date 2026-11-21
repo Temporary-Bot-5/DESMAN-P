@@ -918,6 +918,7 @@ class SearchAsked(BaseModel):
 
 class SearchJob(SearchAsk):
     id: LeaseToken
+    expires_in: float = Field(gt=0, le=SEARCH_WAIT)
 
 
 class SearchJobs(BaseModel):
@@ -948,5 +949,10 @@ class SearchAnswer(BaseModel):
     error: str | None = Field(default=None, max_length=200)
 
 
-class SearchState(SearchAnswer):
-    state: Literal["waiting", "answered", "expired"]
+class SearchState(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: LeaseToken
+    state: Literal["waiting", "answered", "expired", "gone"]
+    hits: list[SearchHit] | None = Field(default=None, max_length=10)
+    error: str | None = Field(default=None, max_length=200)

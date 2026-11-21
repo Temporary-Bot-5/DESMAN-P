@@ -193,6 +193,10 @@ def cards(
                 {
                     "section": "network",
                     "provider": cap.provider,
+                    "scope": "network",
+                    "scope_id": "",
+                    "role": "search",
+                    "work": [],
                     "provider_name": global_cli.provider_name(cap.provider),
                     "label": t("lent: {name}", name=global_cli.provider_name(cap.provider)),
                     "calls": used,

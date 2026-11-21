@@ -137,7 +137,7 @@ def next_jobs(
                    SELECT id FROM search_requests
                    WHERE lender = ? AND state = 'waiting' AND taken = 0
                    ORDER BY assigned_at, id LIMIT ?
-               ) RETURNING id, query, count""",
+               ) RETURNING id, query, count, asked_at""",
             (lender.fingerprint, count),
         ).fetchall()
 
@@ -174,7 +174,17 @@ def next_jobs(
                 )
         if len(rows) < remaining:
             rows.extend(take(remaining - len(rows)))
-    return protocol.SearchJobs(jobs=[protocol.SearchJob(**dict(row)) for row in rows])
+    return protocol.SearchJobs(
+        jobs=[
+            protocol.SearchJob(
+                id=row["id"],
+                query=row["query"],
+                count=row["count"],
+                expires_in=LIFETIME - max(0.0, stamp - row["asked_at"]),
+            )
+            for row in rows
+        ]
+    )
 
 
 def answer(
@@ -199,8 +209,8 @@ def answer(
                 (result.model_dump_json(), None if skipped else stamp, result.id),
             )
             _log(conn, "answered", result.id, row["asker"], lender.fingerprint)
-            return protocol.SearchState(id=result.id, state="answered", hits=[])
-        return protocol.SearchState(id=result.id, state=row["state"], hits=[])
+            return protocol.SearchState(id=result.id, state="answered")
+        return protocol.SearchState(id=result.id, state=row["state"])
 
 
 def get(conn: sqlite3.Connection, asker: store.Node, id: str) -> protocol.SearchState:
@@ -213,7 +223,9 @@ def get(conn: sqlite3.Connection, asker: store.Node, id: str) -> protocol.Search
             raise Refusal("not_found")
         payload = row["payload"]
         if payload is None:
-            return protocol.SearchState(id=id, state=row["state"], hits=[])
+            return protocol.SearchState(
+                id=id, state="gone" if row["state"] == "answered" else row["state"]
+            )
         found = protocol.SearchAnswer.model_validate_json(payload)
         conn.execute("UPDATE search_requests SET payload = NULL WHERE id = ?", (id,))
         return protocol.SearchState(id=id, state="answered", hits=found.hits, error=found.error)

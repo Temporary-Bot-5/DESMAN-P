@@ -706,6 +706,8 @@ def donation(base: Donation, calls: int | None, tokens: int | None, provider: st
     if calls is not None:
         data["calls_per_day"] = calls
     if provider == protocol.SEARCH_PROVIDER:
+        if tokens is not None:
+            raise click.ClickException(t("SearXNG quotas count searches only."))
         data["tokens_per_day"] = 0
     elif tokens is not None:
         data["tokens_per_day"] = tokens

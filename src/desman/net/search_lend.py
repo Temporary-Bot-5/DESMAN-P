@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from desman import net, providers, searxng
 from desman.config import Config, ConfigError
-from desman.core import db, netlog
+from desman.core import netlog
 from desman.core.web import MissingSearchEngine, SearchResult, WebError
 from desman.net import protocol, sign
 
@@ -63,19 +63,32 @@ def answer(
 ) -> protocol.SearchAnswer:
     limit = quota(config)
     now = clock()
-    with db.transaction(conn):
-        if not limit or used_today(conn, now) >= limit:
-            return protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
-        netlog.write(
-            conn,
-            "lent_search",
-            {**query_hash(job.query), "day": now.astimezone(UTC).date().isoformat()},
-        )
+    if not limit or used_today(conn, now) >= limit:
+        return protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
     try:
         found = searxng.engine(config, http, clock).search(job.query, job.count)
     except WebError:
         return protocol.SearchAnswer(id=job.id, hits=[], error="the lending node's SearXNG failed")
     return protocol.SearchAnswer(id=job.id, hits=hits(found))
+
+
+def record_delivery(conn: sqlite3.Connection, job: protocol.SearchJob, now: datetime) -> None:
+    netlog.record(
+        conn,
+        "lent_search",
+        {**query_hash(job.query), "day": now.astimezone(UTC).date().isoformat()},
+    )
+
+
+def borrower_identity(config: Config) -> tuple[str, sign.NodeKey] | None:
+    url = net.registry(config)
+    if url is None or not config.network.borrow_search or providers.search_engines(config):
+        return None
+    try:
+        key = sign.load_node_key(sign.default_node_key_path())
+    except (sign.KeyFileError, OSError):
+        return None
+    return url, key
 
 
 class Lent:
@@ -114,13 +127,10 @@ class Lent:
         load: Callable[[], Config] | None = None,
     ) -> Self | None:
 
-        url = net.registry(config)
-        if url is None or not config.network.borrow_search or providers.search_engines(config):
+        identity = borrower_identity(config)
+        if identity is None:
             return None
-        try:
-            key = sign.load_node_key(sign.default_node_key_path())
-        except (sign.KeyFileError, OSError):
-            return None
+        url, key = identity
         return cls(config, conn, http, clock, key, url, load=load)
 
     def search(
@@ -144,14 +154,15 @@ class Lent:
                 budget - (self.clock() - start).total_seconds(),
             )
 
-        def check_config() -> None:
+        def check_config() -> Config:
             config = self.load()
             if (
                 not config.network.borrow_search
                 or net.registry(config) != self.url
                 or providers.search_engines(config)
             ):
-                raise WebError("no node lends search now")
+                raise WebError("lent search is unavailable")
+            return config
 
         def ask() -> protocol.SearchAsked:
             check_config()
@@ -167,20 +178,21 @@ class Lent:
                 time.monotonic() + remaining(),
             )
 
+        offered = False
         try:
             try:
                 offer = ask()
             except node.Problem as e:
                 if e.error != node.NOT_REGISTERED:
                     raise
-                check_config()
+                lent = node.capabilities(check_config())
                 node.call(
                     self.http,
                     self.key,
                     self.url,
                     "POST",
                     protocol.REGISTER,
-                    protocol.Register(capabilities=[]),
+                    protocol.Register(capabilities=lent),
                     protocol.NodeState,
                     self.clock(),
                     time.monotonic() + remaining(),
@@ -188,9 +200,14 @@ class Lent:
                 netlog.record(
                     self.conn,
                     "registered",
-                    {"registry": self.url, "node": self.key.fingerprint, "capabilities": []},
+                    {
+                        "registry": self.url,
+                        "node": self.key.fingerprint,
+                        "capabilities": [cap.model_dump(mode="json") for cap in lent],
+                    },
                 )
                 offer = ask()
+            offered = True
             budget = min(offer.wait_seconds, protocol.SEARCH_WAIT)
             netlog.record(self.conn, "borrowed_search", query_hash(request.query))
             while (left := remaining()) > 0:
@@ -209,18 +226,25 @@ class Lent:
                     self.clock(),
                     time.monotonic() + remaining(),
                 )
-                if state.id != offer.id or state.state == "expired":
+                if state.id != offer.id or state.state == "gone":
+                    raise WebError("the lending node's answer is unavailable")
+                if state.state == "expired":
                     break
                 if state.state == "answered":
                     if state.error is not None:
-                        raise WebError(state.error)
+                        raise WebError("the lending node could not search")
+                    if state.hits is None:
+                        raise WebError("the lending node's answer is unavailable")
                     return [SearchResult(**hit.model_dump()) for hit in state.hits[:max_results]]
         except node.Problem as e:
-            if e.error != "no_lender":
-                raise WebError(f"lent search refused: {e.error}") from None
+            if e.error == "no_lender":
+                raise MissingSearchEngine("no node lends search now") from None
+            if e.error == "too_many":
+                raise WebError("lent search refused: too many searches, try later") from None
+            raise WebError(f"lent search refused: {e.error}") from None
         except node.Unreachable as e:
-            if remaining() > 0 and str(e) != "ContactTimeout":
+            if not offered or str(e) != "ContactTimeout":
                 raise WebError("the search relay is unreachable") from None
         except (ConfigError, sqlite3.OperationalError):
             raise WebError("lent search is unavailable") from None
-        raise MissingSearchEngine("no node lends search now")
+        raise WebError("the lending node did not answer in time")

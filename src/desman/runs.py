@@ -43,7 +43,7 @@ from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
 from desman.net import jobs, protocol
 from desman.net.node import EXTEND_WHEN, capabilities
-from desman.net.search_lend import Lent
+from desman.net.search_lend import Lent, borrower_identity
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
 from desman.searxng import engine as searxng_engine
 
@@ -521,7 +521,7 @@ def executor_access(
     if (
         permissions.network_access
         and not providers.search_engines(config)
-        and not (config.network.borrow_search and net.registry(config) is not None)
+        and borrower_identity(config) is None
     ):
         ui.warn(
             t(

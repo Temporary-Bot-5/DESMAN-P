@@ -12,6 +12,7 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "on": "açık",
     "Borrowing takes effect after `desman global join`.": "Ödünç alma, `desman global join` komutundan sonra etkinleşir.",
+    "SearXNG quotas count searches only.": "SearXNG kotaları yalnızca arama sayısını hesaba katar.",
     "Borrow web search": "Web aramasını ödünç al",
     "Set up local SearXNG with `desman search setup` before lending it.": "Ödünç vermeden önce `desman search setup` ile yerel SearXNG'yi kurun.",
     "{calls} searches a day": "Günde {calls} arama",

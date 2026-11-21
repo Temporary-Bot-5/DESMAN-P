@@ -17,6 +17,7 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "on": "включён",
     "Borrowing takes effect after `desman global join`.": "Заимствование начнёт действовать после команды `desman global join`.",
+    "SearXNG quotas count searches only.": "В квотах SearXNG учитываются только поисковые запросы.",
     "Borrow web search": "Брать поиск взаймы",
     "Set up local SearXNG with `desman search setup` before lending it.": "Настройте локальный SearXNG командой `desman search setup`, прежде чем давать его взаймы.",
     "{calls} searches a day": "Суточная квота на поиск — {calls}",

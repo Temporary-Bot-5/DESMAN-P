@@ -244,7 +244,9 @@ def _call(
     except httpx.HTTPError as e:
         raise _Unreachable(type(e).__name__) from e
     body_bytes = bytes(received)
-    if reply.status_code == 429 or reply.status_code >= 500:
+    if reply.status_code >= 500 or (
+        reply.status_code == 429 and not path.startswith(protocol.SEARCH_STATE)
+    ):
         raise _Unreachable(f"HTTP {reply.status_code}")
     if reply.status_code == 404 and path == protocol.RELEASES:
         raise _Problem("not_found")
@@ -493,6 +495,8 @@ class Node:
             return
         self.search_at = now + timedelta(seconds=5)
         http = self._http()
+        poll_at = self._clock()
+        poll_started = time.monotonic()
         try:
             offer = _call(
                 http,
@@ -502,10 +506,15 @@ class Node:
                 protocol.SEARCH_NEXT,
                 protocol.SearchPoll(limit=min(4, remaining)),
                 protocol.SearchJobs,
-                now,
+                poll_at,
                 time.monotonic() + TIMEOUT,
             )
             for job in offer.jobs:
+                elapsed = max(
+                    time.monotonic() - poll_started, (self._clock() - poll_at).total_seconds()
+                )
+                if job.expires_in - elapsed < 5:
+                    continue
                 result = protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
                 try:
                     current = self._config()
@@ -514,7 +523,8 @@ class Node:
                 except (ConfigError, sqlite3.OperationalError):
                     pass
                 try:
-                    _call(
+                    sent_at = self._clock()
+                    state = _call(
                         http,
                         key,
                         address,
@@ -522,9 +532,17 @@ class Node:
                         protocol.SEARCH_ANSWER,
                         result,
                         protocol.SearchState,
-                        self._clock(),
+                        sent_at,
                         time.monotonic() + TIMEOUT,
                     )
+                    if (
+                        state.id == job.id
+                        and state.state == "answered"
+                        and result.error != protocol.SEARCH_SKIPPED
+                    ):
+                        search_lend.record_delivery(self.conn, job, sent_at)
+                except sqlite3.OperationalError:
+                    return
                 except _Problem as e:
                     if e.error in {REVOKED, NOT_REGISTERED}:
                         raise

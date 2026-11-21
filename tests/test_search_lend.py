@@ -6,8 +6,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
-from datetime import timedelta
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import httpx
@@ -21,17 +20,19 @@ from desman.cli import cli
 from desman.config import Config, ConfigManager, Donation, Network, default_config_path
 from desman.core import db, netlog, operator
 from desman.core.store import Store
-from desman.core.tools import MissingSearchToolError, ToolError, WebSearchArgs, web_tools
+from desman.core.tools import ToolError, WebSearchArgs, web_tools
 from desman.core.web import MissingSearchEngine, SearchResult, Web, WebError
 from desman.core.workspace import Workspace
-from desman.gui.module_view import cards
+from desman.gui.front import WebFront
+from desman.gui.panels import snapshot
+from desman.gui.runners import Runners
 from desman.net import node, protocol, search_lend, sign
 from desman.net.search_lend import Lent
-from desman.registry import admin, clusters, store
+from desman.registry import store
 from desman.registry.server import Registry
 from helpers import make_config
-from test_registry import LOCAL, root, root_pub
 from test_registry import Node as Wire
+from test_registry import root, root_pub
 
 __all__ = ["root", "root_pub"]
 
@@ -127,21 +128,24 @@ def test_relay_privacy_first_answer_and_expiry(
     assert stranger.call("GET", path).status_code == 404
     assert _answer(stranger, offered.id, [HIT]).status_code == 404
     jobs = lender.call("POST", protocol.SEARCH_NEXT, {"limit": 4}).json()
-    assert jobs == {"jobs": [{"id": offered.id, "query": QUERY, "count": 2}]}
+    assert jobs == {"jobs": [{"id": offered.id, "query": QUERY, "count": 2, "expires_in": 30}]}
     assert lender.call("POST", protocol.SEARCH_NEXT, {"limit": 4}).json() == {"jobs": []}
     assert _answer(lender, offered.id, [HIT]).status_code == 200
     assert _answer(lender, offered.id, []).status_code == 200
     assert conn.execute("SELECT query FROM search_requests").fetchone()[0] is None
     assert asker.call("GET", path).json()["hits"] == [HIT.model_dump()]
-    assert asker.call("GET", path).json()["hits"] == []
+    assert asker.call("GET", path).json()["state"] == "gone"
     assert tuple(conn.execute("SELECT query, payload FROM search_requests").fetchone()) == (
         None,
         None,
     )
 
+    uncollected = _ask(asker).json()["id"]
+    assert _answer(lender, uncollected, [HIT]).json()["state"] == "answered"
     expires = _ask(asker).json()["id"]
     clock.advance(30)
     assert asker.heartbeat().status_code == 200  # the ordinary registry tick also erases
+    assert asker.call("GET", protocol.SEARCH_STATE + uncollected).json()["state"] == "gone"
     assert asker.call("GET", protocol.SEARCH_STATE + expires).json()["state"] == "expired"
     assert _answer(lender, expires, [HIT]).json()["state"] == "expired"
     assert (
@@ -265,10 +269,14 @@ def test_borrower_failures(
             REGISTRY,
             sleep=clock.sleep,
         )
-        error = WebError if case == "unreachable" else MissingSearchEngine
-        match = "unreachable" if case == "unreachable" else "no node lends search now"
-        with pytest.raises(error, match=match):
+        error, match = {
+            "no_lender": (MissingSearchEngine, "no node lends search now"),
+            "timeout": (WebError, "the lending node did not answer in time"),
+            "unreachable": (WebError, "the search relay is unreachable"),
+        }[case]
+        with pytest.raises(error, match=match) as exc:
             engine.search(QUERY, 1)
+        assert type(exc.value) is error
         assert conn.execute("SELECT count(*) FROM search_requests").fetchone()[0] == (
             case == "timeout"
         )
@@ -329,7 +337,7 @@ def test_web_tool_end_to_end_and_local_quota(
         monkeypatch.setattr(engine, "sleep", sleep)
         tool = next(tool for tool in web_tools(web) if tool.name == "web_search")
         if fails:
-            with pytest.raises(ToolError, match="the lending node's SearXNG failed") as exc:
+            with pytest.raises(ToolError, match="the lending node could not search") as exc:
                 tool.run(WebSearchArgs(query=QUERY), Workspace(tmp_path, "0" * 32))
             assert type(exc.value) is ToolError
         else:
@@ -442,7 +450,7 @@ def test_disabling_borrowing_stops_existing_engine(
     ):
         [engine] = runs.web(config, Store(conn, clock), http, load=lambda: config).engines
         config.network.borrow_search = False
-        with pytest.raises(WebError, match="no node lends search now"):
+        with pytest.raises(WebError, match="lent search is unavailable"):
             engine.search(QUERY, 1)
 
 
@@ -466,7 +474,7 @@ def test_native_lender_uses_the_native_start_hook(
     )
     with db.open_db(":memory:") as conn, httpx.Client(transport=transport) as http:
         result = search_lend.answer(
-            conn, config, protocol.SearchJob(id="1" * 32, query=QUERY), http, clock
+            conn, config, protocol.SearchJob(id="1" * 32, query=QUERY, expires_in=30), http, clock
         )
     assert result is not None and result.hits == [HIT]
     assert called == [SEARXNG]
@@ -505,53 +513,52 @@ def test_poll_takes_own_overdue_jobs_first_and_honors_limit(
     assert asker.call("GET", protocol.SEARCH_STATE + newest).json()["state"] == "waiting"
 
 
-def test_borrower_registration_does_not_advertise_models(
-    relay: tuple[Registry, sqlite3.Connection],
-    clock: FakeClock,
-    root: sign.NodeKey,
-    root_pub: Path,
+def test_borrower_registration_preserves_worker_capabilities(
+    relay: tuple[Registry, sqlite3.Connection], clock: FakeClock, tmp_path: Path
 ) -> None:
     registry, conn = relay
-    operator_key = sign.NodeKey.generate()
-    admin.assign(conn, root, operator_key.public, {sign.Scope.TASKS}, days=30, now=clock())
-    job = admin.add_job(
-        conn,
-        operator_key,
-        protocol.Job(description="Sum 2 and 3", acceptance_criteria="Says 5"),
-        days=7,
-        now=clock(),
-        root_pub=root_pub,
-    )
-    asker = Wire(registry, clock)
     config = _borrower()
     config.settings["OLLAMA_MODEL"] = "qwen2.5:7b"
     config.network.donated["ollama"] = Donation(calls_per_day=5, tokens_per_day=1000)
-    assert [c.provider for c in node.capabilities(config)] == ["ollama"]
+    lent = node.capabilities(config)
+    assert [cap.provider for cap in lent] == ["ollama"]
+    path = tmp_path / "node.key"
+    key = sign.create_node_key(path)
+    wire = Wire(registry, clock, key)
+    heartbeats: list[protocol.Heartbeat] = []
 
-    with db.open_db(":memory:") as local:
-        engine = Lent(config, local, asker.client, clock, asker.key, REGISTRY, sleep=clock.sleep)
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == protocol.HEARTBEAT:
+            heartbeats.append(protocol.Heartbeat.model_validate_json(req.content))
+        return wire._handle(req)
+
+    transport = httpx.MockTransport(handle)
+
+    with db.open_db(":memory:") as local, httpx.Client(transport=transport) as http:
+        worker = node.Node(local, lambda: config, key_path=path, clock=clock, transport=transport)
+        worker.poll(idle=False)
+        before = store.node(conn, wire.fingerprint)
+        assert before is not None and before.capabilities == lent
+        assert wire.call("POST", protocol.LEAVE).status_code == 200
+        engine = Lent(config, local, http, clock, key, REGISTRY, sleep=clock.sleep)
         with pytest.raises(MissingSearchEngine):
             engine.search(QUERY, 1)
-        [entry] = netlog.entries(local)
-        assert entry.action == "registered"
-        assert entry.details == {
+        registrations = [entry for entry in netlog.entries(local) if entry.action == "registered"]
+        assert len(registrations) == 2
+        assert registrations[-1].details == {
             "registry": REGISTRY,
-            "node": asker.fingerprint,
-            "capabilities": [],
+            "node": wire.fingerprint,
+            "capabilities": [cap.model_dump(mode="json") for cap in lent],
         }
-
-    offer = asker.call("POST", protocol.CLAIM, {"jobs": True, "lead": True}).json()
-    assert protocol.Offer.model_validate(offer).work is None
-    found = store.node(conn, asker.fingerprint)
-    assert found is not None and found.capabilities == [] and found.takes_jobs
-    assert clusters.free_nodes(conn, clock(), timedelta(seconds=30)) == []
-    normal = Wire(registry, clock)
-    normal.register([LOCAL])
-    control = protocol.Offer.model_validate(normal.call("POST", protocol.CLAIM, {}).json())
-    assert control.work is not None and control.work.task.record.id == job.id
+        clock.advance(protocol.HEARTBEAT_SECONDS)
+        worker.poll(idle=False)
+        worker.close()
+        assert len(heartbeats) == 1 and heartbeats[0].capabilities is None
+        found = store.node(conn, wire.fingerprint)
+        assert found is not None and found.capabilities == lent
 
 
-def test_offer_can_shorten_wait_and_web_preserves_missing_engine(clock: FakeClock) -> None:
+def test_offer_can_shorten_wait_and_web_reports_timeout(clock: FakeClock) -> None:
     def handle(req: httpx.Request) -> httpx.Response:
         id = "a" * 32
         if req.url.path == protocol.SEARCH_ASK:
@@ -566,8 +573,9 @@ def test_offer_can_shorten_wait_and_web_preserves_missing_engine(clock: FakeCloc
             _borrower(), conn, http, clock, sign.NodeKey.generate(), REGISTRY, sleep=clock.sleep
         )
         tool = next(tool for tool in web_tools(Web(engines=[engine])) if tool.name == "web_search")
-        with pytest.raises(MissingSearchToolError, match="no node lends search now"):
+        with pytest.raises(ToolError, match="the lending node did not answer in time") as exc:
             tool.run(WebSearchArgs(query=QUERY), Workspace(Path("."), "0" * 32))
+        assert type(exc.value) is ToolError
     assert clock.slept == 3
 
 
@@ -663,9 +671,22 @@ def test_search_refusal_records_only_reason_and_route(
     assert entry.details == {"reason": "no_lender", "method": "POST", "path": protocol.SEARCH_ASK}
 
 
-def test_lent_search_has_its_own_gui_card() -> None:
-    with db.open_db(":memory:") as conn:
-        [card] = cards(conn, _lender(), [])
+def test_lent_search_has_its_own_gui_card_with_runners(tmp_path: Path) -> None:
+    ConfigManager(default_config_path()).save(_lender())
+    path = tmp_path / "panels.db"
+    with closing(db.open_db(path)):
+        front = WebFront()
+        runners = Runners(path, front)
+        try:
+            [card] = snapshot(path, "modules", front)["modules"]
+        finally:
+            runners.close()
+    assert (card["work"], card["scope"], card["scope_id"], card["role"]) == (
+        [],
+        "network",
+        "",
+        "search",
+    )
     assert card["section"] == "network" and card["provider"] == "searxng"
     assert card["calls"] == 0 and card["calls_per_day"] == 1
     assert "SearXNG" in card["label"] and "tokens" not in card
@@ -707,22 +728,153 @@ def test_legacy_search_donation_upgrades_and_cli_omits_tokens() -> None:
 
 
 @pytest.mark.parametrize(
-    ("enabled", "registry", "warns"),
+    ("enabled", "registry", "borrow", "key_state", "warns"),
     [
-        (False, REGISTRY, True),
-        (True, None, True),
-        (True, REGISTRY, False),
+        (False, REGISTRY, True, "valid", True),
+        (True, None, True, "valid", True),
+        (True, REGISTRY, False, "valid", True),
+        (True, REGISTRY, True, "missing", True),
+        (True, REGISTRY, True, "invalid", True),
+        (True, REGISTRY, True, "valid", False),
     ],
 )
-def test_no_engine_warning_requires_registry(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool, registry: str | None, warns: bool
+def test_no_engine_warning_requires_borrower_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    enabled: bool,
+    registry: str | None,
+    borrow: bool,
+    key_state: str,
+    warns: bool,
 ) -> None:
     config = _borrower()
     config.network.enabled = enabled
     config.network.registry = registry
+    config.network.borrow_search = borrow
     config.permissions.network_access = True
+    key = tmp_path / "node.key"
+    if key_state != "missing":
+        sign.create_node_key(key)
+        if key_state == "invalid":
+            key.write_bytes(b"invalid")
+    monkeypatch.setattr(sign, "default_node_key_path", lambda: key)
     monkeypatch.setattr(net, "DEFAULT_REGISTRY", None)
     warnings: list[str] = []
     monkeypatch.setattr(ui, "warn", lambda text, **kwargs: warnings.append(text))
     runs.executor_access(config)
     assert any("no engine for the whole web" in warning for warning in warnings) is warns
+
+
+@pytest.mark.parametrize("reply", ["gone", "missing_payload", "empty", "lender_error"])
+def test_borrower_only_caches_complete_answers(clock: FakeClock, reply: str) -> None:
+    id = "a" * 32
+    state: dict[str, object] = {"id": id, "state": "gone" if reply == "gone" else "answered"}
+    if reply == "empty":
+        state["hits"] = []
+    if reply == "lender_error":
+        state.update(hits=[], error=f"untrusted lender text {QUERY}")
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == protocol.SEARCH_ASK:
+            return httpx.Response(200, json={"id": id, "wait_seconds": 30})
+        assert req.url.path == protocol.SEARCH_STATE + id
+        return httpx.Response(200, json=state)
+
+    config = _borrower()
+    with (
+        db.open_db(":memory:") as conn,
+        httpx.Client(transport=httpx.MockTransport(handle)) as http,
+    ):
+        web = runs.web(config, Store(conn, clock), http)
+        web.engines = [
+            Lent(config, conn, http, clock, sign.NodeKey.generate(), REGISTRY, sleep=clock.sleep)
+        ]
+        if reply == "empty":
+            assert web.search(QUERY, 1)["results"] == []
+        else:
+            message = (
+                "the lending node could not search"
+                if reply == "lender_error"
+                else "the lending node's answer is unavailable"
+            )
+            with pytest.raises(WebError, match=message) as exc:
+                web.search(QUERY, 1)
+            assert type(exc.value) is WebError
+            assert "untrusted lender text" not in str(exc.value)
+            assert "untrusted lender text" not in repr(netlog.entries(conn))
+        assert conn.execute("SELECT count(*) FROM web_cache").fetchone()[0] == (reply == "empty")
+
+
+def test_borrower_reports_registry_rate_limit(
+    relay: tuple[Registry, sqlite3.Connection], clock: FakeClock
+) -> None:
+    registry, _ = relay
+    asker = Wire(registry, clock)
+    asker.register()
+    for _ in range(30):
+        assert _ask(asker).json()["error"] == "no_lender"
+    with db.open_db(":memory:") as conn:
+        engine = Lent(
+            _borrower(), conn, asker.client, clock, asker.key, REGISTRY, sleep=clock.sleep
+        )
+        with pytest.raises(
+            WebError, match="lent search refused: too many searches, try later"
+        ) as exc:
+            engine.search(QUERY, 1)
+        assert type(exc.value) is WebError
+
+
+@pytest.mark.parametrize("case", ["too_late_to_start", "expires_during_search"])
+def test_late_lender_jobs_do_not_spend_quota(
+    relay: tuple[Registry, sqlite3.Connection], clock: FakeClock, tmp_path: Path, case: str
+) -> None:
+    registry, remote = relay
+    asker = Wire(registry, clock)
+    asker.register()
+    config = _lender()
+    path = tmp_path / "lender.key"
+    sign.create_node_key(path)
+    polls: list[int] = []
+    searches: list[str] = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "127.0.0.1":
+            searches.append(req.url.params["q"])
+            clock.advance(30)
+            return httpx.Response(200, json={"results": [HIT.model_dump()]})
+        if req.url.path == protocol.SEARCH_NEXT:
+            polls.append(json.loads(req.content)["limit"])
+        response = registry.handle(req.method, req.url.path, req.headers.multi_items(), req.content)
+        return httpx.Response(response.status, json=response.body)
+
+    with db.open_db(":memory:") as local:
+        worker = node.Node(
+            local, lambda: config, key_path=path, clock=clock, transport=httpx.MockTransport(handle)
+        )
+        try:
+            worker.poll(idle=False)
+            id = _ask(asker).json()["id"]
+            clock.advance(26 if case == "too_late_to_start" else 5)
+            worker.poll(idle=False)
+            assert searches == ([] if case == "too_late_to_start" else [QUERY])
+            assert search_lend.used_today(local, clock()) == 0
+            clock.advance(5)
+            assert asker.call("GET", protocol.SEARCH_STATE + id).json()["state"] == "expired"
+            worker.poll(idle=False)
+            assert polls == [1, 1, 1]
+            assert (
+                remote.execute("SELECT count(answered_at) FROM search_requests").fetchone()[0] == 0
+            )
+        finally:
+            worker.close()
+
+
+@pytest.mark.parametrize("operation", ["donate", "quota"])
+def test_searxng_cli_rejects_explicit_token_quota(operation: str) -> None:
+    manager = ConfigManager(default_config_path())
+    manager.save(_lender())
+    before = manager.load().network.donated
+    result = CliRunner().invoke(cli, ["global", operation, "searxng", "--tokens", "1000"])
+    assert result.exit_code == 1
+    assert "SearXNG quotas count searches only." in result.output
+    assert manager.load().network.donated == before
