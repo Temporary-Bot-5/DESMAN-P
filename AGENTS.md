@@ -356,7 +356,8 @@ preemption, self-improvement or network features before their phase).
 - Subcommands must stay non-interactive; only bare `desman` (the chat, from phase C), `desman config`, `config reset`
   (confirmation, `--yes` skips it), `inbox` in a terminal, and `keys add` (the hidden key;
   `--stdin` for scripts) may
-  prompt. `docker install --yes` runs the system's installers attached to the terminal, so
+  prompt. `docker install --yes` and `sandbox setup --wsl --yes` run the system's
+  installers attached to the terminal (Windows may ask for administrator rights), so
   their own questions (sudo's password, Windows' UAC, winget/Homebrew) reach the person
   (ADR 0013); without `--yes` it only prints the plan. A key is never accepted as a
   command-line argument.
@@ -387,7 +388,8 @@ preemption, self-improvement or network features before their phase).
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
   except in lock-contention tests, the subprocess crash and reassignment tests (`tests/test_crash.py`, `tests/test_reassign.py`, `tests/test_gui_workers.py`) and the
   real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI, and
-  `tests/test_sandbox_wasi.py`, skipped without wasmtime or the pinned files)
+  `tests/test_sandbox_wasi.py`, skipped without wasmtime or the pinned files, and
+  `tests/test_sandbox_wsl.py`, skipped unless Windows has the desman-sandbox distribution)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
 - Fault test: kill executor mid-task → verify resume from checkpoint
 - Fault injection (`tests/faults.py`, ROADMAP 4.6): seeded simulation of several workers with

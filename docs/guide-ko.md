@@ -27,7 +27,7 @@
   DESMAN 설정에서 코드 실행 권한(`shell_execution`)을 켤 수 있습니다.
   샌드박스가 없어도 DESMAN은 코드를 작성할 수 있으며, 실행할 때는 도움을 요청합니다.
   Docker Desktop을 설치하려면 설정 마법사의 Docker 섹션을 이용하거나 `desman docker install --yes`를 실행하세요.
-  Windows 또는 macOS에서 Docker를 사용할 수 없으면 `desman sandbox setup --yes`로 Python과 pytest용 WebAssembly 샌드박스를 설정하세요.
+  Docker를 사용할 수 없으면 `desman sandbox setup --yes`는 WSL2가 있는 Windows에서 WSL 샌드박스를 설정하고, 그 밖의 경우에는 Python과 pytest용 WebAssembly 샌드박스를 설정합니다.
 
 ## 1. 설치
 

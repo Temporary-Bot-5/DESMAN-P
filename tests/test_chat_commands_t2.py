@@ -569,6 +569,7 @@ def test_cli_confirmations_are_explicit_in_catalog() -> None:
         "global submit-proposal",
         "search setup",
         "sandbox setup",
+        "sandbox remove",
         "docker install",
         "search remove",
     }

@@ -31,7 +31,7 @@ problema. Puedes empezar por las secciones 1–3 y consultar el resto cuando lo 
   el permiso para ejecutar código (`shell_execution`) en la configuración de DESMAN. Sin un
   entorno aislado, DESMAN puede escribir código y te pedirá ayuda para ejecutarlo.
   Para instalar Docker Desktop, usa la sección Docker del asistente de configuración o ejecuta `desman docker install --yes`.
-  Si Docker no está disponible en Windows o macOS, ejecuta `desman sandbox setup --yes` para configurar la zona aislada de WebAssembly para Python y pytest.
+  Sin Docker, `desman sandbox setup --yes` configura la zona aislada WSL en Windows si WSL2 está disponible, o WebAssembly para Python y pytest en los demás casos.
 
 ## 1. Instalación
 

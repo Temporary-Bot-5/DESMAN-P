@@ -21,7 +21,7 @@ from click.testing import CliRunner
 
 from desman import docker_cli, sandbox_cli, ui, wizard
 from desman.cli import cli
-from desman.commands import Context, NoArgs, Proposal, find
+from desman.commands import Context, Proposal, SandboxSetupArgs, find
 from desman.config import Permissions, open_config
 from desman.core import sandbox
 from desman.core.policy import Permission, executor_access
@@ -32,7 +32,7 @@ from desman.core.workspace import Workspace
 
 
 def _box(path: Path, *, platform: str = "darwin", limits: Limits | None = None) -> Sandbox:
-    return Sandbox(limits, platform=platform, docker="", wasi_dir=path)
+    return Sandbox(limits, platform=platform, docker="", wsl="", wasi_dir=path)
 
 
 def test_wasi_uses_the_database_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,7 +90,9 @@ def test_selection(
             return subprocess.CompletedProcess(argv, 0, "linux", "")
         return subprocess.CompletedProcess(argv, 1, "", "No such image")
 
-    docker = Sandbox(platform=platform, docker="docker", docker_runner=docker_run, wasi_dir=root)
+    docker = Sandbox(
+        platform=platform, docker="docker", docker_runner=docker_run, wsl="", wasi_dir=root
+    )
     assert docker.unavailable() is None
     assert docker.backend == "wasi"
     assert Sandbox(platform="linux", docker="docker", docker_runner=docker_run).backend == "bwrap"
@@ -205,7 +207,7 @@ def test_setup_consent_and_status(
     entry = find("sandbox setup")
     assert entry is not None
     proposal = entry.handler(
-        Context(store, open_config(), lambda *_: None, lambda _: False), NoArgs()
+        Context(store, open_config(), lambda *_: None, lambda _: False), SandboxSetupArgs()
     )
     assert isinstance(proposal, Proposal) and "WebAssembly" in proposal.lines[0]
     assert not root.exists()
@@ -413,7 +415,9 @@ def test_wizard_keeps_wasi_offer_in_permissions(
         return subprocess.CompletedProcess(argv, 1, "", "starting")
 
     def box() -> Sandbox:
-        return Sandbox(platform="win32", docker="docker", docker_runner=stopped, wasi_dir=tmp_path)
+        return Sandbox(
+            platform="win32", docker="docker", docker_runner=stopped, wsl="", wasi_dir=tmp_path
+        )
 
     monkeypatch.setattr(sandbox, "Sandbox", box)
     monkeypatch.setattr(sandbox_cli, "wasi_runtime", lambda: True)

@@ -31,7 +31,7 @@ zgłaszać problemy. Zacznij od rozdziałów 1–3, a do reszty zajrzyj w razie 
   kodu (`shell_execution`). Bez piaskownicy DESMAN może napisać kod i poprosi o pomoc przy
   jego uruchomieniu.
   Aby zainstalować Docker Desktop, skorzystaj z sekcji Docker w kreatorze konfiguracji lub uruchom `desman docker install --yes`.
-  Jeśli na Windowsie lub macOS Docker jest niedostępny, uruchom `desman sandbox setup --yes`, aby skonfigurować piaskownicę WebAssembly dla Pythona i pytest.
+  Bez Dockera polecenie `desman sandbox setup --yes` konfiguruje piaskownicę WSL w systemie Windows z WSL2, a w pozostałych przypadkach WebAssembly dla Pythona i pytest.
 
 ## 1. Instalacja
 

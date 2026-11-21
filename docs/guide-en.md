@@ -33,7 +33,7 @@ the rest when you need it.
   to run code (`shell_execution`) in DESMAN's settings. Without a sandbox, DESMAN can write
   code and will ask for help running it.
   To install Docker Desktop, use the Docker section of the setup wizard or run `desman docker install --yes`.
-  If Docker is unavailable on Windows or macOS, run `desman sandbox setup --yes` to set up the WebAssembly sandbox for Python and pytest.
+  Without Docker, `desman sandbox setup --yes` sets up WSL on Windows when WSL2 is available, or WebAssembly for Python and pytest otherwise.
 
 ## 1. Installation
 

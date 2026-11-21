@@ -148,7 +148,7 @@ def test_declining_privacy_adds_no_key() -> None:
 def test_permissions_and_the_admin_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     # Shell on offers the sandbox's setup: on Windows CI (no Docker) that is a WebAssembly
     # download question, which this test does not answer.
-    monkeypatch.setattr("desman.sandbox_cli.prepare_setup", lambda box: None)
+    monkeypatch.setattr("desman.sandbox_cli.prepare_setup", lambda box, backend: None)
     result = wizard(
         "2", DONE, "y", "", "", "y", *KEEP_PERSONAL
     )  # Russian; admin_rights and shell on
