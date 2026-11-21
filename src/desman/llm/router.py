@@ -537,6 +537,7 @@ class Fallback:
 
     A model with a known context or request ceiling too small for the request is skipped.
     Among fitting models, those the task found unfit (`Request.avoid`) go unused when possible.
+    A provider size refusal skips that model for requests at least as large.
     A provider error moves the call to the next model, except a quality one: that is the
     model's own answer, judged by the retry policy (which may switch models for the next
     attempt). A model unable to answer such a request at all (`ProviderError.unfit_model`:
@@ -549,7 +550,7 @@ class Fallback:
     untried, the slow error propagates and the next call in that scope starts with them.
     When all models were tried, the error raised is a
     limit if any model was limited (the soonest one: the subtask pauses until then), else a
-    passing one, else the first model's.
+    passing one, a size refusal, or the first model's error.
     """
 
     def __init__(
@@ -580,6 +581,7 @@ class Fallback:
         self._call = LastCall()
         self._deferred: dict[tuple[str, str] | None, list[str]] = {}
         self._untried: dict[tuple[str, str] | None, set[str]] = {}
+        self._refused_sizes: dict[str, int] = {}
         self._unfit: set[str] = set()
         """Models that proved unable to answer (`unfit_model`): asked only when none else is."""
 
@@ -632,6 +634,11 @@ class Fallback:
             health_changed = healthy_choices != before_health
             health_members = iter(m for c in healthy_choices for m in ordered_members if m[1] == c)
             ordered_members = [m if m[1] is None else next(health_members) for m in ordered_members]
+        sized = [
+            (llm, choice)
+            for llm, choice in ordered_members
+            if need < self._refused_sizes.get(choice.label if choice else llm.name, need + 1)
+        ]
         limits = {
             choice.label: _request_limit(choice, self.conn)
             for _, choice in self.members
@@ -639,7 +646,7 @@ class Fallback:
         }
         large = [
             (llm, choice)
-            for llm, choice in ordered_members
+            for llm, choice in sized
             if choice is None or (limit := limits[choice.label]) is None or limit >= need
         ]
         if large and all(choice is not None and choice.spec.context < need for _, choice in large):
@@ -658,7 +665,9 @@ class Fallback:
                 skipped.append(
                     SkippedModel(
                         llm.name if choice is None else choice.label,
-                        "context" if limit is not None and limit < need else "unfit",
+                        "context"
+                        if (llm, choice) not in sized or (limit is not None and limit < need)
+                        else "unfit",
                         needed=need,
                         context=limit,
                     )
@@ -667,6 +676,8 @@ class Fallback:
         errors: list[ProviderError] = []
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
+            if not sized:
+                raise RequestTooLarge(self.name, 413, f"no model can take {need} tokens")
             largest = max((limit for limit in limits.values() if limit is not None), default=0)
             raise ProviderRejected(
                 self.name,
@@ -696,7 +707,6 @@ class Fallback:
             try:
                 reply = llm.complete(request)
             except ProviderError as e:
-                label = llm.name if choice is None else choice.label
                 reason = (
                     "context"
                     if isinstance(e, RequestTooLarge)
@@ -722,10 +732,11 @@ class Fallback:
                     )
                 )
                 self._call = LastCall(skipped=tuple(skipped))
-                if e.kind is FailureKind.QUALITY:
+                if isinstance(e, RequestTooLarge):
+                    self._refused_sizes[label] = need
+                elif e.kind is FailureKind.QUALITY:
                     if not e.unfit_model or i == len(members) - 1:
                         raise
-                    label = llm.name if choice is None else choice.label
                     self._unfit.add(label)
                     unfit_seen(label)  # kept in the task's history: later runs avoid it too
                     continue
@@ -733,7 +744,11 @@ class Fallback:
                 if scope is not None:
                     self._scopes.pop(scope, None)
                 errors.append(e)
-                if e.slow and not (e.kind is FailureKind.LIMIT and provider_wait.enabled()):
+                if (
+                    e.slow
+                    and not isinstance(e, RequestTooLarge)
+                    and not (e.kind is FailureKind.LIMIT and provider_wait.enabled())
+                ):
                     if i < len(members) - 1:
                         self._untried[scope] = untried.intersection(
                             c.label if c else m.name for m, c in members[i + 1 :]
@@ -773,7 +788,9 @@ def _telling(errors: list[ProviderError]) -> ProviderError:
     if limits:
         return min(limits, key=lambda e: e.paused_until(now) or datetime.max.replace(tzinfo=UTC))
     passing = [e for e in errors if e.kind is FailureKind.TRANSIENT]
-    return passing[0] if passing else errors[0]
+    if passing:
+        return passing[0]
+    return next((e for e in errors if isinstance(e, RequestTooLarge)), errors[0])
 
 
 # ── Backoff ──────────────────────────────────────────────────────────────────

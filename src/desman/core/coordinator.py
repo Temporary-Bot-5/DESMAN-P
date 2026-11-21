@@ -815,6 +815,8 @@ class Coordinator:
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
         except ProviderError as e:
             review = self._provider_failure(e)
+            if review.kind is FailureKind.QUALITY:
+                review = review.model_copy(update={"kind": FailureKind.TRANSIENT})
         except (Exception, ValidationError) as e:
             review = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"

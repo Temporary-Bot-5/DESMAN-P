@@ -861,24 +861,40 @@ def test_groq_request_ceiling_skips_without_calling_and_uses_reported_limit(stor
     assert fallback.complete(request).text == "small"
 
 
-def test_request_too_large_moves_to_next_model_without_backoff() -> None:
-    from desman.llm.base import RequestTooLarge
+@pytest.mark.parametrize("earlier", [None, RateLimit(retry_after=60), ServerError()])
+def test_request_too_large_remembers_only_the_refused_size(earlier: Any) -> None:
+    from desman.llm.base import Completion, RequestTooLarge
 
-    class Oversized:
-        name = "groq"
+    class Sized:
+        name = "small"
         calls = 0
 
         def complete(self, request: Request) -> Completion:
             self.calls += 1
-            raise RequestTooLarge("groq", 413, "Request too large")
+            if router.estimated_tokens(request) >= router.estimated_tokens(large):
+                raise RequestTooLarge(self.name, 413, "Request too large")
+            return FakeLLM("small answer").complete(request)
 
-    from desman.llm.base import Completion
-
-    first = Oversized()
-    fallback = router.Fallback(members(router.Backoff(first), FakeLLM("ok")))
-    assert fallback.complete(REQUEST).text == "ok"
+    large = Request(messages=[Message(role="user", content="x" * 1000)])
+    first = Sized()
+    backed = router.Backoff(first, sleep=lambda _: pytest.fail("backoff on 413"))
+    if earlier is None:
+        fallback = router.Fallback(members(backed, FakeLLM("large answer", "retry answer")))
+        heard: list[str] = []
+        with noticing_unfit(heard.append):
+            assert fallback.complete(large).text == "large answer"
+            assert fallback.complete(large).text == "retry answer"
+        assert not heard
+        assert fallback.last_call.skipped[0].reason == "context"
+    else:
+        fallback = router.Fallback(members(FakeLLM(earlier, earlier, earlier), backed))
+        error = RateLimited if isinstance(earlier, RateLimit) else ProviderUnavailable
+        for _ in range(2):
+            with pytest.raises(error):
+                fallback.complete(large)
     assert first.calls == 1
-    assert fallback.last_call.skipped[0].reason == "context"
+    assert fallback.complete(REQUEST).text == "small answer"
+    assert first.calls == 2
 
 
 def test_all_ceilings_too_small_never_send_known_impossible_request() -> None:

@@ -523,12 +523,48 @@ def test_quote_sources_of_a_combine_include_its_document(store: Store) -> None:
     ]
 
 
-def test_a_file_a_model_wrote_is_no_source_for_quotes() -> None:
-    # Found live (L.2): a combine saved its notes to a file; the next one read it back and the
-    # file's (altered) quotes counted as evidence.
-    from desman.core.effects import _model_written
+def test_quote_sources_use_normalized_paths_and_task_wide_write_history(store: Store) -> None:
+    from desman.core.effects import quote_sources
 
-    assert _model_written("read_file", {"path": "notes.txt", "content": "Живется скучно."})
-    assert not _model_written("read_file", {"path": "input/book.txt", "content": "текст"})
-    assert not _model_written("read_file", {"path": "web/page.txt", "content": "текст"})
-    assert not _model_written("web_fetch", {"text": "страница"})
+    store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="write", acceptance_criteria="c"),
+                SubtaskSpec(description="read", acceptance_criteria="c", depends_on=[0]),
+            ],
+        )
+    )
+
+    def journal(subtask: Subtask, ordinal: int, tool: str, output: dict[str, str]) -> None:
+        assert subtask.lease_token is not None
+        store.start_effect(subtask.id, subtask.lease_token, 0, ordinal, tool, str(ordinal))
+        assert store.finish_effect(
+            subtask.id,
+            subtask.lease_token,
+            0,
+            ordinal,
+            ToolResult(ok=True, output=output).model_dump(),
+        )
+
+    writer = store.claim("w")
+    assert writer is not None and writer.lease_token is not None
+    journal(writer, 0, "write_file", {"path": "input/generated.txt"})
+    store.submit(writer.id, writer.lease_token, {"done": True})
+    store.transition(writer.id, S.REVIEW, S.DONE, Actor.REVIEWER)
+    reader = store.claim("w")
+    assert reader is not None and reader.lease_token is not None
+    attached = {"path": "./input//attached.txt", "content": "The person's words."}
+    fetched = {"path": "./web/page.txt", "content": "The page's words."}
+    journal(reader, 0, "read_file", {"path": "./input//generated.txt", "content": "Invented."})
+    journal(reader, 1, "read_file", attached)
+    journal(reader, 2, "read_file", fetched)
+    journal(reader, 3, "run_command", {"stdout": "Invented output."})
+    page = {"text": "An external source."}
+    journal(reader, 4, "web_fetch", page)
+    store.submit(reader.id, reader.lease_token, {"done": True})
+    assert quote_sources(store, reader, knowledge=None, context_budget_tokens=1000) == [
+        attached,
+        fetched,
+        page,
+    ]
