@@ -562,11 +562,30 @@ def test_wsl_process_failure_is_distinct_from_infrastructure_failure(
         lambda *_, **__: Process(code, stdout, message.encode("utf-16-le")),
     )
     if unavailable:
+        # Only a failing probe makes it the sandbox's failure.
+        assert box.unavailable() is None
+        wsl.fail = "/bin/busybox"
         with pytest.raises(SandboxUnavailable, match="WSL failed"):
             box.run(["true"], tmp_path)
+        wsl.fail = ""
         wsl.calls.clear()
         assert box.unavailable() is None
         assert wsl.calls[-1][0][-1] == "true"
         assert not any("/usr/bin/pkill" in argv for argv, _, _ in wsl.calls)
     else:
         assert box.run(["true"], tmp_path).exit_code == code
+
+
+def test_code_printing_a_wsl_error_is_its_own_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wsl = Wsl(present=True)
+    box = wsl.box(tmp_path)
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *_, **__: Process(1, b"", "There is no distribution".encode("utf-16-le")),
+    )
+    outcome = box.run(["true"], tmp_path)
+    assert outcome.exit_code == 1 and not outcome.timed_out
+    assert box.unavailable() is None

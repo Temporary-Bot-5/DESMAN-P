@@ -403,6 +403,14 @@ class Sandbox:
             argv = self._wsl_argv(command, workdir, limits.timeout, hostname=name)
             try:
                 return _execute_wsl(argv, stdin, limits, lambda: self._stop_wsl(name))
+            except _WslSuspect as suspect:
+                # The code itself may print what looks like a WSL error: only a failing probe
+                # makes it the sandbox's failure.
+                problem = self.wsl_problem()
+                if problem is None:
+                    return suspect.outcome
+                self._retry_at = self._monotonic()
+                raise SandboxUnavailable(f"WSL failed: {suspect.detail}") from None
             except SandboxUnavailable:
                 self._retry_at = self._monotonic()
                 raise
@@ -1094,6 +1102,15 @@ def remove_wsl(box: Sandbox) -> bool:
         return present
 
 
+class _WslSuspect(Exception):
+    """wsl.exe's own failure, or code printing what looks like one: the caller probes."""
+
+    def __init__(self, detail: str, outcome: Outcome) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.outcome = outcome
+
+
 def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[], None]) -> Outcome:
     stdout = _Head(limits.stdout_chars)
     stderr = _WslTail(limits.stderr_chars)
@@ -1138,6 +1155,14 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[],
                     reader.join()
             process.stdout.close()
             process.stderr.close()
+    outcome = Outcome(
+        exit_code=None if timed_out else _exit_code(process.returncode),
+        stdout=stdout.text(),
+        stderr=stderr.text(),
+        timed_out=timed_out,
+        stdout_cut=stdout.cut,
+        stderr_cut=stderr.cut,
+    )
     if not timed_out:
         detail = diagnostic.text().strip()
         if not 0 <= process.returncode <= 255 or (
@@ -1145,15 +1170,8 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[],
             and not stdout.cut
             and any(prefix in detail for prefix in ("There is no distribution", "WSL (", "Wsl/"))
         ):
-            raise SandboxUnavailable(f"WSL failed: {detail or process.returncode}")
-    return Outcome(
-        exit_code=None if timed_out else process.returncode,
-        stdout=stdout.text(),
-        stderr=stderr.text(),
-        timed_out=timed_out,
-        stdout_cut=stdout.cut,
-        stderr_cut=stderr.cut,
-    )
+            raise _WslSuspect(detail or str(process.returncode), outcome)
+    return outcome
 
 
 def _execute_docker(
