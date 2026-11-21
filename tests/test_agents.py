@@ -727,7 +727,9 @@ def test_verbatim_notes_unquotes_an_inner_misquote_revealed_by_repair() -> None:
     artifact = {"text": "«The passage says “a false phrase from memory” here»"}
     model = FakeLLM(json.dumps(artifact))
     request = Request(messages=[Message(role="user", content="Execute: notes")])
-    assert _verbatim_notes(model, request, artifact, "A different passage.") == {
+    assert _verbatim_notes(
+        model, request, artifact, ["A different passage."], "the part's text"
+    ) == {
         "text": "The passage says a false phrase from memory here",
     }
 

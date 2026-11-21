@@ -57,6 +57,7 @@ from desman.core.models import Kind, Subtask
 from desman.core.retry import FailureKind, Strategy
 from desman.core.store import PreemptedError
 from desman.core.tools import TOOL_RESULTS_DIR, untrusted_file
+from desman.core.workspace import PathEscapeError
 from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
 from desman.llm.tool_calls import ToolCall, normalize_tool_calls
@@ -395,9 +396,9 @@ def _execute(
                     ),
                 )
             content = reply.root
-            part = work.subtask.inputs.get("text") if "document" in work.subtask.inputs else None
-            if isinstance(part, str) and not is_error_report(content):
-                content = _verbatim_notes(model, request, content, part)
+            sources = _note_sources(work)
+            if sources is not None and not is_error_report(content):
+                content = _verbatim_notes(model, request, content, *sources)
             if (
                 format_final
                 and context.final_goal is not None
@@ -757,9 +758,9 @@ def _quote_message(absent: list[str], sources: list[str], location: str) -> str:
     )
 
 
-def _absent_quotes(content: object, text: str) -> list[str]:
+def _absent_quotes(content: object, sources: list[str]) -> list[str]:
     fragments = [quote for value in string_values(content) for quote in quotes(value)]
-    return missing(dict.fromkeys(fragments), [text]) if fragments else []
+    return missing(dict.fromkeys(fragments), sources) if fragments else []
 
 
 def _unquote(content: Any, absent: list[str]) -> Any:
@@ -780,11 +781,35 @@ def _unquote(content: Any, absent: list[str]) -> Any:
     return content
 
 
-def _verbatim_notes(model: LLM, request: Request, content: Any, text: str) -> Any:
-    """Notes on a part of a long document (ADR 0014): code checks their quotes against the
-    part at once, asks for one correction within the attempt (showing what the text says), and
-    unquotes whatever is still not word for word, so one misquote does not cost the attempt."""
-    absent = _absent_quotes(content, text)
+def _note_sources(work: Work) -> tuple[list[str], str] | None:
+    """What the quotes of a long document's notes must come from (ADR 0014): a part's text; for
+    a combine, the quotes its notes carried and the document itself."""
+    inputs = work.subtask.inputs
+    if "document" not in inputs:
+        return None
+    if isinstance(inputs.get("text"), str):
+        return [inputs["text"]], "the part's text"
+    carried = [
+        fragment
+        for dependency in work.context.dependencies
+        for value in string_values(dependency.content)
+        for fragment in quotes(value)
+    ]
+    try:
+        document = [work.tools.workspace.read_text(str(inputs["document"]))]
+    except (OSError, UnicodeError, PathEscapeError):
+        document = []
+    sources = carried + document
+    return (sources, "the notes you were given or the document") if sources else None
+
+
+def _verbatim_notes(
+    model: LLM, request: Request, content: Any, sources: list[str], location: str
+) -> Any:
+    """Notes on a long document (ADR 0014): code checks their quotes at once, asks for one
+    correction within the attempt (showing what the text says), and unquotes whatever is still
+    not word for word, so one misquote does not cost the attempt."""
+    absent = _absent_quotes(content, sources)
     if not absent:
         return content
     repair = request.model_copy(
@@ -795,7 +820,7 @@ def _verbatim_notes(model: LLM, request: Request, content: Any, text: str) -> An
                 Message(
                     role="user",
                     content=f"{EXECUTE} (quote check):\n"
-                    + _quote_message(absent, [text], "the part's text")
+                    + _quote_message(absent, sources, location)
                     + " Reply with the whole corrected result, without tool calls.",
                 ),
             ]
@@ -808,7 +833,7 @@ def _verbatim_notes(model: LLM, request: Request, content: Any, text: str) -> An
     except (ProviderError, StructuredOutputError):
         pass
     for _ in range(3):
-        absent = _absent_quotes(content, text)
+        absent = _absent_quotes(content, sources)
         if not absent:
             break
         content = _unquote(content, absent)

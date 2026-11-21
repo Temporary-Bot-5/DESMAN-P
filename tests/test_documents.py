@@ -313,6 +313,14 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
             return json.dumps({"text": f'The riverbank: "{QUOTE}" The path: "{brief_quote}"'})
         return json.dumps({"text": f'Part 1: "{QUOTE}"'})
 
+    repairs: list[str] = []
+
+    def repair(request: Request) -> str:
+        # The combine's invented quote is caught by code within the attempt (L.2 live run).
+        repairs.append(request.prompt)
+        return json.dumps({"text": digest})
+
+    fake.on("Execute subtask (quote check)", repair, repeat_last=True)
     fake.on("Execute subtask (tool results)", after_read, repeat_last=True)
     fake.on("Execute", execute, repeat_last=True).on("Review", review, repeat_last=True)
     monkeypatch.setattr(FakeLLM, "from_file", lambda *args, **kwargs: fake)
@@ -329,18 +337,19 @@ def test_cli_reads_a_long_file_in_parts_and_reviews_quotes(
         script(tmp_path, []),
     )
     assert result.exit_code == 0, (result.output, result.exception)
-    assert combine_attempts == 2
+    assert combine_attempts == 1
+    [repaired] = repairs
+    assert f"«{invented}»" in repaired
     assert reviewed_parts == set(seen_parts) == set(range(1, 6))
     assert "".join(seen_parts[i] for i in range(1, 6)) == text
     with closing(db.open_db()) as conn:
         entries = history(conn, only_task())
         [created] = [entry for entry in entries if entry.action == "task_created"]
-        [rejected] = [
+        assert not [
             entry
             for entry in entries
             if entry.action == "verdict" and entry.details["verdict"] == "retry"
         ]
-        assert f"«{invented}»" in rejected.details["feedback"]
         assert created.details["documents"] == [
             {"path": "input/setting.txt", "chars": len(text), "parts": 5}
         ]
