@@ -53,7 +53,13 @@ from desman.core.context import (
 from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import Replayed, Tool, ToolResult
-from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
+from desman.core.workspace import (
+    PathEscapeError,
+    Workspace,
+    check_path,
+    is_work_file,
+    workspace_root_for,
+)
 
 INTERRUPTED: Final = (
     "this exact call was started by an earlier run of this subtask and interrupted before it "
@@ -142,6 +148,7 @@ def evidence(
                     "result": content,
                     "truncated": not whole,
                     **({"digest": True} if digest else {}),
+                    **({"document_notes": True} if item.document_notes else {}),
                 }
             )
         elif kind == "file":
@@ -175,28 +182,32 @@ def quote_sources(
 ) -> list[object]:
     """Tool outputs from this execution and the knowledge supplied to its executor."""
     execution = store.executions(subtask.id) - 1
-    outputs = [
-        output
-        for row in store.effects(subtask.id, execution)
-        if row["state"] == "done"
-        and not _model_written(
-            row["tool"], output := ToolResult.model_validate_json(row["result_json"]).output
-        )
-    ]
+    written = set()
+    for saved in store.completed_effects(subtask.task_id, "write_file"):
+        result = ToolResult.model_validate_json(saved)
+        if result.ok and (path := _output_path(result.output)) is not None:
+            written.add(path)
+    outputs = []
+    for row in store.effects(subtask.id, execution):
+        if row["state"] != "done" or row["tool"] == "run_command":
+            continue
+        output = ToolResult.model_validate_json(row["result_json"]).output
+        if row["tool"] == "read_file" and _output_path(output) in written:
+            continue
+        outputs.append(output)
     nodes = fit_knowledge(
         given(knowledge, subtask.knowledge)[0], context_budget_tokens * CHARS_PER_TOKEN // 2
     )
     return [*outputs, *(node.text for node in nodes), *_documents_read_in_parts(store, subtask)]
 
 
-def _model_written(tool: str, output: object) -> bool:
-    """A file a model wrote in the workspace is no source for a quote (L.2 live run: a combine
-    saved its notes to a file, the next one read it back and its quotes passed). The person's
-    files and fetched pages are under input/ and web/."""
-    if tool != "read_file" or not isinstance(output, dict):
-        return False
-    path = output.get("path")
-    return not (isinstance(path, str) and path.startswith(("input/", "web/")))
+def _output_path(output: object) -> tuple[str, ...] | None:
+    if isinstance(output, dict) and isinstance(path := output.get("path"), str):
+        try:
+            return check_path(path)
+        except PathEscapeError:
+            pass
+    return None
 
 
 def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:

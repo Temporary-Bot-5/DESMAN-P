@@ -104,3 +104,15 @@ def test_a_translated_quote_is_not_skipped_as_a_title() -> None:
     translated = "The demand for art here is great, but God gives no artists"
     assert missing([translated], source) == [translated]
     assert missing(["From Siberia"], source) == []
+
+
+def test_nearest_requires_unique_whole_words() -> None:
+    quote = "a long morning in the mountains"
+    assert nearest(quote, ["It was a long morning in theatre."]) == "a long morning in theatre."
+    assert nearest(quote, ["The media long morning in the valley."]) is None
+    assert nearest(quote, ["A long morning in the valley. A long morning in the city."]) is None
+    assert (
+        nearest(quote, iter(["A long morning in the valley.", "A long morning in the city."]))
+        is None
+    )
+    assert nearest("morning in the", ["Good morning in theatre."]) is None

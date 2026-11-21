@@ -26,7 +26,7 @@ from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import Attempts, FailureKind, RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.store import DEFAULT_LEASE_SECONDS, Store
-from desman.llm.base import GenerationFailed
+from desman.llm.base import GenerationFailed, RequestTooLarge
 
 S = SubtaskStatus
 K = FailureKind
@@ -367,7 +367,12 @@ def test_run_does_not_touch_other_tasks(store: Store, clock: FakeClock) -> None:
     assert (untouched.status, untouched.attempts) == (S.RUNNING, Attempts())
 
 
-def test_reviewer_outage_does_not_rerun_the_work(store: Store, clock: FakeClock) -> None:
+@pytest.mark.parametrize(
+    "error", [TimeoutError("API timed out"), RequestTooLarge("reviewer", 413, "too large")]
+)
+def test_reviewer_outage_does_not_rerun_the_work(
+    store: Store, clock: FakeClock, error: Exception
+) -> None:
     executions = []
 
     def counting(work: Work) -> Success:
@@ -379,7 +384,7 @@ def test_reviewer_outage_does_not_rerun_the_work(store: Store, clock: FakeClock)
     def flaky(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
         reviews.append(artifact)
         if len(reviews) < 3:
-            raise TimeoutError("reviewer API timed out")
+            raise error
         return Review(verdict=Verdict.ACCEPT)
 
     task_id = store.create_task(chain("a"))

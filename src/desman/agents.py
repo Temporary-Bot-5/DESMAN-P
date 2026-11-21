@@ -424,6 +424,7 @@ def _final_text(model: LLM, goal: str, result: dict[str, Any], original: Request
     request = _request(
         'Convert the result into {"text": "<the complete answer as Markdown>"}, in the '
         "language of the goal. Keep every fact, number, date and source of the result. "
+        "Keep quotes in their original language and copy them word for word. "
         "Present only what the result holds, even when it covers less than the goal: never "
         "answer the goal anew, apologise, or say that you lack access to something. "
         "Use Markdown tables/lists; if the goal asks for data such as JSON/CSV, put the "
@@ -501,7 +502,8 @@ def _quote_feedback(
         or subtask.inputs.get("read_in_parts")  # downstream of a document's notes (ADR 0014)
     ):
         return None
-    fragments = [quote for value in string_values(artifact) for quote in quotes(value)]
+    original = artifact.get("formatted_from", artifact) if isinstance(artifact, dict) else artifact
+    fragments = [quote for value in string_values(original) for quote in quotes(value)]
     if not fragments:
         return None
     if isinstance(part, str):
@@ -509,13 +511,24 @@ def _quote_feedback(
         location = "the part's text"
     else:
         results = (
-            [dep.content for dep in dependencies(subtask.id)]
+            [
+                (dep.content, dep.document_notes or dep.digest is not None)
+                for dep in dependencies(subtask.id)
+            ]
             if dependencies is not None
-            else [note.get("result") for note in notes]
+            else [
+                (note.get("result"), note.get("document_notes") or note.get("digest"))
+                for note in notes
+            ]
         )
         # From notes only what they quoted (checked where it was written): a paraphrase in
         # the notes must not become a quote one step later (L.2 live run).
-        sources = [fragment for value in string_values(results) for fragment in quotes(value)]
+        sources = [
+            fragment
+            for result, document_notes in results
+            for value in string_values(result)
+            for fragment in (quotes(value) if combine or document_notes else [value])
+        ]
         location = "the notes you were given"
         if combine and quote_evidence is not None:
             # A quote the notes carried a little differently is still right if the document
@@ -542,7 +555,7 @@ def _quote_feedback(
 def _quote_message(absent: list[str], sources: list[str], location: str) -> str:
     listed = ", ".join(f"«{quote}»" for quote in absent[:10])
     shown_text = [
-        f"«{quote[:60]}…» — the text there reads: «{passage}»"
+        f"«{quote[:60]}{'…' if len(quote) > 60 else ''}» — the text there reads: «{passage}»"
         for quote in absent[:5]
         if (passage := nearest(quote, sources)) is not None
     ]
@@ -604,8 +617,12 @@ def _verbatim_notes(model: LLM, request: Request, content: Any, text: str) -> An
             content = fixed.root
     except (ProviderError, StructuredOutputError):
         pass
-    absent = _absent_quotes(content, text)
-    return _unquote(content, absent) if absent else content
+    for _ in range(3):
+        absent = _absent_quotes(content, text)
+        if not absent:
+            break
+        content = _unquote(content, absent)
+    return content
 
 
 def llm_reviewer(

@@ -614,7 +614,8 @@ def _duration(text: str) -> float | None:
 
 _CONTEXT_WORDS = re.compile(
     r"exceed_context_size|exceeds the available context|context_length_exceeded|"
-    r"maximum context length|context length|context window|prompt is too long|too many tokens",
+    r"maximum context length|context length|context window|prompt is too long|too many tokens|"
+    r"input token count|maximum number of tokens allowed|input token limit",
     re.IGNORECASE,
 )
 """How servers say a request is bigger than the model's context (llama.cpp, Ollama, vLLM,

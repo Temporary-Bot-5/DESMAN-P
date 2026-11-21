@@ -983,6 +983,7 @@ class Store:
         """
         rows = self.conn.execute(
             """SELECT dep.id, dep.description,
+                      json_type(dep.inputs_json, '$.document') IS NOT NULL AS document_notes,
                       CASE WHEN json_type(dep.inputs_json, '$.digest') = 'true'
                              AND json_type(dep.inputs_json, '$.document') = 'text'
                            THEN json_extract(dep.inputs_json, '$.document') END AS digest,
@@ -1000,6 +1001,7 @@ class Store:
                 description=r["description"],
                 content=json.loads(r["content_json"]) if r["content_json"] else None,
                 digest=r["digest"],
+                document_notes=bool(r["document_notes"]),
             )
             for r in rows
         ]
@@ -1338,6 +1340,17 @@ class Store:
             "SELECT * FROM effects WHERE subtask_id = ? AND execution = ? ORDER BY ordinal",
             (subtask_id, execution),
         ).fetchall()
+
+    def completed_effects(self, task_id: str, tool: str) -> list[str]:
+        """Completed results of a tool across the task's execution journals."""
+        return [
+            row[0]
+            for row in self.conn.execute(
+                """SELECT e.result_json FROM effects e JOIN subtasks s ON s.id = e.subtask_id
+                   WHERE s.task_id = ? AND e.tool = ? AND e.state = 'done'""",
+                (task_id, tool),
+            )
+        ]
 
     def start_effect(
         self, subtask_id: str, lease: str, execution: int, ordinal: int, tool: str, key: str

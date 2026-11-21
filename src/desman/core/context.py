@@ -38,6 +38,8 @@ class DependencyResult(BaseModel):
     """None when the operator accepted the subtask without any artifact."""
     digest: str | None = None
     """The document path when this dependency is a top digest."""
+    document_notes: bool = False
+    """Whether the dependency read or combined parts of a document."""
 
 
 class DependencyContext(BaseModel):

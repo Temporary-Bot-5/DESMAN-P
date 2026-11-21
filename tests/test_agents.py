@@ -13,6 +13,7 @@ from conftest import FakeClock
 from desman.agents import llm_executor, llm_reviewer
 from desman.core.context import DIGEST_CHARS, DependencyResult, build_context
 from desman.core.coordinator import Coordinator, Failure, Review, Success, Verdict, Work
+from desman.core.effects import evidence
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
@@ -658,3 +659,86 @@ def test_a_paraphrase_in_the_notes_does_not_become_a_quote(store: Store) -> None
     paraphrase = reviewer(subtask, {"text": "«Река темнеет, валы беспорядочны»"})
     assert isinstance(paraphrase, Review) and paraphrase.verdict is Verdict.RETRY
     assert reviewer(subtask, {"text": "«На берегу стоял дом.»"}) == Review(verdict=Verdict.ACCEPT)
+
+
+def test_check_original_quotes_when_the_formatter_translated_them(store: Store) -> None:
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    text = "На берегу реки стоял большой деревянный дом."
+    subtask = subtask.model_copy(update={"inputs": {"document": "book.txt", "text": text}})
+    model = FakeLLM().on("Review", '{"verdict":"accept"}')
+    artifact = {
+        "text": "“A large wooden house stood on the river bank.”",
+        "formatted_from": {"text": f"«{text}»"},
+    }
+    assert llm_reviewer(model)(subtask, artifact) == Review(verdict=Verdict.ACCEPT)
+
+
+@pytest.mark.parametrize("full_dependencies", [False, True])
+def test_read_in_parts_checks_only_document_dependencies_as_notes(
+    store: Store, full_dependencies: bool
+) -> None:
+    note = "The notes paraphrase this sentence."
+    ordinary = "An interview recorded this statement."
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(
+                    description="part",
+                    acceptance_criteria="c",
+                    inputs={"document": "book.txt", "text": "A document."},
+                ),
+                SubtaskSpec(description="interview", acceptance_criteria="c"),
+                SubtaskSpec(
+                    description="answer",
+                    acceptance_criteria="c",
+                    depends_on=[0, 1],
+                    inputs={"read_in_parts": ["book.txt"]},
+                ),
+            ],
+        )
+    )
+    part, interview, answer = store.list_subtasks(task_id)
+
+    def execute(work: Work) -> Success:
+        return Success(content={"text": note if work.subtask.id == part.id else ordinary})
+
+    Coordinator(store, execute, lambda *_: Review(verdict=Verdict.ACCEPT)).run(task_id)
+    deps = store.dependency_results(answer.id)
+    assert [(dep.subtask_id, dep.document_notes) for dep in deps] == [
+        (part.id, True),
+        (interview.id, False),
+    ]
+    model = FakeLLM().on("Review", '{"verdict":"accept"}')
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda subtask: evidence(store, subtask),
+        dependencies=store.dependency_results if full_dependencies else None,
+    )
+    assert reviewer(answer, {"text": f"“{ordinary}”"}) == Review(verdict=Verdict.ACCEPT)
+    result = reviewer(answer, {"text": f"“{note}”"})
+    assert isinstance(result, Review) and result.verdict is Verdict.RETRY
+
+
+def test_verbatim_notes_unquotes_an_inner_misquote_revealed_by_repair() -> None:
+    from desman.agents import _verbatim_notes
+    from desman.llm.base import Message, Request
+
+    artifact = {"text": "«The passage says “a false phrase from memory” here»"}
+    model = FakeLLM(json.dumps(artifact))
+    request = Request(messages=[Message(role="user", content="Execute: notes")])
+    assert _verbatim_notes(model, request, artifact, "A different passage.") == {
+        "text": "The passage says a false phrase from memory here",
+    }
+
+
+def test_quote_message_marks_only_actual_truncation() -> None:
+    from desman.agents import _quote_message
+
+    short = "The first three words differ."
+    long = "Another set of words that then continues for more than sixty characters."
+    message = _quote_message(
+        [short, long], ["The first three words agree. Another set of words follows."], "the source"
+    )
+    assert f"«{short}» — the text there reads" in message
+    assert f"«{long[:60]}…» — the text there reads" in message

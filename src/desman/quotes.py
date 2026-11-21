@@ -144,13 +144,18 @@ def nearest(quote: str, sources: Iterable[str], *, extra: int = 40) -> str | Non
     its first words (any spacing, punctuation and case between them), so the model can see
     what the text really says ("по нем", not "по нему")."""
     words = re.findall(r"\w+", quote)
+    sources = list(sources)
     for count in (5, 4, 3):
         if len(words) < count:
             continue
-        pattern = re.compile(r"\W+".join(map(re.escape, words[:count])), re.IGNORECASE)
+        phrase = r"\W+".join(map(re.escape, words[:count]))
+        pattern = re.compile(rf"(?=\b{phrase}\b)", re.IGNORECASE)
+        passage = None
         for source in sources:
-            found = pattern.search(source)
-            if found is not None:
+            for found in pattern.finditer(source):
+                if passage is not None:
+                    return None
                 passage = source[found.start() : found.start() + len(quote) + extra]
-                return " ".join(passage.split())
+        if passage is not None:
+            return " ".join(passage.split())
     return None
