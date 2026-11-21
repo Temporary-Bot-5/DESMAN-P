@@ -12,6 +12,7 @@ from desman.core.sandbox import (
     WSL_PIN,
     Sandbox,
     SandboxUnavailable,
+    WslImportUnavailable,
     enable_wsl,
     install_wasi,
     install_wsl,
@@ -134,7 +135,13 @@ def _needs_image(box: Sandbox) -> bool:
 SetupBackend = Literal["bwrap", "docker", "wasi", "wsl", "enable-wsl"]
 
 
-def setup_backend(box: Sandbox, *, force_wsl: bool = False) -> SetupBackend:
+def setup_backend(
+    box: Sandbox, *, force_wsl: bool = False, force_wasi: bool = False
+) -> SetupBackend:
+    if force_wsl and force_wasi:
+        raise click.UsageError(t("Choose either --wsl or --wasi."))
+    if force_wasi:
+        return "wasi"
     if force_wsl and box.platform != "win32":
         raise click.ClickException(t("WSL sandbox setup requires Windows."))
     if box.platform.startswith("linux"):
@@ -156,11 +163,10 @@ def prepare_setup(box: Sandbox, backend: SetupBackend | None = None) -> str | No
     if backend == "wsl":
         try:
             if box.wsl_distribution_present():
-                problem = box.wsl_problem()
-                if problem is not None:
-                    raise SandboxUnavailable(problem)
-                _show_wsl_files(True)
-                return None
+                if box.wsl_problem() is None:
+                    _show_wsl_files(True)
+                    return None
+                return t("Unregister the existing WSL sandbox distribution and reinstall it?")
         except SandboxUnavailable as exc:
             raise click.ClickException(
                 t("WSL sandbox setup failed: {error}", error=str(exc))
@@ -183,7 +189,7 @@ def prepare_setup(box: Sandbox, backend: SetupBackend | None = None) -> str | No
     return t("Download the pinned sandbox image (about {size} MB)?", size=_image_size(box))
 
 
-def apply_setup(box: Sandbox, backend: SetupBackend | None = None) -> bool:
+def apply_setup(box: Sandbox, backend: SetupBackend | None = None, *, auto: bool = True) -> bool:
     """Apply an operator's confirmed setup and report the result."""
     backend = backend or setup_backend(box)
     if backend in ("wsl", "enable-wsl"):
@@ -194,6 +200,9 @@ def apply_setup(box: Sandbox, backend: SetupBackend | None = None) -> bool:
                 return False
             installed = install_wsl(box)
         except SandboxUnavailable as exc:
+            if auto and isinstance(exc, WslImportUnavailable):
+                ui.note(t("WSL import failed. Setting up the WebAssembly sandbox instead."))
+                return apply_setup(box, "wasi", auto=False)
             raise click.ClickException(
                 t("WSL sandbox setup failed: {error}", error=str(exc))
             ) from exc
@@ -228,8 +237,8 @@ def apply_setup(box: Sandbox, backend: SetupBackend | None = None) -> bool:
     return True
 
 
-def offer_setup(box: Sandbox) -> None:
-    backend = setup_backend(box)
+def offer_setup(box: Sandbox, backend: SetupBackend | None = None) -> None:
+    backend = backend or setup_backend(box)
     question = prepare_setup(box, backend)
     if question is not None and ui.confirm(question):
         apply_setup(box, backend)
@@ -252,18 +261,20 @@ def status(as_json: bool) -> None:
 @sandbox.command()
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 @click.option("--wsl", is_flag=True, help="Use the Windows Subsystem for Linux.")
-def setup(yes: bool, wsl: bool) -> None:
+@click.option("--wasi", is_flag=True, help="Use WebAssembly.")
+def setup(yes: bool, wsl: bool, wasi: bool) -> None:
     """Install the pinned files for the code sandbox."""
     box = Sandbox()
-    backend = setup_backend(box, force_wsl=wsl)
+    backend = setup_backend(box, force_wsl=wsl, force_wasi=wasi)
     question = prepare_setup(box, backend)
     if question is None:
         return
     ui.note(question)
     if yes:
-        apply_setup(box, backend)
+        apply_setup(box, backend, auto=not (wsl or wasi))
     else:
-        command = "desman sandbox setup" + (" --wsl" if wsl else "") + " --yes"
+        option = " --wsl" if wsl else " --wasi" if wasi else ""
+        command = f"desman sandbox setup{option} --yes"
         ui.note(t("Nothing changed. Confirm with: {command}", command=command))
 
 

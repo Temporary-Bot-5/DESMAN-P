@@ -543,7 +543,10 @@ def _docker(s: _Session) -> None:
         question = t("Install bubblewrap now?") if state["available"] else t("Install Docker now?")
         if not installation.steps or not ui.confirm(question, default=False):
             return
-        if not docker_cli.apply_plan(installation)["available"]:
+        installed = docker_cli.apply_plan(installation)
+        if not installed["available"]:
+            if installed["installed"] and not sys.platform.startswith("linux"):
+                _docker_sandbox_later()
             return
     except click.ClickException as exc:
         ui.warn(str(exc))
@@ -555,8 +558,8 @@ def _docker(s: _Session) -> None:
 
         try:
             box = Sandbox()
-            if box.docker_problem() is None or box.wsl_usable():
-                offer_setup(box)
+            if box.docker_problem() is None:
+                offer_setup(box, "docker")
             else:
                 _docker_sandbox_later()
         except click.ClickException as exc:

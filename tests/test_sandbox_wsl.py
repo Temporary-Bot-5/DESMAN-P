@@ -55,7 +55,9 @@ def test_timeout_leaves_no_python(wsl: Sandbox, tmp_path: Path) -> None:
     )
     assert result.timed_out and result.exit_code is None and "started" in result.stdout, result
     for attempt in range(4):
-        processes = wsl.wsl_command(["-d", WSL_DISTRO, "-u", "root", "--exec", "ps"])
+        processes = wsl.wsl_command(
+            ["-d", WSL_DISTRO, "-u", "root", "--exec", "/bin/busybox", "ps"]
+        )
         assert processes.returncode == 0
         if not re.search(rb"\bpython3?\b", processes.stdout):
             break

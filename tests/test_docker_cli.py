@@ -320,7 +320,12 @@ def test_docker_step_in_configuration(
         "Sandbox",
         lambda: Sandbox(platform="darwin", docker="docker", docker_runner=probe),
     )
-    monkeypatch.setattr(sandbox_cli, "offer_setup", lambda _: offers.append("sandbox"))
+
+    def offer_sandbox(_: Sandbox, backend: sandbox_cli.SetupBackend) -> None:
+        assert backend == "docker"
+        offers.append("sandbox")
+
+    monkeypatch.setattr(sandbox_cli, "offer_setup", offer_sandbox)
     monkeypatch.setattr(searxng, "setup", setup)
     answers.extend([*KEEP_PERMISSIONS, *KEEP_PERSONAL, ""])
     result = CliRunner().invoke(cli, ["config"], input="\n".join(answers) + "\n")

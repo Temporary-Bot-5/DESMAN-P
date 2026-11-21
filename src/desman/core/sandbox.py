@@ -41,6 +41,7 @@ files is not); `/usr` is readable (system files only, nothing of the person's).
 
 from __future__ import annotations
 
+import configparser
 import contextlib
 import csv
 import dataclasses
@@ -92,6 +93,9 @@ _WSL_URL: Final = f"https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/
 _WSL_SHA256: Final = "2d7f46af9b7e86ad64ebeba3fe9b75b62dd5b259e708afb2ab21268f627696e5"
 _WSL_MARKER: Final = """printf '%s\\n' "$1" > /etc/desman-sandbox"""
 _WSL_SETUP: Final = "Run `desman sandbox setup`."
+_WSL_REPAIR: Final = "run `desman sandbox setup --wsl --yes` to repair it"
+_WSL_CONF: Final = ("[interop]", "enabled=false", "appendWindowsPath=false")
+_WSL_ROOT: Final = ("-d", WSL_DISTRO, "-u", "root", "--cd", "/", "--exec")
 WslRunner = Callable[[list[str], float, bool], subprocess.CompletedProcess[bytes]]
 
 MOUNT_POINT: Final = "/workspace"
@@ -134,6 +138,10 @@ _READ_CHUNK: Final = 65_536
 
 class SandboxUnavailable(RuntimeError):
     """The sandbox cannot run here: no command runs at all."""
+
+
+class WslImportUnavailable(SandboxUnavailable):
+    """WSL could not import its sandbox distribution."""
 
 
 class _DockerDaemonUnavailable(SandboxUnavailable):
@@ -221,6 +229,16 @@ def _decode_wsl(data: bytes | bytearray) -> str:
 
 def _wsl_detail(result: subprocess.CompletedProcess[bytes]) -> str:
     return _decode_wsl(result.stderr or result.stdout or b"").strip() or str(result.returncode)
+
+
+def _wsl_interop_disabled(text: str) -> bool:
+    conf = configparser.ConfigParser(interpolation=None, delimiters=("=",))
+    conf.optionxform = lambda optionstr: optionstr  # type: ignore[method-assign]
+    try:
+        conf.read_string(text)
+    except configparser.Error:
+        return False
+    return not conf.defaults() and conf.get("interop", "enabled", fallback=None) == "false"
 
 
 def _wsl_run(argv: list[str], timeout: float, terminal: bool) -> subprocess.CompletedProcess[bytes]:
@@ -381,11 +399,22 @@ class Sandbox:
         if self.backend == "wasi":
             return _execute_wasi(command, workdir, stdin, limits, self.wasi_dir)
         if self.backend == "wsl":
-            return _execute_wsl(self._wsl_argv(command, workdir, limits.timeout), stdin, limits)
+            name = f"desman-{uuid.uuid4().hex}"
+            argv = self._wsl_argv(command, workdir, limits.timeout, hostname=name)
+            try:
+                return _execute_wsl(argv, stdin, limits, lambda: self._stop_wsl(name))
+            except SandboxUnavailable:
+                self._retry_at = self._monotonic()
+                raise
         return _execute(self._argv(command, workdir), stdin, limits)
 
     def _wsl_argv(
-        self, command: Sequence[str], workdir: Path, timeout: float | None = None
+        self,
+        command: Sequence[str],
+        workdir: Path,
+        timeout: float | None = None,
+        *,
+        hostname: str | None = None,
     ) -> list[str]:
         assert self.wsl
         mount = _wsl_workspace(workdir)
@@ -404,7 +433,7 @@ class Sandbox:
             "timeout",
             "-s",
             "KILL",
-            str(math.ceil(seconds) + 5),
+            str(math.ceil(seconds) + 2),
             "/usr/bin/bwrap",
             "--unshare-all",
             "--unshare-user",
@@ -415,6 +444,8 @@ class Sandbox:
             "ALL",
             "--clearenv",
         ]
+        if hostname is not None:
+            argv += ["--hostname", hostname]
         for key, value in _DOCKER_ENV.items():
             if key != "PYTHONPATH":
                 argv += ["--setenv", key, "/usr/bin:/bin" if key == "PATH" else value]
@@ -460,11 +491,23 @@ class Sandbox:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise SandboxUnavailable(str(exc)) from exc
 
+    def _stop_wsl(self, name: str) -> None:
+        with contextlib.suppress(SandboxUnavailable):
+            self.wsl_command([*_WSL_ROOT, "/usr/bin/pkill", "-KILL", "-f", name], 5.0)
+
     def wsl_usable(self) -> bool:
         if self.platform != "win32" or not self.wsl:
             return False
         try:
-            return self.wsl_command(["--status"]).returncode == 0
+            result = self.wsl_command(["--status"])
+            status = "\n".join(_decode_wsl(data or b"") for data in (result.stdout, result.stderr))
+            unavailable = re.search(
+                r"(?:WSL\s*2|WSL version 2)\s+is\s+"
+                r"(?:not (?:supported|available|enabled)|unavailable|disabled)",
+                status,
+                re.IGNORECASE,
+            )
+            return result.returncode == 0 and unavailable is None
         except SandboxUnavailable:
             return False
 
@@ -490,6 +533,19 @@ class Sandbox:
                 return f"WSL is missing. {_WSL_SETUP}"
             if not self.wsl_distribution_present():
                 return f"The WSL sandbox distribution is missing. {_WSL_SETUP}"
+            try:
+                conf = self.wsl_command([*_WSL_ROOT, "/bin/cat", "/etc/wsl.conf"])
+                hardened = conf.returncode == 0 and _wsl_interop_disabled(
+                    _decode_wsl(conf.stdout or b"")
+                )
+            except SandboxUnavailable:
+                hardened = False
+            if not hardened:
+                return f"The WSL sandbox is not hardened (interop is on); {_WSL_REPAIR}"
+            marker = self.wsl_command([*_WSL_ROOT, "/bin/cat", "/etc/desman-sandbox"])
+            fields = _decode_wsl(marker.stdout or b"").split()
+            if marker.returncode or not fields or fields[0] != WSL_PIN:
+                return f"The WSL sandbox distribution pin is missing or outdated; {_WSL_REPAIR}"
             with tempfile.TemporaryDirectory(prefix="desman-probe-") as empty:
                 _, *args = self._wsl_argv(["true"], Path(empty), 60.0)
                 result = self.wsl_command(args)
@@ -498,7 +554,7 @@ class Sandbox:
             detail = _wsl_detail(result)
         except (SandboxUnavailable, OSError) as exc:
             detail = str(exc)
-        return f"The WSL sandbox could not start: {detail}. {_WSL_SETUP}"
+        return f"The WSL sandbox could not start: {detail}; {_WSL_REPAIR}"
 
     def _argv(self, command: Sequence[str], workdir: Path) -> list[str]:
         assert self.bwrap is not None and self.prlimit is not None
@@ -964,23 +1020,39 @@ def _download_wsl(url: str) -> bytes:
 def install_wsl(box: Sandbox, *, download: Callable[[str], bytes] | None = None) -> bool:
     fetch = _download_wsl if download is None else download
     with _wsl_install_lock(box.wsl_dir):
-        if box.wsl_distribution_present():
-            if problem := box.wsl_problem():
-                raise SandboxUnavailable(problem)
+        present = box.wsl_distribution_present()
+        if present and box.wsl_problem() is None:
             return False
         data = fetch(_WSL_URL)
         if hashlib.sha256(data).hexdigest() != _WSL_SHA256:
             raise SandboxUnavailable(f"SHA-256 mismatch for {WSL_PIN}.tar.gz")
+        if present:
+            _check_wsl(box, ["--unregister", WSL_DISTRO], 120)
         root = box.wsl_dir / "root"
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".setup-", dir=box.wsl_dir) as stage:
             archive = Path(stage) / f"{WSL_PIN}.tar.gz"
             archive.write_bytes(data)
-            _check_wsl(
-                box, ["--import", WSL_DISTRO, str(root), str(archive), "--version", "2"], 120
-            )
             try:
-                base = ["-d", WSL_DISTRO, "-u", "root", "--cd", "/", "--exec"]
+                _check_wsl(
+                    box, ["--import", WSL_DISTRO, str(root), str(archive), "--version", "2"], 120
+                )
+            except SandboxUnavailable as exc:
+                raise WslImportUnavailable(str(exc)) from exc
+            try:
+                _check_wsl(
+                    box,
+                    [
+                        *_WSL_ROOT,
+                        "/bin/sh",
+                        "-c",
+                        """printf '%s\\n' "$@" > /etc/wsl.conf""",
+                        "sh",
+                        *_WSL_CONF,
+                    ],
+                    60,
+                    step="write /etc/wsl.conf",
+                )
                 for step in (
                     [
                         "/sbin/apk",
@@ -990,6 +1062,7 @@ def install_wsl(box: Sandbox, *, download: Callable[[str], bytes] | None = None)
                         "py3-pytest",
                         "bubblewrap",
                         "util-linux-misc",
+                        "procps-ng",
                     ],
                     ["/usr/sbin/adduser", "-D", "-H", "-s", "/bin/sh", "sandbox"],
                     [
@@ -1000,7 +1073,8 @@ def install_wsl(box: Sandbox, *, download: Callable[[str], bytes] | None = None)
                         f"{WSL_PIN} {dt.date.today().isoformat()}",
                     ],
                 ):
-                    _check_wsl(box, [*base, *step], 600, step=step[0].rsplit("/", 1)[-1])
+                    _check_wsl(box, [*_WSL_ROOT, *step], 600, step=step[0].rsplit("/", 1)[-1])
+                _check_wsl(box, ["--terminate", WSL_DISTRO], 60)
                 if problem := box.wsl_problem():
                     raise SandboxUnavailable(problem)
             except (SandboxUnavailable, KeyboardInterrupt):
@@ -1020,9 +1094,10 @@ def remove_wsl(box: Sandbox) -> bool:
         return present
 
 
-def _execute_wsl(argv: list[str], stdin: str, limits: Limits) -> Outcome:
+def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[], None]) -> Outcome:
     stdout = _Head(limits.stdout_chars)
     stderr = _WslTail(limits.stderr_chars)
+    diagnostic = _WslTail(2_000)
     with tempfile.TemporaryFile() as given:
         given.write(stdin.encode("utf-8"))
         given.seek(0)
@@ -1040,26 +1115,39 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits) -> Outcome:
         assert process.stdout is not None and process.stderr is not None
         readers = [
             threading.Thread(target=_read_output, args=(process.stdout, stdout)),
-            threading.Thread(target=_read_output, args=(process.stderr, stderr)),
+            threading.Thread(target=_read_output, args=(process.stderr, stderr, diagnostic)),
         ]
-        timed_out = False
+        timed_out = interrupted = False
         try:
             for reader in readers:
                 reader.start()
             process.wait(timeout=limits.timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
+        except KeyboardInterrupt:
+            interrupted = True
+            raise
         finally:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+            if timed_out or interrupted:
+                stop()
             for reader in readers:
                 if reader.ident is not None:
                     reader.join()
             process.stdout.close()
             process.stderr.close()
+    if not timed_out:
+        detail = diagnostic.text().strip()
+        if not 0 <= process.returncode <= 255 or (
+            not stdout.data
+            and not stdout.cut
+            and any(prefix in detail for prefix in ("There is no distribution", "WSL (", "Wsl/"))
+        ):
+            raise SandboxUnavailable(f"WSL failed: {detail or process.returncode}")
     return Outcome(
-        exit_code=None if timed_out else _exit_code(process.returncode),
+        exit_code=None if timed_out else process.returncode,
         stdout=stdout.text(),
         stderr=stderr.text(),
         timed_out=timed_out,

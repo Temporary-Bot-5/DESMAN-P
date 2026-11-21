@@ -1973,6 +1973,7 @@ def _sandbox_status(ctx: Context, args: NoArgs) -> Outcome:
 
 class SandboxSetupArgs(Args):
     wsl: bool = False
+    wasi: bool = False
 
 
 class SandboxRemoveArgs(Args):
@@ -1984,13 +1985,13 @@ def _sandbox_setup(ctx: Context, args: SandboxSetupArgs) -> Outcome | Proposal:
     from desman.sandbox_cli import apply_setup, prepare_setup, setup_backend
 
     box = Sandbox()
-    backend = setup_backend(box, force_wsl=args.wsl)
+    backend = setup_backend(box, force_wsl=args.wsl, force_wasi=args.wasi)
     question = prepare_setup(box, backend)
     if question is None:
         return Outcome({"installed": False})
 
     def apply() -> Outcome:
-        return Outcome({"installed": apply_setup(box, backend)})
+        return Outcome({"installed": apply_setup(box, backend, auto=not (args.wsl or args.wasi))})
 
     return Proposal([question], apply)
 
@@ -2056,7 +2057,9 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "sandbox setup",
-        "Install the pinned files for the code sandbox. Set wsl=true to select WSL on Windows.",
+        "Install the pinned files for the code sandbox. On Windows the runtime order is "
+        "Docker, WSL, then WASI. Set wsl=true to install the WSL sandbox on Windows "
+        "or wasi=true to install the WebAssembly sandbox.",
         SandboxSetupArgs,
         Kind.CHANGE,
         _sandbox_setup,
