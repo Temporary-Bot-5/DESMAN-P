@@ -410,7 +410,7 @@ class Sandbox:
                 if problem is None:
                     return suspect.outcome
                 self._retry_at = self._monotonic()
-                raise SandboxUnavailable(f"WSL failed: {suspect.detail}") from None
+                raise SandboxUnavailable(f"WSL failed: {problem}") from None
             except SandboxUnavailable:
                 self._retry_at = self._monotonic()
                 raise
@@ -1156,7 +1156,7 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[],
             process.stdout.close()
             process.stderr.close()
     outcome = Outcome(
-        exit_code=None if timed_out else _exit_code(process.returncode),
+        exit_code=None if timed_out else process.returncode,
         stdout=stdout.text(),
         stderr=stderr.text(),
         timed_out=timed_out,
@@ -1165,12 +1165,15 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[],
     )
     if not timed_out:
         detail = diagnostic.text().strip()
-        if not 0 <= process.returncode <= 255 or (
+        if not 0 <= process.returncode <= 255:
+            # No code inside bwrap can exit so: wsl.exe itself failed.
+            raise SandboxUnavailable(f"WSL failed: {detail or process.returncode}")
+        if (
             not stdout.data
             and not stdout.cut
             and any(prefix in detail for prefix in ("There is no distribution", "WSL (", "Wsl/"))
         ):
-            raise _WslSuspect(detail or str(process.returncode), outcome)
+            raise _WslSuspect(detail, outcome)
     return outcome
 
 

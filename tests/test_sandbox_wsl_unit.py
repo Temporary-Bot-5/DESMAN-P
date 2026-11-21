@@ -589,3 +589,29 @@ def test_code_printing_a_wsl_error_is_its_own_failure(
     outcome = box.run(["true"], tmp_path)
     assert outcome.exit_code == 1 and not outcome.timed_out
     assert box.unavailable() is None
+
+
+@pytest.mark.parametrize("code", [-1, 4294967295])
+def test_an_exit_code_only_wsl_makes_is_unavailable_even_with_a_healthy_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    wsl = Wsl(present=True)
+    box = wsl.box(tmp_path)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: Process(code, b"", b""))
+    with pytest.raises(SandboxUnavailable, match="WSL failed"):
+        box.run(["true"], tmp_path)
+
+
+def test_a_failing_probe_names_its_own_problem_not_the_codes_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wsl = Wsl(present=True)
+    box = wsl.box(tmp_path)
+    assert box.unavailable() is None
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda *_, **__: Process(1, b"", b"WSL (1) ERROR: run this")
+    )
+    wsl.conf = None
+    with pytest.raises(SandboxUnavailable) as raised:
+        box.run(["true"], tmp_path)
+    assert "run this" not in str(raised.value) and "interop" in str(raised.value)
