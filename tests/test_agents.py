@@ -11,8 +11,9 @@ from pydantic import ValidationError
 
 from conftest import FakeClock
 from desman.agents import llm_executor, llm_reviewer
-from desman.core.context import build_context
-from desman.core.coordinator import Coordinator, Failure, Review, Success, Work
+from desman.core.context import DIGEST_CHARS, DependencyResult, build_context
+from desman.core.coordinator import Coordinator, Failure, Review, Success, Verdict, Work
+from desman.core.effects import evidence
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
 from desman.core.states import TaskStatus
@@ -68,6 +69,7 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
     executions = [payload(r.prompt) for r in llm.calls if r.prompt.startswith("Execute")]
     assert [h for h, _ in executions] == ["Execute subtask"] * 3
     assert "goal" not in executions[0][1]
+    assert all("documents_read" not in body for _, body in executions)
     assert executions[1][1]["goal"] == "g"
     assert "person" in executions[1][1]["goal_note"]
     for rule in (
@@ -92,6 +94,39 @@ def test_executor_prompt_carries_the_whole_context(store: Store, clock: FakeCloc
     }
     assert all("part_of_split" not in body for _, body in reviews)
     assert all(r.messages[0].role == "system" for r in llm.calls)
+
+
+def test_executor_uses_document_digest_notes(store: Store, clock: FakeClock) -> None:
+    llm = FakeLLM().on("Execute", '{"text":"Notes"}', '{"text":"Answer"}')
+    spec = TaskSpec(
+        goal="g",
+        subtasks=[
+            SubtaskSpec(
+                description="Combine notes",
+                acceptance_criteria="Complete",
+                inputs={"document": "input/book.txt", "digest": True},
+            ),
+            SubtaskSpec(description="Answer", acceptance_criteria="Clear", depends_on=[0]),
+        ],
+    )
+    task_id = store.create_task(spec)
+    reviewer = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    status = Coordinator(store, llm_executor(llm), llm_reviewer(reviewer), sleep=clock.sleep).run(
+        task_id
+    )
+    assert status.status is TaskStatus.DONE
+    _, first = payload(llm.calls[0].prompt)
+    _, final = payload(llm.calls[1].prompt)
+    assert "documents_read" not in first
+    assert "input/book.txt were read in parts by code" in final["documents_read"]
+    assert final["results_of_dependencies"] == [
+        {
+            "subtask": "Combine notes",
+            "result": {"text": "Notes"},
+            "truncated": False,
+            "digest": True,
+        }
+    ]
 
 
 def test_the_reviewer_checks_facts_against_the_evidence(store: Store) -> None:
@@ -458,3 +493,252 @@ def test_split_review_without_evidence_has_no_unexplained_flag(store: Store) -> 
     llm = FakeLLM().on("Review", '{"verdict": "accept"}')
     llm_reviewer(llm)(subtask.model_copy(update={"parent_id": "parent"}), {"text": "part"})
     assert "part_of_split" not in payload(llm.calls[0].prompt)[1]
+
+
+@pytest.mark.parametrize(
+    ("inputs", "notes", "accepted", "location"),
+    [
+        ({"document": "book.txt", "text": "На берегу стоял дом."}, [], False, "the part's text"),
+        ({"document": "book.txt", "text": "Вдали был большой лес."}, [], True, ""),
+        (
+            {"document": "book.txt"},
+            [{"result": {"text": "«На берегу стоял дом.»"}}],
+            False,
+            "the notes you were given",
+        ),
+        ({"document": "book.txt"}, [{"result": {"text": "«Вдали был большой лес.»"}}], True, ""),
+        (
+            {},
+            [
+                {"digest": True, "result": {"text": "На берегу стоял дом."}},
+                {"result": {"text": "Вдали был большой лес."}},
+            ],
+            True,
+            "",
+        ),
+        (
+            {},
+            [{"digest": True, "result": {"text": "«На берегу стоял дом.»"}}],
+            False,
+            "the evidence you were given",
+        ),
+        ({}, [{"digest": True, "result": None}], True, ""),
+        ({"document": "book.txt"}, [{"result": None}], True, ""),
+        ({}, [{"digest": True, "result": {"text": "«Вдали был большой лес.»"}}], True, ""),
+        ({}, [{"result": {"text": "На берегу стоял дом."}}], True, ""),
+    ],
+)
+def test_document_quote_review(
+    store: Store,
+    inputs: dict[str, Any],
+    notes: list[dict[str, Any]],
+    accepted: bool,
+    location: str,
+) -> None:
+    task_id = store.create_task(one_step())
+    [subtask] = store.list_subtasks(task_id)
+    subtask = subtask.model_copy(update={"inputs": inputs})
+    model = FakeLLM()
+    if accepted:
+        model.on("Review", '{"verdict": "accept"}')
+    review = llm_reviewer(model, evidence=lambda _: {"results_of_dependencies": notes})(
+        subtask, {"sections": [{"notes": ['A quote: "Вдали был большой лес."']}]}
+    )
+    if accepted:
+        assert review == Review(verdict=Verdict.ACCEPT)
+        assert len(model.calls) == 1
+    else:
+        assert isinstance(review, Review) and review.verdict is Verdict.RETRY
+        assert f"in {location}: «Вдали был большой лес.»" in review.feedback
+        assert model.calls == []
+
+
+def test_document_quote_review_checks_full_accepted_notes(store: Store) -> None:
+    task_id = store.create_task(one_step())
+    [subtask] = store.list_subtasks(task_id)
+    model = FakeLLM().on("Review", '{"verdict": "accept"}')
+    fragment = "Вдали был большой лес."
+    digest = DependencyResult(
+        subtask_id="digest",
+        description="Document notes",
+        content={"text": "я" * DIGEST_CHARS + fragment},
+        digest="book.txt",
+    )
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {
+            "results_of_dependencies": [
+                {"digest": True, "result": "Truncated text", "truncated": True}
+            ]
+        },
+        dependencies=lambda _: [digest],
+    )
+    assert reviewer(subtask, {"text": f"«{fragment}»"}) == Review(verdict=Verdict.ACCEPT)
+    assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize("source", ["tool", "knowledge", "inputs", "goal"])
+def test_digest_dependant_can_quote_other_evidence(store: Store, source: str) -> None:
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    model = FakeLLM().on("Review", '{"verdict":"accept"}')
+    fragment = "The original wording matters."
+    shown = {"results_of_dependencies": [{"digest": True, "result": {"text": "Digest notes."}}]}
+    evidence: dict[str, Any] = dict(shown)
+    if source == "inputs":
+        subtask = subtask.model_copy(update={"inputs": {"instruction": fragment}})
+    if source == "goal":
+        evidence["goal"] = f"Discuss this phrase: {fragment}"
+    outputs: list[object] = [{"content": fragment}] if source in {"tool", "knowledge"} else []
+    review = llm_reviewer(model, evidence=lambda _: evidence, quote_evidence=lambda _: outputs)
+    assert review(subtask, {"text": f'"{fragment}"'}) == Review(verdict=Verdict.ACCEPT)
+    assert len(model.calls) == 1
+
+
+def test_a_step_far_below_the_notes_still_quotes_only_the_document(store: Store) -> None:
+    # Found live (L.2): "write chapters 4–6" depended on "group the notes", not on the notes
+    # themselves; its «quotes» were descriptions («Отражение простоты …») and nobody checked.
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    subtask = subtask.model_copy(update={"inputs": {"read_in_parts": ["input/book.txt"]}})
+    document = "Вдали был большой лес. На берегу стоял дом."
+    grouped = DependencyResult(
+        subtask_id="group", description="Group notes", content={"text": "Глава IV: дом."}
+    )
+    model = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {"results_of_dependencies": [{"result": {"text": "Глава IV: дом."}}]},
+        dependencies=lambda _: [grouped],
+        quote_evidence=lambda _: [document],
+    )
+    made_up = reviewer(subtask, {"text": "Цитата: «Отражение простоты и уюта быта.»"})
+    assert isinstance(made_up, Review) and made_up.verdict is Verdict.RETRY
+    assert "«Отражение простоты и уюта быта.»" in made_up.feedback and model.calls == []
+    assert reviewer(subtask, {"text": "Цитата: «На берегу стоял дом.»"}) == Review(
+        verdict=Verdict.ACCEPT
+    )
+
+
+def test_a_combine_may_quote_the_document_more_exactly_than_its_notes(store: Store) -> None:
+    # Found live (L.2): the combine quoted the text itself; the notes had a looser copy.
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    subtask = subtask.model_copy(update={"inputs": {"document": "input/book.txt"}})
+    notes = DependencyResult(
+        subtask_id="part", description="Make notes on part 1", content={"text": "«мука дешёвая»"}
+    )
+    model = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {"results_of_dependencies": [{"result": notes.content}]},
+        dependencies=lambda _: [notes],
+        quote_evidence=lambda _: ["Пшеничная мука здесь дешевая: 30 -- 40 коп. за пуд."],
+    )
+    exact = "Пшеничная мука здесь дешевая: 30 -- 40 коп. за пуд"
+    assert reviewer(subtask, {"text": f"«{exact}»"}) == Review(verdict=Verdict.ACCEPT)
+    invented = reviewer(subtask, {"text": "«Мука здесь дорогая и плохая»"})
+    assert isinstance(invented, Review) and invented.verdict is Verdict.RETRY
+
+
+def test_a_paraphrase_in_the_notes_does_not_become_a_quote(store: Store) -> None:
+    # Found live (L.2): notes said "Река темнеет, валы беспорядочны" in their own words; the next
+    # step put it in quotes and code found the words in the notes, so a false quote passed.
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    subtask = subtask.model_copy(update={"inputs": {"read_in_parts": ["input/book.txt"]}})
+    notes = DependencyResult(
+        subtask_id="digest",
+        description="Combine",
+        content={"text": "Глава VI: река темнеет, валы беспорядочны. «На берегу стоял дом.»"},
+        digest="input/book.txt",
+    )
+    model = FakeLLM().on("Review", '{"verdict":"accept"}', repeat_last=True)
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda _: {"results_of_dependencies": [{"digest": True, "result": notes.content}]},
+        dependencies=lambda _: [notes],
+        quote_evidence=lambda _: ["Вдали был лес. На берегу стоял дом."],
+    )
+    paraphrase = reviewer(subtask, {"text": "«Река темнеет, валы беспорядочны»"})
+    assert isinstance(paraphrase, Review) and paraphrase.verdict is Verdict.RETRY
+    assert reviewer(subtask, {"text": "«На берегу стоял дом.»"}) == Review(verdict=Verdict.ACCEPT)
+
+
+def test_check_original_quotes_when_the_formatter_translated_them(store: Store) -> None:
+    [subtask] = store.list_subtasks(store.create_task(one_step()))
+    text = "На берегу реки стоял большой деревянный дом."
+    subtask = subtask.model_copy(update={"inputs": {"document": "book.txt", "text": text}})
+    model = FakeLLM().on("Review", '{"verdict":"accept"}')
+    artifact = {
+        "text": "“A large wooden house stood on the river bank.”",
+        "formatted_from": {"text": f"«{text}»"},
+    }
+    assert llm_reviewer(model)(subtask, artifact) == Review(verdict=Verdict.ACCEPT)
+
+
+@pytest.mark.parametrize("full_dependencies", [False, True])
+def test_read_in_parts_checks_only_document_dependencies_as_notes(
+    store: Store, full_dependencies: bool
+) -> None:
+    note = "The notes paraphrase this sentence."
+    ordinary = "An interview recorded this statement."
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(
+                    description="part",
+                    acceptance_criteria="c",
+                    inputs={"document": "book.txt", "text": "A document."},
+                ),
+                SubtaskSpec(description="interview", acceptance_criteria="c"),
+                SubtaskSpec(
+                    description="answer",
+                    acceptance_criteria="c",
+                    depends_on=[0, 1],
+                    inputs={"read_in_parts": ["book.txt"]},
+                ),
+            ],
+        )
+    )
+    part, interview, answer = store.list_subtasks(task_id)
+
+    def execute(work: Work) -> Success:
+        return Success(content={"text": note if work.subtask.id == part.id else ordinary})
+
+    Coordinator(store, execute, lambda *_: Review(verdict=Verdict.ACCEPT)).run(task_id)
+    deps = store.dependency_results(answer.id)
+    assert [(dep.subtask_id, dep.document_notes) for dep in deps] == [
+        (part.id, True),
+        (interview.id, False),
+    ]
+    model = FakeLLM().on("Review", '{"verdict":"accept"}')
+    reviewer = llm_reviewer(
+        model,
+        evidence=lambda subtask: evidence(store, subtask),
+        dependencies=store.dependency_results if full_dependencies else None,
+    )
+    assert reviewer(answer, {"text": f"“{ordinary}”"}) == Review(verdict=Verdict.ACCEPT)
+    result = reviewer(answer, {"text": f"“{note}”"})
+    assert isinstance(result, Review) and result.verdict is Verdict.RETRY
+
+
+def test_verbatim_notes_unquotes_an_inner_misquote_revealed_by_repair() -> None:
+    from desman.agents import _verbatim_notes
+    from desman.llm.base import Message, Request
+
+    artifact = {"text": "«The passage says “a false phrase from memory” here»"}
+    model = FakeLLM(json.dumps(artifact))
+    request = Request(messages=[Message(role="user", content="Execute: notes")])
+    assert _verbatim_notes(model, request, artifact, "A different passage.") == {
+        "text": "The passage says a false phrase from memory here",
+    }
+
+
+def test_quote_message_marks_only_actual_truncation() -> None:
+    from desman.agents import _quote_message
+
+    short = "The first three words differ."
+    long = "Another set of words that then continues for more than sixty characters."
+    message = _quote_message(
+        [short, long], ["The first three words agree. Another set of words follows."], "the source"
+    )
+    assert f"«{short}» — the text there reads" in message
+    assert f"«{long[:60]}…» — the text there reads" in message

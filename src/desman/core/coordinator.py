@@ -493,6 +493,9 @@ class Coordinator:
                     and self.decomposer is not None
                     and subtask.parent_id is None
                     and not subtask.runs_code
+                    # Parts of a long document and their combines are cut by code (ADR 0014):
+                    # splitting them again only muddles which part a note is from.
+                    and "document" not in subtask.inputs
                 )
                 strategy = crew.strategies(attempt, split=can_split, **avoid)
             tools = self._toolbox(subtask, journal, heartbeat, crew.access)
@@ -621,7 +624,11 @@ class Coordinator:
                 subtask.id, Actor.EXECUTOR, action, {**details, "execution": journal.execution}
             )
 
-        granted = self.store.tools(subtask.task_id) is Tools.GRANTED
+        # A part of a long document and its combines work from their inputs and dependencies
+        # only (ADR 0014): with tools, notes went to a file no check reads (L.2 live run).
+        granted = (
+            self.store.tools(subtask.task_id) is Tools.GRANTED and "document" not in subtask.inputs
+        )
         return Toolbox(
             Workspace(self.workspaces, subtask.task_id),
             self.tools if granted else Registry(),
@@ -760,6 +767,8 @@ class Coordinator:
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
         except ProviderError as e:
             review = self._provider_failure(e)
+            if review.kind is FailureKind.QUALITY:
+                review = review.model_copy(update={"kind": FailureKind.TRANSIENT})
         except (Exception, ValidationError) as e:
             review = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"

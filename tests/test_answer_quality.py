@@ -73,6 +73,7 @@ def test_final_data_becomes_stored_markdown(store: Store, clock: FakeClock) -> N
     for phrase in (
         "Markdown",
         "language of the goal",
+        "Keep quotes in their original language and copy them word for word.",
         "every fact, number, date and source",
         "JSON/CSV",
         "fenced block",

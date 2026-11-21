@@ -15,6 +15,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Saved the page {url} ({chars} characters) to read it in parts.": "Zapisano stronę {url} ({chars} znaków), aby przeczytać ją w częściach.",
     "Another native SearXNG operation is in progress.": "Trwa inna operacja na natywnym SearXNG.",
     "Native SearXNG failed: {error}": "Błąd natywnego SearXNG: {error}",
     "SearXNG did not stop in time.": "SearXNG nie zatrzymał się w wyznaczonym czasie.",

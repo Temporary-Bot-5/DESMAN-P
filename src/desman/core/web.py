@@ -43,6 +43,8 @@ MAX_BYTES: Final = 2_000_000
 """Bytes of a page read at most; the rest is never downloaded."""
 MAX_TEXT_CHARS: Final = 8_000
 """Text of a page returned per call (as read_file): the rest is paged with `offset`."""
+LONG_CHARS: Final = 12_000
+"""Above this length a page is saved whole, and a task input is read in parts."""
 MAX_REDIRECTS: Final = 5
 MAX_RESULTS: Final = 10
 MAX_CALLS: Final = 20

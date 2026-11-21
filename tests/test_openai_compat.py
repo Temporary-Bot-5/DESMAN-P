@@ -916,3 +916,23 @@ def test_provider_timeout_reaches_client_and_deadline(
         else:
             with pytest.raises(ProviderTimeout):
                 connected.complete(REQUEST)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Found live (L.2): llama.cpp's reply sent the subtask straight to the person.
+        "request (13159 tokens) exceeds the available context size (8192 tokens), try increasing it",
+        "This model's maximum context length is 8192 tokens. However, your messages resulted in 9000",
+        "The input token count (9000) exceeds the maximum number of tokens allowed (8192).",
+        "The input token count is 9000, exceeding the supported size.",
+        "Request exceeds the maximum number of tokens allowed.",
+        "Request exceeds the input token limit.",
+    ],
+)
+def test_a_request_bigger_than_the_context_goes_to_another_model(message: str) -> None:
+    from desman.llm.base import RequestTooLarge
+
+    llm, _ = client(lambda request: httpx.Response(400, json={"error": {"message": message}}))
+    with pytest.raises(RequestTooLarge):
+        llm.complete(REQUEST)

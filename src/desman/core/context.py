@@ -7,7 +7,8 @@ Free models have small context windows, so dependency results are fitted into a 
 The budget is shared fairly: results smaller than their share are passed whole, and whatever they
 leave over goes to the larger ones, which are truncated with an explicit marker. The budget
 covers the results only (descriptions are short and fixed). Tokens are estimated as
-characters / 4, which is close enough for budgeting.
+characters / 4, which is close enough for budgeting. Document digests use a separate
+character allowance.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from desman.core.retry import Strategy, strategy_for
 
 CHARS_PER_TOKEN: Final = 4
 DEFAULT_BUDGET_TOKENS: Final = 4000
+DIGEST_CHARS: Final = 40_000
 
 
 class DependencyResult(BaseModel):
@@ -34,6 +36,10 @@ class DependencyResult(BaseModel):
     description: str
     content: dict[str, Any] | None
     """None when the operator accepted the subtask without any artifact."""
+    digest: str | None = None
+    """The document path when this dependency is a top digest."""
+    document_notes: bool = False
+    """Whether the dependency read or combined parts of a document."""
 
 
 class DependencyContext(BaseModel):
@@ -44,6 +50,7 @@ class DependencyContext(BaseModel):
     content: Any
     """The result itself, or a text preview of it when `truncated`."""
     truncated: bool = False
+    digest: str | None = None
 
 
 class KnowledgeText(BaseModel):
@@ -119,7 +126,12 @@ def build_context(
     attempt = subtask.attempts.quality + 1
     inventory = files(budget_tokens * CHARS_PER_TOKEN // 4) if files and attempt > 1 else []
     reserved = estimate_tokens(json.dumps(inventory, ensure_ascii=False)) if inventory else 0
-    fitted, nodes = fit(dependencies, knowledge or [], max(0, budget_tokens - reserved))
+    fitted, nodes = fit(
+        dependencies,
+        knowledge or [],
+        max(0, budget_tokens - reserved),
+        combine=is_document_combine(subtask),
+    )
     context = Context(
         goal=goal,
         final_goal=final_goal,
@@ -151,43 +163,66 @@ def estimate_tokens(text: str) -> int:
 def fit_dependencies(
     results: list[DependencyResult], budget_tokens: int = DEFAULT_BUDGET_TOKENS
 ) -> list[DependencyContext]:
-    """Fit dependency results into `budget_tokens`, keeping their order."""
+    """Fit ordinary results into `budget_tokens` and cap digests separately, keeping order."""
     return fit(results, [], budget_tokens)[0]
+
+
+def is_document_combine(subtask: Subtask) -> bool:
+    return "document" in subtask.inputs and "text" not in subtask.inputs
+
+
+def evidence_shares(
+    sizes: list[int], budget: int, *, document_notes: list[bool], digests: list[bool]
+) -> tuple[list[int], int]:
+    """Return character shares and how much of the ordinary budget they use."""
+    separate = [note or digest for note, digest in zip(document_notes, digests, strict=True)]
+    ordinary = fair_shares(
+        [0 if included else size for size, included in zip(sizes, separate, strict=True)], budget
+    )
+    notes = fair_shares(
+        [size if note else 0 for size, note in zip(sizes, document_notes, strict=True)],
+        DIGEST_CHARS,
+    )
+    used = sum(ordinary)
+    for index, (size, note, digest) in enumerate(zip(sizes, document_notes, digests, strict=True)):
+        if note:
+            ordinary[index] = notes[index]
+        elif digest:
+            ordinary[index] = min(size, DIGEST_CHARS)
+    return ordinary, used
 
 
 def fit(
     results: list[DependencyResult],
     knowledge: list[KnowledgeText],
     budget_tokens: int = DEFAULT_BUDGET_TOKENS,
+    *,
+    combine: bool = False,
 ) -> tuple[list[DependencyContext], list[KnowledgeText]]:
     """Fit dependency results and knowledge texts into one budget, keeping their order. The
     knowledge is material, the results are the work itself: it gets at most half the budget,
-    and the results whatever it leaves."""
+    and ordinary results get whatever it leaves. Document notes have a separate allowance."""
     budget = budget_tokens * CHARS_PER_TOKEN
     nodes = fit_knowledge(knowledge, budget // 2)
     rendered = [_render(r.content) for r in results]
-    allowance = fair_shares(
-        [len(text) for text in rendered], budget - sum(len(n.text) for n in nodes)
+    allowance, _ = evidence_shares(
+        [len(text) for text in rendered],
+        budget - sum(len(n.text) for n in nodes),
+        document_notes=[combine] * len(results),
+        digests=[r.digest is not None for r in results],
     )
     fitted = []
     for result, text, chars in zip(results, rendered, allowance, strict=True):
-        if chars >= len(text):
-            fitted.append(
-                DependencyContext(
-                    subtask_id=result.subtask_id,
-                    description=result.description,
-                    content=result.content,
-                )
+        whole = chars >= len(text)
+        fitted.append(
+            DependencyContext(
+                subtask_id=result.subtask_id,
+                description=result.description,
+                content=result.content if whole else truncate(text, chars),
+                truncated=not whole,
+                digest=result.digest,
             )
-        else:
-            fitted.append(
-                DependencyContext(
-                    subtask_id=result.subtask_id,
-                    description=result.description,
-                    content=truncate(text, chars),
-                    truncated=True,
-                )
-            )
+        )
     return fitted, nodes
 
 

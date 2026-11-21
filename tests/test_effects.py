@@ -473,3 +473,95 @@ def test_retry_sees_stale_files_sizes_and_writer_attempt_within_budget(
         files=inventory,
     )
     assert called == [40]
+
+
+def test_quote_sources_include_the_documents_a_planned_subtask_works_from(store: Store) -> None:
+    from desman.core.effects import quote_sources
+    from desman.core.workspace import workspace_root_for
+
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(
+                    description="answer",
+                    acceptance_criteria="c",
+                    inputs={"read_in_parts": ["input/book.txt", "input/gone.txt", "../x"]},
+                )
+            ],
+        )
+    )
+    Workspace(workspace_root_for(store.conn), task_id).write("input/book.txt", "Вдали был лес.")
+    [subtask] = store.list_subtasks(task_id)
+    sources = quote_sources(store, subtask, knowledge=None, context_budget_tokens=1000)
+    assert sources == ["Вдали был лес."]
+
+
+def test_quote_sources_of_a_combine_include_its_document(store: Store) -> None:
+    from desman.core.effects import quote_sources
+    from desman.core.workspace import workspace_root_for
+
+    task_id = store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(
+                    description="combine",
+                    acceptance_criteria="c",
+                    inputs={"document": "input/b.txt"},
+                )
+            ],
+        )
+    )
+    Workspace(workspace_root_for(store.conn), task_id).write("input/b.txt", "Текст книги.")
+    [subtask] = store.list_subtasks(task_id)
+    assert quote_sources(store, subtask, knowledge=None, context_budget_tokens=1000) == [
+        "Текст книги."
+    ]
+
+
+def test_quote_sources_use_normalized_paths_and_task_wide_write_history(store: Store) -> None:
+    from desman.core.effects import quote_sources
+
+    store.create_task(
+        TaskSpec(
+            goal="g",
+            subtasks=[
+                SubtaskSpec(description="write", acceptance_criteria="c"),
+                SubtaskSpec(description="read", acceptance_criteria="c", depends_on=[0]),
+            ],
+        )
+    )
+
+    def journal(subtask: Subtask, ordinal: int, tool: str, output: dict[str, str]) -> None:
+        assert subtask.lease_token is not None
+        store.start_effect(subtask.id, subtask.lease_token, 0, ordinal, tool, str(ordinal))
+        assert store.finish_effect(
+            subtask.id,
+            subtask.lease_token,
+            0,
+            ordinal,
+            ToolResult(ok=True, output=output).model_dump(),
+        )
+
+    writer = store.claim("w")
+    assert writer is not None and writer.lease_token is not None
+    journal(writer, 0, "write_file", {"path": "input/generated.txt"})
+    store.submit(writer.id, writer.lease_token, {"done": True})
+    store.transition(writer.id, S.REVIEW, S.DONE, Actor.REVIEWER)
+    reader = store.claim("w")
+    assert reader is not None and reader.lease_token is not None
+    attached = {"path": "./input//attached.txt", "content": "The person's words."}
+    fetched = {"path": "./web/page.txt", "content": "The page's words."}
+    journal(reader, 0, "read_file", {"path": "./input//generated.txt", "content": "Invented."})
+    journal(reader, 1, "read_file", attached)
+    journal(reader, 2, "read_file", fetched)
+    journal(reader, 3, "run_command", {"stdout": "Invented output."})
+    page = {"text": "An external source."}
+    journal(reader, 4, "web_fetch", page)
+    store.submit(reader.id, reader.lease_token, {"done": True})
+    assert quote_sources(store, reader, knowledge=None, context_budget_tokens=1000) == [
+        attached,
+        fetched,
+        page,
+    ]

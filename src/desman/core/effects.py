@@ -43,15 +43,23 @@ from pydantic import BaseModel
 from desman.core.context import (
     CHARS_PER_TOKEN,
     Knowledge,
+    evidence_shares,
     fair_shares,
     fit_knowledge,
     given,
+    is_document_combine,
     truncate,
 )
 from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import Replayed, Tool, ToolResult
-from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
+from desman.core.workspace import (
+    PathEscapeError,
+    Workspace,
+    check_path,
+    is_work_file,
+    workspace_root_for,
+)
 
 INTERRUPTED: Final = (
     "this exact call was started by an earlier run of this subtask and interrupted before it "
@@ -75,8 +83,10 @@ def evidence(
     """What the result under review can rest on: the subtask's inputs, the accepted results of
     its dependencies, the knowledge tree's nodes it was given (looked up by `knowledge`), and
     what the latest execution returned, plus earlier web lookups of this same subtask
-    marked earlier_attempt. Latest results take budget first; older lookups share what
-    remains, newest execution first. In call order within each execution, fitted to
+    marked earlier_attempt. A document part's inputs are kept whole. Latest results take
+    the remaining budget first; older lookups share what remains, newest execution first.
+    Document notes use the same separate allowance as in the executor context.
+    In call order within each execution, fitted to
     `budget_tokens`; a cut item says so. Arguments are not kept (only their hash), so a call
     shows its tool and its result. Files successfully written in that execution also show
     their current workspace text (or an unreadable/binary note), sharing the same budget."""
@@ -85,22 +95,32 @@ def evidence(
     dependencies = store.dependency_results(subtask.id)
     budget = budget_tokens * CHARS_PER_TOKEN
     out: dict[str, Any] = {"inputs": None, "results_of_dependencies": [], "tool_results": []}
-    goal = store.final_goal(subtask)
-    if goal is not None:
+    goal, is_final = store.subtask_goal(subtask)
+    if is_final:
         out["goal"] = goal
+    elif "document" in subtask.inputs:
+        out["task_goal"] = goal
     offered = store.conn.execute(
         "SELECT details_json FROM audit_log WHERE subtask_id = ? "
         "AND action = 'attempt_started' ORDER BY seq DESC LIMIT 1",
         (subtask.id,),
     ).fetchone()
     out["tools_available"] = json.loads(offered[0]).get("tools", []) if offered else []
+    used_inputs = 0
+    if "document" in subtask.inputs and "text" in subtask.inputs:
+        # A document review must be able to check even the last quote against its source.
+        out["inputs"] = subtask.inputs
+        used_inputs = len(_evidence_text("inputs", subtask.inputs))
+        budget = max(0, budget - used_inputs)
     # What the executor was given of the knowledge tree, within at most half the budget, as
     # it got it (`context.fit`): the rest is for what the work itself rests on.
     nodes = fit_knowledge(given(knowledge, subtask.knowledge)[0], budget // 2)
     if nodes:
         out["knowledge"] = [node.model_dump(exclude_defaults=True) for node in nodes]
         budget -= sum(len(node.text) for node in nodes)
-    items: list[tuple[str, Any]] = [("inputs", subtask.inputs)] if subtask.inputs else []
+    items: list[tuple[str, Any]] = []
+    if subtask.inputs and not used_inputs:
+        items.append(("inputs", subtask.inputs))
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
     files = _written_files(rows, workspace, store, subtask)
@@ -108,15 +128,28 @@ def evidence(
         out["written_files"] = []
         items += [("file", file) for file in files]
     texts = [_evidence_text(kind, item) for kind, item in items]
-    shares = fair_shares([len(text) for text in texts], budget)
-    for (kind, item), text, chars in zip(items, texts, shares, strict=True):
+    digests = [kind == "dependency" and item.digest is not None for kind, item in items]
+    combine = is_document_combine(subtask)
+    shares, used_evidence = evidence_shares(
+        [len(text) for text in texts],
+        budget,
+        document_notes=[combine and kind == "dependency" for kind, _ in items],
+        digests=digests,
+    )
+    for (kind, item), text, chars, digest in zip(items, texts, shares, digests, strict=True):
         whole = chars >= len(text)
         content: Any = json.loads(text) if whole else truncate(text, chars)
         if kind == "inputs":
             out["inputs"] = content
         elif kind == "dependency":
             out["results_of_dependencies"].append(
-                {"subtask": item.description, "result": content, "truncated": not whole}
+                {
+                    "subtask": item.description,
+                    "result": content,
+                    "truncated": not whole,
+                    **({"digest": True} if digest else {}),
+                    **({"document_notes": True} if item.document_notes else {}),
+                }
             )
         elif kind == "file":
             out["written_files"].append(
@@ -133,11 +166,67 @@ def evidence(
                     "truncated": not whole,
                 }
             )
-    used = sum(shares) + sum(len(node.text) for node in nodes)
+    used = used_inputs + used_evidence + sum(len(node.text) for node in nodes)
     out["tool_results"].extend(
         earlier_lookups(store, subtask, execution, max(0, budget_tokens * CHARS_PER_TOKEN - used))
     )
     return out
+
+
+def quote_sources(
+    store: Store,
+    subtask: Subtask,
+    *,
+    knowledge: Knowledge | None,
+    context_budget_tokens: int,
+) -> list[object]:
+    """Tool outputs from this execution and the knowledge supplied to its executor."""
+    execution = store.executions(subtask.id) - 1
+    written = set()
+    for saved in store.completed_effects(subtask.task_id, "write_file"):
+        result = ToolResult.model_validate_json(saved)
+        if result.ok and (path := _output_path(result.output)) is not None:
+            written.add(path)
+    outputs = []
+    for row in store.effects(subtask.id, execution):
+        if row["state"] != "done" or row["tool"] == "run_command":
+            continue
+        output = ToolResult.model_validate_json(row["result_json"]).output
+        if row["tool"] == "read_file" and _output_path(output) in written:
+            continue
+        outputs.append(output)
+    nodes = fit_knowledge(
+        given(knowledge, subtask.knowledge)[0], context_budget_tokens * CHARS_PER_TOKEN // 2
+    )
+    return [*outputs, *(node.text for node in nodes), *_documents_read_in_parts(store, subtask)]
+
+
+def _output_path(output: object) -> tuple[str, ...] | None:
+    if isinstance(output, dict) and isinstance(path := output.get("path"), str):
+        try:
+            return check_path(path)
+        except PathEscapeError:
+            pass
+    return None
+
+
+def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:
+    """The long documents a planned subtask works from (ADR 0014): a quote must come from them
+    even when the notes that carried it are several steps away."""
+    paths = subtask.inputs.get("read_in_parts")
+    if isinstance(subtask.inputs.get("document"), str) and "text" not in subtask.inputs:
+        paths = [subtask.inputs["document"]]  # a combine: its quotes come from the document too
+    if not isinstance(paths, list):
+        return []
+    texts = []
+    workspace = Workspace(workspace_root_for(store.conn), subtask.task_id)
+    for path in paths:
+        if isinstance(path, str):
+            try:
+                texts.append(workspace.read_text(path))
+            except (OSError, UnicodeError, PathEscapeError):
+                continue
+    return texts
 
 
 def _written_files(

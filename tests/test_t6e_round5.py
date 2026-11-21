@@ -13,7 +13,7 @@ import pytest
 from desman import actions, providers, task_files
 from desman.agents import llm_executor
 from desman.chat import Chat
-from desman.core.coordinator import Coordinator, Review, Verdict
+from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
 from desman.core.effects import workspace_files
 from desman.core.models import Kind, SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind
@@ -36,7 +36,7 @@ def task() -> TaskSpec:
     return TaskSpec(goal="g", subtasks=[SubtaskSpec(description="work", acceptance_criteria="c")])
 
 
-def test_provider_413_is_permanent_and_falls_back_without_repeating(store: Store) -> None:
+def test_provider_413_fails_the_attempt_and_falls_back_without_repeating(store: Store) -> None:
     seen: list[Request] = []
 
     class Oversized:
@@ -50,18 +50,42 @@ def test_provider_413_is_permanent_and_falls_back_without_repeating(store: Store
     chain = router.Fallback([(backed, None)])
     with pytest.raises(RequestTooLarge) as caught:
         chain.complete(REQUEST)
-    assert caught.value.kind is FailureKind.PERMANENT
+    # L.2 live run: a too-small last model fails the attempt, never the subtask at once.
+    assert caught.value.kind is FailureKind.QUALITY and not caught.value.unfit_model
     assert len(seen) == 1
     assert chain.last_call.skipped[0].reason == "context"
     assert router.Fallback([(backed, None), (FakeLLM("ok"), None)]).complete(REQUEST).text == "ok"
     assert len(seen) == 2
-    # Real coordinator classifies the last model's 413 without retrying the work.
+    # With no model big enough, each attempt fails once (no backoff), then the person decides.
     ref = store.create_task(task())
     report = Coordinator(
         store, llm_executor(backed), lambda *_: Review(verdict=Verdict.ACCEPT)
     ).run(ref)
     assert report.status is TaskStatus.NEEDS_HUMAN
-    assert len(seen) == 3
+    assert store.unfit_providers(ref) == set()
+    attempts = len(seen) - 2
+    assert attempts == task().retry.max_attempts
+
+
+def test_same_size_retry_skips_model_without_task_wide_demotion(store: Store) -> None:
+    calls: list[Request] = []
+
+    def refuse(request: Request) -> str:
+        calls.append(request)
+        raise RequestTooLarge("groq", 413, "too large")
+
+    model = router.Fallback([(FakeLLM(refuse, repeat_last=True), None)])
+
+    def execute(work: Work) -> Success:
+        model.complete(REQUEST)
+        pytest.fail("the request cannot fit")
+
+    task_id = store.create_task(task())
+    report = Coordinator(store, execute, lambda *_: Review(verdict=Verdict.ACCEPT)).run(task_id)
+    assert report.status is TaskStatus.NEEDS_HUMAN
+    assert store.list_subtasks(task_id)[0].attempts.quality == task().retry.max_attempts
+    assert calls == [REQUEST]
+    assert not store.unfit_providers(task_id)
 
 
 @pytest.mark.parametrize(

@@ -9,8 +9,12 @@ import pytest
 from conftest import FakeClock
 from desman.core.context import (
     CHARS_PER_TOKEN,
+    DEFAULT_BUDGET_TOKENS,
+    DIGEST_CHARS,
+    DependencyContext,
     DependencyResult,
     _render,
+    build_context,
     estimate_tokens,
     fair_shares,
     fit_dependencies,
@@ -71,6 +75,29 @@ def test_large_result_is_truncated_and_small_kept() -> None:
 def test_estimate_tokens_rounds_up() -> None:
     assert estimate_tokens("") == 0
     assert estimate_tokens("abcde") == 2
+
+
+@pytest.mark.parametrize("size", [15_900, 50_000])
+def test_digest_has_a_separate_cap(store: Store, size: int) -> None:
+    task_id = store.create_task(diamond())
+    subtask = store.list_subtasks(task_id)[-1]
+    notes = DependencyResult(
+        subtask_id="digest",
+        description="Document notes",
+        content={"text": "я" * size},
+        digest="input/book.txt",
+    )
+    ordinary = result("other", {"text": "x" * 20_000})
+    context = build_context(subtask, [notes, ordinary], None, budget_tokens=DEFAULT_BUDGET_TOKENS)
+    digest, other = context.dependencies
+    assert digest.digest == "input/book.txt"
+    if size < DIGEST_CHARS:
+        assert digest.content == notes.content and not digest.truncated
+    else:
+        assert digest.truncated and len(digest.content) == DIGEST_CHARS
+        assert digest.content.endswith(f"…[truncated, {len(_render(notes.content))} chars in full]")
+    assert other == fit_dependencies([ordinary])[0]
+    assert other.truncated
 
 
 # ── Through the store and the coordinator ────────────────────────────────────
@@ -266,3 +293,52 @@ def test_operator_accepting_escalated_review_passes_that_artifact(store: Store) 
     assert done.accepted_attempt == 1
     [dep] = store.dependency_results(b.id)
     assert dep.content == {"borderline": True}
+
+
+@pytest.mark.parametrize("size", [4_000, 6_000])
+@pytest.mark.parametrize("digest", [False, True])
+def test_combine_context_and_evidence_share_the_document_budget(
+    store: Store, size: int, digest: bool
+) -> None:
+    from desman.core.effects import evidence
+
+    inputs = {"document": "input/book.txt", **({"digest": True} if digest else {})}
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Read the book",
+            subtasks=[
+                *(SubtaskSpec(description=f"Part {i}", acceptance_criteria="ok") for i in range(8)),
+                SubtaskSpec(
+                    description="Combine",
+                    acceptance_criteria="ok",
+                    inputs=inputs,
+                    depends_on=list(range(8)),
+                ),
+            ],
+        )
+    )
+    *_, combine = store.list_subtasks(task_id)
+    notes = {"text": "я" * size}
+
+    def execute(work: Work) -> Success:
+        if work.subtask.id == combine.id:
+            executor_notes.extend(work.context.dependencies)
+        return Success(content=notes)
+
+    def review(subtask: Subtask, artifact: dict[str, Any] | None) -> Review:
+        if subtask.id == combine.id:
+            reviewer_notes.extend(evidence(store, subtask)["results_of_dependencies"])
+        return Review(verdict=Verdict.ACCEPT)
+
+    executor_notes: list[DependencyContext] = []
+    reviewer_notes: list[dict[str, Any]] = []
+    Coordinator(store, execute, review).run(task_id)
+    assert len(executor_notes) == len(reviewer_notes) == 8
+    for given, shown in zip(executor_notes, reviewer_notes, strict=True):
+        assert shown["result"] == given.content
+        assert shown["truncated"] == given.truncated == (size == 6_000)
+        if given.truncated:
+            assert len(given.content) == DIGEST_CHARS // 8
+            assert "[truncated," in given.content
+        else:
+            assert given.content == notes

@@ -17,6 +17,7 @@ from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import StaleStateError, Store
+from desman.core.tools import READ_FILE, Registry
 from desman.llm.fake import FakeLLM, garbage
 from desman.planner import MAX_PARTS, SPLIT, decomposer
 
@@ -283,3 +284,78 @@ def test_without_a_decomposer_nothing_is_split(store: Store, clock: FakeClock) -
     ).run(task_id)
     assert result.status is TaskStatus.NEEDS_HUMAN
     assert "decompose" not in [s for _, s in strategies(store, task_id)]
+
+
+def test_a_part_of_a_long_document_is_never_split(store: Store, clock: FakeClock) -> None:
+    # Found live (L.2): a part's notes split into "quotes" and "facts" muddled which part a
+    # note came from, and its combine then asked for a part that did not exist.
+    llm = (
+        FakeLLM()
+        .on("Execute", '{"v": 1}', repeat_last=True)
+        .on("Review", *[REJECT] * 5, ACCEPT, repeat_last=True)
+        .on(SPLIT, split_reply("a", "b"))
+    )
+    spec = one_step()
+    part = spec.subtasks[0].model_copy(update={"inputs": {"document": "input/a.txt", "part": 1}})
+    task_id = store.create_task(
+        spec.model_copy(update={"subtasks": [part], "retry": RetryPolicy(max_attempts=6)})
+    )
+    assert coordinator(store, clock, llm).run(task_id).status is TaskStatus.DONE
+    assert len(store.list_subtasks(task_id)) == 1
+    assert "decompose" not in [s for _, s in strategies(store, task_id)]
+    assert not any(r.prompt.startswith(SPLIT) for r in llm.calls)
+
+
+def test_a_part_of_a_long_document_is_offered_no_tools(store: Store, clock: FakeClock) -> None:
+    # Found live (L.2): a combine wrote its notes to a file, where no quote check reads them.
+    llm = FakeLLM().on("Execute", '{"v": 1}', repeat_last=True).on("Review", ACCEPT)
+    spec = one_step()
+    part = spec.subtasks[0].model_copy(update={"inputs": {"document": "input/a.txt", "part": 1}})
+    task_id = store.create_task(spec.model_copy(update={"subtasks": [part]}))
+    tools = Registry([READ_FILE])  # an ordinary subtask is offered read_file with it
+    assert coordinator(store, clock, llm, tools=tools).run(task_id).status is TaskStatus.DONE
+    [execute] = [r for r in llm.calls if r.prompt.startswith("Execute")]
+    assert "read_file" not in json.dumps([m.content for m in execute.messages])
+
+
+PART_TEXT = "Мутные валы со злобой хлещут по нем и тотчас же отскакивают назад."
+
+
+def part_task(store: Store) -> str:
+    spec = one_step()
+    part = spec.subtasks[0].model_copy(
+        update={"inputs": {"document": "input/a.txt", "part": 1, "text": PART_TEXT}}
+    )
+    return store.create_task(spec.model_copy(update={"subtasks": [part]}))
+
+
+def notes_of(store: Store, task_id: str) -> str:
+    [subtask] = store.list_subtasks(task_id)
+    [row] = store.artifacts(subtask.id)
+    return str(row["content_json"])
+
+
+def test_a_misquote_in_part_notes_is_corrected_within_the_attempt(
+    store: Store, clock: FakeClock
+) -> None:
+    # Found live (L.2): models wrote "по нему" for Chekhov's "по нем" until the subtask failed.
+    wrong = '{"text": "Иртыш: «Мутные валы со злобой хлещут по нему и тотчас же отскакивают»"}'
+    right = '{"text": "Иртыш: «Мутные валы со злобой хлещут по нем и тотчас же отскакивают»"}'
+    llm = FakeLLM().on("Execute", wrong, right).on("Review", ACCEPT)
+    task_id = part_task(store)
+    assert coordinator(store, clock, llm).run(task_id).status is TaskStatus.DONE
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts.quality == 0
+    assert "по нем и" in notes_of(store, task_id)
+    repair = [r for r in llm.calls if r.prompt.startswith("Execute")][1]
+    assert "the text there reads" in repair.messages[-1].content
+
+
+def test_a_misquote_that_stays_wrong_loses_its_quote_marks(store: Store, clock: FakeClock) -> None:
+    wrong = '{"text": "Иртыш: «Мутные валы со злобой хлещут по нему и тотчас же отскакивают»"}'
+    llm = FakeLLM().on("Execute", wrong, wrong).on("Review", ACCEPT)
+    task_id = part_task(store)
+    assert coordinator(store, clock, llm).run(task_id).status is TaskStatus.DONE
+    notes = json.loads(notes_of(store, task_id))
+    assert "«" not in json.dumps(notes, ensure_ascii=False)
+    assert "хлещут по нему" in json.dumps(notes, ensure_ascii=False)

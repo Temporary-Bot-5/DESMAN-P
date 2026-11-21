@@ -17,14 +17,14 @@ from datetime import UTC, datetime
 import click
 import httpx
 
-from desman import knowledge, net, providers, ui
+from desman import documents, knowledge, net, providers, ui
 from desman.agents import llm_executor, llm_reviewer
 from desman.config import Config, ConfigError, Tuning, open_config
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
 from desman.core.coordinator import Coordinator, Crew, Executor, Labels, Outcome, Work
-from desman.core.effects import evidence
+from desman.core.effects import evidence, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
@@ -569,6 +569,30 @@ def web(config: Config, store: Store, http: httpx.Client | None = None) -> Web:
     return Web(engines=engines, sources=open_sources(http), cache=WebCache(store.conn, store.clock))
 
 
+def document_web(
+    goal: str, config: Config, store: Store, access: Access, http: httpx.Client | None = None
+) -> Web | None:
+    """Prefetch only when the executor could use the registered fetch tool."""
+    if not documents.reading_urls(goal):
+        return None
+    fetch = builtin_registry().get("web_fetch")
+    if fetch is None or access.refusal(fetch) is not None:
+        return None
+    return web(config, store, http)
+
+
+def prefetch_notices(fetched: documents.Prefetched) -> list[str]:
+    chars = {item["url"]: item.get("chars") for item in fetched.details}
+    return [
+        t(
+            "Saved the page {url} ({chars} characters) to read it in parts.",
+            url=file.source,
+            chars=chars[file.source],
+        )
+        for file in fetched.given
+    ]
+
+
 def task_tree(conn: sqlite3.Connection, personalize: bool) -> tuple[knowledge.Node, ...]:
     """The knowledge tree tasks choose from (K.3): the release part, and the person's nodes
     (K.4) while they agreed to personalisation."""
@@ -594,6 +618,7 @@ def coordinator(
     watch: Callable[[], None] | None = None,
     network: Crew | None = None,
     sandbox: Sandbox | None = None,
+    document_reader: Web | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
     # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
@@ -605,7 +630,7 @@ def coordinator(
         access=access,
         tools=builtin_registry(
             sandbox,
-            web=web(config, store, http),
+            web=document_reader if document_reader is not None else web(config, store, http),
             # Without the person's token: see `core.tools.suggest_model_tool`.
             models=lambda ref: hub.inspect(ref, http),
             knowledge=tree,
@@ -734,6 +759,13 @@ def _coordinator(
         llm_reviewer(
             models.for_(calls.Role.REVIEWER),
             evidence=functools.partial(evidence, store, knowledge=knowledge),
+            dependencies=store.dependency_results,
+            quote_evidence=functools.partial(
+                quote_sources,
+                store,
+                knowledge=knowledge,
+                context_budget_tokens=tuned(tuning, "context_tokens"),
+            ),
             clock=store.clock,
         ),
         owner=current_owner(),
