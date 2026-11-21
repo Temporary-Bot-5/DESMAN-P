@@ -94,7 +94,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -260,6 +260,7 @@ class Network(BaseModel):
 
     enabled: StrictBool = False
     lead: StrictBool = True
+    borrow_search: StrictBool = False
     registry: RegistryUrl | None = None
     """None: the address DESMAN ships with (`net.DEFAULT_REGISTRY`)."""
     donated: dict[str, Donation] = Field(default_factory=dict)
@@ -283,7 +284,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[9] = 9
+    schema_version: Literal[10] = 10
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -337,6 +338,10 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     4: `tuning` (empty: DESMAN's defaults).
     5: `network` (desman-global off).
     6: per-role key preferences and the interlocutor’s model.
+    7: background worker count.
+    8: page turns.
+    9: cluster leadership.
+    10: opt-in borrowed search.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -388,6 +393,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
 
     if version == 8:
         version = 9  # cluster leadership defaults on within the opt-in network
+
+    if version == 9:
+        version = 10  # borrowing search defaults off
 
     data["schema_version"] = version
     return data

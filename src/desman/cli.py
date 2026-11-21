@@ -611,6 +611,7 @@ def worker(
             lease_seconds=lease_seconds,
             network=crew,
             sandbox=sandbox,
+            load=manager.load,
         )
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)

@@ -15,6 +15,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "włączone",
+    "Borrow web search": "Pożyczanie wyszukiwania w sieci",
+    "Set up local SearXNG with `desman search setup` before lending it.": "Przed udostępnieniem skonfiguruj lokalny SearXNG poleceniem `desman search setup`.",
+    "{calls} searches a day": "{calls} wyszukiwań dziennie",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "Wyszukiwania wykorzystane dzisiaj: {calls}. Pozostało: {calls_left}.",
+    "Show or change whether this node borrows web search.": "Wyświetl lub zmień ustawienie pożyczania wyszukiwania przez ten węzeł.",
     "Saved the page {url} ({chars} characters) to read it in parts.": "Zapisano stronę {url} ({chars} znaków), aby przeczytać ją w częściach.",
     "Another native SearXNG operation is in progress.": "Trwa inna operacja na natywnym SearXNG.",
     "Native SearXNG failed: {error}": "Błąd natywnego SearXNG: {error}",
@@ -1348,7 +1354,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "Adres rejestru nie jest jeszcze znany: podaj go, `desman global join --registry URL`.",
     "Not now: desman-global stays off.": "Nie teraz: desman-global pozostaje wyłączony.",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "Nic nie jest użyczane, dopóki sam tego nie wybierzesz: `desman global donate PROVIDER`.",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "Dopóki działa `desman worker`, ten węzeł rejestruje się w rejestrze, zgłasza, że żyje, i pobiera listę unieważnień; nic więcej nie jest jeszcze wysyłane. `desman global leave` wycofuje wszystko.",
     "In touch with the desman-global registry {url}.": "Połączono z rejestrem desman-global {url}.",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "Rejestr desman-global jest nieosiągalny ({error}); kolejna próba za {seconds} s. Twoja własna praca trwa dalej.",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "Rejestr desman-global odrzucił ten węzeł ({error}); kolejna próba za {seconds} s. Zwykle przyczyną jest źle ustawiony zegar.",

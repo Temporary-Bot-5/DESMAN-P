@@ -15,14 +15,20 @@ meant for people, which they refuse to robots.
 
 from __future__ import annotations
 
+import sqlite3
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
-from typing import Any, Final
+from datetime import datetime
+from typing import Any, Final, Self
 from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from desman import net, providers
+from desman.config import Config, ConfigError
+from desman.core import netlog
 from desman.core.web import (
     MAX_BYTES,
     TIMEOUT,
@@ -32,6 +38,7 @@ from desman.core.web import (
     WebError,
     html_text,
 )
+from desman.net import protocol, sign
 
 
 def client() -> httpx.Client:
@@ -307,3 +314,135 @@ def open_sources(http: httpx.Client) -> dict[str, SearchEngine]:
         "arxiv": Arxiv(http),
         "github": GitHub(http),
     }
+
+
+class Lent:
+    """The whole-web engine relayed by the registry with the person's consent."""
+
+    name = "desman-global"
+
+    def __init__(
+        self,
+        config: Config,
+        conn: sqlite3.Connection,
+        http: httpx.Client,
+        clock: Callable[[], datetime],
+        key: sign.NodeKey,
+        url: str,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+        load: Callable[[], Config] | None = None,
+    ) -> None:
+        self.load = load or (lambda: config)
+        self.conn = conn
+        self.http = http
+        self.clock = clock
+        self.key = key
+        self.url = url
+        self.sleep = sleep
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Config,
+        conn: sqlite3.Connection,
+        http: httpx.Client,
+        clock: Callable[[], datetime],
+        *,
+        load: Callable[[], Config] | None = None,
+    ) -> Self | None:
+
+        url = net.registry(config)
+        if url is None or not config.network.borrow_search or providers.search_engines(config):
+            return None
+        try:
+            key = sign.load_node_key(sign.default_node_key_path())
+        except (sign.KeyFileError, OSError):
+            return None
+        return cls(config, conn, http, clock, key, url, load=load)
+
+    def search(
+        self, query: str, max_results: int, language: str | None = None
+    ) -> list[SearchResult]:
+        from desman.net import node, search_lend
+
+        try:
+            request = protocol.SearchAsk(query=query, count=max_results)
+        except ValidationError:
+            raise WebError(
+                "lent search requires a query of 1–300 characters without controls"
+            ) from None
+        deadline = time.monotonic() + 30
+        start = self.clock()
+
+        def remaining() -> float:
+            return min(deadline - time.monotonic(), 30 - (self.clock() - start).total_seconds())
+
+        def current_config() -> Config:
+            config = self.load()
+            if (
+                not config.network.borrow_search
+                or net.registry(config) != self.url
+                or providers.search_engines(config)
+            ):
+                raise WebError("no node lends search now")
+            return config
+
+        def ask() -> protocol.SearchAsked:
+            current_config()
+            return node._call(
+                self.http,
+                self.key,
+                self.url,
+                "POST",
+                protocol.SEARCH_ASK,
+                request,
+                protocol.SearchAsked,
+                self.clock(),
+                time.monotonic() + remaining(),
+            )
+
+        try:
+            try:
+                offer = ask()
+            except node._Problem as e:
+                if e.error != node.NOT_REGISTERED:
+                    raise
+                node._call(
+                    self.http,
+                    self.key,
+                    self.url,
+                    "POST",
+                    protocol.REGISTER,
+                    protocol.Register(
+                        capabilities=node.active_capabilities(current_config(), self.conn)
+                    ),
+                    protocol.NodeState,
+                    self.clock(),
+                    time.monotonic() + remaining(),
+                )
+                offer = ask()
+            netlog.record(self.conn, "borrowed_search", search_lend.query_hash(request.query))
+            while remaining() > 0:
+                self.sleep(min(1, remaining()))
+                if remaining() <= 0:
+                    break
+                current_config()
+                state = node._call(
+                    self.http,
+                    self.key,
+                    self.url,
+                    "GET",
+                    protocol.SEARCH_STATE + offer.id,
+                    None,
+                    protocol.SearchState,
+                    self.clock(),
+                    time.monotonic() + remaining(),
+                )
+                if state.id != offer.id or state.error is not None or state.state == "expired":
+                    break
+                if state.state == "answered":
+                    return [SearchResult(**hit.model_dump()) for hit in state.hits[:max_results]]
+        except (ConfigError, node._Problem, node._Unreachable, sqlite3.OperationalError):
+            pass
+        raise WebError("no node lends search now")

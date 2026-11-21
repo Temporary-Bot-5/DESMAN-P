@@ -133,6 +133,8 @@ problème.
 
 ## 5. Le réseau desman-global
 
+Utilisez `desman global donate searxng --calls N` pour prêter le moteur SearXNG géré et `desman global search on|off` pour activer ou désactiver l’emprunt si vous n’avez pas de moteur web.
+
 desman-global relie les ordinateurs des participants. Votre ordinateur peut traiter de petites
 parties des tâches des autres avec les modèles que vous avez *prêtés*. Pour les grandes tâches, le
 réseau regroupe les ordinateurs libres. Vos tâches passent toujours en premier. Le travail des

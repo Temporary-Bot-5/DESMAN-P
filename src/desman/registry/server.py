@@ -32,7 +32,10 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
+import re
 import sqlite3
+import time
 from collections.abc import Callable, Iterable
 from contextlib import closing
 from dataclasses import dataclass
@@ -49,7 +52,7 @@ from pydantic import BaseModel, ValidationError
 from desman.core import db
 from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import checks, clusters, messenger, releases, store, work
+from desman.registry import checks, clusters, messenger, releases, search, store, work
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -152,6 +155,9 @@ class Registry:
             protocol.CHECK_HAND_IN: ("POST", self._hand_in_check),
             protocol.CLUSTERS_MINE: ("GET", self._clusters_mine),
             protocol.CLUSTER_RECORDS: ("POST", self._cluster_records),
+            protocol.SEARCH_ASK: ("POST", self._search_ask),
+            protocol.SEARCH_NEXT: ("POST", self._search_next),
+            protocol.SEARCH_ANSWER: ("POST", self._search_answer),
             protocol.PROPOSALS: ("POST", self._submit_proposal),
             protocol.REPORTS: ("POST", self._submit_report),
             protocol.MESSENGER_KEY: (
@@ -209,7 +215,12 @@ class Registry:
         return timedelta(seconds=2 * self._heartbeat)
 
     def _tick(self, conn: sqlite3.Connection, now: datetime) -> None:
+        search.expire(conn, now)
         clusters.tick(conn, self.appointer, self.root, now, self.online)
+
+    def expire_search(self) -> None:
+        with store.connection(self.path) as conn:
+            search.expire(conn, self._clock())
 
     def handle(
         self, method: str, target: str, headers: Iterable[tuple[str, str]], body: bytes
@@ -229,7 +240,20 @@ class Registry:
                 return Reply(200, {"status": "ok"})
             except (sqlite3.Error, OSError):
                 return Reply(503, {"status": "unavailable"})
-        route = self._routes.get(target.split("?", 1)[0])
+        path = target.split("?", 1)[0]
+        route = self._routes.get(path)
+        if path.startswith(protocol.SEARCH_STATE):
+            search_id = path.removeprefix(protocol.SEARCH_STATE)
+            if re.fullmatch(r"[a-f0-9]{32}", search_id):
+
+                def state(
+                    conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+                ) -> Reply:
+                    _no_body(body, caller)
+                    search.expire(conn, now)
+                    return _ok(search.get(conn, self._active(conn, caller), search_id))
+
+                route = ("GET", state)
         if route is None:
             return _problem(HTTPStatus.NOT_FOUND, NOT_FOUND)
         wanted, handler = route
@@ -252,12 +276,38 @@ class Registry:
             except _NotRegistered:
                 self._refused(conn, caller.fingerprint, NOT_REGISTERED, method, target)
                 return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
+            except search.Refusal as e:
+                status = (
+                    HTTPStatus.TOO_MANY_REQUESTS if str(e) == "too_many" else HTTPStatus.NOT_FOUND
+                )
+                return _problem(status, str(e))
             except messenger.Refusal as e:
                 self._refused(conn, caller.fingerprint, str(e), method, target)
                 return _problem(HTTPStatus.FORBIDDEN, str(e))
             except work.LeaseLost:
                 self._refused(conn, caller.fingerprint, work.LEASE_LOST, method, target)
                 return _problem(HTTPStatus.CONFLICT, work.LEASE_LOST)
+
+    def _search_ask(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        asked = _body(protocol.SearchAsk, body, caller)
+        search.expire(conn, now)
+        return _ok(search.ask(conn, self._active(conn, caller), asked, now))
+
+    def _search_next(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        _body(protocol.EmptySearchPoll, body, caller)
+        search.expire(conn, now)
+        return _ok(search.next_jobs(conn, self._active(conn, caller), now))
+
+    def _search_answer(
+        self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
+    ) -> Reply:
+        result = _body(protocol.SearchAnswer, body, caller)
+        search.expire(conn, now)
+        return _ok(search.answer(conn, self._active(conn, caller), result, now))
 
     def _messenger_route(self, model: type[M], perform: MessengerHandler[M]) -> Handler:
         def route(
@@ -577,9 +627,25 @@ def handler_for(registry: Registry) -> type[BaseHTTPRequestHandler]:
     return RegistryHandler
 
 
+class _RegistryServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, host: str, port: int, registry: Registry) -> None:
+        self.registry = registry
+        self._next_expiry = time.monotonic()
+        super().__init__((host, port), handler_for(registry))
+
+    def service_actions(self) -> None:
+        now = time.monotonic()
+        if now >= self._next_expiry:
+            self._next_expiry = now + 5
+            try:
+                self.registry.expire_search()
+            except sqlite3.Error as e:
+                logging.getLogger(__name__).warning("Search expiry failed: %s", type(e).__name__)
+
+
 def make_server(
     registry: Registry, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT
 ) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), handler_for(registry))
-    server.daemon_threads = True
-    return server
+    return _RegistryServer(host, port, registry)

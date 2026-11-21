@@ -15,6 +15,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "увімкнено",
+    "Borrow web search": "Позичати вебпошук",
+    "Set up local SearXNG with `desman search setup` before lending it.": "Налаштуйте локальний SearXNG командою `desman search setup`, перш ніж позичати його іншим.",
+    "{calls} searches a day": "Добова квота на пошук — {calls}",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "Пошуків за сьогодні: {calls}. Залишилося: {calls_left}.",
+    "Show or change whether this node borrows web search.": "Показати або змінити налаштування позичання вебпошуку цим вузлом.",
     "Saved the page {url} ({chars} characters) to read it in parts.": "Сторінку {url} ({chars} символів) збережено для читання частинами.",
     "Another native SearXNG operation is in progress.": "Уже виконується інша операція з SearXNG у Python.",
     "Native SearXNG failed: {error}": "Помилка SearXNG у Python: {error}",
@@ -1348,7 +1354,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "Адреса реєстру поки невідома: вкажіть її, `desman global join --registry URL`.",
     "Not now: desman-global stays off.": "Не зараз: desman-global лишається вимкненим.",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "Нічого не віддається, доки ви самі не оберете: `desman global donate PROVIDER`.",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "Поки працює `desman worker`, цей вузол реєструється в реєстрі, повідомляє, що живий, і забирає список відкликань; більше поки нічого не надсилається. `desman global leave` забирає все назад.",
     "In touch with the desman-global registry {url}.": "Зв'язок із реєстром desman-global {url} є.",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "Реєстр desman-global недоступний ({error}); наступна спроба через {seconds} с. Ваша робота триває.",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "Реєстр desman-global відмовив цьому вузлу ({error}); наступна спроба через {seconds} с. Зазвичай причина — неточний годинник.",

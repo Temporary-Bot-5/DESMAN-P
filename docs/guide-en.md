@@ -133,6 +133,8 @@ Remember or write down anything that seemed strange, unclear or slow: that's a p
 
 ## 5. The desman-global network
 
+Use `desman global donate searxng --calls N` to lend managed SearXNG searches. If you have no whole-web engine, use `desman global search on|off` to control borrowing.
+
 desman-global is a network of the participants' computers. Through it DESMANs help one
 another: your computer can do small parts of other people's tasks with the models you *lent*,
 and the network itself gathers free computers into "clusters" for big tasks. Your own tasks

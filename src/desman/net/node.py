@@ -59,14 +59,14 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from desman import evaluation, net, providers
+from desman import evaluation, net, providers, searxng
 from desman.config import Config, ConfigError
 from desman.core import db, holds, netlog
 from desman.core.store import Store
 from desman.core.workspace import workspace_root_for
 from desman.llm.base import LLM, ProviderError, limit_model_calls
 from desman.llm.openai_compat import key_id
-from desman.net import checks, cluster, jobs, protocol, request, sign, updates
+from desman.net import checks, cluster, jobs, protocol, request, search_lend, sign, updates
 
 TIMEOUT: Final = 10.0
 RETRY_FIRST: Final = timedelta(seconds=30)
@@ -142,6 +142,14 @@ def capabilities(config: Config) -> list[protocol.Capability]:
     status` and `keys check`)."""
     found: list[protocol.Capability] = []
     for provider_id, donation in sorted(config.network.donated.items()):
+        if provider_id == protocol.SEARCH_PROVIDER:
+            if searxng.managed_search(config):
+                found.append(
+                    protocol.Capability(
+                        provider=provider_id, calls_per_day=donation.calls_per_day, tokens_per_day=0
+                    )
+                )
+            continue
         try:
             provider = providers.find(provider_id)
         except providers.UnknownProvider:
@@ -221,6 +229,8 @@ def _call(
             received = bytearray()
             for piece in reply.iter_bytes():
                 received += piece
+                if path.startswith(protocol.SEARCH_STATE) and len(received) > protocol.MAX_BODY:
+                    raise _Unreachable("large_reply")
                 if time.monotonic() >= deadline:
                     raise _Unreachable("ContactTimeout")
             if time.monotonic() >= deadline:
@@ -361,6 +371,7 @@ class Node:
         self._store = Store(conn, clock)
         self._seen = jobs.Seen(conn)
         self._workspaces = workspace_root_for(conn) if workspaces is None else workspaces
+        self.search_at: datetime | None = None
         self.claim_at: datetime | None = None
         """No asking for work before this."""
         self._config = config
@@ -405,7 +416,14 @@ class Node:
             current_role = cluster.role(self.conn, now)
             if not config.network.lead and current_role and current_role["role"] == "operator":
                 cluster.left(self.conn, now)
-            suspended = config.network.enabled and not active_capabilities(config, self.conn)
+            active = active_capabilities(config, self.conn)
+            suspended = config.network.enabled and not active
+            search_cap = next((c for c in active if c.provider == protocol.SEARCH_PROVIDER), None)
+            sent_search = next(
+                (c for c in self._sent or [] if c.provider == protocol.SEARCH_PROVIDER), None
+            )
+            if self.registered and search_cap != sent_search and self.failures == 0:
+                self.next_at = None
             if config.network.enabled:
                 with db.transaction(self.conn):
                     previous = self.conn.execute(
@@ -422,6 +440,8 @@ class Node:
                 self.suspended = suspended
                 self.next_at = None
             if suspended:
+                if self.registered and sent_search is not None and self.next_at is None:
+                    self._poll(now)
                 for job in jobs.holding(self.conn):
                     self._drop(job, "abandoned", "no module left")
                 for check in checks.pending(self.conn):
@@ -434,6 +454,7 @@ class Node:
                 self._pending_release = event
                 event = None
             if not self.revoked:
+                self._lend_search(config, now)
                 event = self._jobs(now, idle) or event
             if event is None and not self.revoked:
                 event = self._pending_release
@@ -446,6 +467,58 @@ class Node:
             # own work matters more; look again later.
             self.next_at = now + RETRY_FIRST
             return None
+
+    def _lend_search(self, config: Config, now: datetime) -> None:
+        address = net.registry(config)
+        limit = search_lend.quota(config)
+        if (
+            address is None
+            or not limit
+            or address != self.registry
+            or not self.registered
+            or self.failures
+            or (self.search_at is not None and now < self.search_at)
+            or search_lend.used_today(self.conn, now) >= limit
+        ):
+            return
+        key = self._key(address)
+        if key is None:
+            return
+        self.search_at = now + timedelta(seconds=5)
+        http = self._http()
+        try:
+            offer = _call(
+                http,
+                key,
+                address,
+                "POST",
+                protocol.SEARCH_NEXT,
+                None,
+                protocol.SearchJobs,
+                now,
+                time.monotonic() + TIMEOUT,
+            )
+            for job in offer.jobs:
+                current = self._config()
+                if net.registry(current) != address:
+                    break
+                result = search_lend.answer(self.conn, current, job, http, self._clock)
+                if result is None or net.registry(self._config()) != address:
+                    break
+                _call(
+                    http,
+                    key,
+                    address,
+                    "POST",
+                    protocol.SEARCH_ANSWER,
+                    result,
+                    protocol.SearchState,
+                    self._clock(),
+                    time.monotonic() + TIMEOUT,
+                )
+        except (_Problem, _Unreachable) as e:
+            if isinstance(e, _Problem) and e.error in {REVOKED, NOT_REGISTERED}:
+                self._refused(address, key, e.error, now)
 
     def _poll(self, now: datetime) -> Event | None:
         try:
@@ -1076,7 +1149,9 @@ class Node:
         self.claim_at = now + CLAIM_EVERY
         lent = active_capabilities(config, self.conn)
         job_work = bool(self.work) and any(
-            jobs.quota_left(self.conn, config, c.provider, now) for c in lent
+            c.provider != protocol.SEARCH_PROVIDER
+            and jobs.quota_left(self.conn, config, c.provider, now)
+            for c in lent
         )
         proposal_checks = checks.can_check()
         if not job_work and not proposal_checks:

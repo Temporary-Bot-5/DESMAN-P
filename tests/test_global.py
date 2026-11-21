@@ -104,7 +104,7 @@ def test_a_schema_4_config_upgrades_to_desman_global_off() -> None:
     data["schema_version"] = 4
     del data["network"]
     config = Config.model_validate(upgrade(data))
-    assert config.schema_version == 9 and config.network == Network()
+    assert config.schema_version == 10 and config.network == Network()
     assert config.language == "ru"
 
 
@@ -171,6 +171,7 @@ def test_status_says_it_is_off(monkeypatch: pytest.MonkeyPatch, clock: FakeClock
         "used_today": None,
         "resets_at": "2026-01-02T00:00:00+00:00",
         "lead": True,
+        "borrow_search": False,
         "cluster": None,
     }
     assert ok("global").output == result.output

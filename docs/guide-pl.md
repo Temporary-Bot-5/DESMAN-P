@@ -126,6 +126,8 @@ Zapamiętaj lub zanotuj wszystko, co było dziwne, niejasne lub powolne. To też
 
 ## 5. Sieć desman-global
 
+Polecenie `desman global donate searxng --calls N` udostępnia wyszukiwanie przez zarządzany SearXNG. Bez własnej wyszukiwarki użyj `desman global search on|off`, aby włączyć lub wyłączyć pożyczanie.
+
 desman-global łączy komputery uczestników. Twój komputer może wykonać małe części cudzych zadań za
 pomocą *udostępnionych* modeli. Do dużych zadań sieć łączy wolne komputery w grupy. Twoje zadania
 mają pierwszeństwo. Inne są wykonywane tylko wtedy, gdy twój DESMAN jest wolny.

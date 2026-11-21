@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "オン",
+    "Borrow web search": "ウェブ検索を借りる",
+    "Set up local SearXNG with `desman search setup` before lending it.": "貸し出す前に `desman search setup` でローカルの SearXNG を設定してください。",
+    "{calls} searches a day": "1日あたり {calls} 件の検索",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "本日の検索数: {calls} 件。残り: {calls_left} 件。",
+    "Show or change whether this node borrows web search.": "このノードがウェブ検索を借りるかどうかを表示または変更します。",
     "Saved the page {url} ({chars} characters) to read it in parts.": "ページ {url}（{chars} 文字）を分割して読むために保存しました。",
     "Another native SearXNG operation is in progress.": "ネイティブ SearXNG の別の操作を実行中です。",
     "Native SearXNG failed: {error}": "ネイティブ SearXNG でエラーが発生しました: {error}",
@@ -1241,7 +1247,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "レジストリのアドレスはまだわかりません：`desman global join --registry URL` で指定してください。",
     "Not now: desman-global stays off.": "今はしない：desman-global はオフのままです。",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "あなたが選ぶまで何も貸し出されません：`desman global donate PROVIDER`。",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "`desman worker` の実行中、このノードはレジストリに登録し、生存を知らせ、失効リストを取得します。それ以外はまだ何も送信しません。`desman global leave` ですべて取り下げます。",
     "In touch with the desman-global registry {url}.": "desman-global のレジストリ {url} と接続しています。",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "desman-global のレジストリに接続できません（{error}）。{seconds} 秒後に再試行します。あなた自身の作業は続行されます。",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global のレジストリがこのノードを拒否しました（{error}）。{seconds} 秒後に再試行します。よくある原因は時計のずれです。",

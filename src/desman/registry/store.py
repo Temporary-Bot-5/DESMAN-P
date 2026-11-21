@@ -432,6 +432,37 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     ALTER TABLE jobs ADD COLUMN cluster TEXT REFERENCES cluster_tasks (id);
     CREATE INDEX jobs_cluster ON jobs (cluster) WHERE cluster IS NOT NULL;
     """,
+    """
+    CREATE TABLE search_polls (
+        lender TEXT PRIMARY KEY REFERENCES nodes (fingerprint),
+        polled_at REAL NOT NULL
+    ) STRICT;
+    CREATE TABLE search_ask_attempts (
+        asker TEXT NOT NULL REFERENCES nodes (fingerprint),
+        asked_at REAL NOT NULL
+    ) STRICT;
+    CREATE INDEX search_attempts_by_asker ON search_ask_attempts (asker, asked_at);
+    CREATE INDEX search_attempts_by_time ON search_ask_attempts (asked_at);
+    CREATE TABLE search_requests (
+        id TEXT PRIMARY KEY,
+        asker TEXT NOT NULL REFERENCES nodes (fingerprint),
+        lender TEXT NOT NULL REFERENCES nodes (fingerprint),
+        asked_at REAL NOT NULL,
+        assigned_at REAL NOT NULL,
+        taken INTEGER NOT NULL DEFAULT 0,
+        reassigned INTEGER NOT NULL DEFAULT 0,
+        state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'answered', 'expired')),
+        query TEXT,
+        count INTEGER NOT NULL,
+        answered_at REAL,
+        payload TEXT
+    ) STRICT;
+    CREATE INDEX search_by_lender ON search_requests (lender, state, answered_at);
+    CREATE INDEX search_reassign ON search_requests (assigned_at)
+        WHERE state = 'waiting' AND taken = 0 AND reassigned = 0;
+    CREATE INDEX search_expiry ON search_requests (asked_at)
+        WHERE state = 'waiting' OR payload IS NOT NULL;
+    """,
 )
 
 

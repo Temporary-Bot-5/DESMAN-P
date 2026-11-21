@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "on": "चालू",
+    "Borrow web search": "वेब खोज उधार लें",
+    "Set up local SearXNG with `desman search setup` before lending it.": "स्थानीय SearXNG उधार देने से पहले उसे `desman search setup` से सेट अप करें।",
+    "{calls} searches a day": "प्रति दिन {calls} खोजें",
+    "Searches used today: {calls}. Remaining: {calls_left}.": "आज की गई खोजें: {calls}। शेष: {calls_left}।",
+    "Show or change whether this node borrows web search.": "देखें या बदलें कि यह नोड वेब खोज उधार लेता है या नहीं।",
     "Saved the page {url} ({chars} characters) to read it in parts.": "पृष्ठ {url} ({chars} अक्षर) को भागों में पढ़ने के लिए सहेजा गया।",
     "Another native SearXNG operation is in progress.": "नेटिव SearXNG की एक और कार्रवाई चल रही है।",
     "Native SearXNG failed: {error}": "नेटिव SearXNG विफल रहा: {error}",
@@ -1304,7 +1310,6 @@ MESSAGES: dict[str, Forms] = {
     "No registry address is known yet: give one with `desman global join --registry URL`.": "रजिस्ट्री का पता अभी ज्ञात नहीं है: एक दें, `desman global join --registry URL`।",
     "Not now: desman-global stays off.": "अभी नहीं: desman-global बंद रहता है।",
     "Nothing is lent until you choose it: `desman global donate PROVIDER`.": "जब तक आप स्वयं न चुनें, कुछ भी उधार नहीं दिया जाता: `desman global donate PROVIDER`।",
-    "While `desman worker` runs, this node registers with the registry, says it is alive and fetches the revocations; nothing else is sent yet. `desman global leave` takes everything back.": "जब तक `desman worker` चलता है, यह नोड रजिस्ट्री में पंजीकरण करता है, बताता है कि वह सक्रिय है और निरस्तीकरण सूची लाता है; अभी इसके अलावा कुछ नहीं भेजा जाता। `desman global leave` सब कुछ वापस ले लेता है।",
     "In touch with the desman-global registry {url}.": "desman-global रजिस्ट्री {url} से संपर्क बना हुआ है।",
     "The desman-global registry cannot be reached ({error}); trying again in {seconds} s. Your own work goes on.": "desman-global रजिस्ट्री तक नहीं पहुँचा जा सका ({error}); {seconds} सेकंड बाद फिर कोशिश होगी। आपका अपना काम जारी है।",
     "The desman-global registry refused this node ({error}); trying again in {seconds} s. A clock that is off is the usual cause.": "desman-global रजिस्ट्री ने इस नोड को अस्वीकार किया ({error}); {seconds} सेकंड बाद फिर कोशिश होगी। आम तौर पर कारण गलत घड़ी होती है।",

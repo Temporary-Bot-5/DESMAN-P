@@ -130,6 +130,8 @@ DESMAN の画面はブラウザーに表示されます。
 
 ## 5. desman-global ネットワーク
 
+`desman global donate searxng --calls N` で管理下の SearXNG 検索を貸し出せます。ウェブ検索エンジンがなければ `desman global search on|off` で借り入れを切り替えられます。
+
 desman-global は参加者のパソコンをつなぎます。あなたのパソコンは、*貸し出した*
 モデルで他の人のタスクの一部を担当できます。大きなタスクではネットワークが空いている
 パソコンをまとめてグループにします。自分のタスクが優先され、他の人の作業は

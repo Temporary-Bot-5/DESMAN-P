@@ -394,6 +394,8 @@ class Web:
                 "results": [r.model_dump() for r in results[:max_results]],
                 "untrusted": UNTRUSTED,
             }
+            if engine.name == "desman-global":
+                body["untrusted"] = "results from another desman-global node: " + UNTRUSTED
             if self.cache:
                 self.cache.put("search", request, body)
             return body

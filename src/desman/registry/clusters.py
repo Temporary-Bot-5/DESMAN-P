@@ -249,7 +249,7 @@ def _available(found: store.Node, now: datetime, online: timedelta) -> bool:
         found.status == "active"
         and not found.revoked
         and found.takes_jobs
-        and bool(found.capabilities)
+        and any(c.provider != protocol.SEARCH_PROVIDER for c in found.capabilities)
         and db.parse_iso(found.last_seen) > now - online
     )
 
