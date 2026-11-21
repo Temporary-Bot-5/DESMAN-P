@@ -92,7 +92,7 @@ enough for WASI. Then the next steps would be:
    are gone.
 2. Find why `_ctypes`/`_ssl` fail. A test with the python.org build as well as the uv build
    would tell whether it is the build or AppContainer.
-3. Add a self-check before every run that fails closed. It would verify that the child's token
-   is an AppContainer token (`TokenIsAppContainer`) with zero capabilities, and refuse
-   otherwise.
+3. Make the self-check fail closed and complete. The prototype already reads the suspended
+   child's `TokenAppContainerSid` and compares it before resuming. A backend would also check
+   that the child has zero capabilities and that it is in the Job, and refuse otherwise.
 4. Write an ADR and get an independent review.
