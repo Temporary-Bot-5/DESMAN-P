@@ -48,10 +48,14 @@ from desman.llm.base import (
     Request,
     RequestTooLarge,
     Usage,
+    before_model_call,
+    time_for_call,
 )
 from desman.llm.tool_calls import ToolCall, normalize_tool_calls
 
 DEFAULT_TIMEOUT = 60.0
+CLOUD_TIMEOUT_CAP = 300.0
+LOCAL_TIMEOUT_CAP = 900.0
 DEFAULT_LIMIT_PAUSE = 60.0  # a rate limit without a hint
 # A used-up quota without a reset hint: daily quotas reset hours later, so probing every minute
 # would only burn requests. An hour is a cheap, conservative probe.
@@ -107,6 +111,8 @@ class OpenAICompatible:
         max_tokens: int | None = None,
         paid: bool = False,
         context: int | None = None,
+        local: bool = False,
+        timeout_cap: float | None = None,
     ) -> None:
         if not keys:
             raise ValueError(f"{provider}: no API key")
@@ -115,6 +121,9 @@ class OpenAICompatible:
         self.keys = list(keys)
         self.model = model
         self.timeout = timeout
+        self.local = local
+        cap = max(timeout, LOCAL_TIMEOUT_CAP if local else CLOUD_TIMEOUT_CAP)
+        self.max_timeout = min(cap, timeout_cap) if timeout_cap is not None else cap
         self.client = client or httpx.Client(timeout=timeout)
         self.on_call = on_call
         self.clock = clock
@@ -139,7 +148,18 @@ class OpenAICompatible:
         """Called before every request sent (one per key tried): the rate limiter
         (`llm.limiter.Limited`) waits there, or raises `RateLimited` and nothing is sent."""
 
+    def call_timeout(self, request: Request) -> float:
+        from desman.llm.router import REPLY_TOKENS, estimated_tokens
+
+        prompt_tokens = estimated_tokens(request) - (request.max_tokens or REPLY_TOKENS)
+        baseline, seconds = (2_000, 30) if self.local else (4_000, 10)
+        return min(
+            self.max_timeout, self.timeout + seconds * max(0, prompt_tokens - baseline) / 1_000
+        )
+
     def complete(self, request: Request) -> Completion:
+        time_for_call(self.name)
+        timeout = self.call_timeout(request)
         model = request.model or self.model
         body: dict[str, Any] = {
             "model": model,
@@ -194,8 +214,9 @@ class OpenAICompatible:
                 continue
             if self.pace is not None:
                 self.pace()  # request bucket limits apply to every key, outside key rotation
+            available = before_model_call(self.name, timeout)
             try:
-                return self._attempt(i, model, body, prompt_hash)
+                return self._attempt(i, model, body, prompt_hash, available)
             except ProviderRejected as e:
                 if e.status not in (401, 402, 403) and not account_unavailable(e):
                     raise
@@ -235,7 +256,7 @@ class OpenAICompatible:
         )
 
     def _attempt(
-        self, index: int, model: str, body: dict[str, Any], prompt_hash: str
+        self, index: int, model: str, body: dict[str, Any], prompt_hash: str, timeout: float
     ) -> Completion:
         key = self.keys[index]
         started = self.monotonic()
@@ -288,11 +309,11 @@ class OpenAICompatible:
                 else f"{self.base_url}/chat/completions",
                 json=body,
                 headers={name: value.format(key=key) for name, value in self.auth},
-                timeout=self.timeout,
+                timeout=timeout,
             ) as response:
                 chunks = []
                 for chunk in response.iter_bytes():
-                    if self.monotonic() - started >= self.timeout:
+                    if self.monotonic() - started >= timeout:
                         raise httpx.ReadTimeout("whole-call deadline exceeded")
                     chunks.append(chunk)
                 response = httpx.Response(
@@ -301,7 +322,7 @@ class OpenAICompatible:
                     content=b"".join(chunks),
                 )
         except httpx.TimeoutException:
-            error: ProviderError = ProviderTimeout(self.name, self.timeout)
+            error: ProviderError = ProviderTimeout(self.name, timeout)
             record(error)
             raise error from None
         except httpx.TransportError as e:

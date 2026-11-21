@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -54,7 +55,13 @@ from desman.core.context import (
     build_context,
     given,
 )
-from desman.core.effects import Effects, earlier_lookups, workspace_files
+from desman.core.effects import (
+    EffectRef,
+    Effects,
+    earlier_lookups,
+    earlier_results,
+    workspace_files,
+)
 from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
@@ -68,9 +75,10 @@ from desman.core.store import (
 )
 from desman.core.tools import Registry, Toolbox, ToolResult
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
-from desman.llm.base import LLM, ProviderError, among, noticing_unfit
+from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
 S = SubtaskStatus
+MODEL_CALL_MARGIN = 30
 
 DEFAULT_POLL_SECONDS = 5.0
 """How often a coordinator with nothing to do looks again while others hold work (a worker's
@@ -172,6 +180,8 @@ class Work(BaseModel):
     tools: Toolbox
     """The only way to act: tool calls on the task's own workspace (and, once granted, more).
     A refused or mistaken call comes back as a failed ToolResult; every call is audited."""
+    execution: int = 0
+    previous_starts: int = 0
     unfit: frozenset[str] = frozenset()
     """The models an execution of this task found unfit (`Failure.unfit_provider`): an executor
     with a lineup of models does not ask them (`Request.avoid`)."""
@@ -199,6 +209,7 @@ class Crew:
     strategies: Strategies = ONE_MODEL
     providers: Labels | Callable[[Subtask], Labels] | None = None
     planner: LLM | None = None
+    step_seconds: int = 0
 
 
 class RunResult(BaseModel):
@@ -259,8 +270,8 @@ class Coordinator:
         self.owner = owner
         """Lease and review reservations are taken under this name: unique per process when
         several share a database (`core.owner.current_owner`)."""
-        self.lease_seconds = lease_seconds
-        self.review_seconds = review_seconds
+        self._lease_seconds = lease_seconds
+        self._review_seconds = review_seconds
         self.context_budget_tokens = context_budget_tokens
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
         self.tools = tools
@@ -301,6 +312,14 @@ class Coordinator:
         since the start, ROADMAP 5.3)."""
         self.network = network
         """Who works jobs from desman-global; None: they are never taken here."""
+
+    @property
+    def lease_seconds(self) -> int:
+        return max(self._lease_seconds, self.network.step_seconds if self.network else 0)
+
+    @property
+    def review_seconds(self) -> int:
+        return max(self._review_seconds, self.network.step_seconds if self.network else 0)
 
     def run(
         self,
@@ -477,6 +496,14 @@ class Coordinator:
                 events.append(f"preempted {subtask.id} for {critical.id}")
                 raise PreemptedError(subtask.id, critical.id)
 
+        def cover_call(timeout: float) -> None:
+            self.store.heartbeat(
+                subtask.id,
+                lease,
+                lease_seconds=math.ceil(timeout) + MODEL_CALL_MARGIN,
+                only_extend=True,
+            )
+
         outcome: Outcome
         crew = self._crew(subtask)
         own = crew is not self.network  # a job from the network is never split
@@ -506,6 +533,8 @@ class Coordinator:
                     self._cannot_run(subtask, lease, missing, events)
                     return
             goal, is_final = self.store.subtask_goal(subtask)
+            offered = [str(spec["name"]) for spec in tools.specs()]
+            continuation_rows: list[EffectRef] = []
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
@@ -516,39 +545,51 @@ class Coordinator:
                 goal=goal,
                 final_goal=goal if is_final else None,
                 files=(lambda chars: workspace_files(self.store, subtask, tools.workspace, chars))
-                if any(
-                    spec["name"] in {"read_file", "write_file", "list_files"}
-                    for spec in tools.specs()
+                if {"read_file", "write_file", "list_files"}.intersection(offered)
+                else None,
+                continuation=(
+                    lambda chars: earlier_results(
+                        journal, subtask, tools.workspace, chars, continuation_rows
+                    )
                 )
+                if "read_file" in offered and strategy is not Strategy.COMBINE
                 else None,
                 earlier=lambda chars: earlier_lookups(
                     self.store, subtask, self.store.executions(subtask.id), chars
                 ),
             )
-            self._started(subtask, context, [str(tool["name"]) for tool in tools.specs()])
+            previous_starts = self.store.execution_starts(subtask.id, journal.execution)
+            self._started(subtask, context, offered, continuation_rows)
             work = Work(
                 subtask=subtask,
                 context=context,
                 heartbeat=heartbeat,
                 tools=tools,
                 unfit=unfit,
+                execution=journal.execution,
+                previous_starts=previous_starts,
             )
             if strategy is Strategy.DECOMPOSE:
-                if self._decompose(work, lease, events):
-                    return
+                with guard_model_calls(cover_call):
+                    if self._decompose(work, lease, events):
+                        return
                 # No usable split: try once more the way the attempt before did.
                 context = context.model_copy(
                     update={"strategy": crew.strategies(attempt, split=False, **avoid)}
                 )
                 work = work.model_copy(update={"context": context})
-                self._started(subtask, context, [str(tool["name"]) for tool in tools.specs()])
+                self._started(subtask, context, offered, continuation_rows)
 
             def unfit_heard(label: str) -> None:
                 self.store.note(
                     subtask.id, Actor.EXECUTOR, "model_unfit", {"unfit_provider": label}
                 )
 
-            with calls.for_(self._for(calls.Role.EXECUTOR, subtask)), noticing_unfit(unfit_heard):
+            with (
+                calls.for_(self._for(calls.Role.EXECUTOR, subtask)),
+                noticing_unfit(unfit_heard),
+                guard_model_calls(cover_call),
+            ):
                 returned = crew.executor(work)
             if not isinstance(returned, Success | Failure):
                 raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
@@ -721,7 +762,9 @@ class Coordinator:
             self.store.note(subtask.id, Actor.EXECUTOR, "context_missing", {"paths": missing})
         return found
 
-    def _started(self, subtask: Subtask, context: Context, tools: list[str]) -> None:
+    def _started(
+        self, subtask: Subtask, context: Context, tools: list[str], continuation: list[EffectRef]
+    ) -> None:
         self.store.note(
             subtask.id,
             Actor.EXECUTOR,
@@ -731,6 +774,7 @@ class Coordinator:
                 "strategy": context.strategy.value,
                 "execution": self.store.executions(subtask.id),
                 "tools": tools,
+                "continuation": continuation,
             },
         )
 
@@ -759,9 +803,13 @@ class Coordinator:
         only while the reservation is still ours."""
         review: Review | Failure
         artifact = self.store.latest_artifact(subtask.id)
+
+        def cover_call(timeout: float) -> None:
+            self.store.extend_review(subtask.id, token, math.ceil(timeout) + MODEL_CALL_MARGIN)
+
         try:
             reviewer = self._crew(subtask).reviewer
-            with calls.for_(self._for(calls.Role.REVIEWER, subtask)):
+            with calls.for_(self._for(calls.Role.REVIEWER, subtask)), guard_model_calls(cover_call):
                 returned = reviewer(subtask, artifact)
             # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
             review = returned if isinstance(returned, Failure) else Review.model_validate(returned)

@@ -27,6 +27,45 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from desman.core.retry import FailureKind
 
+_lease_guard: ContextVar[Callable[[float], None] | None] = ContextVar("model_lease", default=None)
+_call_budget: ContextVar[Callable[[], float] | None] = ContextVar("model_budget", default=None)
+
+
+@contextmanager
+def guard_model_calls(guard: Callable[[float], None]) -> Iterator[None]:
+    token = _lease_guard.set(guard)
+    try:
+        yield
+    finally:
+        _lease_guard.reset(token)
+
+
+@contextmanager
+def limit_model_calls(remaining: Callable[[], float]) -> Iterator[None]:
+    token = _call_budget.set(remaining)
+    try:
+        yield
+    finally:
+        _call_budget.reset(token)
+
+
+def time_for_call(provider: str, timeout: float = float("inf")) -> float:
+    remaining = _call_budget.get()
+    if remaining is None:
+        return timeout
+    left = remaining()
+    if left <= 0:
+        raise BudgetExhausted(provider)
+    return min(timeout, left)
+
+
+def before_model_call(provider: str, timeout: float) -> float:
+    timeout = time_for_call(provider, timeout)
+    guard = _lease_guard.get()
+    if guard is not None:
+        guard(timeout)
+    return time_for_call(provider, timeout)
+
 
 class Message(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -127,6 +166,15 @@ class ProviderError(Exception):
     def paused_until(self, now: datetime) -> datetime | None:
         """For LIMIT errors: when to try again; None lets the store use its default pause."""
         return None
+
+
+class BudgetExhausted(ProviderError):
+    """The job's remaining lease budget cannot accommodate another call."""
+
+    kind = FailureKind.TRANSIENT
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider, "model call budget exhausted")
 
 
 class ProviderRejected(ProviderError):

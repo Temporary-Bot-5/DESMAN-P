@@ -64,7 +64,7 @@ from desman.config import Config, ConfigError
 from desman.core import db, holds, netlog
 from desman.core.store import Store
 from desman.core.workspace import workspace_root_for
-from desman.llm.base import LLM, ProviderError
+from desman.llm.base import LLM, ProviderError, limit_model_calls
 from desman.llm.openai_compat import key_id
 from desman.net import checks, cluster, jobs, protocol, request, sign, updates
 
@@ -941,7 +941,9 @@ class Node:
                         {"cluster": appointment.cluster, "task": appointment.task, "reason": why},
                     )
 
-            cluster.supervise(state, self.cluster_model, send, stuck)
+            expires = min(appointment.expires_at, state.task.record.expires_at)
+            with limit_model_calls(lambda: (expires - self._clock()).total_seconds() - TIMEOUT):
+                cluster.supervise(state, self.cluster_model, send, stuck)
         except _ClusterRefused:
             pass
         except ProviderError:

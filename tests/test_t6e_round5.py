@@ -224,8 +224,9 @@ def test_ceiling_query_is_bounded_and_once_per_member(
 
     monkeypatch.setattr(router, "request_ceiling", ceiling)
     chain = router.Fallback([(FakeLLM("ok"), choice)], conn=store.conn)
-    with pytest.raises(Exception, match="largest available request ceiling"):
-        chain.complete(Request(messages=[Message(role="user", content="x" * 40000)]))
+    assert (
+        chain.complete(Request(messages=[Message(role="user", content="x" * 40000)])).text == "ok"
+    )
     assert queried == [choice.label]
     store.conn.set_trace_callback(None)
 

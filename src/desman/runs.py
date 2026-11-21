@@ -42,7 +42,7 @@ from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
 from desman.net import jobs
-from desman.net.node import capabilities
+from desman.net.node import EXTEND_WHEN, capabilities
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
 from desman.searxng import ensure_native, uses_docker
 
@@ -127,6 +127,7 @@ def models(
     clock: Callable[[], datetime] | None = None,
     sleep: Callable[[float], None] | None = None,
     only: Collection[str] | None = None,
+    timeout_cap: float | None = None,
     wrap: Callable[[LLM, router.Choice], LLM] | None = None,
     read_tuning: Callable[[], Tuning] | None = None,
 ) -> Models:
@@ -163,8 +164,15 @@ def models(
         )
         identity = (choice.label, applicable, tuple(key_id(k.value) for k in keys))
         if identity not in clients:
-            api = router.connect(cfg, choice, first_key=applicable, on_call=recorder, client=client)
-            timeouts.append(api.timeout)
+            api = router.connect(
+                cfg,
+                choice,
+                first_key=applicable,
+                timeout_cap=timeout_cap,
+                on_call=recorder,
+                client=client,
+            )
+            timeouts.append(min(api.timeout, api.max_timeout))
             paced: LLM
             server = None
             if choice.provider.local:  # paced by the machine, not by a rate
@@ -673,6 +681,9 @@ def network_crew(
                 cache=cache,
                 clock=clock,
                 only=lent,
+                # Workers poll the registry between calls. Leave room for pacing and backoff
+                # within the shortest remaining lease that the registry client won't extend.
+                timeout_cap=EXTEND_WHEN.total_seconds() - WAITS_PER_CALL,
                 wrap=lambda llm, choice: jobs.Quota(llm, store.conn, choice.provider.id, load, now),
             )
         except router.NoProvider:
@@ -692,13 +703,14 @@ def network_crew(
         tz=UTC,  # another node rechecks: one date for both, wherever they are
     )
     return Crew(
-        jobs.executor(store.conn, executor),
+        jobs.executor(store.conn, executor, clock=store.clock),
         jobs.reviewer(
             store.conn,
             llm_reviewer(
                 reviewer, evidence=functools.partial(evidence, store), clock=store.clock, tz=UTC
             ),
             llm_reviewer(reviewer, clock=store.clock, tz=UTC),
+            clock=store.clock,
         ),
         # The person's switches as they are at each tool call, not at the worker's start: a
         # permission turned off holds from the next call on (a config that fails: none on).
@@ -706,6 +718,7 @@ def network_crew(
         strategies=functools.partial(strategy_for, other_model=crew_models.other is not None),
         providers=crew_models.labels,
         planner=crew_models.for_(calls.Role.NETWORK_PLANNER),
+        step_seconds=crew_models.step_seconds,
     )
 
 

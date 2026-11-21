@@ -42,6 +42,7 @@ from desman.llm import catalog
 from desman.llm import waiting as provider_wait
 from desman.llm.base import (
     LLM,
+    BudgetExhausted,
     Completion,
     ProviderError,
     ProviderRejected,
@@ -51,6 +52,7 @@ from desman.llm.base import (
     Request,
     RequestTooLarge,
     among,
+    time_for_call,
     unfit_seen,
 )
 from desman.llm.limiter import Busy
@@ -130,6 +132,7 @@ class Choice:
     """What is known of a local model (its context, from the settings); None: the catalog's."""
 
     memory_risk: bool = field(default=False, compare=False)
+    advisory_context: bool = field(default=False, compare=False)
 
     @property
     def spec(self) -> catalog.Model:
@@ -169,6 +172,7 @@ def lineup(
                 catalog.local_model(
                     name, p.context(config) or (16384 if p.id == "ollama" else None)
                 ),
+                advisory_context=p.context_env not in config.settings or p.context(config) is None,
             )
         return local_choices[identity]
 
@@ -401,9 +405,12 @@ def _choice(config: Config, p: Provider, model: str) -> Choice:
         from desman.local_models import ollama_context
 
         context, risk = ollama_context(config, model)
-        return Choice(p, model, catalog.local_model(model, context), risk)
+        advisory = p.context_env not in config.settings or p.context(config) is None
+        return Choice(p, model, catalog.local_model(model, context), risk, advisory)
     if p.local:
-        return Choice(p, model, catalog.local_model(model, _local_context(config, p, model)))
+        configured = p.context(config)
+        advisory = p.context_env not in config.settings or configured is None
+        return Choice(p, model, catalog.local_model(model, configured), advisory_context=advisory)
     return Choice(p, model)
 
 
@@ -424,6 +431,7 @@ def connect(
     choice: Choice,
     *,
     first_key: str | None = None,
+    timeout_cap: float | None = None,
     on_call: Callable[[CallRecord], None] | None = None,
     client: httpx.Client | None = None,
 ) -> OpenAICompatible:
@@ -439,11 +447,13 @@ def connect(
         choice.model,
         client=client,
         timeout=chosen.timeout,
+        timeout_cap=timeout_cap,
         on_call=on_call,
         auth=chosen.auth,
         send_temperature=chosen.send_temperature,
         max_tokens=chosen.max_tokens,
         paid=chosen.paid,
+        local=chosen.local,
         context=choice.known.context
         if choice.known
         else _local_context(config, chosen, choice.model),
@@ -467,6 +477,11 @@ CHARS_PER_TOKEN = 3
 """A cautious estimate of a prompt's size (fewer characters a token than English averages)."""
 REPLY_TOKENS = 1_024
 """Room left for the reply when a request sets no max_tokens."""
+
+
+ESTIMATE_SLACK = 2.0
+"""How far over a model's known capacity an estimate may be and the model still be tried: the
+estimate counts characters, not tokens."""
 
 
 def estimated_tokens(request: Request) -> int:
@@ -509,12 +524,26 @@ class LastCall:
     skipped: tuple[SkippedModel, ...] = ()
 
 
+def _request_limit(choice: Choice, conn: sqlite3.Connection | None) -> int | None:
+    ceiling = request_ceiling(choice, conn)
+    # Local defaults and uncatalogued cloud contexts are estimates.
+    if choice.advisory_context or (choice.provider.local and choice.known is None):
+        return ceiling
+    if (
+        not choice.provider.local
+        and choice.known is None
+        and not any(known.id == choice.model for known in catalog.models_of(choice.provider))
+    ):
+        return ceiling
+    return min(ceiling, choice.spec.context) if ceiling is not None else choice.spec.context
+
+
 class Fallback:
     """One role's models: a call goes to the first one that can take it.
 
-    A model the task found unfit (`Request.avoid`) is skipped, and so is one whose context is
-    too small for the request (unless that leaves none: then the rest are tried all the same).
-    A size refusal moves the call on and skips that model for requests at least as large.
+    A model with a known context or request ceiling too small for the request is skipped.
+    Among fitting models, those the task found unfit (`Request.avoid`) go unused when possible.
+    A provider size refusal skips that model for requests at least as large.
     A provider error moves the call to the next model, except a quality one: that is the
     model's own answer, judged by the retry policy (which may switch models for the next
     attempt). A model unable to answer such a request at all (`ProviderError.unfit_model`:
@@ -616,62 +645,60 @@ class Fallback:
             for llm, choice in ordered_members
             if need < self._refused_sizes.get(choice.label if choice else llm.name, need + 1)
         ]
-        fit = [
-            (llm, choice)
-            for llm, choice in sized
-            if (choice is None or not among(choice.label, request.avoid))
-            and (choice.label if choice is not None else llm.name) not in self._unfit
-        ]
-        fit = fit or sized
-        # An uncatalogued cloud model has a conservative guessed context, not a measured
-        # limit. Give the person's choice a chance instead of skipping it on that guess.
-        large = [
-            m
-            for m in fit
-            if m[1] is None
-            or m[1].spec.context >= need
-            or (
-                m[1].known is None
-                and not any(known.id == m[1].model for known in catalog.models_of(m[1].provider))
-            )
-        ]
-        ceilings = {
-            choice.label: request_ceiling(choice, self.conn)
+        limits = {
+            choice.label: _request_limit(choice, self.conn)
             for _, choice in self.members
             if choice is not None
         }
-        members = [
-            m
-            for m in (large or fit)
-            if m[1] is None or (ceiling := ceilings[m[1].label]) is None or ceiling >= need
+        large = [
+            (llm, choice)
+            for llm, choice in sized
+            if choice is None or (limit := limits[choice.label]) is None or limit >= need
         ]
+        # Preserve lineup order among models that fit, then try advisory underestimates.
+        if large:
+            large.sort(key=lambda m: max(0, need - m[1].spec.context) if m[1] is not None else 0)
+        elif sized:
+            # The token estimate is rough: a request just over the largest capacity gets a try
+            # there; one far over it would only be refused (or cut) by the model.
+            largest = max(limits[choice.label] or 0 for _, choice in sized if choice is not None)
+            if need <= largest * ESTIMATE_SLACK:
+                large = [
+                    (llm, choice)
+                    for llm, choice in sized
+                    if choice is not None and limits[choice.label] == largest
+                ]
+        fit = [
+            (llm, choice)
+            for llm, choice in large
+            if (choice is None or not among(choice.label, request.avoid))
+            and (choice.label if choice is not None else llm.name) not in self._unfit
+        ]
+        members = fit or large
         for llm, choice in self.members:
             if (llm, choice) not in members:
+                limit = limits[choice.label] if choice is not None else None
                 skipped.append(
                     SkippedModel(
                         llm.name if choice is None else choice.label,
                         "context"
-                        if (llm, choice) in fit or (llm, choice) not in sized
+                        if (llm, choice) not in sized or (limit is not None and limit < need)
                         else "unfit",
                         needed=need,
-                        context=min(
-                            choice.spec.context,
-                            ceilings[choice.label] or choice.spec.context,
-                        )
-                        if choice
-                        else None,
+                        context=limit,
                     )
                 )
-        untried = self._untried.pop(scope, {c.label if c else m.name for m, c in members})
+        untried = self._untried.get(scope, {c.label if c else m.name for m, c in members}).copy()
         errors: list[ProviderError] = []
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
+            self._untried.pop(scope, None)
             if not sized:
                 raise RequestTooLarge(self.name, 413, f"no model can take {need} tokens")
             largest = max(
-                ceilings[choice.label] or 0 for _, choice in (large or fit) if choice is not None
+                (limits[choice.label] or 0 for _, choice in sized if choice is not None), default=0
             )
-            raise ProviderRejected(
+            raise RequestTooLarge(
                 self.name,
                 413,
                 f"request needs {need} tokens; largest available request ceiling is {largest}. "
@@ -679,6 +706,8 @@ class Fallback:
             )
         failed_over = False
         for i, (llm, choice) in enumerate(members):
+            self._call = LastCall(skipped=tuple(skipped))
+            time_for_call(self.name)
             label = llm.name if choice is None else choice.label
             untried.discard(label)
             if self.on_used is not None:
@@ -696,7 +725,10 @@ class Fallback:
                     self._scopes.pop(next(iter(self._scopes)))
             try:
                 reply = llm.complete(request)
+            except BudgetExhausted:
+                raise
             except ProviderError as e:
+                self._untried.pop(scope, None)
                 reason = (
                     "context"
                     if isinstance(e, RequestTooLarge)
@@ -752,12 +784,18 @@ class Fallback:
                         raise
                     break
                 continue
+            self._untried.pop(scope, None)
             self._deferred.pop(scope, None)
             self._last = (reply, llm)
             ahead = [
                 c.label if c else m.name
                 for m, c in ordered_members[: ordered_members.index((llm, choice))]
             ]
+            ahead.extend(
+                label
+                for model, candidate in members[:i]
+                if (label := candidate.label if candidate else model.name) not in ahead
+            )
             ordered = tuple(item for label in ahead for item in skipped if item.model == label)
             self._call = LastCall(f"{reply.provider}/{reply.model}", ordered)
             return reply
@@ -834,6 +872,8 @@ class Backoff:
             started = self.monotonic()
             try:
                 return self.inner.complete(request)
+            except BudgetExhausted:
+                raise
             except ProviderError as e:
                 # Said of this call alone, not of the repeats before it (`Fallback` asks).
                 e.slow = self.monotonic() - started > QUICK_FAILURE
@@ -850,5 +890,7 @@ class Backoff:
                 else:
                     delay = min(MAX_DELAY, BASE_DELAY * 2 ** (attempt - 1))
                     delay *= 0.5 + self.jitter() / 2
+            if delay >= time_for_call(self.name):
+                raise BudgetExhausted(self.name)
             (self.sleep or _sleep)(delay)
         raise AssertionError("unreachable")  # pragma: no cover

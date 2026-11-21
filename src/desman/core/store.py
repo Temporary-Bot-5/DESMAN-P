@@ -1051,6 +1051,7 @@ class Store:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         checkpoint: dict[str, Any] | None = None,
         effects: int | None = None,
+        only_extend: bool = False,
     ) -> Subtask:
         """Extend the lease and, optionally, save a checkpoint in the same update. `effects` is
         how many tool calls the execution's journal had at the checkpoint (`effect_cursor`).
@@ -1059,7 +1060,8 @@ class Store:
         just passed and nobody has requeued the subtask yet. Once it was requeued or reclaimed,
         raises StaleStateError: the executor must stop and drop its work.
         """
-        sets = ["lease_until = ?", "updated_at = ?"]
+        deadline = "max(lease_until, ?)" if only_extend else "?"
+        sets = [f"lease_until = {deadline}", "updated_at = ?"]
         if checkpoint is not None:
             sets.append("checkpoint_json = ?")
         with db.transaction(self.conn):
@@ -1270,6 +1272,18 @@ class Store:
             )
         return token
 
+    def extend_review(self, subtask_id: str, token: str, seconds: int) -> None:
+        """Ensure this reservation covers a call, without shortening it or changing its token."""
+        with db.transaction(self.conn):
+            until = db.to_iso(self.clock() + timedelta(seconds=seconds))
+            updated = self.conn.execute(
+                """UPDATE subtasks SET review_until = max(review_until, ?)
+                   WHERE id = ? AND status = 'review' AND review_token = ?""",
+                (until, subtask_id, token),
+            )
+            if updated.rowcount != 1:
+                self._raise_stale(subtask_id, S.REVIEW, S.REVIEW, None, self._now(), review=token)
+
     def release_review(self, subtask_id: str, token: str) -> None:
         """End the reservation `token` of a review that was not finished (e.g. interrupted);
         a reservation taken over meanwhile is not touched."""
@@ -1319,6 +1333,16 @@ class Store:
         count: int = row[0]
         return count
 
+    def execution_starts(self, subtask_id: str, execution: int) -> int:
+        """Number of recorded starts for this execution, including interrupted invocations."""
+        row = self.conn.execute(
+            """SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
+               AND json_extract(details_json, '$.execution') = ?""",
+            (subtask_id, execution),
+        ).fetchone()
+        count: int = row[0]
+        return count
+
     def effect_cursor(self, subtask_id: str) -> int:
         """Where the current execution's journal resumes: the number of calls it had at the
         latest checkpoint of this execution (0 without one). The executor resumes from that
@@ -1353,22 +1377,47 @@ class Store:
         ]
 
     def start_effect(
-        self, subtask_id: str, lease: str, execution: int, ordinal: int, tool: str, key: str
+        self,
+        subtask_id: str,
+        lease: str,
+        execution: int,
+        ordinal: int,
+        tool: str,
+        key: str,
+        *,
+        continuation: dict[str, str] | None = None,
     ) -> None:
         """Record the intent to make call `ordinal` while the lease is still held. The calls the
         journal had from `ordinal` on belonged to a run that went differently: they are dropped
-        (the audit keeps them)."""
+        (successful results remain available for continuation)."""
         with db.transaction(self.conn):
             self._hold(subtask_id, lease)
+            self.conn.execute(
+                """INSERT INTO discarded_effects
+                   SELECT subtask_id, execution, ordinal, tool, result_json, finished_at,
+                          continuation_json
+                   FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal >= ?
+                   AND state = 'done' AND json_extract(result_json, '$.ok') = 1""",
+                (subtask_id, execution, ordinal),
+            )
             self.conn.execute(
                 "DELETE FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal >= ?",
                 (subtask_id, execution, ordinal),
             )
             self.conn.execute(
                 """INSERT INTO effects (subtask_id, execution, ordinal, tool, key, lease_token,
-                                        state, started_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'started', ?)""",
-                (subtask_id, execution, ordinal, tool, key, lease, self._now()),
+                                        state, started_at, continuation_json)
+                   VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?)""",
+                (
+                    subtask_id,
+                    execution,
+                    ordinal,
+                    tool,
+                    key,
+                    lease,
+                    self._now(),
+                    json.dumps(continuation) if continuation is not None else None,
+                ),
             )
 
     def adopt_effect(self, subtask_id: str, lease: str, execution: int, ordinal: int) -> None:
