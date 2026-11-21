@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from desman import net, providers, searxng
 from desman.config import Config, ConfigError
-from desman.core import netlog
+from desman.core import db, netlog
 from desman.core.web import MissingSearchEngine, SearchResult, WebError
 from desman.net import protocol, sign
 
@@ -63,21 +63,21 @@ def answer(
 ) -> protocol.SearchAnswer:
     limit = quota(config)
     now = clock()
-    if not limit or used_today(conn, now) >= limit:
+    if not limit:
         return protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
+    with db.transaction(conn):
+        if used_today(conn, now) >= limit:
+            return protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
+        netlog.write(
+            conn,
+            "lent_search",
+            {**query_hash(job.query), "day": now.astimezone(UTC).date().isoformat()},
+        )
     try:
         found = searxng.engine(config, http, clock).search(job.query, job.count)
-    except WebError:
+    except (WebError, sqlite3.OperationalError):
         return protocol.SearchAnswer(id=job.id, hits=[], error="the lending node's SearXNG failed")
     return protocol.SearchAnswer(id=job.id, hits=hits(found))
-
-
-def record_delivery(conn: sqlite3.Connection, job: protocol.SearchJob, now: datetime) -> None:
-    netlog.record(
-        conn,
-        "lent_search",
-        {**query_hash(job.query), "day": now.astimezone(UTC).date().isoformat()},
-    )
 
 
 def borrower_identity(config: Config) -> tuple[str, sign.NodeKey] | None:

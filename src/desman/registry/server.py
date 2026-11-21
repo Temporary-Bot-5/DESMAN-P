@@ -345,7 +345,8 @@ class Registry:
                 "INSERT INTO nodes (fingerprint, public_key, status, capabilities_json,"
                 " registered_at, last_seen) VALUES (?, ?, 'active', ?, ?, ?)"
                 " ON CONFLICT (fingerprint) DO UPDATE SET status = 'active',"
-                " capabilities_json = excluded.capabilities_json, last_seen = excluded.last_seen",
+                " capabilities_json = excluded.capabilities_json, last_seen = excluded.last_seen,"
+                " takes_jobs = 0",
                 (
                     caller.fingerprint,
                     caller.public,

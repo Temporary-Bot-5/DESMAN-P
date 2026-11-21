@@ -22,7 +22,7 @@ migrations, WAL, `BEGIN IMMEDIATE` for writes, a schema check on open.
 - `cluster_tasks`, `appointments`, `cluster_records` (ADR 0006, T.4b): goals the global
   operator signed for a cluster, the appointments the registry signed with its appointer key,
   and the plans, jobs and results cluster operators handed in (`registry/clusters.py`).
-  `nodes.takes_jobs` and `nodes.lead` are what a node said in its last claim.
+  A claim sets `nodes.takes_jobs` and `nodes.lead`. Registration clears `takes_jobs`.
 - `registry_log`: the registry's journal (ADR 0004, decision 12) — registrations, changes of
   what is lent, departures, assignments, revocations, refused requests. Keys by fingerprint;
   nothing in it is secret. Append-only.
@@ -806,7 +806,7 @@ class Node:
     revoked: bool
     owner: str | None = None
     takes_jobs: bool = False
-    """What its last claim said (`protocol.Claim.jobs`)."""
+    """Whether the node opted into jobs on a claim since registering."""
     lead: bool = False
     """What its last claim said (`protocol.Claim.lead`): it may lead a cluster."""
 

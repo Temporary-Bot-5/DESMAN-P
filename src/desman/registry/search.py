@@ -199,14 +199,14 @@ def answer(
         if row is None:
             raise Refusal("not_found")
         if row["state"] == "waiting":
-            # A taken job the node could not run still needs a terminal reply.
-            skipped = row["taken"] and result.error == protocol.SEARCH_SKIPPED and not result.hits
-            if not skipped and _used(conn, lender.fingerprint, stamp) >= _quota(lender):
+            # Failed searches still get terminal replies. Only successful ones spend quota.
+            succeeded = result.error is None
+            if succeeded and _used(conn, lender.fingerprint, stamp) >= _quota(lender):
                 raise Refusal("too_many")
             conn.execute(
                 """UPDATE search_requests SET state = 'answered', query = NULL, payload = ?,
                    answered_at = ? WHERE id = ?""",
-                (result.model_dump_json(), None if skipped else stamp, result.id),
+                (result.model_dump_json(), stamp if succeeded else None, result.id),
             )
             _log(conn, "answered", result.id, row["asker"], lender.fingerprint)
             return protocol.SearchState(id=result.id, state="answered")

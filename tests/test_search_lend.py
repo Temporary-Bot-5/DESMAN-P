@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -28,7 +30,7 @@ from desman.gui.panels import snapshot
 from desman.gui.runners import Runners
 from desman.net import node, protocol, search_lend, sign
 from desman.net.search_lend import Lent
-from desman.registry import store
+from desman.registry import clusters, store
 from desman.registry.server import Registry
 from helpers import make_config
 from test_registry import Node as Wire
@@ -558,6 +560,29 @@ def test_borrower_registration_preserves_worker_capabilities(
         assert found is not None and found.capabilities == lent
 
 
+def test_registration_clears_cluster_availability_until_next_claim(
+    relay: tuple[Registry, sqlite3.Connection], clock: FakeClock
+) -> None:
+    registry, conn = relay
+    wire = Wire(registry, clock)
+    capability = protocol.Capability(
+        provider="ollama", model="qwen2.5:7b", calls_per_day=5, tokens_per_day=1000
+    ).model_dump()
+
+    def available() -> bool:
+        found = store.node(conn, wire.fingerprint)
+        assert found is not None
+        return clusters._available(found, clock(), timedelta(minutes=1))
+
+    assert wire.register([capability]).status_code == 200
+    assert wire.call("POST", protocol.CLAIM, {}).status_code == 200
+    assert available()
+    assert wire.register([capability]).status_code == 200
+    assert not available()
+    assert wire.call("POST", protocol.CLAIM, {}).status_code == 200
+    assert available()
+
+
 def test_offer_can_shorten_wait_and_web_reports_timeout(clock: FakeClock) -> None:
     def handle(req: httpx.Request) -> httpx.Response:
         id = "a" * 32
@@ -579,9 +604,13 @@ def test_offer_can_shorten_wait_and_web_reports_timeout(clock: FakeClock) -> Non
     assert clock.slept == 3
 
 
-@pytest.mark.parametrize("change", ["disabled", "quota"])
+@pytest.mark.parametrize("change", ["disabled", "quota", "busy"])
 def test_lender_reports_jobs_it_cannot_run(
-    relay: tuple[Registry, sqlite3.Connection], clock: FakeClock, tmp_path: Path, change: str
+    relay: tuple[Registry, sqlite3.Connection],
+    clock: FakeClock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
 ) -> None:
     registry, conn = relay
     asker = Wire(registry, clock)
@@ -591,20 +620,37 @@ def test_lender_reports_jobs_it_cannot_run(
     path = tmp_path / "lender.key"
     sign.create_node_key(path)
     poll_limits: list[int] = []
+    taken: list[str] = []
+    write = netlog.write
+    busy = change == "busy"
+
+    def write_once_busy(
+        conn: sqlite3.Connection, action: str, details: dict[str, str] | None = None
+    ) -> None:
+        nonlocal busy
+        if action == "lent_search":
+            assert conn.in_transaction
+            if busy:
+                busy = False
+                raise sqlite3.OperationalError("database is locked")
+        write(conn, action, details)
 
     with db.open_db(":memory:") as local:
 
         def handle(req: httpx.Request) -> httpx.Response:
-            assert req.url.host != "127.0.0.1"
+            if req.url.host == "127.0.0.1":
+                assert change == "busy"
+                return httpx.Response(200, json={"results": [HIT.model_dump()]})
             reply = registry.handle(
                 req.method, req.url.path, req.headers.multi_items(), req.content
             )
             if req.url.path == protocol.SEARCH_NEXT:
                 poll_limits.append(json.loads(req.content)["limit"])
                 if reply.body["jobs"]:
+                    taken.extend(job["id"] for job in reply.body["jobs"])
                     if change == "disabled":
                         config.network.enabled = False
-                    else:
+                    elif change == "quota":
                         config.network.donated["searxng"] = Donation(
                             calls_per_day=1, tokens_per_day=0
                         )
@@ -621,16 +667,20 @@ def test_lender_reports_jobs_it_cannot_run(
         clock.advance(1)
         third = _ask(asker).json()["id"]
         clock.advance(3)
+        monkeypatch.setattr(netlog, "write", write_once_busy)
         worker.poll()
         assert poll_limits == [2, 2]
-        for id in (first, second):
-            assert (
-                asker.call("GET", protocol.SEARCH_STATE + id).json()["error"]
-                == protocol.SEARCH_SKIPPED
-            )
+        assert set(taken) == {first, second}
+        assert asker.call("GET", protocol.SEARCH_STATE + taken[0]).json()["error"] == (
+            protocol.SEARCH_SKIPPED
+        )
+        second_result = asker.call("GET", protocol.SEARCH_STATE + taken[1]).json()
+        assert second_result["error"] == (None if change == "busy" else protocol.SEARCH_SKIPPED)
         assert asker.call("GET", protocol.SEARCH_STATE + third).json()["state"] == "waiting"
-        assert search_lend.used_today(local, clock()) == 1
-        assert conn.execute("SELECT count(answered_at) FROM search_requests").fetchone()[0] == 0
+        assert search_lend.used_today(local, clock()) == (2 if change == "busy" else 1)
+        assert conn.execute("SELECT count(answered_at) FROM search_requests").fetchone()[0] == (
+            1 if change == "busy" else 0
+        )
         worker.close()
 
 
@@ -824,8 +874,37 @@ def test_borrower_reports_registry_rate_limit(
         assert type(exc.value) is WebError
 
 
-@pytest.mark.parametrize("case", ["too_late_to_start", "expires_during_search"])
-def test_late_lender_jobs_do_not_spend_quota(
+@pytest.mark.parametrize(
+    ("path", "exception"),
+    [
+        (protocol.SEARCH_ASK, node.Problem),
+        (protocol.SEARCH_STATE + "a" * 32, node.Problem),
+        (protocol.SEARCH_NEXT, node.Unreachable),
+        (protocol.SEARCH_ANSWER, node.Unreachable),
+        (protocol.SEARCH_STATE + "z" * 32, node.Unreachable),
+    ],
+)
+def test_only_borrower_routes_decode_429_as_problem(
+    tmp_path: Path, clock: FakeClock, path: str, exception: type[Exception]
+) -> None:
+    key = sign.create_node_key(tmp_path / "node.key")
+    transport = httpx.MockTransport(lambda _: httpx.Response(429, json={"error": "too_many"}))
+    with httpx.Client(transport=transport) as http, pytest.raises(exception):
+        node.call(
+            http,
+            key,
+            REGISTRY,
+            "GET",
+            path,
+            None,
+            protocol.SearchState,
+            clock(),
+            time.monotonic() + node.TIMEOUT,
+        )
+
+
+@pytest.mark.parametrize("case", ["too_late_to_start", "expires_during_search", "failed_search"])
+def test_lender_counts_runs_even_without_a_successful_delivery(
     relay: tuple[Registry, sqlite3.Connection], clock: FakeClock, tmp_path: Path, case: str
 ) -> None:
     registry, remote = relay
@@ -839,7 +918,15 @@ def test_late_lender_jobs_do_not_spend_quota(
 
     def handle(req: httpx.Request) -> httpx.Response:
         if req.url.host == "127.0.0.1":
+            assert not local.in_transaction
+            assert search_lend.used_today(local, clock()) == 1
+            assert netlog.entries(local)[-1].details == {
+                **search_lend.query_hash(QUERY),
+                "day": clock().date().isoformat(),
+            }
             searches.append(req.url.params["q"])
+            if case == "failed_search":
+                return httpx.Response(500)
             clock.advance(30)
             return httpx.Response(200, json={"results": [HIT.model_dump()]})
         if req.url.path == protocol.SEARCH_NEXT:
@@ -857,11 +944,17 @@ def test_late_lender_jobs_do_not_spend_quota(
             clock.advance(26 if case == "too_late_to_start" else 5)
             worker.poll(idle=False)
             assert searches == ([] if case == "too_late_to_start" else [QUERY])
-            assert search_lend.used_today(local, clock()) == 0
+            assert search_lend.used_today(local, clock()) == (0 if not searches else 1)
+            result = asker.call("GET", protocol.SEARCH_STATE + id).json()
+            if case == "too_late_to_start":
+                assert result["error"] == protocol.SEARCH_SKIPPED
+            elif case == "failed_search":
+                assert result["state"] == "answered" and result["error"]
+            else:
+                assert result["state"] == "expired"
             clock.advance(5)
-            assert asker.call("GET", protocol.SEARCH_STATE + id).json()["state"] == "expired"
             worker.poll(idle=False)
-            assert polls == [1, 1, 1]
+            assert polls == ([1, 1] if searches else [1, 1, 1])
             assert (
                 remote.execute("SELECT count(answered_at) FROM search_requests").fetchone()[0] == 0
             )

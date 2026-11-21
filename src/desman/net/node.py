@@ -19,11 +19,11 @@ drops what is held without a word to anyone (off is off). No job is asked for wh
 list is not fresh (G.6c, `sign.Trust.fresh`): a registry could be hiding a revocation; a job
 already held is still finished.
 
-- Off is off: the config is read again before every contact, and `net.registry()` has no
-  address while desman-global is off, so a `desman global leave` while a worker runs stops it
-  at the next contact, before anything is sent.
+- The config is read again before each worker contact. `net.registry()` has no address while
+  desman-global is off, so `desman global leave` stops regular contacts. A taken search the
+  worker can no longer run still gets a skip reply to the registry that assigned it.
 - The node's own work never waits for the network. A registry that cannot be reached (no
-  connection, a timeout, 5xx, 429, a reply that is not what the protocol says) is tried again
+  connection, a timeout, 5xx, 429 outside the borrower routes, or an invalid reply) is tried again
   later, each time waiting twice as long (`RETRY_FIRST` up to `RETRY_MAX`), like a model's
   provider. A contact (its two requests together) gets `TIMEOUT` seconds: the second request
   only what the first left, and none at all once they are spent; a reply still arriving when
@@ -46,6 +46,7 @@ checks are retried durably before claiming more work.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Callable
@@ -244,9 +245,11 @@ def _call(
     except httpx.HTTPError as e:
         raise _Unreachable(type(e).__name__) from e
     body_bytes = bytes(received)
-    if reply.status_code >= 500 or (
-        reply.status_code == 429 and not path.startswith(protocol.SEARCH_STATE)
+    if reply.status_code == 429 and not (
+        path == protocol.SEARCH_ASK or re.fullmatch(rf"{protocol.SEARCH_STATE}[a-f0-9]{{32}}", path)
     ):
+        raise _Unreachable("HTTP 429")
+    if reply.status_code >= 500:
         raise _Unreachable(f"HTTP {reply.status_code}")
     if reply.status_code == 404 and path == protocol.RELEASES:
         raise _Problem("not_found")
@@ -513,18 +516,16 @@ class Node:
                 elapsed = max(
                     time.monotonic() - poll_started, (self._clock() - poll_at).total_seconds()
                 )
-                if job.expires_in - elapsed < 5:
-                    continue
                 result = protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
                 try:
-                    current = self._config()
-                    if net.registry(current) == address:
-                        result = search_lend.answer(self.conn, current, job, http, self._clock)
+                    if job.expires_in - elapsed >= 5:
+                        current = self._config()
+                        if net.registry(current) == address:
+                            result = search_lend.answer(self.conn, current, job, http, self._clock)
                 except (ConfigError, sqlite3.OperationalError):
                     pass
                 try:
-                    sent_at = self._clock()
-                    state = _call(
+                    _call(
                         http,
                         key,
                         address,
@@ -532,17 +533,9 @@ class Node:
                         protocol.SEARCH_ANSWER,
                         result,
                         protocol.SearchState,
-                        sent_at,
+                        self._clock(),
                         time.monotonic() + TIMEOUT,
                     )
-                    if (
-                        state.id == job.id
-                        and state.state == "answered"
-                        and result.error != protocol.SEARCH_SKIPPED
-                    ):
-                        search_lend.record_delivery(self.conn, job, sent_at)
-                except sqlite3.OperationalError:
-                    return
                 except _Problem as e:
                     if e.error in {REVOKED, NOT_REGISTERED}:
                         raise
