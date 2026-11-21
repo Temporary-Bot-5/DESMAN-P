@@ -150,7 +150,7 @@ def lineup(
     provider: str | None = None,
     model: str | None = None,
     *,
-    kind: Kind | None = None,
+    kind: catalog.Lane | None = None,
     conn: sqlite3.Connection | None = None,
     scope: holds.Scope = "all",
     scope_id: str = "",
@@ -186,6 +186,10 @@ def lineup(
         except providers.UnknownProvider:
             pass
     first = selected if selected is not None else choose(config, provider)
+    if kind == catalog.MASTER:
+        return _master_lineup(
+            config, provider, model, conn, scope, scope_id, local_choices=local_choices
+        )
     if model is not None:
         return filter_holds(config, [choice(first, model)], conn, scope, scope_id)
     pool = [first] if provider is not None else _free(config)
@@ -213,6 +217,98 @@ def lineup(
     return filter_holds(config, choices, conn, scope, scope_id)
 
 
+def qualified(config: Config, choice: Choice, *, named: bool = False) -> bool:
+    """May `choice` be a master module (ADR 0015)? A cloud model only when the catalog marks it;
+    a local one only when the person named it (`tuning.models.master`, or `named`: on the
+    command line) and its context holds a long loop."""
+    if choice.provider.local:
+        return (named or choice.label == config.tuning.models.master) and (
+            choice.spec.context >= catalog.MASTER_LOCAL_CONTEXT
+        )
+    return catalog.model(choice.provider, choice.model).master
+
+
+def _master_lineup(
+    config: Config,
+    provider: str | None,
+    model: str | None,
+    conn: sqlite3.Connection | None,
+    scope: holds.Scope,
+    scope_id: str,
+    *,
+    local_choices: dict[tuple[str, str], Choice] | None,
+) -> list[Choice]:
+    """The executor's of a master subtask: the lineup of analysis, its qualified models only
+    (the person's chosen one first, if qualified); none qualified is `NoProvider`."""
+    # Ordered by the master's own choices (model and key), never by the analysis executor's:
+    # those are the Improvement Analyst's to propose, the master's only the person's.
+    tuned = config.tuning.model_copy(deep=True)
+    tuned.models.analysis = config.tuning.models.master
+    tuned.keys.analysis = config.tuning.keys.master
+    base = config.model_copy(update={"tuning": tuned})
+    choices = lineup(
+        base,
+        Role.EXECUTOR,
+        provider,
+        model,
+        kind=Kind.ANALYSIS,
+        conn=conn,
+        scope=scope,
+        scope_id=scope_id,
+        local_choices=local_choices,
+    )
+    named = provider is not None or model is not None
+    masters = [
+        c
+        for c in choices
+        # A paid model only when the person names its provider for this run, as everywhere.
+        if qualified(config, c, named=named) and (provider is not None or not c.provider.paid)
+    ]
+    if not masters:
+        local_note = (
+            " "
+            + t(
+                "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.",
+                context=catalog.MASTER_LOCAL_CONTEXT,
+            )
+            if providers.find("ollama").model(config)
+            else ""
+        )
+        raise NoProvider(
+            t(
+                "No model ready for a master module: it takes a key for a model marked for it "
+                "({models}), or a local model with a context of at least {context} tokens that "
+                "you name with `desman tuning --model master=PROVIDER/MODEL`.",
+                models=", ".join(master_models()),
+                context=catalog.MASTER_LOCAL_CONTEXT,
+            )
+            + local_note
+        )
+    return masters
+
+
+def may_be_master(label: str) -> bool:
+    """Whether the model `provider/model` could ever be the master: one the catalog marks, or
+    a local one (whose context is checked when it runs)."""
+    provider_id, _, model_id = label.partition("/")
+    try:
+        p = providers.find(provider_id)
+    except providers.UnknownProvider:
+        return False
+    return p.local or catalog.model(p, model_id).master
+
+
+def master_models() -> list[str]:
+    """The free cloud models the catalog marks for a master module, as `provider/model`."""
+    return [
+        f"{p.id}/{m.id}"
+        for p in providers.CLOUD
+        if not p.paid
+        for m in catalog.models_of(p)
+        if m.master
+    ]
+
+
 def sources(config: Config, choice: Choice) -> list[str]:
     if choice.provider.local:
         return [choice.provider.id]
@@ -234,7 +330,9 @@ def filter_holds(
     ]
 
 
-def spread_tier(choices: Sequence[Choice], role: Role, kind: Kind | None = None) -> list[Choice]:
+def spread_tier(
+    choices: Sequence[Choice], role: Role, kind: catalog.Lane | None = None
+) -> list[Choice]:
     """First model per provider in the leading equally suitable run."""
     need = catalog.need(role, kind)
 
@@ -353,11 +451,13 @@ def _key_provider(config: Config, fingerprint: str | None) -> str | None:
     return None
 
 
-def tuning_field(role: Role, kind: Kind | None = None) -> str | None:
+def tuning_field(role: Role, kind: catalog.Lane | None = None) -> str | None:
     """The field of `ModelChoices` for `role` (the executor's: its subtask's kind); None for a
     role without a tuning preference."""
     if role is Role.EXECUTOR:
-        return (kind or Kind.TEXT).value
+        if isinstance(kind, Kind):
+            return kind.value
+        return catalog.MASTER if kind == catalog.MASTER else Kind.TEXT.value
     if role in (Role.PLANNER, Role.REVIEWER, Role.DECOMPOSER, Role.INTERLOCUTOR):
         return role.value
     return None
@@ -366,7 +466,13 @@ def tuning_field(role: Role, kind: Kind | None = None) -> str | None:
 def candidates(config: Config, name: str) -> list[str]:
     """The models the role of `ModelChoices` field `name` may ask now (ready free providers),
     as `provider/model`, best first; none when no provider is ready."""
-    kind = Kind(name) if name in {k.value for k in Kind} else None
+    kind: catalog.Lane | None = (
+        catalog.MASTER
+        if name == catalog.MASTER
+        else Kind(name)
+        if name in {k.value for k in Kind}
+        else None
+    )
     role = Role.EXECUTOR if kind is not None else Role(name)
     try:
         return [c.label for c in lineup(config, role, kind=kind)]
@@ -374,13 +480,13 @@ def candidates(config: Config, name: str) -> list[str]:
         return []
 
 
-def preferred(config: Config, role: Role, kind: Kind | None = None) -> str | None:
+def preferred(config: Config, role: Role, kind: catalog.Lane | None = None) -> str | None:
     """The model the person chose for `role` (`config.tuning.models`), as `provider/model`."""
     name = tuning_field(role, kind)
     return None if name is None else getattr(config.tuning.models, name)
 
 
-def preferred_key(config: Config, role: Role, kind: Kind | None = None) -> str | None:
+def preferred_key(config: Config, role: Role, kind: catalog.Lane | None = None) -> str | None:
     """The fingerprint of the key the person chose to ask first for this role."""
     name = tuning_field(role, kind)
     return None if name is None else getattr(config.tuning.keys, name)

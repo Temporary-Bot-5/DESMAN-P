@@ -23,12 +23,12 @@ from desman.config import Config, ConfigError, Tuning, open_config
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
-from desman.core.coordinator import Coordinator, Crew, Executor, Labels, Outcome, Work
+from desman.core.coordinator import Coordinator, Crew, Executor, Failure, Labels, Outcome, Work
 from desman.core.effects import evidence, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
-from desman.core.retry import RetryPolicy, Strategy, strategy_for
+from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
 from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
@@ -36,7 +36,7 @@ from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Sto
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.i18n import t
-from desman.llm import hub, router
+from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
 from desman.llm.cache import Cached
 from desman.llm.limiter import Buckets, Limited, Local
@@ -74,6 +74,18 @@ def tuned_spec(spec: TaskSpec, tuning: Tuning) -> TaskSpec:
 
 
 @dataclass(frozen=True)
+class Master:
+    """Who may be the master module (ADR 0015), as found at one moment."""
+
+    models: tuple[LLM, LLM | None] | None
+    choice: router.Choice | None = None
+    problem: str | None = None
+    """Why none may (`router.NoProvider`)."""
+    other_choice: router.Choice | None = None
+    """The model an "other model" attempt of the master asks first (None: there is none)."""
+
+
+@dataclass(frozen=True)
 class Models:
     llm: LLM
     """The executor's models; every role without its own (`roles`) asks them too."""
@@ -89,17 +101,36 @@ class Models:
     step_seconds: int = 0
     """The longest one step of an agent may wait on its models (0: unknown, a fake). A lease
     or a review's reservation shorter than that could run out while nobody can renew it."""
+    master: tuple[LLM, LLM | None] | None = None
+    """The main and other models of a master subtask (ADR 0015); None: no qualified model is
+    ready (a fake serves it with `llm`)."""
+    master_choice: router.Choice | None = None
+    """The model a master subtask asks first (None for a fake, or without one)."""
+    no_master: str | None = None
+    """Why no model may be the master now (None: one may, or a fake)."""
+    find_master: Callable[[], Master] | None = None
+    """The master as the tuning is now (a worker's is refreshed while it runs): a model the
+    person names after the run started serves the next attempt. None: `master` is all there is."""
 
     def for_(self, role: calls.Role) -> LLM:
         return self.roles.get(role, self.llm)
 
-    def executor(self, kind: Kind) -> tuple[LLM, LLM | None]:
-        """The main and other models of the executor of a subtask of `kind`."""
+    def executor(self, kind: Kind, master: bool = False) -> tuple[LLM, LLM | None]:
+        """The main and other models of the executor of a subtask of `kind` (of a master
+        subtask: the master's, or the kind's when no model qualifies; the executor refuses
+        such work, `_executor`)."""
+        current = self.current_master() if master else None
+        if current is not None:
+            return current
         return self.kinds.get(kind, (self.llm, self.other))
+
+    def current_master(self) -> tuple[LLM, LLM | None] | None:
+        """The main and other models of a master subtask now; None: none qualifies."""
+        return self.find_master().models if self.find_master is not None else self.master
 
     def labels(self, subtask: Subtask) -> Labels:
         """How the coordinator tells apart the models the executor asks for `subtask`."""
-        main, other = self.executor(subtask.kind)
+        main, other = self.executor(subtask.kind, subtask.master)
         with calls.for_(calls.Purpose(calls.Role.EXECUTOR, task_id=subtask.task_id)):
             chain = other.current() if isinstance(other, Scoped) else other
             choices = getattr(chain, "choices", None) if chain is not None else None
@@ -143,7 +174,7 @@ def models(
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
     recorder = calls.recorder(conn)
-    used: dict[tuple[calls.Role, Kind | None, tuple[str, str] | None], str] = {}
+    used: dict[tuple[calls.Role, catalog.Lane | None, tuple[str, str] | None], str] = {}
 
     def member(
         choice: router.Choice, first: str | None, *, held: Set[tuple[str, str]] = frozenset()
@@ -195,7 +226,7 @@ def models(
     def chain(
         choices: list[router.Choice],
         role: calls.Role = calls.Role.EXECUTOR,
-        kind: Kind | None = None,
+        kind: catalog.Lane | None = None,
         current: Config = config,
         *,
         other: bool = False,
@@ -276,10 +307,12 @@ def models(
         for p in providers.ready(config)
         if p.local
     }
-    lineups: dict[tuple[calls.Role, Kind | None, str | None, str | None], list[router.Choice]] = {}
+    lineups: dict[
+        tuple[calls.Role, catalog.Lane | None, str | None, str | None], list[router.Choice]
+    ] = {}
 
     def lineup(
-        role: calls.Role, kind: Kind | None = None, current: Config = config
+        role: calls.Role, kind: catalog.Lane | None = None, current: Config = config
     ) -> list[router.Choice]:
         identity = (
             role,
@@ -298,12 +331,18 @@ def models(
                 raise router.NoProvider("none of the providers lent has a model for this")
         return choices
 
-    def scoped(role: calls.Role, kind: Kind | None = None, *, other: bool = False) -> LLM | None:
-        own = lineup(role, kind)
+    def scoped(
+        role: calls.Role,
+        kind: catalog.Lane | None = None,
+        *,
+        other: bool = False,
+        base: Config = config,
+    ) -> LLM | None:
+        own = lineup(role, kind, base)
         selected = router.other_lineup(own) if other else own
         if other and (model is not None or not selected):
             return None
-        default = chain(own, role, kind, other=other)
+        default = chain(own, role, kind, base, other=other)
         field = router.tuning_field(role, kind)
         chains: dict[tuple[str, ...], router.Fallback] = {}
 
@@ -410,6 +449,29 @@ def models(
         main = scoped(calls.Role.EXECUTOR, kind)
         assert main is not None
         kinds[kind] = (main, scoped(calls.Role.EXECUTOR, kind, other=True))
+    found: dict[tuple[str | None, str | None], Master] = {}
+
+    def find_master() -> Master:
+        cfg = config if read_tuning is None else config.model_copy(update={"tuning": read_tuning()})
+        # Only the master's own choices decide who it is (`router._master_lineup`).
+        identity = (cfg.tuning.models.master, cfg.tuning.keys.master)
+        if identity not in found:
+            try:
+                masters = lineup(calls.Role.EXECUTOR, catalog.MASTER, cfg)
+            except router.NoProvider as e:
+                found[identity] = Master(None, problem=str(e))
+            else:
+                main = scoped(calls.Role.EXECUTOR, catalog.MASTER, base=cfg)
+                assert main is not None
+                other = scoped(calls.Role.EXECUTOR, catalog.MASTER, other=True, base=cfg)
+                others = router.other_lineup(masters) if other is not None else []
+                found[identity] = Master(
+                    (main, other), masters[0], other_choice=others[0] if others else None
+                )
+        return found[identity]
+
+    # Never for desman-global (ADR 0015, decision 6).
+    first_master = find_master() if only is None else Master(None)
     executor = lineup(calls.Role.EXECUTOR)
     others = [] if model is not None else router.other_lineup(executor)
     return Models(
@@ -420,6 +482,10 @@ def models(
         others[0] if others else None,
         kinds,
         step_seconds(max(timeouts, default=0.0)),
+        first_master.models,
+        first_master.choice,
+        first_master.problem,
+        find_master if only is None else None,
     )
 
 
@@ -736,9 +802,20 @@ def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Co
     return _coordinator(store, models, access=None, tools=Registry(), tuning=tuning)
 
 
+NO_MASTER = (
+    "no model qualified for a master module is ready: add a key of a provider whose model the "
+    "catalog marks for it, or name a local model with `desman tuning --model master=...`; then "
+    "retry the subtask (a worker or the page sees a new key once it restarts)"
+)
+"""Why a master subtask waits for the person when nobody can be its master (audit, English)."""
+
+
 def _executor(models: Models, store: Store) -> Executor:
     def execute(work: Work) -> Outcome:
-        main, other = models.executor(work.subtask.kind)
+        if work.subtask.master and models.choice is not None and models.current_master() is None:
+            # Never worked by a model that was not qualified for it (ADR 0015, decision 2).
+            return Failure(kind=FailureKind.PERMANENT, reason=NO_MASTER)
+        main, other = models.executor(work.subtask.kind, work.subtask.master)
         if work.context.strategy is Strategy.OTHER_MODEL and other is not None:
             # Holds may remove the alternate after the retry strategy was selected.
             available = getattr(other, "choices", None)

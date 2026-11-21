@@ -388,7 +388,7 @@ def test_v9_upgrade_and_cli() -> None:
         '{"schema_version":9,"language":"en","network":{"enabled":true}}', encoding="utf-8"
     )
     current = manager.load()
-    assert current.schema_version == 10 and not current.network.borrow_search
+    assert current.schema_version == 11 and not current.network.borrow_search
     runner = CliRunner()
     assert "off" in runner.invoke(cli, ["global", "search"]).output
     assert "before lending it" in runner.invoke(cli, ["global", "donate", "searxng"]).output
@@ -762,7 +762,7 @@ def test_legacy_search_donation_upgrades_and_cli_omits_tokens() -> None:
     assert manager.load().network.borrow_search
     saved = json.loads(manager.config_path.read_text(encoding="utf-8"))
     assert (
-        saved["schema_version"] == 10
+        saved["schema_version"] == 11
         and saved["network"]["donated"]["searxng"]["tokens_per_day"] == 0
     )
     quota = runner.invoke(cli, ["global", "quota", "searxng", "--json"])

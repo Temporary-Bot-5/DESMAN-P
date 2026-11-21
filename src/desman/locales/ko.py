@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "Ollama는 컨텍스트(OLLAMA_CONTEXT)도 {context} 이상으로 설정하세요.",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model}은(는) 컨텍스트가 {context} 토큰 이상(Ollama는 OLLAMA_CONTEXT 설정)이고 서버가 실행 중일 때만 마스터 모듈이 될 수 있습니다.",
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "마스터 모듈에 쓸 모델이 없습니다: 이를 위해 표시된 모델({models})의 키나, `desman tuning --model master=PROVIDER/MODEL`로 지정한 컨텍스트 {context} 토큰 이상의 로컬 모델이 필요합니다.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model}은(는) 마스터 모듈이 될 수 없습니다: 이를 위해 표시된 모델({models})이나 로컬 모델만 가능합니다. 선택은 저장되지만 이 모델은 호출되지 않습니다.",
+    "--master is for GOAL, without --spec or --plan": "--master는 GOAL에만 쓰며 --spec이나 --plan과 함께 쓸 수 없습니다",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL을 하위 작업으로 나누지 않고 강한 모델 하나(마스터 모듈)에 통째로 맡깁니다. 자격이 있는 모델만 쓰며 도구 라운드가 훨씬 많습니다. 계속 실패하면 작업을 다른 모델들을 위해 나눕니다.",
+    "Master module": "마스터 모듈",
+    "Master module: {provider} · {model}": "마스터 모듈: {provider} · {model}",
+    "No model ready for a master module.": "마스터 모듈에 쓸 모델이 없습니다.",
     "Use the Windows Subsystem for Linux.": "Linux용 Windows 하위 시스템을 사용합니다.",
     "WSL sandbox distribution {pin} is present.": "WSL 샌드박스 배포판 {pin}이 있습니다.",
     "WSL sandbox distribution {pin} is missing.": "WSL 샌드박스 배포판 {pin}이 없습니다.",
@@ -407,8 +416,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "알 수 없는 제공자 또는 키입니다. 사용 가능: {choices}",
     "The key for {role} only applies to models from {provider}.": "{role}의 키는 {provider}의 모델에만 적용됩니다.",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key는 ROLE=PROVIDER:KEY|auto를 받으며 ROLE은 다음 중 하나입니다: {roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "역할이 먼저 사용하는 키: planner, reviewer, decomposer, text, code, analysis, interlocutor. 라벨이나 번호를 사용하세요. 반복 지정할 수 있습니다.",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "역할이 먼저 사용하는 모델: planner, reviewer, decomposer, text, code, analysis, interlocutor. 반복 지정할 수 있습니다.",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "역할이 먼저 사용하는 키: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. 라벨이나 번호를 사용하세요. 반복 지정할 수 있습니다.",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "역할이 먼저 사용하는 모델: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. 반복 지정할 수 있습니다.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "변경: `desman tuning --max-subtasks N|auto` (그리고 --max-parts, --context-tokens, --max-attempts, --max-transient), `--model 역할=제공자/모델|auto`, 또는 `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}”은(는) 명령이 아닙니다. 공용 터미널은 DESMAN 명령만 받습니다 (`help`로 목록 확인). 대화하려면 /back으로 채팅에 돌아가세요.",
     "Type `protected show` to see the change and `protected approve` to approve it.": "`protected show`로 변경 사항을 보고 `protected approve`로 승인하세요.",

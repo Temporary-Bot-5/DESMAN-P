@@ -113,6 +113,9 @@ class Store:
         if origin is not Origin.LOCAL and any(sub.knowledge for sub in spec.subtasks):
             # The tree is the person's own DESMAN's (ADR 0009, decision 6).
             raise ValueError("a job lent by desman-global is never given the knowledge tree")
+        if origin is not Origin.LOCAL and any(sub.master for sub in spec.subtasks):
+            # What a lent module may carry is set by its quota (ADR 0015, decision 6).
+            raise ValueError("a job lent by desman-global is never a master subtask")
         task_id = _new_id()
         ids = [_new_id() for _ in spec.subtasks]
         with db.transaction(self.conn):
@@ -137,8 +140,8 @@ class Store:
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
                                              inputs_json, priority, kind, runs_code,
-                                             knowledge_json, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             knowledge_json, master, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         subtask_id,
                         task_id,
@@ -150,6 +153,7 @@ class Store:
                         sub.kind.value,
                         int(sub.runs_code),
                         json.dumps(sub.knowledge, ensure_ascii=False),
+                        int(sub.master),
                         now,
                         now,
                     ),
@@ -171,6 +175,11 @@ class Store:
                     "retry": spec.retry.model_dump(),
                     "tools": spec.tools.value,
                     **({"origin": origin.value} if origin is not Origin.LOCAL else {}),
+                    **(
+                        {"master": [ids[i] for i, sub in enumerate(spec.subtasks) if sub.master]}
+                        if any(sub.master for sub in spec.subtasks)
+                        else {}
+                    ),
                     "subtasks": ids,
                 },
             )
@@ -881,8 +890,8 @@ class Store:
                 self.conn.execute(
                     """INSERT INTO subtasks (id, task_id, seq, description, acceptance_criteria,
                                              inputs_json, priority, kind, runs_code,
-                                             knowledge_json, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                             knowledge_json, master, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         part_id,
                         task_id,
@@ -894,6 +903,7 @@ class Store:
                         part.kind.value,
                         int(part.runs_code),
                         json.dumps(part.knowledge, ensure_ascii=False),
+                        int(part.master),
                         now,
                         now,
                     ),

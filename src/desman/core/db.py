@@ -808,6 +808,11 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     );
     CREATE INDEX discarded_effects_subtask ON discarded_effects(subtask_id);
     """,
+    # 51: a master subtask (ADR 0015): a whole goal worked by a qualified model. Subtasks made
+    # before were ordinary
+    """
+    ALTER TABLE subtasks ADD COLUMN master INTEGER NOT NULL DEFAULT 0 CHECK (master IN (0, 1));
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

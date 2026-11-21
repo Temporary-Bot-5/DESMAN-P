@@ -75,7 +75,7 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
     groq = next(p for p in data["providers"] if p["id"] == "groq")
     assert groq["ready"] and groq["keys"][0]["fingerprint"] == key_id(secret)
     assert "value" not in groq["keys"][0]
-    assert len(data["roles"]) == 7
+    assert len(data["roles"]) == 8
     assert data["personalize"]["consent"] == wizard.personalize_consent()
     assert data["personalize"]["notes"]
     assert data["network"]["enabled"] is False

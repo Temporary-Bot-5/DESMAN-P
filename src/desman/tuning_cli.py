@@ -59,7 +59,7 @@ ROLES = tuple(ModelChoices.model_fields)
     multiple=True,
     metavar="ROLE=PROVIDER/MODEL|auto",
     help="The model a role asks first: planner, reviewer, decomposer, or the executor's text, "
-    "code, analysis, interlocutor. Repeatable.",
+    "code, analysis, master, interlocutor. Repeatable.",
 )
 @click.option(
     "--key",
@@ -67,7 +67,7 @@ ROLES = tuple(ModelChoices.model_fields)
     multiple=True,
     metavar="ROLE=PROVIDER:KEY|auto",
     help="The key a role asks first: planner, reviewer, decomposer, text, code, analysis, "
-    "interlocutor. Use a label or number. Repeatable.",
+    "master, interlocutor. Use a label or number. Repeatable.",
 )
 @click.option("--reset", is_flag=True, help="Everything back to DESMAN's defaults.")
 @json_option
@@ -210,6 +210,7 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
         "decomposer": t("Decomposer"),
         "interlocutor": t("Interlocutor"),
         **{kind: f"{t('Executor')} ({kind})" for kind in ("text", "code", "analysis")},
+        "master": t("Master module"),
     }
     ollama = providers.find("ollama")
     installed = local_models.installed(config, cached_only=True)[0]
@@ -227,7 +228,11 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
             ):
                 continue
             models = [m for m in candidates if m.startswith(provider.id + "/")]
-            if not provider.local:
+            if role == catalog.MASTER and not provider.local:
+                # The marked ones, paid included: the person may name one (asked only with
+                # --provider, `router._master_lineup`).
+                models = [provider.id + "/" + m.id for m in catalog.models_of(provider) if m.master]
+            elif not provider.local:
                 models = list(
                     dict.fromkeys(
                         [*(provider.id + "/" + m.id for m in catalog.models_of(provider)), *models]
@@ -235,6 +240,8 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
                 )
             if provider.id == "ollama":
                 models = list(dict.fromkeys([*models, *("ollama/" + m.name for m in installed)]))
+            if role == catalog.MASTER and not models:
+                continue  # nothing of this provider can be the master
             available.append(
                 {"id": provider.id, "name": provider.name, "models": models, "keys": provider_keys}
             )
@@ -426,6 +433,26 @@ def print_change(old: Tuning, new: Tuning, config: Config) -> None:
     for line in changed:
         ui.ok(line)
     for role, label in unready(config, new):
+        if role == catalog.MASTER and not router.may_be_master(label):
+            ui.warn(
+                t(
+                    "{model} cannot be the master module: only a model marked for it ({models}) "
+                    "or a local model can. It is kept, but never asked.",
+                    model=label,
+                    models=", ".join(router.master_models()),
+                )
+            )
+            continue
+        if role == catalog.MASTER and providers.find(label.split("/", 1)[0]).local:
+            ui.warn(
+                t(
+                    "{model} can be the master module only with a context of at least {context} "
+                    "tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.",
+                    model=label,
+                    context=catalog.MASTER_LOCAL_CONTEXT,
+                )
+            )
+            continue
         ui.warn(
             t(
                 "{model} is not among the models {role} can use now (a ready free provider): it "

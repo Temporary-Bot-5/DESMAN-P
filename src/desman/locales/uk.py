@@ -15,6 +15,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "Для Ollama також задайте контекст (OLLAMA_CONTEXT) щонайменше {context}.",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model} може бути майстер-модулем, лише якщо її контекст щонайменше {context} токенів (для Ollama задайте OLLAMA_CONTEXT) і її сервер запущено.",
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Немає готової моделі для майстер-модуля: потрібен ключ до моделі, позначеної для цього ({models}), або локальна модель з контекстом щонайменше {context} токенів, яку ви призначите командою `desman tuning --model master=PROVIDER/MODEL`.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} не може бути майстер-модулем: ним може бути лише позначена для цього модель ({models}) або локальна модель. Вибір збережено, але до цієї моделі не звертатимуться.",
+    "--master is for GOAL, without --spec or --plan": "--master — лише для GOAL, без --spec і --plan",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "Віддати GOAL повністю одній сильній моделі (майстер-модулю), а не ділити на підзадачі: лише допущена до цього модель, зі значно більшою кількістю раундів інструментів. Якщо вона раз у раз не справляється, роботу ділять для інших моделей.",
+    "Master module": "Майстер-модуль",
+    "Master module: {provider} · {model}": "Майстер-модуль: {provider} · {model}",
+    "No model ready for a master module.": "Немає готової моделі для майстер-модуля.",
     "Use the Windows Subsystem for Linux.": "Використати підсистему Windows для Linux.",
     "WSL sandbox distribution {pin} is present.": "Дистрибутив пісочниці WSL {pin} установлено.",
     "WSL sandbox distribution {pin} is missing.": "Дистрибутив пісочниці WSL {pin} не встановлено.",
@@ -422,8 +431,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "Невідомий провайдер або ключ. Доступні: {choices}",
     "The key for {role} only applies to models from {provider}.": "Ключ для {role} застосовується лише до моделей {provider}.",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key приймає ROLE=PROVIDER:KEY|auto, ROLE — одна з: {roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "Ключ, який роль пробує першим: planner, reviewer, decomposer, text, code, analysis, interlocutor. Вкажіть мітку або номер. Можна повторювати.",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "Модель, до якої роль звертається першою: planner, reviewer, decomposer, text, code, analysis, interlocutor. Можна повторювати.",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "Ключ, який роль пробує першим: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Вкажіть мітку або номер. Можна повторювати.",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "Модель, до якої роль звертається першою: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Можна повторювати.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "Змінити: `desman tuning --max-subtasks N|auto` (а також --max-parts, --context-tokens, --max-attempts, --max-transient), `--model РОЛЬ=ПРОВАЙДЕР/МОДЕЛЬ|auto` або `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "«{word}» — не команда. Загальний термінал приймає лише команди DESMAN (`help` покаже список); для розмови поверніться до чату через /back.",
     "Type `protected show` to see the change and `protected approve` to approve it.": "Введіть `protected show`, щоб побачити зміну, і `protected approve`, щоб схвалити її.",

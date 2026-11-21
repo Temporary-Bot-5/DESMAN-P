@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "Para o Ollama, defina também o contexto (OLLAMA_CONTEXT) com pelo menos {context}.",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model} só pode ser o módulo mestre com um contexto de pelo menos {context} tokens (no Ollama, defina OLLAMA_CONTEXT) e o servidor em execução.",
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Nenhum modelo pronto para um módulo mestre: é preciso uma chave para um modelo marcado para isso ({models}) ou um modelo local com contexto de pelo menos {context} tokens que você indique com `desman tuning --model master=PROVIDER/MODEL`.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} não pode ser o módulo mestre: só pode sê-lo um modelo marcado para isso ({models}) ou um modelo local. A escolha fica guardada, mas ele nunca é consultado.",
+    "--master is for GOAL, without --spec or --plan": "--master é só para GOAL, sem --spec nem --plan",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "Entregar GOAL inteiro a um único modelo forte (um módulo mestre) em vez de dividi-lo em subtarefas: apenas um modelo qualificado para isso, com muito mais rodadas de ferramentas. Se ele falhar repetidamente, o trabalho é dividido para os outros modelos.",
+    "Master module": "Módulo mestre",
+    "Master module: {provider} · {model}": "Módulo mestre: {provider} · {model}",
+    "No model ready for a master module.": "Nenhum modelo pronto para um módulo mestre.",
     "Use the Windows Subsystem for Linux.": "Usar o Subsistema do Windows para Linux.",
     "WSL sandbox distribution {pin} is present.": "A distribuição {pin} da sandbox WSL está presente.",
     "WSL sandbox distribution {pin} is missing.": "A distribuição {pin} da sandbox WSL está ausente.",
@@ -413,8 +422,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "Provedor ou chave desconhecido. Disponíveis: {choices}",
     "The key for {role} only applies to models from {provider}.": "A chave de {role} só se aplica a modelos de {provider}.",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key aceita ROLE=PROVIDER:KEY|auto, ROLE entre: {roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "A primeira chave de uma função: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use um rótulo ou número. Repetível.",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "O primeiro modelo de uma função: planner, reviewer, decomposer, text, code, analysis, interlocutor. Repetível.",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "A primeira chave de uma função: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use um rótulo ou número. Repetível.",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "O primeiro modelo de uma função: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Repetível.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "Mude com `desman tuning --max-subtasks N|auto` (e --max-parts, --context-tokens, --max-attempts, --max-transient), `--model PAPEL=PROVEDOR/MODELO|auto` ou `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}” não é um comando. Terminal geral aceita apenas comandos do DESMAN (`help` lista-os); para conversar, volte ao chat com /back.",
     "Type `protected show` to see the change and `protected approve` to approve it.": "Digite `protected show` para ver a alteração e `protected approve` para aprová-la.",

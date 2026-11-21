@@ -18,7 +18,7 @@ from desman.core.models import Kind
 from desman.core.report import task_report
 from desman.core.store import Store
 from desman.i18n import t
-from desman.llm import router
+from desman.llm import catalog, router
 from desman.llm.openai_compat import key_id
 
 
@@ -132,26 +132,30 @@ def modules_data(
         report = task_report(store, identity)
         network = store.find_task(identity)["origin"] == "network"
         modules = calls.modules(conn, identity)
-        roles = {s.kind.value for s in report.subtasks}
+        roles = {"master" if s.master else s.kind.value for s in report.subtasks}
         # Executors and review are assigned by the stored graph. Planning/decomposition
         # appear once they actually have task-attributed calls.
         roles.add("reviewer")
         history = conn.execute(
-            "SELECT c.role, s.kind, COUNT(*) AS calls, "
+            "SELECT c.role, CASE WHEN s.master = 1 THEN 'master' ELSE s.kind END AS kind, "
+            "COUNT(*) AS calls, "
             "SUM(c.prompt_tokens + c.completion_tokens) AS tokens "
             "FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
             "WHERE c.task_id = ? GROUP BY c.role, "
-            "CASE WHEN c.role = 'executor' THEN s.kind ELSE NULL END",
+            "CASE WHEN c.role = 'executor' THEN CASE WHEN s.master = 1 THEN 'master' ELSE s.kind END "
+            "ELSE NULL END",
             (identity,),
         ).fetchall()
         used = {(r["kind"] or "text") if r["role"] == "executor" else r["role"]: r for r in history}
         roles.update(r for r in used if r in tuning_cli.ROLES)
         model_history = conn.execute(
-            "SELECT c.role, s.kind, c.provider, c.model, COUNT(*) AS calls, "
+            "SELECT c.role, CASE WHEN s.master = 1 THEN 'master' ELSE s.kind END AS kind, "
+            "c.provider, c.model, COUNT(*) AS calls, "
             "COALESCE(SUM(c.prompt_tokens + c.completion_tokens), 0) AS tokens "
             "FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
             "WHERE c.task_id = ? GROUP BY c.role, "
-            "CASE WHEN c.role = 'executor' THEN s.kind ELSE NULL END, c.provider, c.model",
+            "CASE WHEN c.role = 'executor' THEN CASE WHEN s.master = 1 THEN 'master' ELSE s.kind END "
+            "ELSE NULL END, c.provider, c.model",
             (identity,),
         ).fetchall()
         model_usage = {
@@ -167,7 +171,13 @@ def modules_data(
                 continue
             own = choices.Choice() if network else choices.get(conn, "task", identity, role)
             cfg = choices.effective(config, role, own)
-            kind = Kind(role) if role in ("text", "code", "analysis") else None
+            kind: catalog.Lane | None = (
+                Kind(role)
+                if role in ("text", "code", "analysis")
+                else catalog.MASTER
+                if role == catalog.MASTER
+                else None
+            )
             call_role = calls.Role.EXECUTOR if kind else calls.Role(role)
             try:
                 lineup = router.lineup(cfg, call_role, kind=kind)
@@ -190,13 +200,9 @@ def modules_data(
             latest_call = conn.execute(
                 "SELECT c.provider, c.model, c.key_id FROM model_calls c LEFT JOIN subtasks s ON s.id = c.subtask_id "
                 "WHERE c.task_id = ? AND c.role = ? AND c.error_kind IS NULL "
-                "AND (? IS NULL OR COALESCE(s.kind, 'text') = ?) ORDER BY c.seq DESC LIMIT 1",
-                (
-                    identity,
-                    call_role.value,
-                    kind.value if kind else None,
-                    kind.value if kind else None,
-                ),
+                "AND (? IS NULL OR CASE WHEN s.master = 1 THEN 'master' "
+                "ELSE COALESCE(s.kind, 'text') END = ?) ORDER BY c.seq DESC LIMIT 1",
+                (identity, call_role.value, *([str(kind) if kind else None] * 2)),
             ).fetchone()
             first = lineup[0] if lineup else None
             if latest_call and (
@@ -411,7 +417,13 @@ def assigned_module(
     identity, role = row["task_id"], row["role"]
     network = Store(conn).find_task(identity)["origin"] == "network"
     cfg = choices.effective(config, role, choices.get(conn, "task", identity, role))
-    kind = Kind(role) if role in {k.value for k in Kind} else None
+    kind: catalog.Lane | None = (
+        Kind(role)
+        if role in {k.value for k in Kind}
+        else catalog.MASTER
+        if role == catalog.MASTER
+        else None
+    )
     try:
         lineup = router.lineup(cfg, calls.Role.EXECUTOR if kind else calls.Role(role), kind=kind)
     except router.NoProvider:

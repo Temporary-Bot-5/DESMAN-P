@@ -288,7 +288,10 @@ def decorate(
         )
         if any(
             sub.status.value == "needs_human"
-            and (row["role"] not in ("text", "code", "analysis") or sub.kind.value == row["role"])
+            and (
+                row["role"] not in ("text", "code", "analysis", "master")
+                or ("master" if sub.master else sub.kind.value) == row["role"]
+            )
             for sub in report.subtasks
         ):
             row["state"] = t("Needs human")

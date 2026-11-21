@@ -48,9 +48,9 @@ def test_v5_load_save_and_fingerprint_contract() -> None:
         json.dumps({"schema_version": 5, "language": "en"}), encoding="utf-8"
     )
     loaded = manager.load()
-    assert loaded.schema_version == 10 and loaded.tuning == Tuning()
+    assert loaded.schema_version == 11 and loaded.tuning == Tuning()
     manager.save(loaded)
-    assert json.loads(manager.config_path.read_text(encoding="utf-8"))["schema_version"] == 10
+    assert json.loads(manager.config_path.read_text(encoding="utf-8"))["schema_version"] == 11
     assert KeyChoices(planner=key_id(FIRST)).planner == key_id(FIRST)
     assert Tuning(keys=KeyChoices(planner=key_id(FIRST))).is_set()
     for value in (FIRST, "a" * 11, "A" * 12, "g" * 12, "a" * 13):
@@ -209,7 +209,7 @@ def test_wizard_numbered_section_and_cancellation() -> None:
     def section() -> None:
         wizard.run_section(open_config(), "roles")
 
-    result = runner.invoke(section, [], input="1\n2\n3\n8\n")
+    result = runner.invoke(section, [], input="1\n2\n3\n9\n")
     assert result.exit_code == 0, result.output
     tuned = open_config().load().tuning
     assert tuned.models.planner is not None and tuned.keys.planner == key_id(SECOND)
@@ -217,7 +217,7 @@ def test_wizard_numbered_section_and_cancellation() -> None:
     assert FIRST not in result.output and SECOND not in result.output
     # The whole wizard exposes the section after Done, preserving existing provider numbers.
     role_number = len(providers.PROVIDERS + providers.SERVICES) + 2
-    result = runner.invoke(cli, ["config"], input=f"1\n{role_number}\n8\n")
+    result = runner.invoke(cli, ["config"], input=f"1\n{role_number}\n9\n")
     assert "Models and keys for roles" in result.output
     assert open_config().load().tuning == tuned
 
@@ -279,7 +279,7 @@ def test_preview_is_pure_and_role_data_contains_no_secrets() -> None:
     assert new.models.interlocutor == "groq/test"
     assert set(KeyChoices.model_fields) == set(ModelChoices.model_fields)
     rows = tuning_cli.role_rows(preview)
-    assert len(rows) == 7 and rows[-1]["key_fingerprint"] == key_id(SECOND)
+    assert len(rows) == 8 and rows[-1]["key_fingerprint"] == key_id(SECOND)
     assert FIRST not in json.dumps(rows) and SECOND not in json.dumps(rows)
 
 
@@ -314,7 +314,7 @@ def test_chat_wizard_role_section_journals_changes(monkeypatch: pytest.MonkeyPat
     ask = json.dumps({"type": "command", "name": "config", "args": {"section": "roles"}})
     fake = FakeLLM().on(CHAT, ask)
     monkeypatch.setattr(runs, "models", lambda config, conn, **_: runs.Models(fake, None))
-    result = CliRunner().invoke(cli, [], input="configure roles\ny\n1\n2\n3\n8\n/exit\n")
+    result = CliRunner().invoke(cli, [], input="configure roles\ny\n1\n2\n3\n9\n/exit\n")
     assert result.exit_code == 0, result.output
     assert open_config().load().tuning.keys.planner == key_id(SECOND)
     assert any(
@@ -342,7 +342,7 @@ def test_wizard_keeps_unavailable_defaults_unless_auto_selected(missing: str, re
         wizard.run_section(open_config(), "roles")
 
     # Empty answers in the numbered fallback retain both menu defaults.
-    answers = "1\n1\n1\n8\n" if reset else "1\n\n\n8\n"
+    answers = "1\n1\n1\n9\n" if reset else "1\n\n\n9\n"
     result = CliRunner().invoke(section, [], input=answers)
     assert result.exit_code == 0, result.output
     assert "not available now" in result.output

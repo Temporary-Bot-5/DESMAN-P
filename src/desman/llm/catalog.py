@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final, Literal
 
 from desman.core.calls import Role
 from desman.core.models import Kind
@@ -40,9 +41,33 @@ class Model:
     """Requests a minute one key may make (free tier; for paid providers a cautious pace)."""
     request_tokens: int | None = None
     """Free-tier ceiling for one request, independent of the context window."""
+    master: bool = False
+    """Qualified for a master module (ADR 0015): one subtask holding a whole goal, worked in a
+    long loop of tool calls. A judgement made in code review; `qualifies` checks its basis."""
 
 
 _C, _T, _A = Strength.CODE, Strength.TEXT, Strength.ANALYSIS
+
+MASTER: Final = "master"
+"""The executor's lane of a master subtask (ADR 0015), beside the kinds of `Kind`; also the
+field of `config.ModelChoices` for the model it asks first."""
+Lane = Kind | Literal["master"]
+"""Which models an executor asks: those of its subtask's kind, or the master's."""
+MASTER_CONTEXT: Final = 128_000
+"""The least context of a cloud model marked `master`: a long loop of tool calls needs it."""
+MASTER_LOCAL_CONTEXT: Final = 32_768
+"""The least context of a local model the person names as the master."""
+
+
+def qualifies(m: Model) -> bool:
+    """What a model marked `master` must have: a large context, kept JSON, analysis, and no
+    small per-request ceiling (such a ceiling ends a long loop at its first big request)."""
+    return (
+        m.context >= MASTER_CONTEXT
+        and m.strict_json
+        and Strength.ANALYSIS in m.strengths
+        and m.request_tokens is None
+    )
 
 
 def _m(
@@ -52,8 +77,9 @@ def _m(
     strict_json: bool = True,
     rpm: int = 10,
     request_tokens: int | None = None,
+    master: bool = False,
 ) -> Model:
-    return Model(id, context, strict_json, frozenset(strengths), rpm, request_tokens)
+    return Model(id, context, strict_json, frozenset(strengths), rpm, request_tokens, master)
 
 
 CATALOG: dict[str, tuple[Model, ...]] = {
@@ -64,20 +90,20 @@ CATALOG: dict[str, tuple[Model, ...]] = {
     ),
     "google": (
         _m("gemini-3.5-flash-lite", 1_048_576, _T, _C, rpm=15),
-        _m("gemini-3.8-flash", 1_048_576, _A, _C, _T, rpm=10),
+        _m("gemini-3.8-flash", 1_048_576, _A, _C, _T, rpm=10, master=True),
     ),
     "mistral": (
         _m("mistral-small-latest", 131_072, _T, rpm=30),
-        _m("mistral-medium-latest", 131_072, _A, _T, rpm=30),
+        _m("mistral-medium-latest", 131_072, _A, _T, rpm=30, master=True),
         _m("codestral-latest", 262_144, _C, rpm=30),
     ),
     "openrouter": (_m("nvidia/nemotron-3.5-lightning:free", 131_072, _T, _A, rpm=20),),
     "nvidia": (
-        _m("nvidia/nemotron-3-ultra-550b-a55b", 131_072, _T, _A, rpm=40),
+        _m("nvidia/nemotron-3-ultra-550b-a55b", 131_072, _T, _A, rpm=40, master=True),
         _m("nvidia/nemotron-3.5-lightning-30b-a3b", 131_072, _T, rpm=40),
     ),
     "cohere": (
-        _m("command-a-03-2025", 262_144, _A, _T, rpm=20),
+        _m("command-a-03-2025", 262_144, _A, _T, rpm=20, master=True),
         _m("command-r7b-12-2024", 131_072, rpm=20),
     ),
     "aion": (_m("aion-labs/aion-3.0-mini", 131_072, _T, _A, rpm=10),),
@@ -87,10 +113,10 @@ CATALOG: dict[str, tuple[Model, ...]] = {
     ),
     "vercel": (_m("google/gemini-3.5-flash-lite", 1_048_576, _T, rpm=10),),
     # Paid: the default models only, at a cautious pace (the limit is the bill, not the rate).
-    "openai": (_m("gpt-6-luna", 400_000, _A, _C, _T, rpm=60),),
-    "anthropic": (_m("claude-haiku-5-5", 200_000, _A, _C, _T, rpm=50),),
-    "deepseek": (_m("deepseek-flash", 128_000, _A, _C, _T, rpm=60),),
-    "xai": (_m("grok-4.3", 256_000, _A, _C, _T, rpm=60),),
+    "openai": (_m("gpt-6-luna", 400_000, _A, _C, _T, rpm=60, master=True),),
+    "anthropic": (_m("claude-haiku-5-5", 200_000, _A, _C, _T, rpm=50, master=True),),
+    "deepseek": (_m("deepseek-flash", 128_000, _A, _C, _T, rpm=60, master=True),),
+    "xai": (_m("grok-4.3", 256_000, _A, _C, _T, rpm=60, master=True),),
 }
 
 NEEDS: dict[Role, Strength] = {
@@ -110,10 +136,13 @@ KIND_NEEDS: dict[Kind, Strength] = {
 }
 
 
-def need(role: Role, kind: Kind | None = None) -> Strength:
+def need(role: Role, kind: Lane | None = None) -> Strength:
     """What `role` asks of its model; for the executor of a subtask of `kind`, what that kind
-    of work asks (other roles do the same work whatever the subtask)."""
-    if role is Role.EXECUTOR and kind is not None:
+    of work asks (other roles do the same work whatever the subtask). A master holds a whole
+    goal: it plans and judges its own steps."""
+    if role is Role.EXECUTOR and kind == MASTER:
+        return Strength.ANALYSIS
+    if role is Role.EXECUTOR and isinstance(kind, Kind):
         return KIND_NEEDS[kind]
     return NEEDS[role]
 

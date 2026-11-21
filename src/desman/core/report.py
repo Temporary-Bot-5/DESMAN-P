@@ -33,6 +33,8 @@ class SubtaskReport(BaseModel):
     """For a part of a split subtask (ROADMAP 2.9b): the subtask's seq."""
     kind: Kind = Kind.TEXT
     """What sort of work it is: its executor's model is picked by it (ROADMAP 4.5)."""
+    master: bool = False
+    """A master subtask (ADR 0015): its executor's model is the master's instead."""
     knowledge: list[str] = Field(default_factory=list)
     """The knowledge tree's paths it was given (ADR 0009)."""
     lease_owner: str | None
@@ -103,6 +105,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     depends_on=sorted(seq_of[d] for d in store.dependencies(sub.id)),
                     part_of=None if sub.parent_id is None else seq_of[sub.parent_id],
                     kind=sub.kind,
+                    master=sub.master,
                     knowledge=sub.knowledge,
                     lease_owner=sub.lease_owner,
                     lease_until=sub.lease_until,

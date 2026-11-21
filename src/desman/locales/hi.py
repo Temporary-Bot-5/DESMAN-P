@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "For Ollama, also set its context (OLLAMA_CONTEXT) to at least {context}.": "Ollama के लिए उसका संदर्भ (OLLAMA_CONTEXT) भी कम से कम {context} रखें।",
+    "{model} can be the master module only with a context of at least {context} tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.": "{model} मास्टर मॉड्यूल तभी हो सकता है जब उसका संदर्भ कम से कम {context} टोकन हो (Ollama के लिए OLLAMA_CONTEXT सेट करें) और उसका सर्वर चल रहा हो।",
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है: इसके लिए चिह्नित मॉडल की कुंजी चाहिए ({models}), या कम से कम {context} टोकन संदर्भ वाला स्थानीय मॉडल जिसे आप `desman tuning --model master=PROVIDER/MODEL` से चुनें।",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} मास्टर मॉड्यूल नहीं हो सकता: केवल इसके लिए चिह्नित मॉडल ({models}) या स्थानीय मॉडल हो सकता है। चुनाव सहेजा रहता है, पर इस मॉडल से कभी नहीं पूछा जाएगा।",
+    "--master is for GOAL, without --spec or --plan": "--master केवल GOAL के लिए है, --spec या --plan के बिना",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL को उप-कार्यों में बाँटने के बजाय पूरा एक मज़बूत मॉडल (मास्टर मॉड्यूल) को दें: केवल इसके लिए योग्य मॉडल, कहीं ज़्यादा टूल राउंड के साथ। अगर वह बार-बार विफल हो, तो काम बाकी मॉडलों के लिए बाँट दिया जाता है।",
+    "Master module": "मास्टर मॉड्यूल",
+    "Master module: {provider} · {model}": "मास्टर मॉड्यूल: {provider} · {model}",
+    "No model ready for a master module.": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है।",
     "Use the Windows Subsystem for Linux.": "Linux के लिए Windows सबसिस्टम इस्तेमाल करें।",
     "WSL sandbox distribution {pin} is present.": "WSL सैंडबॉक्स वितरण {pin} मौजूद है।",
     "WSL sandbox distribution {pin} is missing.": "WSL सैंडबॉक्स वितरण {pin} मौजूद नहीं है।",
@@ -413,8 +422,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "अज्ञात प्रदाता या कुंजी। उपलब्ध: {choices}",
     "The key for {role} only applies to models from {provider}.": "{role} की कुंजी केवल {provider} के मॉडल पर लागू होती है।",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key का प्रारूप ROLE=PROVIDER:KEY|auto है, ROLE इनमें से एक: {roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "भूमिका की पहली कुंजी: planner, reviewer, decomposer, text, code, analysis, interlocutor। लेबल या संख्या दें। दोहराया जा सकता है।",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "भूमिका का पहला मॉडल: planner, reviewer, decomposer, text, code, analysis, interlocutor। दोहराया जा सकता है।",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "भूमिका की पहली कुंजी: planner, reviewer, decomposer, text, code, analysis, master, interlocutor। लेबल या संख्या दें। दोहराया जा सकता है।",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "भूमिका का पहला मॉडल: planner, reviewer, decomposer, text, code, analysis, master, interlocutor। दोहराया जा सकता है।",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "बदलें: `desman tuning --max-subtasks N|auto` (और --max-parts, --context-tokens, --max-attempts, --max-transient), `--model भूमिका=प्रदाता/मॉडल|auto`, या `--key ROLE=PROVIDER:KEY|auto`, `--reset`।",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}” कोई कमांड नहीं है। सामान्य टर्मिनल केवल DESMAN की कमांड स्वीकार करता है (`help` सूची दिखाता है); बात करने के लिए /back से चैट में लौटें।",
     "Type `protected show` to see the change and `protected approve` to approve it.": "बदलाव देखने के लिए `protected show` और मंज़ूरी देने के लिए `protected approve` टाइप करें।",

@@ -70,7 +70,7 @@ from desman.models_cli import models
 from desman.modules_cli import modules
 from desman.net import node
 from desman.nodes_cli import nodes_group
-from desman.planner import Planned, must_run, plan, template_plan
+from desman.planner import Planned, master_plan, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
 from desman.sandbox_cli import sandbox
@@ -366,6 +366,13 @@ def model_options(command: F) -> F:
     help="The work must run code: it is done only once run_command really ran it, whatever "
     "the plan (without the shell_execution permission it waits for you).",
 )
+@click.option(
+    "--master",
+    is_flag=True,
+    help="Give GOAL whole to one strong model (a master module) instead of splitting it into "
+    "subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, "
+    "the work is split for the other models.",
+)
 @run_options
 @db_option
 @json_option
@@ -376,6 +383,7 @@ def run(
     priority: str | None,
     plan_mode: str | None,
     runs_code: bool,
+    master: bool,
     fake_script: Path | None,
     provider_name: str | None,
     model: str | None,
@@ -397,6 +405,8 @@ def run(
         raise click.UsageError(t("--plan is for GOAL: a --spec is already a plan"))
     if spec_path is not None and file:
         raise click.UsageError(t("--file requires GOAL and cannot be used with --spec"))
+    if master and (spec_path is not None or plan_mode is not None):
+        raise click.UsageError(t("--master is for GOAL, without --spec or --plan"))
     if goal is not None and not goal.strip():
         raise click.UsageError(t("GOAL is empty"))
     try:
@@ -415,7 +425,9 @@ def run(
         raise click.ClickException(str(e)) from e
     try:
         runs.guard(store)  # before any model is asked
-        models = _attach(source, store, cache=not no_cache, as_json=as_json)
+        models = _attach(source, store, cache=not no_cache, as_json=as_json, master=master)
+        if master and models.master is None and models.choice is not None:
+            raise click.ClickException(models.no_master or t("No model ready for a master module."))
         planned: Planned | None = None
         fetched = documents.Prefetched([], [])
         docs: list[documents.Document] = []
@@ -436,6 +448,7 @@ def run(
                 as_json=as_json,
                 tree=runs.task_tree(store.conn, _config_or_default().personalize),
                 clock=store.clock,
+                master=master,
             )
             spec = planned.spec
         elif level is not None:
@@ -878,9 +891,12 @@ def _plan(
     as_json: bool,
     tree: tuple[knowledge.Node, ...] | None = None,
     clock: Callable[[], datetime] | None = None,
+    master: bool = False,
 ) -> Planned:
     level = Priority.NORMAL if priority is None else priority
     tuning = _tuning()
+    if master:  # the person gave the goal whole to one model: no plan by a model
+        return Planned(runs.tuned_spec(master_plan(goal, level), tuning), "master")
     if not by_model:
         return Planned(runs.tuned_spec(template_plan(goal, level), tuning), "template")
     if not as_json:
@@ -1073,9 +1089,11 @@ def _attach(
     cache: bool,
     as_json: bool,
     read_tuning: Callable[[], Tuning] | None = None,
+    master: bool = False,
 ) -> runs.Models:
     """The run's models (`runs.models`: a lineup per role), said to the operator. The fake is
-    not wrapped: its scripts test the retry policy and count every call."""
+    not wrapped: its scripts test the retry policy and count every call. `master`: the run's
+    work is one master subtask, so its models are said instead of the executor's."""
     if source.fake is not None:
         return runs.Models(source.fake, None)
     config = load_config().load()
@@ -1093,7 +1111,17 @@ def _attach(
     choice = models.choice
     if as_json or choice is None:
         return models
-    if choice.provider.key_env is None:
+    found = models.find_master() if master and models.find_master is not None else None
+    if found is not None and found.choice is not None:
+        choice = found.choice
+        ui.note(
+            t(
+                "Master module: {provider} · {model}",
+                provider=choice.provider.name,
+                model=choice.model,
+            )
+        )
+    elif choice.provider.key_env is None:
         url = choice.provider.endpoint(config)
         ui.note(
             t(
@@ -1128,10 +1156,10 @@ def _attach(
                 model=reviewer.model,
             )
         )
-    code = _first_for(models, Kind.CODE)
+    code = None if found else _first_for(models, Kind.CODE)
     if code is not None and code.label != choice.label:
         ui.note(t("Code by {provider} · {model}", provider=code.provider.name, model=code.model))
-    analysis = _first_for(models, Kind.ANALYSIS)
+    analysis = None if found else _first_for(models, Kind.ANALYSIS)
     if analysis is not None and analysis.label != choice.label:
         ui.note(
             t(
@@ -1143,12 +1171,13 @@ def _attach(
     if choice.provider.paid:
         ui.warn(t("{name} is a paid provider: every call is billed.", name=choice.provider.name))
         ui.warn(providers.untested_note())
-    if models.other_choice is not None:
+    other = found.other_choice if found is not None else models.other_choice
+    if other is not None:
         ui.note(
             t(
                 "Retries may also use {provider} · {model}",
-                provider=models.other_choice.provider.name,
-                model=models.other_choice.model,
+                provider=other.provider.name,
+                model=other.model,
             )
         )
     return models
