@@ -1248,7 +1248,7 @@ def _global_leave(ctx: Context, args: NoArgs) -> Outcome | Proposal:
 
 
 def _lent_outcome(lent: global_cli.Lent) -> Outcome:
-    quota = None if lent.new is None else lent.new.model_dump()
+    quota = None if lent.new is None else global_cli.quota_json(lent.new, lent.provider)
     return Outcome({"provider": lent.provider, "changed": lent.changed, "quota": quota})
 
 
@@ -1270,8 +1270,9 @@ def _global_search(ctx: Context, args: BorrowSearchArgs) -> Outcome | Proposal:
     def apply() -> Outcome:
         state = None if args.state is None else args.state == "on"
         on = global_cli.borrow_search(ctx.manager, state, conn=ctx.store.conn)
-        ui.out(global_cli.search_text(on))
-        return Outcome({"borrow_search": on})
+        joined = ctx.manager.load().network.enabled
+        ui.out(global_cli.search_text(on, joined=joined))
+        return Outcome({"borrow_search": on, "effective_after_join": on and not joined})
 
     if args.state is None:
         return apply()
@@ -2835,7 +2836,7 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
     if old.network != new.network:  # which parts, by name; quotas are not secret
         parts = [
             n
-            for n in ("enabled", "registry", "lead")
+            for n in ("enabled", "registry", "lead", "borrow_search")
             if getattr(old.network, n) != getattr(new.network, n)
         ]
         parts += [

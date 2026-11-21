@@ -381,9 +381,13 @@ class Web:
         if cached is not None:
             return cached
         problems = []
+        missing = []
         for engine in engines:
             try:
                 results = engine.search(query, max_results, language)
+            except MissingSearchEngine as e:
+                missing.append(f"{engine.name}: {e}")
+                continue
             except WebError as e:  # the next engine may answer
                 problems.append(f"{engine.name}: {e}")
                 continue
@@ -399,7 +403,9 @@ class Web:
             if self.cache:
                 self.cache.put("search", request, body)
             return body
-        raise WebError("; ".join(problems))
+        if not problems:
+            raise MissingSearchEngine("; ".join(missing))
+        raise WebError("; ".join(problems + missing))
 
     def page(self, url: str) -> dict[str, Any]:
         """The whole text of a page (cut by MAX_BYTES only), from the cache when it is there."""

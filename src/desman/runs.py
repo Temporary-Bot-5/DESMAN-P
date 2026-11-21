@@ -30,7 +30,7 @@ from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import RetryPolicy, Strategy, strategy_for
 from desman.core.sandbox import Sandbox
-from desman.core.search import Lent, Tavily, client, open_sources
+from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
@@ -43,6 +43,7 @@ from desman.llm.limiter import Buckets, Limited, Local
 from desman.llm.openai_compat import key_id
 from desman.net import jobs, protocol
 from desman.net.node import EXTEND_WHEN, capabilities
+from desman.net.search_lend import Lent
 from desman.planner import MAX_PARTS, MAX_SUBTASKS, decomposer
 from desman.searxng import engine as searxng_engine
 
@@ -520,7 +521,7 @@ def executor_access(
     if (
         permissions.network_access
         and not providers.search_engines(config)
-        and not config.network.borrow_search
+        and not (config.network.borrow_search and net.registry(config) is not None)
     ):
         ui.warn(
             t(

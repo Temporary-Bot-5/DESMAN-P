@@ -10,7 +10,7 @@ from desman.core import db
 from desman.net import protocol
 from desman.registry import store
 
-LIFETIME = 60
+LIFETIME = protocol.SEARCH_WAIT
 POLL_FRESHNESS = 30
 TAKE_WINDOW = 10
 DAY = 86400
@@ -126,10 +126,27 @@ def ask(
     return protocol.SearchAsked(id=id, wait_seconds=LIFETIME)
 
 
-def next_jobs(conn: sqlite3.Connection, lender: store.Node, now: datetime) -> protocol.SearchJobs:
+def next_jobs(
+    conn: sqlite3.Connection, lender: store.Node, limit: int, now: datetime
+) -> protocol.SearchJobs:
     stamp = now.timestamp()
+
+    def take(count: int) -> list[sqlite3.Row]:
+        return conn.execute(
+            """UPDATE search_requests SET taken = 1 WHERE id IN (
+                   SELECT id FROM search_requests
+                   WHERE lender = ? AND state = 'waiting' AND taken = 0
+                   ORDER BY assigned_at, id LIMIT ?
+               ) RETURNING id, query, count""",
+            (lender.fingerprint, count),
+        ).fetchall()
+
     with db.transaction(conn):
-        remaining = _quota(lender) - _used(conn, lender.fingerprint, stamp)
+        taken = conn.execute(
+            "SELECT count(*) FROM search_requests WHERE lender = ? AND state = 'waiting' AND taken = 1",
+            (lender.fingerprint,),
+        ).fetchone()[0]
+        remaining = min(limit, _quota(lender) - _used(conn, lender.fingerprint, stamp) - taken)
         if remaining <= 0:
             return protocol.SearchJobs(jobs=[])
         conn.execute(
@@ -137,11 +154,13 @@ def next_jobs(conn: sqlite3.Connection, lender: store.Node, now: datetime) -> pr
                ON CONFLICT (lender) DO UPDATE SET polled_at = max(polled_at, excluded.polled_at)""",
             (lender.fingerprint, stamp),
         )
+        rows = take(remaining)
         for row in conn.execute(
             """SELECT id, asker, lender FROM search_requests
                WHERE state = 'waiting' AND taken = 0 AND reassigned = 0 AND assigned_at <= ?
+                 AND lender != ?
                ORDER BY assigned_at, id""",
-            (stamp - TAKE_WINDOW,),
+            (stamp - TAKE_WINDOW, lender.fingerprint),
         ).fetchall():
             asker = store.node(conn, row["asker"])
             if asker is None or asker.status != "active" or asker.revoked:
@@ -153,14 +172,8 @@ def next_jobs(conn: sqlite3.Connection, lender: store.Node, now: datetime) -> pr
                        WHERE id = ?""",
                     (replacement, stamp, row["id"]),
                 )
-        rows = conn.execute(
-            """UPDATE search_requests SET taken = 1 WHERE id IN (
-                   SELECT id FROM search_requests
-                   WHERE lender = ? AND state = 'waiting' AND taken = 0
-                   ORDER BY assigned_at, id LIMIT ?
-               ) RETURNING id, query, count""",
-            (lender.fingerprint, min(4, remaining)),
-        ).fetchall()
+        if len(rows) < remaining:
+            rows.extend(take(remaining - len(rows)))
     return protocol.SearchJobs(jobs=[protocol.SearchJob(**dict(row)) for row in rows])
 
 
@@ -176,12 +189,14 @@ def answer(
         if row is None:
             raise Refusal("not_found")
         if row["state"] == "waiting":
-            if _used(conn, lender.fingerprint, stamp) >= _quota(lender):
+            # A taken job the node could not run still needs a terminal reply.
+            skipped = row["taken"] and result.error == protocol.SEARCH_SKIPPED and not result.hits
+            if not skipped and _used(conn, lender.fingerprint, stamp) >= _quota(lender):
                 raise Refusal("too_many")
             conn.execute(
                 """UPDATE search_requests SET state = 'answered', query = NULL, payload = ?,
                    answered_at = ? WHERE id = ?""",
-                (result.model_dump_json(), stamp, result.id),
+                (result.model_dump_json(), None if skipped else stamp, result.id),
             )
             _log(conn, "answered", result.id, row["asker"], lender.fingerprint)
             return protocol.SearchState(id=result.id, state="answered", hits=[])

@@ -131,6 +131,10 @@ class _Problem(Exception):
         self.error = error
 
 
+Problem = _Problem
+Unreachable = _Unreachable
+
+
 class ProposalSendError(Exception):
     """A proposal could not be sent; the message contains no request or key material."""
 
@@ -440,13 +444,14 @@ class Node:
                 self.suspended = suspended
                 self.next_at = None
             if suspended:
+                event = None
                 if self.registered and sent_search is not None and self.next_at is None:
-                    self._poll(now)
+                    event = self._poll(now)
                 for job in jobs.holding(self.conn):
                     self._drop(job, "abandoned", "no module left")
                 for check in checks.pending(self.conn):
                     checks.close(self.conn, check.lease, "lost")
-                return None
+                return event
             event = None
             if self.next_at is None or now >= self.next_at:
                 event = self._poll(now)
@@ -478,8 +483,10 @@ class Node:
             or not self.registered
             or self.failures
             or (self.search_at is not None and now < self.search_at)
-            or search_lend.used_today(self.conn, now) >= limit
         ):
+            return
+        remaining = limit - search_lend.used_today(self.conn, now)
+        if remaining <= 0:
             return
         key = self._key(address)
         if key is None:
@@ -493,29 +500,37 @@ class Node:
                 address,
                 "POST",
                 protocol.SEARCH_NEXT,
-                None,
+                protocol.SearchPoll(limit=min(4, remaining)),
                 protocol.SearchJobs,
                 now,
                 time.monotonic() + TIMEOUT,
             )
             for job in offer.jobs:
-                current = self._config()
-                if net.registry(current) != address:
-                    break
-                result = search_lend.answer(self.conn, current, job, http, self._clock)
-                if result is None or net.registry(self._config()) != address:
-                    break
-                _call(
-                    http,
-                    key,
-                    address,
-                    "POST",
-                    protocol.SEARCH_ANSWER,
-                    result,
-                    protocol.SearchState,
-                    self._clock(),
-                    time.monotonic() + TIMEOUT,
-                )
+                result = protocol.SearchAnswer(id=job.id, hits=[], error=protocol.SEARCH_SKIPPED)
+                try:
+                    current = self._config()
+                    if net.registry(current) == address:
+                        result = search_lend.answer(self.conn, current, job, http, self._clock)
+                except (ConfigError, sqlite3.OperationalError):
+                    pass
+                try:
+                    _call(
+                        http,
+                        key,
+                        address,
+                        "POST",
+                        protocol.SEARCH_ANSWER,
+                        result,
+                        protocol.SearchState,
+                        self._clock(),
+                        time.monotonic() + TIMEOUT,
+                    )
+                except _Problem as e:
+                    if e.error in {REVOKED, NOT_REGISTERED}:
+                        raise
+                except _Unreachable:
+                    # A failed delivery should not abandon the other jobs in this batch.
+                    continue
         except (_Problem, _Unreachable) as e:
             if isinstance(e, _Problem) and e.error in {REVOKED, NOT_REGISTERED}:
                 self._refused(address, key, e.error, now)
@@ -1400,6 +1415,9 @@ def _outcome(record: sign.Signed) -> str:
     if record.record.kind is sign.RecordKind.VERDICT:
         return "accept" if body.get("accept") else "reject"
     return str(body.get("outcome", ""))
+
+
+call = _call
 
 
 def _job_details(job: jobs.Held, why: str | None = None) -> dict[str, Any]:

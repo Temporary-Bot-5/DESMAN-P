@@ -47,6 +47,8 @@ CLUSTERS_MINE: Final = "/v1/clusters/mine"
 CLUSTER_RECORDS: Final = "/v1/clusters/records"
 
 SEARCH_ASK: Final = "/v1/search/ask"
+SEARCH_WAIT: Final = 30
+SEARCH_SKIPPED: Final = "the lending node could not run this search"
 SEARCH_NEXT: Final = "/v1/search/next"
 SEARCH_ANSWER: Final = "/v1/search/answer"
 SEARCH_STATE: Final = "/v1/search/"
@@ -924,8 +926,10 @@ class SearchJobs(BaseModel):
     jobs: list[SearchJob] = Field(max_length=4)
 
 
-class EmptySearchPoll(BaseModel):
+class SearchPoll(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    limit: int = Field(ge=1, le=4)
 
 
 class SearchHit(BaseModel):

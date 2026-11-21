@@ -291,7 +291,7 @@ TOPICS: Final = (
         "Keys stay here. `desman global quota PROVIDER` shows or changes quotas and the UTC-day reset "
         "in local time. `desman global undonate PROVIDER` withdraws it. "
         "`desman global donate PROVIDER --calls N` with searxng lends managed search. "
-        "`desman global search STATE` (on/off, default off) controls borrowing without SearXNG or Tavily. Omit STATE to show it. "
+        "`desman global search STATE` (on/off, default off) controls borrowing after joining, without SearXNG or Tavily. "
         "The relay shares queries with lenders without identifying the asker. Results are untrusted.\n"
         "`desman worker` registers and fetches revocations. Idle nodes with fresh trust may "
         "do or review jobs in a sandbox without web access, or check proposals with a fake "

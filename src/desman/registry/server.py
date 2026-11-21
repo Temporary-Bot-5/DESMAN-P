@@ -277,6 +277,7 @@ class Registry:
                 self._refused(conn, caller.fingerprint, NOT_REGISTERED, method, target)
                 return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
             except search.Refusal as e:
+                self._refused(conn, caller.fingerprint, str(e), method, path)
                 status = (
                     HTTPStatus.TOO_MANY_REQUESTS if str(e) == "too_many" else HTTPStatus.NOT_FOUND
                 )
@@ -298,9 +299,9 @@ class Registry:
     def _search_next(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime
     ) -> Reply:
-        _body(protocol.EmptySearchPoll, body, caller)
+        poll = _body(protocol.SearchPoll, body, caller)
         search.expire(conn, now)
-        return _ok(search.next_jobs(conn, self._active(conn, caller), now))
+        return _ok(search.next_jobs(conn, self._active(conn, caller), poll.limit, now))
 
     def _search_answer(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime

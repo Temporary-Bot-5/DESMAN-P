@@ -11,6 +11,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "on": "开启",
+    "Borrowing takes effect after `desman global join`.": "执行 `desman global join` 后，借用才会生效。",
     "Borrow web search": "借用网页搜索",
     "Set up local SearXNG with `desman search setup` before lending it.": "出借前请先使用 `desman search setup` 设置本地 SearXNG。",
     "{calls} searches a day": "每日 {calls} 次搜索",

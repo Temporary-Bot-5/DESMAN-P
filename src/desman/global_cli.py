@@ -75,8 +75,18 @@ class QuotaUsage:
     tokens: int
     held: int
 
-    def as_json(self) -> dict[str, int]:
-        return {"calls": self.calls, "tokens": self.tokens}
+    def as_json(self, provider: str = "") -> dict[str, int]:
+        data = {"calls": self.calls}
+        if provider != protocol.SEARCH_PROVIDER:
+            data["tokens"] = self.tokens
+        return data
+
+
+def quota_json(quota: Donation, provider: str) -> dict[str, int]:
+    data = {"calls_per_day": quota.calls_per_day}
+    if provider != protocol.SEARCH_PROVIDER:
+        data["tokens_per_day"] = quota.tokens_per_day
+    return data
 
 
 @contextmanager
@@ -130,11 +140,11 @@ class Status:
             "cluster": self.cluster,
             "registry": self.registry,
             "node": self.node,
-            "donated": {name: d.model_dump() for name, d in self.donated.items()},
+            "donated": {name: quota_json(d, name) for name, d in self.donated.items()},
             "used_today": (
                 None
                 if self.used_today is None
-                else {name: usage.as_json() for name, usage in self.used_today.items()}
+                else {name: usage.as_json(name) for name, usage in self.used_today.items()}
             ),
             "resets_at": _reset_at(self.now).isoformat(),
         }
@@ -150,8 +160,10 @@ class QuotaReport:
     def as_json(self, changed: Lent | None = None) -> dict[str, Any]:
         data: dict[str, Any] = {
             "provider": self.provider,
-            "quota": self.quota.model_dump(),
-            "used_today": None if self.used_today is None else self.used_today.as_json(),
+            "quota": quota_json(self.quota, self.provider),
+            "used_today": None
+            if self.used_today is None
+            else self.used_today.as_json(self.provider),
             "resets_at": _reset_at(self.now).isoformat(),
         }
         if changed is not None:
@@ -204,20 +216,26 @@ def journal(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
         opened.close()
 
 
-def commit(conn: sqlite3.Connection, entries: list[Entry], save: Callable[[], None]) -> None:
+def commit(
+    conn: sqlite3.Connection,
+    entries: list[Entry],
+    save: Callable[[], None],
+    *,
+    journal_borrow: bool = False,
+) -> None:
     """Save the config and journal its change together: the entries are written in the
     transaction the config is saved in, so a save that fails journals nothing."""
     with db.transaction(conn):
         for action, details in entries:
             netlog.write(conn, action, details)
-            if action == "borrow_search":
+            if journal_borrow and action == "borrow_search":
                 operator.write(conn, action, details)
         save()
 
 
 @contextmanager
 def _change(
-    manager: ConfigManager, conn: sqlite3.Connection | None
+    manager: ConfigManager, conn: sqlite3.Connection | None, *, journal_borrow: bool = False
 ) -> Iterator[tuple[Config, list[Entry]]]:
     """The config to change and the entries that say how, saved and journaled together under
     the config's lock: two commands at once journal in the order they saved. Nothing is saved
@@ -227,7 +245,7 @@ def _change(
         entries: list[Entry] = []
         yield config, entries
         if entries:
-            commit(db_conn, entries, lambda: manager.save(config))
+            commit(db_conn, entries, lambda: manager.save(config), journal_borrow=journal_borrow)
 
 
 def node_fingerprint(key_path: Path | None = None) -> str | None:
@@ -288,15 +306,18 @@ def borrow_search(
 ) -> bool:
     if on is None:
         return manager.load().network.borrow_search
-    with _change(manager, conn) as (config, entries):
+    with _change(manager, conn, journal_borrow=conn is None) as (config, entries):
         if config.network.borrow_search != on:
             config.network.borrow_search = on
             entries.append(("borrow_search", {"on": on}))
     return on
 
 
-def search_text(on: bool) -> str:
-    return t("Borrow web search") + ": " + (t("on") if on else t("off"))
+def search_text(on: bool, *, joined: bool = True) -> str:
+    state = t("Borrow web search") + ": " + (t("on") if on else t("off"))
+    if on and not joined:
+        state += "\n" + t("Borrowing takes effect after `desman global join`.")
+    return state
 
 
 def cluster_text(details: dict[str, Any] | None) -> str:
@@ -684,9 +705,13 @@ def donation(base: Donation, calls: int | None, tokens: int | None, provider: st
     data = base.model_dump()
     if calls is not None:
         data["calls_per_day"] = calls
-    if tokens is not None and provider != protocol.SEARCH_PROVIDER:
+    if provider == protocol.SEARCH_PROVIDER:
+        data["tokens_per_day"] = 0
+    elif tokens is not None:
         data["tokens_per_day"] = tokens
     try:
+        if provider != protocol.SEARCH_PROVIDER and data["tokens_per_day"] == 0:
+            raise ValueError("model donations need a token quota")
         return Donation.model_validate(data)
     except ValueError:
         raise click.ClickException(
@@ -979,7 +1004,7 @@ def _lent_json(lent: Lent) -> str:
         {
             "provider": lent.provider,
             "changed": lent.changed,
-            "quota": None if lent.new is None else lent.new.model_dump(),
+            "quota": None if lent.new is None else quota_json(lent.new, lent.provider),
         }
     )
 
@@ -996,8 +1021,9 @@ def lead_command(state: str) -> None:
 @click.argument("state", type=click.Choice(["on", "off"]), required=False)
 def search_command(state: str | None) -> None:
     """Show or change whether this node borrows web search."""
-    on = borrow_search(load_config(), None if state is None else state == "on")
-    ui.out(search_text(on))
+    manager = load_config()
+    on = borrow_search(manager, None if state is None else state == "on")
+    ui.out(search_text(on, joined=manager.load().network.enabled))
 
 
 @global_group.command("donate")

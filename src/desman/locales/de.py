@@ -11,6 +11,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "on": "an",
+    "Borrowing takes effect after `desman global join`.": "Das Ausleihen wird nach `desman global join` wirksam.",
     "Borrow web search": "Websuche ausleihen",
     "Set up local SearXNG with `desman search setup` before lending it.": "Richten Sie vor dem Verleihen lokales SearXNG mit `desman search setup` ein.",
     "{calls} searches a day": "{calls} Suchanfragen pro Tag",

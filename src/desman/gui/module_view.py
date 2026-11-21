@@ -7,13 +7,14 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from desman import modules_cli, providers
+from desman import global_cli, modules_cli, providers
 from desman.config import Config
 from desman.core import calls, choices, db, holds
 from desman.core.store import Store
 from desman.i18n import t
 from desman.llm import router
 from desman.llm.openai_compat import key_id
+from desman.net import protocol, search_lend
 from desman.net.node import capabilities
 
 
@@ -184,7 +185,26 @@ def cards(
     # A module is listed while it has work: a live task, a chat, a model lent to desman-global,
     # or a stop the person may lift. One whose tasks are done or failed is gone.
     kept: set[tuple[str, str, str]] = set()
+    search_cards = []
     for cap in capabilities(config):
+        if cap.provider == protocol.SEARCH_PROVIDER:
+            used = search_lend.used_today(conn, datetime.now(UTC))
+            search_cards.append(
+                {
+                    "section": "network",
+                    "provider": cap.provider,
+                    "provider_name": global_cli.provider_name(cap.provider),
+                    "label": t("lent: {name}", name=global_cli.provider_name(cap.provider)),
+                    "calls": used,
+                    "calls_per_day": cap.calls_per_day,
+                    "usage": t(
+                        "Searches used today: {calls}. Remaining: {calls_left}.",
+                        calls=used,
+                        calls_left=max(0, cap.calls_per_day - used),
+                    ),
+                }
+            )
+            continue
         if add(cap.key or cap.provider, f"{cap.provider}/{cap.model}", "network"):
             kept.add(("network", cap.key or cap.provider, f"{cap.provider}/{cap.model}"))
     hour = db.to_iso(datetime.now(UTC) - timedelta(hours=1))
@@ -294,7 +314,7 @@ def cards(
                 card["hold_state"] = hold.state
                 card["scope"] = hold.scope
                 card["scope_id"] = hold.scope_id
-    return [
+    return search_cards + [
         card
         for identity, card in found.items()
         if card["work"] or identity in kept or card.get("hold_state") == "stopped"
