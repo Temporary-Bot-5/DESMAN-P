@@ -55,7 +55,7 @@ def time_for_call(provider: str, timeout: float = float("inf")) -> float:
         return timeout
     left = remaining()
     if left <= 0:
-        raise ProviderTimeout(provider, 0)
+        raise BudgetExhausted(provider)
     return min(timeout, left)
 
 
@@ -166,6 +166,15 @@ class ProviderError(Exception):
     def paused_until(self, now: datetime) -> datetime | None:
         """For LIMIT errors: when to try again; None lets the store use its default pause."""
         return None
+
+
+class BudgetExhausted(ProviderError):
+    """The job's remaining lease budget cannot accommodate another call."""
+
+    kind = FailureKind.TRANSIENT
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider, "model call budget exhausted")
 
 
 class ProviderRejected(ProviderError):

@@ -30,12 +30,12 @@ from desman.llm.base import (
     LLM,
     GenerationFailed,
     Message,
-    ProviderRejected,
     ProviderTimeout,
     ProviderUnavailable,
     QuotaExhausted,
     RateLimited,
     Request,
+    RequestTooLarge,
     among,
     noticing_unfit,
 )
@@ -265,11 +265,56 @@ def test_a_model_too_small_for_the_request_is_skipped() -> None:
     long = Request(messages=[Message(role="user", content="x" * 30_000)], max_tokens=500)
     assert lineup.complete(long).text == "big"
     assert tiny.calls == []
-    # A known undersized context cannot receive the request.
-    only = router.Fallback([(tiny, small)])
-    with pytest.raises(ProviderRejected, match="largest available request ceiling"):
-        only.complete(long)
+
+
+def test_advisory_context_follows_a_model_that_fits() -> None:
+    local = router.Choice(
+        providers.find("ollama"),
+        "local",
+        catalog.Model("local", context=16_384),
+        advisory_context=True,
+    )
+    cloud = router.Choice(
+        providers.find("google"),
+        "cloud",
+        catalog.Model("cloud", context=128_000),
+    )
+    request = Request(messages=[Message(role="user", content="x" * 120_000)])
+    ollama = FakeLLM("local fallback", "local answer")
+    google = FakeLLM("cloud answer", ServerError())
+    lineup = router.Fallback([(ollama, local), (google, cloud)])
+    assert lineup.complete(request).text == "cloud answer"
+    assert not ollama.calls
+    assert lineup.complete(request).text == "local fallback"
+    assert [(skip.model, skip.reason) for skip in lineup.last_call.skipped] == [
+        (cloud.label, "unavailable")
+    ]
+    larger = request.model_copy(update={"max_tokens": 128_000})
+    assert lineup.complete(larger).text == "local answer"
+    assert len(google.calls) == 2
+
+
+def test_context_overestimate_tries_largest_until_provider_refuses() -> None:
+    def refused(_: Request) -> str:
+        raise RequestTooLarge("large", 413, "actual provider refusal")
+
+    provider = providers.find("google")
+    small = router.Choice(provider, "small", catalog.Model("small", context=2000))
+    large = router.Choice(provider, "large", catalog.Model("large", context=3000))
+    tiny, big = FakeLLM("small answer", refused), FakeLLM("fits after all", refused)
+    lineup = router.Fallback([(tiny, small), (big, large)])
+    request = Request(messages=[Message(role="user", content="x" * 12_000)])
+    assert lineup.complete(request).text == "fits after all"
     assert not tiny.calls
+    with pytest.raises(RequestTooLarge, match="actual provider refusal"):
+        lineup.complete(request)
+    assert lineup.complete(request).text == "small answer"
+    assert len(big.calls) == 2
+    with pytest.raises(RequestTooLarge, match="actual provider refusal"):
+        lineup.complete(request)
+    with pytest.raises(RequestTooLarge, match="no model can take"):
+        lineup.complete(request)
+    assert len(tiny.calls) == 2
 
 
 def test_an_accepted_reply_is_kept_by_the_model_that_wrote_it(store: Store) -> None:
@@ -897,22 +942,12 @@ def test_request_too_large_remembers_only_the_refused_size(earlier: Any) -> None
     assert first.calls == 2
 
 
-def test_all_ceilings_too_small_never_send_known_impossible_request() -> None:
-    from desman.core.retry import FailureKind
-
+def test_model_without_a_ceiling_is_preferred_to_an_undersized_ceiling() -> None:
     groq = router.Choice(providers.find("groq"), "openai/gpt-oss-20b")
-    fake = FakeLLM("must not be sent")
-    fallback = router.Fallback([(fake, groq)])
-    with pytest.raises(
-        ProviderRejected, match="needs .* largest available request ceiling"
-    ) as caught:
-        fallback.complete(Request(messages=[Message(role="user", content="x" * 32_000)]))
-    assert caught.value.kind is FailureKind.PERMANENT
-    unbounded = FakeLLM("ok")
+    fake, unbounded = FakeLLM("oversized"), FakeLLM("ok")
+    fallback = router.Fallback([(fake, groq), (unbounded, None)])
     assert (
-        router.Fallback([(fake, groq), (unbounded, None)])
-        .complete(Request(messages=[Message(role="user", content="x" * 32_000)]))
-        .text
+        fallback.complete(Request(messages=[Message(role="user", content="x" * 32_000)])).text
         == "ok"
     )
     assert not fake.calls

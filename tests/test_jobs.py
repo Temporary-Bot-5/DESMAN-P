@@ -28,7 +28,7 @@ from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.core.tools import builtin_registry
 from desman.llm import limiter, router
-from desman.llm.base import Message, ProviderTimeout, QuotaExhausted, Request
+from desman.llm.base import BudgetExhausted, Message, QuotaExhausted, Request
 from desman.llm.fake import FakeLLM
 from desman.llm.openai_compat import CallRecord, OpenAICompatible
 from desman.net import jobs, node, protocol, sign
@@ -1102,8 +1102,48 @@ def test_lent_fallback_shares_remaining_registry_lease(
             )
             for name in ("first", "second", "third")
         ]
-        with jobs.model_deadline(worker.conn, held.task_id, clock), pytest.raises(ProviderTimeout):
+        with jobs.model_deadline(worker.conn, held.task_id, clock), pytest.raises(BudgetExhausted):
             router.Fallback(members).complete(
                 Request(messages=[Message(role="user", content="hi")])
             )
     assert timeouts == [270, 100]
+
+
+def test_lease_budget_expiring_inside_a_member_does_not_defer_it(
+    machine: Callable[[str, FakeLLM], Machine],
+    add_job: Callable[..., str],
+    clock: FakeClock,
+) -> None:
+    add_job()
+    worker = machine("a", doer())
+    worker.poll()
+    [held] = jobs.holding(worker.conn)
+    jobs.extended(worker.conn, held.lease, clock() + timedelta(seconds=50))
+
+    def prepare_call() -> None:
+        clock.advance(21)
+
+    def answer(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": "first"}}]})
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+        first = OpenAICompatible(
+            "first", "https://example.invalid", ["key"], "model", client=client
+        )
+        first.pace = prepare_call
+        fallback = FakeLLM("second", name="second")
+        lineup = router.Fallback(
+            [
+                (router.Backoff(first, monotonic=lambda: clock().timestamp()), None),
+                (fallback, None),
+            ]
+        )
+        request = Request(messages=[Message(role="user", content="hi")])
+        with jobs.model_deadline(worker.conn, held.task_id, clock), pytest.raises(BudgetExhausted):
+            lineup.complete(request)
+        assert not lineup.last_call.skipped
+        assert not lineup.has_untried
+        jobs.extended(worker.conn, held.lease, clock() + timedelta(seconds=120))
+        with jobs.model_deadline(worker.conn, held.task_id, clock):
+            assert lineup.complete(request).text == "first"
+        assert not fallback.calls

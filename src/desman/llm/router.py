@@ -42,6 +42,7 @@ from desman.llm import catalog
 from desman.llm import waiting as provider_wait
 from desman.llm.base import (
     LLM,
+    BudgetExhausted,
     Completion,
     ProviderError,
     ProviderRejected,
@@ -649,9 +650,17 @@ class Fallback:
             for llm, choice in sized
             if choice is None or (limit := limits[choice.label]) is None or limit >= need
         ]
-        if large and all(choice is not None and choice.spec.context < need for _, choice in large):
-            # The remaining contexts are advisory. Start with the largest estimate.
-            large.sort(key=lambda member: member[1].spec.context if member[1] else 0, reverse=True)
+        # Preserve lineup order among models that fit, then try advisory underestimates.
+        if large:
+            large.sort(key=lambda m: max(0, need - m[1].spec.context) if m[1] is not None else 0)
+        elif sized:
+            # The token estimate is rough. Give the largest remaining capacity a try.
+            largest = max(limits[choice.label] or 0 for _, choice in sized if choice is not None)
+            large = [
+                (llm, choice)
+                for llm, choice in sized
+                if choice is not None and limits[choice.label] == largest
+            ]
         fit = [
             (llm, choice)
             for llm, choice in large
@@ -672,19 +681,12 @@ class Fallback:
                         context=limit,
                     )
                 )
-        untried = self._untried.pop(scope, {c.label if c else m.name for m, c in members})
+        untried = self._untried.get(scope, {c.label if c else m.name for m, c in members}).copy()
         errors: list[ProviderError] = []
         if not members:
             self._call = LastCall(skipped=tuple(skipped))
-            if not sized:
-                raise RequestTooLarge(self.name, 413, f"no model can take {need} tokens")
-            largest = max((limit for limit in limits.values() if limit is not None), default=0)
-            raise ProviderRejected(
-                self.name,
-                413,
-                f"request needs {need} tokens; largest available request ceiling is {largest}. "
-                "Choose a model with a larger request ceiling or reduce the task context.",
-            )
+            self._untried.pop(scope, None)
+            raise RequestTooLarge(self.name, 413, f"no model can take {need} tokens")
         failed_over = False
         for i, (llm, choice) in enumerate(members):
             self._call = LastCall(skipped=tuple(skipped))
@@ -706,7 +708,10 @@ class Fallback:
                     self._scopes.pop(next(iter(self._scopes)))
             try:
                 reply = llm.complete(request)
+            except BudgetExhausted:
+                raise
             except ProviderError as e:
+                self._untried.pop(scope, None)
                 reason = (
                     "context"
                     if isinstance(e, RequestTooLarge)
@@ -762,12 +767,18 @@ class Fallback:
                         raise
                     break
                 continue
+            self._untried.pop(scope, None)
             self._deferred.pop(scope, None)
             self._last = (reply, llm)
             ahead = [
                 c.label if c else m.name
                 for m, c in ordered_members[: ordered_members.index((llm, choice))]
             ]
+            ahead.extend(
+                label
+                for model, candidate in members[:i]
+                if (label := candidate.label if candidate else model.name) not in ahead
+            )
             ordered = tuple(item for label in ahead for item in skipped if item.model == label)
             self._call = LastCall(f"{reply.provider}/{reply.model}", ordered)
             return reply
@@ -844,6 +855,8 @@ class Backoff:
             started = self.monotonic()
             try:
                 return self.inner.complete(request)
+            except BudgetExhausted:
+                raise
             except ProviderError as e:
                 # Said of this call alone, not of the repeats before it (`Fallback` asks).
                 e.slow = self.monotonic() - started > QUICK_FAILURE
@@ -861,6 +874,6 @@ class Backoff:
                     delay = min(MAX_DELAY, BASE_DELAY * 2 ** (attempt - 1))
                     delay *= 0.5 + self.jitter() / 2
             if delay >= time_for_call(self.name):
-                raise ProviderTimeout(self.name, 0)
+                raise BudgetExhausted(self.name)
             (self.sleep or _sleep)(delay)
         raise AssertionError("unreachable")  # pragma: no cover

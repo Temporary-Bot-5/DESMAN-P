@@ -30,7 +30,7 @@ from desman.core.tools import (
 from desman.core.web import UNTRUSTED
 from desman.core.workspace import Workspace
 from desman.llm import catalog, router
-from desman.llm.base import Message, ProviderRejected, Request
+from desman.llm.base import Message, Request
 from desman.llm.fake import FakeLLM
 from desman.llm.openai_compat import OpenAICompatible
 from desman.llm.tool_calls import ToolCall
@@ -216,12 +216,6 @@ def test_growing_tool_round_skips_a_model_that_was_fit_initially(
     assert (skipped.model, skipped.reason, skipped.context) == (choice.label, "context", 3500)
     assert skipped.needed == router.estimated_tokens(large.calls[0])
 
-    only_small = router.Fallback([(small, choice)])
-    with pytest.raises(ProviderRejected, match="largest available request ceiling is 3500"):
-        only_small.complete(large.calls[0])
-    assert len(small.calls) == 1
-    assert only_small.last_call.skipped[0].needed == skipped.needed
-
 
 def test_effect_continuation_migration_preserves_legacy_rows(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "legacy.db")
@@ -382,9 +376,12 @@ def test_large_write_arguments_are_folded_even_in_the_latest_round(
     for request in model.calls[1:]:
         history = request.messages[2:]
         assert sum(len(message.content) for message in history) <= TOOL_RESULT_BUDGET
-        saved = json.loads(history[0].content)["tool_calls"][0]
-        assert saved["file"] == "draft.txt"
-        assert len(saved["args"]) <= 120
+        note = history[0].content
+        assert note.startswith("Earlier call: write_file ")
+        assert "; file: draft.txt" in note
+        assert "tool_calls" not in note
+        assert "private draft" not in note
+        assert len(note) <= 170
 
 
 @pytest.mark.parametrize("path", ["./.tool-results/result.json", "web/page.txt", "input/web-x"])
@@ -460,6 +457,101 @@ def test_runs_code_retries_run_again_in_the_current_execution(
     )
     assert coordinator.run(task).status is TaskStatus.DONE
     assert len(calls) == 2
+    first = json.loads(model.calls[0].prompt.split(":\n", 1)[1])
+    assert "earlier_results_note" not in first
     context = json.loads(model.calls[3].prompt.split(":\n", 1)[1])
     assert [entry["tool"] for entry in context["Already done by earlier attempts"]] == ["read_file"]
     assert "Run the code again" in context["earlier_results_note"]
+
+
+@pytest.mark.parametrize("cap", [4300, 24_000])
+def test_history_keeps_data_when_read_file_is_unavailable(
+    store: Store, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch, cap: int
+) -> None:
+    monkeypatch.setattr(agents, "TOOL_RESULT_BUDGET", cap)
+    task, workspace = task_with_book(store, tmp_path)
+    payload = "directory listing " * 250
+    registry = Registry(
+        [
+            Tool(
+                name="list_files",
+                description="List files",
+                args=ListFilesArgs,
+                permission=Permission.WORKSPACE,
+                run=lambda _args, _ws: {"files": payload},
+            )
+        ]
+    )
+    call = '{"tool_calls":[{"tool":"list_files","args":{}}]}'
+    model = FakeLLM().on("Execute", call, call, '{"text":"Done"}')
+    coordinator = Coordinator(
+        store,
+        llm_executor(model),
+        lambda *_: Review(verdict=Verdict.ACCEPT),
+        workspaces=tmp_path,
+        tools=registry,
+        sleep=clock.sleep,
+    )
+    assert coordinator.run(task).status is TaskStatus.DONE
+    messages = tool_messages(model.calls[-1])
+    assert all("read_file" not in message for message in messages)
+    entries = [entry for message in messages for entry in body(message)]
+    if cap == 24_000:
+        assert [entry["output"]["files"] for entry in entries] == [payload, payload]
+    else:
+        assert any("directory listing" in entry.get("preview", "") for entry in entries)
+    assert not workspace.exists(".tool-results/0-e0-r1-1.json")
+
+
+@pytest.mark.parametrize(
+    ("name", "args", "marker"),
+    [
+        ("web_search", {}, False),
+        ("web_fetch", {}, False),
+        ("read_file", {"path": "./web/page.txt"}, False),
+        ("list_files", {}, True),
+    ],
+)
+def test_preview_keeps_untrusted_marker_when_archive_fails(
+    store: Store,
+    tmp_path: Path,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    args: dict[str, str],
+    marker: bool,
+) -> None:
+    monkeypatch.setattr(agents, "TOOL_RESULT_BUDGET", 3500)
+    monkeypatch.setattr(agents, "archive_result", lambda *_: None)
+    task, _ = task_with_book(store, tmp_path)
+    tools = builtin_registry()
+    original = tools.get(name)
+    assert original is not None
+    registry = Registry(tool for tool in tools if tool.name != name)
+    registry.register(
+        Tool(
+            name=name,
+            description=original.description,
+            args=original.args if name == "read_file" else ListFilesArgs,
+            permission=Permission.WORKSPACE,
+            run=lambda _args, _ws: {
+                "content": "external data " * 500,
+                **({"untrusted": UNTRUSTED} if marker else {}),
+            },
+        )
+    )
+    call = json.dumps({"tool_calls": [{"tool": name, "args": args}]})
+    model = FakeLLM().on("Execute", call, '{"text":"Done"}')
+    coordinator = Coordinator(
+        store,
+        llm_executor(model),
+        lambda *_: Review(verdict=Verdict.ACCEPT),
+        workspaces=tmp_path,
+        tools=registry,
+        sleep=clock.sleep,
+    )
+    assert coordinator.run(task).status is TaskStatus.DONE
+    [entry] = body(tool_messages(model.calls[-1])[0])
+    assert entry["result"] == "archive unavailable"
+    assert entry["untrusted"] is True
+    assert "external data" in entry["preview"]
