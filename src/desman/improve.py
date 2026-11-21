@@ -162,7 +162,7 @@ SETTINGS: tuple[Setting, ...] = tuple(
         f"tuning.model.{r}", r, _ROLE_ABOUT[r] + " It is asked first; the others stay behind it."
     )
     for r in ModelChoices.model_fields
-    if r != "interlocutor"
+    if r not in {"interlocutor", "master"}  # the master is the person's choice (ADR 0015)
 )
 SETTINGS_BY_ID = {s.id: s for s in SETTINGS}
 

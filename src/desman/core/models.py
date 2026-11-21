@@ -72,6 +72,10 @@ class SubtaskSpec(BaseModel):
     knowledge: list[str] = Field(default_factory=list, max_length=MAX_KNOWLEDGE)
     """Paths of the knowledge tree (ADR 0009) whose texts its executor is given, as the planner
     chose them; checked against the tree by whoever chose them, looked up when it runs."""
+    master: bool = False
+    """A master subtask (ADR 0015): it holds a whole goal, and its executor asks a qualified
+    model in a long loop of tool calls. Set only by the person's choice (`desman run --master`),
+    never by a planner; the parts of a split master subtask are ordinary."""
 
 
 class TaskSpec(BaseModel):
@@ -136,6 +140,7 @@ class Subtask(BaseModel):
     kind: Kind = Kind.TEXT
     runs_code: bool = False
     knowledge: list[str] = Field(default_factory=list)
+    master: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subtask:
@@ -163,4 +168,5 @@ class Subtask(BaseModel):
             kind=Kind(row["kind"]),
             runs_code=bool(row["runs_code"]),
             knowledge=json.loads(row["knowledge_json"]),
+            master=bool(row["master"]),
         )

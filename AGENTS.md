@@ -257,7 +257,8 @@ src/desman/
                    #   complete_json() accepts, garbage is never kept; --no-cache skips it
     ├── catalog.py # Models per provider (default first): context, strict JSON, strengths
                    #   (code, text, analysis), free-tier rpm; need(): what each role asks (the
-                   #   executor: what its subtask's Kind asks)
+                   #   executor: what its subtask's Kind asks); `master`: qualified to hold a
+                   #   whole goal (ADR 0015, `run --master`; a local one only if the person names it)
     ├── router.py  # lineup(): a role's models, best first (need, JSON, PREFERENCE, catalog);
                    #   --provider narrows it, --model pins one; other_lineup() for "other model"
                    #   Fallback: a call moves to the next model on a limit, outage, refused key,

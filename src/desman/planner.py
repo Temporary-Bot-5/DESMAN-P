@@ -261,7 +261,7 @@ def plan_schema(limit: int) -> type[Plan]:
 @dataclass(frozen=True)
 class Planned:
     spec: TaskSpec
-    source: Literal["llm", "template"]
+    source: Literal["llm", "template", "master"]
     error: str | None = None
     """Why the model's plan was not used (None when it was, or nobody asked the model)."""
     unknown_context: tuple[str, ...] = ()
@@ -303,6 +303,22 @@ def template_plan(goal: str, priority: int = Priority.NORMAL) -> TaskSpec:
         goal=goal,
         priority=priority,
         subtasks=[SubtaskSpec(description=goal, acceptance_criteria=TEMPLATE_CRITERIA)],
+    )
+
+
+MASTER_CRITERIA = (
+    "The result fully achieves the stated goal, as the person would get it from one capable "
+    "agent: complete, and checked by what the tools returned (code: by running it)."
+)
+
+
+def master_plan(goal: str, priority: int = Priority.NORMAL) -> TaskSpec:
+    """One master subtask (ADR 0015): the whole goal, for a qualified model alone. Only the
+    person asks for it; the planner model is not asked."""
+    return TaskSpec(
+        goal=goal,
+        priority=priority,
+        subtasks=[SubtaskSpec(description=goal, acceptance_criteria=MASTER_CRITERIA, master=True)],
     )
 
 

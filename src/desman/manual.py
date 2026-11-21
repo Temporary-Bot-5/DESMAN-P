@@ -43,6 +43,21 @@ TOPICS: Final = (
         "Planner: 1 subtask for simple work, up to 8 for tools/dependencies; template fallback. Simple code changes and tests share one subtask. Executors work; reviewers check. Dependencies form a DAG. Stopped work resumes from checkpoints with `desman resume TASK`; done work is kept. `desman worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `desman run GOAL` and `desman status TASK` show full text answers (data inside) and file folders; status --json includes the full result, files and folder. `desman list` shows visible tasks (with --subtasks, --all: hidden too). `desman status TASK`, `desman audit TASK` and `desman stats` retain access to history. `desman task pin TASK` and `desman task unpin TASK` control a task's pin and its modules' pin. `desman task hide TASK` hides finished work only; `desman task hide --finished` hides finished unpinned ones; nothing is erased. `desman task pause TASK` pauses unfinished work; `desman task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `desman resume TASK` clears the operator pause and continues. `desman task extend TASK GOAL` and `desman task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. Retellings may propose these (window first). Subtasks get ≤3 knowledge nodes (see status).",
     ),
     Topic(
+        "master",
+        "a master module: the whole goal given to one strong model instead of split work",
+        "`desman run --master GOAL` gives the goal whole to one strong model (a master module) "
+        "instead of planning subtasks for the small models. It works in one subtask with up to "
+        "24 rounds of tool calls per attempt, with the same tools, sandbox, review, retries and "
+        "inbox. Only a qualified model is used: a cloud model the catalog marks for it (now "
+        "NVIDIA Nemotron 3 Ultra, Gemini 3.8 Flash, Mistral Medium, Cohere Command A; paid ones "
+        "only with --provider), or a local model with a context of at least 32768 tokens that "
+        "the person names with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). Without one, "
+        "--master says so and starts nothing. If the master keeps failing, its subtask is split "
+        "and the parts go to the ordinary models. Long attached documents are still read in "
+        "parts by the small models first. The person chooses the mode; DESMAN never switches to "
+        "it by itself. The chat cannot start a master task yet.",
+    ),
+    Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
         "The executor uses tools in workspaces/TASK next to the database. Chat lists files and the "

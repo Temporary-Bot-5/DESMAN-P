@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "--master is for GOAL, without --spec or --plan": "--master は GOAL 専用で、--spec や --plan とは併用できません",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL をサブタスクに分けず、強力な 1 つのモデル（マスターモジュール）に丸ごと任せます。資格のあるモデルだけを使い、ツールのラウンド数もずっと多くなります。失敗が続くと、作業は他のモデル向けに分割されます。",
+    "Master module": "マスターモジュール",
+    "Master module: {provider} · {model}": "マスターモジュール: {provider} · {model}",
+    "No model ready for a master module.": "マスターモジュールに使えるモデルがありません。",
+    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "マスターモジュールに使えるモデルがありません: カタログでそのように指定されたモデル（`desman keys check` を参照）か、`desman tuning --model master=PROVIDER/MODEL` で指定した、コンテキスト {context} トークン以上のローカルモデルが必要です。",
     "Use the Windows Subsystem for Linux.": "Windows Subsystem for Linux を使用する。",
     "WSL sandbox distribution {pin} is present.": "WSL サンドボックスのディストリビューション {pin} が見つかりました。",
     "WSL sandbox distribution {pin} is missing.": "WSL サンドボックスのディストリビューション {pin} が見つかりません。",
@@ -407,8 +413,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "不明なプロバイダーまたはキー。利用可能：{choices}",
     "The key for {role} only applies to models from {provider}.": "{role} のキーは {provider} のモデルにのみ適用されます。",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key は ROLE=PROVIDER:KEY|auto を受け取り、ROLE は次のいずれかです：{roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "役割が最初に使うキー：planner、reviewer、decomposer、text、code、analysis、interlocutor。ラベルまたは番号を指定。繰り返し指定可能。",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "役割が最初に使うモデル：planner、reviewer、decomposer、text、code、analysis、interlocutor。繰り返し指定可能。",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "役割が最初に使うキー：planner、reviewer、decomposer、text、code、analysis、master、interlocutor。ラベルまたは番号を指定。繰り返し指定可能。",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "役割が最初に使うモデル：planner、reviewer、decomposer、text、code、analysis、master、interlocutor。繰り返し指定可能。",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "変更するには `desman tuning --max-subtasks N|auto` (ほかに --max-parts、--context-tokens、--max-attempts、--max-transient)、`--model ロール=プロバイダー/モデル|auto`、または `--key ROLE=PROVIDER:KEY|auto`, `--reset`。",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "「{word}」はコマンドではありません。共通ターミナル は DESMAN のコマンドのみ受け付けます（`help` で一覧表示）。会話するには /back でチャットに戻ってください。",
     "Type `protected show` to see the change and `protected approve` to approve it.": "`protected show` で変更を確認し、`protected approve` で承認してください。",

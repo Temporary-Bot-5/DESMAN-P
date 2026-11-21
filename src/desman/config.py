@@ -166,6 +166,9 @@ class ModelChoices(BaseModel):
     """The executor's, for a subtask of that kind."""
     code: ModelLabel | None = None
     analysis: ModelLabel | None = None
+    master: ModelLabel | None = None
+    """The executor's of a master subtask (ADR 0015): only a qualified model is asked, and a
+    local one only when named here (`router.qualified`)."""
     interlocutor: ModelLabel | None = None
 
 
@@ -184,6 +187,7 @@ class KeyChoices(BaseModel):
     text: KeyFingerprint | None = None
     code: KeyFingerprint | None = None
     analysis: KeyFingerprint | None = None
+    master: KeyFingerprint | None = None
     interlocutor: KeyFingerprint | None = None
 
 

@@ -59,7 +59,7 @@ ROLES = tuple(ModelChoices.model_fields)
     multiple=True,
     metavar="ROLE=PROVIDER/MODEL|auto",
     help="The model a role asks first: planner, reviewer, decomposer, or the executor's text, "
-    "code, analysis, interlocutor. Repeatable.",
+    "code, analysis, master, interlocutor. Repeatable.",
 )
 @click.option(
     "--key",
@@ -67,7 +67,7 @@ ROLES = tuple(ModelChoices.model_fields)
     multiple=True,
     metavar="ROLE=PROVIDER:KEY|auto",
     help="The key a role asks first: planner, reviewer, decomposer, text, code, analysis, "
-    "interlocutor. Use a label or number. Repeatable.",
+    "master, interlocutor. Use a label or number. Repeatable.",
 )
 @click.option("--reset", is_flag=True, help="Everything back to DESMAN's defaults.")
 @json_option
@@ -210,6 +210,7 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
         "decomposer": t("Decomposer"),
         "interlocutor": t("Interlocutor"),
         **{kind: f"{t('Executor')} ({kind})" for kind in ("text", "code", "analysis")},
+        "master": t("Master module"),
     }
     ollama = providers.find("ollama")
     installed = local_models.installed(config, cached_only=True)[0]
@@ -227,7 +228,7 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
             ):
                 continue
             models = [m for m in candidates if m.startswith(provider.id + "/")]
-            if not provider.local:
+            if not provider.local and role != catalog.MASTER:  # only qualified ones for it
                 models = list(
                     dict.fromkeys(
                         [*(provider.id + "/" + m.id for m in catalog.models_of(provider)), *models]

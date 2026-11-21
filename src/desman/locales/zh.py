@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "--master is for GOAL, without --spec or --plan": "--master 只用于 GOAL，不能与 --spec 或 --plan 一起使用",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "把 GOAL 整个交给一个强模型（主控模块），而不是拆成子任务：只用具备资格的模型，工具调用轮数多得多。如果它屡次失败，工作会拆分给其他模型。",
+    "Master module": "主控模块",
+    "Master module: {provider} · {model}": "主控模块：{provider} · {model}",
+    "No model ready for a master module.": "没有可用于主控模块的模型。",
+    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "没有可用于主控模块的模型：需要目录中为此标记的模型（见 `desman keys check`），或由你用 `desman tuning --model master=PROVIDER/MODEL` 指定的、上下文至少 {context} 个 token 的本地模型。",
     "Use the Windows Subsystem for Linux.": "使用适用于 Linux 的 Windows 子系统。",
     "WSL sandbox distribution {pin} is present.": "已安装 WSL 沙箱发行版 {pin}。",
     "WSL sandbox distribution {pin} is missing.": "未安装 WSL 沙箱发行版 {pin}。",
@@ -407,8 +413,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "未知的提供商或密钥。可用：{choices}",
     "The key for {role} only applies to models from {provider}.": "{role} 的密钥仅用于 {provider} 的模型。",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key 接受 ROLE=PROVIDER:KEY|auto，ROLE 为以下之一：{roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "角色优先使用的密钥：planner、reviewer、decomposer、text、code、analysis、interlocutor。使用标签或编号。可重复指定。",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "角色优先使用的模型：planner、reviewer、decomposer、text、code、analysis、interlocutor。可重复指定。",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "角色优先使用的密钥：planner、reviewer、decomposer、text、code、analysis、master、interlocutor。使用标签或编号。可重复指定。",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "角色优先使用的模型：planner、reviewer、decomposer、text、code、analysis、master、interlocutor。可重复指定。",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "修改：`desman tuning --max-subtasks N|auto`（以及 --max-parts、--context-tokens、--max-attempts、--max-transient）、`--model 角色=提供商/模型|auto`，或 `--key ROLE=PROVIDER:KEY|auto`, `--reset`。",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "“{word}”不是命令。通用终端 仅接受 DESMAN 命令（`help` 可列出）；如需交谈，请用 /back 返回聊天。",
     "Type `protected show` to see the change and `protected approve` to approve it.": "输入 `protected show` 查看更改，输入 `protected approve` 批准更改。",

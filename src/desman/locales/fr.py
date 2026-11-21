@@ -10,6 +10,12 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "--master is for GOAL, without --spec or --plan": "--master s’utilise seulement avec GOAL, sans --spec ni --plan",
+    "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "Confier GOAL en entier à un seul modèle puissant (un module maître) au lieu de le diviser en sous-tâches : seulement un modèle qualifié pour cela, avec beaucoup plus de tours d’outils. S’il échoue à répétition, le travail est divisé pour les autres modèles.",
+    "Master module": "Module maître",
+    "Master module: {provider} · {model}": "Module maître : {provider} · {model}",
+    "No model ready for a master module.": "Aucun modèle prêt pour un module maître.",
+    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Aucun modèle prêt pour un module maître : il faut un modèle marqué pour cela dans le catalogue (voir `desman keys check`), ou un modèle local d’au moins {context} jetons de contexte que vous désignez avec `desman tuning --model master=PROVIDER/MODEL`.",
     "Use the Windows Subsystem for Linux.": "Utiliser le sous-système Windows pour Linux.",
     "WSL sandbox distribution {pin} is present.": "La distribution du bac à sable WSL {pin} est présente.",
     "WSL sandbox distribution {pin} is missing.": "La distribution du bac à sable WSL {pin} est absente.",
@@ -413,8 +419,8 @@ MESSAGES: dict[str, Forms] = {
     "Unknown provider or key. Available: {choices}": "Fournisseur ou clé inconnu. Disponibles : {choices}",
     "The key for {role} only applies to models from {provider}.": "La clé de {role} ne sert que pour les modèles de {provider}.",
     "--key takes ROLE=PROVIDER:KEY|auto, ROLE one of: {roles}": "--key accepte ROLE=PROVIDER:KEY|auto, ROLE parmi : {roles}",
-    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, interlocutor. Use a label or number. Repeatable.": "La première clé utilisée par un rôle : planner, reviewer, decomposer, text, code, analysis, interlocutor. Indiquez un libellé ou un numéro. Répétable.",
-    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, interlocutor. Repeatable.": "Le premier modèle utilisé par un rôle : planner, reviewer, decomposer, text, code, analysis, interlocutor. Répétable.",
+    "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "La première clé utilisée par un rôle : planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Indiquez un libellé ou un numéro. Répétable.",
+    "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "Le premier modèle utilisé par un rôle : planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Répétable.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "Modifier avec `desman tuning --max-subtasks N|auto` (et --max-parts, --context-tokens, --max-attempts, --max-transient), `--model RÔLE=FOURNISSEUR/MODÈLE|auto`, ou `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "« {word} » n’est pas une commande. Terminal général accepte uniquement les commandes DESMAN (`help` les liste) ; pour discuter, retourne au chat avec /back.",
     "Type `protected show` to see the change and `protected approve` to approve it.": "Tapez `protected show` pour voir la modification et `protected approve` pour l’approuver.",
