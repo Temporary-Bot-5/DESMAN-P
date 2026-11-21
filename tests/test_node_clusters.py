@@ -118,7 +118,7 @@ def test_config_upgrade_and_lead_command() -> None:
     manager.config_path.parent.mkdir(parents=True, exist_ok=True)
     manager.config_path.write_text(json.dumps(old), encoding="utf-8")
     config = manager.load()
-    assert config.schema_version == 10 and config.network.lead
+    assert config.schema_version == 11 and config.network.lead
     for state in ("off", "on"):
         result = CliRunner().invoke(cli, ["global", "lead", state])
         assert result.exit_code == 0, result.output

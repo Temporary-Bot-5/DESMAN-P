@@ -96,7 +96,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -307,7 +307,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[10] = 10
+    schema_version: Literal[11] = 11
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -419,6 +419,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
 
     if version == 9:
         version = 10  # borrowing search defaults off
+
+    if version == 10:
+        version = 11  # the master module's model and key (ADR 0015) default to none
 
     data["schema_version"] = version
     return data

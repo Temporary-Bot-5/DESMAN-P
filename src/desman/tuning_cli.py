@@ -427,6 +427,16 @@ def print_change(old: Tuning, new: Tuning, config: Config) -> None:
     for line in changed:
         ui.ok(line)
     for role, label in unready(config, new):
+        if role == catalog.MASTER and not router.may_be_master(label):
+            ui.warn(
+                t(
+                    "{model} cannot be the master module: only a model marked for it ({models}) "
+                    "or a local model can. It is kept, but never asked.",
+                    model=label,
+                    models=", ".join(router.master_models()),
+                )
+            )
+            continue
         ui.warn(
             t(
                 "{model} is not among the models {role} can use now (a ready free provider): it "

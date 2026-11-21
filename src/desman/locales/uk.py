@@ -15,12 +15,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Немає готової моделі для майстер-модуля: потрібен ключ до моделі, позначеної для цього ({models}), або локальна модель з контекстом щонайменше {context} токенів, яку ви призначите командою `desman tuning --model master=PROVIDER/MODEL`.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} не може бути майстер-модулем: ним може бути лише позначена для цього модель ({models}) або локальна модель. Вибір збережено, але до цієї моделі не звертатимуться.",
     "--master is for GOAL, without --spec or --plan": "--master — лише для GOAL, без --spec і --plan",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "Віддати GOAL повністю одній сильній моделі (майстер-модулю), а не ділити на підзадачі: лише допущена до цього модель, зі значно більшою кількістю раундів інструментів. Якщо вона раз у раз не справляється, роботу ділять для інших моделей.",
     "Master module": "Майстер-модуль",
     "Master module: {provider} · {model}": "Майстер-модуль: {provider} · {model}",
     "No model ready for a master module.": "Немає готової моделі для майстер-модуля.",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Немає готової моделі для майстер-модуля: потрібна модель, позначена для цього в каталозі (див. `desman keys check`), або локальна модель з контекстом щонайменше {context} токенів, яку ви призначите командою `desman tuning --model master=PROVIDER/MODEL`.",
     "Use the Windows Subsystem for Linux.": "Використати підсистему Windows для Linux.",
     "WSL sandbox distribution {pin} is present.": "Дистрибутив пісочниці WSL {pin} установлено.",
     "WSL sandbox distribution {pin} is missing.": "Дистрибутив пісочниці WSL {pin} не встановлено.",

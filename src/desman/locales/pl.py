@@ -15,12 +15,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Brak gotowego modelu dla modułu głównego: potrzebny jest klucz do modelu oznaczonego do tego ({models}) albo model lokalny z kontekstem co najmniej {context} tokenów, wskazany przez Ciebie poleceniem `desman tuning --model master=PROVIDER/MODEL`.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} nie może być modułem głównym: może nim być tylko model oznaczony do tego ({models}) albo model lokalny. Wybór zostaje zapisany, ale ten model nie będzie pytany.",
     "--master is for GOAL, without --spec or --plan": "--master służy tylko do GOAL, bez --spec i --plan",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "Przekazać GOAL w całości jednemu mocnemu modelowi (modułowi głównemu) zamiast dzielić go na podzadania: tylko modelowi do tego dopuszczonemu, z dużo większą liczbą rund narzędzi. Jeśli raz po raz zawodzi, praca jest dzielona dla pozostałych modeli.",
     "Master module": "Moduł główny",
     "Master module: {provider} · {model}": "Moduł główny: {provider} · {model}",
     "No model ready for a master module.": "Brak gotowego modelu dla modułu głównego.",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Brak gotowego modelu dla modułu głównego: potrzebny jest model oznaczony do tego w katalogu (zob. `desman keys check`) albo model lokalny z kontekstem co najmniej {context} tokenów, wskazany przez Ciebie poleceniem `desman tuning --model master=PROVIDER/MODEL`.",
     "Use the Windows Subsystem for Linux.": "Użyj podsystemu Windows dla systemu Linux.",
     "WSL sandbox distribution {pin} is present.": "Dystrybucja piaskownicy WSL {pin} jest obecna.",
     "WSL sandbox distribution {pin} is missing.": "Brakuje dystrybucji piaskownicy WSL {pin}.",

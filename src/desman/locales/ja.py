@@ -10,12 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "マスターモジュールに使えるモデルがありません: そのように指定されたモデル（{models}）のキーか、`desman tuning --model master=PROVIDER/MODEL` で指定した、コンテキスト {context} トークン以上のローカルモデルが必要です。",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} はマスターモジュールになれません: なれるのは指定されたモデル（{models}）かローカルモデルだけです。選択は保存されますが、このモデルは使われません。",
     "--master is for GOAL, without --spec or --plan": "--master は GOAL 専用で、--spec や --plan とは併用できません",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL をサブタスクに分けず、強力な 1 つのモデル（マスターモジュール）に丸ごと任せます。資格のあるモデルだけを使い、ツールのラウンド数もずっと多くなります。失敗が続くと、作業は他のモデル向けに分割されます。",
     "Master module": "マスターモジュール",
     "Master module: {provider} · {model}": "マスターモジュール: {provider} · {model}",
     "No model ready for a master module.": "マスターモジュールに使えるモデルがありません。",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "マスターモジュールに使えるモデルがありません: カタログでそのように指定されたモデル（`desman keys check` を参照）か、`desman tuning --model master=PROVIDER/MODEL` で指定した、コンテキスト {context} トークン以上のローカルモデルが必要です。",
     "Use the Windows Subsystem for Linux.": "Windows Subsystem for Linux を使用する。",
     "WSL sandbox distribution {pin} is present.": "WSL サンドボックスのディストリビューション {pin} が見つかりました。",
     "WSL sandbox distribution {pin} is missing.": "WSL サンドボックスのディストリビューション {pin} が見つかりません。",

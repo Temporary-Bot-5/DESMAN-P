@@ -10,12 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है: इसके लिए चिह्नित मॉडल की कुंजी चाहिए ({models}), या कम से कम {context} टोकन संदर्भ वाला स्थानीय मॉडल जिसे आप `desman tuning --model master=PROVIDER/MODEL` से चुनें।",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} मास्टर मॉड्यूल नहीं हो सकता: केवल इसके लिए चिह्नित मॉडल ({models}) या स्थानीय मॉडल हो सकता है। चुनाव सहेजा रहता है, पर इस मॉडल से कभी नहीं पूछा जाएगा।",
     "--master is for GOAL, without --spec or --plan": "--master केवल GOAL के लिए है, --spec या --plan के बिना",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL को उप-कार्यों में बाँटने के बजाय पूरा एक मज़बूत मॉडल (मास्टर मॉड्यूल) को दें: केवल इसके लिए योग्य मॉडल, कहीं ज़्यादा टूल राउंड के साथ। अगर वह बार-बार विफल हो, तो काम बाकी मॉडलों के लिए बाँट दिया जाता है।",
     "Master module": "मास्टर मॉड्यूल",
     "Master module: {provider} · {model}": "मास्टर मॉड्यूल: {provider} · {model}",
     "No model ready for a master module.": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है।",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है: कैटलॉग में इसके लिए चिह्नित मॉडल चाहिए (देखें `desman keys check`), या कम से कम {context} टोकन संदर्भ वाला स्थानीय मॉडल जिसे आप `desman tuning --model master=PROVIDER/MODEL` से चुनें।",
     "Use the Windows Subsystem for Linux.": "Linux के लिए Windows सबसिस्टम इस्तेमाल करें।",
     "WSL sandbox distribution {pin} is present.": "WSL सैंडबॉक्स वितरण {pin} मौजूद है।",
     "WSL sandbox distribution {pin} is missing.": "WSL सैंडबॉक्स वितरण {pin} मौजूद नहीं है।",

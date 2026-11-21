@@ -13,7 +13,9 @@ class Fields(BaseModel):
 
 Provider = Annotated[str, Field(pattern=r"^[a-z0-9_-]+$", min_length=1, max_length=40)]
 Fingerprint = Annotated[str, Field(pattern=r"^[0-9a-f]{12}$")]
-Role = Literal["planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"]
+Role = Literal[
+    "planner", "reviewer", "decomposer", "text", "code", "analysis", "master", "interlocutor"
+]
 
 
 class General(Fields):

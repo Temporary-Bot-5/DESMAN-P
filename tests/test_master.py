@@ -312,3 +312,95 @@ def test_run_master_without_a_qualified_model_creates_nothing(
         assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_a_config_before_masters_upgrades_with_no_master_chosen(tmp_path: Path) -> None:
+    from desman.config import SCHEMA_VERSION, upgrade
+
+    upgraded = upgrade({"schema_version": 10, "tuning": {"models": {"text": "groq/x"}}})
+    assert upgraded["schema_version"] == SCHEMA_VERSION == 11
+    config = make_config(tuning=upgraded["tuning"])
+    assert config.tuning.models.master is None and config.tuning.keys.master is None
+
+
+# ── Review findings (M.1) ────────────────────────────────────────────────────
+
+MISTRAL = "m" * 32
+ANTHROPIC = "sk-ant-" + "z" * 90
+
+
+def test_the_master_follows_its_own_key_and_never_the_analysis_choices() -> None:
+    from desman.llm.openai_compat import key_id
+
+    keys = {"NVIDIA_API_KEY": NVIDIA, "MISTRAL_API_KEY": MISTRAL}
+    natural = labels(router.lineup(make_config(api_keys=keys), Role.EXECUTOR, kind=catalog.MASTER))
+    assert natural == ["mistral/mistral-medium-latest", ULTRA]
+    # The analyst's choice for analysis work does not decide who the master asks first.
+    analysis = make_config(api_keys=keys, tuning={"models": {"analysis": ULTRA}})
+    assert labels(router.lineup(analysis, Role.EXECUTOR, kind=catalog.MASTER)) == natural
+    # The master's own key does: its provider goes first.
+    by_key = make_config(api_keys=keys, tuning={"keys": {"master": key_id(NVIDIA)}})
+    assert labels(router.lineup(by_key, Role.EXECUTOR, kind=catalog.MASTER))[0] == ULTRA
+
+
+def test_a_paid_master_only_with_its_provider_named() -> None:
+    keys = {"NVIDIA_API_KEY": NVIDIA, "ANTHROPIC_API_KEY": ANTHROPIC}
+    chosen = make_config(api_keys=keys, tuning={"models": {"master": "anthropic/claude-haiku-5-5"}})
+    assert all(
+        not c.provider.paid for c in router.lineup(chosen, Role.EXECUTOR, kind=catalog.MASTER)
+    )
+    named = router.lineup(chosen, Role.EXECUTOR, "anthropic", kind=catalog.MASTER)
+    assert labels(named) == ["anthropic/claude-haiku-5-5"]
+
+
+def test_a_master_named_while_the_run_goes_on_serves_the_next_attempt(tmp_path: Path) -> None:
+    from desman.config import Tuning
+
+    conn = db.open_db(tmp_path / "d.db")
+    try:
+        config = make_config(
+            api_keys={"GROQ_API_KEY": GROQ},
+            settings={"LLAMA_CPP_MODEL": "big", "LLAMA_CPP_CONTEXT": "65536"},
+        )
+        tuning = [config.tuning]
+        models = runs.models(config, conn, read_tuning=lambda: tuning[0])
+        assert models.master is None and models.current_master() is None
+        tuning[0] = Tuning.model_validate({"models": {"master": "llamacpp/big"}})
+        assert models.current_master() is not None
+        found = models.find_master
+        assert found is not None and found().choice is not None
+        assert found().choice.label == "llamacpp/big"  # type: ignore[union-attr]
+    finally:
+        conn.close()
+
+
+def test_combining_the_parts_of_a_split_master_is_ordinary_work(
+    store: Store, tmp_path: Path
+) -> None:
+    from desman.core.retry import Strategy
+
+    llm = FakeLLM().on("Execute", list_files(), repeat_last=True)
+    work = work_of(store, tmp_path, master_plan("Big"))
+    combine = work.model_copy(
+        update={"context": build_context(work.subtask, [], None, strategy=Strategy.COMBINE)}
+    )
+    outcome = llm_executor(llm, format_final=False)(combine)
+    assert isinstance(outcome, Failure) and len(llm.calls) == MAX_TOOL_ROUNDS + 1
+    assert "plan your own steps" not in llm.calls[0].messages[0].content
+
+
+def test_the_modules_view_names_a_master_subtask_by_its_role(store: Store) -> None:
+    from desman.core.report import task_report
+
+    task_id = store.create_task(master_plan("g"))
+    assert [s.master for s in task_report(store, task_id).subtasks] == [True]
+
+
+def test_tuning_warns_that_an_unqualified_master_is_never_asked() -> None:
+    from desman.config import open_config
+
+    open_config().save(make_config(api_keys={"GROQ_API_KEY": GROQ}))
+    result = desman("tuning", "--model", "master=groq/openai/gpt-oss-120b")
+    assert result.exit_code == 0, result.output
+    assert "cannot be the master module" in result.output
+    assert "nvidia/nvidia/nemotron-3-ultra-550b-a55b" in result.output

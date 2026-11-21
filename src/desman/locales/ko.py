@@ -10,12 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "마스터 모듈에 쓸 모델이 없습니다: 이를 위해 표시된 모델({models})의 키나, `desman tuning --model master=PROVIDER/MODEL`로 지정한 컨텍스트 {context} 토큰 이상의 로컬 모델이 필요합니다.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model}은(는) 마스터 모듈이 될 수 없습니다: 이를 위해 표시된 모델({models})이나 로컬 모델만 가능합니다. 선택은 저장되지만 이 모델은 호출되지 않습니다.",
     "--master is for GOAL, without --spec or --plan": "--master는 GOAL에만 쓰며 --spec이나 --plan과 함께 쓸 수 없습니다",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL을 하위 작업으로 나누지 않고 강한 모델 하나(마스터 모듈)에 통째로 맡깁니다. 자격이 있는 모델만 쓰며 도구 라운드가 훨씬 많습니다. 계속 실패하면 작업을 다른 모델들을 위해 나눕니다.",
     "Master module": "마스터 모듈",
     "Master module: {provider} · {model}": "마스터 모듈: {provider} · {model}",
     "No model ready for a master module.": "마스터 모듈에 쓸 모델이 없습니다.",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "마스터 모듈에 쓸 모델이 없습니다: 카탈로그에서 이를 위해 표시된 모델(`desman keys check` 참고)이나, `desman tuning --model master=PROVIDER/MODEL`로 지정한 컨텍스트 {context} 토큰 이상의 로컬 모델이 필요합니다.",
     "Use the Windows Subsystem for Linux.": "Linux용 Windows 하위 시스템을 사용합니다.",
     "WSL sandbox distribution {pin} is present.": "WSL 샌드박스 배포판 {pin}이 있습니다.",
     "WSL sandbox distribution {pin} is missing.": "WSL 샌드박스 배포판 {pin}이 없습니다.",

@@ -353,7 +353,7 @@ def _execute(
             "earlier subtask does not count. Run it before handing in your result."
         )
     rounds = MAX_TOOL_ROUNDS
-    if work.subtask.master:
+    if work.subtask.master and context.strategy is not Strategy.COMBINE:  # combining is short
         rounds = MASTER_TOOL_ROUNDS
         if tools:
             system += MASTER_INSTRUCTIONS.format(rounds=rounds)

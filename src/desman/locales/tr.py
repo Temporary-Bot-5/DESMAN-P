@@ -10,12 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Ana modül için hazır model yok: bunun için işaretli bir modelin anahtarı ({models}) ya da `desman tuning --model master=PROVIDER/MODEL` ile seçtiğiniz, en az {context} token bağlamlı yerel bir model gerekir.",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} ana modül olamaz: yalnızca bunun için işaretli bir model ({models}) ya da yerel bir model olabilir. Seçim saklanır ama bu modele hiç sorulmaz.",
     "--master is for GOAL, without --spec or --plan": "--master yalnızca GOAL içindir; --spec veya --plan ile kullanılmaz",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "GOAL’ü alt görevlere bölmek yerine bütünüyle tek bir güçlü modele (ana modül) ver: yalnızca buna uygun bir model, çok daha fazla araç turuyla. Tekrar tekrar başarısız olursa iş diğer modeller için bölünür.",
     "Master module": "Ana modül",
     "Master module: {provider} · {model}": "Ana modül: {provider} · {model}",
     "No model ready for a master module.": "Ana modül için hazır model yok.",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "Ana modül için hazır model yok: katalogda bunun için işaretli bir model (bkz. `desman keys check`) ya da `desman tuning --model master=PROVIDER/MODEL` ile seçtiğiniz, en az {context} token bağlamlı yerel bir model gerekir.",
     "Use the Windows Subsystem for Linux.": "Linux için Windows Alt Sistemini kullan.",
     "WSL sandbox distribution {pin} is present.": "WSL korumalı alan dağıtımı {pin} mevcut.",
     "WSL sandbox distribution {pin} is missing.": "WSL korumalı alan dağıtımı {pin} eksik.",

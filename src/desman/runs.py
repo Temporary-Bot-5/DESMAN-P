@@ -74,6 +74,16 @@ def tuned_spec(spec: TaskSpec, tuning: Tuning) -> TaskSpec:
 
 
 @dataclass(frozen=True)
+class Master:
+    """Who may be the master module (ADR 0015), as found at one moment."""
+
+    models: tuple[LLM, LLM | None] | None
+    choice: router.Choice | None = None
+    problem: str | None = None
+    """Why none may (`router.NoProvider`)."""
+
+
+@dataclass(frozen=True)
 class Models:
     llm: LLM
     """The executor's models; every role without its own (`roles`) asks them too."""
@@ -96,6 +106,9 @@ class Models:
     """The model a master subtask asks first (None for a fake, or without one)."""
     no_master: str | None = None
     """Why no model may be the master now (None: one may, or a fake)."""
+    find_master: Callable[[], Master] | None = None
+    """The master as the tuning is now (a worker's is refreshed while it runs): a model the
+    person names after the run started serves the next attempt. None: `master` is all there is."""
 
     def for_(self, role: calls.Role) -> LLM:
         return self.roles.get(role, self.llm)
@@ -104,9 +117,14 @@ class Models:
         """The main and other models of the executor of a subtask of `kind` (of a master
         subtask: the master's, or the kind's when no model qualifies; the executor refuses
         such work, `_executor`)."""
-        if master and self.master is not None:
-            return self.master
+        current = self.current_master() if master else None
+        if current is not None:
+            return current
         return self.kinds.get(kind, (self.llm, self.other))
+
+    def current_master(self) -> tuple[LLM, LLM | None] | None:
+        """The main and other models of a master subtask now; None: none qualifies."""
+        return self.find_master().models if self.find_master is not None else self.master
 
     def labels(self, subtask: Subtask) -> Labels:
         """How the coordinator tells apart the models the executor asks for `subtask`."""
@@ -312,13 +330,17 @@ def models(
         return choices
 
     def scoped(
-        role: calls.Role, kind: catalog.Lane | None = None, *, other: bool = False
+        role: calls.Role,
+        kind: catalog.Lane | None = None,
+        *,
+        other: bool = False,
+        base: Config = config,
     ) -> LLM | None:
-        own = lineup(role, kind)
+        own = lineup(role, kind, base)
         selected = router.other_lineup(own) if other else own
         if other and (model is not None or not selected):
             return None
-        default = chain(own, role, kind, other=other)
+        default = chain(own, role, kind, base, other=other)
         field = router.tuning_field(role, kind)
         chains: dict[tuple[str, ...], router.Fallback] = {}
 
@@ -425,19 +447,26 @@ def models(
         main = scoped(calls.Role.EXECUTOR, kind)
         assert main is not None
         kinds[kind] = (main, scoped(calls.Role.EXECUTOR, kind, other=True))
-    master: tuple[LLM, LLM | None] | None = None
-    master_choice: router.Choice | None = None
-    no_master: str | None = None
-    if only is None:  # never for desman-global (ADR 0015, decision 6)
-        try:
-            masters = lineup(calls.Role.EXECUTOR, catalog.MASTER)
-        except router.NoProvider as e:
-            masters, no_master = [], str(e)
-        if masters:
-            main = scoped(calls.Role.EXECUTOR, catalog.MASTER)
-            assert main is not None
-            master = (main, scoped(calls.Role.EXECUTOR, catalog.MASTER, other=True))
-            master_choice = masters[0]
+    found: dict[tuple[str | None, str | None], Master] = {}
+
+    def find_master() -> Master:
+        cfg = config if read_tuning is None else config.model_copy(update={"tuning": read_tuning()})
+        # Only the master's own choices decide who it is (`router._master_lineup`).
+        identity = (cfg.tuning.models.master, cfg.tuning.keys.master)
+        if identity not in found:
+            try:
+                masters = lineup(calls.Role.EXECUTOR, catalog.MASTER, cfg)
+            except router.NoProvider as e:
+                found[identity] = Master(None, problem=str(e))
+            else:
+                main = scoped(calls.Role.EXECUTOR, catalog.MASTER, base=cfg)
+                assert main is not None
+                other = scoped(calls.Role.EXECUTOR, catalog.MASTER, other=True, base=cfg)
+                found[identity] = Master((main, other), masters[0])
+        return found[identity]
+
+    # Never for desman-global (ADR 0015, decision 6).
+    first_master = find_master() if only is None else Master(None)
     executor = lineup(calls.Role.EXECUTOR)
     others = [] if model is not None else router.other_lineup(executor)
     return Models(
@@ -448,9 +477,10 @@ def models(
         others[0] if others else None,
         kinds,
         step_seconds(max(timeouts, default=0.0)),
-        master,
-        master_choice,
-        no_master,
+        first_master.models,
+        first_master.choice,
+        first_master.problem,
+        find_master if only is None else None,
     )
 
 
@@ -777,7 +807,7 @@ NO_MASTER = (
 
 def _executor(models: Models, store: Store) -> Executor:
     def execute(work: Work) -> Outcome:
-        if work.subtask.master and models.master is None and models.choice is not None:
+        if work.subtask.master and models.choice is not None and models.current_master() is None:
             # Never worked by a model that was not qualified for it (ADR 0015, decision 2).
             return Failure(kind=FailureKind.PERMANENT, reason=NO_MASTER)
         main, other = models.executor(work.subtask.kind, work.subtask.master)

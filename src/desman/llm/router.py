@@ -240,13 +240,12 @@ def _master_lineup(
 ) -> list[Choice]:
     """The executor's of a master subtask: the lineup of analysis, its qualified models only
     (the person's chosen one first, if qualified); none qualified is `NoProvider`."""
-    chosen = config.tuning.models.master
-    base = config
-    if chosen is not None and provider is None and model is None:
-        # Where an analysis executor would go first, the person's master goes first instead.
-        tuned = config.tuning.model_copy(deep=True)
-        tuned.models.analysis = chosen
-        base = config.model_copy(update={"tuning": tuned})
+    # Ordered by the master's own choices (model and key), never by the analysis executor's:
+    # those are the Improvement Analyst's to propose, the master's only the person's.
+    tuned = config.tuning.model_copy(deep=True)
+    tuned.models.analysis = config.tuning.models.master
+    tuned.keys.analysis = config.tuning.keys.master
+    base = config.model_copy(update={"tuning": tuned})
     choices = lineup(
         base,
         Role.EXECUTOR,
@@ -259,17 +258,45 @@ def _master_lineup(
         local_choices=local_choices,
     )
     named = provider is not None or model is not None
-    masters = [c for c in choices if qualified(config, c, named=named)]
+    masters = [
+        c
+        for c in choices
+        # A paid model only when the person names its provider for this run, as everywhere.
+        if qualified(config, c, named=named) and (provider is not None or not c.provider.paid)
+    ]
     if not masters:
         raise NoProvider(
             t(
-                "No model ready for a master module: it takes a model marked for it in the "
-                "catalog (see `desman keys check`), or a local model with a context of at least "
-                "{context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.",
+                "No model ready for a master module: it takes a key for a model marked for it "
+                "({models}), or a local model with a context of at least {context} tokens that "
+                "you name with `desman tuning --model master=PROVIDER/MODEL`.",
+                models=", ".join(master_models()),
                 context=catalog.MASTER_LOCAL_CONTEXT,
             )
         )
     return masters
+
+
+def may_be_master(label: str) -> bool:
+    """Whether the model `provider/model` could ever be the master: one the catalog marks, or
+    a local one (whose context is checked when it runs)."""
+    provider_id, _, model_id = label.partition("/")
+    try:
+        p = providers.find(provider_id)
+    except providers.UnknownProvider:
+        return False
+    return p.local or catalog.model(p, model_id).master
+
+
+def master_models() -> list[str]:
+    """The free cloud models the catalog marks for a master module, as `provider/model`."""
+    return [
+        f"{p.id}/{m.id}"
+        for p in providers.CLOUD
+        if not p.paid
+        for m in catalog.models_of(p)
+        if m.master
+    ]
 
 
 def sources(config: Config, choice: Choice) -> list[str]:

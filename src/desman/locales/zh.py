@@ -10,12 +10,13 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No model ready for a master module: it takes a key for a model marked for it ({models}), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "没有可用于主控模块的模型：需要为此标记的模型的密钥（{models}），或由你用 `desman tuning --model master=PROVIDER/MODEL` 指定的、上下文至少 {context} 个 token 的本地模型。",
+    "{model} cannot be the master module: only a model marked for it ({models}) or a local model can. It is kept, but never asked.": "{model} 不能作为主控模块：只有为此标记的模型（{models}）或本地模型可以。该选择会保留，但永远不会被调用。",
     "--master is for GOAL, without --spec or --plan": "--master 只用于 GOAL，不能与 --spec 或 --plan 一起使用",
     "Give GOAL whole to one strong model (a master module) instead of splitting it into subtasks: only a model qualified for it, with many more tool rounds. If it keeps failing, the work is split for the other models.": "把 GOAL 整个交给一个强模型（主控模块），而不是拆成子任务：只用具备资格的模型，工具调用轮数多得多。如果它屡次失败，工作会拆分给其他模型。",
     "Master module": "主控模块",
     "Master module: {provider} · {model}": "主控模块：{provider} · {model}",
     "No model ready for a master module.": "没有可用于主控模块的模型。",
-    "No model ready for a master module: it takes a model marked for it in the catalog (see `desman keys check`), or a local model with a context of at least {context} tokens that you name with `desman tuning --model master=PROVIDER/MODEL`.": "没有可用于主控模块的模型：需要目录中为此标记的模型（见 `desman keys check`），或由你用 `desman tuning --model master=PROVIDER/MODEL` 指定的、上下文至少 {context} 个 token 的本地模型。",
     "Use the Windows Subsystem for Linux.": "使用适用于 Linux 的 Windows 子系统。",
     "WSL sandbox distribution {pin} is present.": "已安装 WSL 沙箱发行版 {pin}。",
     "WSL sandbox distribution {pin} is missing.": "未安装 WSL 沙箱发行版 {pin}。",

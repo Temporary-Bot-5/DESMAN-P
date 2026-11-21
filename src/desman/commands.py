@@ -352,7 +352,14 @@ class TuningArgs(Args):
     models: (
         dict[
             Literal[
-                "planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"
+                "planner",
+                "reviewer",
+                "decomposer",
+                "text",
+                "code",
+                "analysis",
+                "master",
+                "interlocutor",
             ],
             Annotated[str, StringConstraints(min_length=1, max_length=200)],
         ]
@@ -361,7 +368,14 @@ class TuningArgs(Args):
     keys: (
         dict[
             Literal[
-                "planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"
+                "planner",
+                "reviewer",
+                "decomposer",
+                "text",
+                "code",
+                "analysis",
+                "master",
+                "interlocutor",
             ],
             Annotated[str, StringConstraints(min_length=1, max_length=200)],
         ]
@@ -388,7 +402,7 @@ class TuningArgs(Args):
 
 
 ModuleRole = Literal[
-    "planner", "reviewer", "decomposer", "text", "code", "analysis", "interlocutor"
+    "planner", "reviewer", "decomposer", "text", "code", "analysis", "master", "interlocutor"
 ]
 
 
