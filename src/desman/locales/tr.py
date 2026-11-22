@@ -12,6 +12,10 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "Güncel denetimi geçen bir ana modeli kabul et.",
     "Admitted": "Kabul edildi",
+    "Unfinished": "Tamamlanmadı",
+    "The provider’s limits stopped the check. Try again later.": "Sağlayıcının sınırları denetimi durdurdu. Daha sonra tekrar deneyin.",
+    "{model} is already admitted.": "{model} zaten kabul edildi.",
+    "{model} is already revoked.": "{model} için verilen izin zaten iptal edildi.",
     "Admitted {model}.": "{model} kabul edildi.",
     "Allow {model} to be selected as a master module.": "{model} modelinin ana modül olarak seçilmesine izin ver.",
     "Case": "Vaka",

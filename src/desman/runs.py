@@ -171,6 +171,7 @@ def models(
     read_tuning: Callable[[], Tuning] | None = None,
     read_master: Callable[[], MasterChoices] | None = None,
     master_candidate: str | None = None,
+    task_conn: sqlite3.Connection | None = None,
 ) -> Models:
     """A lineup of models per role (`router.lineup`), each model paced by the rate limiter in
     the database, quick blips retried, calls logged and accepted replies kept there. `provider`
@@ -179,11 +180,12 @@ def models(
     lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
     `router.NoProvider`. `read_tuning` supplies the worker’s in-memory tuning snapshot,
     and `read_master` its admissions. Both are refreshed at its config checks.
-    `master_candidate` pins the benchmark executor to one named model."""
+    `master_candidate` pins the benchmark executor to one named model. If `task_conn` is
+    supplied, benchmark task attribution and per-run call totals are recorded there."""
     clients: dict[tuple[str, str | None, tuple[str, ...]], LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
-    recorder = calls.recorder(conn)
+    recorder = calls.recorder(conn, task_conn=task_conn)
     used: dict[tuple[calls.Role, catalog.Lane | None, tuple[str, str] | None], str] = {}
 
     def member(

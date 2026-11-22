@@ -223,11 +223,17 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
         found = next((k for k in keys if k["fingerprint"] == fingerprint), None)
         candidates = router.candidates(config, role)
         available: list[dict[str, Any]] = []
-        for provider in (*providers.CLOUD, ollama):
+        for provider in (
+            *providers.CLOUD,
+            *(providers.LOCAL if role == catalog.MASTER else (ollama,)),
+        ):
             provider_keys = [dict(k) for k in keys if k["provider"] == provider.id]
             if (provider_keys and not provider.is_ready(config)) or (
                 not provider_keys
-                and not (provider.id == "ollama" and (provider.is_ready(config) or installed))
+                and not (
+                    provider.local
+                    and (provider.is_ready(config) or (provider == ollama and installed))
+                )
             ):
                 continue
             models = [m for m in candidates if m.startswith(provider.id + "/")]
@@ -247,7 +253,11 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
                 )
             if provider.id == "ollama":
                 models = list(dict.fromkeys([*models, *("ollama/" + m.name for m in installed)]))
-            if role == catalog.MASTER:
+            if role == catalog.MASTER and provider.local:
+                if served := provider.model(config):
+                    models = list(dict.fromkeys([*models, f"{provider.id}/{served}"]))
+                models = [m for m in models if m not in config.master.revoked]
+            elif role == catalog.MASTER:
                 models = [m for m in models if router.may_be_master(m, config)]
             if role == catalog.MASTER and not models:
                 continue  # nothing of this provider can be the master
@@ -455,7 +465,11 @@ def print_change(old: Tuning, new: Tuning, config: Config) -> None:
         if role == catalog.MASTER and label in config.master.revoked:
             ui.warn(t("{model} is revoked and will not be used.", model=label))
             continue
-        if role == catalog.MASTER and label.partition("/")[0] in {"ollama", "llamacpp"}:
+        try:
+            local = providers.find(label.partition("/")[0]).local
+        except providers.UnknownProvider:
+            local = False
+        if role == catalog.MASTER and local:
             ui.warn(
                 t(
                     "{model} can be the master module only with a context of at least {context} "

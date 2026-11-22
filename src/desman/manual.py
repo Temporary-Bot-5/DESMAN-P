@@ -56,12 +56,12 @@ TOPICS: Final = (
         "A; paid ones only with --provider), or a local model with at least 32768 tokens of "
         "context named with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). "
         "`desman master list` shows the latest checks. `desman master check PROVIDER/MODEL` spends "
-        "quota, tests every case with that model and exits 0 for any finished check (JSON: passed). "
-        "`desman master admit PROVIDER/MODEL` needs a current passing check. "
+        "quota, uses default workflow limits and reports passed, failed or unfinished (try later). "
+        "`desman master admit PROVIDER/MODEL` needs a current passing check with default limits. "
         "`desman master revoke PROVIDER/MODEL` excludes even a catalog model. An admitted local "
         "model needs no tuning preference. All masters need enough context and no per-request cap. "
         "A ready master is required; extend and redo otherwise use the cluster with a warning. "
-        "`desman stats` compares master and cluster tasks.",
+        "`desman stats` compares the person’s master and cluster tasks.",
     ),
     Topic(
         "files",

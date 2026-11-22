@@ -23,10 +23,12 @@ import argparse
 import hashlib
 import json
 import re
+import sqlite3
 import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
@@ -123,8 +125,9 @@ def run(
     provider: str | None = None,
     model: str | None = None,
     master: str | None = None,
+    calls_conn: sqlite3.Connection | None = None,
 ) -> Result:
-    """Every case on a database of its own. In master mode no work is split or delegated."""
+    """Run cases on an isolated store. Real checks can share the operator's model accounting."""
     if mode == "fake":
         llm = Recorded(fake(), store.conn)
         models = runs.Models(llm, None, master=(llm, None) if master is not None else None)
@@ -132,8 +135,16 @@ def run(
         assert config is not None
         # The models each role asks first are part of the tuning being evaluated.
         tuned = config.model_copy(update={"tuning": tuning})
-        models = runs.models(
-            tuned, store.conn, provider=provider, model=model, cache=False, master_candidate=master
+        build_models = runs.models
+        if calls_conn is not None and calls_conn is not store.conn:
+            build_models = partial(runs.models, task_conn=store.conn)
+        models = build_models(
+            tuned,
+            calls_conn if calls_conn is not None else store.conn,
+            provider=provider,
+            model=model,
+            cache=False,
+            master_candidate=master,
         )
     coordinator = runs.summarizer(store, models, tuning, master_check=master is not None)
     cases = []

@@ -12,6 +12,10 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "Ein Master-Modell mit bestandener aktueller Prüfung zulassen.",
     "Admitted": "Zugelassen",
+    "Unfinished": "Nicht abgeschlossen",
+    "The provider’s limits stopped the check. Try again later.": "Das Kontingent des Anbieters hat die Prüfung gestoppt. Versuche es später erneut.",
+    "{model} is already admitted.": "{model} ist bereits zugelassen.",
+    "{model} is already revoked.": "{model} ist bereits widerrufen.",
     "Admitted {model}.": "{model} wurde zugelassen.",
     "Allow {model} to be selected as a master module.": "{model} als Master-Modul zulassen.",
     "Case": "Fall",

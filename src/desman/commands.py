@@ -415,6 +415,10 @@ class MasterArgs(Args):
     model: ModelLabel
 
 
+class MasterDecisionArgs(MasterArgs):
+    as_json: bool = False
+
+
 class ModuleHoldArgs(Args):
     source: str = Field(pattern=r"^(?:[0-9a-f]{12}|ollama|llamacpp)$")
     model: str = Field(pattern=r"^[a-z0-9_-]+/\S+$", max_length=200)
@@ -1045,15 +1049,18 @@ def _master_check(ctx: Context, args: MasterArgs) -> Proposal:
     return Proposal([master_cli.check_notice(args.model)], apply)
 
 
-def _master_decision(ctx: Context, args: MasterArgs, *, admit: bool) -> Proposal:
+def _master_decision(ctx: Context, args: MasterDecisionArgs, *, admit: bool) -> Proposal:
+    config = ctx.config()
+    master_cli.valid_label(args.model, config)
     if admit:
         master_cli.require_pass(ctx.store.conn, args.model)
 
     def apply() -> Outcome:
         changed = master_cli.change(ctx.store.conn, ctx.manager, args.model, admit=admit)
-        master_cli.print_change(args.model, admit=admit)
         return Outcome(
-            {"model": args.model, "admitted": admit, "revoked": not admit, "changed": changed}
+            master_cli.report_decision(
+                args.model, admit=admit, changed=changed, as_json=args.as_json
+            )
         )
 
     line = (
@@ -2406,14 +2413,14 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "master admit",
         "Allow a provider/model with a passing current check to be a master. The person confirms.",
-        MasterArgs,
+        MasterDecisionArgs,
         Kind.CHANGE,
         lambda ctx, args: _master_decision(ctx, args, admit=True),
     ),
     Entry(
         "master revoke",
         "Exclude a provider/model from master selection. The person confirms.",
-        MasterArgs,
+        MasterDecisionArgs,
         Kind.CHANGE,
         lambda ctx, args: _master_decision(ctx, args, admit=False),
     ),

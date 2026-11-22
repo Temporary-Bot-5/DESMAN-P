@@ -12,6 +12,10 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "現行のチェックに合格したモデルをマスターとして許可する。",
     "Admitted": "許可済み",
+    "Unfinished": "未完了",
+    "The provider’s limits stopped the check. Try again later.": "プロバイダーの利用制限によりチェックが停止しました。後でもう一度お試しください。",
+    "{model} is already admitted.": "{model} はすでに承認されています。",
+    "{model} is already revoked.": "{model} の承認はすでに取り消されています。",
     "Admitted {model}.": "{model} を許可しました。",
     "Allow {model} to be selected as a master module.": "{model} をマスターモジュールとして選択できるようにする。",
     "Case": "ケース",

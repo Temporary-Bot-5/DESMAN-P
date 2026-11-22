@@ -820,7 +820,7 @@ MIGRATIONS: Final[tuple[str, ...]] = (
         model TEXT NOT NULL,
         checked_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         version INTEGER NOT NULL,
-        passed INTEGER NOT NULL CHECK (passed IN (0, 1)),
+        outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'failed', 'unfinished')),
         result_json TEXT NOT NULL CHECK (json_valid(result_json))
     ) STRICT;
     CREATE INDEX master_checks_model ON master_checks(model, id DESC);

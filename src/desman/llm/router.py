@@ -295,7 +295,11 @@ def _master_lineup(
                 continue
             for label in config.master.admitted:
                 source, _, model_id = label.partition("/")
-                if source != p.id or any(c.label == label for c in choices):
+                if (
+                    source != p.id
+                    or (p.id != "ollama" and model_id != p.model(config))
+                    or any(c.label == label for c in choices)
+                ):
                     continue
                 known = (local_choices or {}).get((source, model_id))
                 if known is None and local_choices is not None:
@@ -308,7 +312,11 @@ def _master_lineup(
         c
         for c in choices
         # A paid model only when the person names its provider for this run, as everywhere.
-        if qualified(config, c, named=named) and (provider is not None or not c.provider.paid)
+        if qualified(config, c, named=named)
+        and (provider is not None or not c.provider.paid)
+        and (
+            not c.provider.local or c.provider.id == "ollama" or c.model == c.provider.model(config)
+        )
     ]
     if not masters:
         local_note = (

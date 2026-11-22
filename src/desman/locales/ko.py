@@ -12,6 +12,10 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "현재 버전 검사를 통과한 모델을 마스터로 승인합니다.",
     "Admitted": "승인됨",
+    "Unfinished": "미완료",
+    "The provider’s limits stopped the check. Try again later.": "제공업체의 사용량 제한으로 검사가 중단되었습니다. 나중에 다시 시도하세요.",
+    "{model} is already admitted.": "{model}은 이미 승인되었습니다.",
+    "{model} is already revoked.": "{model}의 승인은 이미 취소되었습니다.",
     "Admitted {model}.": "{model} 모델을 승인했습니다.",
     "Allow {model} to be selected as a master module.": "{model} 모델을 마스터 모듈로 선택할 수 있게 합니다.",
     "Case": "사례",

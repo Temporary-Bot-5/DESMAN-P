@@ -15,7 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 from rich.text import Text
 
 from desman import bench, providers, runs, ui
-from desman.config import Config, ConfigManager, MasterChoices, ModelLabel
+from desman.config import Config, ConfigManager, MasterChoices, ModelLabel, Tuning
 from desman.config_cli import json_option, load_config
 from desman.core import db, operator
 from desman.core.states import TaskStatus
@@ -34,9 +34,15 @@ def valid_label(model: str, config: Config) -> str:
             t("an argument looked like an API key, so the command was dropped")
         )
     try:
-        return _LABEL.validate_python(model)
+        label = _LABEL.validate_python(model)
     except ValidationError as e:
         raise click.ClickException(t("Use a model label in the form PROVIDER/MODEL.")) from e
+
+    try:
+        providers.find(label.partition("/")[0])
+    except providers.UnknownProvider as e:
+        raise click.ClickException(str(e)) from e
+    return label
 
 
 def _summary(row: sqlite3.Row, result: bench.Result) -> dict[str, Any]:
@@ -45,7 +51,8 @@ def _summary(row: sqlite3.Row, result: bench.Result) -> dict[str, Any]:
         "model": row["model"],
         "checked_at": row["checked_at"],
         "version": row["version"],
-        "passed": bool(row["passed"]),
+        "passed": row["outcome"] == "passed",
+        "outcome": row["outcome"],
         "done": sum(case.status == "done" for case in result.cases),
         "total": len(result.cases),
     }
@@ -72,8 +79,12 @@ def rows(conn: sqlite3.Connection, config: Config) -> list[dict[str, Any]]:
     ]
 
 
-def _verdict(passed: bool) -> str:
-    return t("Passed") if passed else t("Did not pass")
+def _verdict(outcome: str) -> str:
+    return {
+        "passed": t("Passed"),
+        "failed": t("Did not pass"),
+        "unfinished": t("Unfinished"),
+    }[outcome]
 
 
 def print_list(models: list[dict[str, Any]]) -> None:
@@ -90,7 +101,7 @@ def print_list(models: list[dict[str, Any]]) -> None:
         checked = (
             t(
                 "{verdict} · {done}/{total} done · {date} · v{version}",
-                verdict=_verdict(last["passed"]),
+                verdict=_verdict(last["outcome"]),
                 done=last["done"],
                 total=last["total"],
                 date=last["checked_at"],
@@ -132,6 +143,26 @@ def _served(config: Config, choice: router.Choice) -> None:
     )
 
 
+def _case_reasons(conn: sqlite3.Connection, config: Config) -> dict[str, str]:
+    reasons = {}
+    for case_id, reason in conn.execute(
+        """SELECT json_extract(created.details_json, '$.benchmark'),
+                  (SELECT COALESCE(json_extract(a.details_json, '$.cause'),
+                                   json_extract(a.details_json, '$.reason'))
+                   FROM audit_log a
+                   WHERE a.task_id = created.task_id AND a.subtask_id IS NOT NULL
+                     AND (a.to_status IN ('needs_human', 'paused', 'failed')
+                          OR json_type(a.details_json, '$.failure') IS NOT NULL)
+                     AND json_type(a.details_json, '$.reason') IS NOT NULL
+                   ORDER BY a.seq DESC LIMIT 1)
+           FROM audit_log created WHERE created.action = 'task_created'"""
+    ):
+        if reason:
+            safe = " ".join(providers.redact_keys(reason, config)[0].split())
+            reasons[case_id] = safe if len(safe) <= 200 else safe[:199] + "…"
+    return reasons
+
+
 def run_check(store: Store, config: Config, model: str, *, as_json: bool = False) -> dict[str, Any]:
     model = valid_label(model, config)
     runs.guard(store)
@@ -143,25 +174,36 @@ def run_check(store: Store, config: Config, model: str, *, as_json: bool = False
             tempfile.TemporaryDirectory(prefix="desman-master-") as folder,
             closing(db.open_db(Path(folder) / "desman.db")) as conn,
         ):
+            tuning = Tuning(models=config.tuning.models, keys=config.tuning.keys)
             result = bench.run(
-                Store(conn), "real", config.tuning, config=config, master=choice.label
+                Store(conn),
+                "real",
+                tuning,
+                config=config,
+                master=choice.label,
+                calls_conn=store.conn,
             )
+            reasons = _case_reasons(conn, config)
     except router.NoProvider as e:
         raise click.ClickException(str(e)) from e
-    passed = bench.master_passed(result)
+    outcome = "failed"
+    if bench.master_passed(result):
+        outcome = "passed"
+    elif any(case.status == TaskStatus.ACTIVE for case in result.cases):
+        outcome = "unfinished"
     row = store.conn.execute(
-        "INSERT INTO master_checks (model, version, passed, result_json) VALUES (?, ?, ?, ?) "
-        "RETURNING id, model, checked_at, version, passed",
-        (choice.label, result.version, passed, result.model_dump_json()),
+        "INSERT INTO master_checks (model, version, outcome, result_json) VALUES (?, ?, ?, ?) "
+        "RETURNING id, model, checked_at, version, outcome",
+        (choice.label, result.version, outcome, result.model_dump_json()),
     ).fetchone()
-    return _summary(row, result) | {
-        "result": result.model_dump(mode="json"),
-        "usage": bench.metrics(result),
-    }
+    report = result.model_dump(mode="json")
+    for case in report["cases"]:
+        case["reason"] = None if case["status"] == TaskStatus.DONE else reasons.get(case["id"])
+    return _summary(row, result) | {"result": report, "usage": bench.metrics(result)}
 
 
 def print_check(data: dict[str, Any]) -> None:
-    table = ui.table(t("Case"), t("Status"))
+    table = ui.table(t("Case"), t("Status"), t("Reason"))
     labels = {
         TaskStatus.ACTIVE: t("active"),
         TaskStatus.NEEDS_HUMAN: t("needs human"),
@@ -170,27 +212,35 @@ def print_check(data: dict[str, Any]) -> None:
         TaskStatus.CANCELLED: t("cancelled"),
     }
     for case in data["result"]["cases"]:
-        table.add_row(case["id"], labels[TaskStatus(case["status"])])
+        table.add_row(case["id"], labels[TaskStatus(case["status"])], Text(case["reason"] or ""))
     ui.out(table)
     usage = data["usage"]
     ui.note(t("{calls} calls · {tokens} tokens", calls=usage["calls"], tokens=usage["tokens"]))
     ui.note(
         t(
             "{verdict} · {done}/{total} done · {escalated} escalated",
-            verdict=_verdict(data["passed"]),
+            verdict=_verdict(data["outcome"]),
             done=data["done"],
             total=data["total"],
             escalated=usage["escalated"],
         )
     )
 
+    if data["outcome"] == "unfinished":
+        ui.note(t("The provider’s limits stopped the check. Try again later."))
+
 
 def require_pass(conn: sqlite3.Connection, model: str) -> None:
     latest = conn.execute(
-        "SELECT passed, version FROM master_checks WHERE model = ? ORDER BY id DESC LIMIT 1",
+        "SELECT outcome, version, result_json FROM master_checks WHERE model = ? ORDER BY id DESC LIMIT 1",
         (model,),
     ).fetchone()
-    if latest is None or not latest["passed"] or latest["version"] != bench.VERSION:
+    if (
+        latest is None
+        or latest["outcome"] != "passed"
+        or latest["version"] != bench.VERSION
+        or json.loads(latest["result_json"]).get("limits") != runs.TUNING_DEFAULTS
+    ):
         raise click.ClickException(
             t(
                 "{model} needs a passing check on the current benchmark. Run `desman master check {model}`.",
@@ -211,10 +261,10 @@ def change(
     with manager.locked(), db.transaction(conn):
         config = manager.load()
         model = valid_label(model, config)
-        if admit:
-            require_pass(conn, model)
         old = config.master
         add, remove = ("admitted", "revoked") if admit else ("revoked", "admitted")
+        if admit:
+            require_pass(conn, model)
         values = old.model_dump()
         values[add].append(model)
         values[remove] = [label for label in values[remove] if label != model]
@@ -239,8 +289,24 @@ def changes(before: MasterChoices, after: MasterChoices) -> list[tuple[str, dict
     ]
 
 
-def print_change(model: str, *, admit: bool) -> None:
-    ui.ok(t("Admitted {model}.", model=model) if admit else t("Revoked {model}.", model=model))
+def print_change(model: str, *, admit: bool, changed: bool) -> None:
+    if changed:
+        ui.ok(t("Admitted {model}.", model=model) if admit else t("Revoked {model}.", model=model))
+    else:
+        ui.note(
+            t("{model} is already admitted.", model=model)
+            if admit
+            else t("{model} is already revoked.", model=model)
+        )
+
+
+def report_decision(model: str, *, admit: bool, changed: bool, as_json: bool) -> dict[str, Any]:
+    data = {"model": model, "admitted": admit, "revoked": not admit, "changed": changed}
+    if as_json:
+        click.echo(json.dumps(data, ensure_ascii=False))
+    else:
+        print_change(model, admit=admit, changed=changed)
+    return data
 
 
 @click.group("master", invoke_without_command=True)
@@ -282,24 +348,26 @@ def check_command(model: str, db_path: Path | None, as_json: bool) -> None:
         print_check(data)
 
 
-def _decision(db_path: Path | None, model: str, *, admit: bool) -> None:
+def _decision(db_path: Path | None, model: str, *, admit: bool, as_json: bool) -> None:
     manager = load_config()
     with closing(connect(db_path)) as conn:
-        change(conn, manager, model, admit=admit, journal=True)
-    print_change(model, admit=admit)
+        changed = change(conn, manager, model, admit=admit, journal=True)
+    report_decision(model, admit=admit, changed=changed, as_json=as_json)
 
 
 @master.command("admit")
 @click.argument("model", metavar="PROVIDER/MODEL")
 @db_option
-def admit_command(model: str, db_path: Path | None) -> None:
+@json_option
+def admit_command(model: str, db_path: Path | None, as_json: bool) -> None:
     """Admit a master model with a current passing check."""
-    _decision(db_path, model, admit=True)
+    _decision(db_path, model, admit=True, as_json=as_json)
 
 
 @master.command("revoke")
 @click.argument("model", metavar="PROVIDER/MODEL")
 @db_option
-def revoke_command(model: str, db_path: Path | None) -> None:
+@json_option
+def revoke_command(model: str, db_path: Path | None, as_json: bool) -> None:
     """Exclude a model from master selection."""
-    _decision(db_path, model, admit=False)
+    _decision(db_path, model, admit=False, as_json=as_json)

@@ -12,6 +12,10 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "准入已通过当前版本检查的主控模型。",
     "Admitted": "已准入",
+    "Unfinished": "未完成",
+    "The provider’s limits stopped the check. Try again later.": "服务提供商的用量限制中止了检查。请稍后重试。",
+    "{model} is already admitted.": "{model} 已获准使用。",
+    "{model} is already revoked.": "{model} 的使用许可已撤销。",
     "Admitted {model}.": "已准入 {model}。",
     "Allow {model} to be selected as a master module.": "允许选择 {model} 作为主控模块。",
     "Case": "用例",

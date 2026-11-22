@@ -169,8 +169,16 @@ def _tasks(conn: sqlite3.Connection, w: _Window) -> tuple[dict[str, int], dict[s
     where, args = w.where("t.created_at", "t.id")
     statuses: dict[str, list[SubtaskStatus]] = {}
     masters: set[str] = set()
-    for task_id, value, master in conn.execute(
-        f"""SELECT t.id, s.status, s.master AND s.parent_id IS NULL
+    operator_tasks: set[str] = set()
+    for task_id, value, master, own_work in conn.execute(
+        f"""SELECT t.id, s.status, s.master AND s.parent_id IS NULL,
+                   t.origin = 'local' AND NOT EXISTS (
+                       SELECT 1 FROM audit_log a
+                       WHERE a.task_id = t.id AND a.action = 'task_created'
+                         AND (json_type(a.details_json, '$.purpose') IS NOT NULL
+                              OR json_type(a.details_json, '$.summarises') IS NOT NULL
+                              OR json_type(a.details_json, '$.benchmark') IS NOT NULL)
+                   )
             FROM tasks t LEFT JOIN subtasks s ON s.task_id = t.id WHERE {where}""",
         args,
     ):
@@ -179,6 +187,8 @@ def _tasks(conn: sqlite3.Connection, w: _Window) -> tuple[dict[str, int], dict[s
             statuses[task_id].append(SubtaskStatus(value))
         if master:
             masters.add(task_id)
+        if own_work:
+            operator_tasks.add(task_id)
     usage = {
         row["id"]: row
         for row in conn.execute(
@@ -198,6 +208,8 @@ def _tasks(conn: sqlite3.Connection, w: _Window) -> tuple[dict[str, int], dict[s
     for task_id, subtasks in statuses.items():
         status = derive_task_status(subtasks)
         counts[status.value] += 1
+        if task_id not in operator_tasks:
+            continue
         group = totals["master" if task_id in masters else "cluster"]
         group["tasks"] += 1
         group["done"] += status is TaskStatus.DONE
