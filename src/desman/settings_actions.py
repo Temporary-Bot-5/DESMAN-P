@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from desman.tuning_limits import PAGE_TUNING_BOUNDS, TUNING_BOUNDS
+from desman.tuning_limits import MASTER_TUNING_BOUNDS, PAGE_TUNING_BOUNDS, TUNING_BOUNDS
 
 
 class Fields(BaseModel):
@@ -108,12 +108,13 @@ class Limits(Fields):
         "context_tokens",
         "max_attempts",
         "max_transient",
+        "master_rounds",
     ]
     value: int | Literal["auto"]
 
     @model_validator(mode="after")
     def bounds(self) -> "Limits":
-        low, high = {**PAGE_TUNING_BOUNDS, **TUNING_BOUNDS}[self.name]
+        low, high = {**PAGE_TUNING_BOUNDS, **TUNING_BOUNDS, **MASTER_TUNING_BOUNDS}[self.name]
         if self.value != "auto" and not low <= self.value <= high:
             raise ValueError("outside tuning bounds")
         return self

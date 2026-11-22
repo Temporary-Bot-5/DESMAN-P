@@ -74,12 +74,13 @@ def watching(watcher: Callable[[], None]) -> Iterator[None]:
         _watchers.reset(token)
 
 
-def recorder(conn: sqlite3.Connection) -> Callable[[CallRecord], None]:
-    """An `on_call` for `OpenAICompatible` that appends to model_calls."""
+def recorder(
+    conn: sqlite3.Connection, *, task_conn: sqlite3.Connection | None = None
+) -> Callable[[CallRecord], None]:
+    """Append model calls, keeping isolated benchmark task attribution in its own database."""
 
-    def record(call: CallRecord) -> None:
-        purpose = _purpose.get() or _UNATTRIBUTED
-        conn.execute(
+    def write(target: sqlite3.Connection, call: CallRecord, purpose: Purpose) -> None:
+        target.execute(
             "INSERT INTO model_calls (provider, model, key_id, prompt_hash, response_hash, "
             "prompt_tokens, completion_tokens, latency_ms, http_status, error_kind, error, "
             "limits_json, error_type, role, task_id, subtask_id, session_id) "
@@ -104,6 +105,14 @@ def recorder(conn: sqlite3.Connection) -> Callable[[CallRecord], None]:
                 purpose.session_id,
             ),
         )
+
+    def record(call: CallRecord) -> None:
+        attribution = purpose()
+        if task_conn is None:
+            write(conn, call, attribution)
+        else:
+            write(conn, call, Purpose(attribution.role))
+            write(task_conn, call, attribution)
         for watcher in _watchers.get():
             watcher()
 

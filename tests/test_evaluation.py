@@ -192,7 +192,15 @@ def test_real_mode_asks_the_configured_models(monkeypatch: pytest.MonkeyPatch) -
     result = bench.run(store(), "real", tuning, config=Config(), provider="groq", model="m")
     assert result.mode == "real" and bench.metrics(result)["tasks_done"] == len(bench.CASES)
     # Its own database is new: nothing cached is reused.
-    assert asked == [{"tuning": tuning, "provider": "groq", "model": "m", "cache": False}]
+    assert asked == [
+        {
+            "tuning": tuning,
+            "provider": "groq",
+            "model": "m",
+            "cache": False,
+            "master_candidate": None,
+        }
+    ]
 
 
 def test_real_mode_without_a_provider_reports_it(capsys: pytest.CaptureFixture[str]) -> None:

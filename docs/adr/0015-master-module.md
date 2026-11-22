@@ -30,7 +30,8 @@ already does for a subtask.**
 1. **The mode.** `SubtaskSpec.master` (stored with the subtask). A master subtask's executor
    asks the master lineup instead of its kind's, and may take up to
    `agents.MASTER_TOOL_ROUNDS` (24) rounds of tool calls in one attempt instead of 8, told so
-   in its instructions (plan your own steps, check the work before handing it in). Everything else is the
+   in its instructions (plan your own steps, check the work before handing it in); the person
+   may set the number (`desman tuning`, `master_rounds`, M.3). Everything else is the
    ordinary path: the same tools within the same access, workspace, sandbox, call journal,
    heartbeat and checkpoints, the same reviewer, the same retry policy. There is still one
    planner, one executor, one reviewer, one coordinator: the master is the executor with
@@ -51,7 +52,19 @@ already does for a subtask.**
    The person may put one qualified model first (`desman tuning --model master=...`); an
    unqualified one is never asked (`router.qualified`), and `desman tuning` warns that it is
    not among the models the master may use. The Improvement Analyst never proposes the
-   master's model. M.3 adds a measured gate: the benchmark (`bench.py`) run by the model.
+   master's model, nor admits one.
+   **The measured gate (M.3).** `desman master check PROVIDER/MODEL` runs the benchmark
+   (`bench.py`, protected) in master mode: each case is one master subtask (no tools) worked
+   by that model alone and judged by the ordinary reviewer, on a database of its own. It
+   passes when every case is done with nothing escalated (`bench.master_passed`, in the
+   protected file, so no proposal can lower the bar). Each check is kept (`master_checks`,
+   append-only). `desman master admit MODEL` (the person, like permissions: `Config.master`,
+   never an agent) records an admission only on a passing check of the current benchmark
+   version; `desman master revoke MODEL` takes a model out, a catalog-marked one included.
+   Qualified is then: (marked in the catalog, or admitted) and not revoked, and the basic
+   limits still hold (context ≥ `MASTER_LOCAL_CONTEXT`, no small per-request cap); a local
+   model admitted no longer has to be named in tuning. The catalog's mark is only the
+   starting list.
 3. **Who chooses the mode.** The person: `desman run --master` (M.1); in the chat (M.2) the
    interlocutor's task turn carries `"master": true` when the person asked for the work to be
    done by one agent, and `/master on|off` sets it for the chat session while the chat
@@ -102,4 +115,5 @@ already does for a subtask.**
   reviews, so `desman stats` shows them under the cluster's models.
 - Stats (`desman stats`) already count calls by role and model; a task with a master subtask
   records it in `task_created` (`master`: its ids, `plan`: `master`), so the outcomes can be
-  compared with the cluster's (M.3).
+  compared with the cluster's: `desman stats` shows tasks with a master subtask beside the
+  others (done, escalated, calls and tokens per task; M.3).

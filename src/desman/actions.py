@@ -757,6 +757,28 @@ def print_stats(stats: Stats, since: str) -> None:
                 statuses=_counts(stats.tasks),
             )
         )
+    if (master := stats.modes.get("master")) is not None and master.tasks:
+        table = ui.table(
+            "",
+            t("tasks"),
+            t("done"),
+            t("escalated"),
+            t("calls per task"),
+            t("tokens per task"),
+            title=t("Master vs cluster"),
+        )
+        for label, mode in ((t("Master module"), master), (t("Cluster"), stats.modes["cluster"])):
+            table.add_row(
+                label,
+                str(mode.tasks),
+                _share(mode.done, mode.tasks),
+                str(mode.escalated),
+                f"{mode.calls / mode.tasks:.1f}" if mode.tasks else "—",
+                f"{(mode.prompt_tokens + mode.completion_tokens) / mode.tasks:.1f}"
+                if mode.tasks
+                else "—",
+            )
+        ui.out(table)
     sub = stats.subtasks
     if sub.total:
         ui.out(

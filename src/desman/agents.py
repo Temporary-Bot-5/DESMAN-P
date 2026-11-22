@@ -244,6 +244,8 @@ def llm_executor(
     llm: LLM,
     other: LLM | None = None,
     *,
+    master_rounds: int = MASTER_TOOL_ROUNDS,
+    allow_delegation: bool = True,
     by_kind: Mapping[Kind, tuple[LLM, LLM | None]] | None = None,
     format_final: bool = True,
     clock: Callable[[], datetime] | None = None,
@@ -260,6 +262,8 @@ def llm_executor(
             work,
             *(by_kind or {}).get(work.subtask.kind, (llm, other)),
             clock=clock,
+            master_rounds=master_rounds,
+            allow_delegation=allow_delegation,
             format_final=format_final,
             tz=tz,
         )
@@ -272,6 +276,8 @@ def _execute(
     llm: LLM,
     other: LLM | None,
     *,
+    master_rounds: int,
+    allow_delegation: bool,
     clock: Callable[[], datetime] | None = None,
     format_final: bool = True,
     tz: tzinfo | None = None,
@@ -357,13 +363,14 @@ def _execute(
             "earlier subtask does not count. Run it before handing in your result."
         )
     can_delegate = (
-        work.subtask.master
+        allow_delegation
+        and work.subtask.master
         and context.strategy is not Strategy.COMBINE
         and context.delegations_left > 0
     )
     rounds = MAX_TOOL_ROUNDS
     if work.subtask.master and context.strategy is not Strategy.COMBINE:  # combining is short
-        rounds = MASTER_TOOL_ROUNDS
+        rounds = master_rounds
         if tools:
             system += MASTER_INSTRUCTIONS.format(rounds=rounds)
     if can_delegate:
