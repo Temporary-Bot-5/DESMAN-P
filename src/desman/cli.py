@@ -9,7 +9,9 @@ import json
 import sqlite3
 import sys
 import time
+import traceback
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +38,7 @@ from desman.config import Config, ConfigError, MasterChoices, Tuning, open_confi
 from desman.config_cli import (
     behaviour,
     config,
+    interface,
     keys,
     language,
     load_config,
@@ -148,28 +151,57 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
     is_flag=True,
     help="A temporary chat: nothing said is kept, it is erased when you leave.",
 )
+@click.option("--launcher", is_flag=True, hidden=True)
 @click.pass_context
-def cli(ctx: click.Context, resume: bool, temporary: bool) -> None:
+def cli(ctx: click.Context, resume: bool, temporary: bool, launcher: bool) -> None:
     """DESMAN(P) - Decentralized Self-Evolving Modular Agents Network (Prototype)"""
-    if ctx.invoked_subcommand is not None and (resume or temporary):
-        raise click.UsageError(t("-c and -t are for the chat: give them without a command."))
-    if resume and temporary:
-        raise click.UsageError(t("A temporary chat starts afresh: -c and -t do not go together."))
-    if ctx.invoked_subcommand is None:
-        # Bare `desman` is the interactive entry point (ADR 0003): configure on first run,
-        # then the banner and the chat.
-        config_manager = load_config()
-        if not config_manager.is_configured():
-            run_wizard(config_manager)
-        print_project_info(config_manager)
-        try:
-            conn = db.open_db()
-        except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-            raise click.ClickException(str(e)) from e
-        try:
-            Chat(Sessions(conn), resume=resume, temporary=temporary).run()
-        finally:
-            conn.close()
+    if ctx.invoked_subcommand is not None:
+        if resume or temporary:
+            raise click.UsageError(t("-c and -t are for the chat: give them without a command."))
+        return
+    try:
+        if resume and temporary:
+            raise click.UsageError(
+                t("A temporary chat starts afresh: -c and -t do not go together.")
+            )
+        _open_interface(resume, temporary)
+    except ui.Cancelled:
+        return
+    except (click.Abort, click.exceptions.Exit):
+        raise
+    except Exception as error:
+        if not launcher or not sys.stdin.isatty():
+            raise
+        if isinstance(error, click.ClickException):
+            error.show()
+            code = error.exit_code
+        else:
+            traceback.print_exc()
+            sys.stderr.flush()
+            code = 1
+        with suppress(ui.Cancelled, click.Abort, KeyboardInterrupt, EOFError):
+            ui.text(t("Press Enter to close."))
+        ctx.exit(code)
+
+
+def _open_interface(resume: bool, temporary: bool) -> None:
+    manager = load_config()
+    if not manager.is_configured():
+        run_wizard(manager)
+    if manager.load().interface == "gui":
+        from desman.gui.app import run
+
+        run(resume, temporary, 0, True)
+        return
+    print_project_info(manager)
+    try:
+        conn = db.open_db()
+    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
+        raise click.ClickException(str(e)) from e
+    try:
+        Chat(Sessions(conn), resume=resume, temporary=temporary).run()
+    finally:
+        conn.close()
 
 
 @cli.command()
@@ -195,7 +227,7 @@ def cli(ctx: click.Context, resume: bool, temporary: bool) -> None:
     is_flag=True,
     help="A temporary chat: nothing said is kept, it is erased when you leave.",
 )
-@click.option("--shortcut", is_flag=True, help="Create a shortcut to the page without starting it.")
+@click.option("--shortcut", is_flag=True, help="Create a DESMAN shortcut.")
 def gui(port: int, no_browser: bool, resume: bool, temporary: bool, shortcut: bool) -> None:
     """Open the chat as a local web page."""
     if shortcut:
@@ -226,6 +258,7 @@ cli.add_command(usage)
 cli.add_command(language)
 cli.add_command(permissions)
 cli.add_command(personalize)
+cli.add_command(interface)
 cli.add_command(behaviour)
 cli.add_command(tuning)
 cli.add_command(master)

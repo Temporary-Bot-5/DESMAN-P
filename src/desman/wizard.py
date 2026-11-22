@@ -28,6 +28,7 @@ from desman.config import (
     Behaviour,
     Config,
     ConfigManager,
+    Interface,
     Network,
     Permissions,
 )
@@ -106,7 +107,9 @@ def run(manager: ConfigManager) -> None:
     config.personalize = ask_personalize(config.personalize)
     if ui.confirm(t("Set up how the interlocutor talks to you?"), default=False):
         config.behaviour = ask_behaviour(config.behaviour, config)
-    entries, settle, said = network_change(config, ask_network(config))
+    network = ask_network(config)
+    config.interface = ask_interface(config.interface)
+    entries, settle, said = network_change(config, network)
     save(manager, config, seen, entries, settle)  # a `keys add` meanwhile is not lost
     said()
 
@@ -119,7 +122,16 @@ def run(manager: ConfigManager) -> None:
     ui.note(t('Next: `desman config show` to review, `desman run "..."` to start.'))
 
 
-SECTIONS = ("providers", "docker", "permissions", "personalize", "behaviour", "network", "roles")
+SECTIONS = (
+    "providers",
+    "docker",
+    "permissions",
+    "personalize",
+    "behaviour",
+    "network",
+    "roles",
+    "interface",
+)
 """Parts of the wizard that can be opened on their own (from the chat, ADR 0003 §3)."""
 
 
@@ -140,6 +152,8 @@ def run_section(manager: ConfigManager, section: str) -> None:
         config.personalize = ask_personalize(config.personalize)
     elif section == "behaviour":
         config.behaviour = ask_behaviour(config.behaviour, config)
+    elif section == "interface":
+        config.interface = ask_interface(config.interface)
     elif section == "roles":
         ask_roles(config)
     elif section == "network":
@@ -151,6 +165,22 @@ def run_section(manager: ConfigManager, section: str) -> None:
         raise ValueError(f"no wizard section {section!r}")
     manager.save_if_unchanged(config, seen)
     ui.ok(t("Configuration saved to {path}", path=manager.config_path))
+
+
+def ask_interface(current: str) -> Interface:
+    ui.note(
+        t(
+            "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`."
+        )
+    )
+    return (
+        "gui"
+        if ui.confirm(
+            t("Open the experimental GUI by default instead of the terminal?"),
+            default=current == "gui",
+        )
+        else "terminal"
+    )
 
 
 def ask_roles(config: Config) -> None:

@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "Eine DESMAN-Verknüpfung erstellen.",
+    "Default interface": "Standardoberfläche",
+    "Default interface: {mode}": "Standardoberfläche: {mode}",
+    "Experimental GUI": "Experimentelle grafische Oberfläche",
+    "Open the experimental GUI by default instead of the terminal?": "Standardmäßig die experimentelle grafische Oberfläche statt des Terminals öffnen?",
+    "Open the interface section of the setup wizard.": "Den Abschnitt zur Oberfläche im Einrichtungsassistenten öffnen.",
+    "Press Enter to close.": "Zum Schließen die Eingabetaste drücken.",
+    "Show or set the default interface.": "Die Standardoberfläche anzeigen oder ändern.",
+    "Terminal": "Terminal",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "Die grafische Oberfläche ist experimentell. Das Terminal bleibt verfügbar. Mit `desman interface` können Sie die Vorgabe ändern.",
     "Admit a master model with a current passing check.": "Ein Master-Modell mit bestandener aktueller Prüfung zulassen.",
     "Admitted": "Zugelassen",
     "Unfinished": "Nicht abgeschlossen",
@@ -387,7 +397,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "Ungültiger Startpfad.",
     "Report a problem": "Problem melden",
     "Describe the problem:": "Beschreiben Sie das Problem:",
-    "Create a shortcut to the page without starting it.": "Eine Verknüpfung zur Seite erstellen, ohne sie zu starten.",
     "Shortcut created: {path}": "Verknüpfung erstellt: {path}",
     "Could not create shortcut: {error}": "Verknüpfung konnte nicht erstellt werden: {error}",
     "Shortcuts are not supported on this system yet.": "Verknüpfungen werden auf diesem System noch nicht unterstützt.",

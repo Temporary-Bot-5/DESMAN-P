@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "DESMAN 바로 가기를 만듭니다.",
+    "Default interface": "기본 인터페이스",
+    "Default interface: {mode}": "기본 인터페이스: {mode}",
+    "Experimental GUI": "실험적 그래픽 인터페이스",
+    "Open the experimental GUI by default instead of the terminal?": "터미널 대신 실험적 그래픽 인터페이스를 기본으로 열까요?",
+    "Open the interface section of the setup wizard.": "설정 마법사의 인터페이스 항목을 엽니다.",
+    "Press Enter to close.": "Enter 키를 눌러 닫으세요.",
+    "Show or set the default interface.": "기본 인터페이스를 표시하거나 설정합니다.",
+    "Terminal": "터미널",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "그래픽 인터페이스는 실험적 기능입니다. 터미널도 계속 사용할 수 있습니다. `desman interface`로 기본값을 바꿀 수 있습니다.",
     "Admit a master model with a current passing check.": "현재 버전 검사를 통과한 모델을 마스터로 승인합니다.",
     "Admitted": "승인됨",
     "Unfinished": "미완료",
@@ -381,7 +391,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "실행 경로가 잘못되었습니다.",
     "Report a problem": "문제 신고",
     "Describe the problem:": "문제를 설명하세요:",
-    "Create a shortcut to the page without starting it.": "페이지를 시작하지 않고 바로 가기를 만듭니다.",
     "Shortcut created: {path}": "바로 가기 생성됨: {path}",
     "Could not create shortcut: {error}": "바로 가기를 만들 수 없습니다: {error}",
     "Shortcuts are not supported on this system yet.": "이 시스템은 아직 바로 가기를 지원하지 않습니다.",

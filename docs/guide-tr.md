@@ -45,20 +45,24 @@ Yönetici yetkisine gerek yoktur.
    bilgisayarınızı korudu” penceresi çıkarsa “Ek bilgi” → “Yine de çalıştır” seçeneğine tıklayın.
 3. Siyah bir pencere açılır. Yükleyici gerekli yazılımları (uv, Python ve eksikse Git) kurmak için
    izin ister. `y` yazıp Enter'a basın. Bu birkaç dakika sürer.
-4. Sonunda tarayıcı DESMAN sayfasını açar ve masaüstünde **DESMAN** kısayolu görünür. Bundan sonra
-   programı bu kısayoldan açın.
+4. Yükleyici terminalde `desman` komutunu çalıştırır. Masaüstündeki **DESMAN** kısayolu da
+   programı terminalde açar.
 
 ### Linux
 
 1. Sayfada **Linux** düğmesine basın ve gösterilen komutu kopyalayın.
 2. Terminali açın, komutu Ctrl+Shift+V ile yapıştırın ve Enter'a basın.
 3. Git yoksa yükleyici kurulum komutunu gösterir. Komutu çalıştırıp 2. adımı yineleyin.
-4. Sorulara `y` ile yanıt verin. Sonunda tarayıcı açılır ve **DESMAN** uygulama menüsünde ve
-   masaüstünde görünür. Masaüstü kısayolu çalıştırmak için izin isterse izin verin.
+4. Sorulara `y` ile yanıt verin. Yükleyici terminalde `desman` komutunu çalıştırır. **DESMAN**
+   uygulama menüsünde ve masaüstünde görünür. İstenirse kısayolun çalışmasına izin verin.
 
 Ayrıntılar için [install.md](install.md) dosyasına bakın.
 
 ## 2. İlk açılış ve anahtar
+
+İlk kurulum terminalde yapılır. Son soruda deneysel tarayıcı arayüzünü seçebilirsiniz. Daha
+sonra `desman interface terminal` veya `desman interface gui` ile seçiminizi
+değiştirebilirsiniz.
 
 DESMAN internet üzerinden modellere erişir. Bunun için program parolası gibi çalışan ücretsiz bir
 anahtar gerekir. İlk açılışta ayarlar kendiliğinden açılır.
@@ -77,8 +81,7 @@ anahtar gerekir. İlk açılışta ayarlar kendiliğinden açılır.
 3. **İzinler.** Başlangıçta hepsi kapalıdır. Test için “model sağlayıcıları dışında ağı kullanmak”
    iznini açarak ajanların herkese açık web sayfalarını okumasını sağlayabilirsiniz. Sahip aksini
    istemedikçe diğerlerini kapalı tutun.
-4. **desman-global**, kurulumun son sorusudur. “Şimdi değil” deyip daha sonra katılabilirsiniz (5.
-   bölüm).
+4. **desman-global.** “Şimdi değil” deyip daha sonra katılabilirsiniz (5. bölüm).
 
 Ücretsiz kotalar düşüktür ve değişebilir. DESMAN kota doldu derse kota yenilendiğinde iş sürer. Bu
 genellikle bir dakika, bazen bir gün alır. Bir saatten uzun süre yanıt gelmezse bildirin (7.
@@ -86,7 +89,7 @@ bölüm).
 
 ## 3. Kullanım
 
-DESMAN penceresi tarayıcıda bir sayfa olarak açılır:
+Deneysel tarayıcı arayüzünde sayfa şu şekilde düzenlenir:
 
 - **Solda** sohbetler, alt kısımda **Ayarlar**, **Sorun bildir** ve **Mesajlar** düğmeleri vardır.
 - **Ortada** sohbet alanı vardır. İhtiyacınızı kendi sözlerinizle yazın.

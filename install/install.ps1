@@ -51,7 +51,7 @@ if ($DryRun) {
         if ((Get-Command docker -ErrorAction SilentlyContinue) -and !$Yes -and ![Console]::IsInputRedirected) {
             Write-Output 'Optional: desman search setup --yes (Docker, about 100 MB; asks first)'
         }
-        if (!$NoStart) { Write-Output 'desman gui' }
+        if (!$NoStart) { Write-Output 'desman' }
         Write-Output 'Updates: desman global update --show; desman global update --apply NUMBER'
     }
     return
@@ -180,9 +180,15 @@ try {
                 catch { Write-Warning "search not set up: $_; later: desman search setup --yes" }
             }
         }
-        if (!$NoStart) { Run '.\.venv\Scripts\desman.exe' @('gui') }
+        if (!$NoStart -and ![Console]::IsInputRedirected) {
+            $PSNativeCommandUseErrorActionPreference = $false
+            & '.\.venv\Scripts\desman.exe'
+        } else {
+            Write-Host 'Run desman to get started.'
+        }
     } finally { Pop-Location }
 } catch {
     Write-Error $_
     exit 1
 }
+exit 0

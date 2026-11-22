@@ -18,6 +18,11 @@ Role = Literal[
 ]
 
 
+class InterfaceChoice(Fields):
+    section: Literal["interface"]
+    mode: Literal["terminal", "gui"]
+
+
 class General(Fields):
     section: Literal["general"]
     language: Literal["en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"]
@@ -150,6 +155,7 @@ class Protected(Fields):
 
 Setting = Annotated[
     General
+    | InterfaceChoice
     | Wizard
     | Keys
     | ProviderSetting

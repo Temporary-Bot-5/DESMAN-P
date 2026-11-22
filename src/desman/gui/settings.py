@@ -10,7 +10,17 @@ from typing import Any
 import click
 import httpx
 
-from desman import commands, global_cli, i18n, protected_cli, providers, runs, tuning_cli, wizard
+from desman import (
+    commands,
+    config_cli,
+    global_cli,
+    i18n,
+    protected_cli,
+    providers,
+    runs,
+    tuning_cli,
+    wizard,
+)
 from desman.config import TUNING_BOUNDS, Config, Tuning
 from desman.core import protected
 from desman.core.nodes import PersonalNodes
@@ -21,6 +31,7 @@ from desman.llm.openai_compat import key_id
 from desman.settings_actions import (
     Behaviour,
     General,
+    InterfaceChoice,
     Keys,
     Limits,
     Models,
@@ -80,6 +91,11 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
     return {
         "general": {
             "language": config.language,
+            "interface": config.interface,
+            "interfaces": [
+                {"value": mode, "label": label}
+                for mode, label in config_cli.interface_labels().items()
+            ],
             "languages": [
                 {"value": code, "label": cat.name} for code, cat in i18n.CATALOGS.items()
             ],
@@ -140,6 +156,8 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
     args: dict[str, Any]
     if isinstance(change, General):
         name, args = "language", {"code": change.language}
+    elif isinstance(change, InterfaceChoice):
+        name, args = "interface", {"mode": change.mode}
     elif isinstance(change, Wizard):
         name, args = "config", {}
     elif isinstance(change, Keys):

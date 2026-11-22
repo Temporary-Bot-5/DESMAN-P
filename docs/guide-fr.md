@@ -48,8 +48,8 @@ droits d’administration ne sont pas nécessaires.
    Exécuter quand même ».
 3. Une fenêtre noire s’ouvre. Le programme demande l’autorisation d’installer uv, Python et, si
    nécessaire, Git. Tapez `y` et appuyez sur Entrée. Cela prend quelques minutes.
-4. À la fin, le navigateur ouvre la page DESMAN et un raccourci **DESMAN** apparaît sur le bureau.
-   Utilisez-le ensuite pour lancer le programme.
+4. L’installateur lance `desman` dans le terminal. Le raccourci **DESMAN** sur le bureau le
+   lance aussi dans un terminal.
 
 ### Linux
 
@@ -57,13 +57,16 @@ droits d’administration ne sont pas nécessaires.
 2. Ouvrez un terminal, collez la commande (Ctrl+Maj+V) et appuyez sur Entrée.
 3. Si Git manque, le programme affiche la commande pour l’installer. Exécutez-la et reprenez à
    l’étape 2.
-4. Répondez `y` aux questions. À la fin, le navigateur s’ouvre et **DESMAN** apparaît dans le menu
-   des applications et sur le bureau. Si le bureau vous demande d’autoriser le lancement du
-   raccourci, acceptez.
+4. Répondez `y` aux questions. L’installateur lance `desman` dans le terminal. **DESMAN**
+   apparaît dans le menu des applications et sur le bureau. Autorisez le lancement du raccourci
+   si nécessaire.
 
 Pour plus de détails, consultez [install.md](install.md).
 
 ## 2. Premier lancement et clé d’accès
+
+La première configuration se déroule dans le terminal. La dernière question vous permet de
+choisir l’interface expérimentale dans le navigateur. Vous pouvez modifier ce choix avec `desman interface terminal` ou `desman interface gui`.
 
 DESMAN utilise des modèles sur Internet. Il leur faut une clé gratuite, une sorte de mot de passe
 pour le programme. La configuration s’ouvre automatiquement au premier lancement.
@@ -82,8 +85,7 @@ pour le programme. La configuration s’ouvre automatiquement au premier lanceme
 3. **Autorisations.** Tout est désactivé au départ. Pour le test, vous pouvez activer «
    utiliser le réseau au-delà des fournisseurs de modèles » afin que les agents lisent des pages
    web publiques. Laissez le reste désactivé sauf demande du propriétaire.
-4. **desman-global** est la dernière question. Vous pouvez choisir « pas maintenant » et rejoindre
-   le réseau plus tard (section 5).
+4. **desman-global.** Vous pouvez choisir « pas maintenant » et rejoindre le réseau plus tard (section 5).
 
 Les limites gratuites sont basses et peuvent changer. Si DESMAN annonce qu’une limite est
 atteinte, le travail reprend à son renouvellement, généralement après une minute, parfois après un
@@ -91,7 +93,7 @@ jour. Sans réponse au bout d’une heure, signalez-le (section 7).
 
 ## 3. Utilisation
 
-DESMAN s’ouvre dans une page du navigateur :
+Dans l’interface expérimentale du navigateur, la page s’organise ainsi :
 
 - **À gauche**, les conversations, puis **Paramètres**, **Signaler un problème** et **Messagerie**
   en bas.

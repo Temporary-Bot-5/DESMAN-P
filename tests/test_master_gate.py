@@ -72,7 +72,7 @@ def test_master_rounds_are_live_and_person_only(store: Store, tmp_path: Path) ->
 
 def test_config_upgrade_from_11_and_label_validation() -> None:
     config = Config.model_validate(upgrade({"schema_version": 11, "configured": True}))
-    assert config.schema_version == 12 and config.configured
+    assert config.schema_version == 13 and config.configured
     assert config.master == MasterChoices() and config.tuning.master_rounds is None
     assert MasterChoices(admitted=[CANDIDATE, CANDIDATE]).admitted == [CANDIDATE]
     with pytest.raises(ValidationError):

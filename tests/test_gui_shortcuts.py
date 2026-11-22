@@ -40,8 +40,8 @@ def test_linux_shortcuts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deskto
     paths = shortcuts.create()
     assert len(paths) == (2 if desktop else 1)
     content = paths[0].read_text(encoding="utf-8")
-    assert f'Exec="{script}" gui\n' in content
-    assert "Terminal=false\nCategories=Utility;\n" in content
+    assert f'Exec="{script}" --launcher\n' in content
+    assert "Terminal=true\nCategories=Utility;\n" in content
     assert "logo.png\n" in content
     assert paths[0].stat().st_mode & 0o777 == 0o644
     if desktop:
@@ -55,7 +55,7 @@ def test_windows_fixed_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lau
     python.touch()
     target = python
     if launcher == "pythonw":
-        target = tmp_path / "pythonw.exe"
+        (tmp_path / "pythonw.exe").touch()
     elif launcher == "script":
         target = tmp_path / "desman.exe"
     elif launcher == "scripts":
@@ -77,7 +77,7 @@ def test_windows_fixed_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lau
         payload = json.loads(kwargs["input"])
         assert payload["target"] == str(target)
         assert payload["arguments"] == (
-            "gui" if launcher in ("script", "scripts") else "-m desman gui"
+            "--launcher" if launcher in ("script", "scripts") else "-m desman --launcher"
         )
         assert payload["icon"].endswith("logo.ico")
         assert str(tmp_path) not in argv[-1]
@@ -116,4 +116,4 @@ def test_linux_shortcut_without_a_script_runs_this_python(
     monkeypatch.setattr(sys, "executable", str(python))
     monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/desman")
     content = shortcuts.create()[0].read_text(encoding="utf-8")
-    assert f'Exec="{python}" -m desman gui\n' in content
+    assert f'Exec="{python}" -m desman --launcher\n' in content

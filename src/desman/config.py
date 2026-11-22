@@ -96,7 +96,8 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
+Interface = Literal["terminal", "gui"]
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -322,7 +323,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[12] = 12
+    schema_version: Literal[13] = 13
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -331,6 +332,8 @@ class Config(BaseModel):
     # Secrets, by the provider's variable name; in the order they are tried.
     api_keys: dict[str, list[ApiKey]] = Field(default_factory=dict)
     settings: dict[str, StrictStr] = Field(default_factory=dict)  # not secret: hosts, account ids
+    # The interface that bare desman and shortcuts open.
+    interface: Interface = "terminal"
     # The person lets the interlocutor study the conversation and keep notes about them
     # (ROADMAP C.7); off unless they said yes: it neither sees nor keeps any.
     personalize: StrictBool = False
@@ -381,6 +384,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     8: page turns.
     9: cluster leadership.
     10: opt-in borrowed search; SearXNG donations count calls only.
+    11: master model and key preferences.
+    12: master admissions and revocations.
+    13: default startup interface.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -441,6 +447,10 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
 
     if version == 11:
         version = 12  # no admissions or revocations by default
+
+    if version == 12:
+        data.setdefault("interface", "terminal")
+        version = 13
 
     data["schema_version"] = version
     return data

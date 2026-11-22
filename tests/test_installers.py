@@ -46,9 +46,10 @@ echo "desman $*" >> "$LOG"
 if [ "$*" = 'gui --shortcut' ]; then
     mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"
     for shortcut in "$HOME/.local/share/applications/desman.desktop" "$HOME/Desktop/desman.desktop"; do
-        printf '[Desktop Entry]\nExec="%s/.venv/bin/desman" gui\n' "$PWD" > "$shortcut"
+        printf '[Desktop Entry]\nExec="%s/.venv/bin/desman" --launcher\nTerminal=true\n' "$PWD" > "$shortcut"
     done
 fi
+if [ "$#" = 0 ]; then exit "${DESMAN_START_STATUS:-0}"; fi
 SCRIPT
     chmod +x .venv/bin/desman
 fi
@@ -110,6 +111,19 @@ def test_uv_confirmation_and_noninteractive_refusal(installer: tuple[Path, dict[
 
 
 @linux
+@pytest.mark.parametrize("args", [(), ("--no-start",)])
+def test_install_without_terminal_skips_start(
+    installer: tuple[Path, dict[str, str]], args: tuple[str, ...]
+) -> None:
+    _, env = installer
+    result = run_installer(env, "--yes", *args)
+    assert result.returncode == 0, result.stderr
+    assert "Run desman to get started." in result.stdout
+    calls = Path(env["LOG"]).read_text(encoding="utf-8").splitlines()
+    assert [line for line in calls if line.startswith("desman ")] == ["desman gui --shortcut"]
+
+
+@linux
 def test_install_rerun_uninstall_and_config_preserved(
     installer: tuple[Path, dict[str, str]],
 ) -> None:
@@ -160,12 +174,41 @@ def test_foreign_directory_refused(installer: tuple[Path, dict[str, str]]) -> No
 def test_fallback_and_start(installer: tuple[Path, dict[str, str]]) -> None:
     _, env = installer
     env["NO_TAGS"] = "1"
+    terminal = Path(env["DESMAN_TTY"])
+    terminal.parent.mkdir()
+    terminal.touch()
+    env["DESMAN_START_STATUS"] = "1"
     result = run_installer(env, "--yes")
     assert result.returncode == 0, result.stderr
     assert "No v* tag" in result.stdout
     calls = Path(env["LOG"]).read_text(encoding="utf-8")
     assert "checkout -B desman-installed refs/remotes/origin/master" in calls
-    assert calls.endswith("desman gui\n")
+    assert calls.endswith("desman \n")
+
+
+@linux
+def test_piped_install_reopens_terminal_for_desman(installer: tuple[Path, dict[str, str]]) -> None:
+    home, env = installer
+    terminal = home / "terminal-input"
+    terminal.write_text("wizard reply\n", encoding="utf-8")
+    env["DESMAN_TTY"] = str(terminal)
+    stub = Path(env["UV_STUB"])
+    source = stub.read_text(encoding="utf-8")
+    stub.write_text(
+        source.replace(
+            'echo "desman $*" >> "$LOG"',
+            'echo "desman $*" >> "$LOG"\nif [ "$#" = 0 ]; then cat >> "$LOG"; fi',
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_installer(env, "--yes")
+
+    assert result.returncode == 0, result.stderr
+    assert Path(env["LOG"]).read_text(encoding="utf-8").splitlines()[-2:] == [
+        "desman ",
+        "wizard reply",
+    ]
 
 
 @linux
@@ -272,6 +315,7 @@ def test_windows_dry_run(tmp_path: Path, tmp_path_factory: pytest.TempPathFactor
         "desman global update",
     ):
         assert expected in result.stdout
+    assert "desman" in result.stdout.splitlines()
     assert not (shell_data / "DESMAN").exists()
     assert not (tmp_path / ".config" / "desman").exists()
     assert not (tmp_path / ".local" / "share" / "desman").exists()
@@ -373,7 +417,13 @@ def test_uninstall_refuses_without_confirmation_and_config_collision(
 
 
 @linux
-def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str, str]]) -> None:
+@pytest.mark.parametrize(
+    "launcher",
+    ['desman" gui', 'python" -m desman gui', 'desman" --launcher', 'python" -m desman --launcher'],
+)
+def test_custom_directories_and_shortcuts_purged(
+    installer: tuple[Path, dict[str, str]], launcher: str
+) -> None:
     home, env = installer
     app = home / "custom-app"
     data = home / "custom-data"
@@ -388,9 +438,7 @@ def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str
     assert run_installer(env, "--yes", "--no-start").returncode == 0
     for folder in (data, config, desktop):
         folder.mkdir()
-    (desktop / "desman.desktop").write_text(
-        f'Exec="{app}/.venv/bin/desman" gui\n', encoding="utf-8"
-    )
+    (desktop / "desman.desktop").write_text(f'Exec="{app}/.venv/bin/{launcher}\n', encoding="utf-8")
     result = run_installer(env, "--yes", "--uninstall", "--purge")
     assert result.returncode == 0, result.stderr
     for path in (app, data, config):
@@ -523,7 +571,7 @@ def test_installers_offer_search_only_with_docker_and_interactive_input() -> Non
 if sys.platform != "win32":
 
     @linux
-    def test_optional_search_failure_still_starts_gui(
+    def test_optional_search_failure_still_starts_desman(
         installer: tuple[Path, dict[str, str]],
     ) -> None:
         _, env = installer
@@ -556,7 +604,7 @@ if sys.platform != "win32":
         assert result.returncode == 0, result.stderr
         assert "search not set up: daemon down" in result.stderr
         assert "later: desman search setup --yes" in result.stderr
-        assert Path(env["LOG"]).read_text(encoding="utf-8").endswith("desman gui\n")
+        assert Path(env["LOG"]).read_text(encoding="utf-8").endswith("desman \n")
 
 
 def test_powershell_optional_search_is_dry_run_safe_and_catches_failure() -> None:
@@ -570,7 +618,12 @@ def test_powershell_optional_search_is_dry_run_safe_and_catches_failure() -> Non
         'catch { Write-Warning "search not set up: $_; later: desman search setup --yes" }'
         in optional
     )
-    assert optional.index("catch { Write-Warning") < optional.index("if (!$NoStart)")
+    start = optional.index("if (!$NoStart -and ![Console]::IsInputRedirected)")
+    assert optional.index("catch { Write-Warning") < start
+    startup = optional[start:]
+    assert "& '.\\.venv\\Scripts\\desman.exe'" in startup
+    assert "Run '.\\.venv\\Scripts\\desman.exe'" not in startup
+    assert "Write-Host 'Run desman to get started.'" in startup
 
 
 def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
@@ -579,7 +632,7 @@ def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
         pytest.skip("PowerShell is unavailable")
     source = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
     start = source.index("            if ((Read-Host 'Set up SearXNG")
-    end = source.index("        if (!$NoStart)", start)
+    end = source.index("        if (!$NoStart -and", start)
     # Exercise the installer's actual optional block with no Docker or install side effects.
     script = tmp_path / "optional.ps1"
     script.write_text(

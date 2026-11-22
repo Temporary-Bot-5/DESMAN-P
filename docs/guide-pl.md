@@ -46,8 +46,8 @@ internetu. Uprawnienia administratora są zbędne.
    „System Windows ochronił ten komputer”, wybierz „Więcej informacji” → „Uruchom mimo to”.
 3. W czarnym oknie instalator zapyta o zgodę na instalację uv, Pythona i, jeśli go brakuje, Gita.
    Wpisz `y` i naciśnij Enter. To potrwa kilka minut.
-4. Na koniec przeglądarka otworzy stronę DESMAN, a na pulpicie pojawi się skrót **DESMAN**. Od tej
-   pory uruchamiaj program tym skrótem.
+4. Instalator uruchamia `desman` w terminalu. Skrót **DESMAN** na pulpicie również otwiera
+   program w terminalu.
 
 ### Linux
 
@@ -55,12 +55,17 @@ internetu. Uprawnienia administratora są zbędne.
 2. Otwórz terminal, wklej polecenie (Ctrl+Shift+V) i naciśnij Enter.
 3. Jeśli nie masz Gita, instalator pokaże polecenie do jego instalacji. Wykonaj je i powtórz krok
    2.
-4. Na pytania odpowiadaj `y`. Na koniec otworzy się przeglądarka, a **DESMAN** pojawi się w menu
-   aplikacji i na pulpicie. Jeśli pulpit zapyta o zgodę na uruchomienie skrótu, udziel jej.
+4. Na pytania odpowiadaj `y`. Instalator uruchamia `desman` w terminalu. **DESMAN** pojawi się w
+   menu aplikacji i na pulpicie. Udziel zgody na uruchomienie skrótu, jeśli pulpit o nią
+   poprosi.
 
 Więcej szczegółów znajdziesz w [install.md](install.md).
 
 ## 2. Pierwsze uruchomienie i klucz
+
+Pierwsza konfiguracja odbywa się w terminalu. Ostatnie pytanie pozwala wybrać eksperymentalny
+interfejs w przeglądarce. Później zmienisz ten wybór poleceniem `desman interface terminal` lub
+`desman interface gui`.
 
 DESMAN korzysta z modeli dostępnych przez internet. Potrzebny jest darmowy klucz, który działa jak
 hasło dla programu. Przy pierwszym uruchomieniu ustawienia otworzą się automatycznie.
@@ -78,8 +83,7 @@ hasło dla programu. Przy pierwszym uruchomieniu ustawienia otworzą się automa
 3. **Uprawnienia.** Domyślnie wszystkie są wyłączone. W teście możesz włączyć
    „korzystać z sieci poza dostawcami modeli”, aby agenci mogli czytać publiczne strony. Pozostałe
    zostaw wyłączone, chyba że właściciel poprosi inaczej.
-4. **desman-global** to ostatnie pytanie. Możesz wybrać „nie teraz” i dołączyć później (rozdział
-   5).
+4. **desman-global.** Możesz wybrać „nie teraz” i dołączyć później (rozdział 5).
 
 Darmowe limity są niewielkie i się zmieniają. Jeśli DESMAN informuje o wyczerpaniu limitu, praca
 ruszy po jego odnowieniu, zwykle po minucie, czasem po dniu. Jeśli przez ponad godzinę nie
@@ -87,7 +91,7 @@ otrzymasz odpowiedzi, zgłoś to (rozdział 7).
 
 ## 3. Jak korzystać
 
-Okno DESMAN to strona w przeglądarce:
+W eksperymentalnym interfejsie przeglądarkowym strona wygląda tak:
 
 - **Po lewej** są rozmowy, a na dole **Ustawienia**, **Zgłoś problem** i **Wiadomości**.
 - **Pośrodku** jest rozmowa. Napisz własnymi słowami, czego potrzebujesz.

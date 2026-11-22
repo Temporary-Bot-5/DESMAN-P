@@ -15,6 +15,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "Створити ярлик DESMAN.",
+    "Default interface": "Типовий інтерфейс",
+    "Default interface: {mode}": "Типовий інтерфейс: {mode}",
+    "Experimental GUI": "Експериментальний графічний інтерфейс",
+    "Open the experimental GUI by default instead of the terminal?": "Типово відкривати експериментальний графічний інтерфейс замість термінала?",
+    "Open the interface section of the setup wizard.": "Відкрити розділ вибору інтерфейсу в майстрі налаштування.",
+    "Press Enter to close.": "Натисніть Enter, щоб закрити вікно.",
+    "Show or set the default interface.": "Показати або вибрати типовий інтерфейс.",
+    "Terminal": "Термінал",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "Графічний інтерфейс експериментальний. Термінал залишається доступним. Типовий вибір можна змінити командою `desman interface`.",
     "Admit a master model with a current passing check.": "Допустити модель майстра після успішної перевірки поточної версії.",
     "Admitted": "Допущено",
     "Unfinished": "Не завершено",
@@ -396,7 +406,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "Неприпустимий шлях запуску.",
     "Report a problem": "Повідомити про проблему",
     "Describe the problem:": "Опишіть проблему:",
-    "Create a shortcut to the page without starting it.": "Створити ярлик сторінки без запуску.",
     "Shortcut created: {path}": "Ярлик створено: {path}",
     "Could not create shortcut: {error}": "Не вдалося створити ярлик: {error}",
     "Shortcuts are not supported on this system yet.": "Ярлики для цієї системи ще не підтримуються.",

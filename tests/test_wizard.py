@@ -26,8 +26,8 @@ from helpers import flat_keys, make_config
 
 DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + (find_docker() is not None))
 KEEP_PERMISSIONS = ("", "", "", "")
-KEEP_PERSONAL = ("", "", "")  # personalisation as it was; how it talks: not set up now;
-# desman-global as it was (off)
+KEEP_PERSONAL = ("", "", "", "")  # personalisation as it was; how it talks: not set up now;
+# desman-global as it was (off); interface as it was (terminal)
 
 
 def menu(provider_id: str) -> str:
@@ -203,3 +203,52 @@ def test_a_paid_key_needs_its_own_consent() -> None:
     )
     assert accepted.exit_code == 0, accepted.output
     assert flat_keys(saved().load()) == {"OPENAI_API_KEY": "sk-paid"}
+
+
+def test_interface_is_the_last_question_and_defaults_to_terminal() -> None:
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    network = output.index("Take part in desman-global?")
+    interface = output.index("Open the experimental GUI by default instead of the terminal?")
+    assert network < interface < output.index("Configuration saved")
+    assert output.rindex("?") == interface + len(
+        "Open the experimental GUI by default instead of the terminal"
+    )
+    assert saved().load().interface == "terminal"
+
+
+def test_first_run_opens_gui_immediately_if_chosen(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    from desman.gui import app
+
+    run = Mock()
+    monkeypatch.setattr(app, "run", run)
+    monkeypatch.setattr(setup_wizard, "_docker", lambda session: None)
+    result = CliRunner().invoke(
+        cli, [], input="\n".join(["1", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL[:-1], "y"]) + "\n"
+    )
+    assert result.exit_code == 0, result.output
+    assert saved().load().interface == "gui"
+    run.assert_called_once_with(False, False, 0, True)
+
+
+def test_interface_section_saves_and_uses_the_current_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from desman import ui
+
+    answers = iter([(False, True), (True, True), (True, False)])
+
+    def confirm(question: str, default: bool = False) -> bool:
+        assert question == "Open the experimental GUI by default instead of the terminal?"
+        expected, answer = next(answers)
+        assert default == expected
+        return answer
+
+    monkeypatch.setattr(ui, "confirm", confirm)
+    assert "interface" in setup_wizard.SECTIONS
+    for expected in ("gui", "gui", "terminal"):
+        setup_wizard.run_section(saved(), "interface")
+        assert saved().load().interface == expected

@@ -280,3 +280,104 @@ def test_windows_streams_write_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
         assert errors.getvalue() == "✓".encode()
         utf8_stream(stdin)
         assert stdin.readline() == "ключ\n"
+
+
+@pytest.mark.parametrize("mode", ["terminal", "gui"])
+def test_bare_desman_uses_configured_interface(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    from unittest.mock import Mock
+
+    from desman.chat import Chat
+    from desman.gui import app
+
+    open_config().save(make_config(configured=True, interface=mode))
+    gui_run, chat_run = Mock(), Mock()
+    monkeypatch.setattr(app, "run", gui_run)
+    monkeypatch.setattr(Chat, "run", chat_run)
+    result = CliRunner().invoke(cli, ["-c"])
+    assert result.exit_code == 0, result.output
+    if mode == "gui":
+        gui_run.assert_called_once_with(True, False, 0, True)
+        chat_run.assert_not_called()
+    else:
+        chat_run.assert_called_once_with()
+        gui_run.assert_not_called()
+
+
+@pytest.mark.parametrize("launcher,tty", [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize("unexpected", [False, True])
+def test_launcher_pauses_on_errors_only_in_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, launcher: bool, tty: bool, unexpected: bool
+) -> None:
+    import sys
+    from unittest.mock import Mock
+
+    import click
+
+    from desman import ui
+    from desman.chat import Chat
+
+    open_config().save(make_config(configured=True))
+    error = RuntimeError("launch failed") if unexpected else click.ClickException("launch failed")
+    monkeypatch.setattr(Chat, "run", Mock(side_effect=error))
+    wait = Mock()
+    monkeypatch.setattr(ui, "text", wait)
+    runner = CliRunner()
+    with runner.isolation() as (_, stderr, _):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+        # Calling Click directly here keeps the test's stdin in place.
+        if unexpected and not (launcher and tty):
+            with pytest.raises(RuntimeError, match="launch failed"):
+                cli.main(["--launcher"] if launcher else [])
+        else:
+            with pytest.raises(SystemExit, match="1"):
+                cli.main(["--launcher"] if launcher else [])
+            assert b"launch failed" in stderr.getvalue()
+    if launcher and tty:
+        wait.assert_called_once_with("Press Enter to close.")
+    else:
+        wait.assert_not_called()
+
+
+@pytest.mark.parametrize("exit_kind", ["normal", "cancelled", "interrupt"])
+def test_launcher_does_not_pause_on_normal_exit(
+    monkeypatch: pytest.MonkeyPatch, exit_kind: str
+) -> None:
+    import sys
+    from unittest.mock import Mock
+
+    from desman import ui
+    from desman.chat import Chat
+
+    open_config().save(make_config(configured=True))
+    exits = {"normal": None, "cancelled": ui.Cancelled, "interrupt": KeyboardInterrupt}
+    monkeypatch.setattr(Chat, "run", Mock(side_effect=exits[exit_kind]))
+    wait = Mock()
+    monkeypatch.setattr(ui, "text", wait)
+    with CliRunner().isolation():
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        with pytest.raises(SystemExit, match="1" if exit_kind == "interrupt" else "0"):
+            cli.main(["--launcher"])
+    wait.assert_not_called()
+
+
+def test_interface_command_and_catalog() -> None:
+    from desman import commands
+    from desman.core import db
+
+    runner = CliRunner()
+    assert "Default interface: Terminal" in runner.invoke(cli, ["interface"]).output
+    for mode, message in (
+        ("gui", "Default interface: Experimental GUI"),
+        ("gui", "Nothing changed."),
+        ("terminal", "Default interface: Terminal"),
+    ):
+        result = runner.invoke(cli, ["interface", mode])
+        assert result.exit_code == 0, result.output
+        assert message in result.output
+        assert open_config().load().interface == mode
+    assert not db.default_db_path().exists()
+    parsed = commands.parse_line("interface gui", open_config().load())
+    assert parsed is not None
+    entry, args = parsed
+    assert entry.name == "interface"
+    assert entry.kind_of(args) == commands.Kind.CHANGE

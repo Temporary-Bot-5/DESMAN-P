@@ -26,6 +26,7 @@ from desman.config import (
     Config,
     ConfigError,
     ConfigManager,
+    Interface,
     Permissions,
     open_config,
 )
@@ -403,6 +404,36 @@ def set_personalize(manager: ConfigManager, on: bool) -> bool:
         ui.ok(t("Personalisation is on."))
     else:
         ui.ok(t("Personalisation is off. Notes already kept stay, unused, until you erase them."))
+    return changed
+
+
+@click.command()
+@click.argument("mode", type=click.Choice(["terminal", "gui"]), required=False)
+def interface(mode: Interface | None) -> None:
+    """Show or set the default interface."""
+    manager = load_config()
+    if mode is None:
+        print_interface(manager.load().interface)
+        return
+    set_interface(manager, mode)
+
+
+def interface_labels() -> dict[Interface, str]:
+    return {"terminal": t("Terminal"), "gui": t("Experimental GUI")}
+
+
+def print_interface(mode: Interface) -> None:
+    ui.out(t("Default interface: {mode}", mode=interface_labels()[mode]))
+
+
+def set_interface(manager: ConfigManager, mode: Interface) -> bool:
+    with manager.edit() as config:
+        changed = config.interface != mode
+        config.interface = mode
+    if changed:
+        ui.ok(t("Default interface: {mode}", mode=interface_labels()[mode]))
+    else:
+        ui.note(t("Nothing changed."))
     return changed
 
 

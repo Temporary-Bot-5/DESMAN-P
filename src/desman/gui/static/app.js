@@ -1255,6 +1255,8 @@ function drawSettings() {
   if (settingsSection === "general") {
     const language = settingSelect(root, words.language, d.general.languages, d.general.language);
     settingAuto(root, () => ({section: "general", language: language.value}));
+    const mode = settingSelect(root, words.default_interface, d.general.interfaces, d.general.interface);
+    settingAuto(root, () => ({section: "interface", mode: mode.value}), [mode]);
     settingSave(root, {section: "wizard"}, words.setup_wizard);
   } else if (settingsSection === "keys") {
     const others = text("details", "", root);

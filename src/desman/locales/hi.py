@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "DESMAN का शॉर्टकट बनाएँ।",
+    "Default interface": "डिफ़ॉल्ट इंटरफ़ेस",
+    "Default interface: {mode}": "डिफ़ॉल्ट इंटरफ़ेस: {mode}",
+    "Experimental GUI": "प्रयोगात्मक ग्राफ़िकल इंटरफ़ेस",
+    "Open the experimental GUI by default instead of the terminal?": "क्या डिफ़ॉल्ट रूप से टर्मिनल की जगह प्रयोगात्मक ग्राफ़िकल इंटरफ़ेस खोलें?",
+    "Open the interface section of the setup wizard.": "सेटअप विज़ार्ड में इंटरफ़ेस अनुभाग खोलें।",
+    "Press Enter to close.": "बंद करने के लिए Enter दबाएँ।",
+    "Show or set the default interface.": "डिफ़ॉल्ट इंटरफ़ेस देखें या चुनें।",
+    "Terminal": "टर्मिनल",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "ग्राफ़िकल इंटरफ़ेस प्रयोगात्मक है। टर्मिनल उपलब्ध रहेगा। डिफ़ॉल्ट बदलने के लिए `desman interface` चलाएँ।",
     "Admit a master model with a current passing check.": "मौजूदा जाँच पास करने वाले मास्टर मॉडल को अनुमति दें।",
     "Admitted": "अनुमत",
     "Unfinished": "अधूरी",
@@ -387,7 +397,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "अमान्य लॉन्च पथ।",
     "Report a problem": "समस्या की रिपोर्ट करें",
     "Describe the problem:": "समस्या का वर्णन करें:",
-    "Create a shortcut to the page without starting it.": "पेज शुरू किए बिना शॉर्टकट बनाएँ।",
     "Shortcut created: {path}": "शॉर्टकट बनाया गया: {path}",
     "Could not create shortcut: {error}": "शॉर्टकट नहीं बनाया जा सका: {error}",
     "Shortcuts are not supported on this system yet.": "इस सिस्टम पर शॉर्टकट अभी समर्थित नहीं हैं।",
