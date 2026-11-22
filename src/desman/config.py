@@ -332,9 +332,10 @@ class Config(BaseModel):
     # Secrets, by the provider's variable name; in the order they are tried.
     api_keys: dict[str, list[ApiKey]] = Field(default_factory=dict)
     settings: dict[str, StrictStr] = Field(default_factory=dict)  # not secret: hosts, account ids
+    # The interface that bare desman and shortcuts open.
+    interface: Interface = "terminal"
     # The person lets the interlocutor study the conversation and keep notes about them
     # (ROADMAP C.7); off unless they said yes: it neither sees nor keeps any.
-    interface: Interface = "terminal"
     personalize: StrictBool = False
     behaviour: Behaviour = Field(default_factory=Behaviour)
     tuning: Tuning = Field(default_factory=Tuning)

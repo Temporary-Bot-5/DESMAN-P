@@ -360,28 +360,22 @@ def test_launcher_does_not_pause_on_normal_exit(
     wait.assert_not_called()
 
 
-def test_interface_command_and_catalog_journal() -> None:
-    from contextlib import closing
-
+def test_interface_command_and_catalog() -> None:
     from desman import commands
-    from desman.core import db, operator
+    from desman.core import db
 
     runner = CliRunner()
     assert "Default interface: Terminal" in runner.invoke(cli, ["interface"]).output
-    for mode, label in (
-        ("gui", "Experimental GUI"),
-        ("gui", "Experimental GUI"),
-        ("terminal", "Terminal"),
+    for mode, message in (
+        ("gui", "Default interface: Experimental GUI"),
+        ("gui", "Nothing changed."),
+        ("terminal", "Default interface: Terminal"),
     ):
         result = runner.invoke(cli, ["interface", mode])
         assert result.exit_code == 0, result.output
-        assert f"Default interface: {label}" in result.output
+        assert message in result.output
         assert open_config().load().interface == mode
-    with closing(db.open_db()) as conn:
-        assert [(entry.action, entry.details) for entry in operator.entries(conn)] == [
-            ("operator_interface", {"from": "terminal", "to": "gui"}),
-            ("operator_interface", {"from": "gui", "to": "terminal"}),
-        ]
+    assert not db.default_db_path().exists()
     parsed = commands.parse_line("interface gui", open_config().load())
     assert parsed is not None
     entry, args = parsed

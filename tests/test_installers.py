@@ -49,6 +49,7 @@ if [ "$*" = 'gui --shortcut' ]; then
         printf '[Desktop Entry]\nExec="%s/.venv/bin/desman" --launcher\nTerminal=true\n' "$PWD" > "$shortcut"
     done
 fi
+if [ "$#" = 0 ]; then exit "${DESMAN_START_STATUS:-0}"; fi
 SCRIPT
     chmod +x .venv/bin/desman
 fi
@@ -110,6 +111,19 @@ def test_uv_confirmation_and_noninteractive_refusal(installer: tuple[Path, dict[
 
 
 @linux
+@pytest.mark.parametrize("args", [(), ("--no-start",)])
+def test_install_without_terminal_skips_start(
+    installer: tuple[Path, dict[str, str]], args: tuple[str, ...]
+) -> None:
+    _, env = installer
+    result = run_installer(env, "--yes", *args)
+    assert result.returncode == 0, result.stderr
+    assert "Run desman to get started." in result.stdout
+    calls = Path(env["LOG"]).read_text(encoding="utf-8").splitlines()
+    assert [line for line in calls if line.startswith("desman ")] == ["desman gui --shortcut"]
+
+
+@linux
 def test_install_rerun_uninstall_and_config_preserved(
     installer: tuple[Path, dict[str, str]],
 ) -> None:
@@ -160,6 +174,10 @@ def test_foreign_directory_refused(installer: tuple[Path, dict[str, str]]) -> No
 def test_fallback_and_start(installer: tuple[Path, dict[str, str]]) -> None:
     _, env = installer
     env["NO_TAGS"] = "1"
+    terminal = Path(env["DESMAN_TTY"])
+    terminal.parent.mkdir()
+    terminal.touch()
+    env["DESMAN_START_STATUS"] = "1"
     result = run_installer(env, "--yes")
     assert result.returncode == 0, result.stderr
     assert "No v* tag" in result.stdout
@@ -600,7 +618,12 @@ def test_powershell_optional_search_is_dry_run_safe_and_catches_failure() -> Non
         'catch { Write-Warning "search not set up: $_; later: desman search setup --yes" }'
         in optional
     )
-    assert optional.index("catch { Write-Warning") < optional.index("if (!$NoStart)")
+    start = optional.index("if (!$NoStart -and ![Console]::IsInputRedirected)")
+    assert optional.index("catch { Write-Warning") < start
+    startup = optional[start:]
+    assert "& '.\\.venv\\Scripts\\desman.exe'" in startup
+    assert "Run '.\\.venv\\Scripts\\desman.exe'" not in startup
+    assert "Write-Host 'Run desman to get started.'" in startup
 
 
 def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
@@ -609,7 +632,7 @@ def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
         pytest.skip("PowerShell is unavailable")
     source = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
     start = source.index("            if ((Read-Host 'Set up SearXNG")
-    end = source.index("        if (!$NoStart)", start)
+    end = source.index("        if (!$NoStart -and", start)
     # Exercise the installer's actual optional block with no Docker or install side effects.
     script = tmp_path / "optional.ps1"
     script.write_text(

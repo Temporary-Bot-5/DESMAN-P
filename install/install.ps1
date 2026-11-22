@@ -180,9 +180,15 @@ try {
                 catch { Write-Warning "search not set up: $_; later: desman search setup --yes" }
             }
         }
-        if (!$NoStart) { Run '.\.venv\Scripts\desman.exe' @() }
+        if (!$NoStart -and ![Console]::IsInputRedirected) {
+            $PSNativeCommandUseErrorActionPreference = $false
+            & '.\.venv\Scripts\desman.exe'
+        } else {
+            Write-Host 'Run desman to get started.'
+        }
     } finally { Pop-Location }
 } catch {
     Write-Error $_
     exit 1
 }
+exit 0

@@ -8,10 +8,8 @@ from the command line, where shell history and `ps` would keep it, and never pri
 from __future__ import annotations
 
 import json
-import sqlite3
 import sys
 from collections.abc import Callable, Sequence
-from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,7 +30,7 @@ from desman.config import (
     Permissions,
     open_config,
 )
-from desman.core import calls, db, netlog, operator
+from desman.core import calls, db, netlog
 from desman.i18n import t, tn
 from desman.llm import check
 from desman.llm.openai_compat import key_id, reset_in
@@ -417,8 +415,7 @@ def interface(mode: Interface | None) -> None:
     if mode is None:
         print_interface(manager.load().interface)
         return
-    with closing(db.open_db()) as conn, db.transaction(conn):
-        set_interface(manager, mode, conn=conn)
+    set_interface(manager, mode)
 
 
 def interface_labels() -> dict[Interface, str]:
@@ -429,16 +426,15 @@ def print_interface(mode: Interface) -> None:
     ui.out(t("Default interface: {mode}", mode=interface_labels()[mode]))
 
 
-def set_interface(
-    manager: ConfigManager, mode: Interface, *, conn: sqlite3.Connection | None = None
-) -> bool:
+def set_interface(manager: ConfigManager, mode: Interface) -> bool:
     with manager.edit() as config:
-        previous = config.interface
-        if conn is not None and previous != mode:
-            operator.write(conn, "operator_interface", {"from": previous, "to": mode})
+        changed = config.interface != mode
         config.interface = mode
-    print_interface(mode)
-    return previous != mode
+    if changed:
+        ui.ok(t("Default interface: {mode}", mode=interface_labels()[mode]))
+    else:
+        ui.note(t("Nothing changed."))
+    return changed
 
 
 # ── desman behaviour ────────────────────────────────────────────────────────

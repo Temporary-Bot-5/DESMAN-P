@@ -166,10 +166,10 @@ if command -v docker >/dev/null 2>&1 && [ -t 0 ] && [ "$YES" = 0 ]; then
             fi ;;
     esac
 fi
-if [ "$START" = 1 ]; then
-    if [ ! -t 0 ] && (exec 3<"$DESMAN_TTY") 2>/dev/null; then
-        .venv/bin/desman < "$DESMAN_TTY"
-    else
-        .venv/bin/desman
-    fi
+if [ "$START" = 1 ] && [ -t 0 ]; then
+    .venv/bin/desman || true
+elif [ "$START" = 1 ] && (exec 3<"$DESMAN_TTY") 2>/dev/null; then
+    .venv/bin/desman < "$DESMAN_TTY" || true
+else
+    echo 'Run desman to get started.'
 fi
