@@ -320,9 +320,10 @@ def test_site_assets_and_languages() -> None:
     assert "cp install/install.bat site/install.bat" in pages
     assert "'install/install.bat'" in pages
     assert "MIT" not in html
-    assert "On Windows the agents do not run code because there is no sandbox." in html
+    assert "Agents run code only in a sandbox (Docker, WSL or WebAssembly)" in html
+    assert "no sandbox" not in html
     words = (ROOT / "site/i18n.js").read_text(encoding="utf-8")
-    assert "На Windows агенты не запускают код: там нет песочницы." in words
+    assert "Агенты запускают код только в песочнице (Docker, WSL или WebAssembly)" in words
     assert 'data-i18n="step1">Install<' in html
     assert '"step1": "Установите"' in words
     assert "navigator.language" in (ROOT / "site/app.js").read_text(encoding="utf-8")
