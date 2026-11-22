@@ -34,6 +34,7 @@ from test_stats import desman, script, stats_json
 
 CANDIDATE = "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"
 CANDIDATE_ID = CANDIDATE.partition("/")[2]
+CANDIDATE_ALIAS = f"NVIDIA_API_KEY/{CANDIDATE_ID}"
 
 
 @pytest.mark.parametrize("rounds", [7, 49, True, "24"])
@@ -258,15 +259,21 @@ def test_cli_check_admit_revoke_and_latest_version(
         assert json.loads(command("check", CANDIDATE, "--json").stdout)["passed"]
     assert command("admit", CANDIDATE).exit_code == 1
 
-    result = command("check", CANDIDATE, "--json")
+    result = command("check", CANDIDATE_ALIAS, "--json")
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
+    assert data["model"] == CANDIDATE
     assert data["done"] == len(bench.CASES)
     assert data["outcome"] == "passed"
     assert data["result"]["limits"] == runs.TUNING_DEFAULTS
     assert all(case["reason"] is None for case in data["result"]["cases"])
     assert data["usage"]["calls"] == 2 * len(bench.CASES)
-    assert json.loads(command("admit", CANDIDATE, "--json").stdout)["changed"]
+    assert json.loads(command("admit", CANDIDATE_ALIAS, "--json").stdout) == {
+        "model": CANDIDATE,
+        "admitted": True,
+        "revoked": False,
+        "changed": True,
+    }
     assert "already admitted" in command("admit", CANDIDATE).output
     assert json.loads(command("admit", CANDIDATE, "--json").stdout)["changed"] is False
     assert open_config().load().master == MasterChoices(admitted=[CANDIDATE])
@@ -281,8 +288,13 @@ def test_cli_check_admit_revoke_and_latest_version(
         assert "cannot do this" in case["reason"]
         assert len(case["reason"]) <= 200 and NVIDIA not in case["reason"]
         assert "[key removed]" in case["reason"]
-    assert command("admit", CANDIDATE).exit_code == 1
-    assert json.loads(command("revoke", CANDIDATE, "--json").stdout)["changed"]
+    assert "already admitted" in command("admit", CANDIDATE_ALIAS).output
+    assert json.loads(command("revoke", CANDIDATE_ALIAS, "--json").stdout) == {
+        "model": CANDIDATE,
+        "admitted": False,
+        "revoked": True,
+        "changed": True,
+    }
     assert "already revoked" in command("revoke", CANDIDATE).output
     assert json.loads(command("revoke", CANDIDATE, "--json").stdout)["changed"] is False
     assert open_config().load().master == MasterChoices(revoked=[CANDIDATE])
@@ -319,6 +331,84 @@ def test_cli_check_admit_revoke_and_latest_version(
         ]
 
 
+@pytest.mark.parametrize(
+    ("review_rejects", "zero_limit"), [(False, True), (True, True), (True, False)]
+)
+def test_check_provider_stops_and_reviewer_rejection(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock, review_rejects: bool, zero_limit: bool
+) -> None:
+    open_config().save(make_config(api_keys={"NVIDIA_API_KEY": NVIDIA}))
+    first_case_calls = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal first_case_calls
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": CANDIDATE_ID}]})
+        if review_rejects and first_case_calls < 2:
+            first_case_calls += 1
+            content = (
+                '{"text":"Incomplete."}'
+                if calls.purpose().role == calls.Role.EXECUTOR
+                else '{"verdict":"escalate","feedback":"Incomplete work"}'
+            )
+            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        if not zero_limit:
+            return httpx.Response(429, headers={"retry-after": "3600"}, json={})
+        return httpx.Response(
+            429,
+            headers={"x-ratelimit-limit-requests": "0"},
+            json={"error": {"message": "limit is 0"}},
+        )
+
+    transport = httpx.MockTransport(respond)
+    http_client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **_kw: http_client(transport=transport))
+    build_models = runs.models
+    monkeypatch.setattr(
+        runs,
+        "models",
+        lambda *args, **kwargs: build_models(*args, clock=clock, sleep=clock.sleep, **kwargs),
+    )
+
+    result = desman("master", "check", CANDIDATE, "--json")
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["outcome"] == ("failed" if review_rejects else "unfinished")
+    cases = data["result"]["cases"]
+    assert len(cases) == 4
+    if review_rejects:
+        assert cases[0]["status"] == "needs_human"
+        assert cases[0]["reason"] == "Incomplete work"
+    stopped = cases[int(review_rejects) :]
+    if zero_limit:
+        assert all(case["status"] == "needs_human" for case in stopped)
+        assert all("ProviderRejected" in case["reason"] for case in stopped)
+    else:
+        assert all(case["status"] == "active" for case in stopped)
+
+    if not review_rejects:
+        shown = desman("master", "check", CANDIDATE)
+        assert shown.exit_code == 0, shown.output
+        assert "Unfinished" in shown.output
+        assert "The provider refused or limited requests" in shown.output
+        assert "Did not pass" not in shown.output
+
+
+def test_chat_already_admitted_without_a_check(
+    store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manager = open_config()
+    manager.save(make_config(master={"admitted": [CANDIDATE]}))
+    parsed = commands.parse_line(f"master admit {CANDIDATE_ALIAS}", manager.load())
+    assert parsed is not None
+    entry, args = parsed
+    ctx = commands.Context(store, manager, lambda *_: None, lambda _: False)
+    outcome = entry.handler(ctx, args)
+    assert isinstance(outcome, commands.Outcome)
+    assert f"{CANDIDATE} is already admitted." in capsys.readouterr().out
+    assert manager.load().master.admitted == [CANDIDATE]
+
+
 @pytest.mark.parametrize("command", ["check", "admit", "revoke"])
 def test_master_commands_list_known_providers(command: str) -> None:
     result = desman("master", command, "unknown/model")
@@ -340,8 +430,10 @@ def test_catalog_routes_checks_and_decisions_through_confirmation() -> None:
         entry, given = parsed
         assert entry.kind_of(given) is kind
         if name in {"admit", "revoke"}:
-            parsed_json = commands.parse_line(f"master {name}{args} --json", Config())
-            assert parsed_json and parsed_json[1].model_dump()["as_json"]
+            with pytest.raises(commands.BadArgs, match="--json is not available in the chat"):
+                commands.parse_line(f"master {name}{args} --json", Config())
+            with pytest.raises(commands.BadArgs, match="as_json"):
+                commands.parse(entry, {"model": CANDIDATE, "as_json": True}, Config())
 
 
 def test_mode_stats_include_calls_and_past_escalation(tmp_path: Path) -> None:

@@ -57,7 +57,7 @@ TOPICS: Final = (
         "context named with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). "
         "`desman master list` shows the latest checks. `desman master check PROVIDER/MODEL` spends "
         "quota, uses default workflow limits and reports passed, failed or unfinished (try later). "
-        "`desman master admit PROVIDER/MODEL` needs a current passing check with default limits. "
+        "`desman master admit PROVIDER/MODEL` needs a current passing check with default limits for a new admission. "
         "`desman master revoke PROVIDER/MODEL` excludes even a catalog model. An admitted local "
         "model needs no tuning preference. All masters need enough context and no per-request cap. "
         "A ready master is required; extend and redo otherwise use the cluster with a warning. "

@@ -13,7 +13,7 @@ MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "Güncel denetimi geçen bir ana modeli kabul et.",
     "Admitted": "Kabul edildi",
     "Unfinished": "Tamamlanmadı",
-    "The provider’s limits stopped the check. Try again later.": "Sağlayıcının sınırları denetimi durdurdu. Daha sonra tekrar deneyin.",
+    "The provider refused or limited requests, or the model became unavailable. Try again later.": "Sağlayıcı istekleri reddetti veya sınırladı ya da model kullanılamaz hale geldi. Daha sonra tekrar deneyin.",
     "{model} is already admitted.": "{model} zaten kabul edildi.",
     "{model} is already revoked.": "{model} için verilen izin zaten iptal edildi.",
     "Admitted {model}.": "{model} kabul edildi.",

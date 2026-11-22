@@ -64,7 +64,6 @@ from desman.config import (
     ConfigError,
     ConfigManager,
     ModelChoices,
-    ModelLabel,
     RegistryUrl,
     Tuning,
 )
@@ -412,11 +411,7 @@ ModuleRole = Literal[
 
 
 class MasterArgs(Args):
-    model: ModelLabel
-
-
-class MasterDecisionArgs(MasterArgs):
-    as_json: bool = False
+    model: master_cli.MasterInputLabel
 
 
 class ModuleHoldArgs(Args):
@@ -1049,24 +1044,26 @@ def _master_check(ctx: Context, args: MasterArgs) -> Proposal:
     return Proposal([master_cli.check_notice(args.model)], apply)
 
 
-def _master_decision(ctx: Context, args: MasterDecisionArgs, *, admit: bool) -> Proposal:
+def _master_decision(ctx: Context, args: MasterArgs, *, admit: bool) -> Outcome | Proposal:
     config = ctx.config()
-    master_cli.valid_label(args.model, config)
+    model = master_cli.valid_label(args.model, config)
     if admit:
-        master_cli.require_pass(ctx.store.conn, args.model)
+        if model in config.master.admitted:
+            return Outcome(
+                master_cli.report_decision(model, admit=True, changed=False, as_json=False)
+            )
+        master_cli.require_pass(ctx.store.conn, model)
 
     def apply() -> Outcome:
-        changed = master_cli.change(ctx.store.conn, ctx.manager, args.model, admit=admit)
+        changed = master_cli.change(ctx.store.conn, ctx.manager, model, admit=admit)
         return Outcome(
-            master_cli.report_decision(
-                args.model, admit=admit, changed=changed, as_json=args.as_json
-            )
+            master_cli.report_decision(model, admit=admit, changed=changed, as_json=False)
         )
 
     line = (
-        t("Allow {model} to be selected as a master module.", model=args.model)
+        t("Allow {model} to be selected as a master module.", model=model)
         if admit
-        else t("Exclude {model} from master selection.", model=args.model)
+        else t("Exclude {model} from master selection.", model=model)
     )
     return Proposal([line], apply)
 
@@ -2413,14 +2410,14 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "master admit",
         "Allow a provider/model with a passing current check to be a master. The person confirms.",
-        MasterDecisionArgs,
+        MasterArgs,
         Kind.CHANGE,
         lambda ctx, args: _master_decision(ctx, args, admit=True),
     ),
     Entry(
         "master revoke",
         "Exclude a provider/model from master selection. The person confirms.",
-        MasterDecisionArgs,
+        MasterArgs,
         Kind.CHANGE,
         lambda ctx, args: _master_decision(ctx, args, admit=False),
     ),

@@ -7,25 +7,35 @@ import sqlite3
 import tempfile
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import click
 import httpx
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BeforeValidator, TypeAdapter, ValidationError
 from rich.text import Text
 
 from desman import bench, providers, runs, ui
 from desman.config import Config, ConfigManager, MasterChoices, ModelLabel, Tuning
 from desman.config_cli import json_option, load_config
 from desman.core import db, operator
-from desman.core.states import TaskStatus
+from desman.core.retry import FailureKind
+from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.i18n import t
 from desman.llm import catalog, check, router
 from desman.protected_cli import connect, db_option
 from desman.providers import CLOUD
 
-_LABEL = TypeAdapter(ModelLabel)
+
+def _lower_provider(value: object) -> object:
+    if isinstance(value, str):
+        provider, separator, model = value.partition("/")
+        return provider.lower() + separator + model
+    return value
+
+
+MasterInputLabel = Annotated[ModelLabel, BeforeValidator(_lower_provider)]
+_LABEL = TypeAdapter(MasterInputLabel)
 
 
 def valid_label(model: str, config: Config) -> str:
@@ -38,11 +48,12 @@ def valid_label(model: str, config: Config) -> str:
     except ValidationError as e:
         raise click.ClickException(t("Use a model label in the form PROVIDER/MODEL.")) from e
 
+    source, _, model_id = label.partition("/")
     try:
-        providers.find(label.partition("/")[0])
+        provider = providers.find(source)
     except providers.UnknownProvider as e:
         raise click.ClickException(str(e)) from e
-    return label
+    return f"{provider.id}/{model_id}"
 
 
 def _summary(row: sqlite3.Row, result: bench.Result) -> dict[str, Any]:
@@ -143,24 +154,34 @@ def _served(config: Config, choice: router.Choice) -> None:
     )
 
 
-def _case_reasons(conn: sqlite3.Connection, config: Config) -> dict[str, str]:
-    reasons = {}
-    for case_id, reason in conn.execute(
-        """SELECT json_extract(created.details_json, '$.benchmark'),
-                  (SELECT COALESCE(json_extract(a.details_json, '$.cause'),
-                                   json_extract(a.details_json, '$.reason'))
-                   FROM audit_log a
-                   WHERE a.task_id = created.task_id AND a.subtask_id IS NOT NULL
-                     AND (a.to_status IN ('needs_human', 'paused', 'failed')
-                          OR json_type(a.details_json, '$.failure') IS NOT NULL)
-                     AND json_type(a.details_json, '$.reason') IS NOT NULL
-                   ORDER BY a.seq DESC LIMIT 1)
-           FROM audit_log created WHERE created.action = 'task_created'"""
+def _case_failures(conn: sqlite3.Connection, config: Config) -> tuple[dict[str, str], set[str]]:
+    reasons: dict[str, str] = {}
+    provider_stops: set[str] = set()
+    for case_id, status, failure, reason in conn.execute(
+        """SELECT json_extract(created.details_json, '$.benchmark'), a.to_status,
+                  json_extract(a.details_json, '$.failure'),
+                  COALESCE(json_extract(a.details_json, '$.cause'),
+                           json_extract(a.details_json, '$.reason'))
+           FROM audit_log created
+           JOIN audit_log a ON a.seq = (
+               SELECT seq FROM audit_log
+               WHERE task_id = created.task_id AND subtask_id IS NOT NULL
+                 AND to_status IN ('needs_human', 'paused', 'failed')
+               ORDER BY seq DESC LIMIT 1
+           )
+           WHERE created.action = 'task_created'"""
     ):
+        # The master benchmark runs one subtask without tools. A permanent failure here
+        # means a provider rejection or that the master is unavailable (NO_MASTER).
+        if (status == SubtaskStatus.PAUSED and failure == FailureKind.LIMIT) or (
+            status == SubtaskStatus.NEEDS_HUMAN
+            and failure in (FailureKind.LIMIT, FailureKind.PERMANENT)
+        ):
+            provider_stops.add(case_id)
         if reason:
             safe = " ".join(providers.redact_keys(reason, config)[0].split())
             reasons[case_id] = safe if len(safe) <= 200 else safe[:199] + "…"
-    return reasons
+    return reasons, provider_stops
 
 
 def run_check(store: Store, config: Config, model: str, *, as_json: bool = False) -> dict[str, Any]:
@@ -183,13 +204,14 @@ def run_check(store: Store, config: Config, model: str, *, as_json: bool = False
                 master=choice.label,
                 calls_conn=store.conn,
             )
-            reasons = _case_reasons(conn, config)
+            reasons, provider_stops = _case_failures(conn, config)
     except router.NoProvider as e:
         raise click.ClickException(str(e)) from e
+    incomplete = {case.id for case in result.cases if case.status != TaskStatus.DONE}
     outcome = "failed"
     if bench.master_passed(result):
         outcome = "passed"
-    elif any(case.status == TaskStatus.ACTIVE for case in result.cases):
+    elif incomplete and incomplete <= provider_stops:
         outcome = "unfinished"
     row = store.conn.execute(
         "INSERT INTO master_checks (model, version, outcome, result_json) VALUES (?, ?, ?, ?) "
@@ -227,7 +249,11 @@ def print_check(data: dict[str, Any]) -> None:
     )
 
     if data["outcome"] == "unfinished":
-        ui.note(t("The provider’s limits stopped the check. Try again later."))
+        ui.note(
+            t(
+                "The provider refused or limited requests, or the model became unavailable. Try again later."
+            )
+        )
 
 
 def require_pass(conn: sqlite3.Connection, model: str) -> None:
@@ -264,6 +290,8 @@ def change(
         old = config.master
         add, remove = ("admitted", "revoked") if admit else ("revoked", "admitted")
         if admit:
+            if model in old.admitted:
+                return False
             require_pass(conn, model)
         values = old.model_dump()
         values[add].append(model)
@@ -350,6 +378,7 @@ def check_command(model: str, db_path: Path | None, as_json: bool) -> None:
 
 def _decision(db_path: Path | None, model: str, *, admit: bool, as_json: bool) -> None:
     manager = load_config()
+    model = valid_label(model, manager.load())
     with closing(connect(db_path)) as conn:
         changed = change(conn, manager, model, admit=admit, journal=True)
     report_decision(model, admit=admit, changed=changed, as_json=as_json)

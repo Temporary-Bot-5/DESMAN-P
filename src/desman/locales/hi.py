@@ -13,7 +13,7 @@ MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "मौजूदा जाँच पास करने वाले मास्टर मॉडल को अनुमति दें।",
     "Admitted": "अनुमत",
     "Unfinished": "अधूरी",
-    "The provider’s limits stopped the check. Try again later.": "प्रदाता की सीमाओं के कारण जाँच रुक गई। बाद में फिर से कोशिश करें।",
+    "The provider refused or limited requests, or the model became unavailable. Try again later.": "प्रदाता ने अनुरोध अस्वीकार या सीमित किए, या मॉडल अनुपलब्ध हो गया। बाद में फिर से कोशिश करें।",
     "{model} is already admitted.": "{model} को पहले से अनुमति है।",
     "{model} is already revoked.": "{model} की अनुमति पहले ही रद्द है।",
     "Admitted {model}.": "{model} को अनुमति दी गई।",

@@ -18,7 +18,7 @@ MESSAGES: dict[str, Forms] = {
     "Admit a master model with a current passing check.": "Допустить модель в мастера после успешной проверки текущей версии.",
     "Admitted": "Допущена",
     "Unfinished": "Не завершена",
-    "The provider’s limits stopped the check. Try again later.": "Проверка остановилась из-за лимитов провайдера. Попробуйте позже.",
+    "The provider refused or limited requests, or the model became unavailable. Try again later.": "Провайдер отклонил или ограничил запросы либо модель стала недоступна. Повторите попытку позже.",
     "{model} is already admitted.": "Модель {model} уже допущена.",
     "{model} is already revoked.": "Допуск модели {model} уже отозван.",
     "Admitted {model}.": "Модель {model} допущена.",
