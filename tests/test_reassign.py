@@ -15,10 +15,12 @@ Either way the subtask is done once, with the second worker's result, and the hi
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -167,7 +169,11 @@ def test_a_hung_workers_subtask_is_done_by_another_after_its_lease(tmp_path: Pat
     try:
         wait_until_holding(path, first, "lease_owner")
         if sys.platform != "win32":
-            first.send_signal(signal.SIGSTOP)  # alive, but renews nothing
+            # Freeze it between writes so the second worker can open the database.
+            with closing(db.connect(path)) as conn, db.transaction(conn):
+                first.send_signal(signal.SIGSTOP)
+                _, status = os.waitpid(first.pid, os.WUNTRACED)
+                assert os.WIFSTOPPED(status)
         started = time.monotonic()
         second = finish(worker(path, script(tmp_path, "second", reply("second"), ACCEPT)))
         assert time.monotonic() - started >= lease / 2  # a live owner's lease is waited out

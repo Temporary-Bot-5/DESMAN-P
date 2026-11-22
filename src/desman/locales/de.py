@@ -2024,6 +2024,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "die Datei überschreitet {limit} Byte",
         "the file extension is not a supported text format": "die Dateiendung gehört zu keinem unterstützten Textformat",
         "the maximum number of attached files is {limit}": "es können höchstens {limit} Dateien angehängt werden",
+        "choose master mode for this chat: /master [on|off]": "Master-Modus für diesen Chat wählen: /master [on|off]",
+        "Usage: /master [on|off]": "Verwendung: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "Der Master-Modus ist an. Gib /master off ein, um ihn auszuschalten.",
+        "Master mode is off. Type /master on to turn it on.": "Der Master-Modus ist aus. Gib /master on ein, um ihn einzuschalten.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Für das Master-Modul ist kein Modell bereit. Daher wird die Fortsetzung für den Cluster geplant: {why}",
     }
 )
 

@@ -204,6 +204,9 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                     subtasks.append(
                         {
                             "seq": sub.seq,
+                            "part_of": t("part of {seq}", seq=sub.part_of)
+                            if sub.part_of is not None
+                            else None,
                             "status": sub.status.value,
                             "description": redact(sub.description),
                             "title": short_description(redact(sub.description)),

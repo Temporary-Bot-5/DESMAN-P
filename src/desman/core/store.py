@@ -24,7 +24,16 @@ from typing import Any, NoReturn
 from desman.core import db
 from desman.core.audit import TASK_HISTORY_SQL
 from desman.core.context import DependencyResult, Feedback
-from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, TaskSpec, Tools
+from desman.core.models import (
+    MAX_DELEGATED_PARTS,
+    MAX_DELEGATIONS,
+    Origin,
+    Priority,
+    Subtask,
+    SubtaskSpec,
+    TaskSpec,
+    Tools,
+)
 from desman.core.retry import Attempts, FailureKind, RetryPolicy, decide
 from desman.core.scheduler import DEFAULT_AGING, NETWORK_SQL, Aging
 from desman.core.states import TERMINAL, Actor, SubtaskStatus, TaskStatus, derive_task_status
@@ -33,7 +42,7 @@ from desman.core.states import transition as check_transition
 S = SubtaskStatus
 
 _EXECUTION_ENDED = """actor = 'executor' AND from_status = 'running'
-    AND (action IN ('submit', 'decomposed') OR (action = 'tool_unavailable'
+    AND (action IN ('submit', 'decomposed', 'delegated') OR (action = 'tool_unavailable'
          AND json_extract(details_json, '$.missing') = 'search_engine') OR json_extract(details_json, '$.failure') = 'quality')"""
 """SQL condition on audit_log: the entry ended an execution with something to judge."""
 Clock = Callable[[], datetime]
@@ -784,13 +793,39 @@ class Store:
         again, to combine their results, once they are done. One level only: a part cannot be
         split, nor a subtask twice. Returns the parts.
         """
-        TaskSpec(goal="split", subtasks=parts)  # the same graph checks as a task
+        return self._add_parts(subtask_id, lease, parts)
+
+    def delegate(
+        self, subtask_id: str, lease: str, parts: list[SubtaskSpec], note: str
+    ) -> list[Subtask]:
+        """Pause a master while its ordinary subtasks do the work it handed them."""
+        if not note.strip() or len(note) > 2000:
+            raise ValueError("a delegation note must have 1 to 2000 characters")
+        if not 2 <= len(parts) <= MAX_DELEGATED_PARTS:
+            raise ValueError(f"a delegation needs 2 to {MAX_DELEGATED_PARTS} parts")
+        return self._add_parts(subtask_id, lease, parts, note=note)
+
+    def _add_parts(
+        self, subtask_id: str, lease: str, parts: list[SubtaskSpec], *, note: str | None = None
+    ) -> list[Subtask]:
+        TaskSpec(goal="parts", subtasks=parts)  # the same graph checks as a task
         if len(parts) < 2:
             raise ValueError("a split needs at least two parts")
         with db.transaction(self.conn):
             parent = self.get_subtask(subtask_id)
-            if parent.parent_id is not None or self.parts(subtask_id):
-                raise ValueError(f"subtask {subtask_id} cannot be split again")
+            if note is None:
+                if parent.parent_id is not None or self.parts(subtask_id):
+                    raise ValueError(f"subtask {subtask_id} cannot be split again")
+            else:
+                self._hold(subtask_id, lease)
+            if note is not None and (
+                not parent.master
+                or parent.parent_id is not None
+                or self.origin(parent.task_id) is not Origin.LOCAL
+                or self.was_decomposed(subtask_id)
+                or self.delegations(subtask_id) >= MAX_DELEGATIONS
+            ):
+                raise ValueError("only a local, unsplit master with delegations left may delegate")
             inherited = self.dependencies(subtask_id)
             first_seq = (
                 1
@@ -805,8 +840,8 @@ class Store:
                 S.PENDING,
                 Actor.EXECUTOR,
                 lease=lease,
-                details={"parts": ids},
-                action="decomposed",
+                details={"parts": ids} if note is None else {"parts": ids, "note": note},
+                action="decomposed" if note is None else "delegated",
             )
             now = self._now()
             for offset, (part_id, part) in enumerate(zip(ids, parts, strict=True)):
@@ -823,7 +858,9 @@ class Store:
                         part.acceptance_criteria,
                         json.dumps({**parent.inputs, **part.inputs}, ensure_ascii=False),
                         parent.priority if part.priority is None else part.priority,
-                        part.kind.value,
+                        parent.kind.value
+                        if note is not None and "kind" not in part.model_fields_set
+                        else part.kind.value,
                         int(part.runs_code),
                         # The parts are given what the subtask was: they do its work.
                         json.dumps(parent.knowledge, ensure_ascii=False),
@@ -913,20 +950,47 @@ class Store:
                     "INSERT INTO subtask_deps (subtask_id, depends_on) VALUES (?, ?)",
                     [(part_id, dep) for dep in dict.fromkeys(deps)],
                 )
+            masters = [part_id for part_id, part in zip(ids, parts, strict=True) if part.master]
             # The task has work again: a hidden one is shown (only finished work is hidden).
             self.conn.execute("UPDATE tasks SET hidden_at = NULL WHERE id = ?", (task_id,))
             self._audit(
                 actor,
                 "task_extended",
                 task_id=task_id,
-                details={**(details or {}), "subtasks": ids, "basis": basis},
+                details={
+                    **(details or {}),
+                    "subtasks": ids,
+                    "basis": basis,
+                    **({"master": masters} if masters else {}),
+                },
             )
             self._context_chosen(task_id, ids, parts, actor)
             self._promote_ready()
         return ids
 
+    def was_decomposed(self, subtask_id: str) -> bool:
+        return (
+            self.conn.execute(
+                "SELECT 1 FROM audit_log WHERE subtask_id = ? AND action = 'decomposed' LIMIT 1",
+                (subtask_id,),
+            ).fetchone()
+            is not None
+        )
+
+    def delegations(self, subtask_id: str) -> int:
+        return len(self.delegation_notes(subtask_id))
+
+    def delegation_notes(self, subtask_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT details_json FROM audit_log WHERE subtask_id = ? "
+            "AND action = 'delegated' ORDER BY seq",
+            (subtask_id,),
+        )
+        details = (json.loads(row[0]) for row in rows)
+        return [{"note": entry["note"], "parts": entry["parts"]} for entry in details]
+
     def parts(self, subtask_id: str) -> list[str]:
-        """Ids of the parts a subtask was split into, in order (empty if it was not split)."""
+        """Ids of the parts created by splitting or delegation, in order."""
         rows = self.conn.execute(
             "SELECT id FROM subtasks WHERE parent_id = ? ORDER BY seq", (subtask_id,)
         )
@@ -1334,8 +1398,9 @@ class Store:
 
     def executions(self, subtask_id: str) -> int:
         """How many executions of the subtask have ended with something to judge: a result, a
-        split, a quality failure or a missing-engine escalation. An interrupted one (crash, lost lease, provider error,
-        limits) has not ended: the next run continues it, so its effects are replayed."""
+        split, a delegation, a quality failure or a missing-engine escalation. An interrupted
+        one (crash, lost lease, provider error, limits) has not ended: the next run continues
+        it, so its effects are replayed."""
         row = self.conn.execute(
             f"SELECT COUNT(*) FROM audit_log WHERE subtask_id = ? AND {_EXECUTION_ENDED}",
             (subtask_id,),

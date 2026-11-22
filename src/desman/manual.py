@@ -45,17 +45,18 @@ TOPICS: Final = (
     Topic(
         "master",
         "a master module: the whole goal given to one strong model instead of split work",
-        "`desman run --master GOAL` gives the goal whole to one strong model (a master module) "
-        "instead of planning subtasks for the small models. It works in one subtask with up to "
-        "24 rounds of tool calls per attempt, with the same tools, sandbox, review, retries and "
-        "inbox. Only a qualified model is used: a cloud model the catalog marks for it (now "
-        "NVIDIA Nemotron 3 Ultra, Gemini 3.8 Flash, Mistral Medium, Cohere Command A; paid ones "
-        "only with --provider), or a local model with a context of at least 32768 tokens that "
-        "the person names with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). Without one, "
-        "--master says so and starts nothing. If the master keeps failing, its subtask is split "
-        "and the parts go to the ordinary models (not with --runs-code: then it waits for you). Long attached documents are still read in "
-        "parts by the small models first. The person chooses the mode; DESMAN never switches to "
-        "it by itself. The chat cannot start a master task yet.",
+        "`desman run --master GOAL` gives the whole goal to one qualified model, with up to "
+        "24 tool rounds per attempt. In chat, ask for one agent or type /master on "
+        "(see `/master`). The master may delegate pieces to the cluster. They appear as "
+        "its parts, and it resumes with their results. If it keeps failing, its work may be "
+        "split for the cluster (unless it must run code or already delegated). Long attached "
+        "documents are still read in parts by the cluster. Qualified models: those the catalog "
+        "marks (now NVIDIA Nemotron 3 Ultra, Gemini 3.8 Flash, Mistral Medium, Cohere Command "
+        "A; paid ones only with --provider), or a local model with at least 32768 tokens of "
+        "context named with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). The "
+        "person chooses the mode. Without a ready master, a new master task cannot "
+        "start. Extend and redo keep master mode when one is ready and tell you when "
+        "the cluster will do the continuation instead.",
     ),
     Topic(
         "files",

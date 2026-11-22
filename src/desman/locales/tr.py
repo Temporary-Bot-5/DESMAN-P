@@ -1926,6 +1926,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "dosya {limit} baytı aşıyor",
         "the file extension is not a supported text format": "dosya uzantısı desteklenen bir metin biçimine ait değil",
         "the maximum number of attached files is {limit}": "en fazla {limit} dosya eklenebilir",
+        "choose master mode for this chat: /master [on|off]": "bu sohbet için ana modülü açın veya kapatın: /master [on|off]",
+        "Usage: /master [on|off]": "Kullanım: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "Ana modül modu açık. Kapatmak için /master off yazın.",
+        "Master mode is off. Type /master on to turn it on.": "Ana modül modu kapalı. Açmak için /master on yazın.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Ana modül için hazır model yok, bu yüzden devam işi küme için planlanıyor: {why}",
     }
 )
 

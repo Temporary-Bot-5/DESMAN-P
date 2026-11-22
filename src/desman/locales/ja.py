@@ -1882,6 +1882,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "ファイルが {limit} バイトを超えています",
         "the file extension is not a supported text format": "ファイルの拡張子が対応するテキスト形式ではありません",
         "the maximum number of attached files is {limit}": "添付できるファイルは {limit} 個までです",
+        "choose master mode for this chat: /master [on|off]": "このチャットのマスターモードを切り替える: /master [on|off]",
+        "Usage: /master [on|off]": "使い方: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "マスターモードはオンです。オフにするには /master off と入力してください。",
+        "Master mode is off. Type /master on to turn it on.": "マスターモードはオフです。オンにするには /master on と入力してください。",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "マスターモジュールに使えるモデルがないため、続きの作業はクラスター向けに計画されます: {why}",
     }
 )
 

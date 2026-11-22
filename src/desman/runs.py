@@ -124,9 +124,15 @@ class Models:
             return current
         return self.kinds.get(kind, (self.llm, self.other))
 
+    def master_status(self) -> Master:
+        """The current lineup and the information shown to the person choosing it."""
+        if self.find_master is not None:
+            return self.find_master()
+        return Master(self.master, self.master_choice, self.no_master)
+
     def current_master(self) -> tuple[LLM, LLM | None] | None:
         """The main and other models of a master subtask now; None: none qualifies."""
-        return self.find_master().models if self.find_master is not None else self.master
+        return self.master_status().models
 
     def labels(self, subtask: Subtask) -> Labels:
         """How the coordinator tells apart the models the executor asks for `subtask`."""
@@ -856,6 +862,7 @@ def _coordinator(
             models.for_(calls.Role.REVIEWER),
             evidence=functools.partial(evidence, store, knowledge=knowledge),
             dependencies=store.dependency_results,
+            was_decomposed=store.was_decomposed,
             quote_evidence=functools.partial(
                 quote_sources,
                 store,

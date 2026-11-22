@@ -432,9 +432,7 @@ def test_the_chat_applies_only_after_the_window(
     p = a_proposal(s, checkout)
     before = head(checkout)
     session = Sessions(s.conn).add(None, Role.USER, "apply proposal 1").session_id
-    ctx = commands.Context(
-        s, open_config(), lambda title, goal, runs_code: None, lambda task: False, lambda: session
-    )
+    ctx = commands.Context(s, open_config(), lambda *_: None, lambda task: False, lambda: session)
     entry = commands.find("proposals apply")
     assert entry is not None
     args = entry.args.model_validate({"proposal": p.id})

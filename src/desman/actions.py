@@ -925,6 +925,10 @@ def prepare_continuation(
     return Continuation(task_id, ask, sub)
 
 
+def show_master(provider: str, model: str) -> None:
+    ui.note(t("Master module: {provider} · {model}", provider=provider, model=model))
+
+
 def continue_task(
     store: Store,
     llm: Any,
@@ -933,25 +937,41 @@ def continue_task(
     limit: int | None,
     by: str,
     tree: tuple[knowledge.Node, ...] | None = None,
+    master_ready: bool = False,
+    no_master: str | None = None,
 ) -> tuple[list[str], str | None]:
     """Plan the new subtasks with the model (the template if it fails) and add them to the
     task. `by`: who asked ("person" or "proposal"). Returns the new ids and why the model's
     plan was not used, if it was not."""
-    from desman.planner import continuation, must_run
+    from desman.planner import Planned, continuation, master_plan, must_run
 
     task = store.find_task(pending.task_id)
     subtasks = [s for s in store.list_subtasks(pending.task_id) if s.parent_id is None]
-    planned = continuation(
-        llm,
-        task["goal"],
-        [(s.seq, s.description, s.status.value) for s in subtasks],
-        pending.ask,
-        redo=pending.redo.seq if pending.redo else None,
-        priority=task["priority"],
-        limit=limit,
-        tree=knowledge.task_tree() if tree is None else tree,
-        clock=store.clock,
-    )
+    was_master = any(s.master for s in subtasks)
+    if was_master and master_ready:
+        redo = pending.redo
+        goal = f"Redo step {redo.seq} ({redo.description}): {pending.ask}" if redo else pending.ask
+        planned = Planned(master_plan(goal, task["priority"]), "master")
+    else:
+        if was_master:
+            ui.warn(
+                t(
+                    "No model is ready for a master module, so the continuation is planned for "
+                    "the cluster: {why}",
+                    why=no_master or t("No model ready for a master module."),
+                )
+            )
+        planned = continuation(
+            llm,
+            task["goal"],
+            [(s.seq, s.description, s.status.value) for s in subtasks],
+            pending.ask,
+            redo=pending.redo.seq if pending.redo else None,
+            priority=task["priority"],
+            limit=limit,
+            tree=knowledge.task_tree() if tree is None else tree,
+            clock=store.clock,
+        )
     last = subtasks[-1].id
     basis = [last] + ([pending.redo.id] if pending.redo and pending.redo.id != last else [])
     # A result that had to rest on a real run still has to (`planner.must_run`).

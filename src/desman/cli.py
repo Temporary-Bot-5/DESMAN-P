@@ -426,8 +426,12 @@ def run(
     try:
         runs.guard(store)  # before any model is asked
         models = _attach(source, store, cache=not no_cache, as_json=as_json, master=master)
-        if master and models.master is None and models.choice is not None:
-            raise click.ClickException(models.no_master or t("No model ready for a master module."))
+        if master and models.choice is not None:
+            found = models.master_status()
+            if found.models is None:
+                raise click.ClickException(
+                    found.problem or t("No model ready for a master module.")
+                )
         planned: Planned | None = None
         fetched = documents.Prefetched([], [])
         docs: list[documents.Document] = []
@@ -1111,16 +1115,10 @@ def _attach(
     choice = models.choice
     if as_json or choice is None:
         return models
-    found = models.find_master() if master and models.find_master is not None else None
+    found = models.master_status() if master else None
     if found is not None and found.choice is not None:
         choice = found.choice
-        ui.note(
-            t(
-                "Master module: {provider} · {model}",
-                provider=choice.provider.name,
-                model=choice.model,
-            )
-        )
+        actions.show_master(choice.provider.name, choice.model)
     elif choice.provider.key_env is None:
         url = choice.provider.endpoint(config)
         ui.note(
@@ -1561,12 +1559,15 @@ def continued(
         ) as waiting,
         calls.for_(calls.Purpose(calls.Role.PLANNER, task_id=pending.task_id)),
     ):
+        master = models.master_status()
         ids, error = actions.continue_task(
             store,
             models.for_(calls.Role.PLANNER),
             pending,
             limit=runs.tuned(config.tuning, "max_subtasks"),
             by=by,
+            master_ready=master.models is not None or models.choice is None,
+            no_master=master.problem,
             # The person's nodes only with personalisation on, never for a temporary chat.
             tree=runs.task_tree(store.conn, config.personalize if personal is None else personal),
         )

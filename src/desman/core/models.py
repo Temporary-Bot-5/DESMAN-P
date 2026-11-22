@@ -57,6 +57,10 @@ MAX_KNOWLEDGE: Final = 3
 """Nodes of the knowledge tree one subtask is given: its context is small (ADR 0009)."""
 
 
+MAX_DELEGATIONS = 2
+MAX_DELEGATED_PARTS = 6
+
+
 class SubtaskSpec(BaseModel):
     description: str = Field(min_length=1)
     acceptance_criteria: str = Field(min_length=1)
@@ -131,7 +135,7 @@ class Subtask(BaseModel):
     attempts: Attempts
     accepted_attempt: int | None = None
     parent_id: str | None = None
-    """Set on the parts of a subtask that was split (`Store.decompose`)."""
+    """Set on parts created by `Store.decompose` or `Store.delegate`."""
     review_owner: str | None = None
     review_until: str | None = None
     """A review in progress: who reserved it and until when (`Store.reserve_review`)."""

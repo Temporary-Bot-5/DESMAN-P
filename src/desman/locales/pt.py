@@ -2022,6 +2022,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "o arquivo ultrapassa {limit} bytes",
         "the file extension is not a supported text format": "a extensão do arquivo não é de um formato de texto aceito",
         "the maximum number of attached files is {limit}": "o limite é de {limit} arquivos anexados",
+        "choose master mode for this chat: /master [on|off]": "escolha o modo mestre para este chat: /master [on|off]",
+        "Usage: /master [on|off]": "Uso: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "O modo mestre está ativado. Digite /master off para desativá-lo.",
+        "Master mode is off. Type /master on to turn it on.": "O modo mestre está desativado. Digite /master on para ativá-lo.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Nenhum modelo está pronto para o módulo mestre, então a continuação será planejada para o cluster: {why}",
     }
 )
 

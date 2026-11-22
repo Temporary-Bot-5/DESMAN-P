@@ -52,24 +52,39 @@ already does for a subtask.**
    unqualified one is never asked (`router.qualified`), and `desman tuning` warns that it is
    not among the models the master may use. The Improvement Analyst never proposes the
    master's model. M.3 adds a measured gate: the benchmark (`bench.py`) run by the model.
-3. **Who chooses the mode.** The person: `desman run --master` (M.1), in the chat (M.2). Never
-   automatic in M.1: a silent switch would leave the cluster unused and hide what a task costs.
-   Without a ready qualified model `--master` says so and creates nothing; a master subtask
-   that finds none later (a key removed) waits for the person (`needs_human`) instead of
-   being worked by an unqualified model.
+3. **Who chooses the mode.** The person: `desman run --master` (M.1); in the chat (M.2) the
+   interlocutor's task turn carries `"master": true` when the person asked for the work to be
+   done by one agent, and `/master on|off` sets it for every task of the chat session. Never
+   automatic: a silent switch would leave the cluster unused and hide what a task costs.
+   Without a ready qualified model `--master` (or the chat) says so and creates nothing; a
+   master subtask that finds none later (a key removed) waits for the person (`needs_human`)
+   instead of being worked by an unqualified model.
 4. **Falling back to the cluster.** A master's attempts follow the task's retry strategies:
    feedback, rephrase, the other master model (another provider, if one is qualified and
    ready), and then **decompose**: the parts of a split master subtask are ordinary subtasks
    (`master` off) worked by the cluster's models, and the master's own failure becomes
    ordinary DESMAN work instead of a dead end. A subtask that must run code (`--runs-code`)
    is never split, so with it a failing master waits for the person instead. A continuation
-   of a master task (`task extend`, `task redo`) is planned for the cluster until M.2.
+   of a master task (`task extend`, `task redo`, M.2) is one master subtask again (the
+   planner model is not asked), when a qualified model is ready; otherwise it is planned for
+   the cluster and the person is told so.
 5. **The master uses the cluster.** Long documents (ADR 0014) are still read in parts by the
    cluster: the master subtask depends on their digests like any planned subtask. M.2 lets the
-   master delegate on its own: a result `{"type": "delegate", ...}` with subtasks for the
-   cluster ends the master's subtask; code continues the task (ADR 0010, `Store.extend`) with
-   those subtasks and a master subtask after them that gets their results. Nothing waits
-   inside a lease, and every step stays resumable.
+   master delegate on its own, built on the split (`Store.decompose`) rather than on a
+   continuation: a reply `{"type": "delegate", "note": ..., "parts": [...]}` (2 to
+   `MAX_DELEGATED_PARTS` parts, each a description, acceptance criteria, an optional kind and
+   `depends_on` among the parts) ends the master's execution without a review.
+   `Store.delegate` adds the parts as ordinary subtasks (`master` off, `parent_id` the master
+   subtask, its inputs, dependencies and knowledge, audited `delegated` with the note), and
+   the master subtask goes back to PENDING, depending on them: the existing RUNNING → PENDING
+   edge of a split, so the state machine does not change. Once they are done the master runs
+   again as a master (not a combine), with their results as dependency results and its notes
+   of earlier delegations in its context; its earlier tool results stay readable (L.3).
+   A delegation is not a failed attempt. At most `MAX_DELEGATIONS` per master subtask; after a
+   delegation the subtask is no longer split (its parts are in place), so a failing master
+   waits for the person. Parts are reviewed by the cluster's reviewer like any subtask, and
+   cannot be split themselves (one level, as a split's parts). Nothing waits inside a lease,
+   and every step stays resumable.
 6. **Never for desman-global.** A job lent to the network is never a master subtask (refused
    when the task is created): what a lent module may carry is set by its quota, not this.
 
@@ -82,6 +97,8 @@ already does for a subtask.**
   it.
 - The catalog's `master` mark is a judgement made in code review; free lineups change without
   notice, so M.3's benchmark gate is what makes "qualified" measured instead of believed.
+- A delegation costs no review and no attempt; its parts are cluster work with their own
+  reviews, so `desman stats` shows them under the cluster's models.
 - Stats (`desman stats`) already count calls by role and model; a task with a master subtask
   records it in `task_created` (`master`: its ids, `plan`: `master`), so the outcomes can be
   compared with the cluster's (M.3).

@@ -16,7 +16,16 @@ from conftest import FakeClock
 from desman import providers, runs
 from desman.agents import MAX_TOOL_ROUNDS, _ToolCalls, llm_executor, llm_reviewer
 from desman.core.context import build_context
-from desman.core.coordinator import Coordinator, Crew, Failure, Review, Success, Verdict, Work
+from desman.core.coordinator import (
+    Coordinator,
+    Crew,
+    Failure,
+    Outcome,
+    Review,
+    Success,
+    Verdict,
+    Work,
+)
 from desman.core.effects import Effects, earlier_lookups, evidence
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind, Strategy, strategy_for
@@ -139,7 +148,7 @@ def test_retry_receives_earlier_lookups_within_remaining_budget(
     llm = FakeLLM('{"answer":"from source"}')
     execute = llm_executor(llm)
 
-    def executor(item: Work) -> Success | Failure:
+    def executor(item: Work) -> Outcome:
         seen.append(item)
         if len(seen) == 1:
             journal_result(store, item.subtask, 0, 0, "web_search", "facts " * 1000)

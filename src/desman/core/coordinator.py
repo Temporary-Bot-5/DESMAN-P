@@ -62,7 +62,15 @@ from desman.core.effects import (
     earlier_results,
     workspace_files,
 )
-from desman.core.models import Origin, Priority, Subtask, SubtaskSpec, Tools
+from desman.core.models import (
+    MAX_DELEGATED_PARTS,
+    MAX_DELEGATIONS,
+    Origin,
+    Priority,
+    Subtask,
+    SubtaskSpec,
+    Tools,
+)
 from desman.core.policy import Access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
@@ -124,7 +132,14 @@ class Failure(BaseModel):
         return value
 
 
-Outcome = Success | Failure
+class Delegation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    parts: list[SubtaskSpec] = Field(min_length=2, max_length=MAX_DELEGATED_PARTS)
+    note: str = Field(min_length=1, max_length=2000, pattern=r"\S")
+
+
+Outcome = Success | Failure | Delegation
 
 ONE_MODEL: Strategies = functools.partial(strategy_for, other_model=False)
 """The coordinator's default: no other model to switch to, so none is claimed in the audit."""
@@ -139,10 +154,12 @@ REASON_EXCERPT = 300
 
 def is_error_report(content: dict[str, Any] | None) -> bool:
     """An artifact that reports a failure instead of a result: never accepted (ROADMAP 2.8)."""
-    return content is not None and content.get("type") == ERROR_TYPE
+    return content is not None and content.get("type") in (ERROR_TYPE, "delegate")
 
 
 def _error_reason(content: dict[str, Any]) -> str:
+    if content.get("type") == "delegate":
+        return "an unhandled delegation is not an executor result"
     reason = content.get("reason") or content.get("message") or "no reason given"
     text = str(reason)
     prefix = "executor reported an error: "
@@ -511,7 +528,14 @@ class Coordinator:
             attempt = subtask.attempts.quality + 1
             unfit = frozenset(self.store.unfit_providers(subtask.task_id))
             avoid = self._avoid(crew, subtask, unfit)
-            if self.store.parts(subtask.id):
+            can_delegate = (
+                subtask.master
+                and own
+                and subtask.parent_id is None
+                and self.store.origin(subtask.task_id) is Origin.LOCAL
+            )
+            delegations = self.store.delegation_notes(subtask.id) if can_delegate else []
+            if self.store.was_decomposed(subtask.id):
                 strategy = Strategy.COMBINE  # its parts are done: their results are its inputs
             else:
                 # A split would let parts hand in what only running the code can tell.
@@ -519,6 +543,7 @@ class Coordinator:
                     own
                     and self.decomposer is not None
                     and subtask.parent_id is None
+                    and not delegations
                     and not subtask.runs_code
                     # Parts of a long document and their combines are cut by code (ADR 0014):
                     # splitting them again only muddles which part a note is from.
@@ -558,6 +583,13 @@ class Coordinator:
                     self.store, subtask, self.store.executions(subtask.id), chars
                 ),
             )
+            if can_delegate:
+                context = context.model_copy(
+                    update={
+                        "delegations": delegations,
+                        "delegations_left": MAX_DELEGATIONS - len(delegations),
+                    }
+                )
             previous_starts = self.store.execution_starts(subtask.id, journal.execution)
             self._started(subtask, context, offered, continuation_rows)
             work = Work(
@@ -591,8 +623,10 @@ class Coordinator:
                 guard_model_calls(cover_call),
             ):
                 returned = crew.executor(work)
-            if not isinstance(returned, Success | Failure):
-                raise TypeError(f"executor returned {type(returned).__name__}, not Success/Failure")
+            if not isinstance(returned, Success | Failure | Delegation):
+                raise TypeError(
+                    f"executor returned {type(returned).__name__}, not Success/Failure/Delegation"
+                )
             outcome = returned
         except PreemptedError:
             return  # given back, and recorded, by the heartbeat
@@ -608,6 +642,23 @@ class Coordinator:
             outcome = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"executor raised {type(e).__name__}: {e}"
             )
+
+        if isinstance(outcome, Delegation):
+            try:
+                if not can_delegate:
+                    raise ValueError("only a local master may delegate")
+                if strategy is Strategy.COMBINE:
+                    raise ValueError("this master was already split")
+                if len(delegations) >= MAX_DELEGATIONS:
+                    raise ValueError("this master has reached its delegation limit")
+                created = self.store.delegate(subtask.id, lease, outcome.parts, outcome.note)
+                events.append(f"delegated {subtask.id} into {len(created)}")
+                return
+            except StaleStateError:
+                self._discard(subtask, "lease lost before delegation", events)
+                return
+            except ValueError as e:
+                outcome = Failure(kind=FailureKind.QUALITY, reason=f"delegation not possible: {e}")
 
         if isinstance(outcome, Success) and is_error_report(outcome.content):
             # Not a result: a failed attempt, never something a reviewer could accept.

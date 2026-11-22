@@ -2065,6 +2065,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "plik przekracza {limit} bajtów",
         "the file extension is not a supported text format": "rozszerzenie pliku nie należy do obsługiwanych formatów tekstowych",
         "the maximum number of attached files is {limit}": "można dołączyć co najwyżej {limit} plików",
+        "choose master mode for this chat: /master [on|off]": "ustaw tryb nadrzędny dla tego czatu: /master [on|off]",
+        "Usage: /master [on|off]": "Użycie: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "Tryb nadrzędny jest włączony. Wpisz /master off, aby go wyłączyć.",
+        "Master mode is off. Type /master on to turn it on.": "Tryb nadrzędny jest wyłączony. Wpisz /master on, aby go włączyć.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Żaden model modułu nadrzędnego nie jest gotowy, więc dalsza praca zostanie zaplanowana dla klastra: {why}",
     }
 )
 

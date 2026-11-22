@@ -36,7 +36,7 @@ class SubtaskCounts:
     escalated: int = 0
     """Reached needs_human at least once: the operator had to decide."""
     split: int = 0
-    """Split into parts after failed attempts (the parts are counted as subtasks too)."""
+    """Subtasks split after retries or delegated by a master (their parts are counted too)."""
 
 
 @dataclass(frozen=True)
@@ -167,12 +167,14 @@ def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:
         WITH subs AS (
             SELECT s.id, s.status,
                    (SELECT COUNT(*) FROM audit_log a
-                    WHERE a.subtask_id = s.id AND a.action = 'attempt_started') AS attempts,
+                    WHERE a.subtask_id = s.id AND a.action = 'attempt_started')
+                   - (SELECT COUNT(*) FROM audit_log a
+                      WHERE a.subtask_id = s.id AND a.action = 'delegated') AS attempts,
                    EXISTS (SELECT 1 FROM audit_log a
                            WHERE a.subtask_id = s.id AND a.to_status = 'needs_human')
                        AS escalated,
                    EXISTS (SELECT 1 FROM audit_log a
-                           WHERE a.subtask_id = s.id AND a.action = 'decomposed') AS split,
+                           WHERE a.subtask_id = s.id AND a.action IN ('decomposed', 'delegated')) AS split,
                    (SELECT a.actor FROM audit_log a
                     WHERE a.subtask_id = s.id AND a.to_status = 'done'
                     ORDER BY a.seq DESC LIMIT 1) AS done_by

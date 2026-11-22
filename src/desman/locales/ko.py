@@ -1894,6 +1894,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "파일 크기가 {limit}바이트를 초과합니다",
         "the file extension is not a supported text format": "파일 확장자가 지원되는 텍스트 형식에 속하지 않습니다",
         "the maximum number of attached files is {limit}": "파일은 최대 {limit}개까지 첨부할 수 있습니다",
+        "choose master mode for this chat: /master [on|off]": "이 채팅의 마스터 모드 설정: /master [on|off]",
+        "Usage: /master [on|off]": "사용법: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "마스터 모드가 켜져 있습니다. 끄려면 /master off를 입력하세요.",
+        "Master mode is off. Type /master on to turn it on.": "마스터 모드가 꺼져 있습니다. 켜려면 /master on을 입력하세요.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "마스터 모듈에 사용할 수 있는 모델이 없어 후속 작업을 클러스터용으로 계획합니다: {why}",
     }
 )
 

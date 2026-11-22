@@ -2061,6 +2061,11 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "розмір файла перевищує {limit} байтів",
         "the file extension is not a supported text format": "розширення файла не належить до підтримуваних текстових форматів",
         "the maximum number of attached files is {limit}": "можна прикріпити не більше ніж {limit} файлів",
+        "choose master mode for this chat: /master [on|off]": "вибрати режим майстра для цього чату: /master [on|off]",
+        "Usage: /master [on|off]": "Використання: /master [on|off]",
+        "Master mode is on. Type /master off to turn it off.": "Режим майстра ввімкнено. Щоб вимкнути його, введіть /master off.",
+        "Master mode is off. Type /master on to turn it on.": "Режим майстра вимкнено. Щоб увімкнути його, введіть /master on.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Немає готової моделі для майстер-модуля, тому продовження планується для кластера: {why}",
     }
 )
 
