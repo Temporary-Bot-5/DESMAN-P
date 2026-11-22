@@ -29,12 +29,12 @@ from pydantic import (
 
 from desman.core import filelock
 from desman.core.atomic import read_text, replace_file, retry_sharing
-from desman.tuning_limits import PAGE_TUNING_BOUNDS
+from desman.tuning_limits import MASTER_TUNING_BOUNDS, PAGE_TUNING_BOUNDS
 from desman.tuning_limits import TUNING_BOUNDS as WORKFLOW_TUNING_BOUNDS
 
 _BINARY: Final = getattr(os, "O_BINARY", 0)
 
-TUNING_BOUNDS = {**PAGE_TUNING_BOUNDS, **WORKFLOW_TUNING_BOUNDS}
+TUNING_BOUNDS = {**PAGE_TUNING_BOUNDS, **WORKFLOW_TUNING_BOUNDS, **MASTER_TUNING_BOUNDS}
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
@@ -96,7 +96,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
 _RENAMED_KEYS = {"VERCEL_AI_GATEWAY_KEY": "AI_GATEWAY_API_KEY"}
@@ -152,6 +152,20 @@ ModelLabel = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_-]+/\S+$", max_
 """`provider/model`, as `router.Choice.label` writes it."""
 
 
+class MasterChoices(BaseModel):
+    """The person's benchmark admissions and explicit exclusions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    admitted: list[ModelLabel] = Field(default_factory=list)
+    revoked: list[ModelLabel] = Field(default_factory=list)
+
+    @field_validator("admitted", "revoked")
+    @classmethod
+    def unique(cls, labels: list[str]) -> list[str]:
+        return list(dict.fromkeys(labels))
+
+
 class ModelChoices(BaseModel):
     """The model a role asks first (`provider/model`), when the person chose one (ROADMAP 5.4);
     None: DESMAN's own order. A chosen model only goes first among the ready free ones: one
@@ -168,7 +182,7 @@ class ModelChoices(BaseModel):
     analysis: ModelLabel | None = None
     master: ModelLabel | None = None
     """The executor's of a master subtask (ADR 0015): only a qualified model is asked, and a
-    local one only when named here (`router.qualified`)."""
+    local one may also be named here (`router.qualified`)."""
     interlocutor: ModelLabel | None = None
 
 
@@ -211,6 +225,7 @@ class Tuning(BaseModel):
     keys: KeyChoices = Field(default_factory=KeyChoices)
     chat_turns: StrictInt | None = Field(default=None, ge=1, le=8)
     workers: StrictInt | None = Field(default=None, ge=1, le=8)
+    master_rounds: StrictInt | None = _bounded("master_rounds")
     max_subtasks: StrictInt | None = _bounded("max_subtasks")
     """The most subtasks in a plan."""
     max_parts: StrictInt | None = _bounded("max_parts")
@@ -307,7 +322,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[11] = 11
+    schema_version: Literal[12] = 12
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -321,6 +336,7 @@ class Config(BaseModel):
     personalize: StrictBool = False
     behaviour: Behaviour = Field(default_factory=Behaviour)
     tuning: Tuning = Field(default_factory=Tuning)
+    master: MasterChoices = Field(default_factory=MasterChoices)
     network: Network = Field(default_factory=Network)
 
     def keys(self, env: str) -> list[ApiKey]:
@@ -422,6 +438,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
 
     if version == 10:
         version = 11  # the master module's model and key (ADR 0015) default to none
+
+    if version == 11:
+        version = 12  # no admissions or revocations by default
 
     data["schema_version"] = version
     return data

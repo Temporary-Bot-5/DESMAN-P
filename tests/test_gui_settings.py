@@ -71,7 +71,10 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
     }
     assert len(data["general"]["languages"]) == 13
     assert len(data["permissions"]) == 4
-    assert len(data["limits"]) == 7
+    assert len(data["limits"]) == 8
+    master_rounds = next(limit for limit in data["limits"] if limit["name"] == "master_rounds")
+    assert (master_rounds["value"], master_rounds["min"], master_rounds["max"]) == (None, 8, 48)
+    assert master_rounds["default"] == 24
     groq = next(p for p in data["providers"] if p["id"] == "groq")
     assert groq["ready"] and groq["keys"][0]["fingerprint"] == key_id(secret)
     assert "value" not in groq["keys"][0]

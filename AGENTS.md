@@ -111,6 +111,8 @@ src/desman/
 │                  #   quotas (`providers.can_donate`: local always, free cloud only if
 │                  #   `donatable`, paid never); each change in `network_log`; only `leave`
 │                  #   talks to the registry (says goodbye while still on)
+├── master_cli.py # `master [list]|check MODEL|admit MODEL|revoke MODEL` (M.3): benchmark checks
+│                  #   and the person’s decisions on which models may serve as masters
 ├── tuning_cli.py  # `tuning`: the model each role asks first, the limits of the workflow
 │                  #   (`runs.TUNING_DEFAULTS` when unset); set by the person only
 ├── proposals_cli.py # `proposals [list]|show N|evaluate N [--real]|apply N|revert N` (and
@@ -259,7 +261,7 @@ src/desman/
     ├── catalog.py # Models per provider (default first): context, strict JSON, strengths
                    #   (code, text, analysis), free-tier rpm; need(): what each role asks (the
                    #   executor: what its subtask's Kind asks); `master`: qualified to hold a
-                   #   whole goal (ADR 0015, `run --master`; a local one only if the person names it)
+                   #   whole goal (ADR 0015, `run --master`): starting list; admitted/revoked in Config.master
     ├── router.py  # lineup(): a role's models, best first (need, JSON, PREFERENCE, catalog);
                    #   --provider narrows it, --model pins one; other_lineup() for "other model"
                    #   Fallback: a call moves to the next model on a limit, outage, refused key,

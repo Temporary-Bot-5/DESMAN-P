@@ -12,7 +12,7 @@
 "policy.toml" = "e1d97b1816a6ac8b7a61e8242d152eb654dff28b31d54685c82b4d71b8f82565"
 "core/policy.py" = "f05e222d40b3ec68582960f9095fd826a90f0edccd907d8fec8441957f6223da"
 # The reviewer (and the executor it judges).
-"agents.py" = "317451e7b6c5b736e1ccd58d81a01599e027b23123c14fe9cfa23c7a4e599d0e"
+"agents.py" = "c46aad7ceb8328ec27f133a689ec2705bb555f280a24d1972c07e87b920d995d"
 # Security rules: the sandbox for generated code, the workspace guard for files.
 "core/sandbox.py" = "34d421aaa442a17697cc67faa7603fde96776281c546c892ec53781d31f0670f"
 "core/wasi_runner.py" = "2eacfce0b36e6d6d6ace74806cdd7f8f4df3fa0bbb66b01c9a1ab22084aba6aa"
@@ -22,7 +22,7 @@
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
 # How a proposal of the Improvement Analyst is judged: the benchmark and its comparison.
-"bench.py" = "23feb97c39e501659a15f27d2a3db10f6c43d87fe20bef75e669cb1bfff5abbf"
+"bench.py" = "f3af88b8778c302823b0ddfb14ca423e4ae8b403188464142afd308407bca7b5"
 "evaluation.py" = "a931fe78c83dda1117b4dcf2ec1937126987ad8fb0c82746cdc3a3ffb67b7d96"
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
 "applying.py" = "655a1ac6db3304e4d031a4fcdd627ae046f67c322b9e339cbf5d403bfb21f368"

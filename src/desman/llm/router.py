@@ -185,11 +185,11 @@ def lineup(
                 selected = candidate
         except providers.UnknownProvider:
             pass
-    first = selected if selected is not None else choose(config, provider)
     if kind == catalog.MASTER:
         return _master_lineup(
             config, provider, model, conn, scope, scope_id, local_choices=local_choices
         )
+    first = selected if selected is not None else choose(config, provider)
     if model is not None:
         return filter_holds(config, [choice(first, model)], conn, scope, scope_id)
     pool = [first] if provider is not None else _free(config)
@@ -218,14 +218,45 @@ def lineup(
 
 
 def qualified(config: Config, choice: Choice, *, named: bool = False) -> bool:
-    """May `choice` be a master module (ADR 0015)? A cloud model only when the catalog marks it;
-    a local one only when the person named it (`tuning.models.master`, or `named`: on the
-    command line) and its context holds a long loop."""
-    if choice.provider.local:
-        return (named or choice.label == config.tuning.models.master) and (
-            choice.spec.context >= catalog.MASTER_LOCAL_CONTEXT
+    """Whether the choice meets the person's admissions and the master context floor."""
+    return (
+        choice.label not in config.master.revoked
+        and master_limits(choice)
+        and (
+            choice.spec.master
+            or choice.label in config.master.admitted
+            or (choice.provider.local and (named or choice.label == config.tuning.models.master))
         )
-    return catalog.model(choice.provider, choice.model).master
+    )
+
+
+def master_limits(choice: Choice) -> bool:
+    return (
+        choice.spec.context >= catalog.MASTER_LOCAL_CONTEXT and choice.spec.request_tokens is None
+    )
+
+
+def master_candidate(
+    config: Config, label: str, *, local_choices: dict[tuple[str, str], Choice] | None = None
+) -> Choice:
+    """Resolve exactly the model named for a benchmark, regardless of admissions."""
+    provider_id, sep, model_id = label.partition("/")
+    if not sep or not provider_id or not model_id:
+        raise NoProvider(t("Use a model label in the form PROVIDER/MODEL."))
+    provider = choose(config, provider_id)
+    if not provider.local and all(m.id != model_id for m in catalog.models_of(provider)):
+        raise NoProvider(t("{model} is unknown to the DESMAN model catalog.", model=label))
+    known = (local_choices or {}).get((provider.id, model_id))
+    choice = known if known is not None else _choice(config, provider, model_id)
+    if not master_limits(choice):
+        raise NoProvider(
+            t(
+                "{model} needs a context of at least {context} tokens and no per-request token cap.",
+                model=label,
+                context=catalog.MASTER_LOCAL_CONTEXT,
+            )
+        )
+    return choice
 
 
 def _master_lineup(
@@ -257,6 +288,21 @@ def _master_lineup(
         scope_id=scope_id,
         local_choices=local_choices,
     )
+    if model is None:
+        pool = _free(config) if provider is None else [choose(config, provider)]
+        for p in pool:
+            if not p.local:
+                continue
+            for label in config.master.admitted:
+                source, _, model_id = label.partition("/")
+                if source != p.id or any(c.label == label for c in choices):
+                    continue
+                known = (local_choices or {}).get((source, model_id))
+                if known is None and local_choices is not None:
+                    known = Choice(p, model_id, catalog.local_model(model_id, p.context(config)))
+                    local_choices[source, model_id] = known
+                choices.append(known if known is not None else _choice(config, p, model_id))
+        choices = filter_holds(config, choices, conn, scope, scope_id)
     named = provider is not None or model is not None
     masters = [
         c
@@ -276,10 +322,10 @@ def _master_lineup(
         )
         raise NoProvider(
             t(
-                "No model ready for a master module: it takes a key for a model marked for it "
+                "No model ready for a master module: configure a catalog or admitted model "
                 "({models}), or a local model with a context of at least {context} tokens that "
                 "you name with `desman tuning --model master=PROVIDER/MODEL`.",
-                models=", ".join(master_models()),
+                models=", ".join(master_models(config)),
                 context=catalog.MASTER_LOCAL_CONTEXT,
             )
             + local_note
@@ -287,25 +333,30 @@ def _master_lineup(
     return masters
 
 
-def may_be_master(label: str) -> bool:
-    """Whether the model `provider/model` could ever be the master: one the catalog marks, or
-    a local one (whose context is checked when it runs)."""
-    provider_id, _, model_id = label.partition("/")
+def may_be_master(label: str, config: Config | None = None) -> bool:
+    """Check eligibility when choosing a preference, including a named local model."""
+    provider_id, sep, model_id = label.partition("/")
+    if not sep or not model_id:
+        return False
     try:
         p = providers.find(provider_id)
     except providers.UnknownProvider:
         return False
-    return p.local or catalog.model(p, model_id).master
+    if config is None and p.local:
+        return True  # a local context is only known with the person's config
+    config = config or Config()
+    return qualified(config, _choice(config, p, model_id), named=True)
 
 
-def master_models() -> list[str]:
-    """The free cloud models the catalog marks for a master module, as `provider/model`."""
+def master_models(config: Config | None = None, *, include_paid: bool = False) -> list[str]:
+    """Catalog and admitted labels eligible for master selection."""
+    config = config or Config()
+    marked = [f"{p.id}/{m.id}" for p in providers.CLOUD for m in catalog.models_of(p) if m.master]
     return [
-        f"{p.id}/{m.id}"
-        for p in providers.CLOUD
-        if not p.paid
-        for m in catalog.models_of(p)
-        if m.master
+        label
+        for label in dict.fromkeys([*marked, *config.master.admitted])
+        if may_be_master(label, config)
+        and (include_paid or not providers.find(label.partition("/")[0]).paid)
     ]
 
 

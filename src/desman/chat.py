@@ -1863,7 +1863,19 @@ class Chat:
     def _slash(self, line: str) -> bool:
         """Run a chat command; False when it ends the chat."""
         name = line.split()[0].lower()
-        if name not in _commands():
+        args = line.split(maxsplit=2)
+        master_command = (
+            name == "/master"
+            and len(args) > 1
+            and args[1].lower()
+            in {
+                "list",
+                "check",
+                "admit",
+                "revoke",
+            }
+        )
+        if master_command or name not in _commands():
             if self.in_terminal:
                 self._typed(line[1:])
             else:

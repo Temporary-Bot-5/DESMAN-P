@@ -813,6 +813,22 @@ MIGRATIONS: Final[tuple[str, ...]] = (
     """
     ALTER TABLE subtasks ADD COLUMN master INTEGER NOT NULL DEFAULT 0 CHECK (master IN (0, 1));
     """,
+    # 52: benchmark checks are immutable evidence for master admissions (ADR 0015).
+    """
+    CREATE TABLE master_checks (
+        id INTEGER PRIMARY KEY,
+        model TEXT NOT NULL,
+        checked_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        version INTEGER NOT NULL,
+        passed INTEGER NOT NULL CHECK (passed IN (0, 1)),
+        result_json TEXT NOT NULL CHECK (json_valid(result_json))
+    ) STRICT;
+    CREATE INDEX master_checks_model ON master_checks(model, id DESC);
+    CREATE TRIGGER master_checks_no_update BEFORE UPDATE ON master_checks
+        BEGIN SELECT RAISE(ABORT, 'master_checks is append-only'); END;
+    CREATE TRIGGER master_checks_no_delete BEFORE DELETE ON master_checks
+        BEGIN SELECT RAISE(ABORT, 'master_checks is append-only'); END;
+    """,
 )
 
 SCHEMA_VERSION: Final = len(MIGRATIONS)

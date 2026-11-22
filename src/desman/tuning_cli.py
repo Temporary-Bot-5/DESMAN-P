@@ -34,6 +34,7 @@ ROLES = tuple(ModelChoices.model_fields)
 @click.option(
     "--workers", metavar="N|auto", help="Background workers (1–8); applies on the next page start."
 )
+@click.option("--master-rounds", metavar="N|auto", help="Tool rounds per master attempt (8–48).")
 @click.option("--max-subtasks", metavar="N|auto", help="The most subtasks in a plan (1–12).")
 @click.option(
     "--max-parts", metavar="N|auto", help="The most parts a failing subtask is split into (2–6)."
@@ -74,6 +75,7 @@ ROLES = tuple(ModelChoices.model_fields)
 def tuning(
     chat_turns: str | None,
     workers: str | None,
+    master_rounds: str | None,
     max_subtasks: str | None,
     max_parts: str | None,
     context_tokens: str | None,
@@ -90,6 +92,7 @@ def tuning(
     numbers = {
         "chat_turns": chat_turns,
         "workers": workers,
+        "master_rounds": master_rounds,
         "max_subtasks": max_subtasks,
         "max_parts": max_parts,
         "context_tokens": context_tokens,
@@ -231,7 +234,11 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
             if role == catalog.MASTER and not provider.local:
                 # The marked ones, paid included: the person may name one (asked only with
                 # --provider, `router._master_lineup`).
-                models = [provider.id + "/" + m.id for m in catalog.models_of(provider) if m.master]
+                models = [
+                    m
+                    for m in router.master_models(config, include_paid=True)
+                    if m.startswith(provider.id + "/")
+                ]
             elif not provider.local:
                 models = list(
                     dict.fromkeys(
@@ -240,6 +247,8 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
                 )
             if provider.id == "ollama":
                 models = list(dict.fromkeys([*models, *("ollama/" + m.name for m in installed)]))
+            if role == catalog.MASTER:
+                models = [m for m in models if router.may_be_master(m, config)]
             if role == catalog.MASTER and not models:
                 continue  # nothing of this provider can be the master
             available.append(
@@ -257,6 +266,7 @@ def role_rows(config: Config) -> list[dict[str, Any]]:
                 "key_fingerprint": fingerprint,
                 "key_label": found["label"] if found else t("missing") if fingerprint else AUTO,
                 "candidate_models": candidates,
+                "revoked_models": config.master.revoked if role == catalog.MASTER else [],
                 "candidate_keys": [dict(k) for k in keys],
             }
         )
@@ -328,6 +338,7 @@ def labels() -> dict[str, str]:
     return {
         "chat_turns": t("Concurrent page chat turns"),
         "workers": t("Background workers (next page start)"),
+        "master_rounds": t("tool rounds per master attempt"),
         "max_subtasks": t("most subtasks in a plan"),
         "max_parts": t("most parts of a split subtask"),
         "context_tokens": t("tokens of dependency results shown"),
@@ -416,6 +427,14 @@ def print_tuning(tuning: Tuning, config: Config | None = None) -> None:
             table.add_row(
                 Text(t("key: {role}", role=row["role"]), style="muted"), Text(row["key_label"])
             )
+        for model in config.master.revoked:
+            table.add_row(
+                Text(t("Master module"), style="muted"),
+                t("{model} is revoked and will not be used.", model=model),
+            )
+        eligible = router.master_models(config, include_paid=True)
+        if eligible:
+            table.add_row(Text(t("Master module"), style="muted"), ", ".join(eligible))
     ui.out(table)
     ui.note(
         t(
@@ -433,23 +452,26 @@ def print_change(old: Tuning, new: Tuning, config: Config) -> None:
     for line in changed:
         ui.ok(line)
     for role, label in unready(config, new):
-        if role == catalog.MASTER and not router.may_be_master(label):
-            ui.warn(
-                t(
-                    "{model} cannot be the master module: only a model marked for it ({models}) "
-                    "or a local model can. It is kept, but never asked.",
-                    model=label,
-                    models=", ".join(router.master_models()),
-                )
-            )
+        if role == catalog.MASTER and label in config.master.revoked:
+            ui.warn(t("{model} is revoked and will not be used.", model=label))
             continue
-        if role == catalog.MASTER and providers.find(label.split("/", 1)[0]).local:
+        if role == catalog.MASTER and label.partition("/")[0] in {"ollama", "llamacpp"}:
             ui.warn(
                 t(
                     "{model} can be the master module only with a context of at least {context} "
                     "tokens (for Ollama, set OLLAMA_CONTEXT) and its server running.",
                     model=label,
                     context=catalog.MASTER_LOCAL_CONTEXT,
+                )
+            )
+            continue
+        if role == catalog.MASTER and not router.may_be_master(label, config):
+            ui.warn(
+                t(
+                    "{model} cannot be the master module with the current admissions and model limits. "
+                    "Eligible models: {models}.",
+                    model=label,
+                    models=", ".join(router.master_models(config)),
                 )
             )
             continue

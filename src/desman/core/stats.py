@@ -75,6 +75,18 @@ class ModelUse:
 
 
 @dataclass(frozen=True)
+class ModeUse:
+    tasks: int = 0
+    done: int = 0
+    escalated: int = 0
+    calls: int = 0
+    failed_calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    subtasks: int = 0
+
+
+@dataclass(frozen=True)
 class Stats:
     since: str | None
     """The window's start, None for all time."""
@@ -89,6 +101,10 @@ class Stats:
     """Failed attempts and reviews, by `FailureKind`."""
     roles: list[RoleUse] = field(default_factory=list)
     models: list[ModelUse] = field(default_factory=list)
+    modes: dict[str, ModeUse] = field(
+        default_factory=lambda: {"master": ModeUse(), "cluster": ModeUse()}
+    )
+    """Task cohorts by creation time, with calls attributed to those tasks."""
 
     def as_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -115,9 +131,11 @@ def collect(
     start = None if since is None else db.to_iso(since)
     w = _Window(start, skip)
     with db.read_snapshot(conn):
+        tasks, modes = _tasks(conn, w)
         return Stats(
             since=start,
-            tasks=_tasks(conn, w),
+            tasks=tasks,
+            modes=modes,
             subtasks=_subtasks(conn, w),
             strategies=_strategies(conn, w),
             reviews=_reviews(conn, w),
@@ -147,19 +165,49 @@ class _Window:
         return (" AND ".join(parts) or "1"), args
 
 
-def _tasks(conn: sqlite3.Connection, w: _Window) -> dict[str, int]:
+def _tasks(conn: sqlite3.Connection, w: _Window) -> tuple[dict[str, int], dict[str, ModeUse]]:
     where, args = w.where("t.created_at", "t.id")
     statuses: dict[str, list[SubtaskStatus]] = {}
-    for task_id, value in conn.execute(
-        f"""SELECT t.id, s.status FROM tasks t LEFT JOIN subtasks s ON s.task_id = t.id
-            WHERE {where}""",
+    masters: set[str] = set()
+    for task_id, value, master in conn.execute(
+        f"""SELECT t.id, s.status, s.master AND s.parent_id IS NULL
+            FROM tasks t LEFT JOIN subtasks s ON s.task_id = t.id WHERE {where}""",
         args,
     ):
         statuses.setdefault(task_id, [])
         if value is not None:
             statuses[task_id].append(SubtaskStatus(value))
-    counts = Counter(derive_task_status(s).value for s in statuses.values())
-    return {status.value: counts[status.value] for status in TaskStatus if counts[status.value]}
+        if master:
+            masters.add(task_id)
+    usage = {
+        row["id"]: row
+        for row in conn.execute(
+            f"""SELECT t.id,
+                       EXISTS (SELECT 1 FROM audit_log a
+                               WHERE a.task_id = t.id AND a.to_status = 'needs_human') AS escalated,
+                       COUNT(c.seq) AS calls, SUM(c.error_kind IS NOT NULL) AS failed_calls,
+                       COALESCE(SUM(c.prompt_tokens), 0) AS prompt_tokens,
+                       COALESCE(SUM(c.completion_tokens), 0) AS completion_tokens
+                FROM tasks t LEFT JOIN model_calls c ON c.task_id = t.id
+                WHERE {where} GROUP BY t.id""",
+            args,
+        )
+    }
+    counts: Counter[str] = Counter()
+    totals: dict[str, Counter[str]] = {"master": Counter(), "cluster": Counter()}
+    for task_id, subtasks in statuses.items():
+        status = derive_task_status(subtasks)
+        counts[status.value] += 1
+        group = totals["master" if task_id in masters else "cluster"]
+        group["tasks"] += 1
+        group["done"] += status is TaskStatus.DONE
+        group["subtasks"] += len(subtasks)
+        for name in ("escalated", "calls", "failed_calls", "prompt_tokens", "completion_tokens"):
+            group[name] += usage[task_id][name]
+    return (
+        {status.value: counts[status.value] for status in TaskStatus if counts[status.value]},
+        {name: ModeUse(**group) for name, group in totals.items()},
+    )
 
 
 def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:

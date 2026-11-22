@@ -43,6 +43,7 @@ from desman import (
     i18n,
     improve,
     local_models,
+    master_cli,
     messenger_cli,
     models_cli,
     modules_cli,
@@ -63,6 +64,7 @@ from desman.config import (
     ConfigError,
     ConfigManager,
     ModelChoices,
+    ModelLabel,
     RegistryUrl,
     Tuning,
 )
@@ -345,6 +347,7 @@ Limit = Annotated[int, Field(ge=1, le=16000)] | Literal["auto"]
 class TuningArgs(Args):
     chat_turns: Limit | None = None
     workers: Limit | None = None
+    master_rounds: Annotated[int, Field(ge=8, le=48)] | Literal["auto"] | None = None
     max_subtasks: Limit | None = None
     max_parts: Limit | None = None
     context_tokens: Limit | None = None
@@ -388,6 +391,7 @@ class TuningArgs(Args):
         numbers = (
             "chat_turns",
             "workers",
+            "master_rounds",
             "max_subtasks",
             "max_parts",
             "context_tokens",
@@ -405,6 +409,10 @@ class TuningArgs(Args):
 ModuleRole = Literal[
     "planner", "reviewer", "decomposer", "text", "code", "analysis", "master", "interlocutor"
 ]
+
+
+class MasterArgs(Args):
+    model: ModelLabel
 
 
 class ModuleHoldArgs(Args):
@@ -1020,6 +1028,40 @@ def _modules_clear(ctx: Context, args: ModulesClearArgs) -> Proposal:
         return Outcome({"scope": scope, "scope_id": identity, "cleared": args.role})
 
     return Proposal(lines or [t("Nothing changed.")], apply)
+
+
+def _master_list(ctx: Context, args: NoArgs) -> Outcome:
+    rows = master_cli.rows(ctx.store.conn, ctx.config())
+    master_cli.print_list(rows)
+    return Outcome({"models": rows})
+
+
+def _master_check(ctx: Context, args: MasterArgs) -> Proposal:
+    def apply() -> Outcome:
+        result = master_cli.run_check(ctx.store, ctx.config(), args.model)
+        master_cli.print_check(result)
+        return Outcome(result)
+
+    return Proposal([master_cli.check_notice(args.model)], apply)
+
+
+def _master_decision(ctx: Context, args: MasterArgs, *, admit: bool) -> Proposal:
+    if admit:
+        master_cli.require_pass(ctx.store.conn, args.model)
+
+    def apply() -> Outcome:
+        changed = master_cli.change(ctx.store.conn, ctx.manager, args.model, admit=admit)
+        master_cli.print_change(args.model, admit=admit)
+        return Outcome(
+            {"model": args.model, "admitted": admit, "revoked": not admit, "changed": changed}
+        )
+
+    line = (
+        t("Allow {model} to be selected as a master module.", model=args.model)
+        if admit
+        else t("Exclude {model} from master selection.", model=args.model)
+    )
+    return Proposal([line], apply)
 
 
 def _tuning_kind(args: TuningArgs) -> Kind:
@@ -2338,13 +2380,42 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "tuning",
         "Without arguments: show how the work is done (the model and key each role asks first; the "
-        "most subtasks in a plan, parts of a split, tokens of dependency results shown, "
+        "master tool rounds, most subtasks in a plan, parts of a split, tokens of dependency results shown, "
         'attempts and interruptions before the person decides). With any of them ("auto": '
         "back to the default): change it (the person confirms). A proposal of the Improvement "
         "Analyst names such a change.",
         TuningArgs,
         _tuning_kind,
         _tuning,
+    ),
+    Entry(
+        "master list",
+        "List master models, their admission status and latest benchmark checks.",
+        NoArgs,
+        Kind.READ,
+        _master_list,
+        aliases=("master",),
+    ),
+    Entry(
+        "master check",
+        "Check one provider/model on the master benchmark. Spends that provider's quota.",
+        MasterArgs,
+        Kind.CHANGE,
+        _master_check,
+    ),
+    Entry(
+        "master admit",
+        "Allow a provider/model with a passing current check to be a master. The person confirms.",
+        MasterArgs,
+        Kind.CHANGE,
+        lambda ctx, args: _master_decision(ctx, args, admit=True),
+    ),
+    Entry(
+        "master revoke",
+        "Exclude a provider/model from master selection. The person confirms.",
+        MasterArgs,
+        Kind.CHANGE,
+        lambda ctx, args: _master_decision(ctx, args, admit=False),
     ),
     Entry(
         "nodes list",
@@ -2883,6 +2954,7 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
             if getattr(old.tuning.keys, r) != getattr(new.tuning.keys, r)
         ]
         changes.append(("operator_tuning", {"changed": parts}))
+    changes.extend(master_cli.changes(old.master, new.master))
     if old.network != new.network:  # which parts, by name; quotas are not secret
         parts = [
             n

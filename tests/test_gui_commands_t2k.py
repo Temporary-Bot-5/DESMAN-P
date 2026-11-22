@@ -168,9 +168,11 @@ def test_chat_context_and_clear_keep_history_without_model(tmp_path: Path) -> No
     conn.close()
 
 
-def test_command_names_do_not_collide() -> None:
+def test_only_intentional_command_roots_are_shared() -> None:
     roots = {entry.name.split()[0] for entry in commands.CATALOG}
-    assert roots & {name[1:] for name in _commands()} == {"help"}
+    # /master [on|off] is a chat command; its named subcommands use the CLI catalog.
+    assert roots & {name[1:] for name in _commands()} == {"help", "master"}
+    assert "/master list" in commands.completions()
     assert "/task pause" in commands.completions()
 
 

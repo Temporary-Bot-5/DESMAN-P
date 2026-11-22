@@ -32,7 +32,7 @@ from desman import (
 )
 from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
-from desman.config import Config, ConfigError, Tuning, open_config
+from desman.config import Config, ConfigError, MasterChoices, Tuning, open_config
 from desman.config_cli import (
     behaviour,
     config,
@@ -65,6 +65,7 @@ from desman.llm import router
 from desman.llm import waiting as provider_wait
 from desman.llm.base import LLM
 from desman.llm.fake import FakeLLM, ScriptExhausted
+from desman.master_cli import master
 from desman.messenger_cli import register_commands
 from desman.models_cli import models
 from desman.modules_cli import modules
@@ -227,6 +228,7 @@ cli.add_command(permissions)
 cli.add_command(personalize)
 cli.add_command(behaviour)
 cli.add_command(tuning)
+cli.add_command(master)
 cli.add_command(modules)
 cli.add_command(models)
 cli.add_command(search)
@@ -612,6 +614,7 @@ def worker(
             cache=not no_cache,
             as_json=as_json,
             read_tuning=lambda: network_config.tuning,
+            read_master=lambda: network_config.master,
         )
         crew = runs.network_crew(
             store,
@@ -629,6 +632,7 @@ def worker(
             network=crew,
             sandbox=sandbox,
             load=manager.load,
+            read_tuning=lambda: network_config.tuning,
         )
         coordinator.poll_seconds = poll_seconds
         watch = InboxWatch(store)
@@ -1093,6 +1097,7 @@ def _attach(
     cache: bool,
     as_json: bool,
     read_tuning: Callable[[], Tuning] | None = None,
+    read_master: Callable[[], MasterChoices] | None = None,
     master: bool = False,
 ) -> runs.Models:
     """The run's models (`runs.models`: a lineup per role), said to the operator. The fake is
@@ -1109,6 +1114,7 @@ def _attach(
             model=source.model,
             cache=cache,
             read_tuning=read_tuning,
+            read_master=read_master,
         )
     except router.NoProvider as e:
         raise click.ClickException(str(e)) from e

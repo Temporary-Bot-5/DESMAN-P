@@ -42,8 +42,8 @@ class Model:
     request_tokens: int | None = None
     """Free-tier ceiling for one request, independent of the context window."""
     master: bool = False
-    """Qualified for a master module (ADR 0015): one subtask holding a whole goal, worked in a
-    long loop of tool calls. A judgement made in code review; `qualifies` checks its basis."""
+    """Starting list for master modules (ADR 0015). `qualifies` checks the catalog mark's
+    basis; the person's admissions and revocations are in `Config.master`."""
 
 
 _C, _T, _A = Strength.CODE, Strength.TEXT, Strength.ANALYSIS

@@ -43,7 +43,8 @@ from desman.llm import router
 from desman.llm.base import LLM, Completion, Request
 from desman.llm.fake import FakeLLM, garbage
 from desman.llm.openai_compat import CallRecord
-from desman.planner import PLAN, SPLIT, plan
+from desman.planner import PLAN, SPLIT, master_plan, plan
+from desman.tuning_limits import TUNING_BOUNDS
 
 VERSION = 1
 """Of the benchmark set and its result; results of different versions are not compared."""
@@ -91,7 +92,7 @@ class CaseResult(BaseModel):
     status: str
     """The task's `TaskStatus` when the run stopped."""
     plan: str
-    """"llm", or "template" when the model's plan failed."""
+    """"llm", "template" when planning failed, or "master" when planning was skipped."""
     plan_error: str | None = None
     subtasks: int
 
@@ -121,34 +122,44 @@ def run(
     config: Config | None = None,
     provider: str | None = None,
     model: str | None = None,
+    master: str | None = None,
 ) -> Result:
-    """Every case, one after another, on `store` (a database of its own)."""
+    """Every case on a database of its own. In master mode no work is split or delegated."""
     if mode == "fake":
-        models = runs.Models(Recorded(fake(), store.conn), None)
+        llm = Recorded(fake(), store.conn)
+        models = runs.Models(llm, None, master=(llm, None) if master is not None else None)
     else:
         assert config is not None
         # The models each role asks first are part of the tuning being evaluated.
         tuned = config.model_copy(update={"tuning": tuning})
-        models = runs.models(tuned, store.conn, provider=provider, model=model, cache=False)
-    coordinator = runs.summarizer(store, models, tuning)
+        models = runs.models(
+            tuned, store.conn, provider=provider, model=model, cache=False, master_candidate=master
+        )
+    coordinator = runs.summarizer(store, models, tuning, master_check=master is not None)
     cases = []
     for case in CASES:
-        with calls.for_(calls.Purpose(calls.Role.PLANNER)):
-            planned = plan(
-                models.for_(calls.Role.PLANNER),
-                case.goal,
-                limit=runs.tuned(tuning, "max_subtasks"),
-            )
-        spec = runs.tuned_spec(planned.spec, tuning).model_copy(update={"tools": Tools.NONE})
-        task_id = store.create_task(spec, details=planned.details() | {"benchmark": case.id})
+        if master is None:
+            with calls.for_(calls.Purpose(calls.Role.PLANNER)):
+                planned = plan(
+                    models.for_(calls.Role.PLANNER),
+                    case.goal,
+                    limit=runs.tuned(tuning, "max_subtasks"),
+                )
+            spec, details = planned.spec, planned.details()
+            source, error = planned.source, planned.error
+        else:
+            spec, details = master_plan(case.goal), {"plan": "master"}
+            source, error = "master", None
+        spec = runs.tuned_spec(spec, tuning).model_copy(update={"tools": Tools.NONE})
+        task_id = store.create_task(spec, details=details | {"benchmark": case.id})
         # A pause (a provider's limit) ends the run: the task is left as it is, and counted.
         result = coordinator.run(task_id)
         cases.append(
             CaseResult(
                 id=case.id,
                 status=result.status.value,
-                plan=planned.source,
-                plan_error=planned.error,
+                plan=source,
+                plan_error=error,
                 subtasks=len(store.list_subtasks(task_id)),
             )
         )
@@ -157,7 +168,11 @@ def run(
         mode=mode,
         source=str(Path(desman.__file__).resolve().parent),
         cases=cases,
-        limits={name: runs.tuned(tuning, name) for name in runs.TUNING_DEFAULTS},
+        # Ordinary proposal benchmarks are shared with the registry's existing protocol.
+        limits={
+            name: runs.tuned(tuning, name)
+            for name in (TUNING_BOUNDS if master is None else runs.TUNING_DEFAULTS)
+        },
         stats=collect(store.conn).as_json(),
     )
 
@@ -236,6 +251,15 @@ class Recorded:
         return reply
 
 
+def master_passed(result: Result) -> bool:
+    """All benchmark cases finished without a subtask ever reaching the operator."""
+    return (
+        [case.id for case in result.cases] == [case.id for case in CASES]
+        and all(case.status == "done" for case in result.cases)
+        and result.stats["subtasks"]["escalated"] == 0
+    )
+
+
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -279,7 +303,7 @@ def metrics(result: Result) -> dict[str, int]:
         "tasks": len(result.cases),
         "tasks_done": sum(c.status == "done" for c in result.cases),
         "escalated": int(subtasks.get("escalated", 0)),
-        "plan_fallbacks": sum(c.plan != "llm" for c in result.cases),
+        "plan_fallbacks": sum(c.plan not in ("llm", "master") for c in result.cases),
         "rejected": int(stats.get("reviews", {}).get("retry", 0)),
         "attempts": sum(int(s.get("started", 0)) for s in stats.get("strategies", [])),
         "first_try": int(subtasks.get("first_try", 0)),
@@ -309,8 +333,8 @@ def compare(base: Result, candidate: Result) -> Verdict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`python -m desman.bench --mode fake|real [--tuning JSON] [--provider P] [--model M]`:
-    runs the benchmark on a new database in a temporary folder and prints its `Result` as JSON.
+    """Run the benchmark on a temporary database and print its `Result` as JSON.
+    `--master PROVIDER/MODEL` runs each case as one master subtask.
     Real mode reads the config (`DESMAN_CONFIG_DIR`), and writes nothing to it.
 
     Not a command for people: `desman.evaluation` runs it in a worktree. What it says on
@@ -324,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tuning", default="{}", help="The tuning to run with (JSON).")
     parser.add_argument("--provider")
     parser.add_argument("--model")
+    parser.add_argument("--master", metavar="PROVIDER/MODEL")
     args = parser.parse_args(argv)
     try:
         tuning = Tuning.model_validate_json(args.tuning)
@@ -341,7 +366,13 @@ def main(argv: list[str] | None = None) -> int:
         store = Store(db.open_db(Path(folder) / "desman.db"))
         try:
             result = run(
-                store, args.mode, tuning, config=config, provider=args.provider, model=args.model
+                store,
+                args.mode,
+                tuning,
+                config=config,
+                provider=args.provider,
+                model=args.model,
+                master=args.master,
             )
         except router.NoProvider as e:
             print(str(e), file=sys.stderr)

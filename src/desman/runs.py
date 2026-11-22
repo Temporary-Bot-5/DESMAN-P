@@ -18,8 +18,8 @@ import click
 import httpx
 
 from desman import documents, knowledge, net, providers, ui
-from desman.agents import llm_executor, llm_reviewer
-from desman.config import Config, ConfigError, Tuning, open_config
+from desman.agents import MASTER_TOOL_ROUNDS, llm_executor, llm_reviewer
+from desman.config import Config, ConfigError, MasterChoices, Tuning, open_config
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
@@ -50,6 +50,7 @@ from desman.searxng import engine as searxng_engine
 PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3, "chat_turns": 4}
 
 TUNING_DEFAULTS: Mapping[str, int] = {
+    "master_rounds": MASTER_TOOL_ROUNDS,
     "max_subtasks": MAX_SUBTASKS,
     "max_parts": MAX_PARTS,
     "context_tokens": DEFAULT_BUDGET_TOKENS,
@@ -168,6 +169,8 @@ def models(
     timeout_cap: float | None = None,
     wrap: Callable[[LLM, router.Choice], LLM] | None = None,
     read_tuning: Callable[[], Tuning] | None = None,
+    read_master: Callable[[], MasterChoices] | None = None,
+    master_candidate: str | None = None,
 ) -> Models:
     """A lineup of models per role (`router.lineup`), each model paced by the rate limiter in
     the database, quick blips retried, calls logged and accepted replies kept there. `provider`
@@ -175,7 +178,8 @@ def models(
     leaves no other model for retries. `only`: the models of these providers alone (the ones
     lent to desman-global); `wrap` goes around each model inside the cache (a quota). Raises
     `router.NoProvider`. `read_tuning` supplies the worker’s in-memory tuning snapshot,
-    refreshed at its existing config checks without I/O during routing."""
+    and `read_master` its admissions. Both are refreshed at its config checks.
+    `master_candidate` pins the benchmark executor to one named model."""
     clients: dict[tuple[str, str | None, tuple[str, ...]], LLM] = {}
     timeouts: list[float] = []
     buckets = Buckets(conn, clock)
@@ -313,16 +317,51 @@ def models(
         for p in providers.ready(config)
         if p.local
     }
+    candidate = (
+        router.master_candidate(config, master_candidate, local_choices=local_choices)
+        if master_candidate is not None
+        else None
+    )
+    if (
+        candidate is not None
+        and provider is None
+        and not any(not p.paid for p in providers.ready(config))
+    ):
+        provider = candidate.provider.id
+
+    def master_identity(current: Config) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return tuple(current.master.admitted), tuple(current.master.revoked)
+
+    def current_config() -> Config:
+        if read_tuning is None and read_master is None:
+            return config
+        return config.model_copy(
+            update={
+                "tuning": config.tuning if read_tuning is None else read_tuning(),
+                "master": config.master if read_master is None else read_master(),
+            }
+        )
+
     lineups: dict[
-        tuple[calls.Role, catalog.Lane | None, str | None, str | None], list[router.Choice]
+        tuple[
+            calls.Role,
+            catalog.Lane | None,
+            tuple[tuple[str, ...], tuple[str, ...]] | None,
+            str | None,
+            str | None,
+        ],
+        list[router.Choice],
     ] = {}
 
     def lineup(
         role: calls.Role, kind: catalog.Lane | None = None, current: Config = config
     ) -> list[router.Choice]:
+        if kind == catalog.MASTER and candidate is not None:
+            return [candidate]
         identity = (
             role,
             kind,
+            master_identity(current) if kind == catalog.MASTER else None,
             router.preferred(current, role, kind),
             router.preferred_key(current, role, kind),
         )
@@ -366,9 +405,7 @@ def models(
                 if only is not None
                 else (purpose.session_id if scope == "session" else purpose.task_id) or ""
             )
-            cfg = config
-            if only is None and read_tuning is not None:
-                cfg = config.model_copy(update={"tuning": read_tuning()})
+            cfg = current_config() if only is None else config
             if only is None and identity and field:
                 own_choice = module_choices.get(
                     conn, "session" if scope == "session" else "task", identity, field
@@ -455,12 +492,12 @@ def models(
         main = scoped(calls.Role.EXECUTOR, kind)
         assert main is not None
         kinds[kind] = (main, scoped(calls.Role.EXECUTOR, kind, other=True))
-    found: dict[tuple[str | None, str | None], Master] = {}
+    found: dict[tuple[str | None, str | None, tuple[tuple[str, ...], tuple[str, ...]]], Master] = {}
 
     def find_master() -> Master:
-        cfg = config if read_tuning is None else config.model_copy(update={"tuning": read_tuning()})
+        cfg = current_config()
         # Only the master's own choices decide who it is (`router._master_lineup`).
-        identity = (cfg.tuning.models.master, cfg.tuning.keys.master)
+        identity = (cfg.tuning.models.master, cfg.tuning.keys.master, master_identity(cfg))
         if identity not in found:
             try:
                 masters = lineup(calls.Role.EXECUTOR, catalog.MASTER, cfg)
@@ -703,6 +740,7 @@ def coordinator(
     sandbox: Sandbox | None = None,
     document_reader: Web | None = None,
     load: Callable[[], Config] | None = None,
+    read_tuning: Callable[[], Tuning] | None = None,
 ) -> Coordinator:
     http = client() if http is None else http
     # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
@@ -725,6 +763,7 @@ def coordinator(
         lease_seconds=lease_seconds,
         watch=watch,
         tuning=config.tuning,
+        read_tuning=read_tuning,
         network=network,
     )
 
@@ -800,23 +839,34 @@ def network_crew(
     )
 
 
-def summarizer(store: Store, models: Models, tuning: Tuning | None = None) -> Coordinator:
+def summarizer(
+    store: Store, models: Models, tuning: Tuning | None = None, *, master_check: bool = False
+) -> Coordinator:
     """The operator for a summary of a chat session (`desman.compaction`): an ordinary run, but
     its executor has no tools at all, whatever the permissions. What it reads is a conversation,
     and nothing written in it can make the work act. The benchmark (`desman.bench`) runs on it
     too, with the tuning it evaluates."""
-    return _coordinator(store, models, access=None, tools=Registry(), tuning=tuning)
+    return _coordinator(
+        store, models, access=None, tools=Registry(), tuning=tuning, master_check=master_check
+    )
 
 
 NO_MASTER = (
     "no model qualified for a master module is ready: add a key of a provider whose model the "
-    "catalog marks for it, or name a local model with `desman tuning --model master=...`; then "
+    "catalog marks or the operator admitted, or name a local model with "
+    "`desman tuning --model master=...`; then "
     "retry the subtask (a worker or the page sees a new key once it restarts)"
 )
 """Why a master subtask waits for the person when nobody can be its master (audit, English)."""
 
 
-def _executor(models: Models, store: Store) -> Executor:
+def _executor(
+    models: Models,
+    store: Store,
+    read_tuning: Callable[[], Tuning] = Tuning,
+    *,
+    master_check: bool = False,
+) -> Executor:
     def execute(work: Work) -> Outcome:
         if work.subtask.master and models.choice is not None and models.current_master() is None:
             # Never worked by a model that was not qualified for it (ADR 0015, decision 2).
@@ -833,7 +883,13 @@ def _executor(models: Models, store: Store) -> Executor:
                     {"from": "other_model", "to": "rephrase", "reason": "no other module"},
                 )
                 other = None  # The executor already rephrases when no alternate exists.
-        return llm_executor(main, other, clock=store.clock)(work)
+        return llm_executor(
+            main,
+            other,
+            clock=store.clock,
+            master_rounds=tuned(read_tuning(), "master_rounds"),
+            allow_delegation=not master_check,
+        )(work)
 
     return execute
 
@@ -849,6 +905,8 @@ def _coordinator(
     tuning: Tuning | None = None,
     network: Crew | None = None,
     knowledge: Knowledge | None = None,
+    read_tuning: Callable[[], Tuning] | None = None,
+    master_check: bool = False,
 ) -> Coordinator:
     tuning = tuning or Tuning()
     guard(store)
@@ -857,7 +915,7 @@ def _coordinator(
     # delays taking over the work of a run that died elsewhere).
     return Coordinator(
         store,
-        _executor(models, store),
+        _executor(models, store, read_tuning or (lambda: tuning), master_check=master_check),
         llm_reviewer(
             models.for_(calls.Role.REVIEWER),
             evidence=functools.partial(evidence, store, knowledge=knowledge),
@@ -878,7 +936,9 @@ def _coordinator(
         # Without another provider, "other model" attempts are rephrased instead (and audited so).
         strategies=functools.partial(strategy_for, other_model=models.other is not None),
         providers=models.labels,
-        decomposer=decomposer(
+        decomposer=None
+        if master_check
+        else decomposer(
             models.for_(calls.Role.DECOMPOSER), limit=tuned(tuning, "max_parts"), clock=store.clock
         ),
         context_budget_tokens=tuned(tuning, "context_tokens"),

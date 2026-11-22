@@ -46,7 +46,7 @@ TOPICS: Final = (
         "master",
         "a master module: the whole goal given to one strong model instead of split work",
         "`desman run --master GOAL` gives the whole goal to one qualified model, with up to "
-        "24 tool rounds per attempt. In chat, ask for one agent or type /master on (see "
+        "24 tool rounds per attempt by default (8–48 with `desman tuning --master-rounds N`). In chat, ask for one agent or type /master on (see "
         "`/master`) to enable master mode for this session until the chat ends. The master "
         "may delegate pieces to the cluster. They appear as its parts, and it resumes with "
         "their results. If it keeps failing, its work may be "
@@ -54,10 +54,14 @@ TOPICS: Final = (
         "documents are still read in parts by the cluster. Qualified models: those the catalog "
         "marks (now NVIDIA Nemotron 3 Ultra, Gemini 3.8 Flash, Mistral Medium, Cohere Command "
         "A; paid ones only with --provider), or a local model with at least 32768 tokens of "
-        "context named with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). The "
-        "person chooses the mode. Without a ready master, a new master task cannot "
-        "start. Extend and redo keep master mode when one is ready and tell you when "
-        "the cluster will do the continuation instead.",
+        "context named with `desman tuning --model ROLE=PROVIDER/MODEL` (ROLE master). "
+        "`desman master list` shows the latest checks. `desman master check PROVIDER/MODEL` spends "
+        "quota, tests every case with that model and exits 0 for any finished check (JSON: passed). "
+        "`desman master admit PROVIDER/MODEL` needs a current passing check. "
+        "`desman master revoke PROVIDER/MODEL` excludes even a catalog model. An admitted local "
+        "model needs no tuning preference. All masters need enough context and no per-request cap. "
+        "A ready master is required; extend and redo otherwise use the cluster with a warning. "
+        "`desman stats` compares master and cluster tasks.",
     ),
     Topic(
         "files",
