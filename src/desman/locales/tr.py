@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "DESMAN kısayolu oluştur.",
+    "Default interface": "Varsayılan arayüz",
+    "Default interface: {mode}": "Varsayılan arayüz: {mode}",
+    "Experimental GUI": "Deneysel grafik arayüz",
+    "Open the experimental GUI by default instead of the terminal?": "Terminal yerine varsayılan olarak deneysel grafik arayüz açılsın mı?",
+    "Open the interface section of the setup wizard.": "Kurulum sihirbazının arayüz bölümünü aç.",
+    "Press Enter to close.": "Kapatmak için Enter’a basın.",
+    "Show or set the default interface.": "Varsayılan arayüzü göster veya ayarla.",
+    "Terminal": "Terminal",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "Grafik arayüz deneysel bir özelliktir. Terminali kullanmaya devam edebilirsiniz. Varsayılanı `desman interface` ile değiştirebilirsiniz.",
     "Admit a master model with a current passing check.": "Güncel denetimi geçen bir ana modeli kabul et.",
     "Admitted": "Kabul edildi",
     "Unfinished": "Tamamlanmadı",
@@ -381,7 +391,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "Geçersiz başlatma yolu.",
     "Report a problem": "Sorun bildir",
     "Describe the problem:": "Sorunu açıklayın:",
-    "Create a shortcut to the page without starting it.": "Sayfayı başlatmadan bir kısayol oluştur.",
     "Shortcut created: {path}": "Kısayol oluşturuldu: {path}",
     "Could not create shortcut: {error}": "Kısayol oluşturulamadı: {error}",
     "Shortcuts are not supported on this system yet.": "Bu sistemde kısayollar henüz desteklenmiyor.",

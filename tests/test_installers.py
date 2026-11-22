@@ -46,7 +46,7 @@ echo "desman $*" >> "$LOG"
 if [ "$*" = 'gui --shortcut' ]; then
     mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"
     for shortcut in "$HOME/.local/share/applications/desman.desktop" "$HOME/Desktop/desman.desktop"; do
-        printf '[Desktop Entry]\nExec="%s/.venv/bin/desman" gui\n' "$PWD" > "$shortcut"
+        printf '[Desktop Entry]\nExec="%s/.venv/bin/desman" --launcher\nTerminal=true\n' "$PWD" > "$shortcut"
     done
 fi
 SCRIPT
@@ -165,7 +165,32 @@ def test_fallback_and_start(installer: tuple[Path, dict[str, str]]) -> None:
     assert "No v* tag" in result.stdout
     calls = Path(env["LOG"]).read_text(encoding="utf-8")
     assert "checkout -B desman-installed refs/remotes/origin/master" in calls
-    assert calls.endswith("desman gui\n")
+    assert calls.endswith("desman \n")
+
+
+@linux
+def test_piped_install_reopens_terminal_for_desman(installer: tuple[Path, dict[str, str]]) -> None:
+    home, env = installer
+    terminal = home / "terminal-input"
+    terminal.write_text("wizard reply\n", encoding="utf-8")
+    env["DESMAN_TTY"] = str(terminal)
+    stub = Path(env["UV_STUB"])
+    source = stub.read_text(encoding="utf-8")
+    stub.write_text(
+        source.replace(
+            'echo "desman $*" >> "$LOG"',
+            'echo "desman $*" >> "$LOG"\nif [ "$#" = 0 ]; then cat >> "$LOG"; fi',
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_installer(env, "--yes")
+
+    assert result.returncode == 0, result.stderr
+    assert Path(env["LOG"]).read_text(encoding="utf-8").splitlines()[-2:] == [
+        "desman ",
+        "wizard reply",
+    ]
 
 
 @linux
@@ -272,6 +297,7 @@ def test_windows_dry_run(tmp_path: Path, tmp_path_factory: pytest.TempPathFactor
         "desman global update",
     ):
         assert expected in result.stdout
+    assert "desman" in result.stdout.splitlines()
     assert not (shell_data / "DESMAN").exists()
     assert not (tmp_path / ".config" / "desman").exists()
     assert not (tmp_path / ".local" / "share" / "desman").exists()
@@ -373,7 +399,13 @@ def test_uninstall_refuses_without_confirmation_and_config_collision(
 
 
 @linux
-def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str, str]]) -> None:
+@pytest.mark.parametrize(
+    "launcher",
+    ['desman" gui', 'python" -m desman gui', 'desman" --launcher', 'python" -m desman --launcher'],
+)
+def test_custom_directories_and_shortcuts_purged(
+    installer: tuple[Path, dict[str, str]], launcher: str
+) -> None:
     home, env = installer
     app = home / "custom-app"
     data = home / "custom-data"
@@ -388,9 +420,7 @@ def test_custom_directories_and_shortcuts_purged(installer: tuple[Path, dict[str
     assert run_installer(env, "--yes", "--no-start").returncode == 0
     for folder in (data, config, desktop):
         folder.mkdir()
-    (desktop / "desman.desktop").write_text(
-        f'Exec="{app}/.venv/bin/desman" gui\n', encoding="utf-8"
-    )
+    (desktop / "desman.desktop").write_text(f'Exec="{app}/.venv/bin/{launcher}\n', encoding="utf-8")
     result = run_installer(env, "--yes", "--uninstall", "--purge")
     assert result.returncode == 0, result.stderr
     for path in (app, data, config):
@@ -523,7 +553,7 @@ def test_installers_offer_search_only_with_docker_and_interactive_input() -> Non
 if sys.platform != "win32":
 
     @linux
-    def test_optional_search_failure_still_starts_gui(
+    def test_optional_search_failure_still_starts_desman(
         installer: tuple[Path, dict[str, str]],
     ) -> None:
         _, env = installer
@@ -556,7 +586,7 @@ if sys.platform != "win32":
         assert result.returncode == 0, result.stderr
         assert "search not set up: daemon down" in result.stderr
         assert "later: desman search setup --yes" in result.stderr
-        assert Path(env["LOG"]).read_text(encoding="utf-8").endswith("desman gui\n")
+        assert Path(env["LOG"]).read_text(encoding="utf-8").endswith("desman \n")
 
 
 def test_powershell_optional_search_is_dry_run_safe_and_catches_failure() -> None:

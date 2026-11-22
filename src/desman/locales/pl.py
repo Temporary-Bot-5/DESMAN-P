@@ -15,6 +15,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "Utwórz skrót do DESMAN-a.",
+    "Default interface": "Domyślny interfejs",
+    "Default interface: {mode}": "Domyślny interfejs: {mode}",
+    "Experimental GUI": "Eksperymentalny interfejs graficzny",
+    "Open the experimental GUI by default instead of the terminal?": "Czy domyślnie otwierać eksperymentalny interfejs graficzny zamiast terminala?",
+    "Open the interface section of the setup wizard.": "Otwórz sekcję interfejsu w kreatorze konfiguracji.",
+    "Press Enter to close.": "Naciśnij Enter, aby zamknąć.",
+    "Show or set the default interface.": "Wyświetl lub ustaw domyślny interfejs.",
+    "Terminal": "Terminal",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "Interfejs graficzny jest eksperymentalny. Terminal pozostaje dostępny. Domyślny wybór zmienisz poleceniem `desman interface`.",
     "Admit a master model with a current passing check.": "Dopuść model główny po zaliczeniu testu w bieżącej wersji.",
     "Admitted": "Dopuszczony",
     "Unfinished": "Nieukończony",
@@ -396,7 +406,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "Nieprawidłowa ścieżka uruchamiania.",
     "Report a problem": "Zgłoś problem",
     "Describe the problem:": "Opisz problem:",
-    "Create a shortcut to the page without starting it.": "Utwórz skrót do strony bez jej uruchamiania.",
     "Shortcut created: {path}": "Utworzono skrót: {path}",
     "Could not create shortcut: {error}": "Nie udało się utworzyć skrótu: {error}",
     "Shortcuts are not supported on this system yet.": "Skróty nie są jeszcze obsługiwane w tym systemie.",

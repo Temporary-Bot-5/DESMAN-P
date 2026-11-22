@@ -46,21 +46,24 @@ internet, pero no permisos de administrador.
    su PC», pulsa «Más información» → «Ejecutar de todas formas».
 3. Se abrirá una ventana negra. El instalador te pedirá permiso para instalar lo necesario (uv,
    Python y Git si falta). Escribe `y` y pulsa Intro. Tardará unos minutos.
-4. Al terminar se abrirá la página de DESMAN en el navegador y aparecerá un acceso directo
-   **DESMAN** en el escritorio. Úsalo para abrir el programa en adelante.
+4. El instalador inicia `desman` en el terminal. El acceso directo **DESMAN** del escritorio
+   también lo abre en un terminal.
 
 ### Linux
 
 1. Pulsa **Linux** en la página y copia el comando que aparece.
 2. Abre un terminal, pega el comando (Ctrl+Mayús+V) y pulsa Intro.
 3. Si falta Git, el instalador mostrará el comando para instalarlo. Ejecútalo y repite el paso 2.
-4. Responde `y` a las preguntas. Al final se abrirá un navegador y **DESMAN** aparecerá en el menú
-   de aplicaciones y en el escritorio. Si el escritorio pide permiso para abrir el acceso directo,
-   concédeselo.
+4. Responde `y` a las preguntas. El instalador inicia `desman` en el terminal. **DESMAN**
+   aparece en el menú de aplicaciones y en el escritorio. Autoriza el acceso directo si te lo
+   pide.
 
 Encontrarás más detalles en [install.md](install.md).
 
 ## 2. Primer inicio y clave de acceso
+
+La configuración inicial se realiza en el terminal. En la última pregunta puedes elegir la
+interfaz experimental en el navegador. Puedes cambiar tu elección con `desman interface terminal` o `desman interface gui`.
 
 DESMAN usa modelos que funcionan por internet. Para acceder necesitas una clave gratuita, algo
 parecido a una contraseña para el programa. La primera vez se abre la configuración
@@ -80,8 +83,7 @@ automáticamente.
 3. **Permisos.** Al principio todos están desactivados. Para la prueba puedes activar
    «usar la red más allá de los proveedores de modelos» para que los agentes lean páginas
    públicas. Deja el resto desactivado salvo que el propietario te indique otra cosa.
-4. **desman-global** es la última pregunta. Puedes elegir «ahora no» y unirte más adelante
-   (sección 5).
+4. **desman-global.** Puedes elegir «ahora no» y unirte más adelante (sección 5).
 
 Los límites gratuitos son bajos y pueden cambiar. Si DESMAN dice que alcanzaste un límite, el
 trabajo seguirá cuando se renueve, normalmente al cabo de un minuto y a veces de un día. Si pasa
@@ -89,7 +91,7 @@ más de una hora sin respuesta, avisa (sección 7).
 
 ## 3. Cómo usarlo
 
-DESMAN se abre como una página del navegador:
+En la interfaz experimental del navegador, la página se organiza así:
 
 - **A la izquierda**, los chats. Abajo están **Ajustes**, **Informar de un problema** y
   **Mensajería**.

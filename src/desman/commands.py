@@ -63,6 +63,7 @@ from desman.config import (
     Config,
     ConfigError,
     ConfigManager,
+    Interface,
     ModelChoices,
     RegistryUrl,
     Tuning,
@@ -323,6 +324,10 @@ class ImportArgs(Args):
     file: Annotated[str, StringConstraints(min_length=1, max_length=500)]
 
 
+class InterfaceArgs(Args):
+    mode: Interface | None = None
+
+
 class PersonalizeArgs(Args):
     on: bool | None = Field(None, description="true: turn on, false: off; none: show")
 
@@ -500,7 +505,14 @@ class QuotaArgs(DonateArgs):
 class ConfigArgs(Args):
     section: (
         Literal[
-            "providers", "docker", "permissions", "personalize", "behaviour", "network", "roles"
+            "providers",
+            "docker",
+            "permissions",
+            "personalize",
+            "behaviour",
+            "network",
+            "roles",
+            "interface",
         ]
         | None
     ) = Field(None, description="one section of the setup wizard; none: the whole wizard")
@@ -872,6 +884,25 @@ def _language(ctx: Context, args: LanguageArgs) -> Outcome | Proposal:
 
     old, new = i18n.CATALOGS[current].name, i18n.CATALOGS[code].name
     return Proposal([t("Language: {old} → {new}", old=old, new=new)], apply)
+
+
+def _interface_kind(args: InterfaceArgs) -> Kind:
+    return Kind.READ if args.mode is None else Kind.CHANGE
+
+
+def _interface(ctx: Context, args: InterfaceArgs) -> Outcome | Proposal:
+    current = ctx.config().interface
+    mode = args.mode
+    if mode is None or mode == current:
+        config_cli.print_interface(current)
+        return Outcome({"mode": current, "changed": False})
+
+    def apply() -> Outcome:
+        changed = config_cli.set_interface(ctx.manager, mode)
+        return Outcome({"mode": mode, "changed": changed})
+
+    label = config_cli.interface_labels()[mode]
+    return Proposal([t("Default interface: {mode}", mode=label)], apply)
 
 
 def _personalize_kind(args: PersonalizeArgs) -> Kind:
@@ -1965,6 +1996,8 @@ def _config(ctx: Context, args: ConfigArgs) -> Proposal:
         line = t("Open the setup wizard at personalisation: whether the agent keeps notes.")
     elif args.section == "behaviour":
         line = t("Open the setup wizard at how the interlocutor talks.")
+    elif args.section == "interface":
+        line = t("Open the interface section of the setup wizard.")
     elif args.section == "roles":
         line = t("Models and keys for roles")
     elif args.section == "network":
@@ -2311,6 +2344,14 @@ CATALOG: tuple[Entry, ...] = (
         PermissionArgs,
         _permissions_kind,
         _permissions,
+    ),
+    Entry(
+        "interface",
+        "Without arguments: show the default interface. With mode terminal or gui: change it "
+        "(the person confirms).",
+        InterfaceArgs,
+        _interface_kind,
+        _interface,
     ),
     Entry(
         "personalize",
@@ -2769,7 +2810,7 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "config",
         "Open the setup wizard, or one section of it (providers: keys and settings; "
-        "docker: installation; permissions; personalize; behaviour; roles: model and key preferences; network: desman-global), for the person to fill in; only when they ask to set DESMAN up or to "
+        "docker: installation; permissions; personalize; behaviour; roles: model and key preferences; network: desman-global; interface: terminal or GUI), for the person to fill in; only when they ask to set DESMAN up or to "
         "change settings. To show providers, keys or settings use keys list or config show.",
         ConfigArgs,
         Kind.INPUT,
@@ -2932,6 +2973,8 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
     for env in sorted(set(old.settings) | set(new.settings)):
         if old.settings.get(env) != new.settings.get(env):
             changes.append(("operator_setting", {"name": env}))
+    if old.interface != new.interface:
+        changes.append(("operator_interface", {"from": old.interface, "to": new.interface}))
     if old.personalize != new.personalize:
         changes.append(("operator_personalize", {"on": new.personalize}))
     if old.behaviour != new.behaviour:  # the parts, not the person's own words

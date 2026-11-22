@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "Créer un raccourci DESMAN.",
+    "Default interface": "Interface par défaut",
+    "Default interface: {mode}": "Interface par défaut : {mode}",
+    "Experimental GUI": "Interface graphique expérimentale",
+    "Open the experimental GUI by default instead of the terminal?": "Ouvrir par défaut l’interface graphique expérimentale à la place du terminal ?",
+    "Open the interface section of the setup wizard.": "Ouvrir la section Interface de l’assistant de configuration.",
+    "Press Enter to close.": "Appuyez sur Entrée pour fermer.",
+    "Show or set the default interface.": "Afficher ou définir l’interface par défaut.",
+    "Terminal": "Terminal",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "L’interface graphique est expérimentale. Le terminal reste accessible. Vous pouvez changer l’interface par défaut avec `desman interface`.",
     "Admit a master model with a current passing check.": "Admettre un modèle maître ayant réussi le test de la version courante.",
     "Admitted": "Admis",
     "Unfinished": "Inachevé",
@@ -387,7 +397,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "Chemin de lancement invalide.",
     "Report a problem": "Signaler un problème",
     "Describe the problem:": "Décrivez le problème :",
-    "Create a shortcut to the page without starting it.": "Créer un raccourci vers la page sans la démarrer.",
     "Shortcut created: {path}": "Raccourci créé : {path}",
     "Could not create shortcut: {error}": "Impossible de créer le raccourci : {error}",
     "Shortcuts are not supported on this system yet.": "Les raccourcis ne sont pas encore pris en charge sur ce système.",

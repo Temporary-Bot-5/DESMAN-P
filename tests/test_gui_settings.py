@@ -175,6 +175,7 @@ def test_settings_need_an_open_line(settings_app: Any) -> None:
     "section",
     [
         "general",
+        "interface",
         "permissions",
         "behaviour",
         "limits",
@@ -199,6 +200,7 @@ def test_settings_use_bodies_and_keep_chat(
     seen: list[str] = []
     functions = {
         "general": "set_language",
+        "interface": "set_interface",
         "permissions": "set_permissions",
         "behaviour": "set_behaviour",
         "personalize": "set_personalize",
@@ -229,6 +231,7 @@ def test_settings_use_bodies_and_keep_chat(
     model = tuning_cli.role_rows(config)[0]["candidate_models"][0]
     changes: dict[str, dict[str, Any]] = {
         "general": {"section": "general", "language": "ru"},
+        "interface": {"section": "interface", "mode": "gui"},
         "permissions": {"section": "permissions", "name": "network_access", "on": True},
         "behaviour": {"section": "behaviour", "tone": "formal"},
         "limits": {"section": "limits", "name": "max_subtasks", "value": 6},
@@ -262,6 +265,9 @@ def test_settings_use_bodies_and_keep_chat(
     saved = open_config().load()
     if section == "general":
         assert saved.language == "ru"
+    if section == "interface":
+        assert saved.interface == "gui"
+        assert snapshot(app)["general"]["interface"] == "gui"
     if section == "permissions":
         assert saved.permissions.network_access
     if section == "behaviour":
@@ -285,6 +291,7 @@ def test_settings_use_bodies_and_keep_chat(
     assert journal
     expected = {
         "general": "operator_language",
+        "interface": "operator_interface",
         "permissions": "operator_permission_grant",
         "behaviour": "operator_behaviour",
         "limits": "operator_tuning",

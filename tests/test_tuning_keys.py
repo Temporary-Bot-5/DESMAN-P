@@ -48,9 +48,9 @@ def test_v5_load_save_and_fingerprint_contract() -> None:
         json.dumps({"schema_version": 5, "language": "en"}), encoding="utf-8"
     )
     loaded = manager.load()
-    assert loaded.schema_version == 12 and loaded.tuning == Tuning()
+    assert loaded.schema_version == 13 and loaded.tuning == Tuning()
     manager.save(loaded)
-    assert json.loads(manager.config_path.read_text(encoding="utf-8"))["schema_version"] == 12
+    assert json.loads(manager.config_path.read_text(encoding="utf-8"))["schema_version"] == 13
     assert KeyChoices(planner=key_id(FIRST)).planner == key_id(FIRST)
     assert Tuning(keys=KeyChoices(planner=key_id(FIRST))).is_set()
     for value in (FIRST, "a" * 11, "A" * 12, "g" * 12, "a" * 13):

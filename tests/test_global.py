@@ -104,7 +104,7 @@ def test_a_schema_4_config_upgrades_to_desman_global_off() -> None:
     data["schema_version"] = 4
     del data["network"]
     config = Config.model_validate(upgrade(data))
-    assert config.schema_version == 12 and config.network == Network()
+    assert config.schema_version == 13 and config.network == Network()
     assert config.language == "ru"
 
 
@@ -341,22 +341,30 @@ def test_config_changes_name_the_parts_of_the_network() -> None:
 # ── The wizard ───────────────────────────────────────────────────────────────
 
 
-def test_the_wizards_last_step_joins_and_leaves() -> None:
-    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", "http://nope", REGISTRY)
+def test_the_wizards_network_step_joins_and_leaves() -> None:
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", "http://nope", REGISTRY, "")
     assert result.exit_code == 0, result.output
     assert "is not a registry address" in result.output
     assert "Taking part in desman-global" in result.output
     assert saved().network.enabled and node_key().exists()
-    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "")  # Enter keeps it on
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "", "")  # Enter keeps it on
     assert result.exit_code == 0, result.output
     assert saved().network.enabled and len(network_log()) == 1
-    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "n")
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "n", "")
     assert result.exit_code == 0, result.output
     assert "desman-global is off" in result.output and not saved().network.enabled
 
 
+def test_cancelling_at_interface_does_not_join_the_network() -> None:
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", REGISTRY)
+    assert result.exit_code == 1, result.output
+    assert "nothing was saved" in result.output
+    assert not default_config_path().exists() and not node_key().exists()
+    assert network_log() == []
+
+
 def test_the_wizard_without_an_address_stays_off() -> None:
-    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", "-")
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", "-", "")
     assert result.exit_code == 0, result.output
     assert "Not now: desman-global stays off." in result.output
     assert not saved().network.enabled and not node_key().exists()
@@ -445,7 +453,7 @@ def test_a_journal_that_fails_saves_nothing(monkeypatch: pytest.MonkeyPatch) -> 
 def test_the_wizard_saves_nothing_when_the_key_cannot_be_used() -> None:
     sign.node_key(node_key())
     node_key().chmod(0o644)
-    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", REGISTRY)
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "y", REGISTRY, "")
     assert result.exit_code == 1, result.output
     assert "The node's key cannot be used" in result.output
     assert not default_config_path().exists() and network_log() == []

@@ -53,8 +53,8 @@ Internetzugang. Administratorrechte sind nicht nötig.
 3. Ein schwarzes Fenster öffnet sich. Das Installationsprogramm fragt, ob es uv, Python und bei
    Bedarf Git installieren darf. Geben Sie `y` ein und drücken Sie die Eingabetaste. Das
    dauert ein paar Minuten.
-4. Zum Schluss öffnet sich die DESMAN-Seite im Browser. Auf dem Desktop erscheint die Verknüpfung
-   **DESMAN**. Starten Sie das Programm künftig darüber.
+4. Das Installationsprogramm startet `desman` im Terminal. Die Desktop-Verknüpfung **DESMAN**
+   startet das Programm ebenfalls in einem Terminal.
 
 ### Linux
 
@@ -63,13 +63,17 @@ Internetzugang. Administratorrechte sind nicht nötig.
    Eingabetaste.
 3. Falls Git fehlt, zeigt das Installationsprogramm einen Befehl dafür an. Führen Sie ihn aus und
    wiederholen Sie Schritt 2.
-4. Beantworten Sie die Fragen mit `y`. Zum Schluss öffnet sich der Browser. **DESMAN** erscheint
-   im Anwendungsmenü und auf dem Desktop. Wenn die Desktop-Umgebung fragt, ob sie die Verknüpfung
-   starten darf, erlauben Sie es.
+4. Beantworten Sie die Fragen mit `y`. Das Installationsprogramm startet `desman` im Terminal.
+   **DESMAN** erscheint im Anwendungsmenü und auf dem Desktop. Erlauben Sie den Start der
+   Verknüpfung, wenn Sie danach gefragt werden.
 
 Weitere Einzelheiten stehen in [install.md](install.md).
 
 ## 2. Erster Start und Zugriffsschlüssel
+
+Die Ersteinrichtung läuft im Terminal. Bei der letzten Frage können Sie die experimentelle
+Browseroberfläche wählen. Mit `desman interface terminal` oder `desman interface gui` ändern Sie
+die Auswahl später.
 
 DESMAN nutzt Modelle im Internet. Dafür brauchen Sie einen kostenlosen Schlüssel, eine Art
 Passwort für das Programm. Beim ersten Start öffnet sich automatisch die Einrichtung.
@@ -89,8 +93,7 @@ Passwort für das Programm. Beim ersten Start öffnet sich automatisch die Einri
 3. **Berechtigungen.** Anfangs sind alle aus. Für den Test können Sie „das Netzwerk über die
    Modellanbieter hinaus zu nutzen“ aktivieren, damit Agenten öffentliche Webseiten lesen können.
    Lassen Sie die anderen aus, sofern der Betreiber nichts anderes sagt.
-4. **desman-global** kommt in der Einrichtung zuletzt. Sie können „Jetzt nicht“ wählen und später
-   beitreten (Abschnitt 5).
+4. **desman-global.** Sie können „Jetzt nicht“ wählen und später beitreten (Abschnitt 5).
 
 Die kostenlosen Limits sind klein und können sich ändern. Meldet DESMAN ein erreichtes Limit, geht
 die Arbeit nach der Erneuerung weiter, meist nach einer Minute, manchmal nach einem Tag. Wenn
@@ -98,7 +101,7 @@ länger als eine Stunde keine Antwort kommt, melden Sie es (Abschnitt 7).
 
 ## 3. Bedienung
 
-DESMAN öffnet sich als Seite im Browser:
+Die experimentelle Browseroberfläche ist so aufgebaut:
 
 - **Links** stehen die Chats und unten die Schaltflächen **Einstellungen**, **Problem melden** und
   **Nachrichten**.

@@ -45,8 +45,8 @@ internet. Não precisa de permissões de administrador.
    Windows protegeu o computador”, clique em “Mais informações” → “Executar assim mesmo”.
 3. Uma janela preta abre. O instalador pede autorização para instalar o que falta (uv, Python e,
    se necessário, Git). Digite `y` e pressione Enter. Isso leva alguns minutos.
-4. No fim, o navegador abre a página do DESMAN e aparece um atalho **DESMAN** na área de trabalho.
-   Use esse atalho para abrir o programa.
+4. O instalador inicia o `desman` no terminal. O atalho **DESMAN** na área de trabalho também o
+   abre em um terminal.
 
 ### Linux
 
@@ -54,15 +54,19 @@ internet. Não precisa de permissões de administrador.
 2. Abra um terminal, cole o comando (Ctrl+Shift+V) e pressione Enter.
 3. Se o Git estiver faltando, o instalador mostra o comando para instalá-lo. Execute-o e repita o
    passo 2.
-4. Responda `y` às perguntas. No fim, o navegador abre e o **DESMAN** aparece no menu de
-   aplicativos e na área de trabalho. Se for preciso autorizar a abertura do atalho, autorize.
+4. Responda `y` às perguntas. O instalador inicia o `desman` no terminal. **DESMAN** aparece no
+   menu de aplicativos e na área de trabalho. Autorize a abertura do atalho se solicitado.
 
 Veja mais detalhes em [install.md](install.md).
 
 ## 2. Primeira abertura e chave de acesso
 
+A configuração inicial é feita no terminal. Na última pergunta você pode escolher a interface
+experimental no navegador. Depois, altere essa escolha com `desman interface terminal` ou
+`desman interface gui`.
+
 O DESMAN usa modelos pela internet. Você precisa de uma chave gratuita, que funciona como senha
-para o programa. Na primeira abertura, a página mostra a configuração inicial automaticamente.
+para o programa.
 
 1. Em **Idioma**, escolha “Português” ou seu idioma.
 2. **Chave.** É mais fácil começar por um destes serviços. Ambos são gratuitos e só exigem uma
@@ -78,8 +82,7 @@ para o programa. Na primeira abertura, a página mostra a configuração inicial
 3. **Permissões.** Todas começam desativadas. Para o teste, você pode ativar
    “usem a rede além dos provedores de modelos” para que os agentes possam ler páginas públicas.
    Deixe as outras desativadas, a menos que o proprietário peça o contrário.
-4. **desman-global** é a última pergunta da configuração. Você pode escolher “agora não” e entrar
-   depois (seção 5).
+4. **desman-global.** Você pode escolher “agora não” e entrar depois (seção 5).
 
 Os limites gratuitos são baixos e podem mudar. Se o DESMAN disser que um limite acabou, o trabalho
 seguirá quando ele for renovado, geralmente em um minuto, às vezes em um dia. Se não houver
@@ -87,7 +90,7 @@ resposta por mais de uma hora, relate o problema (seção 7).
 
 ## 3. Como usar
 
-A janela do DESMAN é uma página no navegador:
+Na interface experimental do navegador, a página é organizada assim:
 
 - **À esquerda**, as conversas e, embaixo, **Configurações**, **Relatar um problema** e
   **Mensagens**.

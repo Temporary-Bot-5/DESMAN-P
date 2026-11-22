@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "创建 DESMAN 快捷方式。",
+    "Default interface": "默认界面",
+    "Default interface: {mode}": "默认界面：{mode}",
+    "Experimental GUI": "实验性图形界面",
+    "Open the experimental GUI by default instead of the terminal?": "是否默认打开实验性图形界面，而不是终端？",
+    "Open the interface section of the setup wizard.": "打开设置向导中的界面选项。",
+    "Press Enter to close.": "按 Enter 键关闭。",
+    "Show or set the default interface.": "查看或设置默认界面。",
+    "Terminal": "终端",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "图形界面仍处于实验阶段。终端仍可使用。可用 `desman interface` 更改默认界面。",
     "Admit a master model with a current passing check.": "准入已通过当前版本检查的主控模型。",
     "Admitted": "已准入",
     "Unfinished": "未完成",
@@ -381,7 +391,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "启动路径无效。",
     "Report a problem": "报告问题",
     "Describe the problem:": "请描述问题：",
-    "Create a shortcut to the page without starting it.": "创建页面快捷方式而不启动页面。",
     "Shortcut created: {path}": "已创建快捷方式：{path}",
     "Could not create shortcut: {error}": "无法创建快捷方式：{error}",
     "Shortcuts are not supported on this system yet.": "此系统暂不支持快捷方式。",

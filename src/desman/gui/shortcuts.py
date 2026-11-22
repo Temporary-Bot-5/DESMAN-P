@@ -57,9 +57,8 @@ def _create(runner: Callable[..., subprocess.CompletedProcess[str]]) -> list[Pat
         script = executable.parent / "Scripts" / "desman.exe"
         if not script.is_file():
             script = executable.parent / "desman.exe"
-        pythonw = executable.with_name("pythonw.exe")
-        target = script if script.is_file() else pythonw if pythonw.is_file() else executable
-        arguments = "gui" if script.is_file() else "-m desman gui"
+        target = script if script.is_file() else executable.with_name("python.exe")
+        arguments = "--launcher" if script.is_file() else "-m desman --launcher"
         result = runner(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT],
             input=json.dumps(
@@ -78,9 +77,9 @@ def _create(runner: Callable[..., subprocess.CompletedProcess[str]]) -> list[Pat
     # Python itself (`-m desman`), never whichever `desman` comes first on PATH.
     script_path = executable.parent / "desman"
     command = (
-        f"{_desktop_quote(str(script_path))} gui"
+        f"{_desktop_quote(str(script_path))} --launcher"
         if script_path.is_file()
-        else f"{_desktop_quote(str(executable))} -m desman gui"
+        else f"{_desktop_quote(str(executable))} -m desman --launcher"
     )
     home = Path.home()
     data = Path(os.environ.get("XDG_DATA_HOME", str(home / ".local" / "share")))
@@ -89,7 +88,7 @@ def _create(runner: Callable[..., subprocess.CompletedProcess[str]]) -> list[Pat
         "[Desktop Entry]\nType=Application\nName=DESMAN\n"
         f"Exec={command}\n"
         f"Icon={str(images / 'logo.png')}\n"
-        "Terminal=false\nCategories=Utility;\n"
+        "Terminal=true\nCategories=Utility;\n"
     )
     application.parent.mkdir(parents=True, exist_ok=True)
     application.write_text(content, encoding="utf-8")

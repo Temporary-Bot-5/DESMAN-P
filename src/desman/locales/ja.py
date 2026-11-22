@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Create a DESMAN shortcut.": "DESMAN のショートカットを作成します。",
+    "Default interface": "既定のインターフェース",
+    "Default interface: {mode}": "既定のインターフェース：{mode}",
+    "Experimental GUI": "試験的な GUI",
+    "Open the experimental GUI by default instead of the terminal?": "ターミナルの代わりに試験的な GUI を既定で開きますか？",
+    "Open the interface section of the setup wizard.": "セットアップウィザードのインターフェース設定を開きます。",
+    "Press Enter to close.": "Enter キーを押して閉じます。",
+    "Show or set the default interface.": "既定のインターフェースを表示または設定します。",
+    "Terminal": "ターミナル",
+    "The GUI is experimental. The terminal stays available. You can change the default with `desman interface`.": "GUI は試験的な機能です。ターミナルも引き続き使えます。`desman interface` で既定の設定を変更できます。",
     "Admit a master model with a current passing check.": "現行のチェックに合格したモデルをマスターとして許可する。",
     "Admitted": "許可済み",
     "Unfinished": "未完了",
@@ -381,7 +391,6 @@ MESSAGES: dict[str, Forms] = {
     "Invalid launcher path.": "起動パスが無効です。",
     "Report a problem": "問題を報告",
     "Describe the problem:": "問題を説明してください：",
-    "Create a shortcut to the page without starting it.": "ページを起動せずにショートカットを作成します。",
     "Shortcut created: {path}": "ショートカットを作成しました：{path}",
     "Could not create shortcut: {error}": "ショートカットを作成できませんでした：{error}",
     "Shortcuts are not supported on this system yet.": "このシステムのショートカットはまだサポートされていません。",

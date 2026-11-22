@@ -103,6 +103,7 @@ def strings() -> dict[str, str]:
         "advanced": t("Advanced"),
         "saved": t("Saved"),
         "settings_permissions": t("Permissions"),
+        "default_interface": t("Default interface"),
         "settings_personalize": t("Personalisation"),
         "settings_behaviour": t("Conversation"),
         "download": t("Download"),

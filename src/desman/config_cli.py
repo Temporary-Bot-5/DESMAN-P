@@ -8,8 +8,10 @@ from the command line, where shell history and `ps` would keep it, and never pri
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,10 +28,11 @@ from desman.config import (
     Config,
     ConfigError,
     ConfigManager,
+    Interface,
     Permissions,
     open_config,
 )
-from desman.core import calls, db, netlog
+from desman.core import calls, db, netlog, operator
 from desman.i18n import t, tn
 from desman.llm import check
 from desman.llm.openai_compat import key_id, reset_in
@@ -404,6 +407,38 @@ def set_personalize(manager: ConfigManager, on: bool) -> bool:
     else:
         ui.ok(t("Personalisation is off. Notes already kept stay, unused, until you erase them."))
     return changed
+
+
+@click.command()
+@click.argument("mode", type=click.Choice(["terminal", "gui"]), required=False)
+def interface(mode: Interface | None) -> None:
+    """Show or set the default interface."""
+    manager = load_config()
+    if mode is None:
+        print_interface(manager.load().interface)
+        return
+    with closing(db.open_db()) as conn, db.transaction(conn):
+        set_interface(manager, mode, conn=conn)
+
+
+def interface_labels() -> dict[Interface, str]:
+    return {"terminal": t("Terminal"), "gui": t("Experimental GUI")}
+
+
+def print_interface(mode: Interface) -> None:
+    ui.out(t("Default interface: {mode}", mode=interface_labels()[mode]))
+
+
+def set_interface(
+    manager: ConfigManager, mode: Interface, *, conn: sqlite3.Connection | None = None
+) -> bool:
+    with manager.edit() as config:
+        previous = config.interface
+        if conn is not None and previous != mode:
+            operator.write(conn, "operator_interface", {"from": previous, "to": mode})
+        config.interface = mode
+    print_interface(mode)
+    return previous != mode
 
 
 # ── desman behaviour ────────────────────────────────────────────────────────

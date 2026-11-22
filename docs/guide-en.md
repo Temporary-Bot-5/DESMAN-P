@@ -48,8 +48,8 @@ access; you don't need administrator rights.
    "Windows protected your PC" window, click "More info" → "Run anyway".
 3. A black window opens. The installer asks permission to install what it needs (uv, Python
    and, if it is missing, Git): answer `y` and press Enter. This takes a few minutes.
-4. At the end a browser opens with the DESMAN page, and a **DESMAN** shortcut appears on the
-   desktop. From then on, start the program with that shortcut.
+4. The installer starts `desman` in the terminal. The **DESMAN** desktop shortcut opens it in a
+   terminal too.
 
 ### Linux
 
@@ -57,16 +57,19 @@ access; you don't need administrator rights.
 2. Open a terminal, paste the command (Ctrl+Shift+V) and press Enter.
 3. If Git is missing, the installer prints the command that installs it: run it and repeat
    step 2.
-4. Answer `y` to the questions. At the end a browser opens, and **DESMAN** appears in the
-   applications menu and on the desktop (the desktop may ask you to "allow launching" the
-   shortcut — allow it).
+4. Answer `y` to the questions. The installer starts `desman` in the terminal. **DESMAN**
+   appears in the applications menu and on the desktop. Allow the shortcut to launch if
+   prompted.
 
 More details for the curious are in [install.md](install.md).
 
 ## 2. First start and a key
 
+First-time setup runs in the terminal. Its last question lets you choose the experimental
+browser interface. You can change your choice later with `desman interface terminal` or `desman interface gui`.
+
 DESMAN works through models on the internet. They need a free key, a kind of password for a
-program. On the first start the page opens the setup by itself.
+program.
 
 1. **Language**: choose "English" (or your own language).
 2. **Key.** The easiest is to start with one of these (both are free, you only need an
@@ -81,8 +84,7 @@ program. On the first start the page opens the setup by itself.
 3. **Permissions.** Everything is off by default, and that's fine. For the test you may turn
    on "use the network beyond model providers" (agents can then read public web pages).
    Leave the rest off unless the owner asks otherwise.
-4. **desman-global** is the last question of the setup. You can answer "not now" and join
-   later (section 5).
+4. **desman-global.** You can answer “not now” and join later (section 5).
 
 Free limits are small and they change. If DESMAN says a limit is used up, nothing is broken:
 the work continues when the limit comes back (usually in a minute, sometimes in a day). If
@@ -90,7 +92,7 @@ there is no answer for more than an hour, report it (section 7).
 
 ## 3. How to use it
 
-The DESMAN window is a page in your browser:
+In the experimental browser interface, the page is organized like this:
 
 - **on the left**: the chats, and at the bottom the buttons **Settings**, **Report a
   problem** and **Messenger**;

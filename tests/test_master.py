@@ -318,7 +318,7 @@ def test_a_config_before_masters_upgrades_with_no_master_chosen(tmp_path: Path) 
     from desman.config import SCHEMA_VERSION, upgrade
 
     upgraded = upgrade({"schema_version": 10, "tuning": {"models": {"text": "groq/x"}}})
-    assert upgraded["schema_version"] == SCHEMA_VERSION == 12
+    assert upgraded["schema_version"] == SCHEMA_VERSION == 13
     config = make_config(tuning=upgraded["tuning"])
     assert config.tuning.models.master is None and config.tuning.keys.master is None
 

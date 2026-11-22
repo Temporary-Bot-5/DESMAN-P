@@ -81,7 +81,9 @@ if [ "$UNINSTALL" = 1 ]; then
     remove_shortcut() {
         # Match the installer's executable, never a name alone. Unknown formats stay.
         [ -f "$1" ] && [ ! -L "$1" ] || return 0
-        if grep -Fx "Exec=\"$desktop_app/.venv/bin/desman\" gui" "$1" >/dev/null ||
+        if grep -Fx "Exec=\"$desktop_app/.venv/bin/desman\" --launcher" "$1" >/dev/null ||
+            grep -Fx "Exec=\"$desktop_app/.venv/bin/python\" -m desman --launcher" "$1" >/dev/null ||
+            grep -Fx "Exec=\"$desktop_app/.venv/bin/desman\" gui" "$1" >/dev/null ||
             grep -Fx "Exec=\"$desktop_app/.venv/bin/python\" -m desman gui" "$1" >/dev/null; then
             rm -f "$1"
         fi
@@ -164,4 +166,10 @@ if command -v docker >/dev/null 2>&1 && [ -t 0 ] && [ "$YES" = 0 ]; then
             fi ;;
     esac
 fi
-if [ "$START" = 1 ]; then .venv/bin/desman gui; fi
+if [ "$START" = 1 ]; then
+    if [ ! -t 0 ] && (exec 3<"$DESMAN_TTY") 2>/dev/null; then
+        .venv/bin/desman < "$DESMAN_TTY"
+    else
+        .venv/bin/desman
+    fi
+fi

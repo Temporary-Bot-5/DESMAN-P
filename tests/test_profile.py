@@ -156,7 +156,7 @@ def test_v14_database_upgrades_to_the_profile(tmp_path: Path) -> None:
 
 def test_a_config_from_before_asks_nothing_and_keeps_no_notes() -> None:
     config = Config.model_validate(upgrade({"schema_version": 2, "language": "ru"}))
-    assert config.schema_version == 12 and config.personalize is False
+    assert config.schema_version == 13 and config.personalize is False
     assert not config.behaviour.is_set()
 
 
@@ -408,7 +408,7 @@ def test_how_it_talks_is_changed_in_profile_and_in_the_wizard(fake: FakeLLM) -> 
     # The wizard: language, providers Done, permissions, then personalisation and how it talks.
     from test_wizard import DONE, KEEP_PERMISSIONS, wizard
 
-    result = wizard("1", DONE, *KEEP_PERMISSIONS, "n", "y", "2", "", "", "-", "")
+    result = wizard("1", DONE, *KEEP_PERMISSIONS, "n", "y", "2", "", "", "-", "", "")
     assert result.exit_code == 0, result.output
     config = saved()
     assert config.personalize is False

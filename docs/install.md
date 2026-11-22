@@ -1,7 +1,10 @@
 # Install DESMAN(P)
 
 The installers create a per-user git checkout, install uv and Python 3.12 if needed, install
-DESMAN without development extras, create Desktop/menu shortcuts and open `desman gui`.
+DESMAN without development extras, create Desktop/menu shortcuts and run bare `desman`
+in the current terminal. The shortcuts open a terminal running `desman`. First-time setup
+runs there and offers the experimental browser interface at the end. Change the default
+later with `desman interface terminal` or `desman interface gui`.
 No administrator shell is needed for DESMAN itself. Agents run code only in a sandbox and only
 with the person's permission: Docker or bubblewrap on Linux; Docker, WSL or WebAssembly (Python
 and pytest) on Windows (`desman sandbox setup --yes`).
