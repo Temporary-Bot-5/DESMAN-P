@@ -253,7 +253,7 @@ class Runners:
         self.active = 0
         self.closed = False
         self.summary_failures: dict[str, dict[str, int]] = {}
-        self.master_sessions: set[str | None] = set()
+        self.master_sessions: set[str] = set()
         self.pending_files: dict[str, task_files.PendingFiles] = {}
         front.runners = self
         front.database = path

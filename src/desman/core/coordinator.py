@@ -53,6 +53,7 @@ from desman.core.context import (
     Knowledge,
     KnowledgeText,
     build_context,
+    estimate_tokens,
     given,
 )
 from desman.core.effects import (
@@ -560,11 +561,14 @@ class Coordinator:
             goal, is_final = self.store.subtask_goal(subtask)
             offered = [str(spec["name"]) for spec in tools.specs()]
             continuation_rows: list[EffectRef] = []
+            budget = self.context_budget_tokens
+            if delegations:
+                budget -= estimate_tokens(json.dumps(delegations, ensure_ascii=False))
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
                 self.store.last_feedback(subtask.id),
-                self.context_budget_tokens,
+                max(0, budget),
                 strategy,
                 self._knowledge(subtask) if own else None,
                 goal=goal,

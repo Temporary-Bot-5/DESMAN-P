@@ -260,3 +260,7 @@ def test_files_topic_keeps_the_interlocutor_honesty_rule() -> None:
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done."
         in manual.BY_NAME["files"].text
     )
+
+
+def test_master_topic_explains_the_chat_setting_lifetime() -> None:
+    assert "master mode for this session until the chat ends" in manual.BY_NAME["master"].text

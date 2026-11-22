@@ -1583,7 +1583,12 @@ def _run(ctx: Context, args: RunArgs) -> Proposal:
         ctx.start_task(title, args.goal, args.runs_code, args.master)
         return Outcome(None)
 
-    return Proposal([t("Start a task: {goal}", goal=actions.one_line(args.goal, 300))], apply)
+    lines = [t("Start a task: {goal}", goal=actions.one_line(args.goal, 300))]
+    if args.master:
+        lines.append(t("Give the whole goal to one master module."))
+    if args.runs_code:
+        lines.append(t("The work must run code."))
+    return Proposal(lines, apply)
 
 
 def _resume(ctx: Context, args: TaskArgs) -> Proposal:

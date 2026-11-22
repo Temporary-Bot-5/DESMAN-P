@@ -8,18 +8,19 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue
 
-from desman import actions, commands, runs
+from desman import actions, commands, runs, ui
 from desman.agents import EXECUTE, REVIEW, llm_executor, llm_reviewer
-from desman.chat import Chat
+from desman.chat import Chat, _commands
 from desman.cli import continued
 from desman.config import open_config
 from desman.core import stats
 from desman.core.audit import check_history, history
+from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
 from desman.core.coordinator import Coordinator, Crew, Delegation, Failure, Success, Work
 from desman.core.models import MAX_DELEGATIONS, Kind, Origin, SubtaskSpec, TaskSpec
 from desman.core.report import task_report
 from desman.core.retry import Strategy
-from desman.core.sessions import Sessions
+from desman.core.sessions import Role, Sessions
 from desman.core.states import SubtaskStatus as S
 from desman.core.states import TaskStatus
 from desman.core.store import StaleStateError, Store
@@ -56,7 +57,9 @@ def delegation() -> Delegation:
     return Delegation(parts=parts(), note=NOTE)
 
 
-def test_master_delegates_and_resumes_without_spending_a_quality_attempt(store: Store) -> None:
+def test_master_delegates_and_resumes_without_spending_a_quality_attempt(
+    store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
     spec = TaskSpec(
         goal="Research a topic",
         subtasks=[
@@ -128,9 +131,43 @@ def test_master_delegates_and_resumes_without_spending_a_quality_attempt(store: 
     assert starts == ["first", "first"]
     assert len(calls(llm, REVIEW)) == 4
     assert store.final_result(task) == {"text": "Done"}
-    counts = stats.collect(store.conn).subtasks
-    assert counts.split == 1 and counts.retried == 0 and counts.first_try == 4
+    report = stats.collect(store.conn)
+    counts = report.subtasks
+    assert counts.split == 0 and counts.delegated == 1
+    assert counts.retried == 0 and counts.first_try == 4
+    assert report.strategies == [stats.StrategyUse("first", started=4, accepted=4)]
+    assert report.as_json()["subtasks"]["delegated"] == 1
+    actions.print_stats(report, "all")
+    assert "Delegated parts to the cluster: 1." in capsys.readouterr().out
     assert check_history(store.conn, task) == []
+
+
+def test_delegation_notes_reduce_the_budget_for_dependency_results(store: Store) -> None:
+    task = store.create_task(master_plan("Write an outline"))
+    [master] = store.list_subtasks(task)
+    note = "Outline: " + "x" * 200
+    budget = 110
+    resumed: list[Work] = []
+
+    def execute(work: Work) -> Success | Delegation:
+        if not work.subtask.master:
+            return Success(content={"text": "Fact " * 100})
+        if not work.context.delegations:
+            return Delegation(parts=parts(), note=note)
+        resumed.append(work)
+        return Success(content={"text": "Done"})
+
+    reviewer = llm_reviewer(FakeLLM().on(REVIEW, ACCEPT, repeat_last=True))
+    coordinator = Coordinator(store, execute, reviewer, context_budget_tokens=budget)
+    assert coordinator.run(task).status is TaskStatus.DONE
+    [work] = resumed
+    notes = store.delegation_notes(master.id)
+    assert work.context.delegations == notes
+    reserved = estimate_tokens(json.dumps(notes, ensure_ascii=False))
+    assert 0 < reserved < budget
+    dependencies = work.context.dependencies
+    assert all(dep.truncated for dep in dependencies)
+    assert sum(len(dep.content) for dep in dependencies) == (budget - reserved) * CHARS_PER_TOKEN
 
 
 @pytest.mark.parametrize("mode", ["available", "exhausted", "combine", "ordinary"])
@@ -246,6 +283,8 @@ def test_split_master_cannot_delegate(store: Store) -> None:
         assert coordinator.tick(task, events)
     assert store.delegations(master.id) == 0
     assert any("already split" in e.details.get("reason", "") for e in history(store.conn, task))
+    counts = stats.collect(store.conn).subtasks
+    assert counts.split == 1 and counts.delegated == 0
 
 
 @pytest.mark.parametrize("origin", [Origin.LOCAL, Origin.NETWORK])
@@ -308,7 +347,8 @@ def test_chat_master_bypasses_planner(
         assert "Master mode is off" in capsys.readouterr().out
         assert chat._slash("/master on")
         assert chat._slash("/master")
-        assert "Master mode is on" in capsys.readouterr().out
+        assert "Master mode is on for this chat until it ends." in capsys.readouterr().out
+        assert "until this chat ends" in _commands()["/master"]
     if selection == "catalog":
         parsed = commands.parse_line('run --master "Write an outline"', config)
         assert parsed is not None
@@ -323,6 +363,38 @@ def test_chat_master_bypasses_planner(
     assert not calls(llm, "Plan task")
     if selection in ("switch", "temporary"):
         assert chat._slash("/master off") and not chat.master_mode
+
+
+@pytest.mark.parametrize("exit_by", ["delete", "delete_all", "new", "terminal"])
+def test_pending_master_mode_does_not_follow_session_navigation(
+    store: Store, monkeypatch: pytest.MonkeyPatch, exit_by: str
+) -> None:
+    sessions = Sessions(store.conn)
+    existing = sessions.add(None, Role.USER, "Existing chat")
+    selected = sessions.get(existing.session_id)
+    assert selected is not None
+    open_config().save(make_config(configured=True, language="en"))
+    llm = FakeLLM().on(CHAT, '{"type":"reply","text":"Hello"}')
+    monkeypatch.setattr(runs, "models", lambda *a, **kw: runs.Models(llm, None))
+    monkeypatch.setattr(ui, "confirm", lambda *a, **kw: True)
+    chat = Chat(sessions, background_tasks=True)
+    assert chat._slash("/master on") and chat.master_mode
+    assert not chat.master_sessions
+    if exit_by == "new":
+        chat._new()
+    elif exit_by == "terminal":
+        chat._terminal_open()
+        chat._back()
+    else:
+        chat._open_session(selected)
+        if exit_by == "delete":
+            chat._delete()
+        else:
+            chat._delete_all()
+    assert chat.session_id is None
+    chat._message("New message")
+    assert chat.session_id is not None and not chat.master_mode
+    assert not chat.master_sessions
 
 
 def test_chat_without_a_master_keeps_files_pending(

@@ -46,9 +46,10 @@ TOPICS: Final = (
         "master",
         "a master module: the whole goal given to one strong model instead of split work",
         "`desman run --master GOAL` gives the whole goal to one qualified model, with up to "
-        "24 tool rounds per attempt. In chat, ask for one agent or type /master on "
-        "(see `/master`). The master may delegate pieces to the cluster. They appear as "
-        "its parts, and it resumes with their results. If it keeps failing, its work may be "
+        "24 tool rounds per attempt. In chat, ask for one agent or type /master on (see "
+        "`/master`) to enable master mode for this session until the chat ends. The master "
+        "may delegate pieces to the cluster. They appear as its parts, and it resumes with "
+        "their results. If it keeps failing, its work may be "
         "split for the cluster (unless it must run code or already delegated). Long attached "
         "documents are still read in parts by the cluster. Qualified models: those the catalog "
         "marks (now NVIDIA Nemotron 3 Ultra, Gemini 3.8 Flash, Mistral Medium, Cohere Command "

@@ -2302,10 +2302,13 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "размер файла превышает {limit} байт",
         "the file extension is not a supported text format": "расширение файла не относится к поддерживаемым текстовым форматам",
         "the maximum number of attached files is {limit}": "можно прикрепить не более {limit} файлов",
-        "choose master mode for this chat: /master [on|off]": "выбрать режим мастера для этого чата: /master [on|off]",
+        "set master mode until this chat ends: /master [on|off]": "настроить режим мастера до конца этого чата: /master [on|off]",
         "Usage: /master [on|off]": "Использование: /master [on|off]",
-        "Master mode is on. Type /master off to turn it off.": "Режим мастера включён. Чтобы выключить его, введите /master off.",
-        "Master mode is off. Type /master on to turn it on.": "Режим мастера выключен. Чтобы включить его, введите /master on.",
+        "Master mode is on for this chat until it ends. Type /master off to turn it off.": "Режим мастера включён до конца этого чата. Чтобы выключить его, введите /master off.",
+        "Master mode is off. Type /master on to enable it until this chat ends.": "Режим мастера выключен. Чтобы включить его до конца этого чата, введите /master on.",
+        "Delegated parts to the cluster: {n}.": "Делегировали части кластеру: {n}.",
+        "Give the whole goal to one master module.": "Передать всю цель одному модулю-мастеру.",
+        "The work must run code.": "Для работы требуется запуск кода.",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Нет готовой модели для мастер-модуля, поэтому продолжение планируется для кластера: {why}",
     }
 )

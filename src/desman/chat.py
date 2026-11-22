@@ -141,7 +141,7 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/help": t("the chat's commands"),
         "/clear": t("clear the screen (history is kept)"),
         "/context": t("show the context of the next model call: /context [full]"),
-        "/master": t("choose master mode for this chat: /master [on|off]"),
+        "/master": t("set master mode until this chat ends: /master [on|off]"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
@@ -202,7 +202,8 @@ class Chat:
             sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
         )
         self._pending_choice: choices.Choice | None = None
-        self.master_sessions: set[str | None] = set()
+        self.master_sessions: set[str] = set()
+        self._master_pending = False
         self.pending_files: dict[str, task_files.PendingFiles] = {}
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
@@ -319,6 +320,7 @@ class Chat:
     def _terminal_open(self) -> None:
         if self.in_terminal:
             return
+        self._master_pending = False
         self._previous = (self.session_id, self.temporary)
         self.session_id, self.temporary = self._terminal_id, False
         self.models, self._models_for = None, None
@@ -589,11 +591,13 @@ class Chat:
 
     @property
     def master_mode(self) -> bool:
+        if self.session_id is None:
+            return self._master_pending
         return self.session_id in self.master_sessions
 
     def _bind_master_mode(self, session_id: str) -> None:
-        if self.session_id is None and None in self.master_sessions:
-            self.master_sessions.remove(None)
+        if self.session_id is None and self._master_pending:
+            self._master_pending = False
             self.master_sessions.add(session_id)
 
     def _add_user(self, text: str) -> str:
@@ -1885,17 +1889,21 @@ class Chat:
             self._back()
         elif name == "/master":
             args = line.lower().split()[1:]
-            if args == ["on"]:
-                self.master_sessions.add(self.session_id)
-            elif args == ["off"]:
-                self.master_sessions.discard(self.session_id)
+            if args in (["on"], ["off"]):
+                enabled = args == ["on"]
+                if self.session_id is None:
+                    self._master_pending = enabled
+                elif enabled:
+                    self.master_sessions.add(self.session_id)
+                else:
+                    self.master_sessions.discard(self.session_id)
             elif args:
                 ui.note(t("Usage: /master [on|off]"))
                 return True
             ui.note(
-                t("Master mode is on. Type /master off to turn it off.")
+                t("Master mode is on for this chat until it ends. Type /master off to turn it off.")
                 if self.master_mode
-                else t("Master mode is off. Type /master on to turn it on.")
+                else t("Master mode is off. Type /master on to enable it until this chat ends.")
             )
         elif name == "/help":
             self._help()
@@ -2501,6 +2509,7 @@ class Chat:
         ui.pending_module(None)
 
     def _new(self, temporary: bool = False) -> None:
+        self._master_pending = False
         self._drop_pending()
         self._leave_terminal()
         if self.session_id is None and self.temporary == temporary:
@@ -2508,7 +2517,6 @@ class Chat:
             ui.note(t("This session is new already."))
             return
         self._erase()
-        self.master_sessions.discard(None)
         self.temporary = temporary
         self._terminal_started = db.to_iso(self.sessions.clock())
         self._terminal_floor = int(
@@ -2563,6 +2571,8 @@ class Chat:
             and self.session_id is not None
             and self.sessions.get(self.session_id) is None
         ):
+            self.master_sessions.discard(self.session_id)
+            self._master_pending = False
             self.session_id = None
             ui.reset()
         ui.ok(tn(deleted, "Deleted {count} session.", "Deleted {count} sessions.", count=deleted))
@@ -2630,7 +2640,9 @@ class Chat:
             return
         self.sessions.delete(current.id)
         operator.record(self.store.conn, "operator_session_deleted", session_id=current.id)
+        self.master_sessions.discard(current.id)
         if current.id == self.session_id:
+            self._master_pending = False
             self.session_id = None
             ui.reset()
         if self.session_id is None:
@@ -2792,6 +2804,7 @@ class Chat:
             self._open_session(selected)
 
     def _open_session(self, selected: SessionInfo) -> None:
+        self._master_pending = False
         self._leave_terminal()
         self._erase()
         self.temporary = False

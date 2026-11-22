@@ -54,8 +54,9 @@ already does for a subtask.**
    master's model. M.3 adds a measured gate: the benchmark (`bench.py`) run by the model.
 3. **Who chooses the mode.** The person: `desman run --master` (M.1); in the chat (M.2) the
    interlocutor's task turn carries `"master": true` when the person asked for the work to be
-   done by one agent, and `/master on|off` sets it for every task of the chat session. Never
-   automatic: a silent switch would leave the cluster unused and hide what a task costs.
+   done by one agent, and `/master on|off` sets it for the chat session while the chat
+   runs. It never switches automatically, since a silent switch would leave the cluster unused
+   and hide what a task costs.
    Without a ready qualified model `--master` (or the chat) says so and creates nothing; a
    master subtask that finds none later (a key removed) waits for the person (`needs_human`)
    instead of being worked by an unqualified model.

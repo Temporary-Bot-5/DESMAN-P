@@ -1853,10 +1853,13 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "文件大小超过 {limit} 字节",
         "the file extension is not a supported text format": "文件扩展名不属于支持的文本格式",
         "the maximum number of attached files is {limit}": "最多可附加 {limit} 个文件",
-        "choose master mode for this chat: /master [on|off]": "设置此聊天的主模块模式：/master [on|off]",
+        "set master mode until this chat ends: /master [on|off]": "设置主模块模式，有效期至本次聊天结束：/master [on|off]",
         "Usage: /master [on|off]": "用法：/master [on|off]",
-        "Master mode is on. Type /master off to turn it off.": "主模块模式已开启。输入 /master off 可关闭。",
-        "Master mode is off. Type /master on to turn it on.": "主模块模式已关闭。输入 /master on 可开启。",
+        "Master mode is on for this chat until it ends. Type /master off to turn it off.": "主模块模式已开启，有效期至本次聊天结束。输入 /master off 可关闭。",
+        "Master mode is off. Type /master on to enable it until this chat ends.": "主模块模式已关闭。输入 /master on 可开启，有效期至本次聊天结束。",
+        "Delegated parts to the cluster: {n}.": "向集群委派部分工作的子任务：{n}。",
+        "Give the whole goal to one master module.": "将整个目标交给一个主模块。",
+        "The work must run code.": "这项工作必须运行代码。",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "没有可供主模块使用的模型，因此将为集群规划后续任务：{why}",
     }
 )

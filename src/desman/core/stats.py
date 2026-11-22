@@ -36,7 +36,9 @@ class SubtaskCounts:
     escalated: int = 0
     """Reached needs_human at least once: the operator had to decide."""
     split: int = 0
-    """Subtasks split after retries or delegated by a master (their parts are counted too)."""
+    """Subtasks split after retries (their parts are counted too)."""
+    delegated: int = 0
+    """Subtasks that delegated parts to the cluster."""
 
 
 @dataclass(frozen=True)
@@ -174,7 +176,9 @@ def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:
                            WHERE a.subtask_id = s.id AND a.to_status = 'needs_human')
                        AS escalated,
                    EXISTS (SELECT 1 FROM audit_log a
-                           WHERE a.subtask_id = s.id AND a.action IN ('decomposed', 'delegated')) AS split,
+                           WHERE a.subtask_id = s.id AND a.action = 'decomposed') AS split,
+                   EXISTS (SELECT 1 FROM audit_log a
+                           WHERE a.subtask_id = s.id AND a.action = 'delegated') AS delegated,
                    (SELECT a.actor FROM audit_log a
                     WHERE a.subtask_id = s.id AND a.to_status = 'done'
                     ORDER BY a.seq DESC LIMIT 1) AS done_by
@@ -186,7 +190,8 @@ def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:
                SUM(status = 'done' AND attempts = 1 AND done_by = 'reviewer') AS first_try,
                SUM(attempts > 1) AS retried,
                SUM(escalated) AS escalated,
-               SUM(split) AS split
+               SUM(split) AS split,
+               SUM(delegated) AS delegated
         FROM subs
         """,
         args,
@@ -199,14 +204,16 @@ def _subtasks(conn: sqlite3.Connection, w: _Window) -> SubtaskCounts:
 def _strategies(conn: sqlite3.Connection, w: _Window) -> list[StrategyUse]:
     """Each attempt_started opens an attempt; the next verdict on that subtask closes it. An
     attempt with no verdict (failed, interrupted, still running) was not accepted.
-    A strategy_fallback reclassifies the open attempt without rewriting its start."""
+    A strategy_fallback reclassifies the open attempt. Delegation closes it without
+    spending an attempt."""
     where, args = w.where("ts", "task_id")
     started: Counter[str] = Counter()
     accepted: Counter[str] = Counter()
     open_: dict[str, str] = {}  # subtask id -> strategy of its attempt waiting for a verdict
     for subtask_id, action, details_json in conn.execute(
         f"""SELECT subtask_id, action, details_json FROM audit_log
-            WHERE action IN ('attempt_started', 'strategy_fallback', 'verdict') AND {where} ORDER BY seq""",
+            WHERE action IN ('attempt_started', 'strategy_fallback', 'delegated', 'verdict')
+              AND {where} ORDER BY seq""",
         args,
     ):
         details = json.loads(details_json)
@@ -223,7 +230,9 @@ def _strategies(conn: sqlite3.Connection, w: _Window) -> list[StrategyUse]:
                 open_[subtask_id] = target
         elif subtask_id in open_:
             strategy = open_.pop(subtask_id)
-            if details.get("verdict") == "accept":
+            if action == "delegated":
+                started[strategy] -= 1
+            elif details.get("verdict") == "accept":
                 accepted[strategy] += 1
     order = [s.value for s in Strategy]
     names = sorted(

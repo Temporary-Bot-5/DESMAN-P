@@ -776,6 +776,7 @@ def print_stats(stats: Stats, since: str) -> None:
                 split=sub.split,
             )
         )
+        ui.out(t("Delegated parts to the cluster: {n}.", n=sub.delegated))
     if stats.reviews:
         ui.out(t("Reviews: {verdicts}.", verdicts=_counts(stats.reviews)))
     if stats.failures:
