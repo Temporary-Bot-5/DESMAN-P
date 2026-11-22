@@ -2,8 +2,9 @@
 
 The installers create a per-user git checkout, install uv and Python 3.12 if needed, install
 DESMAN without development extras, create Desktop/menu shortcuts and open `desman gui`.
-No administrator shell is needed for DESMAN itself. On Windows the agents do not run code
-because there is no sandbox; Linux code execution requires bubblewrap and the person's permission.
+No administrator shell is needed for DESMAN itself. Agents run code only in a sandbox and only
+with the person's permission: Docker or bubblewrap on Linux; Docker, WSL or WebAssembly (Python
+and pytest) on Windows (`desman sandbox setup --yes`).
 
 ## 1. Linux
 
