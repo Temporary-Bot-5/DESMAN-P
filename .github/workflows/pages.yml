@@ -2,7 +2,7 @@ name: GitHub Pages
 on:
   push:
     branches: [master]
-    paths: ['site/**']
+    paths: ['site/**', 'install/install.bat']
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # Served by the site itself: a browser ignores `download` on another origin's link
+      # and shows raw.githubusercontent.com's text/plain instead of saving the file.
+      - run: cp install/install.bat site/install.bat
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

@@ -314,6 +314,11 @@ def test_site_assets_and_languages() -> None:
         assert command.replace("&amp;", "&") in (ROOT / name).read_text(encoding="utf-8")
     assert "| sh" not in html
     assert "install.ps1" not in html
+    # Same origin, or the browser shows the file as text instead of saving it.
+    assert 'href="install.bat" download="install.bat"' in html
+    pages = (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8")
+    assert "cp install/install.bat site/install.bat" in pages
+    assert "'install/install.bat'" in pages
     assert "MIT" not in html
     assert "On Windows the agents do not run code because there is no sandbox." in html
     words = (ROOT / "site/i18n.js").read_text(encoding="utf-8")
