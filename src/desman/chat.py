@@ -100,7 +100,7 @@ from desman.llm import waiting as provider_wait
 from desman.llm.base import Completion, ProviderError, Request
 from desman.llm.structured import StructuredOutputError
 from desman.net import protocol
-from desman.planner import must_run, plan
+from desman.planner import Planned, master_plan, must_run, plan
 
 SHOWN_ON_RETURN = 6
 """How many of the last messages are shown when a session is continued or switched to."""
@@ -141,6 +141,7 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/help": t("the chat's commands"),
         "/clear": t("clear the screen (history is kept)"),
         "/context": t("show the context of the next model call: /context [full]"),
+        "/master": t("set master mode until this chat ends: /master [on|off]"),
         "/new": t("start a new session"),
         "/sessions": t("earlier sessions; pick one to continue it"),
         "/rename": t("name this session: /rename NAME"),
@@ -201,6 +202,10 @@ class Chat:
             sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
         )
         self._pending_choice: choices.Choice | None = None
+        self.master_sessions: set[str] = set()
+        self._master_pending = False
+        self._master_kept = False
+        """`_master_pending` of the chat left for the General Terminal (`_back` restores it)."""
         self.pending_files: dict[str, task_files.PendingFiles] = {}
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
@@ -317,6 +322,8 @@ class Chat:
     def _terminal_open(self) -> None:
         if self.in_terminal:
             return
+        # A chat not started yet keeps its pending master mode for `/back` (`_back`).
+        self._master_kept, self._master_pending = self._master_pending, False
         self._previous = (self.session_id, self.temporary)
         self.session_id, self.temporary = self._terminal_id, False
         self.models, self._models_for = None, None
@@ -348,6 +355,7 @@ class Chat:
         ):
             session_id, temporary = None, False
         self.session_id, self.temporary = session_id, temporary
+        self._master_pending, self._master_kept = session_id is None and self._master_kept, False
         self.models, self._models_for = None, None
         ui.reset()
         ui.session(session_id, temporary)
@@ -444,6 +452,7 @@ class Chat:
                     ui.note(t("{n} new in General Terminal (/terminal)", n=count))
 
     def _erase_session(self, session_id: str) -> None:
+        self.master_sessions.discard(session_id)
         self.pending_files.pop(session_id, None)
         self.sessions.erase(session_id)
 
@@ -584,6 +593,17 @@ class Chat:
             node_author=author,
         )
 
+    @property
+    def master_mode(self) -> bool:
+        if self.session_id is None:
+            return self._master_pending
+        return self.session_id in self.master_sessions
+
+    def _bind_master_mode(self, session_id: str) -> None:
+        if self.session_id is None and self._master_pending:
+            self._master_pending = False
+            self.master_sessions.add(session_id)
+
     def _add_user(self, text: str) -> str:
         """The person's message, kept in the session (a new one with the first message)."""
         pending = self._pending_choice if self.session_id is None else None
@@ -593,6 +613,7 @@ class Chat:
         if pending is not None:
             self._pending_choice = None
             ui.pending_module(None)
+        self._bind_master_mode(added.session_id)
         return added.session_id
 
     def _config(self) -> Config | None:
@@ -682,6 +703,7 @@ class Chat:
             temporary=self.temporary,
             initial_choice=choice,
         )
+        self._bind_master_mode(message.session_id)
         self.session_id = message.session_id
         if choice is not None:
             self._drop_pending()
@@ -843,10 +865,10 @@ class Chat:
             ui.error(t("DESMAN needs configuring before this command can use models."))
             return
 
-        def start_task(title: str, goal: str, runs_code: bool) -> None:
+        def start_task(title: str, goal: str, runs_code: bool, master: bool) -> None:
             assert models is not None
             self._task(
-                NewTask(type="task", title=title, goal=goal, runs_code=runs_code),
+                NewTask(type="task", title=title, goal=goal, runs_code=runs_code, master=master),
                 config,
                 models,
                 interlocutor,
@@ -1187,6 +1209,10 @@ class Chat:
         *,
         attached: list[task_files.Given] | None = None,
     ) -> None:
+        master = models.master_status() if turn.master or self.master_mode else None
+        if master is not None and master.models is None and models.choice is not None:
+            ui.error(master.problem or t("No model ready for a master module."))
+            return
         sandbox = Sandbox()
         access = self._access(config, sandbox)
         if access is None:
@@ -1221,29 +1247,34 @@ class Chat:
                 "\n\nFiles of earlier work are in this task's workspace (read them with the "
                 "file tools): " + ", ".join(paths) + "."
             )
-        ui.note(t("Planning…"))
-        with (
-            provider_wait.waiting(
-                sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
-            ) as wait_state,
-            self._for(calls.Role.PLANNER),
-        ):  # the task does not exist yet: the session asked
-            planned = plan(
-                models.for_(calls.Role.PLANNER),
-                goal,
-                limit=runs.tuned(config.tuning, "max_subtasks"),
-                # A temporary chat's work is given no personal node, as it is told no note.
-                tree=runs.task_tree(self.store.conn, config.personalize and not self.temporary),
-                clock=self.store.clock,
-            )
-        if planned.error is not None:
-            ui.provider_limit(wait_state.limited_until)
-            ui.warn(
-                t(
-                    "The model did not make a plan, so the goal is the only subtask: {error}",
-                    error=planned.error,
+        if master is not None:
+            planned = Planned(master_plan(goal), "master")
+            if master.choice is not None:
+                actions.show_master(master.choice.provider.name, master.choice.model)
+        else:
+            ui.note(t("Planning…"))
+            with (
+                provider_wait.waiting(
+                    sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+                ) as wait_state,
+                self._for(calls.Role.PLANNER),
+            ):  # the task does not exist yet: the session asked
+                planned = plan(
+                    models.for_(calls.Role.PLANNER),
+                    goal,
+                    limit=runs.tuned(config.tuning, "max_subtasks"),
+                    # A temporary chat's work is given no personal node, as it is told no note.
+                    tree=runs.task_tree(self.store.conn, config.personalize and not self.temporary),
+                    clock=self.store.clock,
                 )
-            )
+            if planned.error is not None:
+                ui.provider_limit(wait_state.limited_until)
+                ui.warn(
+                    t(
+                        "The model did not make a plan, so the goal is the only subtask: {error}",
+                        error=planned.error,
+                    )
+                )
         spec = must_run(planned.spec) if turn.runs_code else planned.spec
         spec = documents.in_parts(runs.tuned_spec(spec, config.tuning), docs)
         copied: dict[str, list[str]] = {}
@@ -1860,6 +1891,24 @@ class Chat:
             self._terminal_open()
         elif name == "/back":
             self._back()
+        elif name == "/master":
+            args = line.lower().split()[1:]
+            if args in (["on"], ["off"]):
+                enabled = args == ["on"]
+                if self.session_id is None:
+                    self._master_pending = enabled
+                elif enabled:
+                    self.master_sessions.add(self.session_id)
+                else:
+                    self.master_sessions.discard(self.session_id)
+            elif args:
+                ui.note(t("Usage: /master [on|off]"))
+                return True
+            ui.note(
+                t("Master mode is on for this chat until it ends. Type /master off to turn it off.")
+                if self.master_mode
+                else t("Master mode is off. Type /master on to enable it until this chat ends.")
+            )
         elif name == "/help":
             self._help()
             entry = commands.find("help")
@@ -2470,6 +2519,7 @@ class Chat:
             ui.reset()
             ui.note(t("This session is new already."))
             return
+        self._master_pending = False
         self._erase()
         self.temporary = temporary
         self._terminal_started = db.to_iso(self.sessions.clock())
@@ -2525,6 +2575,8 @@ class Chat:
             and self.session_id is not None
             and self.sessions.get(self.session_id) is None
         ):
+            self.master_sessions.discard(self.session_id)
+            self._master_pending = False
             self.session_id = None
             ui.reset()
         ui.ok(tn(deleted, "Deleted {count} session.", "Deleted {count} sessions.", count=deleted))
@@ -2592,7 +2644,9 @@ class Chat:
             return
         self.sessions.delete(current.id)
         operator.record(self.store.conn, "operator_session_deleted", session_id=current.id)
+        self.master_sessions.discard(current.id)
         if current.id == self.session_id:
+            self._master_pending = False
             self.session_id = None
             ui.reset()
         if self.session_id is None:
@@ -2754,6 +2808,7 @@ class Chat:
             self._open_session(selected)
 
     def _open_session(self, selected: SessionInfo) -> None:
+        self._master_pending = False
         self._leave_terminal()
         self._erase()
         self.temporary = False

@@ -81,7 +81,8 @@ src/desman/
 │                  #   config_changes() for the operator's journal
 ├── agents.py      # LLM executor/reviewer behind `desman run`: retry/escalate need feedback,
 │                  #   `{"type": "error"}` = can't do it (never accepted, see coordinator)
-│                  #   executor acts only via `{"tool_calls": [...]}` (≤8 rounds per attempt)
+│                  #   executor calls tools via `{"tool_calls": [...]}` (≤8 rounds per ordinary attempt)
+│                  #   a master may delegate parts to the cluster before resuming its work
 ├── planner.py     # Goal → subtask graph by the model (Plan, ≤8 nodes, DAG, each tagged with its
 │                  #   Kind); template on failure; decomposer(): splits a subtask whose retries
 │                  #   failed (2–4 parts, untagged ones keep the subtask's kind)

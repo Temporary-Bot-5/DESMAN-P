@@ -253,6 +253,7 @@ class Runners:
         self.active = 0
         self.closed = False
         self.summary_failures: dict[str, dict[str, int]] = {}
+        self.master_sessions: set[str] = set()
         self.pending_files: dict[str, task_files.PendingFiles] = {}
         front.runners = self
         front.database = path
@@ -340,6 +341,7 @@ class Runners:
                 runner.front = sink
             # One context per session lifetime, never shared with the dispatcher.
             chat = self.factory(sessions)
+            chat.master_sessions = self.master_sessions
             chat.pending_files = self.pending_files
             chat.session_id, chat.temporary = runner.session_id, runner.temporary
             chat.turn_sink = sink.changed
@@ -590,6 +592,7 @@ class PageChat(Chat):
     def __init__(self, sessions: Sessions, runners: Runners, **options: Any) -> None:
         super().__init__(sessions, background_tasks=True, **options)
         self.runners = runners
+        self.master_sessions = runners.master_sessions
         self.pending_files = runners.pending_files
         self.dispatch_turn = self.dispatch
         runners.front.apply_attachment = self._apply_attachment
@@ -603,6 +606,7 @@ class PageChat(Chat):
             self.runners.front.session_changed(self.session_id)
 
     def _erase_session(self, session_id: str) -> None:
+        self.master_sessions.discard(session_id)
         self.pending_files.pop(session_id, None)
         if not self.runners.defer_erase(session_id):
             super()._erase_session(session_id)

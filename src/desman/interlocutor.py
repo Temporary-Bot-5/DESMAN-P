@@ -108,7 +108,7 @@ INTERLOCUTOR_SYSTEM = (
     "or about what DESMAN can do, anything you can answer from what was said;\n"
     '{"type": "clarify", "question": "..."} when the request is too unclear to act on;\n'
     '{"type": "task", "title": "a few words", "goal": "...", "files_from"?: ["task id"], '
-    '"runs_code"?: true} when '
+    '"runs_code"?: true, "master"?: true} when '
     "the person wants something done that needs work (finding, writing, saving, running, "
     "testing, computing, checking). The goal is all the workers see: never refer to the "
     "conversation, write into the goal every detail the person gave. Files a task wrote stay "
@@ -117,6 +117,8 @@ INTERLOCUTOR_SYSTEM = (
     f"{MAX_FILES_FROM}); the workers then get copies of its files. Give "
     '"runs_code": true when the work must run code or a command and tell what came of it '
     "(testing a program, a crash test, measuring): it is then done only if it really ran. "
+    'Give "master": true only when the person asks for one strong agent, one model, or the '
+    "master module instead of splitting work among small models. "
     "A request to work on the pending_files is a task turn; DESMAN attaches them automatically. "
     "Work is always a task turn, never a command: the person asked for it already. A "
     "request for current information (prices, news, weather, latest versions, anything "
@@ -366,6 +368,8 @@ class NewTask(Noting):
     """The work must run code: the task is held to it whatever the plan says (`must_run`)."""
     """Earlier tasks of the session whose files the new one gets copies of (the chat checks
     they are the session's own)."""
+    master: bool = False
+    """The person asked for one agent: the goal is one master subtask (ADR 0015)."""
 
 
 class Command(Noting):

@@ -18,6 +18,7 @@ from desman.cli import cli
 from desman.commands import TuningArgs
 from desman.config import Config, Tuning, open_config, upgrade
 from desman.core import db
+from desman.core.models import SubtaskSpec
 from desman.core.sessions import Role, Sessions
 from desman.gui.front import WebFront
 from desman.gui.panels import snapshot
@@ -133,6 +134,28 @@ def test_a_blocked_model_leaves_slash_commands_and_b_free(page: Harness) -> None
     gate.set()
     page.done(a)
     assert page.answers(a) == ["reply:A"]
+
+
+def test_master_mode_reaches_the_page_runner_and_parts_panel(page: Harness) -> None:
+    with ui.use(page.front):
+        assert not page.chat.dispatch("/master on")
+        assert page.chat._slash("/master on")
+    page.outcomes["work"] = {"type": "task", "goal": "Write an outline", "title": "Outline"}
+    session = page.send("work")
+    page.done(session)
+    assert "plan" not in page.entered
+    store = page.chat.store
+    [row] = page.conn.execute("SELECT id FROM tasks")
+    master = store.claim("test", task_id=row["id"])
+    assert master is not None and master.master and master.lease_token is not None
+    store.delegate(
+        master.id,
+        master.lease_token,
+        [SubtaskSpec(description=name, acceptance_criteria="Done") for name in ("A", "B")],
+        "Will combine the sections into an outline.",
+    )
+    [task] = snapshot(page.path, "tasks", page.front)["tasks"]
+    assert [sub["part_of"] for sub in task["subtasks"]] == [None, "part of 0", "part of 0"]
 
 
 def test_same_session_is_ordered_without_blocking_an_eligible_b(page: Harness) -> None:

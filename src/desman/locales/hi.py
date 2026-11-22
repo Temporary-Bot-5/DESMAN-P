@@ -2015,6 +2015,14 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "फ़ाइल का आकार {limit} बाइट से अधिक है",
         "the file extension is not a supported text format": "फ़ाइल का एक्सटेंशन किसी समर्थित टेक्स्ट फ़ॉर्मैट का नहीं है",
         "the maximum number of attached files is {limit}": "ज़्यादा से ज़्यादा {limit} फ़ाइलें जोड़ी जा सकती हैं",
+        "set master mode until this chat ends: /master [on|off]": "इस चैट के अंत तक मास्टर मोड सेट करें: /master [on|off]",
+        "Usage: /master [on|off]": "उपयोग: /master [on|off]",
+        "Master mode is on for this chat until it ends. Type /master off to turn it off.": "इस चैट के अंत तक मास्टर मोड चालू है। इसे बंद करने के लिए /master off लिखें।",
+        "Master mode is off. Type /master on to enable it until this chat ends.": "मास्टर मोड बंद है। इसे इस चैट के अंत तक चालू करने के लिए /master on लिखें।",
+        "Master subtasks that delegated to the cluster: {n}.": "क्लस्टर को हिस्से सौंपने वाले मास्टर उपकार्य: {n}।",
+        "Give the whole goal to one master module.": "पूरा लक्ष्य एक मास्टर मॉड्यूल को सौंपें।",
+        "The work must run code.": "इस काम के लिए कोड चलाना ज़रूरी है।",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है, इसलिए आगे का काम क्लस्टर के लिए नियोजित किया जाएगा: {why}",
     }
 )
 

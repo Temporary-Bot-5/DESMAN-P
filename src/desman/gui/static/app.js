@@ -843,7 +843,7 @@ function showTasks(data) {
       const row = text("div", "", card);
       row.className = "subtask";
       text("span", words[`status_${sub.status}`], row).className = "status-chip";
-      const heading = text("span", `${sub.seq} · ${sub.title}`, row);
+      const heading = text("span", `${sub.seq} · ${sub.title}${sub.part_of ? ` · ${sub.part_of}` : ""}`, row);
       heading.title = sub.description;
       text("p", sub.description, card);
       if (sub.version === null) continue;

@@ -102,6 +102,8 @@ class Context(BaseModel):
     workspace_files: list[dict[str, Any]] = []
     earlier_results: list[dict[str, Any]] = []
     earlier_lookups: list[dict[str, Any]] = []
+    delegations: list[dict[str, Any]] = []
+    delegations_left: int = 0
     feedback: Feedback | None = None
     attempt: int = 1
     """1 for the first try; grows with every quality retry."""

@@ -421,6 +421,17 @@ def test_run_starts_a_task_of_the_session_after_yes(fake: FakeLLM) -> None:
     assert any(m.task_id for m in conversation())
 
 
+@pytest.mark.parametrize(("master", "runs_code"), [(True, False), (False, True), (True, True)])
+def test_run_confirmation_shows_the_requested_mode(
+    fake: FakeLLM, master: bool, runs_code: bool
+) -> None:
+    fake.on(CHAT, asks("run", goal="Check the output", master=master, runs_code=runs_code))
+    result = chat("check the output", "n")
+    assert "Start a task: Check the output" in result.output
+    assert ("Give the whole goal to one master module." in result.output) == master
+    assert ("The work must run code." in result.output) == runs_code
+
+
 def test_resume_continues_a_task_after_yes(fake: FakeLLM) -> None:
     task_id, _ = escalated_task()
     retried = CliRunner().invoke(cli, ["retry", f"{task_id[:8]}/0"])

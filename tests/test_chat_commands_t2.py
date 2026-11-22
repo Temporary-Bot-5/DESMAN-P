@@ -93,7 +93,7 @@ def test_each_catalog_field_is_reachable_from_click() -> None:
         (
             'run "two words"',
             "run",
-            {"goal": "two words", "title": None, "runs_code": False, "file": []},
+            {"goal": "two words", "title": None, "runs_code": False, "master": False, "file": []},
         ),
     ],
 )

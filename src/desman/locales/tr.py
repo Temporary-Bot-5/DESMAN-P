@@ -1926,6 +1926,14 @@ MESSAGES.update(
         "the file exceeds {limit} bytes": "dosya {limit} baytı aşıyor",
         "the file extension is not a supported text format": "dosya uzantısı desteklenen bir metin biçimine ait değil",
         "the maximum number of attached files is {limit}": "en fazla {limit} dosya eklenebilir",
+        "set master mode until this chat ends: /master [on|off]": "ana modül kipini bu sohbet bitene kadar ayarla: /master [on|off]",
+        "Usage: /master [on|off]": "Kullanım: /master [on|off]",
+        "Master mode is on for this chat until it ends. Type /master off to turn it off.": "Ana modül kipi bu sohbet bitene kadar açık. Kapatmak için /master off yazın.",
+        "Master mode is off. Type /master on to enable it until this chat ends.": "Ana modül kipi kapalı. Bu sohbet bitene kadar açmak için /master on yazın.",
+        "Master subtasks that delegated to the cluster: {n}.": "Kümeye parça devreden ana alt görevler: {n}.",
+        "Give the whole goal to one master module.": "Hedefin tamamını tek bir ana modüle ver.",
+        "The work must run code.": "Bu işte kod çalıştırılması gerekiyor.",
+        "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Ana modül için hazır model yok, bu yüzden devam işi küme için planlanıyor: {why}",
     }
 )
 

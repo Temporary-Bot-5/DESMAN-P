@@ -117,9 +117,9 @@ class Context:
 
     store: Store
     manager: ConfigManager
-    start_task: Callable[[str, str, bool], None]
-    """(title, goal, runs_code): plan a task of the session and run it; with runs_code it
-    must run code (`planner.must_run`)."""
+    start_task: Callable[[str, str, bool, bool], None]
+    """(title, goal, runs_code, master): plan a task of the session and run it; with runs_code
+    it must run code (`planner.must_run`), with master it is one master subtask (ADR 0015)."""
     resume_task: Callable[[str], bool]
     """(task id): run or schedule further work; False if it could not resume."""
     session_id: Callable[[], str | None] = lambda: None
@@ -269,6 +269,7 @@ class RunArgs(Args):
     goal: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
     title: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
     runs_code: bool = False
+    master: bool = False
     file: list[Annotated[str, StringConstraints(min_length=1, max_length=4096)]] = Field(
         default_factory=list, max_length=task_files.MAX_GIVEN_FILES
     )
@@ -1579,10 +1580,15 @@ def _run(ctx: Context, args: RunArgs) -> Proposal:
     title = args.title or actions.one_line(args.goal, 60)
 
     def apply() -> Outcome:
-        ctx.start_task(title, args.goal, args.runs_code)
+        ctx.start_task(title, args.goal, args.runs_code, args.master)
         return Outcome(None)
 
-    return Proposal([t("Start a task: {goal}", goal=actions.one_line(args.goal, 300))], apply)
+    lines = [t("Start a task: {goal}", goal=actions.one_line(args.goal, 300))]
+    if args.master:
+        lines.append(t("Give the whole goal to one master module."))
+    if args.runs_code:
+        lines.append(t("The work must run code."))
+    return Proposal(lines, apply)
 
 
 def _resume(ctx: Context, args: TaskArgs) -> Proposal:
