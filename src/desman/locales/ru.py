@@ -2306,7 +2306,7 @@ MESSAGES.update(
         "Usage: /master [on|off]": "Использование: /master [on|off]",
         "Master mode is on for this chat until it ends. Type /master off to turn it off.": "Режим мастера включён до конца этого чата. Чтобы выключить его, введите /master off.",
         "Master mode is off. Type /master on to enable it until this chat ends.": "Режим мастера выключен. Чтобы включить его до конца этого чата, введите /master on.",
-        "Delegated parts to the cluster: {n}.": "Делегировали части кластеру: {n}.",
+        "Master subtasks that delegated to the cluster: {n}.": "Мастер-подзадачи, поручившие части кластеру: {n}.",
         "Give the whole goal to one master module.": "Передать всю цель одному модулю-мастеру.",
         "The work must run code.": "Для работы требуется запуск кода.",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Нет готовой модели для мастер-модуля, поэтому продолжение планируется для кластера: {why}",

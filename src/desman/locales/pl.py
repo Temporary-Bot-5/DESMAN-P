@@ -2069,7 +2069,7 @@ MESSAGES.update(
         "Usage: /master [on|off]": "Użycie: /master [on|off]",
         "Master mode is on for this chat until it ends. Type /master off to turn it off.": "Tryb nadrzędny jest włączony do końca tej rozmowy. Wpisz /master off, aby go wyłączyć.",
         "Master mode is off. Type /master on to enable it until this chat ends.": "Tryb nadrzędny jest wyłączony. Wpisz /master on, aby go włączyć do końca tej rozmowy.",
-        "Delegated parts to the cluster: {n}.": "Przekazały części do klastra: {n}.",
+        "Master subtasks that delegated to the cluster: {n}.": "Podzadania mistrza, które przekazały części klastrowi: {n}.",
         "Give the whole goal to one master module.": "Powierz cały cel jednemu modułowi nadrzędnemu.",
         "The work must run code.": "Praca wymaga uruchomienia kodu.",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Żaden model modułu nadrzędnego nie jest gotowy, więc dalsza praca zostanie zaplanowana dla klastra: {why}",

@@ -53,7 +53,6 @@ from desman.core.context import (
     Knowledge,
     KnowledgeText,
     build_context,
-    estimate_tokens,
     given,
 )
 from desman.core.effects import (
@@ -151,6 +150,8 @@ RUN_TOOL = "run_command"
 ERROR_TYPE = "error"
 """A result `{"type": "error", "reason": ...}` is the executor saying it could not do the work."""
 REASON_EXCERPT = 300
+DELEGATION_NOTE_SHOWN = 600
+"""Characters of each earlier delegation note a resumed master is shown (≤ MAX_DELEGATIONS)."""
 
 
 def is_error_report(content: dict[str, Any] | None) -> bool:
@@ -561,14 +562,11 @@ class Coordinator:
             goal, is_final = self.store.subtask_goal(subtask)
             offered = [str(spec["name"]) for spec in tools.specs()]
             continuation_rows: list[EffectRef] = []
-            budget = self.context_budget_tokens
-            if delegations:
-                budget -= estimate_tokens(json.dumps(delegations, ensure_ascii=False))
             context = build_context(
                 subtask,
                 self.store.dependency_results(subtask.id),
                 self.store.last_feedback(subtask.id),
-                max(0, budget),
+                self.context_budget_tokens,
                 strategy,
                 self._knowledge(subtask) if own else None,
                 goal=goal,
@@ -590,7 +588,11 @@ class Coordinator:
             if can_delegate:
                 context = context.model_copy(
                     update={
-                        "delegations": delegations,
+                        # Outside the budget the dependencies are fitted to, so kept short:
+                        # the parts' results matter more than the master's notes on them.
+                        "delegations": [
+                            {**d, "note": d["note"][:DELEGATION_NOTE_SHOWN]} for d in delegations
+                        ],
                         "delegations_left": MAX_DELEGATIONS - len(delegations),
                     }
                 )

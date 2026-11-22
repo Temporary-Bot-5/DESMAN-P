@@ -133,7 +133,7 @@ def test_stats_for_the_person(tmp_path: Path) -> None:
     assert "Stats (last 7d)" in out and "3 tasks: done 3." in out
     assert "Subtasks: 3. Done: 3, on the first try: 1 (33%)." in out
     assert "Retried: 1, escalated to you: 1, split into parts: 0." in out
-    assert "Delegated parts to the cluster: 0." in out
+    assert "delegated to the cluster" not in out
     assert "Reviews: accept 2, retry 1." in out and "Failures by kind: permanent 1" in out
     assert "feedback" in out  # the attempts table
 

@@ -15,8 +15,16 @@ from desman.cli import continued
 from desman.config import open_config
 from desman.core import stats
 from desman.core.audit import check_history, history
-from desman.core.context import CHARS_PER_TOKEN, estimate_tokens
-from desman.core.coordinator import Coordinator, Crew, Delegation, Failure, Success, Work
+from desman.core.context import CHARS_PER_TOKEN
+from desman.core.coordinator import (
+    DELEGATION_NOTE_SHOWN,
+    Coordinator,
+    Crew,
+    Delegation,
+    Failure,
+    Success,
+    Work,
+)
 from desman.core.models import MAX_DELEGATIONS, Kind, Origin, SubtaskSpec, TaskSpec
 from desman.core.report import task_report
 from desman.core.retry import Strategy
@@ -138,14 +146,14 @@ def test_master_delegates_and_resumes_without_spending_a_quality_attempt(
     assert report.strategies == [stats.StrategyUse("first", started=4, accepted=4)]
     assert report.as_json()["subtasks"]["delegated"] == 1
     actions.print_stats(report, "all")
-    assert "Delegated parts to the cluster: 1." in capsys.readouterr().out
+    assert "Master subtasks that delegated to the cluster: 1." in capsys.readouterr().out
     assert check_history(store.conn, task) == []
 
 
-def test_delegation_notes_reduce_the_budget_for_dependency_results(store: Store) -> None:
+def test_resumed_master_sees_short_notes_and_the_whole_budget(store: Store) -> None:
     task = store.create_task(master_plan("Write an outline"))
     [master] = store.list_subtasks(task)
-    note = "Outline: " + "x" * 200
+    note = "Outline: " + "x" * 2000
     budget = 110
     resumed: list[Work] = []
 
@@ -153,7 +161,7 @@ def test_delegation_notes_reduce_the_budget_for_dependency_results(store: Store)
         if not work.subtask.master:
             return Success(content={"text": "Fact " * 100})
         if not work.context.delegations:
-            return Delegation(parts=parts(), note=note)
+            return Delegation(parts=parts(), note=note[:2000])
         resumed.append(work)
         return Success(content={"text": "Done"})
 
@@ -161,13 +169,12 @@ def test_delegation_notes_reduce_the_budget_for_dependency_results(store: Store)
     coordinator = Coordinator(store, execute, reviewer, context_budget_tokens=budget)
     assert coordinator.run(task).status is TaskStatus.DONE
     [work] = resumed
-    notes = store.delegation_notes(master.id)
-    assert work.context.delegations == notes
-    reserved = estimate_tokens(json.dumps(notes, ensure_ascii=False))
-    assert 0 < reserved < budget
+    [shown] = work.context.delegations
+    assert shown["note"] == note[:DELEGATION_NOTE_SHOWN]
+    assert shown["parts"] == store.delegation_notes(master.id)[0]["parts"]
+    # The parts' results get the budget the notes do not take.
     dependencies = work.context.dependencies
-    assert all(dep.truncated for dep in dependencies)
-    assert sum(len(dep.content) for dep in dependencies) == (budget - reserved) * CHARS_PER_TOKEN
+    assert sum(len(dep.content) for dep in dependencies) == budget * CHARS_PER_TOKEN
 
 
 @pytest.mark.parametrize("mode", ["available", "exhausted", "combine", "ordinary"])
@@ -365,7 +372,7 @@ def test_chat_master_bypasses_planner(
         assert chat._slash("/master off") and not chat.master_mode
 
 
-@pytest.mark.parametrize("exit_by", ["delete", "delete_all", "new", "terminal"])
+@pytest.mark.parametrize("exit_by", ["delete", "delete_all"])
 def test_pending_master_mode_does_not_follow_session_navigation(
     store: Store, monkeypatch: pytest.MonkeyPatch, exit_by: str
 ) -> None:
@@ -380,21 +387,37 @@ def test_pending_master_mode_does_not_follow_session_navigation(
     chat = Chat(sessions, background_tasks=True)
     assert chat._slash("/master on") and chat.master_mode
     assert not chat.master_sessions
-    if exit_by == "new":
-        chat._new()
-    elif exit_by == "terminal":
-        chat._terminal_open()
-        chat._back()
+    chat._open_session(selected)
+    if exit_by == "delete":
+        chat._delete()
     else:
-        chat._open_session(selected)
-        if exit_by == "delete":
-            chat._delete()
-        else:
-            chat._delete_all()
+        chat._delete_all()
     assert chat.session_id is None
     chat._message("New message")
     assert chat.session_id is not None and not chat.master_mode
     assert not chat.master_sessions
+
+
+@pytest.mark.parametrize("by", ["terminal", "new"])
+def test_pending_master_mode_survives_a_trip_to_the_terminal_and_new(
+    store: Store, monkeypatch: pytest.MonkeyPatch, by: str
+) -> None:
+    """The chat is still the same unstarted one: what the person turned on stays on."""
+    sessions = Sessions(store.conn)
+    open_config().save(make_config(configured=True, language="en"))
+    llm = FakeLLM().on(CHAT, '{"type":"reply","text":"Hello"}')
+    monkeypatch.setattr(runs, "models", lambda *a, **kw: runs.Models(llm, None))
+    chat = Chat(sessions, background_tasks=True)
+    assert chat._slash("/master on") and chat.master_mode
+    if by == "terminal":
+        chat._terminal_open()
+        assert not chat.master_mode  # the General Terminal is not that chat
+        chat._back()
+    else:
+        chat._new()  # "This session is new already."
+    assert chat.session_id is None and chat.master_mode
+    chat._message("New message")
+    assert chat.session_id is not None and chat.master_mode
 
 
 def test_chat_without_a_master_keeps_files_pending(

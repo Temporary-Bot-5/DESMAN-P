@@ -1886,7 +1886,7 @@ MESSAGES.update(
         "Usage: /master [on|off]": "使い方: /master [on|off]",
         "Master mode is on for this chat until it ends. Type /master off to turn it off.": "このチャットが終わるまでマスターモードはオンです。オフにするには /master off と入力してください。",
         "Master mode is off. Type /master on to enable it until this chat ends.": "マスターモードはオフです。このチャットが終わるまでオンにするには /master on と入力してください。",
-        "Delegated parts to the cluster: {n}.": "クラスターに一部を委任したサブタスク: {n} 件。",
+        "Master subtasks that delegated to the cluster: {n}.": "クラスターに一部を委任したマスターのサブタスク: {n} 件。",
         "Give the whole goal to one master module.": "目標全体を 1 つのマスターモジュールに任せます。",
         "The work must run code.": "この作業ではコードの実行が必要です。",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "マスターモジュールに使えるモデルがないため、続きの作業はクラスター向けに計画されます: {why}",

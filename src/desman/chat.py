@@ -204,6 +204,8 @@ class Chat:
         self._pending_choice: choices.Choice | None = None
         self.master_sessions: set[str] = set()
         self._master_pending = False
+        self._master_kept = False
+        """`_master_pending` of the chat left for the General Terminal (`_back` restores it)."""
         self.pending_files: dict[str, task_files.PendingFiles] = {}
         self.store = Store(sessions.conn, clock=sessions.clock)
         self.profile = Profile(sessions.conn, clock=sessions.clock)
@@ -320,7 +322,8 @@ class Chat:
     def _terminal_open(self) -> None:
         if self.in_terminal:
             return
-        self._master_pending = False
+        # A chat not started yet keeps its pending master mode for `/back` (`_back`).
+        self._master_kept, self._master_pending = self._master_pending, False
         self._previous = (self.session_id, self.temporary)
         self.session_id, self.temporary = self._terminal_id, False
         self.models, self._models_for = None, None
@@ -352,6 +355,7 @@ class Chat:
         ):
             session_id, temporary = None, False
         self.session_id, self.temporary = session_id, temporary
+        self._master_pending, self._master_kept = session_id is None and self._master_kept, False
         self.models, self._models_for = None, None
         ui.reset()
         ui.session(session_id, temporary)
@@ -2509,13 +2513,13 @@ class Chat:
         ui.pending_module(None)
 
     def _new(self, temporary: bool = False) -> None:
-        self._master_pending = False
         self._drop_pending()
         self._leave_terminal()
         if self.session_id is None and self.temporary == temporary:
             ui.reset()
             ui.note(t("This session is new already."))
             return
+        self._master_pending = False
         self._erase()
         self.temporary = temporary
         self._terminal_started = db.to_iso(self.sessions.clock())

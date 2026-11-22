@@ -1930,7 +1930,7 @@ MESSAGES.update(
         "Usage: /master [on|off]": "Kullanım: /master [on|off]",
         "Master mode is on for this chat until it ends. Type /master off to turn it off.": "Ana modül kipi bu sohbet bitene kadar açık. Kapatmak için /master off yazın.",
         "Master mode is off. Type /master on to enable it until this chat ends.": "Ana modül kipi kapalı. Bu sohbet bitene kadar açmak için /master on yazın.",
-        "Delegated parts to the cluster: {n}.": "Kümeye parça devreden alt görevler: {n}.",
+        "Master subtasks that delegated to the cluster: {n}.": "Kümeye parça devreden ana alt görevler: {n}.",
         "Give the whole goal to one master module.": "Hedefin tamamını tek bir ana modüle ver.",
         "The work must run code.": "Bu işte kod çalıştırılması gerekiyor.",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "Ana modül için hazır model yok, bu yüzden devam işi küme için planlanıyor: {why}",

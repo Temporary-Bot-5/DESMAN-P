@@ -2019,7 +2019,7 @@ MESSAGES.update(
         "Usage: /master [on|off]": "उपयोग: /master [on|off]",
         "Master mode is on for this chat until it ends. Type /master off to turn it off.": "इस चैट के अंत तक मास्टर मोड चालू है। इसे बंद करने के लिए /master off लिखें।",
         "Master mode is off. Type /master on to enable it until this chat ends.": "मास्टर मोड बंद है। इसे इस चैट के अंत तक चालू करने के लिए /master on लिखें।",
-        "Delegated parts to the cluster: {n}.": "क्लस्टर को हिस्से सौंपने वाले उपकार्य: {n}।",
+        "Master subtasks that delegated to the cluster: {n}.": "क्लस्टर को हिस्से सौंपने वाले मास्टर उपकार्य: {n}।",
         "Give the whole goal to one master module.": "पूरा लक्ष्य एक मास्टर मॉड्यूल को सौंपें।",
         "The work must run code.": "इस काम के लिए कोड चलाना ज़रूरी है।",
         "No model is ready for a master module, so the continuation is planned for the cluster: {why}": "मास्टर मॉड्यूल के लिए कोई मॉडल तैयार नहीं है, इसलिए आगे का काम क्लस्टर के लिए नियोजित किया जाएगा: {why}",
