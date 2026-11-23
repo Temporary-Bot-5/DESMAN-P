@@ -350,7 +350,7 @@ class Runners:
             with ui.use(sink), sink.capture():
                 while True:
                     with self.condition:
-                        if not runner.queue:
+                        if self.front.ended or not runner.queue:
                             break
                         work = runner.queue.popleft()
                         runner.current = work
@@ -358,11 +358,14 @@ class Runners:
                         def ready(work: Work = work) -> bool:
                             return (
                                 work.stopped.is_set()
+                                or self.front.ended
                                 or self._eligible(work)
                                 and self.active < self.cap
                             )
 
                         self.condition.wait_for(ready)
+                        if self.front.ended:
+                            break
                         if work.stopped.is_set():
                             runner.current = None
                             continue
@@ -434,6 +437,8 @@ class Runners:
                         # No raw exception/model content in diagnostics or the event log.
                         sink.error(t("The chat turn failed ({error}).", error=type(exc).__name__))
                     finally:
+                        if chat.exit_requested:
+                            self.front.end()
                         with self.condition:
                             runner.current = None
                             if work.slot:
@@ -443,7 +448,6 @@ class Runners:
                             self.condition.notify_all()
                         sink.changed(runner.session_id)
                     if chat.exit_requested:
-                        self.front.end()
                         break
                 if chat._http is not None:
                     chat._http.close()
@@ -461,18 +465,17 @@ class Runners:
             if sink is not None:
                 sink.error(t("The chat turn failed ({error}).", error=type(exc).__name__))
         finally:
-            if conn is not None:
-                if runner.erase or self.closed and runner.temporary:
-                    Sessions(conn).erase(runner.session_id)
-                conn.close()
             with self.condition:
                 # Submit and retirement share this lock, so work cannot be stranded.
+                if self.front.ended:
+                    self._drop_waiting(runner)
+                    self.tickets = deque(w for w in self.tickets if not w.stopped.is_set())
+                if conn is not None:
+                    if runner.erase or self.closed and runner.temporary:
+                        Sessions(conn).erase(runner.session_id)
+                    conn.close()
                 runner.thread = None
                 runner.front = None
-                if self.front.ended and runner.queue:
-                    abandoned = set(runner.queue)
-                    self.tickets = deque(w for w in self.tickets if w not in abandoned)
-                    runner.queue.clear()
                 if runner.queue:
                     runner.thread = Thread(target=self._run, args=(runner,), daemon=True)
                     runner.thread.start()
@@ -553,17 +556,30 @@ class Runners:
             runner.erase = True
             return True
 
+    def _drop_waiting(self, runner: Runner) -> None:
+        waiting = list(runner.queue)
+        if runner.current is not None and not runner.current.slot:
+            waiting.append(runner.current)
+        for work in waiting:
+            work.stopped.set()
+        if self.front.ended and any(work.user_seq is not None for work in waiting):
+            # An explicit page exit discards queued inputs durably.
+            conn = db.open_db(self.path)
+            try:
+                sessions = Sessions(conn)
+                for work in waiting:
+                    if work.user_seq is not None:
+                        sessions.settle_turn(work.user_seq, cancelled=True)
+            finally:
+                conn.close()
+        runner.queue.clear()
+
     def close(self, timeout: float = 10) -> None:
         with self.condition:
             self.closed = True
-            # Queued inputs stay pending in SQLite for the next page. A running
-            # model may still finish durably during or after the grace period.
+            # An ordinary shutdown leaves queued inputs pending for recovery.
             for runner in self.runners.values():
-                for work in runner.queue:
-                    work.stopped.set()
-                runner.queue.clear()
-                if runner.current is not None and not runner.current.slot:
-                    runner.current.stopped.set()
+                self._drop_waiting(runner)
             self.tickets = deque(w for w in self.tickets if not w.stopped.is_set())
             self.condition.notify_all()
             sinks = [r.front for r in self.runners.values() if r.front is not None]

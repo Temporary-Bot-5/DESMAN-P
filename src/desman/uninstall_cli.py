@@ -10,7 +10,9 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.text import Text
@@ -21,6 +23,16 @@ from desman.config import CONFIG_DIR_ENV, default_config_path, home_config_dir
 from desman.core import db
 from desman.core.sandbox import Sandbox, SandboxUnavailable, find_docker
 from desman.i18n import t
+
+FAILURE_MARKER = "uninstall-failed.txt"
+
+
+def warn_last_failure() -> None:
+    marker = db.default_db_path().parent / FAILURE_MARKER
+    with suppress(OSError, UnicodeError):
+        log = marker.read_text(encoding="utf-8").strip()
+        marker.unlink()
+        ui.warn(t("The last uninstall did not finish. Details: {log}", log=log))
 
 
 def _installer(app: Path) -> Path:
@@ -117,13 +129,13 @@ def plan(app: Path, purge: bool) -> list[str]:
     lines = [
         t("Remove the DESMAN app folder: {path}", path=app),
         t("Remove the desman launcher and DESMAN shortcuts."),
+        t("Remove managed SearXNG if present (desman search setup brings it back)."),
     ]
     if purge:
         lines.extend(
             [
                 t("Delete the data folder: {path}", path=db.default_db_path().parent.absolute()),
                 t("Delete the configuration folder: {path}", path=_config_folder().absolute()),
-                t("Remove managed SearXNG if present."),
             ]
         )
         if sys.platform == "win32" and _wsl_sandbox() is not None:
@@ -141,58 +153,75 @@ def _powershell_quote(path: Path) -> str:
     return "'" + value + "'"
 
 
-def _purge_services() -> None:
-    if sys.platform == "win32" and (box := _wsl_sandbox(removing=True)) is not None:
-        sandbox_cli.remove_wsl_sandbox(box)
-    # Docker keeps the container and its volumes outside the app, config and data folders.
-    if find_docker() is not None:
-        try:
-            container = searxng.inspect()
-        except click.ClickException:
-            config = default_config_path().parent
-            if any(
-                (config / name / "settings.yml").is_file() for name in ("searxng", "searxng-docker")
-            ):
-                raise
-        else:
-            if container is not None:
-                searxng.docker(["rm", "-f", "-v", searxng.CONTAINER])
-    # The installer deletes the native files. Stop the service to release its handles.
-    folder = searxng_native.directory()
-    if folder.is_dir():
-        with searxng_native.locked(folder):
-            searxng_native.stop(folder)
+def _docker_search(app: Path) -> dict[str, Any] | None:
+    if find_docker() is None:
+        return None
+    try:
+        return searxng.inspect()
+    except click.ClickException:
+        roots = {app, default_config_path().parent, home_config_dir()}
+        if any(
+            (root / name / "settings.yml").is_file()
+            for root in roots
+            for name in ("searxng", "searxng-docker")
+        ):
+            raise
+        return None
 
 
-def _finish_purge() -> None:
+def _services(app: Path, purge: bool, *, removing: bool) -> None:
+    box = _wsl_sandbox(removing=True) if purge and sys.platform == "win32" else None
+    container = _docker_search(app)
+    if purge:
+        # The installer deletes the native files. Stop the service to release its handles.
+        folder = searxng_native.directory()
+        if folder.is_dir():
+            with searxng_native.locked(folder):
+                if removing:
+                    searxng_native.stop(folder)
+    if removing:
+        if box is not None:
+            sandbox_cli.remove_wsl_sandbox(box)
+        if container is not None:
+            # The image can have a configuration volume as well as a cache volume.
+            volumes = [m for m in container.get("Mounts", []) if m.get("Type") == "volume"]
+            cache_only = all(m.get("Destination") == "/var/cache/searxng" for m in volumes)
+            flags = ["-v"] if cache_only else []
+            searxng.docker(["rm", "-f", *flags, searxng.CONTAINER])
+
+
+def _finish_cleanup(purge: bool) -> None:
     app = require_app()
-    check_paths(app, True)
-    _purge_services()
+    check_paths(app, purge)
+    _services(app, purge, removing=True)
 
 
-_PURGE_COMMAND = "from desman.uninstall_cli import _finish_purge; _finish_purge()"
+def _cleanup_command(purge: bool) -> str:
+    return f"from desman.uninstall_cli import _finish_cleanup; _finish_cleanup({purge})"
 
 
 def _windows_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]:
     extra = " -Purge" if purge else ""
-    cleanup = (
-        f"& $env:DESMAN_UNINSTALL_PYTHON -c '{_PURGE_COMMAND}'; "
-        "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; "
-        if purge
-        else ""
-    )
     command = (
+        "function Report-Failure { "
+        "[IO.Directory]::CreateDirectory($env:DESMAN_UNINSTALL_DATA) | Out-Null; "
+        f"[IO.File]::WriteAllText((Join-Path $env:DESMAN_UNINSTALL_DATA '{FAILURE_MARKER}'), "
+        "$env:DESMAN_UNINSTALL_LOG) }; "
         "$prefix = $env:DESMAN_HOME + '\\'; "
         "$timer = [Diagnostics.Stopwatch]::StartNew(); "
         f"while (Get-Process | Where-Object {{ $_.Id -eq {pid} -or "
         "($_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) }) { "
         "if ($timer.Elapsed.TotalSeconds -ge 600) { "
         f"Set-Content -LiteralPath {_powershell_quote(log)} -Encoding UTF8 "
-        "-Value $env:DESMAN_UNINSTALL_TIMEOUT; exit 1 }; "
+        "-Value $env:DESMAN_UNINSTALL_TIMEOUT; Report-Failure; exit 1 }; "
         "Start-Sleep -Seconds 1 }; "
         "Start-Sleep -Seconds 2; "
-        f"& {{ {cleanup}& {_powershell_quote(script)} -Uninstall -Yes{extra} }} "
-        f"*> {_powershell_quote(log)}"
+        f"& $env:DESMAN_UNINSTALL_PYTHON -c '{_cleanup_command(purge)}' "
+        f"*> {_powershell_quote(log)}; "
+        "if ($LASTEXITCODE -eq 0) { "
+        "& powershell -NoProfile -ExecutionPolicy Bypass "
+        f"-File {_powershell_quote(script)} -Uninstall -Yes{extra} *>> {_powershell_quote(log)} }}; "
+        "$code = $LASTEXITCODE; if ($code -ne 0) { Report-Failure }; exit $code"
     )
     return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
 
@@ -200,7 +229,6 @@ def _windows_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]
 def _posix_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]:
     # A virtualenv may symlink Python outside the app. Check argv[0] as well as the
     # kernel's executable path so a chat or worker using that virtualenv also counts.
-    processes = ""
     if sys.platform == "linux":
         processes = """
     for entry in /proc/[0-9]*; do
@@ -210,11 +238,20 @@ def _posix_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]:
         case "$argv0" in "$DESMAN_HOME/"*) return 0 ;; esac
     done
 """
+    else:
+        processes = """
+    ps -axo pid=,comm= | awk '{
+        sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "")
+        if (index($0, ENVIRON["DESMAN_HOME"] "/") == 1) found = 1
+    } END { exit !found }' && return 0
+"""
     extra = " --purge" if purge else ""
-    cleanup = (
-        f'"$DESMAN_UNINSTALL_PYTHON" -c {shlex.quote(_PURGE_COMMAND)} || exit $?; ' if purge else ""
-    )
     command = f"""exec >{shlex.quote(str(log))} 2>&1
+failed() {{
+    mkdir -p "$DESMAN_UNINSTALL_DATA" &&
+        printf '%s\\n' "$DESMAN_UNINSTALL_LOG" > "$DESMAN_UNINSTALL_DATA/{FAILURE_MARKER}"
+    exit "$1"
+}}
 running() {{
     if kill -0 {pid} 2>/dev/null; then return 0; fi
 {processes}    return 1
@@ -223,12 +260,13 @@ deadline=$(($(date +%s) + 600))
 while running; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         printf '%s\\n' "$DESMAN_UNINSTALL_TIMEOUT"
-        exit 1
+        failed 1
     fi
     sleep 1
 done
 sleep 2
-{cleanup}exec sh {shlex.quote(str(script))} --uninstall --yes{extra}
+"$DESMAN_UNINSTALL_PYTHON" -c {shlex.quote(_cleanup_command(purge))} || failed $?
+sh {shlex.quote(str(script))} --uninstall --yes{extra} || failed $?
 """
     return ["sh", "-c", command]
 
@@ -253,6 +291,7 @@ def start(
             raise click.ClickException(
                 t("The temporary folder is inside a directory being removed.")
             )
+        _services(app, purge, removing=False)
         folder = Path(tempfile.mkdtemp(prefix="desman-uninstall-", dir=temp_root))
         script = folder / _installer(app).name
         shutil.copyfile(_installer(app), script)
@@ -261,6 +300,8 @@ def start(
             os.environ,
             DESMAN_HOME=str(app),
             DESMAN_UNINSTALL_PYTHON=sys.executable,
+            DESMAN_UNINSTALL_DATA=str(db.default_db_path().parent.absolute()),
+            DESMAN_UNINSTALL_LOG=str(log),
             DESMAN_UNINSTALL_TIMEOUT=t(
                 "Uninstall cancelled after waiting 10 minutes for DESMAN processes to close."
             ),
@@ -302,7 +343,9 @@ def start(
 
 def started_message(log: Path) -> str:
     return t(
-        "DESMAN will be removed after all DESMAN windows and workers close. Log: {path}", path=log
+        "DESMAN will be removed after all DESMAN windows and workers close. "
+        "Removal is cancelled if any stay open for more than 10 minutes. Log: {path}",
+        path=log,
     )
 
 
@@ -311,8 +354,7 @@ def started_message(log: Path) -> str:
 @click.option("--yes", is_flag=True, help="Confirm removal.")
 def uninstall(purge: bool, yes: bool) -> None:
     app = require_app()
-    if yes:
-        check_paths(app, purge)
+    check_paths(app, purge)
     for line in plan(app, purge):
         ui.out(Text(line))
     if yes:

@@ -115,6 +115,8 @@ class WebFront(ui.Front):
     def settings_result(self, id: str, ok: bool, message: str) -> None:
         with self.condition:
             self.settings_outcome = {"id": id, "ok": ok, "message": self.redact(message)}
+            self.state += 1
+            self.condition.notify_all()
 
     def emit(self, event_type: str, **data: Any) -> None:
         """Append retained display output and wake readers waiting for changes."""
@@ -239,7 +241,7 @@ class WebFront(ui.Front):
                 ],
                 **self._session_poll(),
                 "ended": self.ended,
-                "settings_result": self.settings_outcome if self.ended else None,
+                "settings_result": self.settings_outcome,
             }
 
     def _session_poll(self) -> dict[str, Any]:

@@ -890,25 +890,42 @@ def test_confirmed_uninstall_ends_page_from_a_runner(
 ) -> None:
     installed = tmp_path / "installed-app"
     calls: list[tuple[Path, bool]] = []
+    starting = Event()
+    finish_start = Event()
 
     def start(path: Path, purge: bool) -> Path:
         calls.append((path, purge))
+        starting.set()
+        assert finish_start.wait(10)
         return tmp_path / "uninstall.log"
 
     monkeypatch.setattr(uninstall_cli, "installed_app", lambda: installed)
     monkeypatch.setattr(uninstall_cli, "start", start)
+    page.runners.set_cap(1)
     page.outcomes["Remove DESMAN"] = {"type": "command", "name": "uninstall", "args": {}}
     session = page.send("Remove DESMAN")
     page.wait(lambda: page.runners.status(session)["state"] == "pending")
     mailbox = page.runners.mailbox(session)
     assert mailbox is not None and mailbox.prompt is not None
     assert not calls and not page.front.ended
-    assert page.send("Keep this queued") == session
-    assert page.front.answer({"id": mailbox.prompt["id"], "value": True})
+    assert page.send("Drop this queued turn") == session
+    with page.runners.condition:
+        [queued] = page.runners.runners[session].queue
+    assert mailbox.answer({"id": mailbox.prompt["id"], "value": True})
+    assert starting.wait(10)
+    page.new()
+    other = page.send("Drop this other queued turn")
+    with page.runners.condition:
+        [other_work] = [w for w in page.runners.tickets if w is not queued]
+    finish_start.set()
     page.wait(lambda: page.front.ended)
+    page.runners.close()
     page.done(session)
+    page.done(other)
     assert calls == [(installed, False)]
     assert any("uninstall.log" in message.text for message in page.sessions.messages(session))
-    assert [message.text for message in page.sessions.pending_turns()] == ["Keep this queued"]
+    assert queued.stopped.is_set()
+    assert other_work.stopped.is_set()
+    assert not page.sessions.pending_turns()
     with page.runners.condition:
         assert not page.runners.tickets

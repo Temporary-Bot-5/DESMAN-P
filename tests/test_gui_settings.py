@@ -70,7 +70,7 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
         "protected",
         "result",
     }
-    assert data["uninstall"] == {"available": False, "lines": []}
+    assert data["uninstall"] == {"available": False, "lines": [], "purge_lines": []}
     assert len(data["general"]["languages"]) == 13
     assert len(data["permissions"]) == 4
     assert len(data["limits"]) == 8
@@ -705,6 +705,7 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
     assert snapshot(app)["uninstall"] == {
         "available": True,
         "lines": uninstall_cli.plan(installed, False),
+        "purge_lines": uninstall_cli.plan(installed, True),
     }
 
     def respond() -> None:
@@ -734,7 +735,8 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
     thread.join(2)
     assert calls == ([(installed, not conflict)] if approved else [])
     assert chat.exit_requested is removed
-    app.front.end()
+    if removed:
+        app.front.end()
     result = app.front.poll(0, timeout=0)["settings_result"]
     assert result["ok"] is removed
     if conflict:
