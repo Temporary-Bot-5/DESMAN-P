@@ -115,7 +115,7 @@ def test_uninstall_spawns_detached_copy(
         script_literal, log_literal = (str(path).replace("'", "''") for path in (script, log))
         extra = " -Purge" if purge else ""
         assert command == f"& '{script_literal}' -Uninstall -Yes{extra} *> '{log_literal}'"
-        assert kwargs["creationflags"] == 0x8 | 0x200 | 0x08000000
+        assert kwargs["creationflags"] == 0x200 | 0x08000000
         assert not kwargs["start_new_session"]
     else:
         assert argv[:2] == ["sh", "-c"]

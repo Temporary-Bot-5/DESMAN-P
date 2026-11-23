@@ -154,10 +154,10 @@ def start(
                 f"& {_powershell_quote(script)} -Uninstall -Yes{extra} *> {_powershell_quote(log)}"
             )
             argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
-            flags = (
-                getattr(subprocess, "DETACHED_PROCESS", 0x8)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
-                | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            # A hidden console of its own: Windows PowerShell 5.1 exits at once without any
+            # console (DETACHED_PROCESS), and the person's window may close before it runs.
+            flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200) | getattr(
+                subprocess, "CREATE_NO_WINDOW", 0x08000000
             )
         else:
             extra = " --purge" if purge else ""
