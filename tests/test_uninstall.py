@@ -223,12 +223,16 @@ def test_refuses_unsafe_purge(app: Path, location: str, monkeypatch: pytest.Monk
 @pytest.mark.parametrize("case", ["executable", "symlink", "timeout"])
 def test_linux_waiter_checks_other_processes(app: Path, case: str) -> None:
     sleep = shutil.which("sleep")
-    assert sleep is not None
+    shell = shutil.which("sh")
+    assert sleep is not None and shell is not None
+    # Not a copy of `sleep`: multi-call coreutils (uutils on newer Ubuntu) dispatch on the
+    # program's name and exit at once under another one. A shell runs under any name.
+    shell = os.path.realpath(shell)
     worker = app / "worker"
     if case == "symlink":
-        worker.symlink_to(sleep)
+        worker.symlink_to(shell)
     else:
-        shutil.copy(sleep, worker)
+        shutil.copy(shell, worker)
     folder = app.parent
     script = folder / "remove.sh"
     script.write_text("echo installer-ran\n", encoding="utf-8")
@@ -265,7 +269,7 @@ def test_linux_waiter_checks_other_processes(app: Path, case: str) -> None:
         WAITING=str(waiting),
         REAL_SLEEP=sleep,
     )
-    with subprocess.Popen([worker, "60"]) as other:
+    with subprocess.Popen([worker, "-c", '"$0" 60; :', sleep]) as other:
         try:
             with subprocess.Popen(
                 uninstall_cli._posix_waiter(2**30, script, log, True), env=env
