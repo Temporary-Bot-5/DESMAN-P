@@ -228,15 +228,16 @@ def _terminal_checkbox(question: str, choices: Sequence[Choice], checked: set[An
         ).ask()
         if answer is None:
             raise Cancelled
-        if answer:
-            out(
-                t(
-                    "Selected options: {choices}",
-                    choices=", ".join(choices[i].label for i in answer),
-                )
+        summary = (
+            t(
+                "{question}: {choices}",
+                question=question,
+                choices=", ".join(choices[i].label for i in answer),
             )
-        else:
-            out(t("No options selected."))
+            if answer
+            else t("{question}: none selected", question=question)
+        )
+        out(Text(summary))
         return {choices[i].value for i in answer}
 
     out(Text(question, style="bold"))

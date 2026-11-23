@@ -13,7 +13,7 @@ import pytest
 from rich.table import Table
 
 from conftest import FakeClock
-from desman import runs, ui
+from desman import runs, task_files, ui
 from desman.chat import Chat
 from desman.config import Config, open_config
 from desman.core import db
@@ -158,6 +158,83 @@ def test_explicit_command_runs_in_place(
     chat._notices()
     notice = capsys.readouterr().out
     assert notice == ("" if temporary else "1 new in General Terminal (/terminal)\n")
+
+
+@pytest.mark.parametrize("command", ["/clear", "!clear"])
+def test_clear_alias_only_clears_the_chat_screen(
+    sessions: Sessions, command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions)
+    normal = sessions.add(None, Role.USER, "hello").session_id
+    chat.session_id = normal
+    terminal = sessions.terminal()
+    sessions.add(terminal, Role.DESMAN, "terminal output", Kind.EVENT)
+    cleared: list[str | None] = []
+    monkeypatch.setattr(ui, "clear_screen", lambda: cleared.append(chat.session_id))
+    lines = iter([command, "/exit"])
+    chat.read = lambda: next(lines, None)
+
+    chat.run()
+
+    assert cleared == [normal] and chat.session_id == normal
+    assert [m.text for m in sessions.messages(normal)] == ["hello"]
+    assert [m.text for m in sessions.screen(terminal)] == ["terminal output"]
+    assert [m.text for m in sessions.messages(terminal)] == ["terminal output"]
+
+
+def test_help_alias_lists_chat_commands(
+    sessions: Sessions, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lines = iter(["!help", "!exit"])
+    chat = Chat(sessions, read=lambda: next(lines, None))
+    chat.run()
+
+    output = capsys.readouterr().out
+    assert "/rename" in output and "/compact" in output
+    assert not sessions.messages(sessions.terminal())
+
+
+def test_in_place_commands_share_pending_files(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions)
+    terminal = sessions.terminal()
+    files = task_files.PendingFiles()
+
+    def typed(runner: Chat, line: str, *, in_place: bool) -> None:
+        assert in_place and runner.session_id == terminal
+        if line == "list":
+            runner.pending_files[terminal] = files
+        else:
+            assert runner.pending_files[terminal] is files
+
+    monkeypatch.setattr(Chat, "_typed", typed)
+    chat._terminal_command("/list")
+    chat._terminal_command("/stats")
+
+
+def test_in_place_command_restores_chat_on_error(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions, temporary=True)
+    normal = sessions.add(None, Role.USER, "hello", temporary=True).session_id
+    chat.session_id = normal
+    models = runs.Models(FakeLLM(), None)
+    config = Config()
+    chat.models, chat._models_for = models, config
+    chat._master_pending = True
+
+    def typed(line: str, *, in_place: bool) -> None:
+        assert in_place and chat.in_terminal and not chat.temporary
+        chat.models, chat._models_for = None, None
+        raise RuntimeError("command failed")
+
+    monkeypatch.setattr(chat, "_typed", typed)
+    with pytest.raises(RuntimeError, match="command failed"):
+        chat._terminal_command("/list")
+
+    assert chat.session_id == normal and chat.temporary and chat._master_pending
+    assert chat.models is models and chat._models_for is config
 
 
 @pytest.mark.parametrize("line", ["/foo", "!foo"])

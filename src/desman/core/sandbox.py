@@ -204,10 +204,11 @@ def docker_env(executable: str) -> dict[str, str]:
     env = dict(os.environ)
     directory = paths.dirname(executable)
     if directory:
-        entries = env.get("PATH", paths.defpath).split(separator)
+        entries = [entry for entry in env.get("PATH", paths.defpath).split(separator) if entry]
         normalized = paths.normcase(paths.abspath(directory))
         if not any(paths.normcase(paths.abspath(entry)) == normalized for entry in entries):
-            env["PATH"] = separator.join([directory, *entries])
+            entries.insert(0, directory)
+        env["PATH"] = separator.join(entries)
     return env
 
 

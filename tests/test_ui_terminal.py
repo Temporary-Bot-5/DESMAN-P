@@ -1,6 +1,9 @@
 """Render the terminal chat's completion menu through prompt_toolkit."""
 
+from types import SimpleNamespace
+
 import pytest
+import questionary
 from prompt_toolkit.application.current import create_app_session
 from prompt_toolkit.buffer import CompletionState
 from prompt_toolkit.document import Document
@@ -9,6 +12,27 @@ from prompt_toolkit.layout.screen import Screen
 from prompt_toolkit.output import DummyOutput
 
 from desman import ui
+
+
+@pytest.mark.parametrize(
+    ("answer", "summary"),
+    [([0], "Choose [items]: Option [brackets]"), ([], "Choose [items]: none selected")],
+)
+def test_checkbox_summary_preserves_brackets(
+    answer: list[int],
+    summary: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(ui, "interactive", lambda: True)
+    monkeypatch.setattr(
+        questionary, "checkbox", lambda *a, **kw: SimpleNamespace(ask=lambda: answer)
+    )
+
+    selected = ui.checkbox("Choose [items]", [ui.Choice("Option [brackets]", "option")], set())
+
+    assert selected == ({"option"} if answer else set())
+    assert capsys.readouterr().out.strip() == summary
 
 
 @pytest.mark.parametrize("typed", ["/c", "/co"])

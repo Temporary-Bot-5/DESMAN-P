@@ -257,6 +257,10 @@ class Chat:
                 command = line.strip()
                 if not command:
                     continue
+                if command.startswith("!") and not self.in_terminal:
+                    alias = "/" + command[1:]
+                    if alias.split()[0].lower() in _commands(self.temporary, False):
+                        line = command = alias
                 if self.dispatch_turn is not None and self.dispatch_turn(line):
                     continue
                 if command.startswith("/"):
@@ -426,17 +430,22 @@ class Chat:
         if explicit:
             command = command[1:]
         if explicit and ui.is_terminal_front() and not self.in_terminal:
-            # Use the command's General Terminal context without changing the open chat.
-            runner = Chat(self.sessions, sleep=self.sleep)
-            runner.session_id = self._terminal_id
-            try:
-                self._terminal_output(
-                    lambda: runner._typed(command, in_place=True), line, in_place=True
-                )
-            finally:
-                if runner._http is not None:
-                    runner._http.close()
-                self.exit_requested |= runner.exit_requested
+
+            def run_in_place() -> None:
+                session_id, temporary = self.session_id, self.temporary
+                models, models_for = self.models, self._models_for
+                master_pending = self._master_pending
+                self.session_id, self.temporary = self._terminal_id, False
+                self._master_pending = False
+                try:
+                    self._typed(command, in_place=True)
+                finally:
+                    self.session_id, self.temporary = session_id, temporary
+                    self.models, self._models_for = models, models_for
+                    self._master_pending = master_pending
+
+            # Restore the chat before recording the output so existing notices stay unread.
+            self._terminal_output(run_in_place, line, in_place=True)
             return
         self._terminal_open()
         self._terminal_output(lambda: self._typed(command), line)

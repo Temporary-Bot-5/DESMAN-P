@@ -1096,8 +1096,8 @@ MESSAGES: dict[str, Forms] = {
     "config: {path}": "настройки: {path}",
     # ── Prompts ──────────────────────────────────────────────────────────────
     "(↑/↓, Enter)": "(↑/↓, Enter)",
-    "Selected options: {choices}": "Выбранные пункты: {choices}",
-    "No options selected.": "Ничего не выбрано.",
+    "{question}: {choices}": "{question}: {choices}",
+    "{question}: none selected": "{question}: Ничего не выбрано",
     "(Space toggles, Enter confirms)": "(Пробел — отметить, Enter — подтвердить)",
     "enter a number from 1 to {n}": "введите число от 1 до {n}",
     "enter y or n": "введите y или n (д или н)",

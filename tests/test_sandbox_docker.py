@@ -60,6 +60,23 @@ class Docker:
         )
 
 
+@pytest.mark.parametrize(
+    ("path", "executable", "expected"),
+    [
+        ("", "/opt/docker/bin/docker", "/opt/docker/bin"),
+        ("", "./docker", "."),
+        (":.:", "./docker", "."),
+    ],
+)
+def test_docker_env_drops_empty_path_entries(
+    path: str, executable: str, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("PATH", path)
+
+    assert sandbox.docker_env(executable)["PATH"] == expected
+
+
 @pytest.mark.parametrize("platform", ["win32", "darwin"])
 def test_docker_argv(platform: str, tmp_path: Path) -> None:
     limits = Limits(
