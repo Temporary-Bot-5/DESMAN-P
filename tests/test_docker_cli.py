@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 from typing import NamedTuple
 
@@ -289,7 +290,7 @@ def test_docker_step_in_configuration(
         SimpleNamespace(sleep=clock.sleep, monotonic=lambda: clock().timestamp()),
     )
     # The provider menu checks PATH before the Docker step.
-    done = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + machine.installed)
+    done = str(len(providers.PROVIDERS + providers.SERVICES) + 4)
     answers = ["1", done]
     if response in ("yes", "no", "failure", "timeout"):
         answers.append("n" if response == "no" else "y")
@@ -531,3 +532,67 @@ def test_waiting_for_desktop_reports_version_when_cli_appears(
     result = docker_cli.apply_plan(installation, sleep=sleep, clock=lambda: clock().timestamp())
     assert result["available"]
     assert result["version"] == "Docker version 29.0.0"
+
+
+@pytest.mark.parametrize(
+    "platform, executable, original_path, helper_path, same_directory",
+    [
+        (
+            "win32",
+            r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+            r"C:\Windows\System32",
+            r"C:\Program Files\Docker\Docker\resources\bin;C:\Windows\System32",
+            r"c:\program files\docker\Docker\resources\BIN",
+        ),
+        (
+            "darwin",
+            "/Applications/Docker.app/Contents/Resources/bin/docker",
+            "/usr/bin:/bin",
+            "/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin",
+            "/Applications/Docker.app/Contents/Resources/bin/",
+        ),
+    ],
+)
+def test_bundled_docker_children_can_find_credential_helpers(
+    platform: str,
+    executable: str,
+    original_path: str,
+    helper_path: str,
+    same_directory: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
+    monkeypatch.setenv("PROGRAMW6432", r"C:\Program Files")
+    monkeypatch.setenv("PATH", original_path)
+    isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda path: path == executable or isfile(path))
+    assert sandbox.find_docker() == executable
+
+    calls: list[list[str]] = []
+
+    def run(
+        argv: list[str], *, env: dict[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        assert argv[0] == executable
+        assert env["PATH"] == helper_path
+        calls.append(argv[1:])
+        return subprocess.CompletedProcess(argv, 0, "ok", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert docker_cli.docker_status(display=False)["available"]
+    assert searxng.docker(["pull", "test-image"]) == "ok"
+    assert (
+        Sandbox(docker=executable).docker_command(["image", "inspect", "test-image"]).returncode
+        == 0
+    )
+    assert calls == [
+        ["info"],
+        ["--version"],
+        ["pull", "test-image"],
+        ["image", "inspect", "test-image"],
+    ]
+    assert os.environ["PATH"] == original_path
+
+    monkeypatch.setenv("PATH", same_directory)
+    assert sandbox.docker_env(executable)["PATH"] == same_directory

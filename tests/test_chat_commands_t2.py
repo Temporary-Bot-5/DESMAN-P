@@ -461,20 +461,16 @@ def test_bad_command_keys_are_not_echoed_or_kept(
 
 
 def test_terminal_recall_redacts_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    import prompt_toolkit
+    from prompt_toolkit.application.current import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
 
-    captured: dict[str, Any] = {}
-
-    def prompt(*args: Any, **kwargs: Any) -> object:
-        captured.update(kwargs)
-        return object()
-
-    monkeypatch.setattr(prompt_toolkit, "PromptSession", prompt)
     monkeypatch.setattr(ui, "_prompt", None)
-    ui._chat_prompt()
-    key = "gsk_" + "Abc123" * 8
-    captured["history"].append_string("!language " + key)
-    assert key not in "\n".join(captured["history"].get_strings())
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        history = ui._chat_prompt().history
+        key = "gsk_" + "Abc123" * 8
+        history.append_string("!language " + key)
+        assert key not in "\n".join(history.get_strings())
 
 
 def test_path_argument_is_converted_before_catalog_validation(tmp_path: Path) -> None:

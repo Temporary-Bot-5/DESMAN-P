@@ -53,6 +53,7 @@ import io
 import math
 import ntpath
 import os
+import posixpath
 import re
 import selectors
 import shutil
@@ -193,6 +194,21 @@ def find_docker() -> str | None:
     elif sys.platform == "darwin":
         bundled = "/Applications/Docker.app/Contents/Resources/bin/docker"
     return bundled if bundled is not None and os.path.isfile(bundled) else None
+
+
+def docker_env(executable: str) -> dict[str, str]:
+    """Let the Docker CLI find credential helpers shipped beside it."""
+    windows = sys.platform == "win32"
+    paths = ntpath if windows else posixpath
+    separator = ";" if windows else ":"
+    env = dict(os.environ)
+    directory = paths.dirname(executable)
+    if directory:
+        entries = env.get("PATH", paths.defpath).split(separator)
+        normalized = paths.normcase(paths.abspath(directory))
+        if not any(paths.normcase(paths.abspath(entry)) == normalized for entry in entries):
+            env["PATH"] = separator.join([directory, *entries])
+    return env
 
 
 def _system_wsl() -> str:
@@ -871,6 +887,7 @@ class Sandbox:
 def _docker_run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
+        env=docker_env(argv[0]),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         encoding="utf-8",
@@ -1193,6 +1210,7 @@ def _execute_docker(
         try:
             process = subprocess.Popen(
                 argv,
+                env=docker_env(argv[0]),
                 stdin=given,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

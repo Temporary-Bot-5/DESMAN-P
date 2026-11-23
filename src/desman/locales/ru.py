@@ -508,6 +508,7 @@ MESSAGES: dict[str, Forms] = {
     "The key a role asks first: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Use a label or number. Repeatable.": "Ключ, который роль пробует первым: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Укажите метку или номер. Можно повторять.",
     "The model a role asks first: planner, reviewer, decomposer, or the executor's text, code, analysis, master, interlocutor. Repeatable.": "Модель, к которой роль обращается первой: planner, reviewer, decomposer, text, code, analysis, master, interlocutor. Можно повторять.",
     "Change with `desman tuning --max-subtasks N|auto` (and --max-parts, --context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, or `--reset`.": "Изменить: `desman tuning --max-subtasks N|auto` (а также --max-parts, --context-tokens, --max-attempts, --max-transient), `--model РОЛЬ=ПРОВАЙДЕР/МОДЕЛЬ|auto` или `--key ROLE=PROVIDER:KEY|auto`, `--reset`.",
+    "“{word}” is not a command. /help lists them.": "«{word}» — не команда. /help покажет список команд.",
     "“{word}” is not a command. General Terminal takes only DESMAN's commands (`help` lists them); to talk, go back to a chat with /back.": "«{word}» — не команда. Общий терминал принимает только команды DESMAN (`help` покажет список); для разговора вернитесь в чат через /back.",
     "Type `protected show` to see the change and `protected approve` to approve it.": "Введите `protected show`, чтобы увидеть изменение, и `protected approve`, чтобы одобрить его.",
     "Decide with `inbox`, or `retry`, `accept`, `fail` REF.": "Примите решение через `inbox` или `retry`, `accept`, `fail` REF.",
@@ -1095,6 +1096,8 @@ MESSAGES: dict[str, Forms] = {
     "config: {path}": "настройки: {path}",
     # ── Prompts ──────────────────────────────────────────────────────────────
     "(↑/↓, Enter)": "(↑/↓, Enter)",
+    "Selected options: {choices}": "Выбранные пункты: {choices}",
+    "No options selected.": "Ничего не выбрано.",
     "(Space toggles, Enter confirms)": "(Пробел — отметить, Enter — подтвердить)",
     "enter a number from 1 to {n}": "введите число от 1 до {n}",
     "enter y or n": "введите y или n (д или н)",

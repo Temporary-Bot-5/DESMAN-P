@@ -221,7 +221,7 @@ def test_wizard_setup_uses_staged_url(monkeypatch: pytest.MonkeyPatch) -> None:
         "1",
         str(len(providers.PROVIDERS) + 1),
         "y",
-        str(len(providers.PROVIDERS + providers.SERVICES) + 2),
+        str(len(providers.PROVIDERS + providers.SERVICES) + 4),
         *KEEP_PERMISSIONS,
         *KEEP_PERSONAL,
     )

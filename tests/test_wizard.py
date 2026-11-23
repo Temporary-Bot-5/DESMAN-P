@@ -2,7 +2,7 @@
 
 Main menu: providers numbered in `providers.PROVIDERS` order (free, paid, local), then the search
 engines (`providers.SEARCH`), under section
-headings that take no number, then Done. A provider without
+headings that take no number, then setup options and Done. A provider without
 keys goes straight to the key prompt; one with keys opens its menu: 1 add, 2 remove, then its
 settings, then Back. Permissions follow: four Y/N questions, Enter keeps the current value;
 then personalisation (Y/N), whether to set up how the interlocutor talks (Y/N) and whether to
@@ -24,7 +24,7 @@ from desman.config import ConfigManager, Permissions, default_config_path
 from desman.core.sandbox import find_docker
 from helpers import flat_keys, make_config
 
-DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 1 + (find_docker() is not None))
+DONE = str(len(providers.PROVIDERS + providers.SERVICES) + 4)
 KEEP_PERMISSIONS = ("", "", "", "")
 KEEP_PERSONAL = ("", "", "", "")  # personalisation as it was; how it talks: not set up now;
 # desman-global as it was (off); interface as it was (terminal)
@@ -188,6 +188,8 @@ def test_free_and_paid_providers_are_listed_apart() -> None:
         out.index("── Local"),
     )
     assert free < out.index("GROQ") < paid < out.index("OpenAI") < local < out.index("Ollama")
+    assert out.index("Models and keys for roles") < out.index("Done — continue")
+    assert out.index("Set up local SearXNG as a Python program") < out.index("Done — continue")
 
 
 def test_a_paid_key_needs_its_own_consent() -> None:

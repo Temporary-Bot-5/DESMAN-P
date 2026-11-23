@@ -198,6 +198,7 @@ class Chat:
         self._terminal_id = sessions.terminal()
         self._previous: tuple[str | None, bool] | None = None
         self._terminal_seen = 0
+        self._terminal_shown: set[int] = set()
         self._terminal_started = db.to_iso(sessions.clock())
         self._terminal_floor = int(
             sessions.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
@@ -340,6 +341,7 @@ class Chat:
             (self._terminal_id,),
         ).fetchone()
         self._terminal_seen = int(row[0])
+        self._terminal_shown.clear()
         ui.terminal_seen(self._terminal_seen)
 
     def _back(self) -> None:
@@ -378,15 +380,21 @@ class Chat:
         return styled
 
     def _terminal_output(
-        self, operation: Callable[[], Any], line: str | None = None, *, keep_inputs: bool = False
+        self,
+        operation: Callable[[], Any],
+        line: str | None = None,
+        *,
+        keep_inputs: bool = False,
+        in_place: bool = False,
     ) -> Any:
         config = self._saved_config()
         if line is not None:
             self.sessions.add(self._terminal_id, Role.USER, providers.redact_keys(line, config)[0])
+        show = self.in_terminal or in_place
         with (
-            ui.panel_output(not self.in_terminal),
+            ui.panel_output(not show),
             ui.recording(
-                show=self.in_terminal,
+                show=show,
                 redact=lambda text: providers.redact_keys(text, config)[0],
                 keep_inputs=keep_inputs,
             ) as rec,
@@ -397,13 +405,15 @@ class Chat:
                 text = providers.redact_keys(rec.text, config)[0]
                 text = providers.redact_keys(text, self._saved_config())[0]
                 if text.strip():
-                    self.sessions.add(
+                    event = self.sessions.add(
                         self._terminal_id,
                         Role.DESMAN,
                         text,
                         kind=Kind.EVENT,
                         styled=self._stored_style(rec.styled, text, config, self._saved_config()),
                     )
+                    if in_place:
+                        self._terminal_shown.add(event.seq)
                 if self.in_terminal:
                     self._seen_terminal()
 
@@ -411,11 +421,25 @@ class Chat:
         if self.in_terminal and not line.strip().startswith(("/", "!")):
             self._terminal_output(lambda: ui.note(t("Commands start with /, e.g. /status")), line)
             return
-        self._terminal_open()
         command = line.strip()
-        self._terminal_output(
-            lambda: self._typed(command[1:] if command.startswith(("!", "/")) else command), line
-        )
+        explicit = command.startswith(("!", "/"))
+        if explicit:
+            command = command[1:]
+        if explicit and ui.is_terminal_front() and not self.in_terminal:
+            # Use the command's General Terminal context without changing the open chat.
+            runner = Chat(self.sessions, sleep=self.sleep)
+            runner.session_id = self._terminal_id
+            try:
+                self._terminal_output(
+                    lambda: runner._typed(command, in_place=True), line, in_place=True
+                )
+            finally:
+                if runner._http is not None:
+                    runner._http.close()
+                self.exit_requested |= runner.exit_requested
+            return
+        self._terminal_open()
+        self._terminal_output(lambda: self._typed(command), line)
 
     def _notices(self) -> None:
         if self.background_tasks:
@@ -438,8 +462,8 @@ class Chat:
             if self.in_terminal:
                 self._seen_terminal()
             elif not self.temporary:
-                count = self.sessions.conn.execute(
-                    "SELECT COUNT(*) FROM messages WHERE session_id = ? AND kind = 'event' "
+                events = self.sessions.conn.execute(
+                    "SELECT seq FROM messages WHERE session_id = ? AND kind = 'event' "
                     "AND seq > ? AND at >= ? "
                     "AND seq > (SELECT cleared_seq FROM sessions WHERE id = ?)",
                     (
@@ -448,7 +472,8 @@ class Chat:
                         self._terminal_started,
                         self._terminal_id,
                     ),
-                ).fetchone()[0]
+                )
+                count = sum(seq not in self._terminal_shown for (seq,) in events)
                 if count:
                     ui.note(t("{n} new in General Terminal (/terminal)", n=count))
 
@@ -971,7 +996,7 @@ class Chat:
                 config,
             )
 
-    def _typed(self, line: str) -> None:
+    def _typed(self, line: str, *, in_place: bool = False) -> None:
         """A person's explicit command line never becomes a model turn or a user message."""
         if line.strip() == "clear":
             self.sessions.clear_terminal()
@@ -1006,11 +1031,14 @@ class Chat:
         word = line.split(maxsplit=1)[0] if line.split() else ""
         known = {entry.name.split()[0] for entry in commands.CATALOG} | {"desman"}
         if self.in_terminal and word and word not in known:
+            word = providers.redact_keys(word, config)[0]
             ui.error(
-                t(
+                t("“{word}” is not a command. /help lists them.", word=word)
+                if in_place
+                else t(
                     "“{word}” is not a command. General Terminal takes only DESMAN's commands "
                     "(`help` lists them); to talk, go back to a chat with /back.",
-                    word=providers.redact_keys(word, config)[0],
+                    word=word,
                 ).replace("`help`", "`/help`")
             )
             return

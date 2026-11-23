@@ -24,7 +24,7 @@ from desman import searxng_native as native
 from desman import ui
 from desman.config import Config, ConfigManager
 from desman.core import search
-from desman.core.sandbox import find_docker
+from desman.core.sandbox import docker_env, find_docker
 from desman.i18n import t
 
 IMAGE = "searxng/searxng:2026.11.15-2d500cb6b"
@@ -35,9 +35,11 @@ START_RETRY_SECONDS = 600
 
 def docker(args: list[str], timeout: float = 60) -> str:
     """One bounded subprocess boundary; tests replace this helper."""
+    executable = find_docker() or "docker"
     try:
         result = subprocess.run(
-            [find_docker() or "docker", *args],
+            [executable, *args],
+            env=docker_env(executable),
             capture_output=True,
             text=True,
             encoding="utf-8",

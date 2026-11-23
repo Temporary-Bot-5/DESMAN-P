@@ -258,13 +258,16 @@ def test_docker_uses_container_state(
         stdin: IO[bytes],
         stdout: int,
         stderr: int,
+        env: dict[str, str],
     ) -> subprocess.Popen[bytes]:
         assert argv[0] == "docker-test"
         script = (  # bytes: a Linux container never writes \r\n, whatever the host
             f"import sys; sys.stderr.buffer.write({(message + chr(10)).encode()!r}); "
             f"sys.exit({client_code})"
         )
-        return popen([sys.executable, "-c", script], stdin=stdin, stdout=stdout, stderr=stderr)
+        return popen(
+            [sys.executable, "-c", script], stdin=stdin, stdout=stdout, stderr=stderr, env=env
+        )
 
     monkeypatch.setattr(subprocess, "Popen", fake_client)
     box = docker.sandbox()
@@ -288,7 +291,15 @@ def test_docker_stops_container_before_client(
     events: list[str] = []
 
     class Client:
-        def __init__(self, argv: list[str], *, stdin: IO[bytes], stdout: int, stderr: int) -> None:
+        def __init__(
+            self,
+            argv: list[str],
+            *,
+            stdin: IO[bytes],
+            stdout: int,
+            stderr: int,
+            env: dict[str, str],
+        ) -> None:
             self.stdout = io.BytesIO(b"hello world")
             self.stderr = io.BytesIO(b"warning")
             assert stdin.read() == b"input\n"

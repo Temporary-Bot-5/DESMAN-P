@@ -18,6 +18,7 @@ from desman.config import ApiKey, Config, KeyChoices, ModelChoices, Tuning, open
 from desman.core import db, operator
 from desman.core.calls import Role
 from desman.core.models import Kind
+from desman.core.sandbox import find_docker
 from desman.llm import router
 from desman.llm.base import Message, Request
 from desman.llm.openai_compat import key_id
@@ -215,8 +216,8 @@ def test_wizard_numbered_section_and_cancellation() -> None:
     assert tuned.models.planner is not None and tuned.keys.planner == key_id(SECOND)
     assert "key: planner" in result.output and "backup" in result.output
     assert FIRST not in result.output and SECOND not in result.output
-    # The whole wizard exposes the section after Done, preserving existing provider numbers.
-    role_number = len(providers.PROVIDERS + providers.SERVICES) + 2
+    # The roles section follows the providers and the optional Docker search setup.
+    role_number = len(providers.PROVIDERS + providers.SERVICES) + 1 + (find_docker() is not None)
     result = runner.invoke(cli, ["config"], input=f"1\n{role_number}\n9\n")
     assert "Models and keys for roles" in result.output
     assert open_config().load().tuning == tuned
