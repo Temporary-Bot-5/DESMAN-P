@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Also delete my data, keys and chat history": "Supprimer aussi mes données, clés et historique des chats",
+    "Close other DESMAN windows, chats and workers first.": "Fermez d’abord les autres fenêtres, chats et processus de travail de DESMAN.",
+    "Confirm removal.": "Confirmer la désinstallation.",
+    "Could not start uninstall: {error}": "Impossible de lancer la désinstallation : {error}",
+    "DESMAN was not installed by the installer. Remove it the way it was installed.": "DESMAN n’a pas été installé avec le programme d’installation. Désinstallez-le avec la méthode utilisée pour l’installer.",
+    "DESMAN will be removed as soon as this program ends. Log: {path}": "DESMAN sera désinstallé à la fermeture de ce programme. Journal : {path}",
+    "Delete the configuration folder: {path}": "Supprimer le dossier de configuration : {path}",
+    "Delete the data folder: {path}": "Supprimer le dossier des données : {path}",
+    "Remove DESMAN": "Désinstaller DESMAN",
+    "Remove DESMAN installed by the installer.": "Désinstaller DESMAN s’il a été installé avec le programme d’installation.",
+    "Remove managed SearXNG if present.": "Supprimer l’installation SearXNG gérée par DESMAN si elle existe.",
+    "Remove the DESMAN app folder: {path}": "Supprimer le dossier de l’application DESMAN : {path}",
+    "Remove the desman launcher and DESMAN shortcuts.": "Supprimer le lanceur desman et les raccourcis DESMAN.",
+    "The temporary folder is inside a directory being removed.": "Le dossier temporaire se trouve dans un répertoire à supprimer.",
+    "Unregister the desman-sandbox WSL distribution.": "Désinscrire la distribution WSL desman-sandbox.",
+    "Your data, keys and history are kept.": "Vos données, vos clés et votre historique sont conservés.",
     "Create a DESMAN shortcut.": "Créer un raccourci DESMAN.",
     "Default interface": "Interface par défaut",
     "Default interface: {mode}": "Interface par défaut : {mode}",

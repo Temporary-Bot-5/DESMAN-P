@@ -212,6 +212,9 @@ Depois, feche e reabra o DESMAN. Se aparecer um aviso de “arquivos protegidos�
 - **Linux:** feche o DESMAN e execute
   `sh ~/.local/share/desman-app/install/install.sh --uninstall` no terminal.
 
+No terminal, `desman uninstall` mostra o mesmo plano de remoção e `desman uninstall --yes` o
+confirma. Você também pode usar Configurações → Geral → Remover DESMAN.
+
 O programa é removido e as configurações, chaves e histórico ficam guardados caso você o instale
 de novo. Para apagar tudo, acrescente `-Purge` no Windows ou `--purge` no Linux. O DESMAN mostra o
 que será apagado e pede confirmação mais uma vez.

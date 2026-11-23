@@ -209,6 +209,8 @@ potwierdź w oknie, aby przyjąć nowe zasady. Poprzednią wersję przywraca `/g
 - **Linux:** zamknij DESMAN i wykonaj
   `sh ~/.local/share/desman-app/install/install.sh --uninstall` w terminalu.
 
+W terminalu polecenie `desman uninstall` wyświetla ten sam plan odinstalowania, a `desman uninstall --yes` go zatwierdza. Możesz też wybrać Ustawienia → Ogólne → Usuń DESMAN.
+
 Program zostanie usunięty, a ustawienia (z kluczami) i historia zostaną na wypadek ponownej
 instalacji. Aby wyczyścić wszystko, dodaj `-Purge` w Windows lub `--purge` w systemie Linux.
 DESMAN pokaże, co usunie, i poprosi o ponowne potwierdzenie.

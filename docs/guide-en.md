@@ -218,6 +218,9 @@ you accept the new version of the rules. To roll back: `/global update --revert`
 - **Linux:** close DESMAN and run in a terminal
   `sh ~/.local/share/desman-app/install/install.sh --uninstall`.
 
+In a terminal, `desman uninstall` previews the same removal and `desman uninstall --yes` confirms
+it. You can also use Settings → General → Remove DESMAN.
+
 The program is removed, but the settings (with the keys) and the history are kept in case you
 install it again. To erase everything, keys and history included, add `-Purge` (Windows) or
 `--purge` (Linux) — DESMAN shows what exactly it will remove and asks once more.

@@ -23,6 +23,11 @@ class InterfaceChoice(Fields):
     mode: Literal["terminal", "gui"]
 
 
+class Uninstall(Fields):
+    section: Literal["uninstall"]
+    purge: bool
+
+
 class General(Fields):
     section: Literal["general"]
     language: Literal["en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"]
@@ -156,6 +161,7 @@ class Protected(Fields):
 Setting = Annotated[
     General
     | InterfaceChoice
+    | Uninstall
     | Wizard
     | Keys
     | ProviderSetting

@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Also delete my data, keys and chat history": "मेरे डेटा, कुंजियाँ और चैट इतिहास भी मिटाएँ",
+    "Close other DESMAN windows, chats and workers first.": "पहले DESMAN की अन्य विंडो, चैट और वर्कर बंद करें।",
+    "Confirm removal.": "हटाने की पुष्टि करें।",
+    "Could not start uninstall: {error}": "हटाने की प्रक्रिया शुरू नहीं हो सकी: {error}",
+    "DESMAN was not installed by the installer. Remove it the way it was installed.": "DESMAN इंस्टॉलर से इंस्टॉल नहीं किया गया था। इसे उसी तरीके से हटाएँ जिससे इसे इंस्टॉल किया गया था।",
+    "DESMAN will be removed as soon as this program ends. Log: {path}": "यह प्रोग्राम बंद होते ही DESMAN हटा दिया जाएगा। लॉग: {path}",
+    "Delete the configuration folder: {path}": "कॉन्फ़िगरेशन फ़ोल्डर मिटाएँ: {path}",
+    "Delete the data folder: {path}": "डेटा फ़ोल्डर मिटाएँ: {path}",
+    "Remove DESMAN": "DESMAN हटाएँ",
+    "Remove DESMAN installed by the installer.": "इंस्टॉलर से इंस्टॉल किया गया DESMAN हटाएँ।",
+    "Remove managed SearXNG if present.": "DESMAN द्वारा प्रबंधित SearXNG मौजूद हो तो उसे हटाएँ।",
+    "Remove the DESMAN app folder: {path}": "DESMAN ऐप फ़ोल्डर हटाएँ: {path}",
+    "Remove the desman launcher and DESMAN shortcuts.": "desman लॉन्चर और DESMAN शॉर्टकट हटाएँ।",
+    "The temporary folder is inside a directory being removed.": "अस्थायी फ़ोल्डर उस निर्देशिका के अंदर है जिसे हटाया जाएगा।",
+    "Unregister the desman-sandbox WSL distribution.": "desman-sandbox WSL वितरण का पंजीकरण रद्द करें।",
+    "Your data, keys and history are kept.": "आपका डेटा, कुंजियाँ और इतिहास सुरक्षित रहेंगे।",
     "Create a DESMAN shortcut.": "DESMAN का शॉर्टकट बनाएँ।",
     "Default interface": "डिफ़ॉल्ट इंटरफ़ेस",
     "Default interface: {mode}": "डिफ़ॉल्ट इंटरफ़ेस: {mode}",

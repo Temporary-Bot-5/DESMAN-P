@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Also delete my data, keys and chat history": "Verilerimi, anahtarlarımı ve sohbet geçmişimi de sil",
+    "Close other DESMAN windows, chats and workers first.": "Önce diğer DESMAN pencerelerini, sohbetlerini ve işçi süreçlerini kapatın.",
+    "Confirm removal.": "Kaldırmayı onaylayın.",
+    "Could not start uninstall: {error}": "Kaldırma başlatılamadı: {error}",
+    "DESMAN was not installed by the installer. Remove it the way it was installed.": "DESMAN kurulum programıyla kurulmadı. Hangi yöntemle kurulduysa o yöntemle kaldırın.",
+    "DESMAN will be removed as soon as this program ends. Log: {path}": "Bu program kapanınca DESMAN kaldırılacak. Günlük: {path}",
+    "Delete the configuration folder: {path}": "Yapılandırma klasörünü sil: {path}",
+    "Delete the data folder: {path}": "Veri klasörünü sil: {path}",
+    "Remove DESMAN": "DESMAN’ı kaldır",
+    "Remove DESMAN installed by the installer.": "Kurulum programıyla yüklenen DESMAN’ı kaldırır.",
+    "Remove managed SearXNG if present.": "Varsa DESMAN tarafından yönetilen SearXNG kurulumunu kaldırır.",
+    "Remove the DESMAN app folder: {path}": "DESMAN uygulama klasörünü kaldır: {path}",
+    "Remove the desman launcher and DESMAN shortcuts.": "desman başlatıcısını ve DESMAN kısayollarını kaldırır.",
+    "The temporary folder is inside a directory being removed.": "Geçici klasör, kaldırılacak bir dizinin içinde.",
+    "Unregister the desman-sandbox WSL distribution.": "desman-sandbox WSL dağıtımının kaydını siler.",
+    "Your data, keys and history are kept.": "Verileriniz, anahtarlarınız ve geçmişiniz korunur.",
     "Create a DESMAN shortcut.": "DESMAN kısayolu oluştur.",
     "Default interface": "Varsayılan arayüz",
     "Default interface: {mode}": "Varsayılan arayüz: {mode}",

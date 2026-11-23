@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Also delete my data, keys and chat history": "同时删除我的数据、密钥和聊天记录",
+    "Close other DESMAN windows, chats and workers first.": "请先关闭其他 DESMAN 窗口、聊天和工作进程。",
+    "Confirm removal.": "确认卸载。",
+    "Could not start uninstall: {error}": "无法启动卸载：{error}",
+    "DESMAN was not installed by the installer. Remove it the way it was installed.": "DESMAN 并非通过安装程序安装。请按照原来的安装方式卸载。",
+    "DESMAN will be removed as soon as this program ends. Log: {path}": "此程序退出后将卸载 DESMAN。日志：{path}",
+    "Delete the configuration folder: {path}": "删除配置文件夹：{path}",
+    "Delete the data folder: {path}": "删除数据文件夹：{path}",
+    "Remove DESMAN": "卸载 DESMAN",
+    "Remove DESMAN installed by the installer.": "卸载由安装程序安装的 DESMAN。",
+    "Remove managed SearXNG if present.": "如果存在由 DESMAN 管理的 SearXNG，则将其移除。",
+    "Remove the DESMAN app folder: {path}": "移除 DESMAN 应用文件夹：{path}",
+    "Remove the desman launcher and DESMAN shortcuts.": "移除 desman 启动器和 DESMAN 快捷方式。",
+    "The temporary folder is inside a directory being removed.": "临时文件夹位于将要删除的目录内。",
+    "Unregister the desman-sandbox WSL distribution.": "注销 desman-sandbox WSL 发行版。",
+    "Your data, keys and history are kept.": "您的数据、密钥和历史记录将保留。",
     "Create a DESMAN shortcut.": "创建 DESMAN 快捷方式。",
     "Default interface": "默认界面",
     "Default interface: {mode}": "默认界面：{mode}",

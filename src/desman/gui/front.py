@@ -239,6 +239,7 @@ class WebFront(ui.Front):
                 ],
                 **self._session_poll(),
                 "ended": self.ended,
+                "settings_result": self.settings_outcome if self.ended else None,
             }
 
     def _session_poll(self) -> dict[str, Any]:

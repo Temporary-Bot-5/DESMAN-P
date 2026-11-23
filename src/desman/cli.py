@@ -81,6 +81,7 @@ from desman.sandbox_cli import sandbox
 from desman.search_cli import search
 from desman.stdio import configure_output
 from desman.tuning_cli import tuning
+from desman.uninstall_cli import uninstall
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -267,6 +268,7 @@ cli.add_command(models)
 cli.add_command(search)
 cli.add_command(sandbox)
 cli.add_command(docker)
+cli.add_command(uninstall)
 cli.add_command(protected_group, name="protected")
 cli.add_command(nodes_group, name="nodes")
 cli.add_command(proposals_group, name="proposals")

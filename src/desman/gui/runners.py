@@ -442,6 +442,9 @@ class Runners:
                             sink.live = None
                             self.condition.notify_all()
                         sink.changed(runner.session_id)
+                    if chat.exit_requested:
+                        self.front.end()
+                        break
                 if chat._http is not None:
                     chat._http.close()
         except Exception as exc:
@@ -466,6 +469,10 @@ class Runners:
                 # Submit and retirement share this lock, so work cannot be stranded.
                 runner.thread = None
                 runner.front = None
+                if self.front.ended and runner.queue:
+                    abandoned = set(runner.queue)
+                    self.tickets = deque(w for w in self.tickets if w not in abandoned)
+                    runner.queue.clear()
                 if runner.queue:
                     runner.thread = Thread(target=self._run, args=(runner,), daemon=True)
                     runner.thread.start()

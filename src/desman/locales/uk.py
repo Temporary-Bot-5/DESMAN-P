@@ -15,6 +15,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Also delete my data, keys and chat history": "Також видалити мої дані, ключі та історію чатів",
+    "Close other DESMAN windows, chats and workers first.": "Спочатку закрийте інші вікна й чати DESMAN та зупиніть його робочі процеси.",
+    "Confirm removal.": "Підтвердити видалення.",
+    "Could not start uninstall: {error}": "Не вдалося запустити видалення: {error}",
+    "DESMAN was not installed by the installer. Remove it the way it was installed.": "DESMAN встановлено без програми встановлення. Видаліть його способом, яким його було встановлено.",
+    "DESMAN will be removed as soon as this program ends. Log: {path}": "DESMAN буде видалено одразу після завершення цієї програми. Журнал: {path}",
+    "Delete the configuration folder: {path}": "Видалити папку конфігурації: {path}",
+    "Delete the data folder: {path}": "Видалити папку даних: {path}",
+    "Remove DESMAN": "Видалити DESMAN",
+    "Remove DESMAN installed by the installer.": "Видалити DESMAN, інстальований через програму встановлення.",
+    "Remove managed SearXNG if present.": "Видалити SearXNG, якщо ним керує DESMAN.",
+    "Remove the DESMAN app folder: {path}": "Видалити папку програми DESMAN: {path}",
+    "Remove the desman launcher and DESMAN shortcuts.": "Видалити засіб запуску desman та ярлики DESMAN.",
+    "The temporary folder is inside a directory being removed.": "Тимчасова папка міститься в каталозі, який буде видалено.",
+    "Unregister the desman-sandbox WSL distribution.": "Скасувати реєстрацію дистрибутива WSL desman-sandbox.",
+    "Your data, keys and history are kept.": "Ваші дані, ключі та історія зберігаються.",
     "Create a DESMAN shortcut.": "Створити ярлик DESMAN.",
     "Default interface": "Типовий інтерфейс",
     "Default interface: {mode}": "Типовий інтерфейс: {mode}",

@@ -10,6 +10,22 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Also delete my data, keys and chat history": "내 데이터, 키, 채팅 기록도 삭제",
+    "Close other DESMAN windows, chats and workers first.": "다른 DESMAN 창, 채팅 및 워커를 먼저 종료하세요.",
+    "Confirm removal.": "제거를 확인합니다.",
+    "Could not start uninstall: {error}": "제거를 시작하지 못했습니다: {error}",
+    "DESMAN was not installed by the installer. Remove it the way it was installed.": "DESMAN이 설치 프로그램으로 설치되지 않았습니다. 설치할 때 사용한 방법으로 제거하세요.",
+    "DESMAN will be removed as soon as this program ends. Log: {path}": "이 프로그램이 종료되면 DESMAN이 제거됩니다. 로그: {path}",
+    "Delete the configuration folder: {path}": "구성 폴더 삭제: {path}",
+    "Delete the data folder: {path}": "데이터 폴더 삭제: {path}",
+    "Remove DESMAN": "DESMAN 제거",
+    "Remove DESMAN installed by the installer.": "설치 프로그램으로 설치한 DESMAN을 제거합니다.",
+    "Remove managed SearXNG if present.": "DESMAN이 관리하는 SearXNG가 있으면 제거합니다.",
+    "Remove the DESMAN app folder: {path}": "DESMAN 앱 폴더 제거: {path}",
+    "Remove the desman launcher and DESMAN shortcuts.": "desman 실행기와 DESMAN 바로 가기를 제거합니다.",
+    "The temporary folder is inside a directory being removed.": "임시 폴더가 제거할 디렉터리 안에 있습니다.",
+    "Unregister the desman-sandbox WSL distribution.": "desman-sandbox WSL 배포판의 등록을 해제합니다.",
+    "Your data, keys and history are kept.": "데이터, 키, 기록은 유지됩니다.",
     "Create a DESMAN shortcut.": "DESMAN 바로 가기를 만듭니다.",
     "Default interface": "기본 인터페이스",
     "Default interface: {mode}": "기본 인터페이스: {mode}",

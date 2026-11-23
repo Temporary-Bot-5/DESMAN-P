@@ -585,6 +585,15 @@ async function poll() {
       showAttachments(data.attached_files || [], data.prompt?.id);
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
+      if (ended) {
+        clearInterval(settingsTimer);
+        const result = data.settings_result;
+        if (settingsPending && result?.id === settingsPending) {
+          settingsPending = null;
+          $("settings-result").textContent = result.message;
+          $("settings-result").className = result.ok ? "good" : "bad";
+        }
+      }
       // Another chat opened: start at its latest message, wherever the last one was read.
       const opened = replaced && data.session_id !== shownSession;
       if (replaced) shownSession = data.session_id;
@@ -1160,7 +1169,7 @@ async function refreshSettings(redraw = false, languageChanged = false) {
       drawSettings();
       if (languageChanged && focused) $("settings-nav").querySelector('[aria-current="true"]')?.focus({preventScroll: true});
     }
-  } catch { $("settings-result").textContent = words.invalid; }
+  } catch { if (!ended) $("settings-result").textContent = words.invalid; }
 }
 
 function openSettings() {
@@ -1258,6 +1267,12 @@ function drawSettings() {
     const mode = settingSelect(root, words.default_interface, d.general.interfaces, d.general.interface);
     settingAuto(root, () => ({section: "interface", mode: mode.value}), [mode]);
     settingSave(root, {section: "wizard"}, words.setup_wizard);
+    if (d.uninstall.available) {
+      text("h3", words.remove_desman, root);
+      const purge = settingInput(root, words.purge_desman, false, "checkbox");
+      settingSave(root, () => ({section: "uninstall", purge: purge.checked}), words.remove_desman)
+        .classList.add("danger");
+    }
   } else if (settingsSection === "keys") {
     const others = text("details", "", root);
     text("summary", words.other_providers, others);

@@ -13,7 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import FakeClock
-from desman import runs, ui
+from desman import runs, ui, uninstall_cli
 from desman.cli import cli
 from desman.commands import TuningArgs
 from desman.config import Config, Tuning, open_config, upgrade
@@ -883,3 +883,32 @@ def test_module_wait_keeps_receipt_queued_without_blocking_other_chats(
     page.done(a)
     assert page.answers(a) == ["reply:held"]
     assert page.sessions.turn_settled(message.seq)
+
+
+def test_confirmed_uninstall_ends_page_from_a_runner(
+    page: Harness, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installed = tmp_path / "installed-app"
+    calls: list[tuple[Path, bool]] = []
+
+    def start(path: Path, purge: bool) -> Path:
+        calls.append((path, purge))
+        return tmp_path / "uninstall.log"
+
+    monkeypatch.setattr(uninstall_cli, "installed_app", lambda: installed)
+    monkeypatch.setattr(uninstall_cli, "start", start)
+    page.outcomes["Remove DESMAN"] = {"type": "command", "name": "uninstall", "args": {}}
+    session = page.send("Remove DESMAN")
+    page.wait(lambda: page.runners.status(session)["state"] == "pending")
+    mailbox = page.runners.mailbox(session)
+    assert mailbox is not None and mailbox.prompt is not None
+    assert not calls and not page.front.ended
+    assert page.send("Keep this queued") == session
+    assert page.front.answer({"id": mailbox.prompt["id"], "value": True})
+    page.wait(lambda: page.front.ended)
+    page.done(session)
+    assert calls == [(installed, False)]
+    assert any("uninstall.log" in message.text for message in page.sessions.messages(session))
+    assert [message.text for message in page.sessions.pending_turns()] == ["Keep this queued"]
+    with page.runners.condition:
+        assert not page.runners.tickets
