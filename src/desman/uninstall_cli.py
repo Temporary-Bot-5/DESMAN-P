@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,54 @@ def _config_folder() -> Path:
     return default_config_path().parent if os.environ.get(CONFIG_DIR_ENV) else home_config_dir()
 
 
+def check_paths(app: Path, purge: bool) -> None:
+    """Check the installer's path restrictions before scheduling removal."""
+    try:
+        _check_paths(app, purge)
+    except (OSError, RuntimeError) as exc:
+        raise click.ClickException(t("Could not start uninstall: {error}", error=str(exc))) from exc
+
+
+def _check_paths(app: Path, purge: bool) -> None:
+    home = Path.home().resolve()
+    if home.is_relative_to(app) or app == Path(app.anchor):
+        raise click.ClickException(t("Unsafe app folder: {path}", path=app))
+    home_config = home_config_dir()
+    data, config = db.default_db_path().parent, _config_folder()
+    for path in (data, config, home_config):
+        if path.absolute().is_relative_to(app) or path.resolve().is_relative_to(app):
+            raise click.ClickException(t("Data and configuration must be outside the app folder."))
+
+    if purge:
+        for path in (data.absolute(), config.absolute()):
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISLNK(info.st_mode) or (
+                    getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                ):
+                    raise click.ClickException(t("Purge folder is a link: {path}", path=path))
+            if (
+                ".." in path.parts
+                or home.is_relative_to(path.resolve())
+                or path == Path(path.anchor)
+            ):
+                raise click.ClickException(t("Unsafe purge folder: {path}", path=path))
+    else:
+        source = app / "config.json"
+        backup = home_config / "config.json"
+        source_exists = source.exists() if sys.platform == "win32" else source.is_file()
+        if source_exists and (backup.exists() or backup.is_symlink()):
+            raise click.ClickException(
+                t(
+                    "A config backup already exists at {path}. Preserve app/config.json before uninstalling.",
+                    path=backup,
+                )
+            )
+
+
 def plan(app: Path, purge: bool) -> list[str]:
     lines = [
         t("Remove the DESMAN app folder: {path}", path=app),
@@ -115,6 +164,75 @@ def _purge_services() -> None:
             searxng_native.stop(folder)
 
 
+def _finish_purge() -> None:
+    app = require_app()
+    check_paths(app, True)
+    _purge_services()
+
+
+_PURGE_COMMAND = "from desman.uninstall_cli import _finish_purge; _finish_purge()"
+
+
+def _windows_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]:
+    extra = " -Purge" if purge else ""
+    cleanup = (
+        f"& $env:DESMAN_UNINSTALL_PYTHON -c '{_PURGE_COMMAND}'; "
+        "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; "
+        if purge
+        else ""
+    )
+    command = (
+        "$prefix = $env:DESMAN_HOME + '\\'; "
+        "$timer = [Diagnostics.Stopwatch]::StartNew(); "
+        f"while (Get-Process | Where-Object {{ $_.Id -eq {pid} -or "
+        "($_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) }) { "
+        "if ($timer.Elapsed.TotalSeconds -ge 600) { "
+        f"Set-Content -LiteralPath {_powershell_quote(log)} -Encoding UTF8 "
+        "-Value $env:DESMAN_UNINSTALL_TIMEOUT; exit 1 }; "
+        "Start-Sleep -Seconds 1 }; "
+        "Start-Sleep -Seconds 2; "
+        f"& {{ {cleanup}& {_powershell_quote(script)} -Uninstall -Yes{extra} }} "
+        f"*> {_powershell_quote(log)}"
+    )
+    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
+
+
+def _posix_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]:
+    # A virtualenv may symlink Python outside the app. Check argv[0] as well as the
+    # kernel's executable path so a chat or worker using that virtualenv also counts.
+    processes = ""
+    if sys.platform == "linux":
+        processes = """
+    for entry in /proc/[0-9]*; do
+        exe=$(readlink "$entry/exe" 2>/dev/null) || continue
+        case "$exe" in "$DESMAN_HOME/"*) return 0 ;; esac
+        argv0=$(head -z -n 1 "$entry/cmdline" 2>/dev/null | tr -d '\\000')
+        case "$argv0" in "$DESMAN_HOME/"*) return 0 ;; esac
+    done
+"""
+    extra = " --purge" if purge else ""
+    cleanup = (
+        f'"$DESMAN_UNINSTALL_PYTHON" -c {shlex.quote(_PURGE_COMMAND)} || exit $?; ' if purge else ""
+    )
+    command = f"""exec >{shlex.quote(str(log))} 2>&1
+running() {{
+    if kill -0 {pid} 2>/dev/null; then return 0; fi
+{processes}    return 1
+}}
+deadline=$(($(date +%s) + 600))
+while running; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        printf '%s\\n' "$DESMAN_UNINSTALL_TIMEOUT"
+        exit 1
+    fi
+    sleep 1
+done
+sleep 2
+{cleanup}exec sh {shlex.quote(str(script))} --uninstall --yes{extra}
+"""
+    return ["sh", "-c", command]
+
+
 def start(
     app: Path,
     purge: bool,
@@ -126,6 +244,7 @@ def start(
         spawn = subprocess.Popen
     folder: Path | None = None
     try:
+        check_paths(app, purge)
         temp_root = Path(tempfile.gettempdir()).resolve()
         removed = [app]
         if purge:
@@ -138,7 +257,14 @@ def start(
         script = folder / _installer(app).name
         shutil.copyfile(_installer(app), script)
         log = folder / "uninstall.log"
-        env = dict(os.environ, DESMAN_HOME=str(app))
+        env = dict(
+            os.environ,
+            DESMAN_HOME=str(app),
+            DESMAN_UNINSTALL_PYTHON=sys.executable,
+            DESMAN_UNINSTALL_TIMEOUT=t(
+                "Uninstall cancelled after waiting 10 minutes for DESMAN processes to close."
+            ),
+        )
         # The detached process must not hold the app (or a purge directory) as its cwd.
         for name in (db.DATA_DIR_ENV, CONFIG_DIR_ENV):
             if env.get(name):
@@ -147,28 +273,14 @@ def start(
         flags = 0
         windows = sys.platform == "win32"
         if windows:
-            extra = " -Purge" if purge else ""
-            command = (
-                f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; "
-                "Start-Sleep -Seconds 2; "
-                f"& {_powershell_quote(script)} -Uninstall -Yes{extra} *> {_powershell_quote(log)}"
-            )
-            argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
+            argv = _windows_waiter(pid, script, log, purge)
             # A hidden console of its own: Windows PowerShell 5.1 exits at once without any
             # console (DETACHED_PROCESS), and the person's window may close before it runs.
             flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200) | getattr(
                 subprocess, "CREATE_NO_WINDOW", 0x08000000
             )
         else:
-            extra = " --purge" if purge else ""
-            command = (
-                f"while kill -0 {pid} 2>/dev/null; do sleep 1; done; sleep 2; "
-                f"exec sh {shlex.quote(str(script))} --uninstall --yes{extra} "
-                f">{shlex.quote(str(log))} 2>&1"
-            )
-            argv = ["sh", "-c", command]
-        if purge:
-            _purge_services()
+            argv = _posix_waiter(pid, script, log, purge)
         spawn(
             argv,
             env=env,
@@ -189,7 +301,9 @@ def start(
 
 
 def started_message(log: Path) -> str:
-    return t("DESMAN will be removed as soon as this program ends. Log: {path}", path=log)
+    return t(
+        "DESMAN will be removed after all DESMAN windows and workers close. Log: {path}", path=log
+    )
 
 
 @click.command(help="Remove DESMAN installed by the installer.")
@@ -198,9 +312,11 @@ def started_message(log: Path) -> str:
 def uninstall(purge: bool, yes: bool) -> None:
     app = require_app()
     if yes:
-        ui.out(Text(started_message(start(app, purge))))
-        return
+        check_paths(app, purge)
     for line in plan(app, purge):
         ui.out(Text(line))
+    if yes:
+        ui.out(Text(started_message(start(app, purge))))
+        return
     command = "desman uninstall --purge --yes" if purge else "desman uninstall --yes"
     ui.out(t("Nothing changed. Confirm with: {command}", command=command))

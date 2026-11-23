@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -39,6 +41,10 @@ def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for script in ("install.sh", "install.ps1"):
         (app / "install" / script).write_text(script, encoding="utf-8")
     monkeypatch.setattr(desman, "__file__", str(source / "__init__.py"))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     temp = tmp_path / "DESMAN's temp"
     temp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(temp))
@@ -76,7 +82,7 @@ def test_uninstall_previews_without_yes(
         assert "Your data, keys and history are kept." in result.output
 
 
-@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
 @pytest.mark.parametrize("purge", [False, True])
 def test_uninstall_spawns_detached_copy(
     app: Path, platform: str, purge: bool, monkeypatch: pytest.MonkeyPatch
@@ -107,32 +113,171 @@ def test_uninstall_spawns_detached_copy(
     assert kwargs["env"]["DESMAN_HOME"] == str(app)
     assert kwargs["stdin"] == subprocess.DEVNULL
     assert str(log) in result.output
+    assert result.output.index("Remove the DESMAN app folder") < result.output.index(
+        "DESMAN will be removed after all DESMAN windows and workers close"
+    )
+    command = argv[-1]
     if platform == "win32":
         assert argv[:-1] == ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
-        assert f"Wait-Process -Id {os.getpid()}" in argv[-1]
-        assert "Start-Sleep -Seconds 2;" in argv[-1]
-        command = argv[-1].split("; ")[-1]
+        assert f"Get-Process | Where-Object {{ $_.Id -eq {os.getpid()}" in command
+        assert "$_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)" in command
+        assert "Start-Sleep -Seconds 2;" in command
         script_literal, log_literal = (str(path).replace("'", "''") for path in (script, log))
         extra = " -Purge" if purge else ""
-        assert command == f"& '{script_literal}' -Uninstall -Yes{extra} *> '{log_literal}'"
+        assert command.endswith(
+            f"& '{script_literal}' -Uninstall -Yes{extra} }} *> '{log_literal}'"
+        )
         assert kwargs["creationflags"] == 0x200 | 0x08000000
         assert not kwargs["start_new_session"]
     else:
         assert argv[:2] == ["sh", "-c"]
-        assert f"kill -0 {os.getpid()}" in argv[-1]
-        assert "sleep 2;" in argv[-1]
-        args = ["exec", "sh", str(script), "--uninstall", "--yes"]
-        if purge:
-            args.append("--purge")
-        command = argv[-1].split("; ")[-1]
-        assert shlex.split(command) == [*args, f">{log}", "2>&1"]
+        assert f"kill -0 {os.getpid()}" in command
+        assert ('readlink "$entry/exe"' in command) is (platform == "linux")
+        assert "\nsleep 2\n" in command
+        assert command.endswith(f" --uninstall --yes{' --purge' if purge else ''}\n")
         assert kwargs["start_new_session"]
         assert kwargs["creationflags"] == 0
+    assert ("_finish_purge()" in command) is purge
 
 
-def test_windows_purge_unregisters_sandbox_before_spawn(
-    app: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_refuses_existing_config_backup(
+    app: Path, platform: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    (app / "config.json").touch()
+    backup = Path.home() / ".config" / "desman" / "config.json"
+    backup.parent.mkdir(parents=True)
+    backup.touch()
+    monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: pytest.fail("spawned"))
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", platform)
+        result = CliRunner().invoke(cli, ["uninstall", "--yes"], terminal_width=250)
+    assert result.exit_code == 1
+    assert f"A config backup already exists at {backup}." in result.output
+    assert "will be removed" not in result.output
+
+
+@pytest.mark.parametrize("env", [CONFIG_DIR_ENV, db.DATA_DIR_ENV])
+@pytest.mark.parametrize("purge", [False, True])
+def test_refuses_folders_inside_app(
+    app: Path, env: str, purge: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(env, str(app / "nested"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: pytest.fail("spawned"))
+    result = CliRunner().invoke(cli, ["uninstall", "--yes", *(["--purge"] if purge else [])])
+    assert result.exit_code == 1
+    assert "Data and configuration must be outside the app folder." in result.output
+
+
+@pytest.mark.parametrize("location", ["home", "root", "parent-traversal", "link", "reparse"])
+def test_refuses_unsafe_purge(app: Path, location: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = app.parent / "purge"
+    if location == "home":
+        path = Path.home()
+    elif location == "root":
+        path = Path(app.anchor)
+    elif location == "parent-traversal":
+        path = path / ".." / "other"
+    elif location == "link":
+        try:
+            path.symlink_to(app.parent / "missing", target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"Cannot create a symlink: {exc}")
+    else:
+        lstat = Path.lstat
+
+        def with_reparse(candidate: Path) -> Any:
+            if candidate == path:
+                return SimpleNamespace(
+                    st_mode=stat.S_IFDIR, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT
+                )
+            return lstat(candidate)
+
+        monkeypatch.setattr(Path, "lstat", with_reparse)
+    monkeypatch.setenv(db.DATA_DIR_ENV, str(path))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: pytest.fail("spawned"))
+    monkeypatch.setattr(uninstall_cli, "_purge_services", lambda: pytest.fail("purged services"))
+    result = CliRunner().invoke(cli, ["uninstall", "--yes", "--purge"], terminal_width=250)
+    assert result.exit_code == 1
+    expected = (
+        "Purge folder is a link" if location in {"link", "reparse"} else "Unsafe purge folder"
+    )
+    assert f"{expected}: {path}" in result.output
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux process discovery uses /proc")
+@pytest.mark.parametrize("case", ["executable", "symlink", "timeout"])
+def test_linux_waiter_checks_other_processes(app: Path, case: str) -> None:
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    worker = app / "worker"
+    if case == "symlink":
+        worker.symlink_to(sleep)
+    else:
+        shutil.copy(sleep, worker)
+    folder = app.parent
+    script = folder / "remove.sh"
+    script.write_text("echo installer-ran\n", encoding="utf-8")
+    log = folder / "log"
+    waiting = folder / "waiting"
+    programs = folder / "waiter-tools"
+    programs.mkdir()
+    pause = programs / "sleep"
+    pause.write_text(
+        '#!/bin/sh\nif [ "$1" = 1 ]; then touch "$WAITING"; "$REAL_SLEEP" .05; fi\n',
+        encoding="utf-8",
+    )
+    pause.chmod(0o755)
+    if case == "timeout":
+        date = programs / "date"
+        date.write_text(
+            '#!/bin/sh\nif [ -e "$WAITING" ]; then echo 601; else touch "$WAITING"; echo 0; fi\n',
+            encoding="utf-8",
+        )
+        date.chmod(0o755)
+    purge_marker = folder / "purge-ran"
+    purge_helper = programs / "purge-helper"
+    purge_helper.write_text('#!/bin/sh\ntouch "$PURGE_MARKER"\n', encoding="utf-8")
+    purge_helper.chmod(0o755)
+    env = dict(
+        os.environ,
+        PATH=f"{programs}:{os.environ['PATH']}",
+        DESMAN_HOME=str(app),
+        DESMAN_UNINSTALL_TIMEOUT="Timed out after 10 minutes",
+        DESMAN_UNINSTALL_PYTHON=str(purge_helper),
+        PURGE_MARKER=str(purge_marker),
+        WAITING=str(waiting),
+        REAL_SLEEP=sleep,
+    )
+    with subprocess.Popen([worker, "60"]) as other:
+        try:
+            with subprocess.Popen(
+                uninstall_cli._posix_waiter(2**30, script, log, True), env=env
+            ) as waiter:
+                try:
+                    if case != "timeout":
+                        deadline = time.monotonic() + 5
+                        while not waiting.exists() and waiter.poll() is None:
+                            assert time.monotonic() < deadline
+                            time.sleep(0.01)
+                        assert waiting.exists()
+                        assert log.read_text() == ""
+                        other.terminate()
+                        other.wait(timeout=5)
+                    assert waiter.wait(timeout=5) == (1 if case == "timeout" else 0)
+                finally:
+                    if waiter.poll() is None:
+                        waiter.kill()
+        finally:
+            if other.poll() is None:
+                other.kill()
+    assert log.read_text().strip() == (
+        "Timed out after 10 minutes" if case == "timeout" else "installer-ran"
+    )
+    assert purge_marker.exists() is (case != "timeout")
+
+
+def test_windows_purge_unregisters_sandbox(app: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
     def remove(box: Sandbox) -> bool:
@@ -146,8 +291,8 @@ def test_windows_purge_unregisters_sandbox_before_spawn(
         patch.setattr(sys, "platform", "win32")
         patch.setattr(shutil, "which", lambda *_: None)
         assert any("desman-sandbox" in line for line in uninstall_cli.plan(app, True))
-        uninstall_cli.start(app, True, spawn=lambda *_, **__: calls.append("spawn"))
-    assert calls == ["remove", "spawn"]
+        uninstall_cli._purge_services()
+    assert calls == ["remove"]
 
 
 def test_purge_cleans_managed_search(app: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,7 +304,7 @@ def test_purge_cleans_managed_search(app: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(searxng, "inspect", lambda: {"Name": "/desman-searxng"})
     monkeypatch.setattr(searxng, "docker", docker.append)
     monkeypatch.setattr(searxng_native, "stop", stopped.append)
-    uninstall_cli.start(app, True, spawn=lambda *_, **__: None)
+    uninstall_cli._purge_services()
     assert docker == [["rm", "-f", "-v", "desman-searxng"]]
     assert stopped == [native]
     assert native.is_dir()  # the installer purges this directory
@@ -184,14 +329,23 @@ def test_catalog_previews_uninstall(app: Path, monkeypatch: pytest.MonkeyPatch) 
         conn.close()
 
 
-@pytest.mark.parametrize("line", ["/uninstall --purge", "Remove DESMAN"])
+@pytest.mark.parametrize(
+    "line",
+    ["/uninstall --purge", "Remove DESMAN", "/uninstall --purge --yes", "!uninstall --purge --yes"],
+)
 def test_confirmed_uninstall_ends_terminal_chat(
     app: Path, line: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     open_config().save(make_config(configured=True))
     llm = FakeLLM().on(CHAT, '{"type":"command","name":"uninstall","args":{"purge":true}}')
     monkeypatch.setattr(runs, "models", lambda *_, **__: runs.Models(llm, None))
-    monkeypatch.setattr(ui, "confirm", lambda *_, **__: True)
+    confirmations: list[bool] = []
+
+    def confirm(*_: Any, **__: Any) -> bool:
+        confirmations.append(True)
+        return True
+
+    monkeypatch.setattr(ui, "confirm", confirm)
     calls: list[tuple[Path, bool]] = []
 
     def start(path: Path, purge: bool) -> Path:
@@ -206,3 +360,4 @@ def test_confirmed_uninstall_ends_terminal_chat(
     finally:
         conn.close()
     assert calls == [(app, True)]
+    assert len(confirmations) == (0 if "--yes" in line else 1)

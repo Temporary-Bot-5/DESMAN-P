@@ -1269,6 +1269,9 @@ function drawSettings() {
     settingSave(root, {section: "wizard"}, words.setup_wizard);
     if (d.uninstall.available) {
       text("h3", words.remove_desman, root);
+      for (const line of d.uninstall.lines) {
+        text("small", line, root).className = "uninstall-line";
+      }
       const purge = settingInput(root, words.purge_desman, false, "checkbox");
       settingSave(root, () => ({section: "uninstall", purge: purge.checked}), words.remove_desman)
         .classList.add("danger");

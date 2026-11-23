@@ -896,6 +896,7 @@ def _uninstall(_ctx: Context, args: UninstallArgs) -> Proposal:
     from desman import uninstall_cli
 
     app = uninstall_cli.require_app()
+    uninstall_cli.check_paths(app, args.purge)
 
     def apply() -> Outcome:
         log = uninstall_cli.start(app, args.purge)
@@ -3140,6 +3141,7 @@ def parse_line(
                     "sandbox setup",
                     "sandbox remove",
                     "docker install",
+                    "uninstall",
                 }
                 and name == "yes"
             ):
