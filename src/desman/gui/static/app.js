@@ -346,7 +346,7 @@ async function answer(p, value, cancel = false) {
       promptId = null;
     }
   } catch {
-    $("status").textContent = words.invalid;
+    if (!ended && !uninstallPending) $("status").textContent = words.invalid;
   } finally {
     sending = false;
   }
@@ -585,6 +585,17 @@ async function poll() {
       showAttachments(data.attached_files || [], data.prompt?.id);
       $("stop").hidden = !data.busy;
       ended ||= data.ended;
+      if (ended) clearInterval(settingsTimer);
+      const result = data.settings_result;
+      if ((ended || (uninstallPending && !result?.ok)) &&
+          settingsPending && result?.id === settingsPending) {
+        settingsPending = null;
+        uninstallPending = false;
+        $("settings-result").textContent = result.message;
+        $("settings-result").className = result.ok ? "good" : "bad";
+        updateActions();
+        if (!ended && !$("settings-window").hidden) startSettingsTimer();
+      }
       // Another chat opened: start at its latest message, wherever the last one was read.
       const opened = replaced && data.session_id !== shownSession;
       if (replaced) shownSession = data.session_id;
@@ -651,6 +662,11 @@ function actionButton(parent, label, value) {
 
 async function act(action) {
   if (!action || !lineOpen || sending || attaching) return;
+  const uninstall = action.type === "settings" && action.change.section === "uninstall";
+  if (uninstall) {
+    uninstallPending = true;
+    clearInterval(settingsTimer);
+  }
   sending = true;
   try {
     const response = await post("/action", action);
@@ -658,12 +674,17 @@ async function act(action) {
     lineOpen = false;
     updateActions();
   } catch {
+    const showInvalid = !ended && !uninstallPending;
     if (action.type === "settings") {
       settingsPending = null;
       settingsReceipt?.settled?.(false);
-      $("settings-result").textContent = words.invalid;
+      if (showInvalid) $("settings-result").textContent = words.invalid;
     }
-    $("status").textContent = words.invalid;
+    if (showInvalid) $("status").textContent = words.invalid;
+    if (uninstall) {
+      uninstallPending = false;
+      if (!ended && !$("settings-window").hidden) startSettingsTimer();
+    }
   } finally { sending = false; }
 }
 
@@ -1114,6 +1135,7 @@ let settingsRedraw = false;
 let settingsSection = "general";
 let settingsPending = null;
 let settingsTimer = null;
+let uninstallPending = false;
 let settingsFocus = null;
 let settingsReceipt = null;
 let settingsReceiptTimer = null;
@@ -1128,10 +1150,13 @@ function closeSettings() {
 }
 
 async function refreshSettings(redraw = false, languageChanged = false) {
+  if (ended || uninstallPending) return;
   try {
     const response = await fetch("/settings");
     if (!response.ok) throw new Error();
-    settingsData = await response.json();
+    const snapshot = await response.json();
+    if (ended || uninstallPending) return;
+    settingsData = snapshot;
     const result = settingsData.result;
     if (settingsPending && result?.id === settingsPending) {
       settingsPending = null;
@@ -1160,7 +1185,15 @@ async function refreshSettings(redraw = false, languageChanged = false) {
       drawSettings();
       if (languageChanged && focused) $("settings-nav").querySelector('[aria-current="true"]')?.focus({preventScroll: true});
     }
-  } catch { $("settings-result").textContent = words.invalid; }
+  } catch { if (!ended && !uninstallPending) $("settings-result").textContent = words.invalid; }
+}
+
+function startSettingsTimer() {
+  clearInterval(settingsTimer);
+  if (ended || uninstallPending) return;
+  settingsTimer = setInterval(() => {
+    if (!document.hidden) refreshSettings();
+  }, 1500);
 }
 
 function openSettings() {
@@ -1171,10 +1204,7 @@ function openSettings() {
     $("prompt").querySelector("input, textarea, button")?.focus({preventScroll: true});
   } else $("settings-close").focus();
   refreshSettings(true);
-  clearInterval(settingsTimer);
-  settingsTimer = setInterval(() => {
-    if (!document.hidden) refreshSettings();
-  }, 1500);
+  startSettingsTimer();
 }
 
 function settingSelect(parent, label, options, current) {
@@ -1258,6 +1288,21 @@ function drawSettings() {
     const mode = settingSelect(root, words.default_interface, d.general.interfaces, d.general.interface);
     settingAuto(root, () => ({section: "interface", mode: mode.value}), [mode]);
     settingSave(root, {section: "wizard"}, words.setup_wizard);
+    if (d.uninstall.available) {
+      text("h3", words.remove_desman, root);
+      const preview = text("div", "", root);
+      const purge = settingInput(root, words.purge_desman, false, "checkbox");
+      const drawPreview = () => {
+        preview.replaceChildren();
+        for (const line of purge.checked ? d.uninstall.purge_lines : d.uninstall.lines) {
+          text("small", line, preview).className = "uninstall-line";
+        }
+      };
+      purge.addEventListener("change", drawPreview);
+      drawPreview();
+      settingSave(root, () => ({section: "uninstall", purge: purge.checked}), words.remove_desman)
+        .classList.add("danger");
+    }
   } else if (settingsSection === "keys") {
     const others = text("details", "", root);
     text("summary", words.other_providers, others);
@@ -1500,7 +1545,7 @@ async function refreshUsage(since, root) {
       if (data.limits.some(r => !r.limits_current)) text("p", words.older_limits, root).className = "usage-note";
       for (const who of new Set(data.limits.filter(r => r.exhausted_for_good).map(r => `${r.provider} ${r.key}`))) text("p", words.zero_limit.replace("{key}", who), root).className = "usage-note bad";
     }
-  } catch { if (request === usageRequest) root.textContent = words.invalid; }
+  } catch { if (request === usageRequest && !ended && !uninstallPending) root.textContent = words.invalid; }
 }
 $("usage-close").addEventListener("click", closeUsage);
 document.addEventListener("keydown", e => {

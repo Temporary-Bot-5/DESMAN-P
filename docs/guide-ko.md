@@ -198,6 +198,9 @@ DESMAN은 다른 사람이 보낸 메시지를 작업으로 실행하지 않습�
 - **Linux:** DESMAN을 닫고 터미널에서
   `sh ~/.local/share/desman-app/install/install.sh --uninstall`을 실행하세요.
 
+터미널에서 `desman uninstall`로 같은 제거 계획을 확인하고 `desman uninstall --yes`로 승인할 수 있습니다. 설정 → 일반 → DESMAN 제거를
+사용해도 됩니다.
+
 프로그램이 삭제되어도 다시 설치할 때를 대비해 설정(키 포함)과 기록은 남습니다. 모두 지우려면
 Windows에서는 `-Purge`, Linux에서는 `--purge`를 추가하세요. DESMAN이 삭제할 항목을 보여 주고 다시
 확인을 요청합니다.

@@ -99,6 +99,8 @@ class Outcome:
     data: Any
     done: bool = True
     """False: the person left the window empty or cancelled it; nothing changed."""
+    exit_message: str | None = None
+    """When set, display this message and close the chat after the command."""
 
 
 @dataclass(frozen=True)
@@ -179,6 +181,10 @@ class BadArgs(Exception):
 
 Ref = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 Note = Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+
+
+class UninstallArgs(Args):
+    purge: bool = False
 
 
 class NoArgs(Args):
@@ -884,6 +890,19 @@ def _language(ctx: Context, args: LanguageArgs) -> Outcome | Proposal:
 
     old, new = i18n.CATALOGS[current].name, i18n.CATALOGS[code].name
     return Proposal([t("Language: {old} → {new}", old=old, new=new)], apply)
+
+
+def _uninstall(_ctx: Context, args: UninstallArgs) -> Proposal:
+    from desman import uninstall_cli
+
+    app = uninstall_cli.require_app()
+    uninstall_cli.check_paths(app, args.purge)
+
+    def apply() -> Outcome:
+        log = uninstall_cli.start(app, args.purge)
+        return Outcome(None, exit_message=uninstall_cli.started_message(log))
+
+    return Proposal(uninstall_cli.plan(app, args.purge), apply)
 
 
 def _interface_kind(args: InterfaceArgs) -> Kind:
@@ -2346,6 +2365,15 @@ CATALOG: tuple[Entry, ...] = (
         _permissions,
     ),
     Entry(
+        "uninstall",
+        "Only when the person asks to remove or uninstall DESMAN itself. "
+        "Purge also deletes their data, keys and history.",
+        UninstallArgs,
+        Kind.CHANGE,
+        _uninstall,
+        typed_confirm=True,
+    ),
+    Entry(
         "interface",
         "Without arguments: show the default interface. With mode terminal or gui: change it "
         "(the person confirms).",
@@ -3113,6 +3141,7 @@ def parse_line(
                     "sandbox setup",
                     "sandbox remove",
                     "docker install",
+                    "uninstall",
                 }
                 and name == "yes"
             ):

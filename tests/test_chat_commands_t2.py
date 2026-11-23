@@ -572,6 +572,7 @@ def test_cli_confirmations_are_explicit_in_catalog() -> None:
         "sandbox remove",
         "docker install",
         "search remove",
+        "uninstall",
     }
     assert {entry.name for entry in commands.CATALOG if entry.typed_confirm} == confirming
     for entry in commands.CATALOG:

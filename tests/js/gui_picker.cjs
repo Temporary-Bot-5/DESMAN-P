@@ -169,6 +169,7 @@ assert.deepEqual(taskCards.map(n => n.children[0].children[1].title), ['Unpin', 
 
 // Settings' 1.5-second refresh defers a requested redraw until the picker loses focus.
 global.settingsData = null; global.settingsPending = null; global.settingsRedraw = false;
+global.ended = false; global.uninstallPending = false;
 global.fetch = async () => ({ok: true, json: async () => ({})});
 let draws = 0; global.drawSettings = () => draws++;
 global.$ = () => panel;
@@ -203,6 +204,33 @@ vm.runInThisContext(source.slice(source.indexOf('async function refreshSettings(
   // Language changes override focus preservation and keep the current settings section.
   trigger.dispatchEvent({type:'click'});
   await refreshSettings(true, true); assert.equal(draws, 2);
+  // An uninstall stops the timer before posting and silences failed in-flight refreshes.
+  const controls = {'settings-result': new Element('div'), status: new Element('div')};
+  controls['settings-result'].textContent = controls.status.textContent = '';
+  global.$ = id => controls[id];
+  global.attaching = false;
+  global.settingsTimer = 123;
+  global.settingsPending = 'remove';
+  global.updateActions = () => {};
+  let timerCleared = false;
+  const originalClearInterval = global.clearInterval;
+  global.clearInterval = id => { assert.equal(id, 123); timerCleared = true; };
+  let rejectRefresh;
+  global.fetch = () => new Promise((_, reject) => { rejectRefresh = reject; });
+  const inFlight = refreshSettings();
+  global.post = async () => {
+    assert.equal(timerCleared, true);
+    assert.equal(uninstallPending, true);
+    rejectRefresh(new Error('page shutting down'));
+    return {ok: true};
+  };
+  vm.runInThisContext(source.slice(source.indexOf('async function act('), source.indexOf('async function applyStrings(')));
+  await act({type:'settings', id:'remove', change:{section:'uninstall', purge:false}});
+  await inFlight;
+  assert.equal(controls['settings-result'].textContent, '');
+  assert.equal(controls.status.textContent, '');
+  global.clearInterval = originalClearInterval;
+  global.fetch = originalFetch;
   const originalRefresh = refreshSettings;
   let refreshed = null, modulesDrawn = 0, panelsDrawn = 0;
   global.refreshSettings = async (...args) => { refreshed = args; };

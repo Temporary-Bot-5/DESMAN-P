@@ -185,6 +185,7 @@ class Chat:
     ) -> None:
         if resume and temporary:
             raise ValueError("a temporary chat never continues a session")
+        self.exit_requested = False
         self.dispatch_turn: Callable[[str], bool] | None = None
         self.turn_sink: Callable[[str], None] | None = None
         self._outcome_audit: int | None = None
@@ -244,7 +245,7 @@ class Chat:
         if self.session_id is not None:
             self._show_last()
         try:
-            while True:
+            while not self.exit_requested:
                 self._notices()
                 ui.session(self.session_id, self.temporary)
                 if (line := self.read()) is None:
@@ -547,7 +548,9 @@ class Chat:
             if turn.text is not None:
                 self._say(turn.text, settle=False)
             self._command(turn, config, models, interlocutor)
-        if personal and turn.node is not None:  # off: never told how, never taken
+        if (
+            not self.exit_requested and personal and turn.node is not None
+        ):  # off: never told how, never taken
             self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
 
     def _own_nodes(self, config: Config) -> tuple[knowledge.Node, ...] | None:
@@ -947,6 +950,9 @@ class Chat:
         except (ui.Cancelled, click.Abort):
             ui.out("")
             made = commands.Outcome({"declined": True}, done=False)
+        if made.done and made.exit_message is not None:
+            self.exit_requested = True
+            ui.out(Text(made.exit_message))
         if typed or kind is not commands.Kind.READ:
             self._journal(entry, args, made.done, before, typed=typed)
         if not made.done:
@@ -2168,12 +2174,16 @@ class Chat:
                             "models remove",
                             "global join",
                             "config reset",
+                            "uninstall",
                         )
                         made = (
                             made.apply()
                             if not confirm or self._confirmed(made, in_prompt=True)
                             else commands.Outcome(None, done=False)
                         )
+                if made.done and made.exit_message is not None:
+                    self.exit_requested = True
+                    message = made.exit_message
                 if isinstance(args, commands.KeyAddArgs):
                     # The newly saved key may also have been pasted into its label.
                     args = args.model_copy(

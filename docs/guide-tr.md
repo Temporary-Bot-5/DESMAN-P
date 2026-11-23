@@ -208,6 +208,9 @@ edin. Önceki sürüme dönmek için `/global update --revert` kullanın.
 - **Linux:** DESMAN'ı kapatın ve terminalde
   `sh ~/.local/share/desman-app/install/install.sh --uninstall` komutunu çalıştırın.
 
+Terminalde `desman uninstall` aynı kaldırma planını gösterir ve `desman uninstall --yes` işlemi
+onaylar. Ayarlar → Genel → DESMAN’ı kaldır seçeneğini de kullanabilirsiniz.
+
 Program kaldırılır. Yeniden kurmanız gerekirse diye ayarlar (anahtarlarla birlikte) ve geçmiş
 kalır. Hepsini silmek için Windows'ta `-Purge`, Linux'ta `--purge` ekleyin. DESMAN neleri
 sileceğini gösterir ve yeniden onay ister.

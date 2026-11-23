@@ -230,6 +230,8 @@ hin, geben Sie `/protected approve` ein und bestätigen Sie, um die neuen Regeln
 - **Linux:** Schließen Sie DESMAN und führen Sie
   `sh ~/.local/share/desman-app/install/install.sh --uninstall` in einem Terminal aus.
 
+Im Terminal zeigt `desman uninstall` denselben Entfernungsvorgang vorab an, und `desman uninstall --yes` bestätigt ihn. Alternativ geht das über Einstellungen → Allgemein → DESMAN entfernen.
+
 Das Programm wird entfernt. Einstellungen, Schlüssel und Verlauf bleiben für eine mögliche
 Neuinstallation erhalten. Wenn Sie alles löschen wollen, ergänzen Sie unter Windows `-Purge` oder
 unter Linux `--purge`. DESMAN zeigt, was genau entfernt wird, und fragt noch einmal nach.

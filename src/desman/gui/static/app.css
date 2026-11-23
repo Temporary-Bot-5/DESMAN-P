@@ -282,6 +282,7 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 #settings-nav button[aria-current="true"] { background: #00eeff10; box-shadow: inset 2px 0 var(--settings-accent); color: var(--settings-accent); }
 #settings-form h2 { font-size: 16px; margin: 0 0 12px; }
 #settings-form h3 { font-size: 14px; margin: 0; }
+#settings-form .uninstall-line { display: block; margin-top: .25rem; overflow-wrap: anywhere; }
 :is(#settings-dialog, #usage-dialog) button { min-height: 30px; font-size: 13px; padding: 4px 10px; }
 #settings-form .setting-row { display: grid; grid-template-columns: minmax(110px, 1fr) 240px; align-items: center; gap: 4px 16px; margin: 0; padding: 12px 0; border-bottom: 1px solid #ffffff0c; }
 #settings-form .setting-row > span { line-height: 1.4; }

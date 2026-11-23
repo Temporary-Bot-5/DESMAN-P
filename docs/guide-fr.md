@@ -218,6 +218,8 @@ précédente, tapez `/global update --revert`.
 - **Linux :** fermez DESMAN et exécutez
   `sh ~/.local/share/desman-app/install/install.sh --uninstall` dans un terminal.
 
+Dans un terminal, `desman uninstall` affiche le même plan de désinstallation et `desman uninstall --yes` le confirme. Vous pouvez aussi passer par Paramètres → Général → Désinstaller DESMAN.
+
 Le programme est supprimé et les paramètres, les clés et l’historique restent en cas de
 réinstallation. Pour tout effacer, ajoutez `-Purge` sous Windows ou `--purge` sous Linux. DESMAN
 montre ce qui sera supprimé et vous demande une nouvelle confirmation.

@@ -19,6 +19,7 @@ from desman import (
     providers,
     runs,
     tuning_cli,
+    uninstall_cli,
     wizard,
 )
 from desman.config import TUNING_BOUNDS, Config, Tuning
@@ -42,6 +43,7 @@ from desman.settings_actions import (
     Protected,
     Roles,
     Setting,
+    Uninstall,
     Wizard,
 )
 
@@ -88,7 +90,13 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             "lines": [t("Cannot check the protected files: {error}", error=e)],
         }
     network = global_cli.status(config, conn=conn)
+    app = uninstall_cli.installed_app()
     return {
+        "uninstall": {
+            "available": app is not None,
+            "lines": uninstall_cli.plan(app, False) if app is not None else [],
+            "purge_lines": uninstall_cli.plan(app, True) if app is not None else [],
+        },
         "general": {
             "language": config.language,
             "interface": config.interface,
@@ -158,6 +166,8 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
         name, args = "language", {"code": change.language}
     elif isinstance(change, InterfaceChoice):
         name, args = "interface", {"mode": change.mode}
+    elif isinstance(change, Uninstall):
+        name, args = "uninstall", {"purge": change.purge}
     elif isinstance(change, Wizard):
         name, args = "config", {}
     elif isinstance(change, Keys):

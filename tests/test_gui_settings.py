@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from desman import config_cli, tuning_cli, ui, wizard
+from desman import config_cli, tuning_cli, ui, uninstall_cli, wizard
 from desman.chat import Chat
 from desman.config import open_config
 from desman.core import db
@@ -59,6 +59,7 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
     data = snapshot(app)
     assert set(data) == {
         "general",
+        "uninstall",
         "providers",
         "roles",
         "permissions",
@@ -69,6 +70,7 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
         "protected",
         "result",
     }
+    assert data["uninstall"] == {"available": False, "lines": [], "purge_lines": []}
     assert len(data["general"]["languages"]) == 13
     assert len(data["permissions"]) == 4
     assert len(data["limits"]) == 8
@@ -671,3 +673,73 @@ def test_settings_reads_network_status_once(
     monkeypatch.setattr(global_cli, "status", status)
     snapshot(settings_app[0])
     assert count == 1
+
+
+@pytest.mark.parametrize(("approved", "conflict"), [(False, False), (True, False), (True, True)])
+def test_uninstall_settings_confirms_and_only_exits_on_success(
+    settings_app: Any,
+    tmp_path: Path,
+    approved: bool,
+    conflict: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, store = settings_app
+    open_config().save(make_config())
+    installed = tmp_path / "installed-app"
+    installed.mkdir()
+    monkeypatch.setattr(uninstall_cli, "installed_app", lambda: installed)
+    home_config = tmp_path / "home-config"
+    home_config.mkdir()
+    monkeypatch.setattr(uninstall_cli, "home_config_dir", lambda: home_config)
+    real_start = uninstall_cli.start
+    calls: list[tuple[Path, bool]] = []
+
+    def start(path: Path, purge: bool) -> Path:
+        calls.append((path, purge))
+        if conflict:
+            return real_start(path, purge, spawn=lambda *_, **__: pytest.fail("spawned"))
+        return tmp_path / "uninstall.log"
+
+    monkeypatch.setattr(uninstall_cli, "start", start)
+    chat = Chat(Sessions(store.conn))
+    assert snapshot(app)["uninstall"] == {
+        "available": True,
+        "lines": uninstall_cli.plan(installed, False),
+        "purge_lines": uninstall_cli.plan(installed, True),
+    }
+
+    def respond() -> None:
+        with app.front.condition:
+            assert app.front.condition.wait_for(lambda: app.front.prompt is not None, timeout=2)
+            prompt = app.front.prompt
+            assert prompt is not None and prompt["kind"] == "confirm"
+            assert str(installed) in prompt["question"]
+            assert ("Delete the data folder" in prompt["question"]) is not conflict
+            assert not calls
+            if conflict:
+                (installed / "config.json").touch()
+                (home_config / "config.json").touch()
+            assert app.front.answer({"id": prompt["id"], "value": approved})
+
+    thread = threading.Thread(target=respond)
+    thread.start()
+    submitted = action({"section": "uninstall", "purge": not conflict})
+    inputs: list[str | ui.Action] = [submitted]
+    removed = approved and not conflict
+    if not removed:
+        inputs.append("/exit")
+    actions = iter(inputs)
+    chat.read = lambda: next(actions)
+    with ui.use(app.front):
+        chat.run()
+    thread.join(2)
+    assert calls == ([(installed, not conflict)] if approved else [])
+    assert chat.exit_requested is removed
+    if removed:
+        app.front.end()
+    result = app.front.poll(0, timeout=0)["settings_result"]
+    assert result["ok"] is removed
+    if conflict:
+        assert "A config backup already exists" in result["message"]
+    else:
+        assert ("uninstall.log" if approved else "Nothing changed.") in result["message"]

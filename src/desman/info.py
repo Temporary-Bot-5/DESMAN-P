@@ -10,6 +10,7 @@ from rich.text import Text
 from desman import __author__, __version__, providers, ui
 from desman.config import ConfigManager
 from desman.i18n import t, tn
+from desman.uninstall_cli import warn_last_failure
 
 BANNER = """████░░█████░█████░█░░░█░█████░█░░░█
 █░░░█░█░░░░░█░░░░░██░██░█░░░█░██░░█
@@ -33,6 +34,7 @@ def _commands() -> list[tuple[str, str]]:
 
 def print_project_info(config_manager: ConfigManager) -> None:
     config = config_manager.load()
+    warn_last_failure()
 
     ui.out(Text(ui.banner(BANNER), style="accent"))
     ui.out(Text(t("Decentralized Self-Evolving Modular Agents Network"), style="bold"))

@@ -213,6 +213,9 @@ DESMAN が変更内容を表示して確認を求めます。インストール�
 - **Linux：** DESMAN を閉じ、端末で
   `sh ~/.local/share/desman-app/install/install.sh --uninstall` を実行します。
 
+ターミナルでは `desman uninstall` で同じ削除内容を確認し、`desman uninstall --yes` で実行できます。設定 → 一般 → DESMAN
+を削除からも実行できます。
+
 プログラムが削除されても、再インストールに備えて設定（キーを含む）と履歴は残ります。
 すべて消すには Windows では `-Purge`、Linux では `--purge` を追加してください。
 DESMAN は何を削除するかを表示して、もう一度確認します。

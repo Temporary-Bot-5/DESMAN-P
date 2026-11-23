@@ -95,6 +95,8 @@ be descendants of the installed commit. A git tag alone is not a root-signed net
 Without a verified installer-owned app directory, uninstall removes nothing. Launchers and
 shortcuts belonging to another installation are preserved.
 
+Use `desman uninstall [--purge]` to preview removal, then add `--yes` to confirm. Settings → General → Remove DESMAN also previews and confirms removal.
+
 Close DESMAN first. Run the installer copy inside the installation:
 `sh ~/.local/share/desman-app/install/install.sh --uninstall` on Linux, or
 `"%LOCALAPPDATA%\DESMAN\app\install\install.bat" -Uninstall` in Windows Command Prompt.

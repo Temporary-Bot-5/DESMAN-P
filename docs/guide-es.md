@@ -216,6 +216,8 @@ las reglas. Para volver a la versión anterior, usa `/global update --revert`.
 - **Linux:** cierra DESMAN y ejecuta `sh ~/.local/share/desman-app/install/install.sh --uninstall`
   en un terminal.
 
+En un terminal, `desman uninstall` muestra el plan de la misma desinstalación y `desman uninstall --yes` la confirma. También puedes usar Ajustes → General → Desinstalar DESMAN.
+
 Se elimina el programa y se conservan los ajustes, las claves y el historial por si lo instalas de
 nuevo. Para borrarlo todo, incluidas claves e historial, añade `-Purge` en Windows o `--purge` en
 Linux. DESMAN te muestra qué borrará y vuelve a pedirte confirmación.

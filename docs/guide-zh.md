@@ -185,6 +185,8 @@ DESMAN 不会把其他人发来的消息当成任务执行，里面的链接和�
 - **Linux：** 关闭 DESMAN，在终端运行
   `sh ~/.local/share/desman-app/install/install.sh --uninstall`。
 
+在终端中运行 `desman uninstall` 可预览相同的卸载操作，运行 `desman uninstall --yes` 可确认。也可以在“设置 → 常规 → 卸载 DESMAN”中操作。
+
 卸载后会保留设置（包括密钥）和历史记录，方便以后重装。要连同密钥和记录全部删除，
 请在 Windows 上加 `-Purge`，或在 Linux 上加 `--purge`。DESMAN 会显示将删除的内容，再请你确认。
 

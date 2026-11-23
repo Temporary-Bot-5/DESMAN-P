@@ -433,13 +433,16 @@ def test_stored_transcript_follows_new_output(tmp_path: Path) -> None:
         "let after = 0, state = 0, transcriptVersion = null, ended = false;\n"
         "let followUntil = 0, shownSession = null, currentSession = null, waitingData = null;\n"
         "let canAttach = false; const showAttachments = () => {};\n"
+        "let settingsPending = null, settingsTimer = null, uninstallPending = false;\n"
         "const words = {};\n"
         "const node = () => ({textContent: '', hidden: false, replaceChildren() {}});\n"
-        "const nodes = {status: node(), live: node(), stop: node(), prompt: node()};\n"
+        "const nodes = {status: node(), live: node(), stop: node(), prompt: node(), "
+        "'settings-result': node()};\n"
         "const messages = {scrollTop: 800, clientHeight: 200, scrollHeight: 1000, rows: 0,\n"
         "  replaceChildren() { this.rows = 0; }, append() { this.rows++; this.scrollHeight += 100; }};\n"
         "const $ = id => id === 'messages' ? messages : nodes[id];\n"
         "const text = (tag, value, parent) => { parent.append(); return {}; };\n"
+        "const updateActions = () => {};\n"
         "const rich = () => {}, showPrompt = () => {}, updateBottomButton = () => {}, event = () => {};\n"
         "const document = {querySelector: () => null};\n"
         "let replies = [];\n"
@@ -472,6 +475,13 @@ const reply = (version, rows, last = false, session = 's') => ({events: [], stat
   ended = false; messages.scrollTop = 0; replies = [reply('v5', 3, true, 'other')];
   await poll();
   assert.equal(messages.scrollTop, messages.scrollHeight);
+  // Settings removal can finish between settings polls and delivers its receipt on shutdown.
+  ended = false; settingsPending = 'remove';
+  replies = [{...reply('v5', 3, true, 'other'),
+    settings_result: {id: 'remove', ok: true, message: 'Removing DESMAN. Log: uninstall.log'}}];
+  await poll();
+  assert.equal(nodes['settings-result'].textContent, 'Removing DESMAN. Log: uninstall.log');
+  assert.equal(settingsPending, null);
 })().catch(e => { console.error(e); process.exit(1); });
 """,
         encoding="utf-8",
