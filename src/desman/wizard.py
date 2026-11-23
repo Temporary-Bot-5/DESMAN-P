@@ -283,11 +283,11 @@ def _providers_menu(s: _Session) -> None:
             if group is providers.SEARCH and docker_present:
                 choices.append(setup_search)
             choices += [ui.Choice(p.name, p, _status(s.config, p)) for p in group]
-        choices.append(ui.Choice(t("Done — continue"), None))
         choices.append(ui.Choice(t("Models and keys for roles"), "roles"))
         if not docker_present:
             choices.append(setup_search)
         choices.append(ui.Choice(t("Set up local SearXNG as a Python program"), "search_native"))
+        choices.append(ui.Choice(t("Done — continue"), None))
         picked = ui.select(
             t("Pick a provider to add keys or change settings"), choices, default=last
         )

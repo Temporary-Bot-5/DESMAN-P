@@ -13,7 +13,7 @@ import pytest
 from rich.table import Table
 
 from conftest import FakeClock
-from desman import runs, ui
+from desman import runs, task_files, ui
 from desman.chat import Chat
 from desman.config import Config, open_config
 from desman.core import db
@@ -93,7 +93,7 @@ def test_command_switches_and_back_preserves_chat(
     chat.session_id = normal
     llm = FakeLLM()
     monkeypatch.setattr(runs, "models", lambda *a, **kw: runs.Models(llm, None))
-    lines = iter(["!list", "list", "nonsense ordinary text", "/back", "/exit"])
+    lines = iter(["/terminal", "!list", "list", "nonsense ordinary text", "/back", "/exit"])
     chat.read = lambda: next(lines, None)
     # Check before final cleanup, which intentionally erases temporary sessions.
     original_back = chat._back
@@ -119,6 +119,184 @@ def test_command_switches_and_back_preserves_chat(
     assert "Commands start with /" in events[2].text
     assert "/status" in events[2].text
     assert not llm.calls
+
+
+@pytest.mark.parametrize("line", ["/list", "!list"])
+@pytest.mark.parametrize("temporary", [False, True])
+def test_explicit_command_runs_in_place(
+    sessions: Sessions,
+    line: str,
+    temporary: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    normal = sessions.add(None, Role.USER, "hello", temporary=temporary).session_id
+    terminal = sessions.terminal()
+    sessions.add(terminal, Role.DESMAN, "old terminal output", Kind.EVENT)
+    chat = Chat(sessions, temporary=temporary)
+    chat.session_id = normal
+    chat.models = runs.Models(FakeLLM(), None)
+    models = chat.models
+    monkeypatch.setattr(chat, "_tell_blocked", lambda: None)
+    monkeypatch.setattr(chat, "_tell_waiting", lambda: None)
+
+    if line.startswith("/"):
+        assert chat._slash(line)
+    else:
+        chat._terminal_command(line)
+
+    output = capsys.readouterr().out
+    assert "No tasks." in output
+    assert "→ General Terminal" not in output and "old terminal output" not in output
+    assert chat.session_id == normal and chat.temporary is temporary and chat.models is models
+    assert [m.text for m in sessions.messages(normal)] == ["hello"]
+    user, event = sessions.messages(terminal)[-2:]
+    assert user.role is Role.USER and user.text == line
+    assert event.kind is Kind.EVENT and "No tasks." in event.text
+
+    monkeypatch.setattr(chat, "_tell_waiting", lambda: ui.warn("new notice"))
+    chat._notices()
+    notice = capsys.readouterr().out
+    assert notice == ("" if temporary else "1 new in General Terminal (/terminal)\n")
+
+
+@pytest.mark.parametrize("command", ["/clear", "!clear"])
+def test_clear_alias_only_clears_the_chat_screen(
+    sessions: Sessions, command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions)
+    normal = sessions.add(None, Role.USER, "hello").session_id
+    chat.session_id = normal
+    terminal = sessions.terminal()
+    sessions.add(terminal, Role.DESMAN, "terminal output", Kind.EVENT)
+    cleared: list[str | None] = []
+    monkeypatch.setattr(ui, "clear_screen", lambda: cleared.append(chat.session_id))
+    lines = iter([command, "/exit"])
+    chat.read = lambda: next(lines, None)
+
+    chat.run()
+
+    assert cleared == [normal] and chat.session_id == normal
+    assert [m.text for m in sessions.messages(normal)] == ["hello"]
+    assert [m.text for m in sessions.screen(terminal)] == ["terminal output"]
+    assert [m.text for m in sessions.messages(terminal)] == ["terminal output"]
+
+
+def test_help_alias_lists_chat_commands(
+    sessions: Sessions, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lines = iter(["!help", "!exit"])
+    chat = Chat(sessions, read=lambda: next(lines, None))
+    chat.run()
+
+    output = capsys.readouterr().out
+    assert "/rename" in output and "/compact" in output
+    assert not sessions.messages(sessions.terminal())
+
+
+def test_in_place_commands_share_pending_files(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions)
+    terminal = sessions.terminal()
+    files = task_files.PendingFiles()
+
+    def typed(runner: Chat, line: str, *, in_place: bool) -> None:
+        assert in_place and runner.session_id == terminal
+        if line == "list":
+            runner.pending_files[terminal] = files
+        else:
+            assert runner.pending_files[terminal] is files
+
+    monkeypatch.setattr(Chat, "_typed", typed)
+    chat._terminal_command("/list")
+    chat._terminal_command("/stats")
+
+
+def test_in_place_command_restores_chat_on_error(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions, temporary=True)
+    normal = sessions.add(None, Role.USER, "hello", temporary=True).session_id
+    chat.session_id = normal
+    models = runs.Models(FakeLLM(), None)
+    config = Config()
+    chat.models, chat._models_for = models, config
+    chat._master_pending = True
+
+    def typed(line: str, *, in_place: bool) -> None:
+        assert in_place and chat.in_terminal and not chat.temporary
+        chat.models, chat._models_for = None, None
+        raise RuntimeError("command failed")
+
+    monkeypatch.setattr(chat, "_typed", typed)
+    with pytest.raises(RuntimeError, match="command failed"):
+        chat._terminal_command("/list")
+
+    assert chat.session_id == normal and chat.temporary and chat._master_pending
+    assert chat.models is models and chat._models_for is config
+
+
+@pytest.mark.parametrize("line", ["/foo", "!foo"])
+@pytest.mark.parametrize("in_terminal", [False, True])
+def test_unknown_explicit_command_message(
+    sessions: Sessions, line: str, in_terminal: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    normal = sessions.add(None, Role.USER, "hello").session_id
+    terminal = sessions.terminal()
+    chat = Chat(sessions)
+    chat.session_id = terminal if in_terminal else normal
+    lines = iter([line])
+    chat.read = lambda: next(lines, None)
+    chat.run()
+
+    output = " ".join(capsys.readouterr().err.split())
+    user, event = sessions.messages(terminal)
+    assert user.text == line and event.kind is Kind.EVENT
+    expected = (
+        "“foo” is not a command. General Terminal takes only DESMAN's commands "
+        "(`/help` lists them); to talk, go back to a chat with /back."
+        if in_terminal
+        else "“foo” is not a command. /help lists them."
+    )
+    assert f"✗ {expected}" in output
+    assert " ".join(event.text.split()) == f"✗ {expected}"
+    assert chat.session_id == (terminal if in_terminal else normal)
+
+
+def test_in_place_command_keeps_temporary_chat_erasable(sessions: Sessions) -> None:
+    temporary = sessions.add(None, Role.USER, "hello", temporary=True).session_id
+    chat = Chat(sessions, temporary=True)
+    chat.session_id = temporary
+
+    def lines() -> Iterator[str]:
+        yield "/list"
+        assert chat.session_id == temporary and chat.temporary
+        assert [m.text for m in sessions.messages(temporary)] == ["hello"]
+        yield "/exit"
+
+    commands = lines()
+    chat.read = lambda: next(commands, None)
+    chat.run()
+
+    assert sessions.messages(temporary) == []
+    user, event = sessions.messages(sessions.terminal())
+    assert user.text == "/list" and "No tasks." in event.text
+
+
+def test_in_place_command_keeps_pending_master_and_previous_unread(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    chat = Chat(sessions)
+    chat._master_pending = True
+    sessions.add(sessions.terminal(), Role.DESMAN, "unseen output", Kind.EVENT)
+    chat._terminal_command("/list")
+    assert chat.session_id is None and chat.master_mode
+    assert "unseen output" not in capsys.readouterr().out
+    monkeypatch.setattr(chat, "_tell_waiting", lambda: ui.warn("new notice"))
+    monkeypatch.setattr(chat, "_tell_blocked", lambda: None)
+    chat._notices()
+    assert "2 new in General Terminal" in capsys.readouterr().out
 
 
 def test_notices_stay_out_of_chat_and_pointer_is_one_per_batch(
@@ -214,7 +392,7 @@ def test_command_output_and_input_redact_configured_key(
         ui.out(table)
         click.echo(secret)
 
-    monkeypatch.setattr(chat, "_typed", print_key)
+    monkeypatch.setattr(Chat, "_typed", lambda self, line, **kwargs: print_key(line))
     front = WebFront() if web else ui.TerminalFront()
     with ui.use(front):
         if isinstance(front, WebFront):
@@ -222,6 +400,7 @@ def test_command_output_and_input_redact_configured_key(
                 chat._terminal_command("!list " + secret)
         else:
             chat._terminal_command("!list " + secret)
+    assert chat.in_terminal is web
     texts = "\n".join(m.text for m in sessions.messages(sessions.terminal()))
     assert secret not in texts and secret[:30] not in texts and "[" in texts
     styled = "\n".join(m.styled or "" for m in sessions.messages(sessions.terminal()))
@@ -524,7 +703,7 @@ def test_terminal_help_is_journaled_and_follows_the_language(sessions: Sessions)
 def test_usage_remains_a_terminal_command(sessions: Sessions) -> None:
     chat = Chat(sessions)
     chat._terminal_command("/usage")
-    assert chat.in_terminal
+    assert chat.session_id is None
     messages = sessions.messages(sessions.terminal())
     assert messages[-2].role is Role.USER and messages[-2].text == "/usage"
     assert messages[-1].kind is Kind.EVENT

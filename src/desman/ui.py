@@ -224,9 +224,20 @@ def _terminal_checkbox(question: str, choices: Sequence[Choice], checked: set[An
             qmark="›",
             instruction=t("(Space toggles, Enter confirms)"),
             style=_style(),
+            erase_when_done=True,
         ).ask()
         if answer is None:
             raise Cancelled
+        summary = (
+            t(
+                "{question}: {choices}",
+                question=question,
+                choices=", ".join(choices[i].label for i in answer),
+            )
+            if answer
+            else t("{question}: none selected", question=question)
+        )
+        out(Text(summary))
         return {choices[i].value for i in answer}
 
     out(Text(question, style="bold"))
@@ -314,6 +325,8 @@ def _chat_prompt() -> Any:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import InMemoryHistory
         from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout.containers import FloatContainer
+        from prompt_toolkit.layout.menus import CompletionsMenu
         from prompt_toolkit.styles import Style
 
         class RedactedHistory(InMemoryHistory):
@@ -362,8 +375,9 @@ def _chat_prompt() -> Any:
             # Keep the inserted completion when dismissing the list.
             event.current_buffer.complete_state = None
 
+        marker = "› "
         _prompt = PromptSession(
-            [("class:mark", "› ")],
+            [("class:mark", marker)],
             history=RedactedHistory(),
             key_bindings=bindings,
             complete_while_typing=True,
@@ -379,6 +393,13 @@ def _chat_prompt() -> Any:
                 }
             ),
         )
+        for container in _prompt.layout.walk():
+            if isinstance(container, FloatContainer):
+                for floating in container.floats:
+                    if isinstance(floating.content, CompletionsMenu):
+                        # The menu pads each entry with one leading cell.
+                        floating.xcursor = False
+                        floating.left = cell_len(marker) - 1
     return _prompt
 
 
@@ -843,6 +864,10 @@ def live_update(renderable: RenderableType) -> None:
 
 def live_stop() -> None:
     _front.live_stop()
+
+
+def is_terminal_front() -> bool:
+    return isinstance(_active_front.get(), TerminalFront)
 
 
 def interactive() -> bool:

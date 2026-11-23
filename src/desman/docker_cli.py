@@ -18,7 +18,7 @@ import click
 
 from desman import ui
 from desman.config_cli import json_option
-from desman.core.sandbox import find_docker, windows_program_files
+from desman.core.sandbox import docker_env, find_docker, windows_program_files
 from desman.i18n import t
 
 docker_executable = find_docker
@@ -235,6 +235,7 @@ def _process(
             argv,
             check=False,
             capture_output=True,
+            env=docker_env(argv[0]),
             encoding="utf-8",
             errors="replace",
             timeout=timeout,

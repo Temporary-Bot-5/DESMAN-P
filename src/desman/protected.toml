@@ -14,7 +14,7 @@
 # The reviewer (and the executor it judges).
 "agents.py" = "c46aad7ceb8328ec27f133a689ec2705bb555f280a24d1972c07e87b920d995d"
 # Security rules: the sandbox for generated code, the workspace guard for files.
-"core/sandbox.py" = "34d421aaa442a17697cc67faa7603fde96776281c546c892ec53781d31f0670f"
+"core/sandbox.py" = "13e63e58e733a6c3167b2e24d8dbbcea3ab661e12c1f085beeeb78e326c66553"
 "core/wasi_runner.py" = "2eacfce0b36e6d6d6ace74806cdd7f8f4df3fa0bbb66b01c9a1ab22084aba6aa"
 "core/workspace.py" = "b22bad0a351d5fd2fd04172f7c7e9a60314a766bcae4c57574d69a87468ed398"
 "core/atomic.py" = "cbfaa6ef20fc9923426f115893ccda1f7eaf8dbe8290a987a5d8d09d438dc48a"
