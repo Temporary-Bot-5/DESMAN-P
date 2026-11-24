@@ -501,6 +501,12 @@ def _resolve(ref: str, ids: Iterable[str]) -> str:
     return matches[0]
 
 
+def _in_force(row: p.ModerationRow, now: datetime) -> bool:
+    if row.in_force is not None:
+        return row.in_force
+    return not row.lifted and datetime.fromisoformat(row.expires_at) > now
+
+
 def moderate(
     client: operator.OperatorClient,
     action: Literal["suspend", "lift"],
@@ -526,7 +532,7 @@ def moderate(
         active = [
             row
             for row in suspensions.suspensions
-            if row.node == node and row.action == "suspend" and row.in_force
+            if row.node == node and row.action == "suspend" and _in_force(row, now)
         ]
         if not active:
             raise click.ClickException(t("Node {node} has no suspension in force.", node=node))
@@ -675,6 +681,18 @@ def _print_clusters(rows: list[p.OperatorCluster]) -> None:
     )
 
 
+def _result_text(output: str) -> str:
+    try:
+        value = json.loads(output)
+        if isinstance(value, dict) and value.keys() == {"text"}:
+            content = value["text"]
+            if isinstance(content, str):
+                return content
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except (ValueError, RecursionError):
+        return output
+
+
 def _print_job(reply: p.OperatorJobDetail) -> None:
     _lines(
         _field(t("Job"), reply.job),
@@ -686,9 +704,10 @@ def _print_job(reply: p.OperatorJobDetail) -> None:
     if not reply.handed_in:
         ui.note(t("Nothing handed in yet."))
     for item in reply.handed_in:
+        output = item.body.get("output")
         _lines(
             f"{ui.when(item.received_at)}  {item.kind}  {item.outcome}  {item.node}",
-            str(item.body.get("output") or item.body.get("reason") or ""),
+            _result_text(output) if isinstance(output, str) else str(item.body.get("reason") or ""),
         )
         for file in item.body.get("files") or []:
             _lines(f"{file['path']} ({t('characters')}: {len(str(file.get('text', '')))})")
@@ -719,7 +738,7 @@ def _print_cluster(reply: p.OperatorClusterDetail) -> None:
     if reply.job_list:
         _print_jobs(reply.job_list)
     if reply.result is not None:
-        _lines(_field(t("Result"), reply.result.summary))
+        _lines(_field(t("Result"), _result_text(reply.result.summary)))
 
 
 def _print_complaints(rows: Iterable[p.ComplaintRow]) -> None:
@@ -739,7 +758,35 @@ def _print_complaints(rows: Iterable[p.ComplaintRow]) -> None:
     )
 
 
-def print_reply(reply: BaseModel, *, as_json: bool = False) -> None:
+def _print_inbox(client: operator.OperatorClient, reply: p.OperatorInbox) -> None:
+    if not reply.jobs and not reply.clusters:
+        ui.note(t("Nothing waits for the operator."))
+    if reply.jobs:
+        _print_jobs(reply.jobs)
+    if reply.clusters:
+        _print_clusters(reply.clusters)
+    for job in reply.jobs:
+        if job.result is None:
+            continue
+        job_detail = call(client, lambda c: c.job(job.job))  # noqa: B023 (called immediately)
+        for item in job_detail.handed_in:
+            output = item.body.get("output")
+            if item.id == job.result and isinstance(output, str):
+                _lines(_field(t("Job"), job.job), _field(t("Result"), _result_text(output)))
+    for cluster in reply.clusters:
+        if cluster.reason != "result":
+            continue
+        cluster_detail = call(client, lambda c: c.cluster(cluster.task))  # noqa: B023
+        if cluster_detail.result is not None:
+            _lines(
+                _field(t("Cluster task"), cluster.task),
+                _field(t("Result"), _result_text(cluster_detail.result.summary)),
+            )
+
+
+def print_reply(
+    client: operator.OperatorClient, reply: BaseModel, *, as_json: bool = False
+) -> None:
     if as_json:
         encoded = json.dumps(reply.model_dump(mode="json"), ensure_ascii=False)
         if ui.is_terminal_front():
@@ -749,12 +796,7 @@ def print_reply(reply: BaseModel, *, as_json: bool = False) -> None:
         return
     match reply:
         case p.OperatorInbox():
-            if not reply.jobs and not reply.clusters:
-                ui.note(t("Nothing waits for the operator."))
-            if reply.jobs:
-                _print_jobs(reply.jobs)
-            if reply.clusters:
-                _print_clusters(reply.clusters)
+            _print_inbox(client, reply)
         case p.OperatorJobs():
             _print_jobs(reply.jobs)
         case p.OperatorClusters():
@@ -849,7 +891,7 @@ def print_change(reply: BaseModel) -> dict[str, str]:
         case p.ModerationRow():
             ui.ok(t("Moderation recorded as {id}.", id=reply.id))
             return {"id": reply.id}
-        case p.OperatorRef():
+        case p.OperatorDismissed():
             ui.ok(t("Complaint dismissed."))
             return {"id": reply.id}
         case p.OperatorNode():
@@ -866,7 +908,8 @@ def _read_cli(
     as_json: bool,
     scope: sign.Scope | None = None,
 ) -> None:
-    print_reply(call(connect(load_config()), action, scope), as_json=as_json)
+    client = connect(load_config())
+    print_reply(client, call(client, action, scope), as_json=as_json)
 
 
 def _change_cli(build: Callable[[operator.OperatorClient], Change]) -> None:

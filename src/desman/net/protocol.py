@@ -987,27 +987,27 @@ ClusterStatus = Literal["waiting", "running", "operator", "accepted", "dropped",
 ReportKind = Literal["bug", "memory"]
 
 
-class OperatorBody(BaseModel):
+class OperatorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
-class OperatorEmpty(OperatorBody):
+class OperatorEmpty(OperatorRequest):
     pass
 
 
-class OperatorRef(OperatorBody):
+class OperatorRef(OperatorRequest):
     id: OperatorPrefix
 
 
-class OperatorJobQuery(OperatorBody):
+class OperatorJobQuery(OperatorRequest):
     status: JobStatus | None = None
 
 
-class OperatorClusterQuery(OperatorBody):
+class OperatorClusterQuery(OperatorRequest):
     status: ClusterStatus | None = None
 
 
-class OperatorRecord(OperatorBody):
+class OperatorRecord(OperatorRequest):
     record: Signed
 
 
@@ -1019,30 +1019,38 @@ class OperatorClusterSettle(OperatorSettle):
     note: str | None = Field(default=None, max_length=2000)
 
 
-class OperatorComplaintsQuery(OperatorBody):
+class OperatorComplaintsQuery(OperatorRequest):
     all: bool
 
 
-class OperatorReportQuery(OperatorBody):
+class OperatorReportQuery(OperatorRequest):
     kind: ReportKind | None = None
 
 
-class OperatorOwner(OperatorBody):
+class OperatorOwner(OperatorRequest):
     node: OperatorPrefix
     owner: str | None = Field(min_length=1, max_length=64)
 
 
-class OperatorLogQuery(OperatorBody):
+class OperatorLogQuery(OperatorRequest):
     limit: int = Field(ge=1, le=500)
 
 
-class OperatorIdentity(OperatorBody):
+class OperatorReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+
+
+class OperatorDismissed(OperatorReply):
+    id: OperatorPrefix
+
+
+class OperatorIdentity(OperatorReply):
     fingerprint: Fingerprint
     scopes: list[sign.Scope]
     until: datetime
 
 
-class OperatorJob(OperatorBody):
+class OperatorJob(OperatorReply):
     job: str
     signer: str
     status: JobStatus
@@ -1054,7 +1062,7 @@ class OperatorJob(OperatorBody):
     cluster: str | None
 
 
-class OperatorHanded(OperatorBody):
+class OperatorHanded(OperatorReply):
     id: str
     node: str
     kind: str
@@ -1067,11 +1075,11 @@ class OperatorJobDetail(OperatorJob):
     handed_in: list[OperatorHanded]
 
 
-class OperatorJobs(OperatorBody):
+class OperatorJobs(OperatorReply):
     jobs: list[OperatorJob]
 
 
-class OperatorCluster(OperatorBody):
+class OperatorCluster(OperatorReply):
     task: str
     cluster: str
     status: ClusterStatus
@@ -1098,7 +1106,7 @@ class OperatorClusterDetail(OperatorCluster):
     result: ClusterResult | None
 
 
-class OperatorClusters(OperatorBody):
+class OperatorClusters(OperatorReply):
     clusters: list[OperatorCluster]
 
 
@@ -1106,7 +1114,7 @@ class OperatorInbox(OperatorJobs, OperatorClusters):
     pass
 
 
-class ModerationRow(OperatorBody):
+class ModerationRow(OperatorReply):
     id: str
     node: str
     action: Literal["suspend", "lift"]
@@ -1115,10 +1123,10 @@ class ModerationRow(OperatorBody):
     issued_at: str
     expires_at: str
     lifted: bool
-    in_force: bool
+    in_force: bool | None = None
 
 
-class ComplaintRow(OperatorBody):
+class ComplaintRow(OperatorReply):
     id: str
     from_node: str
     about_node: str
@@ -1130,7 +1138,7 @@ class ComplaintRow(OperatorBody):
     count: int
 
 
-class ComplaintDecision(OperatorBody):
+class ComplaintDecision(OperatorReply):
     complaint: str
     decision: str
     record: str | None
@@ -1144,15 +1152,15 @@ class ComplaintDetail(ComplaintRow):
     decisions: list[ComplaintDecision]
 
 
-class OperatorComplaints(OperatorBody):
+class OperatorComplaints(OperatorReply):
     complaints: list[ComplaintRow]
 
 
-class OperatorSuspensions(OperatorBody):
+class OperatorSuspensions(OperatorReply):
     suspensions: list[ModerationRow]
 
 
-class OperatorReport(OperatorBody):
+class OperatorReport(OperatorReply):
     id: str
     node: str
     kind: ReportKind
@@ -1163,11 +1171,11 @@ class OperatorReportDetail(OperatorReport):
     report: SignedReport
 
 
-class OperatorReports(OperatorBody):
+class OperatorReports(OperatorReply):
     reports: list[OperatorReport]
 
 
-class OperatorNode(OperatorBody):
+class OperatorNode(OperatorReply):
     node: str
     status: Literal["active", "left", "revoked"]
     capabilities: list[Capability]
@@ -1178,11 +1186,11 @@ class OperatorNode(OperatorBody):
     lead: bool
 
 
-class OperatorNodes(OperatorBody):
+class OperatorNodes(OperatorReply):
     nodes: list[OperatorNode]
 
 
-class OperatorLogEntry(OperatorBody):
+class OperatorLogEntry(OperatorReply):
     seq: int
     ts: str
     action: str
@@ -1190,5 +1198,5 @@ class OperatorLogEntry(OperatorBody):
     details: dict[str, Any]
 
 
-class OperatorLog(OperatorBody):
+class OperatorLog(OperatorReply):
     entries: list[OperatorLogEntry]

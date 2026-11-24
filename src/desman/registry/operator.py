@@ -265,9 +265,9 @@ def complaint(ctx: Actions, asked: p.OperatorRef) -> tuple[p.ComplaintDetail, st
 
 
 @route(p.OPERATOR_COMPLAINT_DISMISS, p.OperatorRef, MODERATION, writes=True)
-def complaint_dismiss(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorRef, str]:
+def complaint_dismiss(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorDismissed, str]:
     id = moderation.dismiss(ctx.conn, asked.id, None, ctx.now)
-    return p.OperatorRef(id=id), id
+    return p.OperatorDismissed(id=id), id
 
 
 @route(p.OPERATOR_MODERATION, p.OperatorRecord, MODERATION, writes=True)

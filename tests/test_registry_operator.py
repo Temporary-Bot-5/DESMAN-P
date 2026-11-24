@@ -16,7 +16,7 @@ from click.testing import CliRunner
 from pydantic import JsonValue
 
 from conftest import FakeClock
-from desman import commands, operator_cli, runs
+from desman import commands, operator_cli, runs, ui
 from desman.cli import cli
 from desman.config import open_config
 from desman.core import db, netlog, nodes
@@ -393,6 +393,9 @@ def test_cli_status_import_create_and_remove(
     result = runner.invoke(cli, ["operator", "status"])
     assert result.exit_code == 0, result.output
     assert all(word in result.output for word in [key.fingerprint, URL, "moderation", "tasks"])
+    until = remote.whoami().until.isoformat()
+    assert ui.when(until) in result.output
+    assert until not in result.output
     assert sign.encode_public(key.public) in result.output.splitlines()
     assert "PRIVATE KEY" not in result.output
     assert runner.invoke(cli, ["operator", "key", "remove"]).exit_code == 0
@@ -593,7 +596,7 @@ def invoke_operator(*args: str) -> str:
     return result.output
 
 
-def assert_operator_read(expected: p.OperatorBody, *args: str) -> None:
+def assert_operator_read(expected: p.OperatorReply, *args: str) -> None:
     assert json.loads(invoke_operator(*args, "--json")) == expected.model_dump(mode="json")
     assert invoke_operator(*args).strip()
 
@@ -621,12 +624,15 @@ def test_operator_work_commands(
     a, b = node(registry, clock), node(registry, clock)
     lent = claim(a)
     assert lent is not None and sign.parse(lent["task"]).record.id == job.job
-    assert hand_in(a, lent).status_code == 200
+    output = "[bold]Café[/bold]\n\n1. Five"
+    assert hand_in(a, lent, output=json.dumps({"text": output})).status_code == 200
     check = claim(b)
     assert check is not None
     assert hand_in(b, check, accept=False).status_code == 200
     assert_operator_read(remote.inbox(), "inbox")
     assert_operator_read(remote.job(job.job), "job", "show", job.job[:8])
+    assert output in invoke_operator("job", "show", job.job[:8])
+    assert output in invoke_operator("inbox")
     invoke_operator("job", "settle", job.job[:8], "accept")
     duplicate = CliRunner().invoke(cli, ["operator", "job", "settle", job.job[:8], "accept"])
     assert duplicate.exit_code == 1 and "already been settled" in duplicate.output
@@ -903,6 +909,95 @@ def test_operator_http_refusals(
     result = CliRunner().invoke(cli, ["operator", "inbox", "--json"])
     assert result.exit_code == 1
     assert message in " ".join(result.output.split())
+
+
+def test_operator_replies_from_other_registry_versions(
+    registry: Registry, local_operator: operator.OperatorClient, clock: FakeClock
+) -> None:
+    target = node(registry, clock).fingerprint
+    peer = Node(registry, clock, local_operator.key)
+
+    def other_version(request: httpx.Request) -> httpx.Response:
+        response = peer._handle(request)
+        if response.status_code != 200:
+            return response
+        payload = response.json()
+        payload["future_field"] = "ignored"
+        if request.url.path == p.OPERATOR_MODERATION:
+            del payload["in_force"]
+        if request.url.path == p.OPERATOR_SUSPENSIONS:
+            for row in payload["suspensions"]:
+                del row["in_force"]
+                row["future_field"] = True
+                if row["action"] == "suspend" and not row["lifted"]:
+                    extras = [
+                        row | {"id": "expired", "expires_at": db.to_iso(clock())},
+                        row | {"id": "lifted", "lifted": True},
+                    ]
+                    payload["suspensions"] = [row, *extras]
+                    break
+        return httpx.Response(200, json=payload)
+
+    local_operator.transport = httpx.MockTransport(other_version)
+    assert "Moderation recorded" in invoke_operator("suspend", target, "--reason", "test")
+    rows = local_operator.suspensions().suspensions
+    assert len(rows) == 3 and all(row.in_force is None for row in rows)
+    assert target[:12] in invoke_operator("suspensions")
+    assert "Moderation recorded" in invoke_operator("lift", target, "--reason", "resolved")
+    lifted = local_operator.suspensions().suspensions
+    assert any(row.lifts == rows[0].id for row in lifted)
+    with pytest.raises(ClickException, match="no suspension in force"):
+        operator_cli.moderate(local_operator, "lift", target, "resolved")
+    denied = peer.call("POST", p.OPERATOR_WHOAMI, {"future_field": True})
+    assert denied.status_code == 400 and denied.json()["error"] == "malformed"
+
+
+@pytest.mark.parametrize(
+    "value, displayed",
+    [
+        ({"text": "[bold]Café[/bold]\n\n1. First"}, "[bold]Café[/bold]\n\n1. First"),
+        ({"text": "Café", "count": 1}, '{\n  "text": "Café",\n  "count": 1\n}'),
+    ],
+)
+def test_operator_cluster_result_display(
+    value: dict[str, object],
+    displayed: str,
+    registry: Registry,
+    local_operator: operator.OperatorClient,
+    clock: FakeClock,
+) -> None:
+    invoke_operator("cluster", "add", "--goal", "Compare", "--acceptance", "Give reasons")
+    [cluster] = local_operator.clusters().clusters
+    peer = Node(registry, clock, local_operator.key)
+    summary = json.dumps(value)
+
+    def completed_cluster(request: httpx.Request) -> httpx.Response:
+        response = peer._handle(request)
+        if response.status_code != 200:
+            return response
+        payload = response.json()
+        waiting = {"status": "operator", "reason": "result", "why": "result"}
+        if request.url.path == p.OPERATOR_CLUSTER:
+            payload.update(waiting)
+            payload["result"] = {
+                "cluster": cluster.cluster,
+                "task": cluster.task,
+                "plan": cluster.task,
+                "version": 1,
+                "result": cluster.task,
+                "summary": summary,
+            }
+        if request.url.path == p.OPERATOR_INBOX:
+            payload["clusters"] = [cluster.model_dump(mode="json") | waiting]
+        return httpx.Response(200, json=payload)
+
+    local_operator.transport = httpx.MockTransport(completed_cluster)
+    assert f"Result: {displayed}" in invoke_operator("cluster", "show", cluster.task)
+    assert f"Result: {displayed}" in invoke_operator("inbox")
+    detail = json.loads(invoke_operator("cluster", "show", cluster.task, "--json"))
+    assert detail["result"]["summary"] == summary
+    inbox = json.loads(invoke_operator("inbox", "--json"))
+    assert inbox == local_operator.inbox().model_dump(mode="json")
 
 
 def test_lift_uses_only_suspensions_in_force_and_warns_when_shorter(

@@ -346,7 +346,7 @@ TOPICS: Final = (
         "`/operator key remove` previews removal in the terminal. Add --yes to remove it. "
         "The private key stays on this machine. The tasks scope can offer and settle work and set "
         "node owners; moderation covers complaints and suspensions. "
-        "Use `/operator inbox` for work waiting for a decision, `/operator jobs` and "
+        "Use `/operator inbox` for work waiting for a decision and its available results, `/operator jobs` and "
         "`/operator clusters` to list work, and `/operator job show ID` or "
         "`/operator cluster show ID` for results. Decisions are accept, again or drop. "
         "`/operator complaints`, `/operator suspensions`, `/operator reports`, "

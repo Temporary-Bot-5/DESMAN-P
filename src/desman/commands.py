@@ -2330,7 +2330,7 @@ def _operator_read(
     def handle(ctx: Context, args: OperatorReadArgs) -> Outcome | Proposal:
         client = operator_cli.connect(ctx.manager)
         reply = operator_cli.call(client, lambda c: action(c, args), scope)
-        operator_cli.print_reply(reply, as_json=args.as_json)
+        operator_cli.print_reply(client, reply, as_json=args.as_json)
         if not external_text:
             return Outcome(reply.model_dump(mode="json"))
         if ctx.node_author is nodes.Author.PERSON:
