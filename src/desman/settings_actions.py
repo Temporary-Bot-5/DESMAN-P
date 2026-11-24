@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from desman.tuning_limits import MASTER_TUNING_BOUNDS, PAGE_TUNING_BOUNDS, TUNING_BOUNDS
 
@@ -158,6 +158,24 @@ class Protected(Fields):
     operation: Literal["show", "approve"]
 
 
+class Operator(Fields):
+    section: Literal["operator"]
+    operation: Literal[
+        "key import",
+        "key create",
+        "key remove",
+        "job add",
+        "job settle",
+        "cluster add",
+        "cluster settle",
+        "complaint dismiss",
+        "suspend",
+        "lift",
+        "owner",
+    ]
+    args: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 Setting = Annotated[
     General
     | InterfaceChoice
@@ -174,6 +192,7 @@ Setting = Annotated[
     | Limits
     | Models
     | Network
-    | Protected,
+    | Protected
+    | Operator,
     Field(discriminator="section"),
 ]

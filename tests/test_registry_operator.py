@@ -213,11 +213,14 @@ def test_remote_job_can_be_claimed_and_settled(
     a, b = node(registry, clock), node(registry, clock)
     lent = claim(a)
     assert lent is not None and sign.parse(lent["task"]) == signed
-    assert hand_in(a, lent).status_code == 200
+    output = "<script>5</script>"
+    assert hand_in(a, lent, output=output).status_code == 200
     check = claim(b)
     assert check is not None
     assert hand_in(b, check, accept=False, reason="disputed").status_code == 200
-    assert [j.job for j in remote.inbox().jobs] == [row.job]
+    inbox = remote.inbox()
+    assert [j.job for j in inbox.jobs] == [row.job]
+    assert inbox.job_results == {row.job: output}
     detail = remote.job(row.job[:8])
     assert {item.outcome for item in detail.handed_in} == {"done", "reject"}
     assert remote.job_settle(row.job, "accept").status == "accepted"
@@ -665,6 +668,7 @@ def test_operator_moderation_and_record_commands(
     invoke_operator("lift", b.fingerprint[:12], "--reason", "resolved")
     assert_operator_read(remote.suspensions(), "suspensions")
     invoke_operator("owner", b.fingerprint[:12], "Test owner")
+    assert {row.node: row.name for row in remote.nodes().nodes}[b.fingerprint] == "bobby"
     assert_operator_read(remote.nodes(), "nodes")
     invoke_operator("owner", b.fingerprint, "--clear")
     signed = signed_bug(a.key, "private report")

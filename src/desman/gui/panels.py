@@ -21,6 +21,7 @@ from desman.i18n import t
 from desman.live import Progress, key_labels
 from desman.llm import router
 from desman.net.node import active_capabilities
+from desman.net.operator import operator_key_path
 
 
 def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
@@ -31,6 +32,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 "current": None,
                 "temporary": False,
                 "sessions": [],
+                "operator_key": operator_key_path().exists(),
                 "terminal": {"id": None, "unread": 0},
             }
             if kind == "sessions"
@@ -98,6 +100,7 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                 )
                 return {
                     "terminal": {"id": terminal_id, "unread": unread},
+                    "operator_key": operator_key_path().exists(),
                     "current": current,
                     "temporary": temporary,
                     "sessions": [

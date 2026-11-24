@@ -350,6 +350,8 @@ TOPICS: Final = (
         "`/operator complaints`, `/operator suspensions`, `/operator reports`, "
         "`/operator nodes` and `/operator log` show registry records. "
         "Chat changes requested through the interlocutor require confirmation. "
+        "On the page, manage the key in Settings → desman-global. With a key, the Operator "
+        "section shows Status, Inbox, Work, Network and, with the scope, Moderation. Confirm changes in its windows. "
         "Registry text is shown by code and is shared with the interlocutor only after agreement, "
         "as untrusted data.",
     ),

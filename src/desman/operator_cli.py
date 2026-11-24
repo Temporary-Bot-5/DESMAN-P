@@ -253,6 +253,8 @@ def call(
     client: operator.OperatorClient,
     action: Callable[[operator.OperatorClient], M],
     scope: sign.Scope | None = None,
+    *,
+    show_assignment: bool = True,
 ) -> M:
     try:
         return action(client)
@@ -262,7 +264,10 @@ def call(
         match e.reason:
             case "not_operator" | "revoked":
                 # The command result sent back to the interlocutor contains only the message.
-                ui.out(Text(f"desman-registry assign {sign.encode_public(client.key.public)} …"))
+                if show_assignment:
+                    ui.out(
+                        Text(f"desman-registry assign {sign.encode_public(client.key.public)} …")
+                    )
                 message = t(
                     "This key has no current operator assignment. Ask the root owner to run "
                     "desman-registry assign with the public key."

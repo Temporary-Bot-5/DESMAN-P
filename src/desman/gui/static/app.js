@@ -743,7 +743,10 @@ function setupPanels() {
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
   actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
   button($("sidebar-bottom"), `◔ ${words.usage}`, openUsage);
-  button($("sidebar-bottom"), `⚙ ${words.settings}`, openSettings);
+  const operator = button($("sidebar-bottom"), words.operator, openOperator);
+  operator.id = "operator-button";
+  operator.hidden = !operatorPresent;
+  button($("sidebar-bottom"), `⚙ ${words.settings}`, () => openSettings());
   $("topbar").replaceChildren();
   for (const [label, id] of [[words.sessions, "sidebar"], [words.tasks, "tasks-panel"]]) {
     const b = button($("topbar"), label, () => {
@@ -775,6 +778,7 @@ function iconAction(parent, icon, label, value) {
 }
 
 function showSessions(data) {
+  showOperatorButton(data.operator_key);
   currentSession = data.current || null;
   terminalOpen = !!data.terminal && !!data.terminal.id && data.current === data.terminal.id;
   $("session-title").textContent = terminalOpen ? words.terminal : "";
@@ -1143,6 +1147,11 @@ const settingsDeferred = new Set();
 const settingsSections = ["general", "keys", "roles", "permissions", "personalize", "behaviour", "limits", "models", "network", "protected"];
 
 function closeSettings() {
+  operatorOpen = false;
+  operatorEpoch++;
+  operatorStatusRequest = null;
+  clearInterval(operatorTimer);
+  $("settings-window").classList.remove("operator-mode");
   $("settings-window").hidden = true;
   document.body.classList.remove("settings-open");
   clearInterval(settingsTimer);
@@ -1156,6 +1165,9 @@ async function refreshSettings(redraw = false, languageChanged = false) {
     if (!response.ok) throw new Error();
     const snapshot = await response.json();
     if (ended || uninstallPending) return;
+    const keyChanged = settingsData?.operator_key !== snapshot.operator_key;
+    showOperatorButton(snapshot.operator_key);
+    if (keyChanged && !operatorOpen) redraw = true;
     settingsData = snapshot;
     const result = settingsData.result;
     if (settingsPending && result?.id === settingsPending) {
@@ -1173,10 +1185,17 @@ async function refreshSettings(redraw = false, languageChanged = false) {
       updateActions();
       redraw ||= !settingsReceipt?.isConnected;
       if (result.ok) {
+        if (operatorOpen) {
+          $("settings-form").querySelector("[data-operator-list]")?.reloadOperator?.();
+        }
         $("settings-form").querySelector("[data-local-models]")?.reload?.();
         const labels = await fetch("/strings.json");
         if (labels.ok) { await applyStrings(await labels.json()); }
       }
+    }
+    if (operatorOpen) {
+      if (languageChanged) drawOperator();
+      return;
     }
     settingsRedraw ||= redraw;
     if (settingsRedraw && (languageChanged || !preserveEditor($("settings-form")))) {
@@ -1192,7 +1211,7 @@ function startSettingsTimer() {
   clearInterval(settingsTimer);
   if (ended || uninstallPending) return;
   settingsTimer = setInterval(() => {
-    if (!document.hidden) refreshSettings();
+    if (!document.hidden && (!operatorOpen || settingsPending)) refreshSettings();
   }, 1500);
 }
 
@@ -1203,7 +1222,7 @@ function openSettings() {
   if (document.body.classList.contains("settings-prompt")) {
     $("prompt").querySelector("input, textarea, button")?.focus({preventScroll: true});
   } else $("settings-close").focus();
-  refreshSettings(true);
+  if (!operatorOpen) refreshSettings(true);
   startSettingsTimer();
 }
 
@@ -1254,7 +1273,7 @@ function settingAuto(parent, change, controls = null) {
 
 function settingSave(parent, change, label = words.save) {
   const b = actionButton(parent, label, () => {
-    if (!lineOpen || sending || settingsPending) return null;
+    if (!lineOpen || sending || attaching || settingsPending) return null;
     const id = crypto.randomUUID();
     settingsPending = id;
     settingsReceipt = null;
@@ -1425,6 +1444,7 @@ function drawSettings() {
     };
     load("");
   } else if (settingsSection === "network") {
+    operatorKeySettings(root, d.operator_key);
     const status = text("div", "desman-global", root); status.className = "provider-heading";
     text("small", d.network.enabled ? words.status_active : words.off, status).className = "setting-badge";
     const advanced = text("details", "", root); text("summary", words.advanced, advanced);
@@ -1558,3 +1578,439 @@ document.addEventListener("keydown", e => {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 });
+
+// Operator uses the Settings dialog and its catalog action receipts.
+let operatorOpen = false;
+let operatorPresent = false;
+let operatorStatus = {};
+let operatorTab = "status";
+let operatorTimer = null;
+let operatorEpoch = 0;
+let operatorStatusRequest = null;
+
+function showOperatorButton(present) {
+  operatorPresent = Boolean(present);
+  $("operator-button").hidden = !operatorPresent;
+  if (!operatorPresent && operatorOpen) closeSettings();
+}
+
+function operatorChange(parent, label, operation, args = {}) {
+  return settingSave(parent, () => ({
+    section: "operator", operation, args: typeof args === "function" ? args() : args,
+  }), label);
+}
+
+function operatorKeySettings(root, installed) {
+  const area = text("section", "", root);
+  text("h3", words.operator_key, area);
+  const path = settingInput(area, words.op_file, "");
+  const registry = settingInput(area, words.registry, "");
+  operatorChange(area, words.op_import, "key import", () => ({
+    file: path.value, registry: registry.value || null, replace: installed,
+  }));
+  if (installed) operatorChange(area, words.remove, "key remove");
+  else operatorChange(area, words.op_create, "key create", () => ({registry: registry.value || null}));
+}
+
+async function operatorRead(view, params = {}) {
+  const query = new URLSearchParams({view, ...params});
+  const response = await fetch(`/operator?${query}`);
+  if (!response.ok) throw new Error();
+  return response.json();
+}
+
+function openOperator() {
+  if (!operatorPresent || operatorOpen) return;
+  operatorOpen = true;
+  operatorStatus = {};
+  operatorTab = "status";
+  openSettings();
+  $("settings-window").classList.add("operator-mode");
+  $("settings-result").textContent = "";
+  drawOperator();
+  refreshOperatorStatus();
+  operatorTimer = setInterval(() => {
+    if (ended) clearInterval(operatorTimer);
+    else if (!document.hidden && operatorOpen) refreshOperatorStatus();
+  }, 30000);
+}
+
+async function refreshOperatorStatus() {
+  if (operatorStatusRequest) return;
+  const epoch = operatorEpoch;
+  const request = operatorRead("status");
+  operatorStatusRequest = request;
+  let status;
+  try { status = await request; }
+  catch { status = {has_key: operatorPresent, error: words.invalid}; }
+  finally {
+    if (operatorStatusRequest === request) operatorStatusRequest = null;
+  }
+  if (!operatorOpen || epoch !== operatorEpoch) return;
+  const previous = (operatorStatus.scopes || []).join();
+  const statusChanged = JSON.stringify(operatorStatus) !== JSON.stringify(status);
+  operatorStatus = status;
+  if (!status.has_key) { showOperatorButton(false); return; }
+  if (previous !== (status.scopes || []).join()) {
+    if (operatorTab === "moderation" && !operatorCan("moderation")) operatorTab = "status";
+    drawOperator();
+  } else if (operatorTab === "status" && statusChanged) {
+    const body = $("settings-form").querySelector("[data-operator-status]");
+    body.replaceChildren();
+    operatorStatusPanel(body);
+  }
+}
+
+function operatorCan(scope) {
+  return operatorStatus.scopes?.includes(scope);
+}
+
+function drawOperator() {
+  const nav = $("settings-nav"), root = $("settings-form");
+  $("settings-heading").textContent = words.operator;
+  $("settings-close").setAttribute("aria-label", words.close);
+  nav.replaceChildren();
+  root.replaceChildren();
+  const tabs = ["status", "inbox", "work", "moderation", "network"];
+  for (const tab of tabs) {
+    if (tab === "moderation" && !operatorCan("moderation")) continue;
+    const control = button(nav, words[`op_${tab}`], () => {
+      operatorTab = tab;
+      drawOperator();
+      nav.querySelector('[aria-current="true"]')?.focus();
+    });
+    control.setAttribute("aria-current", String(tab === operatorTab));
+  }
+  text("h2", words[`op_${operatorTab}`], root);
+  switch (operatorTab) {
+    case "status": {
+      const body = text("div", "", root);
+      body.dataset.operatorStatus = "";
+      operatorStatusPanel(body);
+      break;
+    }
+    case "inbox": operatorList(root, "inbox", operatorInbox); break;
+    case "work": operatorWork(root); break;
+    case "moderation": operatorModeration(root); break;
+    case "network": operatorNetwork(root); break;
+  }
+  updateActions();
+}
+
+function operatorDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(words.lang);
+}
+
+function operatorFacts(parent, facts) {
+  const list = text("dl", "", parent);
+  list.className = "operator-facts";
+  for (const [label, value] of facts) {
+    text("dt", label, list);
+    text("dd", value ?? "—", list);
+  }
+}
+
+function operatorStatusPanel(root) {
+  const s = operatorStatus;
+  if (s.error) text("p", s.error, root).className = "bad";
+  operatorFacts(root, [
+    [words.op_fingerprint, s.fingerprint],
+    [words.op_public, s.public_key],
+    [words.registry, s.registry],
+    [words.op_scopes, s.scopes?.join(", ")],
+    [words.op_until, operatorDate(s.until)],
+  ]);
+  if (s.public_key) button(root, words.op_copy, async () => {
+    try { await navigator.clipboard.writeText(s.public_key); }
+    catch { $("settings-result").textContent = words.invalid; }
+  });
+  button(root, words.op_refresh, refreshOperatorStatus);
+}
+
+function operatorSelect(parent, label, options, changed) {
+  const row = text("label", label, parent);
+  const control = text("select", "", row);
+  for (const [value, title] of options) text("option", title, control).value = value;
+  if (changed) control.onchange = () => changed(control.value);
+  return control;
+}
+
+function operatorList(root, view, draw, options = []) {
+  const tools = text("div", "", root);
+  const body = text("div", "", root);
+  let serial = 0;
+  const load = async () => {
+    const id = ++serial;
+    try {
+      const result = await operatorRead(view, filter ? {status: filter.value} : {});
+      if (id !== serial || !body.isConnected || !operatorOpen) return;
+      body.replaceChildren();
+      if (result.error) text("p", result.error, body).className = "bad";
+      else if (!result.has_key) showOperatorButton(false);
+      else draw(body, result);
+      updateActions();
+    } catch {
+      if (id === serial && body.isConnected) {
+        body.replaceChildren();
+        text("p", words.invalid, body).className = "bad";
+      }
+    }
+  };
+  const filter = options.length ? operatorSelect(tools, words.op_status, options, load) : null;
+  button(tools, words.op_refresh, load);
+  body.reloadOperator = load;
+  body.dataset.operatorList = "";
+  load();
+}
+
+function operatorQuote(parent, label, content) {
+  if (content == null) return;
+  text("strong", label, parent);
+  text("pre", content, parent).className = "operator-quote";
+}
+
+function operatorInbox(root, data) {
+  if (!data.jobs.length && !data.clusters.length) text("p", words.op_empty, root);
+  for (const [kind, items] of [["job", data.jobs], ["cluster", data.clusters]]) {
+    for (const row of items) {
+      const card = text("section", "", root);
+      const cluster = kind === "cluster";
+      const id = cluster ? row.task : row.job;
+      text("h3", cluster ? row.goal.goal : row.task.description, card);
+      text("small", id, card);
+      text("p", words.op_untrusted, card);
+      const results = cluster ? data.cluster_results : data.job_results;
+      const preview = results?.[id];
+      if (results) operatorQuote(card, words.op_result, preview ?? "—");
+      if (!results || preview?.length >= 2000) {
+        operatorDetail(card, kind, id, cluster ? operatorClusterResult : operatorJobResult);
+      }
+      if (!operatorCan("tasks")) continue;
+      const note = cluster ? settingInput(card, words.op_note, "", "textarea") : null;
+      if (note) note.maxLength = 2000;
+      for (const decision of ["accept", "again", "drop"]) {
+        operatorChange(card, words[`op_${decision}`], `${kind} settle`, () => ({
+          id, decision, ...(note && decision === "again" && note.value ? {note: note.value} : {}),
+        }));
+      }
+    }
+  }
+}
+
+function operatorJobResult(detail) {
+  return detail.handed_in.find(item => item.id === detail.result)?.body.output ?? null;
+}
+
+function operatorClusterResult(detail) {
+  return detail.output ?? detail.result?.summary ?? null;
+}
+
+function operatorDays(parent, value, max) {
+  const field = settingInput(parent, words.op_days, value, "number");
+  field.min = 1;
+  field.max = max;
+  return field;
+}
+
+function operatorOffer(parent, cluster) {
+  const form = text("details", "", parent);
+  const title = cluster ? words.op_cluster_offer : words.op_job_offer;
+  text("summary", title, form);
+  const goal = settingInput(form, cluster ? words.op_goal : words.op_description, "", "textarea");
+  goal.maxLength = 4000;
+  const acceptance = settingInput(form, words.op_acceptance, "", "textarea");
+  acceptance.maxLength = 2000;
+  const inputs = settingInput(form, words.op_inputs, "", "textarea");
+  const kind = cluster ? null : operatorSelect(form, words.op_kind,
+    ["text", "code", "analysis"].map(value => [value, words[`op_${value}`]]));
+  const runs = cluster ? null : settingInput(form, words.op_runs_code, false, "checkbox");
+  const days = operatorDays(form, 7, cluster ? 30 : 90);
+  operatorChange(form, title, cluster ? "cluster add" : "job add", () => ({
+    [cluster ? "goal" : "description"]: goal.value, acceptance: acceptance.value,
+    inputs: inputs.value.split(/\r?\n/).filter(line => line.trim()), days: Number(days.value),
+    ...(cluster ? {} : {kind: kind.value, runs_code: runs.checked}),
+  }));
+}
+
+function operatorWork(root) {
+  const content = text("div", "", root);
+  const show = view => {
+    content.replaceChildren();
+    const cluster = view === "clusters";
+    if (operatorCan("tasks")) operatorOffer(content, cluster);
+    const states = [
+      ...(cluster ? ["waiting", "running"] : ["execute", "recheck"]),
+      "operator", "accepted", "dropped", "expired",
+    ];
+    operatorList(content, view, (body, data) => {
+      const rows = data[view].map(row => [
+        cluster ? row.goal.goal : row.task.description,
+        cluster ? row.task : row.job,
+        words[`op_${row.status}`], operatorDate(row.expires_at),
+        cell => operatorDetail(cell, cluster ? "cluster" : "job",
+          cluster ? row.task : row.job, cluster ? operatorClusterResult : operatorJobResult),
+      ]);
+      operatorTable(body, [cluster ? words.op_goal : words.op_description, words.op_id, words.op_status,
+        words.op_until, words.op_result], rows);
+    }, [["", words.op_all], ...states.map(value => [value, words[`op_${value}`]])]);
+    updateActions();
+  };
+  const select = operatorSelect(root, words.op_kind,
+    [["jobs", words.op_jobs], ["clusters", words.op_clusters]], show);
+  root.append(content);
+  show(select.value);
+}
+
+function operatorDetail(parent, view, id, display) {
+  const panel = text("details", "", parent);
+  text("summary", words.op_details, panel);
+  const body = text("div", "", panel);
+  let loading = false;
+  let loaded = false;
+  panel.addEventListener("toggle", async () => {
+    if (!panel.open || loading || loaded || !operatorOpen) return;
+    loading = true;
+    body.replaceChildren();
+    try {
+      const data = await operatorRead(view, {id});
+      if (!body.isConnected || !operatorOpen) return;
+      if (data.error) {
+        text("p", data.error, body).className = "bad";
+      } else if (!data.has_key) showOperatorButton(false);
+      else {
+        text("small", id, body);
+        text("p", words.op_untrusted, body);
+        const value = display(data, body);
+        if (value !== undefined) operatorQuote(body, words.op_result, value ?? "—");
+        loaded = true;
+      }
+      updateActions();
+    } catch { text("p", words.invalid, body).className = "bad"; }
+    finally { loading = false; }
+  });
+}
+
+function operatorModeration(root) {
+  const content = text("div", "", root);
+  const show = view => {
+    content.replaceChildren();
+    if (view === "complaints") operatorList(content, view, operatorComplaints,
+      [["open", words.op_open], ["all", words.op_all]]);
+    else operatorList(content, view, operatorSuspensions);
+  };
+  const select = operatorSelect(root, words.op_kind,
+    [["complaints", words.op_complaints], ["suspensions", words.op_suspensions]], show);
+  root.append(content);
+  show(select.value);
+}
+
+function operatorComplaints(root, data) {
+  if (!data.complaints.length) text("p", words.op_empty, root);
+  for (const row of data.complaints) {
+    const card = text("section", "", root);
+    operatorFacts(card, [
+      [words.op_from, row.from_name || row.from_node], [words.op_about, row.about_name || row.about_node],
+      [words.op_created, operatorDate(row.created_at)], [words.op_status, words[`op_${row.status}`] || row.status],
+    ]);
+    operatorDetail(card, "complaint", row.id, (detail, body) => {
+      operatorQuote(body, words.op_complaint, detail.text);
+      operatorQuote(body, words.op_message, detail.message_text);
+      if (detail.status !== "open") return;
+      operatorChange(body, words.op_dismiss, "complaint dismiss", {id: detail.id});
+      const form = text("details", "", body);
+      text("summary", words.op_suspend, form);
+      const complaint = settingInput(form, words.op_complaints, detail.id);
+      complaint.readOnly = true;
+      const reason = settingInput(form, words.op_reason, "", "textarea");
+      reason.maxLength = 500;
+      const days = operatorDays(form, 30, 365);
+      operatorChange(form, words.op_suspend, "suspend", () => ({
+        node: detail.about_node, reason: reason.value, days: Number(days.value), complaints: [complaint.value],
+      }));
+    });
+  }
+}
+
+function operatorSuspensions(root, data) {
+  if (!data.suspensions.length) text("p", words.op_empty, root);
+  for (const row of data.suspensions) {
+    const card = text("section", "", root);
+    operatorFacts(card, [
+      [words.op_node, row.node],
+      [words.op_action, words[`op_${row.action}`]],
+      [words.op_until, operatorDate(row.expires_at)],
+      [words.op_lifted, row.lifted ? words.op_yes : words.op_no],
+    ]);
+    if (row.action === "suspend" && !row.lifted && new Date(row.expires_at) > new Date()) {
+      const reason = settingInput(card, words.op_reason, "", "textarea");
+      reason.maxLength = 500;
+      operatorChange(card, words.op_lift, "lift", () => ({node: row.node, reason: reason.value}));
+    }
+  }
+}
+
+function operatorTable(root, labels, rows) {
+  if (!rows.length) { text("p", words.op_empty, root); return; }
+  const scroll = text("div", "", root);
+  scroll.className = "operator-table";
+  const table = text("table", "", scroll);
+  const head = text("tr", "", text("thead", "", table));
+  labels.forEach(label => { text("th", label, head).scope = "col"; });
+  const body = text("tbody", "", table);
+  for (const values of rows) {
+    const row = text("tr", "", body);
+    for (const value of values) {
+      const cell = text("td", "", row);
+      if (typeof value === "function") value(cell);
+      else cell.textContent = value ?? "—";
+    }
+  }
+}
+
+function operatorNetwork(root) {
+  const content = text("div", "", root);
+  const show = view => {
+    content.replaceChildren();
+    operatorList(content, view, {
+      nodes: operatorNodes, reports: operatorReports, log: operatorLog,
+    }[view]);
+  };
+  const select = operatorSelect(root, words.op_kind,
+    ["nodes", "reports", "log"].map(value => [value, words[`op_${value}`]]), show);
+  root.append(content);
+  show(select.value);
+}
+
+function operatorNodes(root, data) {
+  const rows = data.nodes.map(row => [
+    row.name, cell => { cell.textContent = row.node.slice(0, 12); cell.title = row.node; },
+    cell => {
+      if (!operatorCan("tasks")) { cell.textContent = row.owner ?? "—"; return; }
+      const form = text("details", "", cell);
+      text("summary", row.owner ?? words.op_owner, form);
+      const name = settingInput(form, words.op_name, row.owner);
+      name.maxLength = 64;
+      operatorChange(form, words.save, "owner", () => ({node: row.node, name: name.value.trim()}));
+      operatorChange(form, words.op_clear, "owner", {node: row.node, clear: true});
+    },
+    words[`op_${row.status}`] || row.status,
+    row.capabilities.map(c => c.model ? `${c.provider}/${c.model}` : c.provider).join(", ") || "—",
+    operatorDate(row.last_seen),
+  ]);
+  operatorTable(root, [words.op_name, words.op_fingerprint, words.op_owner,
+    words.op_status, words.op_lends, words.op_last_seen], rows);
+}
+
+function operatorReports(root, data) {
+  operatorTable(root, [words.op_node, words.op_kind, words.op_created, words.op_details],
+    data.reports.map(row => [row.node, row.kind, operatorDate(row.created_at),
+      cell => operatorDetail(cell, "report", row.id,
+        d => JSON.stringify(d.report.report, null, 2))]));
+}
+
+function operatorLog(root, data) {
+  operatorTable(root, [words.op_time, words.op_action, words.op_node, words.op_details],
+    data.entries.map(row => [operatorDate(row.ts), row.action, row.node, JSON.stringify(row.details)]));
+}

@@ -1096,6 +1096,7 @@ class OperatorClusterDetail(OperatorCluster):
     plan: ClusterPlan | None
     job_list: list[OperatorJob]
     result: ClusterResult | None
+    output: str | None = None
 
 
 class OperatorClusters(OperatorBody):
@@ -1103,7 +1104,8 @@ class OperatorClusters(OperatorBody):
 
 
 class OperatorInbox(OperatorJobs, OperatorClusters):
-    pass
+    job_results: dict[str, str] | None = None
+    cluster_results: dict[str, str] | None = None
 
 
 class ModerationRow(OperatorBody):
@@ -1168,6 +1170,7 @@ class OperatorReports(OperatorBody):
 
 class OperatorNode(OperatorBody):
     node: str
+    name: str | None = None
     status: Literal["active", "left", "revoked"]
     capabilities: list[Capability]
     registered_at: str

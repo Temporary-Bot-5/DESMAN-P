@@ -29,6 +29,7 @@ from desman.core.profile import Profile
 from desman.gui.front import WebFront
 from desman.i18n import t
 from desman.llm.openai_compat import key_id
+from desman.net.operator import operator_key_path
 from desman.settings_actions import (
     Behaviour,
     General,
@@ -38,6 +39,7 @@ from desman.settings_actions import (
     Models,
     Network,
     Node,
+    Operator,
     Permission,
     Personalize,
     Protected,
@@ -147,6 +149,7 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             }
             for n, bounds in TUNING_BOUNDS.items()
         ],
+        "operator_key": operator_key_path().exists(),
         "network": {
             **network.as_json(),
             "lead_label": t("Lead clusters"),
@@ -213,6 +216,8 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
             args["provider"] = change.provider
         if change.operation in ("donate", "quota"):
             args.update(calls=change.calls, tokens=change.tokens)
+    elif isinstance(change, Operator):
+        name, args = f"operator {change.operation}", change.args
     elif isinstance(change, Protected):
         name, args = f"protected {change.operation}", {}
         if change.operation == "show":

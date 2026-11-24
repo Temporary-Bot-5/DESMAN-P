@@ -2224,9 +2224,9 @@ class Chat:
                 with ui.recording() as shown:
                     made = entry.handler(context, args)
                     if isinstance(made, commands.Proposal):
-                        # Keep confirmations belonging to downloads/join/reset. Ordinary fields
-                        # are already the person's explicit act, as with !COMMAND.
-                        confirm = entry.name in (
+                        # Operator decisions and the settings commands below need a
+                        # confirmation in addition to the person's form submission.
+                        confirm = entry.name.startswith("operator ") or entry.name in (
                             "models add",
                             "models remove",
                             "global join",
@@ -2248,7 +2248,12 @@ class Chat:
                     )
                 self._journal(entry, args, made.done, before, typed=True)
                 ok = made.done
-                if entry.name in ("keys check", "models show", "protected show"):
+                if entry.name in (
+                    "keys check",
+                    "models show",
+                    "protected show",
+                    "operator key create",
+                ):
                     message = shown.text.strip()
                 if not ok:
                     message = t("Nothing changed.")
