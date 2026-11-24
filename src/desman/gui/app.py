@@ -22,12 +22,21 @@ from desman.i18n import t
 from desman.info import print_project_info
 
 
+class ServerStartError(click.ClickException):
+    """The local page server could not start."""
+
+    def __init__(self, message: str, *, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail if detail is not None else message
+
+
 def run(
     resume: bool,
     temporary: bool,
     port: int,
     open_browser: bool,
     *,
+    session_id: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Keep setup and navigation on the main thread; model turns own their sessions."""
@@ -39,20 +48,30 @@ def run(
         # Windows: 10048 in use; 10013 when the port is held by another socket (or reserved).
         if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) not in {10048, 10013}:
             raise
-        raise click.ClickException(
+        raise ServerStartError(
             t(
                 "Port {port} is busy (is another `desman gui` open?). Use another --port, "
                 "or leave it out to pick a free one.",
                 port=port,
-            )
+            ),
+            detail=t("Port {port} is busy.", port=port) if port else (exc.strerror or str(exc)),
         ) from exc
     thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except RuntimeError as exc:
+        server.server_close()
+        raise ServerStartError(str(exc)) from exc
     try:
         ui.out(app.url)
         if open_browser:
-            webbrowser.open(app.url)
-        with ui.use(front), front.capture():
+            try:
+                opened = webbrowser.open(app.url)
+            except webbrowser.Error:
+                opened = False
+            if not opened:
+                ui.note(t("Open this address in your browser: {url}", url=app.url))
+        with ui.use(front), ui.chat_output(), front.capture():
             try:
                 manager = load_config()
                 if not manager.is_configured():
@@ -78,7 +97,9 @@ def run(
                         cap=runs.tuned(manager.load().tuning, "chat_turns"),
                     )
 
-                    chat = PageChat(sessions, runners, resume=resume, temporary=temporary)
+                    chat = PageChat(
+                        sessions, runners, resume=resume, temporary=temporary, session_id=session_id
+                    )
 
                     def idle() -> None:
                         while pool.messages:

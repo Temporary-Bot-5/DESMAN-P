@@ -20,10 +20,15 @@ BANNER = """████░░█████░█████░█░░░�
 
 
 def _commands() -> list[tuple[str, str]]:
+    chat = ui.in_chat_output()
     return [
-        ("desman -c / -t", t("continue the last chat / a chat that is not kept")),
+        (
+            ("/sessions / /temporary", t("continue an earlier chat / a chat that is not kept"))
+            if chat
+            else ("desman -c / -t", t("continue the last chat / a chat that is not kept"))
+        ),
         (t('desman run "GOAL"'), t("plan and run a task")),
-        ("desman list / status", t("tasks and their progress")),
+        ("/list / /status" if chat else "desman list / status", t("tasks and their progress")),
         ("desman inbox", t("what waits for your decision")),
         ("desman keys", t("API keys per provider")),
         ("desman config", t("providers, keys, permissions")),
@@ -46,7 +51,7 @@ def print_project_info(config_manager: ConfigManager) -> None:
         Text("● ", style="good") + Text(tn(len(ready), "{n} provider ready", "{n} providers ready"))
         if ready
         else Text("● ", style="warn")
-        + Text(t("no provider ready: run `desman config`"), style="warn")
+        + Text(ui.chat_hint(t("no provider ready: run `desman config`")), style="warn")
     )
     if ready:
         status.append("  " + ", ".join(p.name for p in ready), style="muted")
@@ -55,7 +60,7 @@ def print_project_info(config_manager: ConfigManager) -> None:
     commands.add_column(style="key", no_wrap=True)
     commands.add_column(style="muted")
     for cmd, what in _commands():
-        commands.add_row(cmd, what)
+        commands.add_row(ui.chat_hint(cmd), what)
 
     ui.out(
         Panel(

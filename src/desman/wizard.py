@@ -40,6 +40,15 @@ from desman.providers import Provider
 SEARXNG_DOC = "https://github.com/Temporary-Bot-5/DESMAN-P/blob/master/docs/searxng.md"
 
 
+def paid_provider_chat_note(name: str) -> str:
+    return t(
+        "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.",
+        name=name,
+        roles=t("Models and keys for roles"),
+        command="`/config`",
+    )
+
+
 def permission_labels() -> dict[str, str]:
     return {
         "admin_rights": t("act with administrator / root privileges"),
@@ -442,6 +451,8 @@ def _add_key(s: _Session, p: Provider) -> None:
                         name=p.name,
                         id=p.id,
                     )
+                    if not ui.in_chat_output()
+                    else paid_provider_chat_note(p.name),
                 ),
                 title=t("Paid provider"),
                 title_align="left",

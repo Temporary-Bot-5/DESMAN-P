@@ -28,9 +28,7 @@ from helpers import make_config
 
 @pytest.mark.parametrize("topic", manual.TOPICS, ids=lambda topic: topic.name)
 def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
-    """Whatever a topic writes in backticks is a command of the CLI and the catalog, typed as
-    it would work (`desman models show MODEL`, `desman fail SUBTASK --note TEXT`), one of the
-    chat's (`/compact`), or bare `desman`: nothing it names is made up or incomplete."""
+    """Check that every command in backticks has valid syntax for the chat or its launcher."""
     chat_commands = set(chat._commands())
     for quoted in re.findall(r"`([^`]*)`", topic.text):
         if quoted == "desman" or quoted in chat_commands:
@@ -38,8 +36,10 @@ def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
         if re.fullmatch(r"desman( -\w)+", quoted):  # the chat's own options: `desman -t`
             assert typed(cli, quoted.split()[1:]), f"{topic.name}: `{quoted}`"
             continue
-        assert quoted.startswith("desman "), f"{topic.name}: `{quoted}` is not a command"
-        words = quoted.split()[1:]
+        assert quoted.startswith("/"), f"{topic.name}: `{quoted}` is not a chat command"
+        words = quoted[1:].split()
+        if words == ["gui", "shortcut"]:
+            words = ["gui", "--shortcut"]
         name = list(itertools.takewhile(lambda w: not w.startswith("-") and not w.isupper(), words))
         entry = commands.find(" ".join(name))
         assert entry is not None, f"{topic.name}: no command `{quoted}`"

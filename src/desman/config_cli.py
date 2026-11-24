@@ -354,7 +354,11 @@ def print_permissions(current: Permissions) -> None:
         table.add_row(name, mark, labels[name])
     ui.out(table)
     ui.out("")
-    ui.note(t("Change with `desman permissions --grant NAME` or `--revoke NAME`."))
+    ui.note(
+        t("For options, use {command}.", command="`/permissions --help`")
+        if ui.in_chat_output()
+        else t("Change with `desman permissions --grant NAME` or `--revoke NAME`.")
+    )
     if current.admin_rights:
         ui.warn(t("WARNING: admin_rights is on: agents may act with elevated privileges."))
 
@@ -540,6 +544,8 @@ def print_behaviour(behaviour: Behaviour) -> None:
             "Change with `desman behaviour --length short|detailed|auto`, `--tone`, `--style`, "
             "`--custom TEXT`, or `--reset`."
         )
+        if not ui.in_chat_output()
+        else t("For options, use {command}.", command="`/behaviour --help`")
     )
 
 
@@ -1199,6 +1205,8 @@ def print_added(result: Added) -> None:
                 name=p.name,
                 id=p.id,
             )
+            if not ui.in_chat_output()
+            else wizard.paid_provider_chat_note(p.name)
         )
         ui.warn(providers.untested_note())
     missing = [s for s in p.settings if not s.default and not config.settings.get(s.env)]

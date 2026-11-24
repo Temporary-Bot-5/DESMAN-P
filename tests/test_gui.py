@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+import webbrowser
 from collections.abc import Callable
 from http.client import HTTPConnection
 from typing import Any
@@ -333,6 +334,19 @@ def test_gui_cli_flags_and_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     assert CliRunner().invoke(cli, ["gui", "-c", "-t"]).exit_code == 2
 
 
+def test_gui_cli_busy_port_still_offers_port_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    import errno
+
+    def busy(*args: object) -> None:
+        raise OSError(errno.EADDRINUSE, "Address in use")
+
+    monkeypatch.setattr("desman.gui.app.http_server", busy)
+    result = CliRunner().invoke(cli, ["gui", "--port", "1234", "--no-browser"])
+    assert result.exit_code == 1
+    assert "Port 1234 is busy" in result.output
+    assert "Use another --port" in result.output
+
+
 def test_strings_follow_language() -> None:
     i18n.set_language("ru")
     try:
@@ -367,11 +381,14 @@ def test_real_loopback_request() -> None:
         thread.join(5)
 
 
-@pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize(
+    "interrupted,browser_result", [(False, True), (True, True), (False, False), (False, None)]
+)
 def test_app_runs_wizard_then_dispatcher_on_main_thread_and_cleans_up(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     interrupted: bool,
+    browser_result: bool | None,
 ) -> None:
     from desman.gui import app as gui_app
     from desman.gui.runners import Runners
@@ -405,9 +422,15 @@ def test_app_runs_wizard_then_dispatcher_on_main_thread_and_cleans_up(
 
     class FakeChat:
         def __init__(
-            self, sessions: Sessions, runners: Any, *, resume: bool, temporary: bool
+            self,
+            sessions: Sessions,
+            runners: Any,
+            *,
+            resume: bool,
+            temporary: bool,
+            session_id: str | None,
         ) -> None:
-            assert resume and not temporary and runners.cap == 4
+            assert resume and not temporary and session_id is None and runners.cap == 4
             seen.append("chat")
 
         def run(self) -> None:
@@ -438,11 +461,20 @@ def test_app_runs_wizard_then_dispatcher_on_main_thread_and_cleans_up(
             raise KeyboardInterrupt
 
         monkeypatch.setattr(Runners, "close", interrupted_close)
-    monkeypatch.setattr("desman.gui.app.webbrowser.open", browser.append)
+
+    def open_browser(url: str) -> bool:
+        browser.append(url)
+        if browser_result is None:
+            raise webbrowser.Error("No default browser")
+        return browser_result
+
+    monkeypatch.setattr("desman.gui.app.webbrowser.open", open_browser)
     gui_app.run(True, False, 0, True, sleep=pauses.append)
     [app] = apps
     assert seen == ["wizard", "banner", "chat", "pool start", "pool stop", "shutdown", "closed"]
-    assert browser == [app.url] and app.url in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert browser == [app.url] and app.url in output
+    assert (f"Open this address in your browser: {app.url}" in output) is (not browser_result)
     assert pauses == [0.5] and app.front.ended
     assert list(app.front.events)[-1]["type"] == "end"
     captured = json.dumps(list(app.front.events))

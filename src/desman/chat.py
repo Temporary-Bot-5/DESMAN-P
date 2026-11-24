@@ -179,6 +179,7 @@ class Chat:
         read: Callable[[], str | ui.Action | None] | None = None,
         *,
         resume: bool = False,
+        session_id: str | None = None,
         temporary: bool = False,
         background_tasks: bool = False,
         sleep: Callable[[float], None] = time.sleep,
@@ -186,6 +187,7 @@ class Chat:
         if resume and temporary:
             raise ValueError("a temporary chat never continues a session")
         self.exit_requested = False
+        self.open_page = False
         self.dispatch_turn: Callable[[str], bool] | None = None
         self.turn_sink: Callable[[str], None] | None = None
         self._outcome_audit: int | None = None
@@ -221,8 +223,10 @@ class Chat:
         self._models_for: Config | None = None
         self._http: httpx.Client | None = None
         """The web tools' client, shared by the session's tasks and closed with the chat."""
-        latest = sessions.latest() if resume else None
-        self.session_id: str | None = latest.id if latest else None
+        selected = sessions.latest() if resume else None
+        if session_id is not None and not temporary:
+            selected = sessions.get(session_id)
+        self.session_id: str | None = selected.id if selected else None
         """A new session (it starts with the first message) unless asked to continue the last
         one (`desman -c`); /sessions continues any."""
         self._search_hints_told: set[tuple[str, int]] = set()
@@ -239,7 +243,16 @@ class Chat:
         self._told_blocked: str | None = None
         """The block of protected files last told (5.3): told again only when it changes."""
 
+    @property
+    def page_session(self) -> str | None:
+        session_id, temporary = self._previous or (self.session_id, self.temporary)
+        return None if temporary or session_id == self._terminal_id else session_id
+
     def run(self) -> None:
+        with ui.chat_output():
+            self._run()
+
+    def _run(self) -> None:
         self.sessions.sweep()  # what a temporary chat that crashed left behind
         with ui.greeting():
             self._greet(show_messages=False)
@@ -702,6 +715,7 @@ class Chat:
             ui.out(_render(message))
 
     def _event(self, text: str, task_id: str | None = None) -> None:
+        text = ui.chat_hint(text)
         if self.session_id is None or self.in_terminal:
             ui.note(text)
             return
@@ -955,6 +969,7 @@ class Chat:
             resume_task=resume_task,
             session_id=lambda: self.session_id,
             in_terminal=self.in_terminal,
+            on_page=self.background_tasks,
             continue_task=continue_task,
             temporary=self.temporary,
             node_author=node_author or (NodeAuthor.PERSON if typed else NodeAuthor.INTERLOCUTOR),
@@ -984,6 +999,9 @@ class Chat:
         except (ui.Cancelled, click.Abort):
             ui.out("")
             made = commands.Outcome({"declined": True}, done=False)
+        if made.open_page:
+            self.open_page = self.exit_requested = True
+            ui.note(t("Opening the page in your browser. Close this window to stop it."))
         if made.done and made.exit_message is not None:
             self.exit_requested = True
             ui.out(Text(made.exit_message))
@@ -1622,7 +1640,7 @@ class Chat:
         elif paused_until is not None:
             ui.note(
                 t(
-                    "`desman resume --wait {ref}` or `desman worker` waits automatically for longer limits.",
+                    "Use `/resume {ref}` or `/worker` to try again after the limit resets.",
                     ref=ref,
                 )
             )
@@ -1881,7 +1899,9 @@ class Chat:
         if said is not None and said != self._told_blocked:
             ui.warn(said)
             ui.note(
-                t("Type `protected show` to see the change and `protected approve` to approve it.")
+                t(
+                    "Type `/protected show` to see the change and `/protected approve` to approve it."
+                )
             )
         self._told_blocked = said
 
@@ -2907,7 +2927,8 @@ def _render(message: Message) -> Text:
         return Text("› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
         return Text(message.text, style="muted")
-    return Text(actions.plain_math(message.text))
+    with ui.chat_output():
+        return Text(ui.chat_hint(actions.plain_math(message.text)))
 
 
 def _paused_until(report: TaskReport) -> str | None:

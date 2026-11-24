@@ -490,3 +490,110 @@ def test_a_temporary_chat_s_command_is_journaled_without_its_text(
     dumped = "\n".join(conn.iterdump())
     conn.close()
     assert "secret trip" not in dumped and "run it" not in dumped  # nowhere in the database
+
+
+@pytest.mark.parametrize("temporary", [False, True])
+def test_gui_handoff_follows_chat_cleanup(
+    temporary: bool, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    from desman import runs
+    from desman.gui import app
+    from desman.llm.fake import FakeLLM
+
+    configured()
+    fake = FakeLLM().on("Chat turn", '{"type": "reply", "text": "Hello!"}')
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
+    calls: list[str | None] = []
+
+    def start(
+        resume: bool, temp: bool, port: int, browser: bool, *, session_id: str | None = None
+    ) -> None:
+        assert (resume, temp, port, browser) == (False, False, 0, True)
+        with db.open_db() as conn:
+            sessions = Sessions(conn, clock=clock)
+            if temporary:
+                assert session_id is None
+                assert (
+                    conn.execute(
+                        "SELECT COUNT(*) FROM messages JOIN sessions ON session_id = sessions.id WHERE temporary = 1"
+                    ).fetchone()[0]
+                    == 0
+                )
+            else:
+                assert session_id is not None
+                assert sessions.messages(session_id)[0].text == "hello"
+        calls.append(session_id)
+
+    monkeypatch.setattr(app, "run", start)
+    result = chat("hello", "/terminal", "/gui", "unread", args=("-t",) if temporary else ())
+    assert len(calls) == 1
+    assert "Opening the page in your browser." in result.output
+    assert "unread" not in result.output
+    assert len(fake.calls) == 1
+
+
+@pytest.mark.parametrize("permission_denied", [False, True], ids=["port-busy", "permission-denied"])
+def test_gui_start_failure_returns_to_the_same_chat(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock, permission_denied: bool
+) -> None:
+    from desman.gui import app
+
+    configured()
+    with db.open_db() as conn:
+        sessions = Sessions(conn, clock=clock)
+        session_id = sessions.add(None, Role.USER, "kept chat").session_id
+
+    def start(*args: object, **kwargs: object) -> None:
+        assert kwargs["session_id"] == session_id
+        if permission_denied:
+            raise PermissionError("Permission denied")
+        raise app.ServerStartError("Port is busy.")
+
+    monkeypatch.setattr(app, "run", start)
+    result = again("/gui", "/rename Continued", "/exit")
+    message = "Permission denied" if permission_denied else "Port is busy"
+    assert f"The page could not start: {message}." in result.output
+    assert "--port" not in result.output
+    assert stored().get(session_id).title == "Continued"  # type: ignore[union-attr]
+
+
+def test_reply_hints_change_only_on_display(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from desman import runs
+    from desman.llm.fake import FakeLLM
+
+    configured()
+    reply = "See `desman list`.\n```sh\ndesman list\n```"
+    answer = json.dumps({"type": "reply", "text": reply})
+    fake = FakeLLM().on("Chat turn", answer, answer)
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
+
+    result = chat("What can I run?", "/exit")
+    assert "See `/list`." in result.output
+    assert "\ndesman list\n" in result.output
+    with db.open_db() as conn:
+        sessions = Sessions(conn)
+        session = sessions.latest()
+        assert session is not None
+        assert sessions.history(session.id).messages[-1].text == reply
+
+    replay = again("/exit")
+    assert "See `/list`." in replay.output
+    assert "\ndesman list\n" in replay.output
+
+
+def test_adding_paid_key_in_chat_points_to_role_selection() -> None:
+    configured()
+    result = chat("/keys add openai", "sk-example-paid", "/exit")
+    assert "choose its model and key under Models and keys for roles in `/config`" in " ".join(
+        result.output.split()
+    )
+    assert "--provider" not in result.output
+
+
+def test_chat_can_find_out_how_to_receive_a_release() -> None:
+    configured()
+    result = chat("/global update", "/exit")
+    assert "browser page checks for releases" in " ".join(result.output.split())
+    assert "desman worker" not in result.output

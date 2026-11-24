@@ -168,7 +168,11 @@ def print_state(conn: sqlite3.Connection, changes: list[Change], *, with_diff: b
             ui.out(Text(text or t("{path}: no difference in the text.", path=change.path)))
     else:
         ui.note(t("See what changed: desman protected show --diff"))
-    ui.note(t("Approve: desman protected approve [--note TEXT]"))
+    ui.note(
+        t("Approve: desman protected approve")
+        if ui.in_chat_output()
+        else t("Approve: desman protected approve [--note TEXT]")
+    )
 
 
 def print_approved(done: list[Change]) -> None:

@@ -419,7 +419,7 @@ def test_the_chat_says_tasks_are_blocked_and_runs_none(fake: FakeLLM, here: Pack
     assert result.output.count("Protected files changed without your approval") == 1
     assert "1 new in General Terminal (/terminal)" in result.output
     assert (
-        "Type `protected show` to see the change and `protected approve` to approve it."
+        "Type `/protected show` to see the change and `/protected approve` to approve it."
         not in result.output
     )
     conn = db.open_db()
@@ -429,7 +429,7 @@ def test_the_chat_says_tasks_are_blocked_and_runs_none(fake: FakeLLM, here: Pack
         assert len(events) == 1
         assert "Protected files changed without your approval" in events[0].text
         assert (
-            "Type `protected show` to see the change and `protected approve` to approve it."
+            "Type `/protected show` to see the change and `/protected approve` to approve it."
             in events[0].text
         )
     finally:

@@ -829,3 +829,62 @@ def test_confirmed_global_search_journals_one_change(
     decision, change = operator.entries(sessions.conn)
     assert decision.action == "operator_command"
     assert change.action == "operator_network" and change.details == {"changed": ["borrow_search"]}
+
+
+@pytest.mark.parametrize("answer", ["yes", "no"])
+def test_gui_shortcut_proposal_needs_confirmation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answer: str
+) -> None:
+    from desman import runs
+    from desman.gui import shortcuts
+    from desman.llm.fake import FakeLLM
+
+    open_config().save(Config(language="en", configured=True))
+    fake = FakeLLM().on("Chat turn", '{"type":"command","name":"gui","args":{"shortcut":true}}')
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
+    path = tmp_path / "DESMAN.lnk"
+    created: list[Path] = []
+
+    def create() -> list[Path]:
+        created.append(path)
+        return [path]
+
+    monkeypatch.setattr(shortcuts, "create", create)
+    result = CliRunner().invoke(cli, input=f"make a shortcut\n{answer}\n/exit\n")
+    assert result.exit_code == 0, result.output
+    assert "Create DESMAN shortcuts." in result.output
+    assert "Apply this change?" in result.output
+    assert created == ([path] if answer == "yes" else [])
+    assert ("Shortcut created:" in result.output) == (answer == "yes")
+
+
+def test_typed_gui_shortcut_runs_immediately(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sessions: Sessions
+) -> None:
+    from desman.gui import shortcuts
+
+    path = tmp_path / "DESMAN.lnk"
+    monkeypatch.setattr(shortcuts, "create", lambda: [path])
+    result = CliRunner().invoke(cli, input="/gui shortcut\n/exit\n")
+    assert result.exit_code == 0, result.output
+    assert f"Shortcut created: {path}" in result.output
+    assert "Apply this change?" not in result.output
+
+
+@pytest.mark.parametrize("answer", ["yes", "no"])
+def test_model_gui_handoff_needs_confirmation(monkeypatch: pytest.MonkeyPatch, answer: str) -> None:
+    from unittest.mock import Mock
+
+    from desman import runs
+    from desman.gui import app
+    from desman.llm.fake import FakeLLM
+
+    open_config().save(Config(language="en", configured=True))
+    fake = FakeLLM().on("Chat turn", '{"type":"command","name":"gui","args":{}}')
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
+    start = Mock()
+    monkeypatch.setattr(app, "run", start)
+    result = CliRunner().invoke(cli, input=f"open the page\n{answer}\n/exit\n")
+    assert result.exit_code == 0, result.output
+    assert "Apply this change?" in result.output
+    assert start.call_count == (1 if answer == "yes" else 0)

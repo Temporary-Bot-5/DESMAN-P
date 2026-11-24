@@ -296,11 +296,45 @@ def test_bare_desman_uses_configured_interface(monkeypatch: pytest.MonkeyPatch, 
     result = CliRunner().invoke(cli, ["-c"])
     assert result.exit_code == 0, result.output
     if mode == "gui":
-        gui_run.assert_called_once_with(True, False, 0, True)
+        gui_run.assert_called_once_with(True, False, 0, True, session_id=None)
         chat_run.assert_not_called()
     else:
         chat_run.assert_called_once_with()
         gui_run.assert_not_called()
+
+
+@pytest.mark.parametrize("startup_failure", [True, False])
+def test_bare_desman_falls_back_only_when_page_server_cannot_start(
+    monkeypatch: pytest.MonkeyPatch, startup_failure: bool
+) -> None:
+    import errno
+    from unittest.mock import Mock
+
+    import click
+
+    from desman.chat import Chat
+    from desman.gui import app
+
+    open_config().save(make_config(configured=True, interface="gui"))
+    chat_run = Mock()
+    monkeypatch.setattr(Chat, "run", chat_run)
+    if startup_failure:
+        monkeypatch.setattr(
+            app, "http_server", Mock(side_effect=OSError(errno.EADDRINUSE, "Address in use"))
+        )
+    else:
+        monkeypatch.setattr(app, "run", Mock(side_effect=click.ClickException("Page failed")))
+
+    result = CliRunner().invoke(cli, [])
+    if startup_failure:
+        assert result.exit_code == 0, result.output
+        assert "The page could not start: Address in use." in result.output
+        assert "--port" not in result.output
+        chat_run.assert_called_once_with()
+    else:
+        assert result.exit_code == 1
+        assert "Page failed" in result.output
+        chat_run.assert_not_called()
 
 
 @pytest.mark.parametrize("launcher,tty", [(True, True), (True, False), (False, True)])

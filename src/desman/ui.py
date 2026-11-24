@@ -17,6 +17,7 @@ from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cache
 from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
 import click
@@ -878,7 +879,106 @@ class ContextText(Text):
     """An exact request, displayed as a scrollable monospace block by the page."""
 
 
+_chat_output: ContextVar[bool] = ContextVar("chat_output", default=False)
+
+
+@cache
+def _command_hint_pattern() -> re.Pattern[str]:
+    from desman.commands import CATALOG
+
+    names = {name for entry in CATALOG for name in (entry.name, *entry.aliases)}
+    names.add("gui shortcut")
+    paths = "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
+    # Outside backticks, ordinary prose ends a hint. Keep command syntax in the span,
+    # including optional-argument notation, so the parser can reject it when appropriate.
+    word = (
+        r"""(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'"""
+        r"|--?[\w-]+(?:=[^\s`]+)?|[\w.-]+=[^\s`]+"
+        r"|\[(?:--|[A-Z])[^\n\]]*\]"
+        r"|[A-Z][A-Z0-9_]*(?:/[A-Z][A-Z0-9_]*)?"
+        r"|[a-f0-9]{8,}(?:/\d+)?|\d+(?:/\d+)?)"
+    )
+    return re.compile(
+        r"(?<!`)(?P<ticks>`+)(?!`)(?P<quoted>.*?)"
+        r"(?<!`)(?P=ticks)(?!`)|(?<![\w/.-])(?P<bare>desman +(?:"
+        + paths
+        + r")(?![\w/|-])(?:[ \t]+"
+        + word
+        + r")*)(?![\w/|-])"
+    )
+
+
+def in_chat_output() -> bool:
+    return _chat_output.get()
+
+
+@contextmanager
+def chat_output() -> Iterator[None]:
+    """Use chat command syntax on this front and in its recordings."""
+    token = _chat_output.set(True)
+    try:
+        yield
+    finally:
+        _chat_output.reset(token)
+
+
+def _command_hints(text: str) -> Iterator[tuple[int, int]]:
+    if not _chat_output.get() or "desman " not in text:
+        return
+    from desman.commands import BadArgs, parse_line
+
+    fence: str | None = None
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        marker = re.match(r"(?: {0,3}>[ \t]?)* {0,3}(`{3,}|~{3,})(.*)", line)
+        if marker:
+            run, tail = marker.groups()
+            if fence is None:
+                fence = run
+            elif run.startswith(fence) and not tail.strip():
+                fence = None
+        elif fence is None:
+            for match in _command_hint_pattern().finditer(line):
+                group = match.lastgroup
+                assert group is not None
+                hint = match[group]
+                prefix = re.match(r"desman +", hint)
+                if prefix is None:
+                    continue
+                command = hint[prefix.end() :].strip()
+                if command.split()[:1] == ["worker"]:
+                    continue
+                try:
+                    parsed = parse_line(command, None, dry_run=True)
+                except (BadArgs, click.ClickException, click.exceptions.Exit):
+                    continue
+                if parsed is not None:
+                    start = offset + match.start(group)
+                    yield start, start + prefix.end()
+        offset += len(line)
+
+
+def chat_hint(text: str) -> str:
+    for start, end in reversed(list(_command_hints(text))):
+        text = text[:start] + "/" + text[end:]
+    return text
+
+
+def _chat_renderable(item: RenderableType | str) -> RenderableType | str:
+    if isinstance(item, str):
+        return chat_hint(item)
+    if type(item) is Text:
+        for start, end in reversed(list(_command_hints(item.plain))):
+            item = (
+                item[:start]
+                + Text("/", style=item.get_style_at_offset(console(), start))
+                + item[end:]
+            )
+    return item
+
+
 def out(*items: RenderableType | str) -> None:
+    items = tuple(_chat_renderable(item) for item in items)
     _record(*items)
     with _ui_writes():
         _front.out(*items)
@@ -910,18 +1010,21 @@ def notice_text(level: str, text: str) -> Text:
 
 
 def note(text: str) -> None:
+    text = chat_hint(text)
     _record(notice_text("note", text))
     with _ui_writes():
         _front.note(text)
 
 
 def ok(text: str) -> None:
+    text = chat_hint(text)
     _record(notice_text("ok", text))
     with _ui_writes():
         _front.ok(text)
 
 
 def warn(text: str, *, stderr: bool = False) -> None:
+    text = chat_hint(text)
     for rec in _recordings.get():
         rec.warnings.append(rec.redact(text))
     _record(notice_text("warn", text))
@@ -930,25 +1033,26 @@ def warn(text: str, *, stderr: bool = False) -> None:
 
 
 def error(text: str) -> None:
+    text = chat_hint(text)
     _record(notice_text("error", text))
     with _ui_writes():
         _front.error(text)
 
 
 def select(question: str, items: Sequence[Choice | Heading], default: Any = None) -> Any:
-    return _front.select(question, items, default)
+    return _front.select(chat_hint(question), items, default)
 
 
 def checkbox(question: str, choices: Sequence[Choice], checked: set[Any]) -> set[Any]:
-    return _front.checkbox(question, choices, checked)
+    return _front.checkbox(chat_hint(question), choices, checked)
 
 
 def confirm(question: str, default: bool = False) -> bool:
-    return _front.confirm(question, default)
+    return _front.confirm(chat_hint(question), default)
 
 
 def text(question: str, default: str = "") -> str:
-    return _front.text(question, default)
+    return _front.text(chat_hint(question), default)
 
 
 def line(commands: Mapping[str, str] | None = None) -> str | Action | None:
@@ -956,7 +1060,7 @@ def line(commands: Mapping[str, str] | None = None) -> str | Action | None:
 
 
 def secret(question: str) -> str:
-    return _front.secret(question)
+    return _front.secret(chat_hint(question))
 
 
 def banner(value: str) -> str:

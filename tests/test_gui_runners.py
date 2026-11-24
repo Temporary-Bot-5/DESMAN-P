@@ -655,6 +655,18 @@ def test_clear_persists_screen_boundary_without_changing_context(page: Harness) 
     assert "hello" not in "".join(reload.poll(0, timeout=0)["transcript"])
 
 
+def test_page_renders_command_hints_without_rewriting_stored_reply(page: Harness) -> None:
+    session = page.sessions.add(None, Role.USER, "show commands").session_id
+    reply = "Try `desman list`.\n```sh\ndesman list\n```"
+    page.sessions.add(session, Role.INTERLOCUTOR, reply)
+    page.front.session(session, False)
+
+    screen = "".join(page.front.poll(0, timeout=0)["transcript"])
+    assert "Try `/list`." in screen
+    assert "desman list" in screen
+    assert page.answers(session) == [reply]
+
+
 def test_handed_off_command_saved_once_before_terminal_output(page: Harness) -> None:
     page.send("/run example")
     terminal = page.chat.session_id

@@ -131,7 +131,7 @@ def test_without_a_ready_provider_the_program_says_what_is_missing() -> None:
     ConfigManager(default_config_path()).save(make_config(language="en", configured=True))
     result = chat("hi")
     assert "no model is ready to answer" in result.output
-    assert "desman keys add" in result.output
+    assert "/keys add" in result.output
     assert [m.text for m in conversation()] == ["hi"]
 
 
@@ -226,7 +226,7 @@ def test_ctrl_c_stops_the_task_and_the_chat_goes_on(fake: FakeLLM) -> None:
     fake.on(CHAT, TASK_TURN, '{"type": "reply", "text": "Still here."}')
     fake.on("Plan task", PLAN).on("Execute subtask", interrupted)
     result = chat("find cheap flights to Lisbon", "hello?")
-    assert "stopped" in result.output and "desman resume" in result.output
+    assert "stopped" in result.output and "/resume" in result.output
     assert "Still here." in result.output
 
 
@@ -392,7 +392,7 @@ def test_a_suggested_model_is_shown_and_retold(
     result = chat("find cheap flights to Lisbon")
     assert asked == [repo]
     assert "Suggested models" in result.output
-    assert f"desman models add {repo}:Q4_K_M --server ollama" in result.output
+    assert f"/models add {repo}:Q4_K_M --server ollama" in result.output
     [retold] = calls(fake, RETELL)
     assert payload(retold)["suggested_models"] == [
         {
@@ -717,6 +717,6 @@ def test_confirmed_answer_resumes_waiting_task(fake: FakeLLM) -> None:
     fake.on(RETELL, '{"text":"Which dates?"}', '{"text":"Complete answer"}')
     result = chat("find flights", "Tomorrow", "y")
     assert "Complete answer" in result.output
-    assert "Continue with: desman resume" not in result.output
+    assert "Continue with: /resume" not in result.output
     assert len(calls(fake, "Execute subtask")) == 2
     assert payload(calls(fake, RETELL)[-1])["status"] == "done"

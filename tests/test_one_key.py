@@ -322,7 +322,7 @@ def test_terminal_chat_task_waits_or_reports_long_pause(
         assert store.list_subtasks(row[0])[0].status is SubtaskStatus.PAUSED
         assert clock.slept == 0
         assert "paused by a provider limit until" in output
-        assert "`desman resume --wait" in output
+        assert "`/resume " in output and "`/worker`" in output
 
 
 def test_all_slow_models_limited_wait_once(
