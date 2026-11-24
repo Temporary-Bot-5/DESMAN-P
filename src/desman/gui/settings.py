@@ -77,7 +77,15 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
                     }
                     for s in p.settings
                 ],
-                "lendable": providers.can_donate(p),
+                "lendable": providers.can_donate(p, lend_cloud=config.network.lend_cloud),
+                "lending_label": (
+                    t("{name} (not lent: cloud lending off)", name=p.name)
+                    if not config.network.lend_cloud
+                    and not providers.can_donate(p)
+                    and providers.can_donate(p, lend_cloud=True)
+                    and p.id in config.network.donated
+                    else p.name
+                ),
             }
         )
     with front.condition:
@@ -153,6 +161,8 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
         "network": {
             **network.as_json(),
             "lead_label": t("Lead clusters"),
+            "cloud_label": t("Lend my free cloud keys to desman-global"),
+            "cloud_warning": global_cli.cloud_warning(),
             "cluster_text": global_cli.cluster_text(network.cluster),
             "default_quota": global_cli.DEFAULT_DONATION.model_dump(),
         },
@@ -208,7 +218,7 @@ def command(change: Setting, config: Config) -> tuple[commands.Entry, commands.A
             args["server"] = change.server
     elif isinstance(change, Network):
         name, args = f"global {change.operation}", {}
-        if change.operation == "lead":
+        if change.operation in ("lead", "cloud"):
             args["state"] = change.state
         if change.operation == "join":
             args["registry"] = change.registry

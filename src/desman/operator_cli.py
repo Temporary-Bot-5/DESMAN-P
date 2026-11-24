@@ -261,6 +261,10 @@ def call(
     except ValidationError as e:
         raise click.ClickException(t("Invalid operator request.")) from e
     except operator.OperatorError as e:
+        if e.status == 429:
+            raise click.ClickException(
+                t("The registry rate limited the request. Try again later.")
+            ) from e
         match e.reason:
             case "not_operator" | "revoked":
                 # The command result sent back to the interlocutor contains only the message.
@@ -286,12 +290,30 @@ def call(
                 message = t("Invalid operator request.")
             case "expired":
                 message = t("The operator assignment or record has expired.")
+            case "term":
+                message = t("The registry refused the record because its term is invalid.")
+            case "not_allowed":
+                message = t(
+                    "The registry refused the record because the signer is not allowed to issue it."
+                )
+            case "wrong_signer":
+                message = t(
+                    "The registry refused the record because it was signed by a different key."
+                )
+            case "unknown_signer":
+                message = t(
+                    "The registry refused the record because it does not recognize the signer."
+                )
+            case _ if e.status is not None:
+                message = t("The registry refused the request ({code}).", code=e.status)
             case "bad_reply" | "large_reply":
                 message = t("The registry sent an invalid reply.")
             case reason if "Timeout" in reason:
                 message = t("The registry request timed out.")
-            case _:
+            case "ConnectError" | "ReadError" | "WriteError" | "CloseError" | "ProxyError":
                 message = t("The registry could not be reached.")
+            case _:
+                message = t("The registry sent an invalid reply.")
         raise click.ClickException(message) from e
 
 
@@ -484,6 +506,12 @@ def _resolve(ref: str, ids: Iterable[str]) -> str:
     return matches[0]
 
 
+def _in_force(row: p.ModerationRow, now: datetime) -> bool:
+    if row.in_force is not None:
+        return row.in_force
+    return not row.lifted and datetime.fromisoformat(row.expires_at) > now
+
+
 def moderate(
     client: operator.OperatorClient,
     action: Literal["suspend", "lift"],
@@ -497,6 +525,7 @@ def moderate(
     node = _resolve(node, (row.node for row in nodes.nodes))
     now = client.clock()
     lifts = None
+    suspension_end = None
     lifetime = timedelta(days=days)
     refs = tuple(complaints)
     ids = []
@@ -505,21 +534,24 @@ def moderate(
         ids = [_resolve(ref, (row.id for row in rows.complaints)) for ref in refs]
     if action == "lift":
         suspensions = call(client, lambda c: c.suspensions(), MODERATION)
-        active = next(
-            (
-                row
-                for row in suspensions.suspensions
-                if row.node == node
-                and row.action == "suspend"
-                and not row.lifted
-                and datetime.fromisoformat(row.expires_at) > now
-            ),
-            None,
-        )
-        if active is None:
-            raise click.ClickException(t("No suspension is in effect for {id}.", id=node))
-        lifts = active.id
-        lifetime = datetime.fromisoformat(active.expires_at) - now.replace(microsecond=0)
+        active = [
+            row
+            for row in suspensions.suspensions
+            if row.node == node and row.action == "suspend" and _in_force(row, now)
+        ]
+        if not active:
+            raise click.ClickException(t("Node {node} has no suspension in force.", node=node))
+        if len(active) > 1:
+            raise click.ClickException(
+                t(
+                    "Node {node} has multiple suspensions in force. A lift can target only one.",
+                    node=node,
+                )
+            )
+        [suspension] = active
+        lifts = suspension.id
+        suspension_end = datetime.fromisoformat(suspension.expires_at)
+        lifetime = suspension_end - now.replace(microsecond=0)
     body = p.Moderation(node=node, action=action, reason=reason, complaints=ids, lifts=lifts)
     record = operator_records.moderation(client.key, body, now=now, lifetime=lifetime, until=until)
     lines = [
@@ -530,6 +562,15 @@ def moderate(
     ]
     if lifts is not None:
         lines.append(_field(t("ID"), lifts))
+    if suspension_end is not None and record.record.expires_at < suspension_end:
+        lines.append(
+            t(
+                "This lift stops counting on {lift_end}, before the suspension ends on "
+                "{suspension_end}; the suspension would come back.",
+                lift_end=record.record.expires_at.astimezone().isoformat(timespec="seconds"),
+                suspension_end=suspension_end.astimezone().isoformat(timespec="seconds"),
+            )
+        )
     lines.extend(_field(t("Complaint"), id) for id in ids)
     return _change(
         client,
@@ -645,6 +686,18 @@ def _print_clusters(rows: list[p.OperatorCluster]) -> None:
     )
 
 
+def _result_text(output: str) -> str:
+    try:
+        value = json.loads(output)
+        if isinstance(value, dict) and value.keys() == {"text"}:
+            content = value["text"]
+            if isinstance(content, str):
+                return content
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except (ValueError, RecursionError):
+        return output
+
+
 def _print_job(reply: p.OperatorJobDetail) -> None:
     _lines(
         _field(t("Job"), reply.job),
@@ -656,9 +709,10 @@ def _print_job(reply: p.OperatorJobDetail) -> None:
     if not reply.handed_in:
         ui.note(t("Nothing handed in yet."))
     for item in reply.handed_in:
+        output = item.body.get("output")
         _lines(
             f"{ui.when(item.received_at)}  {item.kind}  {item.outcome}  {item.node}",
-            str(item.body.get("output") or item.body.get("reason") or ""),
+            _result_text(output) if isinstance(output, str) else str(item.body.get("reason") or ""),
         )
         for file in item.body.get("files") or []:
             _lines(f"{file['path']} ({t('characters')}: {len(str(file.get('text', '')))})")
@@ -689,7 +743,7 @@ def _print_cluster(reply: p.OperatorClusterDetail) -> None:
     if reply.job_list:
         _print_jobs(reply.job_list)
     if reply.result is not None:
-        _lines(_field(t("Result"), reply.result.summary))
+        _lines(_field(t("Result"), _result_text(reply.result.summary)))
 
 
 def _print_complaints(rows: Iterable[p.ComplaintRow]) -> None:
@@ -709,22 +763,51 @@ def _print_complaints(rows: Iterable[p.ComplaintRow]) -> None:
     )
 
 
-def print_reply(reply: BaseModel, *, as_json: bool = False) -> None:
+def _print_inbox(client: operator.OperatorClient, reply: p.OperatorInbox) -> dict[str, str]:
+    results: dict[str, str] = {}
+    if not reply.jobs and not reply.clusters:
+        ui.note(t("Nothing waits for the operator."))
+    if reply.jobs:
+        _print_jobs(reply.jobs)
+    if reply.clusters:
+        _print_clusters(reply.clusters)
+    for job in reply.jobs:
+        if job.result is None:
+            continue
+        job_detail = call(client, lambda c: c.job(job.job))  # noqa: B023 (called immediately)
+        for item in job_detail.handed_in:
+            output = item.body.get("output")
+            if item.id == job.result and isinstance(output, str):
+                result = _result_text(output)
+                _lines(_field(t("Job"), job.job), _field(t("Result"), result))
+                if result.strip():
+                    results[job.job] = result
+    for cluster in reply.clusters:
+        if cluster.reason != "result":
+            continue
+        cluster_detail = call(client, lambda c: c.cluster(cluster.task))  # noqa: B023
+        if cluster_detail.result is not None:
+            result = _result_text(cluster_detail.result.summary)
+            _lines(_field(t("Cluster task"), cluster.task), _field(t("Result"), result))
+            if result.strip():
+                results[cluster.task] = result
+    return results
+
+
+def print_reply(
+    client: operator.OperatorClient, reply: BaseModel, *, as_json: bool = False
+) -> dict[str, str] | None:
+    """Print the reply, returning any result text fetched to display the inbox."""
     if as_json:
         encoded = json.dumps(reply.model_dump(mode="json"), ensure_ascii=False)
         if ui.is_terminal_front():
             click.echo(encoded)
         else:
             ui.out(Text(encoded))
-        return
+        return None
     match reply:
         case p.OperatorInbox():
-            if not reply.jobs and not reply.clusters:
-                ui.note(t("Nothing waits for the operator."))
-            if reply.jobs:
-                _print_jobs(reply.jobs)
-            if reply.clusters:
-                _print_clusters(reply.clusters)
+            return _print_inbox(client, reply)
         case p.OperatorJobs():
             _print_jobs(reply.jobs)
         case p.OperatorClusters():
@@ -805,6 +888,8 @@ def print_reply(reply: BaseModel, *, as_json: bool = False) -> None:
                 ),
             )
 
+    return None
+
 
 def print_change(reply: BaseModel) -> dict[str, str]:
     match reply:
@@ -819,7 +904,7 @@ def print_change(reply: BaseModel) -> dict[str, str]:
         case p.ModerationRow():
             ui.ok(t("Moderation recorded as {id}.", id=reply.id))
             return {"id": reply.id}
-        case p.OperatorRef():
+        case p.OperatorDismissed():
             ui.ok(t("Complaint dismissed."))
             return {"id": reply.id}
         case p.OperatorNode():
@@ -836,7 +921,8 @@ def _read_cli(
     as_json: bool,
     scope: sign.Scope | None = None,
 ) -> None:
-    print_reply(call(connect(load_config()), action, scope), as_json=as_json)
+    client = connect(load_config())
+    print_reply(client, call(client, action, scope), as_json=as_json)
 
 
 def _change_cli(build: Callable[[operator.OperatorClient], Change]) -> None:

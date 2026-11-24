@@ -985,7 +985,11 @@ class Chat:
                     or isinstance(args, commands.TaskHideArgs)
                     and args.finished
                 ) and not self._confirmed(made):
-                    made = commands.Outcome({"declined": True}, done=False)
+                    made = (
+                        made.on_decline()
+                        if made.on_decline is not None
+                        else commands.Outcome({"declined": True}, done=False)
+                    )
                 else:
                     made = made.apply()
         except click.ClickException as e:

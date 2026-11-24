@@ -40,6 +40,8 @@ def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
         words = quoted[1:].split()
         if words == ["gui", "shortcut"]:
             words = ["gui", "--shortcut"]
+        if words in (["global", "cloud", "on"], ["global", "cloud", "off"]):
+            words[-1] = "STATE"
         name = list(itertools.takewhile(lambda w: not w.startswith("-") and not w.isupper(), words))
         entry = commands.find(" ".join(name))
         assert entry is not None, f"{topic.name}: no command `{quoted}`"

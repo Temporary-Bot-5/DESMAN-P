@@ -37,7 +37,7 @@ NODE is a node fingerprint or its unique prefix.
 | `desman operator complaint show ID [--json]` | Show a complaint, its quoted message and decisions. |
 | `desman operator complaint dismiss ID` | Dismiss a complaint. |
 | `desman operator suspend NODE --reason TEXT [--days N] [--complaint ID]...` | Sign a suspension, optionally citing complaints. |
-| `desman operator lift NODE --reason TEXT` | Sign a lift of the active suspension. |
+| `desman operator lift NODE --reason TEXT` | Sign a lift when exactly one suspension is in force. The chat confirmation warns if the lift ends sooner than the suspension. |
 | `desman operator suspensions [--json]` | List moderation records. |
 | `desman operator reports [--kind KIND] [--json]` | List shared reports. Kind can be `bug` or `memory`. |
 | `desman operator report show ID [--json]` | Read a shared report. |
@@ -45,10 +45,11 @@ NODE is a node fingerprint or its unique prefix.
 | `desman operator owner NODE [NAME] [--clear]` | Set a node's owner name or clear it. |
 | `desman operator log [--limit N] [--json]` | Read recent registry journal entries. |
 
-The same commands work in chat with `/operator`. When the interlocutor proposes a
-change, DESMAN shows the proposed record or decision and asks you to confirm it.
-DESMAN displays registry text directly and asks before sharing other people's words
-with the interlocutor as untrusted data.
+Chat commands under `/operator` display tables or text. The CLI accepts `--json`.
+When the interlocutor proposes a change, DESMAN shows the proposed record or decision
+and asks you to confirm it. DESMAN displays registry text directly and asks before
+sharing other people's words with the interlocutor as untrusted data. Empty and
+metadata-only replies need no consent.
 
 ## Server administration
 
