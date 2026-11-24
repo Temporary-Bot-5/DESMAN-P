@@ -1577,6 +1577,10 @@ MESSAGES: dict[str, Forms] = {
     "Added": "Eklendi",
     "Decide each with: desman-registry job settle JOB accept|again|drop": "Her birine karar verin: desman-registry job settle İŞ accept|again|drop",
     "Job {id} is now: {status}": "{id} işi artık: {status}",
+    "No complaints.": "Şikâyet yok.",
+    "No nodes.": "Düğüm yok.",
+    "No reports.": "Rapor yok.",
+    "No suspensions.": "Askıya alma kaydı yok.",
     "No jobs.": "İş yok.",
     "Nothing waits for the operator.": "Operatörü bekleyen bir şey yok.",
     "Nothing handed in yet.": "Henüz bir şey teslim edilmedi.",
@@ -2075,8 +2079,6 @@ MESSAGES.update(
         "start timers": "zamanlayıcıları başlatma",
     }
 )
-
-MESSAGES.update({"yes": "evet", "no": "hayır"})
 
 MESSAGES.update(
     {

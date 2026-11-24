@@ -1753,7 +1753,9 @@ function operatorList(root, view, draw, options = []) {
       body.replaceChildren();
       if (result.error) text("p", result.error, body).className = "bad";
       else if (!result.has_key) showOperatorButton(false);
-      else draw(body, result);
+      else if (Array.isArray(result[view]) && !result[view].length) {
+        text("p", words[`op_empty_${view}`], body);
+      } else draw(body, result);
       updateActions();
     } catch {
       if (id === serial && body.isConnected) {
@@ -1776,7 +1778,7 @@ function operatorQuote(parent, label, content) {
 }
 
 function operatorInbox(root, data) {
-  if (!data.jobs.length && !data.clusters.length) text("p", words.op_empty, root);
+  if (!data.jobs.length && !data.clusters.length) text("p", words.op_empty_inbox, root);
   for (const [kind, items] of [["job", data.jobs], ["cluster", data.clusters]]) {
     for (const row of items) {
       const card = text("section", "", root);
@@ -1911,7 +1913,6 @@ function operatorModeration(root) {
 }
 
 function operatorComplaints(root, data) {
-  if (!data.complaints.length) text("p", words.op_empty, root);
   for (const row of data.complaints) {
     const card = text("section", "", root);
     operatorFacts(card, [
@@ -1938,7 +1939,6 @@ function operatorComplaints(root, data) {
 }
 
 function operatorSuspensions(root, data) {
-  if (!data.suspensions.length) text("p", words.op_empty, root);
   for (const row of data.suspensions) {
     const card = text("section", "", root);
     operatorFacts(card, [
@@ -1968,7 +1968,17 @@ function operatorTable(root, labels, rows) {
     for (const value of values) {
       const cell = text("td", "", row);
       if (typeof value === "function") value(cell);
-      else cell.textContent = value ?? "—";
+      else if (typeof value === "string" && /^[0-9a-f]{32,64}$/.test(value)) {
+        // Ids and fingerprints: the first 12 characters, the whole one on hover and copy.
+        cell.textContent = value.slice(0, 12);
+        cell.title = value;
+        cell.className = "operator-id";
+      } else if (typeof value === "string" && value.length > 160) {
+        // Long descriptions: four lines, the rest on click.
+        const box = text("div", value, cell);
+        box.className = "operator-long";
+        box.addEventListener("click", () => box.classList.toggle("open"));
+      } else cell.textContent = value ?? "—";
     }
   }
 }
@@ -1989,7 +1999,7 @@ function operatorNetwork(root) {
 
 function operatorNodes(root, data) {
   const rows = data.nodes.map(row => [
-    row.name, cell => { cell.textContent = row.node.slice(0, 12); cell.title = row.node; },
+    row.name, row.node,
     cell => {
       if (!operatorCan("tasks")) { cell.textContent = row.owner ?? "—"; return; }
       const form = text("details", "", cell);

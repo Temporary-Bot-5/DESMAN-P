@@ -185,4 +185,15 @@ context.fetch = async path => {
       args: {node: "node", reason: "Abuse", days: 30, complaints: ["complaint"]},
     },
   ]);
+
+  for (const view of ["jobs", "clusters", "complaints", "suspensions", "nodes", "reports"]) {
+    context.fetch = async path => {
+      assert.equal(path, `/operator?view=${view}`);
+      return {ok: true, json: async () => ({has_key: true, [view]: []})};
+    };
+    root.replaceChildren();
+    run(`operatorList(root, "${view}", () => { throw new Error("Empty lists should skip rendering rows"); })`);
+    await root.children[1].reloadOperator();
+    assert.deepEqual(root.children[1].children.map(node => node.textContent), [`op_empty_${view}`]);
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

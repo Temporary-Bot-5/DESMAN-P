@@ -1565,6 +1565,10 @@ MESSAGES: dict[str, Forms] = {
     "Added": "添加时间",
     "Decide each with: desman-registry job settle JOB accept|again|drop": "逐个裁决：desman-registry job settle 任务 accept|again|drop",
     "Job {id} is now: {status}": "任务 {id} 现在：{status}",
+    "No complaints.": "没有投诉。",
+    "No nodes.": "没有节点。",
+    "No reports.": "没有报告。",
+    "No suspensions.": "没有暂停记录。",
     "No jobs.": "没有任务。",
     "Nothing waits for the operator.": "没有等待运营者的事项。",
     "Nothing handed in yet.": "尚未提交任何内容。",
@@ -2002,8 +2006,6 @@ MESSAGES.update(
         "start timers": "启动计时器",
     }
 )
-
-MESSAGES.update({"yes": "是", "no": "否"})
 
 MESSAGES.update(
     {

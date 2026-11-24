@@ -1575,6 +1575,10 @@ MESSAGES: dict[str, Forms] = {
     "Added": "追加日時",
     "Decide each with: desman-registry job settle JOB accept|again|drop": "それぞれ決定してください: desman-registry job settle ジョブ accept|again|drop",
     "Job {id} is now: {status}": "ジョブ {id} は現在: {status}",
+    "No complaints.": "苦情はありません。",
+    "No nodes.": "ノードはありません。",
+    "No reports.": "報告はありません。",
+    "No suspensions.": "利用停止はありません。",
     "No jobs.": "ジョブはありません。",
     "Nothing waits for the operator.": "オペレーターを待っているものはありません。",
     "Nothing handed in yet.": "まだ何も提出されていません。",
@@ -2031,8 +2035,6 @@ MESSAGES.update(
         "start timers": "タイマー開始",
     }
 )
-
-MESSAGES.update({"yes": "はい", "no": "いいえ"})
 
 MESSAGES.update(
     {

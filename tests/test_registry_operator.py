@@ -604,6 +604,24 @@ def assert_operator_read(expected: p.OperatorReply, *args: str) -> None:
     assert invoke_operator(*args).strip()
 
 
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        ("jobs", "No jobs."),
+        ("clusters", "No cluster tasks."),
+        ("complaints", "No complaints."),
+        ("suspensions", "No suspensions."),
+        ("nodes", "No nodes."),
+        ("reports", "No reports."),
+    ],
+)
+def test_empty_operator_lists(
+    local_operator: operator.OperatorClient, name: str, message: str
+) -> None:
+    assert invoke_operator(name).strip() == message
+    assert json.loads(invoke_operator(name, "--json")) == {name: []}
+
+
 def test_operator_work_commands(
     registry: Registry, clock: FakeClock, local_operator: operator.OperatorClient
 ) -> None:
@@ -849,6 +867,31 @@ def test_operator_catalog_shares_journal_metadata_without_consent(
         assert result.apply().data["untrusted"]
 
 
+def test_operator_catalog_requires_consent_for_registered_name(
+    registry: Registry, clock: FakeClock, local_operator: operator.OperatorClient
+) -> None:
+    node(registry, clock)
+    read = commands.find("operator nodes")
+    assert read is not None
+    manager = open_config()
+    args = commands.parse(read, {}, manager.load())
+    with db.open_db() as conn:
+        ctx = commands.Context(
+            Store(conn),
+            manager,
+            lambda *_: None,
+            lambda _: False,
+            node_author=nodes.Author.INTERLOCUTOR,
+        )
+        # The lent model's name comes from another node: already text from others.
+        assert isinstance(read.handler(ctx, args), commands.Proposal)
+        named(registry, clock, "alice")
+        assert "alice" in invoke_operator("nodes")
+        result = read.handler(ctx, args)
+        assert isinstance(result, commands.Proposal)
+        assert result.apply().data["untrusted"]
+
+
 @pytest.mark.parametrize("consent", [None, "n", "y"])
 def test_operator_chat_inbox(
     registry: Registry,
@@ -898,7 +941,7 @@ def test_operator_chat_inbox(
     ]
     data = json.loads(event.split("\n", 1)[1])
     if consent is None:
-        assert data == {"clusters": [], "jobs": []}
+        assert data["clusters"] == [] and data["jobs"] == []
     elif consent == "n":
         assert data == {"withheld": True}
     else:

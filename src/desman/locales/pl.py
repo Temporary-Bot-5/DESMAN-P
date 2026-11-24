@@ -1682,6 +1682,10 @@ MESSAGES: dict[str, Forms] = {
     "Added": "Dodano",
     "Decide each with: desman-registry job settle JOB accept|again|drop": "Zdecyduj o każdym: desman-registry job settle ZADANIE accept|again|drop",
     "Job {id} is now: {status}": "Zadanie {id} jest teraz: {status}",
+    "No complaints.": "Brak skarg.",
+    "No nodes.": "Brak węzłów.",
+    "No reports.": "Brak raportów.",
+    "No suspensions.": "Brak zawieszeń.",
     "No jobs.": "Brak zadań.",
     "Nothing waits for the operator.": "Nic nie czeka na operatora.",
     "Nothing handed in yet.": "Jeszcze nic nie oddano.",
@@ -2212,8 +2216,6 @@ MESSAGES.update(
         "start timers": "uruchomienie timerów",
     }
 )
-
-MESSAGES.update({"yes": "tak", "no": "nie"})
 
 MESSAGES.update(
     {

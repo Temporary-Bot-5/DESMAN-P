@@ -2366,7 +2366,7 @@ def _operator_has_text(reply: BaseModel) -> bool:
             ) or bool((report.stats or {}).get("models"))
         case protocol.OperatorNodes():
             return any(
-                _has_text(row.owner, *(cap.model for cap in row.capabilities))
+                _has_text(row.name, row.owner, *(cap.model for cap in row.capabilities))
                 for row in reply.nodes
             )
         case protocol.OperatorLog():
@@ -3424,11 +3424,19 @@ def shown(entry: Entry, args: Args) -> str:
     return entry.name + (" " + json.dumps(given, ensure_ascii=False) if given else "")
 
 
-def for_model(about: bool = True) -> str:
+def for_model(about: bool = True, *, operator_access: bool = True) -> str:
     """The catalog as a model reads it: each command with its arguments and, unless `about` is
-    False (the interlocutor's prompt, ADR 0009), what it does: that is in the knowledge tree."""
+    False (the interlocutor's prompt, ADR 0009), what it does: that is in the knowledge tree.
+    Without an operator key, keep only operator setup and status commands."""
     lines = []
     for entry in CATALOG:
+        if (
+            not operator_access
+            and entry.name.startswith("operator ")
+            and entry.name != "operator status"
+            and not entry.name.startswith("operator key ")
+        ):
+            continue
         # A command without arguments shows none: an empty "{}" ended up in replies.
         signature = _signature(entry.args, excluded=("file",) if entry.name == "run" else ())
         shown = entry.name if signature == "{}" else f"{entry.name} {signature}"

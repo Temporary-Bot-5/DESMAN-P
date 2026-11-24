@@ -663,6 +663,9 @@ def _node_status(status: str) -> str:
 
 
 def _print_jobs(rows: list[p.OperatorJob]) -> None:
+    if not rows:
+        ui.note(t("No jobs."))
+        return
     _table(
         (t("Job"), t("Status"), t("Description"), t("Until")),
         ((r.job, _status(r.status), r.task.description, ui.when(r.expires_at)) for r in rows),
@@ -670,6 +673,9 @@ def _print_jobs(rows: list[p.OperatorJob]) -> None:
 
 
 def _print_clusters(rows: list[p.OperatorCluster]) -> None:
+    if not rows:
+        ui.note(t("No cluster tasks."))
+        return
     _table(
         (t("Cluster task"), t("Status"), t("Goal"), t("Members"), t("Accepted"), t("Until")),
         (
@@ -746,7 +752,10 @@ def _print_cluster(reply: p.OperatorClusterDetail) -> None:
         _lines(_field(t("Result"), _result_text(reply.result.summary)))
 
 
-def _print_complaints(rows: Iterable[p.ComplaintRow]) -> None:
+def _print_complaints(rows: list[p.ComplaintRow]) -> None:
+    if not rows:
+        ui.note(t("No complaints."))
+        return
     _table(
         (t("ID"), t("Created"), t("From"), t("About"), t("Count"), t("Status")),
         (
@@ -828,6 +837,9 @@ def print_reply(
                 if row.note:
                     _lines(row.note)
         case p.OperatorSuspensions():
+            if not reply.suspensions:
+                ui.note(t("No suspensions."))
+                return None
             _table(
                 (t("ID"), t("Action"), t("Node"), t("Until"), t("Lifted")),
                 (
@@ -842,6 +854,9 @@ def print_reply(
                 ),
             )
         case p.OperatorReports():
+            if not reply.reports:
+                ui.note(t("No reports."))
+                return None
             _table(
                 (t("ID"), t("Kind"), t("Node"), t("Created")),
                 ((r.id, r.kind, r.node, ui.when(r.created_at)) for r in reply.reports),
@@ -857,11 +872,15 @@ def print_reply(
                 ),
             )
         case p.OperatorNodes():
+            if not reply.nodes:
+                ui.note(t("No nodes."))
+                return None
             _table(
-                (t("Node"), t("Owner"), t("Status"), t("Lends"), t("Last seen")),
+                (t("Node"), t("Name"), t("Owner"), t("Status"), t("Lends"), t("Last seen")),
                 (
                     (
                         r.node,
+                        r.name or "—",
                         r.owner or "—",
                         _node_status(r.status),
                         ", ".join(

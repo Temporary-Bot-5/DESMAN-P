@@ -1573,6 +1573,10 @@ MESSAGES: dict[str, Forms] = {
     "Added": "추가됨",
     "Decide each with: desman-registry job settle JOB accept|again|drop": "각각 결정하세요: desman-registry job settle 작업 accept|again|drop",
     "Job {id} is now: {status}": "작업 {id}의 현재 상태: {status}",
+    "No complaints.": "신고가 없습니다.",
+    "No nodes.": "노드가 없습니다.",
+    "No reports.": "보고서가 없습니다.",
+    "No suspensions.": "정지 기록이 없습니다.",
     "No jobs.": "작업이 없습니다.",
     "Nothing waits for the operator.": "운영자를 기다리는 것이 없습니다.",
     "Nothing handed in yet.": "아직 제출된 것이 없습니다.",
@@ -2043,8 +2047,6 @@ MESSAGES.update(
         "start timers": "타이머 시작",
     }
 )
-
-MESSAGES.update({"yes": "예", "no": "아니요"})
 
 MESSAGES.update(
     {

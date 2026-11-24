@@ -350,7 +350,7 @@ TOPICS: Final = (
         "`/operator clusters` to list work, and `/operator job show ID` or "
         "`/operator cluster show ID` for results. Decisions are accept, again or drop. "
         "`/operator complaints`, `/operator suspensions`, `/operator reports`, "
-        "`/operator nodes` and `/operator log` show registry records. "
+        "`/operator nodes` and `/operator log` show registry records. Empty lists show a message. "
         "A lift targets one suspension. If multiple are in force, the node lift is refused. "
         "The confirmation warns if a lift ends before its suspension. "
         "Chat changes requested through the interlocutor require confirmation. "

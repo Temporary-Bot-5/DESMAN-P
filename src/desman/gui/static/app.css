@@ -445,6 +445,9 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 .operator-table table { border-collapse: collapse; width: 100%; }
 .operator-table :is(th, td) { padding: .45rem; text-align: start; vertical-align: top; border-bottom: 1px solid var(--settings-border); }
 .operator-table td { min-width: 5rem; max-width: 22rem; }
+.operator-table td.operator-id { min-width: 0; white-space: nowrap; font-family: var(--mono, ui-monospace, monospace); font-size: .85em; }
+.operator-long { cursor: pointer; }
+.operator-long:not(.open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 #settings-result { white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; max-height: 7em; }
 @media (max-width: 650px) {
   .operator-mode #settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
