@@ -941,3 +941,31 @@ def test_confirmed_uninstall_ends_page_from_a_runner(
     assert not page.sessions.pending_turns()
     with page.runners.condition:
         assert not page.runners.tickets
+
+
+def test_page_followup_keeps_read_event_after_queued_question(
+    page: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = page.reply
+
+    def reply(request: Request) -> str:
+        answer = original(request)
+        user, data = page.requests[-1]
+        if user == "Show tasks" and data["conversation"][-1].get("kind") == "event":
+            return '{"type":"reply","text":"Task list read."}'
+        return answer
+
+    monkeypatch.setattr(page, "reply", reply)
+    page.outcomes["Show tasks"] = {"type": "command", "name": "list"}
+    gate = page.gate("First question")
+    session = page.send("First question")
+    assert page.entered["First question"].wait(10)
+    assert page.send("Show tasks") == session
+    gate.set()
+    page.done(session)
+    [initial, followup] = [data for user, data in page.requests if user == "Show tasks"]
+    assert initial["conversation"][-1]["text"] == "Show tasks"
+    followup_texts = [message["text"] for message in followup["conversation"]]
+    assert followup_texts.index("reply:First question") < followup_texts.index("Show tasks")
+    assert followup_texts[-1].startswith("list ran.")
+    assert page.answers(session) == ["reply:First question", "Task list read."]

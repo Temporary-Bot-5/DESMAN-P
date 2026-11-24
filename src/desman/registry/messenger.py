@@ -345,7 +345,7 @@ def complain(
             (asked.message, other, who),
         ).fetchone()
         if evidence is None:
-            raise Refusal("unknown_name")
+            raise Refusal("message_not_from_contact")
         message_text = evidence[0]
         if evidence[1] is not None:
             try:

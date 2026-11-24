@@ -55,6 +55,8 @@ def print_project_info(config_manager: ConfigManager) -> None:
     )
     if ready:
         status.append("  " + ", ".join(p.name for p in ready), style="muted")
+        status.no_wrap = False
+        status.overflow = "fold"
 
     commands = Table.grid(padding=(0, 3))
     commands.add_column(style="key", no_wrap=True)

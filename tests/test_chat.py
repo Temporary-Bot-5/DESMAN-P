@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Iterator
 
 import pytest
@@ -597,3 +599,41 @@ def test_chat_can_find_out_how_to_receive_a_release() -> None:
     result = chat("/global update", "/exit")
     assert "browser page checks for releases" in " ".join(result.output.split())
     assert "desman worker" not in result.output
+
+
+def test_piped_eof_declines_confirmation_and_exits_temporary_chat() -> None:
+    configured()
+    script = """
+from desman import runs
+from desman.cli import cli
+from desman.interlocutor import CHAT
+from desman.llm.fake import FakeLLM
+
+model = FakeLLM().on(
+    CHAT, '{"type":"command","name":"language","args":{"code":"ru"}}'
+)
+runs.models = lambda *a, **k: runs.Models(model, None)
+cli(["-t"])
+"""
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", script],
+        input="switch to Russian\n",
+        capture_output=True,
+        encoding="utf-8",
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("(Y/N)") == 1
+    assert not result.stderr
+    assert ConfigManager(default_config_path()).load().language == "en"
+    conn = db.open_db()
+    try:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM messages JOIN sessions ON session_id = sessions.id WHERE temporary = 1"
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        conn.close()

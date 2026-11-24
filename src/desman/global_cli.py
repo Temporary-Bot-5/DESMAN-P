@@ -326,7 +326,19 @@ def cloud_warning() -> str:
 
 
 def cloud_text(on: bool) -> str:
-    return t("Lend my free cloud keys to desman-global") + ": " + (t("on") if on else t("off"))
+    return (
+        t("Lend my free cloud keys to desman-global: on")
+        if on
+        else t("Lend my free cloud keys to desman-global: off")
+    )
+
+
+def lead_text(on: bool) -> str:
+    return t("Lead clusters: on") if on else t("Lead clusters: off")
+
+
+def setting_state(on: bool) -> str:
+    return t("Enabled") if on else t("Disabled")
 
 
 def borrow_search(
@@ -342,7 +354,7 @@ def borrow_search(
 
 
 def search_text(on: bool, *, joined: bool = True) -> str:
-    state = t("Borrow web search") + ": " + (t("on") if on else t("off"))
+    state = t("Borrow web search: on") if on else t("Borrow web search: off")
     if on and not joined:
         state += "\n" + t("Borrowing takes effect after `desman global join`.")
     return state
@@ -890,11 +902,9 @@ def print_status(found: Status, *, tz: tzinfo | None = None) -> None:
     table.add_row(Text(t("taking part"), style="muted"), t("yes") if found.enabled else t("no"))
     table.add_row(Text(t("registry"), style="muted"), found.registry or t("not known yet"))
     table.add_row(Text(t("node key"), style="muted"), found.node or t("none yet"))
-    table.add_row(t("Lead clusters"), t("yes") if found.lead else t("off"))
-    table.add_row(t("Borrow web search"), t("on") if found.borrow_search else t("off"))
-    table.add_row(
-        t("Lend my free cloud keys to desman-global"), t("on") if found.lend_cloud else t("off")
-    )
+    table.add_row(t("Lead clusters"), setting_state(found.lead))
+    table.add_row(t("Borrow web search"), setting_state(found.borrow_search))
+    table.add_row(t("Lend my free cloud keys to desman-global"), setting_state(found.lend_cloud))
     if found.cluster:
         table.add_row(cluster_text(found.cluster), "")
     for provider_id, donation in sorted(found.donated.items()):
@@ -1052,7 +1062,7 @@ def _lent_json(lent: Lent) -> str:
 def lead_command(state: str) -> None:
     """Allow this node to lead clusters with the modules lent."""
     set_lead(load_config(), state == "on")
-    ui.ok(t("Lead clusters") + ": " + (t("yes") if state == "on" else t("off")))
+    ui.ok(lead_text(state == "on"))
 
 
 @global_group.command("cloud")

@@ -404,6 +404,7 @@ def test_join_and_donate_from_the_chat_wait_for_yes(fake: FakeLLM) -> None:
         asks("global join", registry=REGISTRY),
         asks("global donate", provider="ollama", calls=10),
         asks("global status"),
+        asks("global status"),
     )
     result = chat("join the network", "y", "lend my ollama", "y", "and now?")
     assert f"Take part in desman-global, registry {REGISTRY}." in result.output
@@ -597,8 +598,13 @@ def test_quota_usage_and_reset_in_cli_and_chat(
         "used_today": usage,
         "resets_at": resets_at,
     }
-    fake.on(CHAT, asks("global status"), asks("global quota", provider="ollama"))
-    result = chat("status?", "when does Ollama reset?")
+    fake.on(
+        CHAT,
+        asks("global status"),
+        asks("global quota", provider="ollama"),
+        asks("global quota", provider="ollama"),
+    )
+    result = chat("what is my status and when does Ollama reset?")
     assert result.exit_code == 0, result.output
     assert result.output.count(f"Daily quotas reset at {reset} local time.") == 2
     events = [
@@ -639,3 +645,15 @@ def test_quota_and_status_omit_usage_without_a_usable_database(
 
     monkeypatch.setattr(db, "default_db_path", unexpected_database_access)
     assert "is not lent" in refused("global", "quota", "nvidia")
+
+
+def test_russian_network_switches_agree() -> None:
+    config = make_config(language="ru", configured=True)
+    save(config)
+    assert "выключено" in ok("global", "cloud").output
+    ok("global", "join", "--registry", "https://registry.example")
+    assert "включено" in ok("global", "cloud", "on").output
+    assert "включено" in ok("global", "lead", "on").output
+    assert "включено" in ok("global", "search", "on").output
+    status = ok("global", "status").output
+    assert status.count("включено") >= 3 and "включён" not in status

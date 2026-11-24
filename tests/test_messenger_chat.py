@@ -11,11 +11,11 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import FakeClock
-from desman import commands, messenger_cli, runs
+from desman import commands, global_cli, messenger_cli, runs
 from desman.chat import Chat, _commands
 from desman.cli import cli
 from desman.config import Config, open_config
-from desman.core import db, operator
+from desman.core import db, netlog, operator
 from desman.core.sessions import Sessions
 from desman.core.store import Store
 from desman.interlocutor import CHAT
@@ -174,3 +174,60 @@ def test_slash_malformed_config_continues(
     assert chat._slash("/help")
     assert "/messages" in capsys.readouterr().out
     assert wire == []
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["complain", "2", "text"], "No contact named 2."),
+        (["complain", "nobody", "text"], "No contact named nobody."),
+        (["complain", "bobby", "text", "--message", "99"], "Message #99 is not from bobby."),
+        (["send", "nobody", "text"], "No contact named nobody."),
+        (["contact", "add", "nobody"], "No contact named nobody."),
+        (["send", "Invalid Name", "text"], "Invalid messenger request; nothing was sent."),
+        (["send", "9" * 33, "text"], "Invalid messenger request; nothing was sent."),
+    ],
+)
+def test_cli_messenger_refusal(wire: list[str], args: list[str], expected: str) -> None:
+    result = CliRunner().invoke(cli, ["global", *args])
+    assert result.exit_code == 1
+    assert expected in result.output
+
+
+def test_notice_is_shared_by_cli_and_chat(wire: list[str]) -> None:
+    runner = CliRunner()
+    raw = runner.invoke(cli, ["global", "messages", "--json"])
+    assert json.loads(raw.output)["warning"] == messenger_cli.WARNING
+    contacts = runner.invoke(cli, ["global", "contacts"])
+    assert contacts.exit_code == 0 and "Messages are end-to-end encrypted" in contacts.output
+    with global_cli.journal(None) as shared, runner.isolation() as (output, *_):
+        chat = Chat(Sessions(shared))
+        assert chat._slash("/messages bobby")
+        assert "Messages are end-to-end encrypted" not in output.getvalue().decode()
+        assert [entry.action for entry in netlog.entries(shared)].count("messenger_notice") == 1
+    again = runner.invoke(cli, ["global", "messages"])
+    assert again.exit_code == 0 and "Messages are end-to-end encrypted" not in again.output
+
+
+def test_first_send_window_displays_notice_only_once(
+    joined: Config, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    llm = FakeLLM().on(
+        CHAT,
+        json.dumps(
+            {"type": "command", "name": "global send", "args": {"name": "bobby", "text": "hello"}}
+        ),
+        repeat_last=True,
+    )
+    monkeypatch.setattr(runs, "models", lambda *a, **k: runs.Models(llm, None))
+    monkeypatch.setattr(
+        messenger_cli, "perform", lambda *a, **k: p.MessageSent(id=1, sent_at=clock())
+    )
+    joined.configured = True
+    open_config().save(joined)
+    result = CliRunner().invoke(cli, [], input="send hello\ny\nsend again\ny\n")
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Messages are end-to-end encrypted") == 1
+    assert result.output.index("Messages are end-to-end encrypted") < result.output.index("(Y/N)")
+    assert result.output.count("Message sent as 1.") == 2
+    assert messenger_cli.WARNING not in str(llm.calls)

@@ -220,7 +220,7 @@ def test_config_changes_name_keys_by_fingerprint() -> None:
 def test_a_read_runs_at_once_and_its_data_goes_to_the_interlocutor(fake: FakeLLM) -> None:
     task_id, _ = escalated_task()
     fake.on(CHAT, asks("status", task=task_id[:8]), '{"type": "reply", "text": "It waits."}')
-    result = chat("how is my task?", "and now?")
+    result = chat("how is my task?")
     assert "Goal: the goal" in result.output and "needs_human" in result.output
     assert "Apply this change?" not in result.output  # a read asks nothing
     event = conversation()[1]
@@ -250,7 +250,7 @@ def test_every_read_shows_its_result(
     task_id, _ = escalated_task()
     if name == "audit":
         args = {"task": task_id}
-    fake.on(CHAT, asks(name, **args))
+    fake.on(CHAT, asks(name, **args), asks(name, **args))
     result = chat("show me")
     assert shown in result.output
     assert conversation()[-1].text.startswith(f"{name}")
@@ -264,7 +264,7 @@ def test_keys_check_from_the_chat(fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
         return [check.KeyCheck(p.id, 1, key_id(KEY), False, 401, f"rejected {KEY}")]
 
     monkeypatch.setattr(check, "check", checked)
-    fake.on(CHAT, asks("keys check", provider="groq"))
+    fake.on(CHAT, asks("keys check", provider="groq"), asks("keys check", provider="groq"))
     result = chat("do my keys work?")
     assert "failed" in result.output
     assert KEY not in conversation()[-1].text  # a provider's message may quote the key
@@ -272,8 +272,8 @@ def test_keys_check_from_the_chat(fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
 
 def test_shown_data_keeps_keys_and_masks_out(fake: FakeLLM) -> None:
     save(make_config(language="en", configured=True, api_keys={"GROQ_API_KEY": KEY}))
-    fake.on(CHAT, asks("config show"), asks("keys list"))
-    chat("my config?", "my keys?")
+    fake.on(CHAT, asks("config show"), asks("keys list"), asks("keys list"))
+    chat("my config and keys?")
     for message in conversation():
         assert KEY not in message.text and providers.mask(KEY) not in message.text
 
@@ -656,7 +656,7 @@ def test_usage_event_carries_window_totals(fake: FakeLLM, monkeypatch: pytest.Mo
         KeyUsage("nvidia", "other", 3, 0, 1, 200, 30, None, None, {}),
     ]
     monkeypatch.setattr(config_cli, "usage_since", lambda *args: rows)
-    fake.on(CHAT, asks("usage", since="all"))
+    fake.on(CHAT, asks("usage", since="all"), asks("usage", since="all"))
     result = chat("how much did I spend?")
     assert "Total: 5 calls" in result.output
     event = next(m for m in conversation() if m.kind is Kind.EVENT)
@@ -670,3 +670,43 @@ def test_usage_event_carries_window_totals(fake: FakeLLM, monkeypatch: pytest.Mo
         "providers": 2,
     }
     assert len(data["rows"]) == 2 and "key" not in data["rows"][0]
+
+
+def test_two_reads_then_reply_in_one_turn(fake: FakeLLM) -> None:
+    fake.on(
+        CHAT,
+        asks("inbox", list=True),
+        asks("list"),
+        '{"type": "reply", "text": "I checked both."}',
+    )
+    result = chat("show my inbox and tasks")
+    assert "I checked both." in result.output
+    first, second, third = map(payload, chat_calls(fake))
+    assert len(first["conversation"]) == 1
+    assert second["conversation"][-1]["text"].startswith("inbox")
+    assert third["conversation"][-1]["text"].startswith("list")
+    assert sum(message.role is Role.USER for message in conversation()) == 1
+
+
+@pytest.mark.parametrize(
+    ("requests", "events"),
+    [
+        ([asks("inbox", list=True), asks("list"), asks("language"), asks("help")], 3),
+        ([asks("list"), asks("list")], 1),
+    ],
+)
+def test_read_chain_stops_at_cap_or_identical_repeat(
+    fake: FakeLLM, requests: list[str], events: int
+) -> None:
+    fake.on(CHAT, *requests)
+    chat("show me")
+    assert len(chat_calls(fake)) == len(requests)
+    assert sum(message.kind is Kind.EVENT for message in conversation()) == events
+
+
+def test_change_ends_chain_after_a_read(fake: FakeLLM) -> None:
+    fake.on(CHAT, asks("language"), asks("language", code="ru"), asks("list"))
+    result = chat("check the language, then switch to Russian", "y")
+    assert "Apply this change?" in result.output
+    assert saved().language == "ru"
+    assert len(chat_calls(fake)) == 2

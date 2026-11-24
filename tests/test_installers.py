@@ -653,3 +653,15 @@ def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "search not set up: daemon down" in result.stdout
     assert "GUI reached" in result.stdout
+
+
+def test_windows_busy_install_exits_before_any_install_steps() -> None:
+    source = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
+    guard, install = source.split("    if (!(Get-Command uv", 1)
+    assert "$VenvPrefix = (Join-Path $App '.venv') + '\\'" in guard
+    assert "Get-CimInstance Win32_Process" in guard
+    assert "ExecutablePath.StartsWith($VenvPrefix, [StringComparison]::OrdinalIgnoreCase)" in guard
+    busy = guard.split("if ($Running.Count -gt 0)", 1)[1]
+    assert "Close DESMAN (the page, the chat and any worker)" in busy
+    assert "$Process.ProcessId, $Process.ExecutablePath" in busy and "exit 1" in busy
+    assert "Run 'git' @('checkout'" in install and "Run 'uv' @('pip', 'install'" in install
