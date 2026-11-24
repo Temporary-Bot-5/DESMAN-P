@@ -1147,3 +1147,18 @@ def test_lease_budget_expiring_inside_a_member_does_not_defer_it(
         with jobs.model_deadline(worker.conn, held.task_id, clock):
             assert lineup.complete(request).text == "first"
         assert not fallback.calls
+
+
+def test_switching_cloud_lending_off_stops_an_existing_quota_wrapper(
+    clock: FakeClock, store: Store
+) -> None:
+    config = Config(network=Network(enabled=True, lend_cloud=True, donated={"groq": LENT}))
+    llm = FakeLLM(DONE, DONE)
+    quota = jobs.Quota(llm, store.conn, "groq", lambda: config, clock)
+    request = Request(messages=[Message(role="user", content="hi")])
+    assert quota.complete(request).text == DONE
+    config.network.lend_cloud = False
+    with pytest.raises(QuotaExhausted):
+        quota.complete(request)
+    config.network.lend_cloud = True
+    assert quota.complete(request).text == DONE

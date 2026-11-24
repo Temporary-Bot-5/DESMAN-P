@@ -7,7 +7,7 @@ shown by its fingerprint only) and switches desman-global on; leaving takes back
 lent and switches it off, while the key stays until the person deletes it. A module lent
 (`donate`) is a model provider of this machine with a daily quota of calls and tokens: its key
 never leaves the machine, a paid provider is never lent, and a free cloud provider only once
-its terms were checked (`providers.can_donate`).
+its terms were checked or the person opts in (`providers.can_donate`).
 
 Leaving says goodbye to the registry (`farewell`, `node.tell_left`); explicitly confirmed
 proposals and reports also contact it here. The worker handles ongoing contact (`net.node`, G.5). Both get the
@@ -130,6 +130,7 @@ class Status:
     now: datetime
     lead: bool = True
     borrow_search: bool = False
+    lend_cloud: bool = False
     cluster: dict[str, Any] | None = None
 
     def as_json(self) -> dict[str, Any]:
@@ -137,6 +138,7 @@ class Status:
             "enabled": self.enabled,
             "lead": self.lead,
             "borrow_search": self.borrow_search,
+            "lend_cloud": self.lend_cloud,
             "cluster": self.cluster,
             "registry": self.registry,
             "node": self.node,
@@ -288,6 +290,7 @@ def status(
         now=now,
         lead=network.lead,
         borrow_search=network.borrow_search,
+        lend_cloud=network.lend_cloud,
         cluster=cluster.role(conn, now) if conn is not None and network.enabled else None,
     )
 
@@ -299,6 +302,29 @@ def set_lead(manager: ConfigManager, on: bool, *, conn: sqlite3.Connection | Non
             config.network.lead = on
             entries.append(("lead", {"on": on}))
     return on
+
+
+def set_lend_cloud(
+    manager: ConfigManager, on: bool, *, conn: sqlite3.Connection | None = None
+) -> bool:
+    """Save the person's consent to lend free cloud keys and journal the change."""
+    with _change(manager, conn) as (config, entries):
+        if config.network.lend_cloud != on:
+            config.network.lend_cloud = on
+            entries.append(("lend_cloud", {"on": on}))
+    return on
+
+
+def cloud_warning() -> str:
+    return t(
+        "Most free tiers' terms forbid serving other people. Lend your cloud keys only to "
+        "your own nodes (e.g. testing on your own machines); you are responsible for following "
+        "each provider's terms. Keys never leave this machine: only their fingerprint is sent."
+    )
+
+
+def cloud_text(on: bool) -> str:
+    return t("Lend my free cloud keys (own nodes only)") + ": " + (t("on") if on else t("off"))
 
 
 def borrow_search(
@@ -687,10 +713,10 @@ def donatable(config: Config, name: str) -> Provider:
         raise click.ClickException(
             t("{name} is a paid provider: it is never lent.", name=provider.name)
         )
-    if not providers.can_donate(provider):
+    if not providers.can_donate(provider, lend_cloud=config.network.lend_cloud):
         raise click.ClickException(
             t(
-                "{name}'s free tier has not been checked for serving others, so it cannot be lent.",
+                "To lend {name}'s free tier to your own nodes, enable `desman global cloud on`.",
                 name=provider.name,
             )
         )
@@ -864,15 +890,23 @@ def print_status(found: Status, *, tz: tzinfo | None = None) -> None:
     table.add_row(Text(t("node key"), style="muted"), found.node or t("none yet"))
     table.add_row(t("Lead clusters"), t("yes") if found.lead else t("off"))
     table.add_row(t("Borrow web search"), t("on") if found.borrow_search else t("off"))
+    table.add_row(
+        t("Lend my free cloud keys (own nodes only)"), t("on") if found.lend_cloud else t("off")
+    )
     if found.cluster:
         table.add_row(cluster_text(found.cluster), "")
     for provider_id, donation in sorted(found.donated.items()):
         details = quota_text(donation, provider_id)
         if found.used_today is not None:
             details += "\n" + _usage_text(donation, found.used_today[provider_id], provider_id)
-        table.add_row(
-            Text(t("lent: {name}", name=provider_name(provider_id)), style="muted"), details
-        )
+        name = provider_name(provider_id)
+        label = t("lent: {name}", name=name)
+        if not found.lend_cloud and any(
+            p.id == provider_id and not providers.can_donate(p, lend_cloud=found.lend_cloud)
+            for p in providers.FREE
+        ):
+            label = t("{name} (not lent: cloud lending off)", name=name)
+        table.add_row(Text(label, style="muted"), details)
     ui.out(table)
     if found.donated:
         ui.note(_reset_text(found.now, tz))
@@ -1017,6 +1051,21 @@ def lead_command(state: str) -> None:
     """Allow this node to lead clusters with the modules lent."""
     set_lead(load_config(), state == "on")
     ui.ok(t("Lead clusters") + ": " + (t("yes") if state == "on" else t("off")))
+
+
+@global_group.command("cloud")
+@click.argument("state", type=click.Choice(["on", "off"]), required=False)
+def cloud_command(state: str | None) -> None:
+    """Show or change whether this node lends free cloud keys."""
+    manager = load_config()
+    on = (
+        manager.load().network.lend_cloud
+        if state is None
+        else set_lend_cloud(manager, state == "on")
+    )
+    ui.out(cloud_text(on))
+    if state == "on":
+        ui.warn(cloud_warning())
 
 
 @global_group.command("search")

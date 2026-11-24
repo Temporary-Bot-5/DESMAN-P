@@ -42,7 +42,11 @@ def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
             words = ["gui", "--shortcut"]
         name = list(itertools.takewhile(lambda w: not w.startswith("-") and not w.isupper(), words))
         entry = commands.find(" ".join(name))
-        assert entry is not None, f"{topic.name}: no command `{quoted}`"
+        if entry is None:  # A concrete example can include lower-case argument values.
+            assert commands.parse_line(quoted[1:], None, dry_run=True), (
+                f"{topic.name}: `{quoted}` would not run"
+            )
+            continue
         command = commands.cli_command(cli, entry.name)
         assert command is not None, f"{topic.name}: `{quoted}` is not in the CLI"
         assert typed(command, words[len(name) :]), f"{topic.name}: `{quoted}` would not run"

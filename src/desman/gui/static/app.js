@@ -1437,6 +1437,9 @@ function drawSettings() {
     settingAuto(leadRow, () => ({section: "network", operation: "lead", state: lead.checked ? "on" : "off"}), [lead]);
     if (d.network.cluster_text) text("small", d.network.cluster_text, status);
     settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registry.value || null})}), d.network.enabled ? words.leave : words.join);
+    const cloud = settingInput(root, d.network.cloud_label, d.network.lend_cloud, "checkbox");
+    settingAuto(root, () => ({section: "network", operation: "cloud", state: cloud.checked ? "on" : "off"}), [cloud]);
+    text("p", d.network.cloud_warning, root);
     for (const p of d.providers.filter(p => p.lendable)) {
       const card = text("section", "", root); card.className = "lending-row"; text("strong", p.name, card);
       const quota = d.network.donated[p.id];
