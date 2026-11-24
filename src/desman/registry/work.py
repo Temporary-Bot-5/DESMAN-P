@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import ValidationError
 
 from desman.core import db
-from desman.net import protocol, sign
+from desman.net import operator_records, protocol, sign
 from desman.net.sign import Reason, Refused
 from desman.registry import checks, store
 
@@ -614,6 +614,7 @@ def add(
     moment = db.to_iso(now)
     with store.write_transaction(conn):
         store.trust(conn, root, now).receive(signed.model_dump(mode="json"))
+        store.check_term(record, operator_records.MAX_JOB_DAYS)
         if conn.execute("SELECT 1 FROM jobs WHERE id=?", (record.id,)).fetchone():
             raise Refused(Reason.REPLAY, "record already stored", id=record.id)
         conn.execute(

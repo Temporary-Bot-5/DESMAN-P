@@ -357,6 +357,8 @@ class Registry:
             if e.reason is Reason.REPLAY:
                 raise operator.Refusal(e.reason.value, HTTPStatus.CONFLICT) from e
             raise Refused(e.reason, str(e), id=e.id, signer=caller.fingerprint) from e
+        except store.RecordTermError as e:
+            raise operator.Refusal("term", HTTPStatus.BAD_REQUEST) from e
         except admin.Missing as e:
             raise operator.Refusal("not_found", HTTPStatus.NOT_FOUND) from e
         except admin.Ambiguous as e:

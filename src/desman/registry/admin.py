@@ -36,6 +36,7 @@ _BINARY: Final = getattr(os, "O_BINARY", 0)
 
 ASSIGNMENT_DAYS: Final = 90
 JOB_DAYS: Final = 7
+MAX_JOB_DAYS: Final = operator_records.MAX_JOB_DAYS
 TRUST_DAYS: Final = 7
 """How long a trust list lasts unless the person says otherwise."""
 MAX_TRUST_DAYS: Final = 30
@@ -350,6 +351,8 @@ def find_node(conn: sqlite3.Connection, prefix: str) -> str:
 
 
 def set_owner(conn: sqlite3.Connection, prefix: str, owner: str | None) -> str:
+    if owner is not None and not 1 <= len(owner) <= 64:
+        raise AdminError(t("At most 64 characters."))
     fingerprint = find_node(conn, prefix)
     work.set_owner(conn, fingerprint, owner)
     return fingerprint

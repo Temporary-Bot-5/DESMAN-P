@@ -18,7 +18,7 @@ from desman.config import open_config
 from desman.core import db, netlog
 from desman.net import operator, operator_records, sign
 from desman.net import protocol as p
-from desman.registry import admin, store
+from desman.registry import admin, store, work
 from desman.registry.server import Registry
 from test_global_reports import signed_bug
 from test_messenger import call, connect, named
@@ -145,8 +145,36 @@ def test_newest_assignment_controls_access(
         admin.assign(conn, root, key.public, {TASKS}, days=1, now=clock())
     assert remote.whoami().scopes == [TASKS]
     clock.advance(86400)
+    assert remote.whoami().scopes == [MODERATION, TASKS]
+    clock.advance(86400)
     with pytest.raises(operator.OperatorError, match="not_operator"):
         remote.whoami()
+
+
+def test_assignment_skips_future_and_forged_records(
+    registry: Registry, db_path: Path, root: sign.NodeKey, key: sign.NodeKey, clock: FakeClock
+) -> None:
+    remote = client(registry, key, clock)
+    with store.connection(db_path) as conn:
+        future = sign.assign(
+            root,
+            key.public,
+            {TASKS},
+            issued_at=clock() + timedelta(seconds=2),
+            lifetime=timedelta(days=1),
+        )
+        forged = sign.assign(
+            root,
+            key.public,
+            {MODERATION},
+            issued_at=clock() + timedelta(seconds=3),
+            lifetime=timedelta(days=1),
+        ).model_copy(update={"signature": future.signature})
+        store.add_record(conn, future)
+        store.add_record(conn, forged)
+    assert remote.whoami().scopes == [MODERATION, TASKS]
+    clock.advance(3)
+    assert remote.whoami().scopes == [TASKS]
 
 
 def test_routes_require_signed_post_json(
@@ -357,6 +385,8 @@ def test_cli_status_import_create_and_remove(
     result = runner.invoke(cli, ["operator", "status"])
     assert result.exit_code == 0, result.output
     assert all(word in result.output for word in [key.fingerprint, URL, "moderation", "tasks"])
+    assert sign.encode_public(key.public) in result.output.splitlines()
+    assert "PRIVATE KEY" not in result.output
     assert runner.invoke(cli, ["operator", "key", "remove"]).exit_code == 0
     assert installed.is_file()
     assert runner.invoke(cli, ["operator", "key", "remove", "--yes"]).exit_code == 0
@@ -397,3 +427,127 @@ def test_reports_and_validation(registry: Registry, key: sign.NodeKey, clock: Fa
     )
     with pytest.raises(operator.OperatorError, match="malformed"):
         remote.moderation(malformed)
+
+
+@pytest.mark.parametrize(
+    "path,kind,max_days",
+    [
+        (p.OPERATOR_JOB_ADD, sign.RecordKind.TASK, admin.MAX_JOB_DAYS),
+        (p.OPERATOR_CLUSTER_ADD, sign.RecordKind.CLUSTER_TASK, admin.CLUSTER_DAYS),
+        (p.OPERATOR_MODERATION, sign.RecordKind.MODERATION, p.MAX_MODERATION_DAYS),
+    ],
+)
+def test_record_term_limit(
+    registry: Registry,
+    db_path: Path,
+    root: sign.NodeKey,
+    root_pub: Path,
+    clock: FakeClock,
+    path: str,
+    kind: sign.RecordKind,
+    max_days: int,
+) -> None:
+    key = sign.NodeKey.generate()
+    with store.connection(db_path) as conn:
+        admin.assign(conn, root, key.public, {TASKS, MODERATION}, days=max_days + 2, now=clock())
+    n = node(registry, clock)
+    bodies = {
+        sign.RecordKind.TASK: p.Job(description="Do work", acceptance_criteria="Done"),
+        sign.RecordKind.CLUSTER_TASK: p.ClusterTask(goal="Do work", acceptance_criteria="Done"),
+        sign.RecordKind.MODERATION: p.Moderation(
+            node=n.fingerprint, action="suspend", reason="Test"
+        ),
+    }
+    peer = Node(registry, clock, key)
+    for seconds_over, expected in ((1, 400), (0, 200)):
+        signed = sign.sign(
+            key,
+            kind,
+            bodies[kind].model_dump(mode="json"),
+            issued_at=clock(),
+            lifetime=timedelta(days=max_days, seconds=seconds_over),
+        )
+        reply = peer.call("POST", path, {"record": signed.model_dump(mode="json")})
+        assert reply.status_code == expected, reply.text
+        if seconds_over:
+            assert reply.json()["error"] == "term"
+            with store.connection(db_path) as conn:
+                entry = store.entries(conn, 1)[0]
+            assert (entry.action, entry.node, entry.details["reason"]) == (
+                "refused",
+                key.fingerprint,
+                "term",
+            )
+
+
+@pytest.mark.parametrize("owner", ["", "a" * 65])
+def test_invalid_owner_length(
+    registry: Registry, db_path: Path, key: sign.NodeKey, clock: FakeClock, owner: str
+) -> None:
+    n = node(registry, clock)
+    peer = Node(registry, clock, key)
+    reply = peer.call("POST", p.OPERATOR_OWNER, {"node": n.fingerprint, "owner": owner})
+    assert (reply.status_code, reply.json()["error"]) == (400, "malformed")
+    with store.connection(db_path) as conn, pytest.raises(admin.AdminError):
+        admin.set_owner(conn, n.fingerprint, owner)
+    assert client(registry, key, clock).owner(n.fingerprint, "a" * 64).owner == "a" * 64
+
+
+def test_settlement_from_a_previous_inbox_round(
+    registry: Registry, db_path: Path, key: sign.NodeKey, clock: FakeClock
+) -> None:
+    remote = client(registry, key, clock)
+    task = p.Job(description="Do work", acceptance_criteria="Done")
+    signed = operator_records.job(key, task, days=1, now=clock(), until=remote.whoami().until)
+    id = remote.job_add(signed).job
+
+    def return_without_result() -> None:
+        with store.connection(db_path) as conn, store.write_transaction(conn):
+            row = work.job(conn, id)
+            assert row is not None and row.status == "execute"
+            work.to_operator(conn, row, "failures", {})
+
+    return_without_result()
+    assert remote.job_settle(id, "again").status == "execute"
+    with pytest.raises(operator.OperatorError, match="already_settled"):
+        remote.job_settle(id, "accept")
+    return_without_result()
+    with pytest.raises(operator.OperatorError, match="cannot_settle"):
+        remote.job_settle(id, "accept")
+    assert remote.job_settle(id, "again").status == "execute"
+
+
+def test_operator_record_signer_must_match_caller(
+    registry: Registry, db_path: Path, root: sign.NodeKey, key: sign.NodeKey, clock: FakeClock
+) -> None:
+    signer = assigned(db_path, root, clock, TASKS)
+    job = p.Job(description="Do work", acceptance_criteria="Done")
+    signed = operator_records.job(signer, job, days=1, now=clock(), until=None)
+    peer = Node(registry, clock, key)
+    reply = peer.call("POST", p.OPERATOR_JOB_ADD, {"record": signed.model_dump(mode="json")})
+    assert (reply.status_code, reply.json()["error"]) == (403, "wrong_signer")
+    with store.connection(db_path) as conn:
+        entry = store.entries(conn, 1)[0]
+        assert (entry.action, entry.node, entry.details["reason"]) == (
+            "refused",
+            key.fingerprint,
+            "wrong_signer",
+        )
+        assert work.job(conn, signed.record.id) is None
+
+
+def test_automatic_acceptance_is_not_an_operator_settlement(
+    registry: Registry, key: sign.NodeKey, clock: FakeClock
+) -> None:
+    remote = client(registry, key, clock)
+    task = p.Job(description="Do work", acceptance_criteria="Done")
+    signed = operator_records.job(key, task, days=1, now=clock(), until=remote.whoami().until)
+    id = remote.job_add(signed).job
+    executor, reviewer = node(registry, clock), node(registry, clock)
+    lent = claim(executor)
+    assert lent is not None and hand_in(executor, lent).status_code == 200
+    check = claim(reviewer)
+    assert check is not None and hand_in(reviewer, check).status_code == 200
+    assert remote.job(id).status == "accepted"
+    with pytest.raises(operator.OperatorError, match="cannot_settle"):
+        remote.job_settle(id, "accept")

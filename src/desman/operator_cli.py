@@ -34,27 +34,36 @@ def fingerprint(key: sign.NodeKey | None) -> str | None:
 
 
 def show_status(
-    manager: ConfigManager, conn: sqlite3.Connection | None = None
+    manager: ConfigManager, conn: sqlite3.Connection | None = None, *, for_chat: bool = False
 ) -> dict[str, object]:
     key = current_key()
     if key is None:
         ui.note(t("No operator key. Use {command}.", command=_KEY_HELP))
         return {"fingerprint": None}
+    public = sign.encode_public(key.public)
     ui.out(Text(t("Operator key: {fingerprint}", fingerprint=key.fingerprint)))
+    ui.out(Text(public))
     try:
         address = net.operator_registry(manager.load())
     except ConfigError as e:
         raise click.ClickException(str(e)) from e
     if address is None:
         ui.note(t("No registry address. Set it with --registry URL."))
-        return {"fingerprint": key.fingerprint, "registry": None}
+        return {"fingerprint": key.fingerprint, "public_key": public, "registry": None}
     ui.out(Text(t("Registry: {address}", address=address)))
     try:
         identity = operator.OperatorClient(address, key).whoami()
     except operator.OperatorError as e:
-        raise click.ClickException(
-            t("Operator status unavailable ({reason}).", reason=e.reason)
-        ) from e
+        message = t("Operator status unavailable ({reason}).", reason=e.reason)
+        if not for_chat:
+            raise click.ClickException(message) from e
+        ui.error(message)
+        return {
+            "fingerprint": key.fingerprint,
+            "public_key": public,
+            "registry": address,
+            "error": message,
+        }
     ui.out(
         Text(
             t(
@@ -67,7 +76,7 @@ def show_status(
     )
     with journal(conn) as opened:
         netlog.record(opened, "operator_status", {"fingerprint": identity.fingerprint})
-    return {**identity.model_dump(mode="json"), "registry": address}
+    return {**identity.model_dump(mode="json"), "public_key": public, "registry": address}
 
 
 @dataclass(frozen=True)
@@ -123,6 +132,15 @@ class KeyChange:
         except ConfigError as e:
             raise click.ClickException(str(e)) from e
         return logged
+
+
+def show_created_key(key: sign.NodeKey) -> dict[str, str]:
+    public = sign.encode_public(key.public)
+    command = f"desman-registry assign {public}"
+    ui.out(Text(t("Operator key: {fingerprint}", fingerprint=key.fingerprint)))
+    ui.out(Text(public))
+    ui.out(Text(command))
+    return {"fingerprint": key.fingerprint, "public_key": public, "assign_command": command}
 
 
 def prepare_import(source: Path, registry: str | None, *, replace: bool) -> KeyChange:
@@ -189,12 +207,9 @@ def import_command(file: Path, registry: str | None, replace: bool) -> None:
 def create_command(registry: str | None) -> None:
     """Create an operator key and show its public key."""
     change = prepare_create(_registry(registry))
-    value = change.apply(load_config())
+    change.apply(load_config())
     assert change.key is not None
-    public = sign.encode_public(change.key.public)
-    ui.out(Text(t("Operator key: {fingerprint}", fingerprint=value)))
-    ui.out(Text(public))
-    ui.out(Text(f"desman-registry assign {public}"))
+    show_created_key(change.key)
 
 
 @key_group.command("remove")

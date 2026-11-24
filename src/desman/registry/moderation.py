@@ -237,6 +237,8 @@ def _add(
         body = p.Moderation.model_validate(record.body)
     except ValidationError as e:
         raise sign.Refused(sign.Reason.MALFORMED, "invalid moderation body") from e
+    if body.action == "suspend":
+        store.check_term(record, p.MAX_MODERATION_DAYS)
     if store.node(conn, body.node) is None:
         raise admin.Missing(t("No node {key}.", key=body.node))
     if len(set(body.complaints)) != len(body.complaints):

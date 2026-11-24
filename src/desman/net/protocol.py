@@ -1029,7 +1029,7 @@ class OperatorReportQuery(OperatorBody):
 
 class OperatorOwner(OperatorBody):
     node: OperatorPrefix
-    owner: str | None
+    owner: str | None = Field(min_length=1, max_length=64)
 
 
 class OperatorLogQuery(OperatorBody):

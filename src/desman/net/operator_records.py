@@ -33,6 +33,7 @@ def job(
     )
 
 
+MAX_JOB_DAYS = 90
 CLUSTER_DAYS = 30
 
 

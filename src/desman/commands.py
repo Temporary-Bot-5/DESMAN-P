@@ -2187,12 +2187,15 @@ class OperatorImportArgs(OperatorCreateArgs):
 
 
 def _operator_status(ctx: Context, args: NoArgs) -> Outcome:
-    return Outcome(operator_cli.show_status(ctx.manager, ctx.store.conn))
+    return Outcome(operator_cli.show_status(ctx.manager, ctx.store.conn, for_chat=True))
 
 
 def _operator_key_change(ctx: Context, change: operator_cli.KeyChange) -> Proposal:
     def apply() -> Outcome:
         value = change.apply(ctx.manager, ctx.store.conn)
+        if change.action == "create":
+            assert change.key is not None
+            return Outcome(operator_cli.show_created_key(change.key))
         return Outcome({"fingerprint": value})
 
     return Proposal(change.lines, apply)
@@ -2214,7 +2217,7 @@ def _operator_key_remove(ctx: Context, args: NoArgs) -> Proposal:
 CATALOG: tuple[Entry, ...] = (
     Entry(
         "operator status",
-        "Show the local operator fingerprint, registry, scopes and term.",
+        "Show the local operator fingerprint, public key, registry, scopes and term.",
         NoArgs,
         Kind.READ,
         _operator_status,
@@ -2229,8 +2232,8 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "operator key create",
-        "Create a local operator key after confirmation. Use the terminal "
-        "command to obtain the public key and assignment command for the root owner.",
+        "Create a local operator key after confirmation and show the public key "
+        "and assignment command for the root owner.",
         OperatorCreateArgs,
         Kind.CHANGE,
         _operator_key_create,

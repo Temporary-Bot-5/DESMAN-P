@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -30,21 +29,24 @@ class Refusal(Exception):
 def assignment(
     conn: sqlite3.Connection, fingerprint: str, root: Ed25519PublicKey, now: datetime
 ) -> sign.Operator:
-    row = conn.execute(
-        "SELECT signed_json FROM records WHERE subject = ? AND kind = 'assignment'"
-        " ORDER BY issued_at DESC, seq DESC LIMIT 1",
-        (fingerprint,),
-    ).fetchone()
-    if row is not None and not store.is_revoked(conn, fingerprint):
-        believed = sign.Trust(root, clock=lambda: now)
-        try:
-            record = believed.receive(json.loads(row["signed_json"]))
-        except sign.Refused:
-            pass
-        else:
+    if not store.is_revoked(conn, fingerprint):
+        rows = conn.execute(
+            "SELECT signed_json FROM records WHERE subject = ? AND kind = 'assignment'"
+            " ORDER BY issued_at DESC, seq DESC",
+            (fingerprint,),
+        )
+        for row in rows:
+            believed = sign.Trust(root, clock=lambda: now)
+            try:
+                record = believed.receive(row["signed_json"])
+            except sign.Refused:
+                continue
             found = believed.operator(fingerprint)
-            if found is not None and found.scopes & {TASKS, MODERATION} and record.issued_at <= now:
+            if found is None or record.issued_at > now:
+                continue
+            if found.scopes & {TASKS, MODERATION}:
                 return found
+            break
     raise Refusal("not_operator", 403)
 
 
@@ -62,7 +64,7 @@ class Actions:
 
     def check_record(self, signed: sign.Signed) -> None:
         if signed.record.signer != self.identity.fingerprint:
-            raise Refusal("scope", 403)
+            raise Refusal("wrong_signer", 403)
         if signed.record.expires_at > self.identity.until:
             raise Refusal("expired", 403)
 
@@ -141,20 +143,13 @@ def _cluster(ctx: Actions, row: clusters.ClusterTaskRow) -> p.OperatorCluster:
     return p.OperatorCluster.model_validate(fields)
 
 
-def _settle_error(
-    conn: sqlite3.Connection, action: str, field: str, id: str, status: str
-) -> Refusal:
-    if status in {"accepted", "dropped"}:
-        return Refusal("already_settled", 409)
-    # The decision to try again parks work in its queue. Check whether it was settled
-    # before calling a refused decision on queued or active work a repeated settlement.
-    if (
-        status in {"execute", "recheck", "waiting", "running"}
-        and conn.execute(
-            "SELECT 1 FROM registry_log WHERE action=? AND json_extract(details_json, ?) = ? LIMIT 1",
-            (action, field, id),
-        ).fetchone()
-    ):
+def _settle_error(conn: sqlite3.Connection, kind: str, field: str, id: str) -> Refusal:
+    latest = conn.execute(
+        "SELECT action FROM registry_log WHERE action IN (?, ?)"
+        " AND json_extract(details_json, ?) = ? ORDER BY seq DESC LIMIT 1",
+        (f"{kind}_settled", f"{kind}_to_operator", field, id),
+    ).fetchone()
+    if latest is not None and latest["action"] == f"{kind}_settled":
         return Refusal("already_settled", 409)
     return Refusal("cannot_settle", 409)
 
@@ -204,7 +199,7 @@ def job_settle(ctx: Actions, asked: p.OperatorSettle) -> tuple[p.OperatorJob, st
     try:
         row = work.settle(ctx.conn, id, asked.decision, ctx.now)
     except work.SettleError as e:
-        raise _settle_error(ctx.conn, "job_settled", "$.job", id, e.status) from e
+        raise _settle_error(ctx.conn, "job", "$.job", id) from e
     return p.OperatorJob.model_validate(row.as_json()), id
 
 
@@ -254,7 +249,7 @@ def cluster_settle(ctx: Actions, asked: p.OperatorClusterSettle) -> tuple[p.Oper
     try:
         row = clusters.settle(ctx.conn, id, asked.decision, ctx.now, note=asked.note or "")
     except clusters.SettleError as e:
-        raise _settle_error(ctx.conn, "cluster_settled", "$.task", id, e.status) from e
+        raise _settle_error(ctx.conn, "cluster", "$.task", id) from e
     return _cluster(ctx, row), id
 
 
