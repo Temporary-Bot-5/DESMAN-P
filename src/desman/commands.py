@@ -49,6 +49,7 @@ from desman import (
     modules_cli,
     net,
     nodes_cli,
+    operator_cli,
     proposals_cli,
     protected_cli,
     providers,
@@ -2201,7 +2202,75 @@ def _docker_install(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     return Proposal(installation.lines(), apply)
 
 
+class OperatorCreateArgs(Args):
+    registry: RegistryUrl | None = None
+
+
+class OperatorImportArgs(OperatorCreateArgs):
+    file: str
+    replace: bool = False
+
+
+def _operator_status(ctx: Context, args: NoArgs) -> Outcome:
+    return Outcome(operator_cli.show_status(ctx.manager, ctx.store.conn, for_chat=True))
+
+
+def _operator_key_change(ctx: Context, change: operator_cli.KeyChange) -> Proposal:
+    def apply() -> Outcome:
+        value = change.apply(ctx.manager, ctx.store.conn)
+        if change.action == "create":
+            assert change.key is not None
+            return Outcome(operator_cli.show_created_key(change.key))
+        return Outcome({"fingerprint": value})
+
+    return Proposal(change.lines, apply)
+
+
+def _operator_key_import(ctx: Context, args: OperatorImportArgs) -> Proposal:
+    change = operator_cli.prepare_import(Path(args.file), args.registry, replace=args.replace)
+    return _operator_key_change(ctx, change)
+
+
+def _operator_key_create(ctx: Context, args: OperatorCreateArgs) -> Proposal:
+    return _operator_key_change(ctx, operator_cli.prepare_create(args.registry))
+
+
+def _operator_key_remove(ctx: Context, args: NoArgs) -> Proposal:
+    return _operator_key_change(ctx, operator_cli.prepare_remove())
+
+
 CATALOG: tuple[Entry, ...] = (
+    Entry(
+        "operator status",
+        "Show the local operator fingerprint, public key, registry, scopes and term.",
+        NoArgs,
+        Kind.READ,
+        _operator_status,
+    ),
+    Entry(
+        "operator key import",
+        "Import an operator key from a local PEM file after confirmation.",
+        OperatorImportArgs,
+        Kind.CHANGE,
+        _operator_key_import,
+        private=("file",),
+    ),
+    Entry(
+        "operator key create",
+        "Create a local operator key after confirmation and show the public key "
+        "and assignment command for the root owner.",
+        OperatorCreateArgs,
+        Kind.CHANGE,
+        _operator_key_create,
+    ),
+    Entry(
+        "operator key remove",
+        "Remove the local operator key after confirmation.",
+        NoArgs,
+        Kind.CHANGE,
+        _operator_key_remove,
+        typed_confirm=True,
+    ),
     Entry(
         "docker status",
         "Check Docker and its daemon.",
@@ -3212,6 +3281,7 @@ def parse_line(
                 entry.name
                 in {
                     "config reset",
+                    "operator key remove",
                     "search setup",
                     "search remove",
                     "sandbox setup",

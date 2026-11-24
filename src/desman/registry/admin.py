@@ -29,18 +29,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
 from desman.i18n import t
-from desman.net import protocol, sign
+from desman.net import operator_records, protocol, sign
 from desman.registry import clusters, store, work
 
 _BINARY: Final = getattr(os, "O_BINARY", 0)
 
 ASSIGNMENT_DAYS: Final = 90
 JOB_DAYS: Final = 7
+MAX_JOB_DAYS: Final = operator_records.MAX_JOB_DAYS
 TRUST_DAYS: Final = 7
 """How long a trust list lasts unless the person says otherwise."""
 MAX_TRUST_DAYS: Final = 30
 """The longest a trust list may last: a hidden revocation is hidden at most this long."""
-CLUSTER_DAYS: Final = 30
+CLUSTER_DAYS: Final = operator_records.CLUSTER_DAYS
 """The longest a cluster task lasts: its appointments (renewed every quarter hour) stay
 within what a node keeps of one cluster (`sign.MAX_APPOINTMENTS`)."""
 REVOCATION_LIFETIME: Final = timedelta(days=3650)
@@ -49,6 +50,18 @@ REVOCATION_LIFETIME: Final = timedelta(days=3650)
 
 class AdminError(ValueError):
     """Something the owner asked for that cannot be done; the message (translated) says why."""
+
+
+class Missing(AdminError):
+    pass
+
+
+class Ambiguous(AdminError):
+    pass
+
+
+class AlreadySettled(AdminError):
+    pass
 
 
 def load_root_key(path: Path, root_pub: Path | None = None) -> sign.NodeKey:
@@ -267,19 +280,17 @@ def add_job(
     """Sign the job as a `task` record and keep it, if a node would accept it. Its term ends
     with the operator's assignment at the latest: after that nodes refuse what it signed."""
     root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
-    lifetime = timedelta(days=days)
     assigned = store.trust(conn, root, now).operator(operator.fingerprint)
-    if assigned is not None:
-        lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
-    if lifetime <= timedelta(0):
-        raise AdminError(t("A node would refuse it: the assignment has ended."))
-    signed = sign.sign(
-        operator,
-        sign.RecordKind.TASK,
-        job.model_dump(mode="json"),
-        issued_at=now,
-        lifetime=lifetime,
-    )
+    try:
+        signed = operator_records.job(
+            operator,
+            job,
+            days=days,
+            now=now,
+            until=None if assigned is None else assigned.expires_at,
+        )
+    except operator_records.AssignmentEnded:
+        raise AdminError(t("A node would refuse it: the assignment has ended.")) from None
     try:
         return work.add(conn, signed, root, now)
     except sign.Refused as e:
@@ -289,16 +300,13 @@ def add_job(
 def find_job(conn: sqlite3.Connection, prefix: str) -> str:
     found = work.find(conn, prefix)
     if not found:
-        raise AdminError(t("No job {id}.", id=prefix))
+        raise Missing(t("No job {id}.", id=prefix))
     if len(found) > 1:
-        raise AdminError(t("More than one job starts with {id}; give more of it.", id=prefix))
+        raise Ambiguous(t("More than one job starts with {id}; give more of it.", id=prefix))
     return found[0]
 
 
-def settle(
-    conn: sqlite3.Connection, prefix: str, decision: work.Decision, *, now: datetime
-) -> work.JobRow:
-    job_id = find_job(conn, prefix)
+def ordinary_job(conn: sqlite3.Connection, job_id: str) -> None:
     found = work.job(conn, job_id)
     if found is not None and found.cluster is not None:
         raise AdminError(
@@ -309,6 +317,13 @@ def settle(
                 task=found.cluster[:8],
             )
         )
+
+
+def settle(
+    conn: sqlite3.Connection, prefix: str, decision: work.Decision, *, now: datetime
+) -> work.JobRow:
+    job_id = find_job(conn, prefix)
+    ordinary_job(conn, job_id)
     work.expire(conn, now)  # decided on where the job is now, not where nodes last left it
     try:
         return work.settle(conn, job_id, decision, now)
@@ -326,16 +341,18 @@ def settle(
 def find_node(conn: sqlite3.Connection, prefix: str) -> str:
     """A registered node by its fingerprint or the start of it (as `nodes` shows it)."""
     if not prefix or any(c not in "0123456789abcdef" for c in prefix):
-        raise AdminError(t("No node {key}.", key=prefix))
+        raise Missing(t("No node {key}.", key=prefix))
     found = [n.fingerprint for n in store.nodes(conn) if n.fingerprint.startswith(prefix)]
     if not found:
-        raise AdminError(t("No node {key}.", key=prefix))
+        raise Missing(t("No node {key}.", key=prefix))
     if len(found) > 1:
-        raise AdminError(t("More than one node starts with {key}; give more of it.", key=prefix))
+        raise Ambiguous(t("More than one node starts with {key}; give more of it.", key=prefix))
     return found[0]
 
 
 def set_owner(conn: sqlite3.Connection, prefix: str, owner: str | None) -> str:
+    if owner is not None and not 1 <= len(owner) <= 64:
+        raise AdminError(t("At most 64 characters."))
     fingerprint = find_node(conn, prefix)
     work.set_owner(conn, fingerprint, owner)
     return fingerprint
@@ -386,19 +403,17 @@ def add_cluster_task(
     if not 1 <= days <= CLUSTER_DAYS:
         raise AdminError(t("A cluster task lasts from 1 to {days} days.", days=CLUSTER_DAYS))
     root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
-    lifetime = timedelta(days=days)
     assigned = store.trust(conn, root, now).operator(operator.fingerprint)
-    if assigned is not None:
-        lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
-    if lifetime <= timedelta(0):
-        raise AdminError(t("A node would refuse it: the assignment has ended."))
-    signed = sign.sign(
-        operator,
-        sign.RecordKind.CLUSTER_TASK,
-        task.model_dump(mode="json"),
-        issued_at=now,
-        lifetime=lifetime,
-    )
+    try:
+        signed = operator_records.cluster_task(
+            operator,
+            task,
+            days=days,
+            now=now,
+            until=None if assigned is None else assigned.expires_at,
+        )
+    except operator_records.AssignmentEnded:
+        raise AdminError(t("A node would refuse it: the assignment has ended.")) from None
     try:
         return clusters.add(conn, signed, root, now)
     except sign.Refused as e:
@@ -408,9 +423,9 @@ def add_cluster_task(
 def find_cluster(conn: sqlite3.Connection, prefix: str) -> str:
     found = clusters.find(conn, prefix)
     if not found:
-        raise AdminError(t("No cluster task {id}.", id=prefix))
+        raise Missing(t("No cluster task {id}.", id=prefix))
     if len(found) > 1:
-        raise AdminError(
+        raise Ambiguous(
             t("More than one cluster task starts with {id}; give more of it.", id=prefix)
         )
     return found[0]

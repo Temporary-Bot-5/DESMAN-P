@@ -24,6 +24,8 @@ from desman.core.sessions import Kind, Role, Sessions
 from desman.core.states import Actor, SubtaskStatus
 from desman.core.store import Store
 from desman.interlocutor import Command
+from desman.net import operator as operator_key
+from desman.net import sign
 
 
 @pytest.fixture
@@ -560,6 +562,7 @@ def test_cli_confirmations_are_explicit_in_catalog() -> None:
     # CLI reset asks; uploads preview and require --confirm SHA256 to send.
     confirming = {
         "config reset",
+        "operator key remove",
         "global report",
         "global share",
         "global submit-proposal",
@@ -596,6 +599,58 @@ def test_typed_reset_keeps_cli_confirmation(
     Chat(sessions)._typed("config reset" + (" --yes" if yes else ""))
     assert bool(seen) is not yes
     assert open_config().config_path.exists() is not yes
+
+
+def test_operator_key_create_and_status_show_public_key(
+    sessions: Sessions, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ctx = commands.Context(Store(sessions.conn), open_config(), lambda *a: None, lambda *a: False)
+    create = commands.find("operator key create")
+    status = commands.find("operator status")
+    assert create is not None and status is not None
+    proposal = create.handler(ctx, commands.OperatorCreateArgs())
+    assert isinstance(proposal, commands.Proposal)
+    assert operator_key.load_key() is None
+    outcome = proposal.apply()
+    key = operator_key.load_key()
+    assert key is not None
+    public = sign.encode_public(key.public)
+    assignment = f"desman-registry assign {public}"
+    assert outcome.data == {
+        "fingerprint": key.fingerprint,
+        "public_key": public,
+        "assign_command": assignment,
+    }
+    shown = capsys.readouterr().out
+    assert public in shown.splitlines() and assignment in shown.splitlines()
+    assert "PRIVATE KEY" not in shown
+    status_outcome = status.handler(ctx, commands.NoArgs())
+    assert isinstance(status_outcome, commands.Outcome)
+    assert status_outcome.data["public_key"] == public
+    shown = capsys.readouterr().out
+    assert public in shown.splitlines() and "PRIVATE KEY" not in shown
+
+
+@pytest.mark.parametrize("yes", [False, True])
+def test_typed_operator_key_remove_keeps_confirmation(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, yes: bool
+) -> None:
+    public = operator_key.create_key()
+    key = operator_key.load_key()
+    assert key is not None
+    seen: list[commands.Proposal] = []
+
+    def decline(self: Chat, proposal: commands.Proposal) -> bool:
+        seen.append(proposal)
+        return False
+
+    monkeypatch.setattr(Chat, "_confirmed", decline)
+    Chat(sessions)._typed("operator key remove" + (" --yes" if yes else ""))
+    assert bool(seen) is not yes
+    assert operator_key.operator_key_path().exists() is not yes
+    if seen:
+        assert key.fingerprint in seen[0].lines[0]
+        assert public not in seen[0].lines[0]
 
 
 @pytest.mark.parametrize("name", ["global report", "global share", "global submit-proposal"])

@@ -346,7 +346,7 @@ def job() -> None:
     "--days",
     default=admin.JOB_DAYS,
     show_default=True,
-    type=click.IntRange(1, 90),
+    type=click.IntRange(1, admin.MAX_JOB_DAYS),
     help="How long nodes may take it.",
 )
 @click.option(

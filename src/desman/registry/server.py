@@ -10,8 +10,8 @@ reply.
 Every request is checked before anything else (`net.request.verify_request`): signature,
 time, nonce; then whether its key is revoked; then its body against `net.protocol`. A refusal
 is answered with a `protocol.Problem` and written to the journal with the key it claimed.
-Only `REGISTER` is open to a key the registry has not seen; everything else needs a node that
-takes part (`active`), and a signed request from one that does not is a refusal like any other.
+Node routes require an active node except where they establish its registration. Operator
+routes authorize the current root assignment independently of node registration.
 
 Work (G.6) is `registry/work.py`'s: `CLAIM` lends a job, `EXTEND` keeps the lease, `HAND_IN`
 takes a signed result or verdict. A token that names no lease the caller holds now is refused
@@ -52,7 +52,17 @@ from pydantic import BaseModel, ValidationError
 from desman.core import db
 from desman.net import protocol, request, sign
 from desman.net.sign import Reason, Refused
-from desman.registry import checks, clusters, messenger, releases, search, store, work
+from desman.registry import (
+    admin,
+    checks,
+    clusters,
+    messenger,
+    operator,
+    releases,
+    search,
+    store,
+    work,
+)
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 8470
@@ -242,6 +252,7 @@ class Registry:
                 return Reply(503, {"status": "unavailable"})
         path = target.split("?", 1)[0]
         route = self._routes.get(path)
+        operator_route = operator.ROUTES.get(path)
         if path.startswith(protocol.SEARCH_STATE):
             search_id = path.removeprefix(protocol.SEARCH_STATE)
             if re.fullmatch(r"[a-f0-9]{32}", search_id):
@@ -254,9 +265,12 @@ class Registry:
                     return _ok(search.get(conn, self._active(conn, caller), search_id))
 
                 route = ("GET", state)
-        if route is None:
+        if operator_route is not None:
+            wanted = "POST"
+        elif route is not None:
+            wanted = route[0]
+        else:
             return _problem(HTTPStatus.NOT_FOUND, NOT_FOUND)
-        wanted, handler = route
         if method != wanted:
             return _problem(HTTPStatus.METHOD_NOT_ALLOWED, NOT_ALLOWED_METHOD, wanted)
         if len(body) > protocol.MAX_BODY:
@@ -267,12 +281,22 @@ class Registry:
                 caller = request.verify_request(
                     method, target, body, headers, now=now, seen=store.NonceStore(conn)
                 )
+                if operator_route is not None:
+                    if target != path:
+                        raise operator.Refusal("malformed", HTTPStatus.BAD_REQUEST)
+                    return self._handle_operator(conn, caller, body, now, path, operator_route)
                 if store.is_revoked(conn, caller.fingerprint):
                     raise Refused(Reason.REVOKED, "this key is revoked", signer=caller.fingerprint)
-                return handler(conn, caller, body, now)
+                assert route is not None
+                return route[1](conn, caller, body, now)
             except Refused as e:
-                self._refused(conn, e.signer, e.reason.value, method, target)
+                self._refused(
+                    conn, e.signer, e.reason.value, method, path if operator_route else target
+                )
                 return _problem(_STATUS.get(e.reason, HTTPStatus.UNAUTHORIZED), e.reason.value)
+            except operator.Refusal as e:
+                self._refused(conn, caller.fingerprint, e.reason, method, path)
+                return _problem(e.status, e.reason)
             except _NotRegistered:
                 self._refused(conn, caller.fingerprint, NOT_REGISTERED, method, target)
                 return _problem(HTTPStatus.FORBIDDEN, NOT_REGISTERED)
@@ -288,6 +312,61 @@ class Registry:
             except work.LeaseLost:
                 self._refused(conn, caller.fingerprint, work.LEASE_LOST, method, target)
                 return _problem(HTTPStatus.CONFLICT, work.LEASE_LOST)
+
+    def _operator(
+        self,
+        conn: sqlite3.Connection,
+        caller: request.Caller,
+        scope: sign.Scope | None,
+        now: datetime,
+    ) -> protocol.OperatorIdentity:
+        assigned = operator.assignment(conn, caller.fingerprint, self.root, now)
+        if scope is not None and scope not in assigned.scopes:
+            raise operator.Refusal("scope", HTTPStatus.FORBIDDEN)
+        return protocol.OperatorIdentity(
+            fingerprint=caller.fingerprint,
+            scopes=sorted(assigned.scopes),
+            until=assigned.expires_at,
+        )
+
+    def _handle_operator(
+        self,
+        conn: sqlite3.Connection,
+        caller: request.Caller,
+        body: bytes,
+        now: datetime,
+        path: str,
+        route: operator.Route,
+    ) -> Reply:
+        try:
+            with db.transaction(conn):
+                identity = self._operator(conn, caller, route.scope, now)
+                context = operator.Actions(
+                    conn, self.root, now, lambda: self.appointer, self.online, identity
+                )
+                result, id = route.perform(context, body)
+                if route.writes:
+                    details = {"path": path}
+                    if id is not None:
+                        details["id"] = id
+                    store.log(conn, "operator", caller.fingerprint, details)
+                elif path == protocol.OPERATOR_COMPLAINT:
+                    store.log(conn, "operator_read_complaint", caller.fingerprint, {"id": id})
+                return _ok(result)
+        except Refused as e:
+            if e.reason is Reason.REPLAY:
+                raise operator.Refusal(e.reason.value, HTTPStatus.CONFLICT) from e
+            raise Refused(e.reason, str(e), id=e.id, signer=caller.fingerprint) from e
+        except store.RecordTermError as e:
+            raise operator.Refusal("term", HTTPStatus.BAD_REQUEST) from e
+        except admin.Missing as e:
+            raise operator.Refusal("not_found", HTTPStatus.NOT_FOUND) from e
+        except admin.Ambiguous as e:
+            raise operator.Refusal("ambiguous", HTTPStatus.CONFLICT) from e
+        except admin.AlreadySettled as e:
+            raise operator.Refusal("already_settled", HTTPStatus.CONFLICT) from e
+        except admin.AdminError as e:
+            raise operator.Refusal("invalid_decision", HTTPStatus.CONFLICT) from e
 
     def _search_ask(
         self, conn: sqlite3.Connection, caller: request.Caller, body: bytes, now: datetime

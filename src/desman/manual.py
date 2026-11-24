@@ -337,6 +337,16 @@ TOPICS: Final = (
         "dependencies. Chat changes require confirmation.",
     ),
     Topic(
+        "operator",
+        "Operator key setup and registry assignment",
+        "`/operator status` shows the key fingerprint, public key, registry, scopes and assignment expiry. "
+        "Use `/operator key import FILE` for an existing Ed25519 PEM key. "
+        "`/operator key create` generates a key and shows its public key "
+        "and the assignment command for the root owner. Import and create accept --registry URL. "
+        "`/operator key remove` previews removal in the terminal. Add --yes to remove it. "
+        "Key changes requested in chat require confirmation. The private key stays on this machine.",
+    ),
+    Topic(
         "globalsend",
         "Sending bug reports and shared memory to the registry",
         "`/global report TEXT` previews your problem description and system/version; "

@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import ValidationError
 
 from desman.core import db
-from desman.net import protocol, sign
+from desman.net import operator_records, protocol, sign
 from desman.net.sign import Reason, Refused
 from desman.registry import store, work
 
@@ -56,8 +56,8 @@ NEEDED: Final = 3
 """Free nodes before a cluster is formed: one leads, one executes, another rechecks."""
 MAX_OPERATORS_LOST: Final = 3
 
-Status = Literal["waiting", "running", "operator", "accepted", "dropped", "expired"]
-Decision = Literal["accept", "again", "drop"]
+Status = protocol.ClusterStatus
+Decision = protocol.OperatorDecision
 _Refuse = Callable[[Reason, str], Refused]
 Waiting = Literal["no_appointer", "appointer_not_assigned", "trust_list", "no_leader", "free"]
 
@@ -321,8 +321,11 @@ def add(
     except ValidationError as e:
         raise Refused(Reason.MALFORMED, str(e), id=record.id) from e
     cluster = uuid.uuid4().hex
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         store.trust(conn, root, now).receive(signed.model_dump(mode="json"))
+        store.check_term(record, operator_records.CLUSTER_DAYS)
+        if conn.execute("SELECT 1 FROM cluster_tasks WHERE id=?", (record.id,)).fetchone():
+            raise Refused(Reason.REPLAY, "record already stored", id=record.id)
         conn.execute(
             "INSERT INTO cluster_tasks (id, cluster, signer, signed_json, expires_at, status,"
             " created_at) VALUES (?, ?, ?, ?, ?, 'waiting', ?)",
@@ -361,7 +364,7 @@ def settle(
     start; operators lost → counted from zero), or `drop` it (its jobs with it)."""
     note = note.strip()[:2000]
     moment = db.to_iso(now)
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         found = cluster_task(conn, id)
         if found is None:
             raise SettleError("missing")
@@ -472,7 +475,7 @@ def tick(
     nodes are free. Its own transaction; run before anything reads or changes a cluster."""
     work.expire(conn, now)
     moment = db.to_iso(now)
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         for row in conn.execute(
             "SELECT id FROM cluster_tasks WHERE status IN ('waiting', 'running')"
             " AND expires_at <= ?",

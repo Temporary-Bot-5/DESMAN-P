@@ -494,6 +494,16 @@ def connection(path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+@contextmanager
+def write_transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Join an operator request's write transaction or start a standalone mutation."""
+    if conn.in_transaction:
+        yield conn
+    else:
+        with db.transaction(conn):
+            yield conn
+
+
 # ── Journal ──────────────────────────────────────────────────────────────────
 
 
@@ -758,6 +768,15 @@ def trust(conn: sqlite3.Connection, root: Ed25519PublicKey, now: datetime) -> si
         except sign.Refused:
             continue
     return believed
+
+
+class RecordTermError(ValueError):
+    """A record exceeds the registry limit for its kind."""
+
+
+def check_term(record: sign.Record, max_days: int) -> None:
+    if record.expires_at - record.issued_at > timedelta(days=max_days):
+        raise RecordTermError
 
 
 def add_record(conn: sqlite3.Connection, signed: sign.Signed) -> str:

@@ -352,7 +352,9 @@ preemption, self-improvement or network features before their phase).
   request the human confirms in the window). Agents must never write them; they are the
   upper bound of the tool policy (`src/desman/policy.toml`, which is code: changed by people
   through git, never by an agent). `network` (desman-global) likewise: set by the human only,
-  off by default; anything that talks to the registry gets its address from `net.registry()`.
+  off by default; anything that talks to the registry gets its address from `net.registry()`; the one
+  exception is operator mode (ADR 0016), which uses `net.operator_registry()` and only while
+  the person has installed an operator key.
 - A new CLI command also gets an entry in `commands.CATALOG` (a test requires it); the chat
   calls the same body function as the CLI, never the CLI itself.
 - A change that alters what DESMAN does for the person also updates the topic of

@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import ValidationError
 
 from desman.core import db
-from desman.net import protocol, sign
+from desman.net import operator_records, protocol, sign
 from desman.net.sign import Reason, Refused
 from desman.registry import checks, store
 
@@ -58,9 +58,9 @@ MAX_HELD: Final = 1
 
 LEASE_LOST: Final = "lease_lost"
 
-Status = Literal["execute", "recheck", "accepted", "operator", "dropped", "expired"]
+Status = protocol.JobStatus
 LENT: Final = ("execute", "recheck")
-Decision = Literal["accept", "again", "drop"]
+Decision = protocol.OperatorDecision
 
 
 class LeaseLost(Exception):
@@ -236,7 +236,7 @@ def expire(conn: sqlite3.Connection, now: datetime) -> None:
     record's term (and lent to nobody) is `expired`. Its own transaction. Run before anything
     that lends or hands in, and before the operator reads or decides (nothing else sweeps)."""
     moment = db.to_iso(now)
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         checks.expire(conn, now, MAX_LOST)
         lapsed = conn.execute(
             "SELECT token, job, node, stage FROM leases WHERE ended IS NULL AND expires_at <= ?",
@@ -612,8 +612,11 @@ def add(
     except ValidationError as e:
         raise Refused(Reason.MALFORMED, str(e), id=record.id) from e
     moment = db.to_iso(now)
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         store.trust(conn, root, now).receive(signed.model_dump(mode="json"))
+        store.check_term(record, operator_records.MAX_JOB_DAYS)
+        if conn.execute("SELECT 1 FROM jobs WHERE id=?", (record.id,)).fetchone():
+            raise Refused(Reason.REPLAY, "record already stored", id=record.id)
         conn.execute(
             "INSERT INTO jobs (id, signer, signed_json, expires_at, status, created_at)"
             " VALUES (?, ?, ?, ?, 'execute', ?)",
@@ -648,7 +651,7 @@ def settle(conn: sqlite3.Connection, job_id: str, decision: Decision, now: datet
     from the start (a new round: counts of lost leases and failures start over), or `drop` it
     (a lease held on it is withdrawn)."""
     moment = db.to_iso(now)
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         found = job(conn, job_id)
         if found is None:
             raise SettleError("missing")
@@ -685,7 +688,7 @@ def settle(conn: sqlite3.Connection, job_id: str, decision: Decision, now: datet
 
 def set_owner(conn: sqlite3.Connection, fingerprint: str, owner: str | None) -> bool:
     """Name whose node it is (None: its own). False if no such node registered."""
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         if store.node(conn, fingerprint) is None:
             return False
         conn.execute("UPDATE nodes SET owner = ? WHERE fingerprint = ?", (owner, fingerprint))
