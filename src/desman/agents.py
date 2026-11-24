@@ -588,9 +588,13 @@ class _ToolHistory:
             ):
                 exchange.fold(work, self.read_file_offered)
 
-        run_body = (
-            latest_run.render_run_output(TOOL_RESULT_BUDGET // 2) if latest_run is not None else ""
-        )
+        run_body = ""
+        if latest_run is not None:
+            budget = TOOL_RESULT_BUDGET // 2
+            if not any(entry is latest_run for entry in latest):
+                # Keep a short diagnostic from older runs without crowding out fresh results.
+                budget = min(budget, TOOL_RESULT_FOLD_CHARS)
+            run_body = latest_run.render_run_output(budget)
 
         compact = {
             pos

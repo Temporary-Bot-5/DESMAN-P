@@ -13,7 +13,7 @@ from click.testing import CliRunner, Result
 from pydantic import BaseModel, ConfigDict
 
 from conftest import FakeClock
-from desman import runs, task_files
+from desman import agents, runs, task_files
 from desman.agents import HONEST, NO_TOOLS, llm_executor
 from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
@@ -564,16 +564,20 @@ def test_last_run_must_pass_and_its_output_survives_later_tool_rounds(
     assert ran == ["check original file", "check edited file", "check repaired program"]
 
 
-def test_resuming_after_a_checkpoint_keeps_the_run_in_that_attempt(
-    store: Store, clock: FakeClock, tmp_path: Path
+@pytest.mark.parametrize("checkpoint", ["none", "before", "after"])
+def test_resuming_keeps_the_run_in_that_execution(
+    store: Store, clock: FakeClock, tmp_path: Path, checkpoint: str
 ) -> None:
     ran: list[str] = []
 
     def execute(work: Work) -> Success:
-        if work.context.checkpoint is None:
+        if not ran:
+            if checkpoint == "before":
+                work.heartbeat({"step": "before"})
             result = work.tools.call(ToolCall(tool="run_command", args={"command": "check"}))
             assert result.ok
-            work.heartbeat({"ran": True})
+            if checkpoint == "after":
+                work.heartbeat({"step": "after"})
             raise KeyboardInterrupt
         return Success(content={"stdout": "5\n"})
 
@@ -584,3 +588,41 @@ def test_resuming_after_a_checkpoint_keeps_the_run_in_that_attempt(
     run.abandoned = lambda _: True
     assert run.run(task_id).status is TaskStatus.DONE
     assert ran == ["check"]
+
+
+def test_older_run_keeps_a_short_tail_and_leaves_room_for_a_fresh_read(
+    store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agents, "TOOL_RESULT_BUDGET", 6000)
+    task_id = store.create_task(runs_code())
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("calc.py", "broken")
+    notes = "new diagnostics " * 260
+    workspace.write("notes.txt", notes)
+    fake = FakeLLM().on(
+        "Execute",
+        '{"tool_calls": [{"tool": "run_command", "args": {"command": "check edited file"}}]}',
+        '{"tool_calls": [{"tool": "read_file", "args": {"path": "notes.txt"}}]}',
+        '{"tool_calls": [{"tool": "run_command", "args": {"command": "check"}}]}',
+        '{"text": "Done."}',
+    )
+    ran: list[str] = []
+    run = coordinator(
+        store,
+        llm_executor(fake, format_final=False),
+        tmp_path,
+        clock,
+        ran,
+        Permission.SHELL,
+        Permission.WORKSPACE,
+    )
+    assert run.run(task_id).status is TaskStatus.DONE
+    after_run, after_read = [
+        [message.content for message in request.messages if "(tool results)" in message.content]
+        for request in fake.calls[1:3]
+    ]
+    assert sum(map(len, after_run)) > agents.TOOL_RESULT_FOLD_CHARS
+    assert any(
+        '"exit_code": 1' in message and "AssertionError" in message for message in after_read
+    )
+    assert any(notes in message for message in after_read)

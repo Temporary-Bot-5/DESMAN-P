@@ -18,7 +18,13 @@ import click
 import httpx
 
 from desman import documents, knowledge, net, providers, ui
-from desman.agents import CODE_TOOL_ROUNDS, MASTER_TOOL_ROUNDS, llm_executor, llm_reviewer
+from desman.agents import (
+    CODE_TOOL_ROUNDS,
+    MASTER_TOOL_ROUNDS,
+    MAX_TOOL_ROUNDS,
+    llm_executor,
+    llm_reviewer,
+)
 from desman.config import Config, ConfigError, MasterChoices, Tuning, open_config
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
@@ -820,6 +826,7 @@ def network_crew(
         by_kind=crew_models.kinds,
         clock=store.clock,
         format_final=False,
+        code_rounds=MAX_TOOL_ROUNDS,  # lent models share their owners' quotas
         tz=UTC,  # another node rechecks: one date for both, wherever they are
     )
     return Crew(

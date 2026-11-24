@@ -488,7 +488,6 @@ class Coordinator:
         lease = subtask.lease_token
         assert lease is not None
         journal = Effects(self.store, subtask.id, lease)  # a rerun replays, never repeats
-        checkpoint_position = journal.position
 
         def heartbeat(checkpoint: dict[str, Any] | None = None) -> None:
             self.store.heartbeat(
@@ -669,8 +668,8 @@ class Coordinator:
             outcome = Failure(kind=FailureKind.QUALITY, reason=_error_reason(outcome.content))
         elif isinstance(outcome, Success) and subtask.runs_code:
             run = tools.last_run
-            if run is None and checkpoint_position:
-                run = self._checkpoint_run(journal, checkpoint_position)
+            if run is None:
+                run = self._journal_run(journal)
             output = run.output if run is not None and run.ok else None
             if not isinstance(output, dict) or output.get("exit_code") != 0:
                 reason = (
@@ -748,10 +747,10 @@ class Coordinator:
             if row["state"] == "done"
         ]
 
-    def _checkpoint_run(self, journal: Effects, position: int) -> ToolResult | None:
-        """The last run in the completed prefix a resumed executor skips."""
+    def _journal_run(self, journal: Effects) -> ToolResult | None:
+        """The most recent run in this execution, including calls after a checkpoint."""
         for row in reversed(self.store.effects(journal.subtask_id, journal.execution)):
-            if row["ordinal"] < position and row["tool"] == RUN_TOOL:
+            if row["tool"] == RUN_TOOL:
                 if row["state"] == "done":
                     return ToolResult.model_validate_json(row["result_json"])
                 return ToolResult(ok=False, error="interrupted run_command")

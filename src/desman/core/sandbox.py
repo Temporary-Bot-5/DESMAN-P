@@ -1325,16 +1325,21 @@ class _Tail:
         self.limit = limit
         self.data = bytearray()
         self.cut = False
+        self._byte_cut = False
 
     def add(self, chunk: bytes) -> None:
         self.data += chunk
         excess = len(self.data) - 4 * self.limit
         if excess > 0:
             del self.data[:excess]
-            self.cut = True
+            self.cut = self._byte_cut = True
 
     def text(self) -> str:
-        text = self.data.decode("utf-8", errors="replace")
+        start = 0
+        if self._byte_cut:
+            while start < len(self.data) and 0x80 <= self.data[start] <= 0xBF:
+                start += 1
+        text = self.data[start:].decode("utf-8", errors="replace")
         if len(text) > self.limit:
             self.cut = True
             text = text[-self.limit :] if self.limit else ""
@@ -1565,8 +1570,6 @@ class _WasiSpec(BaseModel):
     timeout: float
     memory_bytes: int
     stdin: Path
-    stdout: Path
-    stderr: Path
     result: Path
     ready: Path
 
@@ -1586,12 +1589,6 @@ def _wasi_runner_command(spec: Path) -> list[str]:
     # Isolated mode ignores PYTHONPATH. Explicitly load this checkout in source/editable runs.
     bootstrap = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(sys.argv.pop(1), run_name='__main__')"
     return [sys.executable, "-I", "-c", bootstrap, str(source), runner, str(spec)]
-
-
-def _wasi_output_over_limit(path: Path, chars: int, limits: Limits) -> bool:
-    # Leave headroom for ordinary output truncation before terminating a writer.
-    cap = min(limits.file_bytes, 4 * chars + 64 * 1024)
-    return path.stat().st_size > cap
 
 
 def _workspace_files(root: Path) -> Iterator[tuple[Path, os.stat_result]]:
@@ -1657,25 +1654,6 @@ def _wait_wasi(
         if now >= deadline:
             note = "" if ready else "Timed out loading the WebAssembly sandbox.\n"
             return _WasiResult(trap=note)
-        if _wasi_output_over_limit(
-            spec.stdout, limits.stdout_chars, limits
-        ) or _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits):
-            # A large final write can reach the files just before the runner exits.
-            # Give teardown one polling interval before terminating an active writer.
-            try:
-                process.wait(timeout=min(0.2, deadline - now))
-            except subprocess.TimeoutExpired:
-                if process.poll() is None:
-                    _kill(process)
-                    code = process.wait()
-                    if sys.platform == "win32":
-                        killed = code == 1
-                    else:
-                        killed = code == -signal.SIGKILL
-                    if killed:
-                        return _WasiResult(
-                            exit_code=1, trap="WebAssembly sandbox output limit exceeded.\n"
-                        )
 
 
 def _wasi_exit_result(code: int, spec: _WasiSpec) -> _WasiResult:
@@ -1714,14 +1692,10 @@ def _execute_wasi(
                 timeout=limits.timeout,
                 memory_bytes=limits.memory_bytes,
                 stdin=scratch / "stdin",
-                stdout=scratch / "stdout",
-                stderr=scratch / "stderr",
                 result=scratch / "result.json",
                 ready=scratch / "ready",
             )
             spec.stdin.write_bytes(stdin.encode("utf-8"))
-            spec.stdout.touch()
-            spec.stderr.touch()
             config = scratch / "spec.json"
             config.write_text(spec.model_dump_json(), encoding="utf-8")
             return _run_wasi_child(config, spec, limits)
@@ -1741,32 +1715,35 @@ def _run_wasi_child(config: Path, spec: _WasiSpec, limits: Limits) -> Outcome:
         else {}
     )
     before = {path: _file_version(info) for path, info in _workspace_files(spec.workdir)}
+    stdout, stderr = _Tail(limits.stdout_chars), _Tail(limits.stderr_chars)
     # This child runs DESMAN's trusted runner. Generated code executes only inside Wasmtime.
     with subprocess.Popen(
         _wasi_runner_command(config),
         cwd=config.parent,
         env=env,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         start_new_session=not windows,
         creationflags=_WINDOWS_PROCESS_GROUP if windows else 0,
     ) as process:
+        assert process.stdout is not None and process.stderr is not None
+        readers = [
+            threading.Thread(target=_read_output, args=(process.stdout, stdout)),
+            threading.Thread(target=_read_output, args=(process.stderr, stderr)),
+        ]
         try:
+            for reader in readers:
+                reader.start()
             result = _wait_wasi(process, spec, limits, before)
         finally:
             if process.returncode is None:
                 _kill(process)
                 process.wait()
+            for reader in readers:
+                if reader.ident is not None:
+                    reader.join()
 
-    stdout_cut = _wasi_output_over_limit(spec.stdout, limits.stdout_chars, limits)
-    stderr_cut = _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits)
-    stdout, stderr = _Tail(limits.stdout_chars), _Tail(limits.stderr_chars)
-    for path, tail in ((spec.stdout, stdout), (spec.stderr, stderr)):
-        with path.open("rb") as stream:
-            size = stream.seek(0, os.SEEK_END)
-            stream.seek(max(0, size - 4 * tail.limit - 1))
-            tail.add(stream.read())
     if result.trap:
         stderr.add(result.trap.encode("utf-8"))
     return Outcome(
@@ -1774,6 +1751,6 @@ def _run_wasi_child(config: Path, spec: _WasiSpec, limits: Limits) -> Outcome:
         stdout.text(),
         stderr.text(),
         result.exit_code is None,
-        stdout_cut or stdout.cut,
-        stderr_cut or stderr.cut,
+        stdout.cut,
+        stderr.cut,
     )

@@ -27,7 +27,7 @@ from desman.core.audit import check_history
 from desman.core.coordinator import Coordinator, Review, Verdict
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.policy import Permission, executor_access
-from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable
+from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable, _Tail
 from desman.core.states import TaskStatus
 from desman.core.store import Store
 from desman.core.tools import MAX_RUN_SECONDS, Toolbox, ToolCall, builtin_registry
@@ -426,3 +426,11 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
         and ("cannot be started" if sys.platform.startswith("linux") else "Docker is not installed")
         in output
     )
+
+
+def test_output_tail_skips_continuation_bytes_at_the_cut() -> None:
+    tail = _Tail(4)
+    tail.add(b"x" + bytes([0x80]) * 18)
+    tail.add("éé".encode())
+    assert tail.cut
+    assert tail.text() == "éé"

@@ -261,11 +261,13 @@ def require_pass(conn: sqlite3.Connection, model: str) -> None:
         "SELECT outcome, version, result_json FROM master_checks WHERE model = ? ORDER BY id DESC LIMIT 1",
         (model,),
     ).fetchone()
+    limits = json.loads(latest["result_json"]).get("limits") if latest is not None else None
     if (
         latest is None
         or latest["outcome"] != "passed"
         or latest["version"] != bench.VERSION
-        or json.loads(latest["result_json"]).get("limits") != runs.TUNING_DEFAULTS
+        or not isinstance(limits, dict)
+        or {**runs.TUNING_DEFAULTS, **limits} != runs.TUNING_DEFAULTS
     ):
         raise click.ClickException(
             t(

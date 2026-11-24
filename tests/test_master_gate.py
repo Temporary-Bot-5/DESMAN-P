@@ -7,13 +7,14 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import click
 import httpx
 import pytest
 from click.testing import CliRunner, Result
 from pydantic import ValidationError
 
 from conftest import FakeClock
-from desman import bench, commands, improve, local_models, providers, runs, tuning_cli
+from desman import bench, commands, improve, local_models, master_cli, providers, runs, tuning_cli
 from desman.cli import cli
 from desman.config import Config, MasterChoices, Tuning, open_config, upgrade
 from desman.core import calls, db, operator, proposals
@@ -171,6 +172,24 @@ def test_bench_uses_one_master_and_no_planner(
         assert row["tools"] == Tools.NONE.value
         [subtask] = store.list_subtasks(row["id"])
         assert subtask.master
+
+
+def test_master_check_accepts_limits_recorded_before_code_rounds(store: Store) -> None:
+    limits = dict(runs.TUNING_DEFAULTS)
+    del limits["code_rounds"]
+
+    def record() -> None:
+        store.conn.execute(
+            "INSERT INTO master_checks (model, version, outcome, result_json) VALUES (?, ?, ?, ?)",
+            (CANDIDATE, bench.VERSION, "passed", json.dumps({"limits": limits})),
+        )
+
+    record()
+    master_cli.require_pass(store.conn, CANDIDATE)
+    limits["master_rounds"] += 1
+    record()
+    with pytest.raises(click.ClickException, match="needs a passing check"):
+        master_cli.require_pass(store.conn, CANDIDATE)
 
 
 def test_cli_check_admit_revoke_and_latest_version(

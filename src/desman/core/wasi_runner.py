@@ -73,11 +73,9 @@ def _start(engine: wasmtime.Engine, module: wasmtime.Module, spec: _WasiSpec) ->
             wasi.preopen_dir(str(spec.root / "py/lib"), "/lib", False)
             wasi.preopen_dir(str(spec.root / "site"), "/site", False)
             wasi.preopen_dir(str(spec.workdir), MOUNT_POINT, True)
-            wasi.stdin_file, wasi.stdout_file, wasi.stderr_file = (
-                str(spec.stdin),
-                str(spec.stdout),
-                str(spec.stderr),
-            )
+            wasi.stdin_file = str(spec.stdin)
+            wasi.inherit_stdout()
+            wasi.inherit_stderr()
             store.set_wasi(wasi)
         store.set_limits(memory_size=spec.memory_bytes)
         store.set_epoch_deadline(1)
