@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from desman import (
     __version__,
     actions,
+    commands,
     documents,
     i18n,
     knowledge,
@@ -34,7 +35,7 @@ from desman import (
 )
 from desman.actions import find_task, open_existing, print_report
 from desman.chat import Chat
-from desman.config import Config, ConfigError, MasterChoices, Tuning, open_config
+from desman.config import Config, ConfigError, ConfigManager, MasterChoices, Tuning, open_config
 from desman.config_cli import (
     behaviour,
     config,
@@ -188,19 +189,46 @@ def cli(ctx: click.Context, resume: bool, temporary: bool, launcher: bool) -> No
 def _open_interface(resume: bool, temporary: bool) -> None:
     manager = load_config()
     if not manager.is_configured():
-        run_wizard(manager)
-    if manager.load().interface == "gui":
-        from desman.gui.app import run
-
-        run(resume, temporary, 0, True)
+        with ui.chat_output():
+            run_wizard(manager)
+    if manager.load().interface == "gui" and _open_page(resume, temporary):
         return
-    print_project_info(manager)
+    session_id = None
+    while True:
+        chat = _terminal_chat(manager, resume, temporary, session_id)
+        if not chat.open_page:
+            return
+        session_id = chat.page_session
+        resume = temporary = False
+        if _open_page(resume, temporary, session_id):
+            return
+
+
+def _open_page(resume: bool, temporary: bool, session_id: str | None = None) -> bool:
+    from desman.gui.app import ServerStartError, run
+
+    try:
+        run(resume, temporary, 0, True, session_id=session_id)
+    except ServerStartError as e:
+        with ui.chat_output():
+            ui.error(e.format_message())
+        return False
+    return True
+
+
+def _terminal_chat(
+    manager: ConfigManager, resume: bool, temporary: bool, session_id: str | None
+) -> Chat:
+    with ui.chat_output():
+        print_project_info(manager)
     try:
         conn = db.open_db()
     except (db.SchemaVersionError, db.SchemaMismatchError) as e:
         raise click.ClickException(str(e)) from e
     try:
-        Chat(Sessions(conn), resume=resume, temporary=temporary).run()
+        chat = Chat(Sessions(conn), resume=resume, temporary=temporary, session_id=session_id)
+        chat.run()
+        return chat
     finally:
         conn.close()
 
@@ -232,10 +260,7 @@ def _open_interface(resume: bool, temporary: bool) -> None:
 def gui(port: int, no_browser: bool, resume: bool, temporary: bool, shortcut: bool) -> None:
     """Open the chat as a local web page."""
     if shortcut:
-        from desman.gui.shortcuts import create
-
-        for path in create():
-            ui.ok(t("Shortcut created: {path}", path=str(path)))
+        commands.create_shortcuts()
         return
     if resume and temporary:
         raise click.UsageError(t("A temporary chat starts afresh: -c and -t do not go together."))

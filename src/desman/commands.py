@@ -101,6 +101,7 @@ class Outcome:
     """False: the person left the window empty or cancelled it; nothing changed."""
     exit_message: str | None = None
     """When set, display this message and close the chat after the command."""
+    open_page: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,7 @@ class Context:
     continue_task: Callable[[actions.Continuation], None] | None = None
     """Plan what a continuation adds and add it to the task (ADR 0010), then run it further:
     the chat's, with its models. None where nothing can be planned."""
+    on_page: bool = False
 
     def config(self) -> Config:
         try:
@@ -583,15 +585,38 @@ class PermissionArgs(Args):
     revoke: list[Permission] = []
 
 
-# ── Read ─────────────────────────────────────────────────────────────────────
+class GuiArgs(Args):
+    shortcut: bool = False
 
 
-def _gui(ctx: Context, args: NoArgs) -> Outcome:
-    message = t(
-        "Open the page with desman gui in a terminal; desman gui --shortcut creates a shortcut."
+# ── Frontend ─────────────────────────────────────────────────────────────────
+
+
+def create_shortcuts() -> None:
+    from desman.gui.shortcuts import create
+
+    for path in create():
+        ui.ok(t("Shortcut created: {path}", path=str(path)))
+
+
+def _gui(ctx: Context, args: GuiArgs) -> Outcome | Proposal:
+    if args.shortcut:
+
+        def apply() -> Outcome:
+            create_shortcuts()
+            return Outcome(None)
+
+        return Proposal([t("Create DESMAN shortcuts.")], apply)
+    if ctx.on_page:
+        ui.note(t("The page is already open."))
+        return Outcome(None)
+    return Proposal(
+        [t("Open the page in your browser.")],
+        lambda: Outcome(None, open_page=True),
     )
-    ui.note(message)
-    return Outcome({"message": message})
+
+
+# ── Read ─────────────────────────────────────────────────────────────────────
 
 
 def print_help(*, shell: bool = False, terminal: bool = False, temporary: bool = False) -> None:
@@ -1715,7 +1740,7 @@ window says how many are left for the next one."""
 def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     """The chat's worker: the unfinished tasks in turn, most urgent first (the oldest among
     equals), each as `resume` runs it (live progress, retold), until none has work left. It does
-    not wait for new tasks: that is the CLI's `desman worker`, in a terminal of its own."""
+    not wait for new tasks."""
     # Every unfinished task is a candidate: the most urgent may be the oldest.
     active = [
         r
@@ -2212,9 +2237,9 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "gui",
-        "Explain desman gui and desman gui --shortcut; never create a shortcut from the chat.",
-        NoArgs,
-        Kind.READ,
+        "Open the browser page, or create DESMAN shortcuts with shortcut=true.",
+        GuiArgs,
+        Kind.CHANGE,
         _gui,
     ),
     Entry(
@@ -2313,9 +2338,7 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "worker",
-        "Work on every unfinished task in turn until none has work left (the CLI's worker keeps "
-        "waiting for new work in a terminal of its own; in the chat it stops when idle). The "
-        "person confirms.",
+        "Work on every unfinished task in turn until none has work left. The person confirms.",
         NoArgs,
         Kind.CHANGE,
         _worker,
@@ -3120,7 +3143,12 @@ def parse_line(
     entry = find(" ".join(path))
     if entry is None:
         raise BadArgs(t("DESMAN has no command {name}.", name=" ".join(path or words[:1]) or "/"))
+    if entry.name == "gui" and words == ["shortcut"]:
+        words = ["--shortcut"]
     if "--help" in words:
+        if entry.name == "worker":
+            ui.note(t("Use /worker to work on unfinished tasks until idle."))
+            return None
         with command.make_context(entry.name, [], resilient_parsing=True) as ctx:
             ui.out(Text(command.get_help(ctx)))
         return None

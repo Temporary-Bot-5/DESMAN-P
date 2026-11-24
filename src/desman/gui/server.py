@@ -217,7 +217,7 @@ def strings() -> dict[str, str]:
         "stop": t("Stop"),
         "ended": t("DESMAN finished, you can close this tab"),
         "offline": t("DESMAN is not running"),
-        "open": t("Open the page with desman gui in a terminal."),
+        "open": t("Start DESMAN again to reopen the page."),
         "invalid": t("Please check your answer and try again."),
     }
 

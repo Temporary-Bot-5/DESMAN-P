@@ -261,7 +261,7 @@ def test_nodes_from_the_command_line() -> None:
     assert "Cats." not in run("list", "--json").output  # texts are not listed
     assert "Cats." in run("show", "projects/site").output
     manual = json.loads(run("show", "DESMAN/Manual/nodes", "--json").output)
-    assert manual["origin"] == "release" and "desman nodes" in manual["text"]
+    assert manual["origin"] == "release" and "/nodes" in manual["text"]
     assert run("change", "Projects/Site").exit_code == 1  # says what to change
     assert run("change", "Projects/Site", "--to", "Projects/Shop", "--text", "Dogs.").exit_code == 0
     assert kept() == [("Projects/Shop", "Dogs.", Author.PERSON, False)]

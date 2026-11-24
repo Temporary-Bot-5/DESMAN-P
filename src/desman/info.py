@@ -46,7 +46,7 @@ def print_project_info(config_manager: ConfigManager) -> None:
         Text("● ", style="good") + Text(tn(len(ready), "{n} provider ready", "{n} providers ready"))
         if ready
         else Text("● ", style="warn")
-        + Text(t("no provider ready: run `desman config`"), style="warn")
+        + Text(ui.chat_hint(t("no provider ready: run `desman config`")), style="warn")
     )
     if ready:
         status.append("  " + ", ".join(p.name for p in ready), style="muted")
@@ -55,7 +55,7 @@ def print_project_info(config_manager: ConfigManager) -> None:
     commands.add_column(style="key", no_wrap=True)
     commands.add_column(style="muted")
     for cmd, what in _commands():
-        commands.add_row(cmd, what)
+        commands.add_row(ui.chat_hint(cmd), what)
 
     ui.out(
         Panel(

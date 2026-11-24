@@ -233,7 +233,7 @@ def test_first_run_opens_gui_immediately_if_chosen(monkeypatch: pytest.MonkeyPat
     )
     assert result.exit_code == 0, result.output
     assert saved().load().interface == "gui"
-    run.assert_called_once_with(False, False, 0, True)
+    run.assert_called_once_with(False, False, 0, True, session_id=None)
 
 
 def test_interface_section_saves_and_uses_the_current_default(

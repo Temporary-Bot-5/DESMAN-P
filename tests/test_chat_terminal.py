@@ -913,3 +913,40 @@ def test_decision_without_models_shows_resume_hint(
     chat._terminal_command(f"retry {subtask.id}")
     assert "Continue with: desman resume" in capsys.readouterr().out
     assert chat.store.get_subtask(subtask.id).status is SubtaskStatus.READY
+
+
+def test_command_hints_match_general_terminal_recording(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from rich.text import Text
+
+    original = "For the sandbox, run `desman sandbox setup --yes`. desman -c, desman -t, desman keys, desman unknown"
+    rewritten = original.replace("desman sandbox", "/sandbox").replace("desman keys", "/keys")
+
+    def hint() -> None:
+        ui.note(original)
+        ui.out(Text(original, style="bold"))
+
+    ui.note(original)
+    assert capsys.readouterr().out.strip() == original
+    lines = iter(["/status", "/exit"])
+    chat = Chat(sessions, read=lambda: next(lines, None))
+    monkeypatch.setattr(chat, "_typed", lambda *args, **kwargs: hint())
+    chat.run()
+
+    shown = capsys.readouterr().out
+    (event,) = (m for m in sessions.messages(sessions.terminal()) if m.kind is Kind.EVENT)
+    assert event.text == f"{rewritten}\n{rewritten}\n"
+    assert event.text in shown
+    assert original not in shown
+
+
+def test_gui_in_page_general_terminal_reports_that_it_is_open(sessions: Sessions) -> None:
+    lines = iter(["/terminal", "/gui", "/exit"])
+    chat = Chat(sessions, read=lambda: next(lines, None), background_tasks=True)
+    with ui.use(WebFront()):
+        chat.run()
+    assert not chat.open_page
+    assert any(
+        "The page is already open." in m.text for m in sessions.messages(sessions.terminal())
+    )

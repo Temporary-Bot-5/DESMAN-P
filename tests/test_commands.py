@@ -490,7 +490,7 @@ def test_worker_takes_the_most_urgent_first_and_says_what_it_leaves(
     result = chat("do everything that waits", "y")
     assert "Work on the unfinished tasks in turn, until none has work left (1):" in result.output
     assert "urgent goal" in result.output and "routine goal" not in result.output
-    assert "Not taken this time (ask again, or run `desman worker`): 1" in result.output
+    assert "Not taken this time (ask again, or run `/worker`): 1" in result.output
     store = Store(db.open_db())
     try:
         assert store.task_status(urgent) is TaskStatus.DONE

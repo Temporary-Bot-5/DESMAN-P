@@ -347,7 +347,7 @@ class Runners:
             chat.turn_sink = sink.changed
             with self.condition:
                 chat._gave_up = self.summary_failures.setdefault(runner.session_id, {})
-            with ui.use(sink), sink.capture():
+            with ui.use(sink), ui.chat_output(), sink.capture():
                 while True:
                     with self.condition:
                         if self.front.ended or not runner.queue:
