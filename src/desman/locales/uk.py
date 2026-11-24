@@ -15,6 +15,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No messenger name {name} exists.": "Ім’я {name} не зареєстровано в месенджері.",
+    "You have never corresponded with {name}.": "Ви ніколи не листувалися з {name}.",
+    "The read is done. Your message is kept.": "Читання завершено. Ваше повідомлення збережено.",
+    "I could not finish answering; ask again.": "Не вдалося завершити відповідь. Запитайте ще раз.",
     "You \u2192 {name}": "Ви → {name}",
     "{name} \u2192 you": "{name} → вам",
     "No contact named {name}.": "Немає контакту з іменем {name}.",
@@ -751,6 +755,7 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Показати листування месенджера.",
     "Show or set your messenger name.": "Показати або задати ім’я в месенджері.",
     "The registry refused the messenger request: {error}": "Реєстр відхилив запит месенджера: {error}",
+    "The local journal is busy.": "Локальний журнал зайнятий.",
     "The request succeeded, but the local journal is busy.": "Запит виконано, але локальний журнал зайнятий.",
     "This message contains an API key; nothing was sent.": "Повідомлення містить API-ключ; нічого не надіслано.",
     "Unblock a messenger name.": "Розблокувати ім’я в месенджері.",

@@ -404,7 +404,7 @@ def test_join_and_donate_from_the_chat_wait_for_yes(fake: FakeLLM) -> None:
         asks("global join", registry=REGISTRY),
         asks("global donate", provider="ollama", calls=10),
         asks("global status"),
-        asks("global status"),
+        '{"type": "reply", "text": "The network is on."}',
     )
     result = chat("join the network", "y", "lend my ollama", "y", "and now?")
     assert f"Take part in desman-global, registry {REGISTRY}." in result.output
@@ -602,7 +602,7 @@ def test_quota_usage_and_reset_in_cli_and_chat(
         CHAT,
         asks("global status"),
         asks("global quota", provider="ollama"),
-        asks("global quota", provider="ollama"),
+        '{"type": "reply", "text": "I checked both."}',
     )
     result = chat("what is my status and when does Ollama reset?")
     assert result.exit_code == 0, result.output

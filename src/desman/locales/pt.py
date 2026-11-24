@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No messenger name {name} exists.": "O nome de mensageiro {name} não existe.",
+    "You have never corresponded with {name}.": "Você nunca trocou mensagens com {name}.",
+    "The read is done. Your message is kept.": "A consulta foi concluída. Sua mensagem foi guardada.",
+    "I could not finish answering; ask again.": "Não consegui concluir a resposta. Pergunte novamente.",
     "You \u2192 {name}": "Você → {name}",
     "{name} \u2192 you": "{name} → você",
     "No contact named {name}.": "Não há contato com o nome {name}.",
@@ -742,6 +746,7 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Mostrar conversas do mensageiro.",
     "Show or set your messenger name.": "Mostrar ou definir seu nome no mensageiro.",
     "The registry refused the messenger request: {error}": "O registro recusou a solicitação do mensageiro: {error}",
+    "The local journal is busy.": "O registo local está ocupado.",
     "The request succeeded, but the local journal is busy.": "A solicitação foi concluída, mas o diário local está ocupado.",
     "This message contains an API key; nothing was sent.": "Esta mensagem contém uma chave API; nada foi enviado.",
     "Unblock a messenger name.": "Desbloquear um nome no mensageiro.",

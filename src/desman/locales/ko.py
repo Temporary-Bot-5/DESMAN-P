@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No messenger name {name} exists.": "메신저 이름 {name}이 존재하지 않습니다.",
+    "You have never corresponded with {name}.": "{name} 님과 메시지를 주고받은 적이 없습니다.",
+    "The read is done. Your message is kept.": "읽기를 완료했습니다. 메시지는 저장되었습니다.",
+    "I could not finish answering; ask again.": "답변을 마치지 못했습니다. 다시 질문해 주세요.",
     "You \u2192 {name}": "나 → {name}",
     "{name} \u2192 you": "{name} → 나",
     "No contact named {name}.": "{name}이라는 연락처가 없습니다.",
@@ -736,6 +740,7 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "메신저 대화를 표시합니다.",
     "Show or set your messenger name.": "메신저 이름을 표시하거나 설정합니다.",
     "The registry refused the messenger request: {error}": "레지스트리가 메신저 요청을 거부했습니다: {error}",
+    "The local journal is busy.": "로컬 기록이 사용 중입니다.",
     "The request succeeded, but the local journal is busy.": "요청은 성공했지만 로컬 로그가 사용 중입니다.",
     "This message contains an API key; nothing was sent.": "이 메시지에 API 키가 포함되어 있습니다. 아무것도 전송하지 않았습니다.",
     "Unblock a messenger name.": "메신저 이름의 차단을 해제합니다.",

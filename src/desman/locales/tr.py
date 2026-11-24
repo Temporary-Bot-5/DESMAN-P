@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No messenger name {name} exists.": "Mesajlaşma sisteminde {name} adı yok.",
+    "You have never corresponded with {name}.": "{name} ile hiç mesajlaşmadınız.",
+    "The read is done. Your message is kept.": "Okuma tamamlandı. Mesajınız saklandı.",
+    "I could not finish answering; ask again.": "Yanıtımı tamamlayamadım. Tekrar sorun.",
     "You \u2192 {name}": "Siz → {name}",
     "{name} \u2192 you": "{name} → size",
     "No contact named {name}.": "{name} adlı bir kişi yok.",
@@ -736,6 +740,7 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "Mesajlaşma yazışmalarını göster.",
     "Show or set your messenger name.": "Mesajlaşma adınızı göster veya ayarla.",
     "The registry refused the messenger request: {error}": "Kayıt sunucusu mesajlaşma isteğini reddetti: {error}",
+    "The local journal is busy.": "Yerel günlük meşgul.",
     "The request succeeded, but the local journal is busy.": "İstek başarılı oldu, ancak yerel günlük meşgul.",
     "This message contains an API key; nothing was sent.": "Bu mesaj bir API anahtarı içeriyor; hiçbir şey gönderilmedi.",
     "Unblock a messenger name.": "Mesajlaşma adının engelini kaldır.",

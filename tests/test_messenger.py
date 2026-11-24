@@ -224,7 +224,9 @@ def test_limits_and_withdrawn_requests(registry: Registry, clock: FakeClock) -> 
 def test_complaints_retention_and_journal(registry: Registry, clock: FakeClock) -> None:
     a, b = named(registry, clock, "alice"), named(registry, clock, "bobby")
     c = named(registry, clock, "carol")
-    assert call(c, p.MESSENGER_COMPLAIN, name="alice", text="stranger")["error"] == "unknown_name"
+    assert (
+        call(c, p.MESSENGER_COMPLAIN, name="alice", text="stranger")["error"] == "no_correspondence"
+    )
     connect(a, b)
     sent = call(a, p.MESSENGER_SEND, to="bobby", text="private message marker")
     assert (
@@ -810,3 +812,6 @@ def test_message_header_uses_partner_fingerprint_and_local_time(
     assert own not in shown and partner not in shown and "123456" not in shown
     messenger_cli.print_result(inbox, view="messages", as_json=True)
     assert json.loads(capsys.readouterr().out)["fingerprints"] == inbox.fingerprints
+    messenger_cli.print_result(inbox, view="contacts")
+    contacts = capsys.readouterr().out
+    assert f"bobby ({partner[:12]})" in contacts and partner not in contacts

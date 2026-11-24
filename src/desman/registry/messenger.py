@@ -364,7 +364,7 @@ def complain(
         or _has(conn, "messages", "sender = ? AND recipient = ?", (other, who))
     )
     if not known:
-        raise Refusal("unknown_name")
+        raise Refusal("no_correspondence")
     _limit(conn, "complaints", who, "from_node", "created_at", now, p.MAX_COMPLAINTS_PER_DAY)
     id = uuid4().hex
     conn.execute(

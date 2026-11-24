@@ -1182,26 +1182,36 @@ def _global_status(ctx: Context, args: NoArgs) -> Outcome:
     return Outcome(found.as_json())
 
 
-def _messenger_read(ctx: Context, body: protocol.InboxQuery, view: str) -> Outcome:
-    messenger_cli.show_notice(ctx.store.conn)
+def _messenger_read(
+    ctx: Context, body: protocol.InboxQuery, view: str, *, previewed: bool = False
+) -> Outcome:
     result = messenger_cli.perform(ctx.manager, ctx.store.conn, body)
+    messenger_cli.show_notice(ctx.store.conn, result, previewed=previewed)
     messenger_cli.print_result(result, view=view)
     # State-only reads never disclose correspondence to the interlocutor.
     found = messenger_cli.data(result, untrusted=True)
     if view != "messages":
         found.pop("messages", None)
-    elif isinstance(result, messenger_cli.ReadInbox):
+    if isinstance(result, messenger_cli.ReadInbox):
         found["fingerprints"] = {
-            name: node[:12] for name, node in result.fingerprints.items() if name != result.name
+            name: messenger_cli.short_fingerprint(node)
+            for name, node in result.fingerprints.items()
+            if name != result.name
         }
     return Outcome(found)
 
 
 def _messenger_change(ctx: Context, body: messenger_cli.Request, view: str) -> Proposal:
     address = messenger_cli.ready(ctx.config(), body)
+    notice = (
+        messenger_cli.pending_notice(ctx.store.conn)
+        if ctx.node_author is not nodes.Author.PERSON
+        else None
+    )
 
     def apply() -> Outcome:
         result = messenger_cli.perform(ctx.manager, ctx.store.conn, body, registry=address)
+        messenger_cli.show_notice(ctx.store.conn, result, previewed=notice is not None)
         messenger_cli.print_result(result, view=view)
         return Outcome(messenger_cli.data(result))
 
@@ -1225,13 +1235,7 @@ def _messenger_change(ctx: Context, body: messenger_cli.Request, view: str) -> P
             lines.append(t("Unblock {name}.", name=body.name))
     elif isinstance(body, protocol.SetName):
         lines.append(t("Set your messenger name to {name}.", name=body.name))
-    notice = messenger_cli.take_notice(ctx.store.conn)
-    if notice is None:
-        return Proposal(lines, apply)
-    if ctx.node_author is nodes.Author.PERSON:
-        ui.note(notice)
-        return Proposal(lines, apply)
-    return Proposal(lines, apply, [notice])
+    return Proposal(lines, apply, [notice] if notice is not None else [])
 
 
 def _messenger_name(ctx: Context, args: MessengerNameArgs) -> Outcome | Proposal:
@@ -1245,9 +1249,18 @@ def _messenger_contacts(ctx: Context, args: NoArgs) -> Outcome:
 
 
 def _messenger_messages(ctx: Context, args: MessengerMessagesArgs) -> Proposal:
+    notice = (
+        messenger_cli.pending_notice(ctx.store.conn)
+        if ctx.node_author is not nodes.Author.PERSON
+        else None
+    )
+
     def apply() -> Outcome:
         return _messenger_read(
-            ctx, protocol.InboxQuery(after=args.after, with_name=args.name), "messages"
+            ctx,
+            protocol.InboxQuery(after=args.after, with_name=args.name),
+            "messages",
+            previewed=notice is not None,
         )
 
     lines = [
@@ -1258,8 +1271,12 @@ def _messenger_messages(ctx: Context, args: MessengerMessagesArgs) -> Proposal:
     ]
     if args.name is not None:
         lines.append(t("With: {name}", name=args.name))
-    messenger_cli.show_notice(ctx.store.conn)
-    return Proposal(lines, apply, question=t("Show your messages to the interlocutor?"))
+    return Proposal(
+        lines,
+        apply,
+        [notice] if notice is not None else [],
+        question=t("Show your messages to the interlocutor?"),
+    )
 
 
 def _messenger_contact(action: Literal["add", "remove", "block", "unblock"]) -> Handler:

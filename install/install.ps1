@@ -108,13 +108,25 @@ try {
     }
     if ($Purge) { throw '-Purge requires -Uninstall.' }
     $VenvPrefix = (Join-Path $App '.venv') + '\'
-    $Running = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($VenvPrefix, [StringComparison]::OrdinalIgnoreCase)
+    $AppPrefix = $App.TrimEnd('\') + '\'
+    $Processes = @(Get-CimInstance Win32_Process)
+    $Running = @($Processes | Where-Object {
+        if ($_.ExecutablePath) {
+            $_.ExecutablePath.StartsWith($VenvPrefix, [StringComparison]::OrdinalIgnoreCase)
+        } elseif ($_.CommandLine -and $_.ProcessId -ne $PID) {
+            $_.CommandLine.IndexOf($AppPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        }
     })
+    $Unchecked = @($Processes | Where-Object { !$_.ExecutablePath -and !$_.CommandLine })
+    if ($Unchecked.Count -gt 0) {
+        Write-Warning "Could not check $($Unchecked.Count) process(es) for a running DESMAN. Close any open DESMAN windows before continuing."
+    }
     if ($Running.Count -gt 0) {
         Write-Host 'Close DESMAN (the page, the chat and any worker), then run the installer again.'
         foreach ($Process in $Running) {
-            Write-Host ("  PID {0}: {1}" -f $Process.ProcessId, $Process.ExecutablePath)
+            $Location = $Process.ExecutablePath
+            if (!$Location) { $Location = $App }
+            Write-Host ("  PID {0}: {1}" -f $Process.ProcessId, $Location)
         }
         exit 1
     }

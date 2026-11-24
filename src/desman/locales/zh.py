@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "No messenger name {name} exists.": "通讯工具中不存在名称 {name}。",
+    "You have never corresponded with {name}.": "你从未与 {name} 互发过消息。",
+    "The read is done. Your message is kept.": "读取已完成。你的消息已保存。",
+    "I could not finish answering; ask again.": "我无法完成回答，请再问一次。",
     "You \u2192 {name}": "你 → {name}",
     "{name} \u2192 you": "{name} → 你",
     "No contact named {name}.": "没有名为 {name} 的联系人。",
@@ -736,6 +740,7 @@ MESSAGES: dict[str, Forms] = {
     "Show messenger correspondence.": "显示通信记录。",
     "Show or set your messenger name.": "显示或设置您的通信名称。",
     "The registry refused the messenger request: {error}": "注册中心拒绝了通信请求：{error}",
+    "The local journal is busy.": "本地日志正忙。",
     "The request succeeded, but the local journal is busy.": "请求已成功，但本地日志正忙。",
     "This message contains an API key; nothing was sent.": "此消息包含API密钥；未发送任何内容。",
     "Unblock a messenger name.": "解除屏蔽通信名称。",

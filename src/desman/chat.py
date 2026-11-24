@@ -194,6 +194,7 @@ class Chat:
         self._outcome_audit: int | None = None
         self.background_tasks = background_tasks
         self.sessions = sessions
+        self._turn_messages: list[Message] | None = None
         self.sleep = sleep
         self.temporary = temporary
         """Nothing said is kept (C.11): the session is erased when the chat ends; no profile
@@ -552,9 +553,26 @@ class Chat:
         if not added:
             self.session_id = self._add_user(text)
         assert self.session_id is not None
-        sent: list[tuple[str, dict[str, JsonValue]]] = []
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
-        first_view_end = max((message.seq for message in history.messages), default=0)
+        self._turn_messages = []
+        try:
+            self._answer(history, interlocutor, config, models, personal, notes)
+        finally:
+            self._turn_messages = None
+
+    def _answer(
+        self,
+        history: History,
+        interlocutor: Interlocutor,
+        config: Config,
+        models: runs.Models,
+        personal: bool,
+        notes: list[Note] | None,
+    ) -> None:
+        assert self.session_id is not None and self._turn_messages is not None
+        sent: list[tuple[str, dict[str, JsonValue]]] = []
+        initial = history
+        reply_only = False
         while not self.exit_requested:
             try:
                 try:
@@ -564,7 +582,11 @@ class Chat:
                         ) as waiting,
                         self._for(calls.Role.INTERLOCUTOR),
                     ):
-                        turn = interlocutor.turn(history)
+                        turn = (
+                            interlocutor.reply_only(history)
+                            if reply_only
+                            else interlocutor.turn(history)
+                        )
                 finally:  # what this answer read, also when it failed
                     self._opened[self.session_id] = interlocutor.opened
             except runs.ModuleWaiting as e:
@@ -572,9 +594,12 @@ class Chat:
                     raise
                 # The read was already displayed and recorded. Do not run it again on retry.
                 ui.note(e.display())
+                ui.note(t("The read is done. Your message is kept."))
                 return
             except ProviderError as e:
                 ui.provider_limit(waiting.limited_until)
+                if sent:
+                    ui.note(t("The read is done. Your message is kept."))
                 ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
                 return
             except StructuredOutputError:
@@ -585,12 +610,13 @@ class Chat:
                     )
                 )
                 return
-            if isinstance(turn, Command):
+            stop_commands = False
+            if isinstance(turn, Command) and not reply_only:
                 entry = commands.find(turn.name)
                 call = (entry.name if entry is not None else turn.name, turn.args)
-                if len(sent) >= 3 or call in sent:
-                    return
-                sent.append(call)
+                stop_commands = len(sent) >= 3 or call in sent
+                if not stop_commands:
+                    sent.append(call)
             follow_up = False
             if personal:  # off: the model was told nothing of it, and nothing is kept
                 self._note(turn.profile, config, notes or [])
@@ -602,6 +628,14 @@ class Chat:
             elif isinstance(turn, Clarify):
                 self._say(turn.question)
                 self._fallback_note(interlocutor)
+            elif reply_only:
+                text = turn.text if isinstance(turn, Command) else None
+                self._say(text or t("I could not finish answering; ask again."))
+            elif stop_commands:
+                assert isinstance(turn, Command)
+                if turn.text is not None:
+                    self._say(turn.text, settle=False)
+                follow_up = reply_only = True
             elif isinstance(turn, NewTask):
                 if personal and turn.node is not None:  # asked now, not after the whole task
                     self._propose_node(
@@ -619,11 +653,10 @@ class Chat:
                 self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
             if not follow_up:
                 return
-            history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
-            # The page moves queued user input after previous replies. Keep this turn's
-            # events after that input, even when it was queued before those replies.
-            history = history.model_copy(
-                update={"messages": sorted(history.messages, key=lambda m: m.seq > first_view_end)}
+            # Keep the first view and only messages written by this turn. The page
+            # can persist another user input while the current turn is running.
+            history = initial.model_copy(
+                update={"messages": [*initial.messages, *self._turn_messages]}
             )
 
     def _own_nodes(self, config: Config) -> tuple[knowledge.Node, ...] | None:
@@ -735,6 +768,8 @@ class Chat:
             outcome_audit=self._outcome_audit,
             settle=settle and task_id is None and self._outcome_audit is None,
         )
+        if self._turn_messages is not None:
+            self._turn_messages.append(message)
         if self.turn_sink is not None:
             self.turn_sink(message.session_id)
         else:
@@ -753,6 +788,8 @@ class Chat:
             task_id=task_id,
             outcome_audit=self._outcome_audit,
         )
+        if self._turn_messages is not None:
+            self._turn_messages.append(message)
         if self.turn_sink is not None:
             self.turn_sink(message.session_id)
         else:
@@ -1165,7 +1202,7 @@ class Chat:
                 ui.warn(warning)
             return ui.confirm(proposal.question or t("Apply this change?"), default=False)
         except click.Abort as e:
-            if isinstance(e.__context__, EOFError):
+            if not in_prompt and isinstance(e.__context__, EOFError):
                 return False
             raise
 
@@ -1224,7 +1261,11 @@ class Chat:
             configs = [config, self._saved_config()]
             budget = COMMAND_RESULT_TOKENS * CHARS_PER_TOKEN
             text += "\n" + commands.for_interlocutor(data, configs, budget)
-        self.sessions.add(self.session_id, Role.DESMAN, text, kind=Kind.EVENT, settle=True)
+        message = self.sessions.add(
+            self.session_id, Role.DESMAN, text, kind=Kind.EVENT, settle=True
+        )
+        if self._turn_messages is not None:
+            self._turn_messages.append(message)
 
     # ── Compaction ───────────────────────────────────────────────────────────
 
@@ -2059,8 +2100,8 @@ class Chat:
         elif name == "/messages":
             try:
                 body = protocol.InboxQuery(with_name=line.strip()[len(name) :].strip() or None)
-                messenger_cli.show_notice(self.store.conn)
                 result = messenger_cli.perform(open_config(), self.store.conn, body)
+                messenger_cli.show_notice(self.store.conn, result)
                 messenger_cli.print_result(result, view="messages")
             except ConfigError as e:
                 ui.error(str(e))

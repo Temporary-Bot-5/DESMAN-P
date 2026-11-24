@@ -608,6 +608,27 @@ class Interlocutor:
             answer = answer.model_copy(update={"node": None})
         return answer
 
+    def reply_only(self, history: History) -> AnyTurn:
+        """Give the model one chance to finish after the chat stops running commands."""
+        self.opened = []
+        request = self.build_request(history)
+        system, prompt = request.messages
+        system = system.model_copy(
+            update={
+                "content": system.content + "\nNo more commands or tasks for this message. "
+                "Return a reply using the results already in the conversation."
+            }
+        )
+        request = request.model_copy(update={"messages": [system, prompt]})
+        token = _TREE.set(self.tree)
+        try:
+            answer = complete_json(self.llm, request, Turn, heading=CHAT).root
+        finally:
+            _TREE.reset(token)
+        if self.nodes is None and answer.node is not None:
+            answer = answer.model_copy(update={"node": None})
+        return answer
+
     def _turn(self, history: History) -> tuple[AnyTurn, Request]:
         request = self.build_request(history)
         payload = json.loads(request.messages[1].content.split(":\n", 1)[1])
