@@ -1170,6 +1170,10 @@ class ClusterSimulation(NetSimulation):
         self.observe()
         problems = self.report.problems
         with registry_store.connection(self.registry_db) as conn:
+            lost_operators: Counter[str] = Counter()
+            for event in registry_store.entries(conn):
+                if event.action == "operator_lost":
+                    lost_operators[event.details["task"]] += 1
             finished = 0
             for t in clusters.cluster_tasks(conn):
                 if t.status == "operator" and t.reason == "result":
@@ -1184,6 +1188,13 @@ class ClusterSimulation(NetSimulation):
                     and self.report.faults["reject"]
                 ):
                     self.report.trace.append("inbox job_given_up explained by injected reject")
+                elif (
+                    t.status == "operator"
+                    and t.reason == "operators_lost"
+                    and t.lost == clusters.MAX_OPERATORS_LOST
+                    and lost_operators[t.id] == t.lost
+                ):
+                    self.report.trace.append("inbox operators_lost explained by journaled losses")
                 else:
                     problems.append(f"cluster left {t.status}: {t.reason}")
             if not finished:

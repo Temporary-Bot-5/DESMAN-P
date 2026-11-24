@@ -14,6 +14,7 @@ import click
 import httpx
 
 from desman import local_models, ui
+from desman.actions import open_user_db
 from desman.config_cli import json_option, load_config
 from desman.i18n import t
 from desman.llm import hub
@@ -112,10 +113,10 @@ def remove(model: str) -> None:
     """Remove one installed Ollama MODEL, keeping saved choices."""
     from contextlib import closing
 
-    from desman.core import db, operator
+    from desman.core import operator
 
     config = load_config().load()
-    with closing(db.open_db()) as conn, httpx.Client() as client:
+    with closing(open_user_db()) as conn, httpx.Client() as client:
         found = local_models.removal_model(config, model, client)
         references = local_models.remove(config, found.name, client, conn)
         operator.record(

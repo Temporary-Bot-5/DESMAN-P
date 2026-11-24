@@ -293,6 +293,14 @@ def _owners_of_result(conn: sqlite3.Connection, result_id: str | None) -> set[st
     return owners
 
 
+def can_lend_model(node: store.Node) -> bool:
+    return (
+        node.status == "active"
+        and not node.revoked
+        and any(c.provider != protocol.SEARCH_PROVIDER for c in node.capabilities)
+    )
+
+
 def claim(
     conn: sqlite3.Connection,
     caller: store.Node,
@@ -309,7 +317,7 @@ def claim(
     has seen as a replay, G.6b), and never rechecks the work of its own owner. Nothing is
     lent while the registry holds no fresh trust list (G.6c): every node would refuse it."""
     expire(conn, now)
-    jobs = jobs and any(c.provider != protocol.SEARCH_PROVIDER for c in caller.capabilities)
+    jobs = jobs and can_lend_model(caller)
     if not jobs and not proposals:
         return None
     moment = db.to_iso(now)
@@ -349,15 +357,16 @@ def claim(
                     return offered
                 continue
             found = _job(row)
-            lent_before = conn.execute(
-                "SELECT 1 FROM leases WHERE job = ? AND node = ?", (found.id, caller.fingerprint)
-            ).fetchone()
-            if lent_before is not None:
+            if found.cluster is not None and not _cluster_lends_to(conn, found, caller, now):
                 continue
-            if found.cluster is not None:
-                if not _cluster_lends_to(conn, found, caller, now):
+            if found.cluster is None or found.status != "recheck":
+                lent_before = conn.execute(
+                    "SELECT 1 FROM leases WHERE job = ? AND node = ?",
+                    (found.id, caller.fingerprint),
+                ).fetchone()
+                if lent_before is not None:
                     continue
-            elif found.status == "recheck":
+            if found.cluster is None and found.status == "recheck":
                 owners = _owners_of_result(conn, found.result)
                 if owners is None or caller.owned_by in owners:
                     continue
@@ -408,10 +417,20 @@ def _cluster_lends_to(
         return False
     if found.status == "execute":
         return caller.fingerprint in json.loads(appointment["members_json"])
+    excluded = cluster_recheck_exclusions(conn, found)
+    return excluded is not None and caller.fingerprint not in excluded
+
+
+def cluster_recheck_exclusions(conn: sqlite3.Connection, found: JobRow) -> set[str] | None:
+    """Nodes excluded by independence or prior leases, or None if the result is missing."""
+    assert found.cluster is not None
     done_by = conn.execute("SELECT node FROM results WHERE id = ?", (found.result,)).fetchone()
-    if done_by is None or done_by["node"] == caller.fingerprint:
-        return False
-    return caller.fingerprint not in cluster_operators(conn, found.cluster) | {found.signer}
+    if done_by is None:
+        return None
+    tried = {
+        row["node"] for row in conn.execute("SELECT node FROM leases WHERE job = ?", (found.id,))
+    }
+    return cluster_operators(conn, found.cluster) | {found.signer, done_by["node"]} | tried
 
 
 def _lend(

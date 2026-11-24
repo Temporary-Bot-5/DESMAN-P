@@ -163,6 +163,23 @@ def test_protected_guard_warning_is_once_and_never_restarted(tmp_path: Path) -> 
     assert len(launcher.calls) == 1 and pool.blocked
 
 
+def test_pool_reports_newer_database_on_the_page(tmp_path: Path) -> None:
+    path = tmp_path / "db"
+    conn = db.open_db(path)
+    conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) + 1}")
+    conn.close()
+    launcher = Launcher()
+    pool = Pool(path, tmp_path, 1, launcher=launcher, ready=lambda: True)
+
+    pool.tick()
+
+    assert pool.blocked and not launcher.calls
+    assert list(pool.messages) == [
+        f"The database at {path} was created by a newer DESMAN. "
+        "Update DESMAN or set DESMAN_DATA_DIR to another directory."
+    ]
+
+
 def test_hung_workers_are_terminated_then_killed(tmp_path: Path) -> None:
     launcher = Launcher()
     pool = Pool(

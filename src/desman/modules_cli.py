@@ -13,7 +13,7 @@ from rich.text import Text
 from desman import actions, live, providers, tuning_cli, ui
 from desman.config import Config
 from desman.config_cli import json_option, load_config
-from desman.core import calls, choices, db, holds
+from desman.core import calls, choices, holds
 from desman.core.models import Kind
 from desman.core.report import task_report
 from desman.core.store import Store
@@ -329,7 +329,7 @@ def modules(ctx: click.Context, task: str | None, as_json: bool) -> None:
 
 def show_modules(task: str | None, as_json: bool) -> None:
     config = load_config().load()
-    with closing(db.open_db()) as conn:
+    with closing(actions.open_user_db()) as conn:
         print_modules(modules_data(conn, config, task), as_json)
         if not as_json:
             print_holds(conn)
@@ -371,7 +371,7 @@ def set_command(
     config = load_config().load()
     if model is None and key is None:
         raise click.ClickException(t("Give --model or --key."))
-    with closing(db.open_db()) as conn:
+    with closing(actions.open_user_db()) as conn:
         scope, identity = scope_id(conn, task, session)
         old, new = set_module(conn, config, scope, identity, role, model, key)
         for line in change_lines(role, old, new, config):
@@ -386,7 +386,7 @@ def set_command(
 )
 def clear_command(role: str | None, task: str | None, session: str | None) -> None:
     """Clear choices only here. Roles: planner, reviewer, decomposer, text, code, analysis, interlocutor."""
-    with closing(db.open_db()) as conn:
+    with closing(actions.open_user_db()) as conn:
         scope, identity = scope_id(conn, task, session)
         check_role(scope, role)
         choices.clear(conn, scope, identity, role)
@@ -647,7 +647,7 @@ def _hold_command(
     operation: str, source: str, model: str, task: str | None, chat: str | None, network: bool
 ) -> None:
     config = load_config().load()
-    with closing(db.open_db()) as conn:
+    with closing(actions.open_user_db()) as conn:
         try:
             scope, identity = hold_scope(conn, task, chat, network)
             hold_change(

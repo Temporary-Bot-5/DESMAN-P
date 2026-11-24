@@ -241,7 +241,7 @@ def test_cluster_harness_catches_a_late_record(
     assert "late cluster record accepted" in report.problems, report.explain()
 
 
-@pytest.mark.parametrize("reason", ["versions", "job_given_up"])
+@pytest.mark.parametrize("reason", ["versions", "job_given_up", "operators_lost"])
 def test_cluster_harness_rejects_unexplained_inbox(tmp_path: Path, reason: str) -> None:
     from desman.registry import store
     from faults import ClusterFaults, ClusterShape, ClusterSimulation
@@ -253,6 +253,27 @@ def test_cluster_harness_rejects_unexplained_inbox(tmp_path: Path, reason: str) 
         sim.check()
         assert f"cluster left operator: {reason}" in sim.report.problems
         assert "no cluster result accepted" in sim.report.problems
+    finally:
+        sim.close()
+
+
+def test_cluster_harness_counts_repeated_operator_losses(tmp_path: Path) -> None:
+    from desman.registry import clusters, store
+    from faults import ClusterFaults, ClusterShape, ClusterSimulation
+
+    sim = ClusterSimulation(tmp_path, 0, ClusterFaults(), ClusterShape(nodes=0, tasks=1))
+    try:
+        with store.connection(sim.registry_db) as conn:
+            (task,) = clusters.cluster_tasks(conn)
+            losses = clusters.MAX_OPERATORS_LOST
+            conn.execute(
+                "UPDATE cluster_tasks SET status='operator', reason='operators_lost', lost=?",
+                (losses,),
+            )
+            for _ in range(losses):
+                store.log(conn, "operator_lost", "same-node", {"task": task.id})
+        sim.check()
+        assert "cluster left operator: operators_lost" not in sim.report.problems
     finally:
         sim.close()
 

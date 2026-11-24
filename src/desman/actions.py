@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -41,15 +42,33 @@ from desman.llm import hub
 from desman.result_prose import prose_key, unwrap
 
 
+def _newer_database(path: Path) -> click.ClickException:
+    return click.ClickException(
+        t(
+            "The database at {path} was created by a newer DESMAN. "
+            "Update DESMAN or set DESMAN_DATA_DIR to another directory.",
+            path=path,
+        )
+    )
+
+
+def open_user_db(db_path: Path | None = None) -> sqlite3.Connection:
+    """Open the user's database and report schema errors at the interface boundary."""
+    path = db_path or db.default_db_path()
+    try:
+        return db.open_db(path)
+    except db.SchemaVersionError as e:
+        raise _newer_database(path) from e
+    except db.SchemaMismatchError as e:
+        raise click.ClickException(str(e)) from e
+
+
 def open_existing(db_path: Path | None) -> Store:
     """The store for commands that read tasks: they never create an empty database."""
     path = db_path or db.default_db_path()
     if not path.exists():
         raise click.ClickException(t("no database at {path} (nothing has run yet?)", path=path))
-    try:
-        return Store(db.open_db(path))
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
+    return Store(open_user_db(path))
 
 
 def find_task(store: Store, task: str) -> str:
@@ -66,7 +85,9 @@ def init_database(path: Path) -> int:
     try:
         applied = db.migrate(conn)
         db.verify_schema(conn)
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
+    except db.SchemaVersionError as e:
+        raise _newer_database(path) from e
+    except db.SchemaMismatchError as e:
         raise click.ClickException(str(e)) from e
     finally:
         conn.close()

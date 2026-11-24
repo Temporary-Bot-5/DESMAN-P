@@ -10,6 +10,10 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The database at {path} was created by a newer DESMAN. "
+    "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
+        "Die Datenbank unter {path} wurde von einer neueren DESMAN-Version erstellt. Aktualisieren Sie DESMAN oder setzen Sie DESMAN_DATA_DIR auf ein anderes Verzeichnis."
+    ),
     "No messenger name {name} exists.": "Es gibt keinen Messenger-Namen {name}.",
     "You have never corresponded with {name}.": "Sie haben noch nie mit {name} Nachrichten ausgetauscht.",
     "The read is done. Your message is kept.": "Die Abfrage ist abgeschlossen. Ihre Nachricht wurde gespeichert.",

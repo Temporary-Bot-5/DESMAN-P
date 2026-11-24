@@ -284,7 +284,7 @@ def test_notice_read_avoids_write_lock_and_reports_busy(tmp_path: Path) -> None:
 
 
 def test_cli_reports_busy_when_opening_journal(monkeypatch: pytest.MonkeyPatch) -> None:
-    def locked() -> sqlite3.Connection:
+    def locked(*_args: object, **_kwargs: object) -> sqlite3.Connection:
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(db, "open_db", locked)

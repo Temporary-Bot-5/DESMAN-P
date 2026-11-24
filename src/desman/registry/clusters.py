@@ -246,10 +246,8 @@ def _accepted_counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 def _available(found: store.Node, now: datetime, online: timedelta) -> bool:
     return (
-        found.status == "active"
-        and not found.revoked
+        work.can_lend_model(found)
         and found.takes_jobs
-        and any(c.provider != protocol.SEARCH_PROVIDER for c in found.capabilities)
         and db.parse_iso(found.last_seen) > now - online
     )
 
@@ -361,7 +359,8 @@ def settle(
 ) -> ClusterTaskRow:
     """The global operator's word on a cluster task in its inbox: `accept` its result, send it
     back `again` (its result → a new plan version; a job that gave up → lent again from the
-    start; operators lost → counted from zero), or `drop` it (its jobs with it)."""
+    start or replanned if no reviewer is left; operators lost → counted from zero),
+    or `drop` it (its jobs with it)."""
     note = note.strip()[:2000]
     moment = db.to_iso(now)
     with store.write_transaction(conn):
@@ -382,7 +381,12 @@ def settle(
             replan = found.reason == "result"
             if found.reason == "job_given_up":
                 for job in work.jobs(conn, "operator", cluster=found.id):
-                    if db.parse_iso(job.expires_at) <= now:
+                    if job.reason == "no_reviewer_left":
+                        if version >= protocol.MAX_PLAN_VERSIONS:
+                            raise SettleError("no_versions")
+                        _drop_job(conn, job, "no_reviewer_left", moment)
+                        replan = True
+                    elif db.parse_iso(job.expires_at) <= now:
                         _drop_job(conn, job, "expired", moment)
                         replan = version < protocol.MAX_PLAN_VERSIONS
                     elif not _untried_members(conn, found, job):
@@ -441,6 +445,18 @@ def _untried_members(conn: sqlite3.Connection, found: ClusterTaskRow, job: work.
         for r in conn.execute("SELECT node FROM leases WHERE job = ?", (job.id,)).fetchall()
     }
     return set(current.members) - tried
+
+
+def _untried_reviewers(conn: sqlite3.Connection, job: work.JobRow) -> set[str]:
+    """Registered nodes that could recheck, including those currently offline."""
+    excluded = work.cluster_recheck_exclusions(conn, job)
+    if excluded is None:
+        return set()
+    return {
+        node.fingerprint
+        for node in store.nodes(conn)
+        if node.fingerprint not in excluded and work.can_lend_model(node)
+    }
 
 
 def _drop_job(conn: sqlite3.Connection, job: work.JobRow, why: str, moment: str) -> None:
@@ -511,13 +527,19 @@ def tick(
 def _supervise(
     conn: sqlite3.Connection, found: ClusterTaskRow, now: datetime, online: timedelta
 ) -> None:
-    for job in work.jobs(conn, "execute", cluster=found.id):
+    for job in [
+        *work.jobs(conn, "execute", cluster=found.id),
+        *work.jobs(conn, "recheck", cluster=found.id),
+    ]:
         held = conn.execute(
             "SELECT 1 FROM leases WHERE job = ? AND ended IS NULL", (job.id,)
         ).fetchone()
-        if held is None and not _untried_members(conn, found, job):
-            # Every member took it once and none may take it again: back to the operator.
+        if held is not None:
+            continue
+        if job.status == "execute" and not _untried_members(conn, found, job):
             work.to_operator(conn, job, "no_member_left", {})
+        if job.status == "recheck" and not _untried_reviewers(conn, job):
+            work.to_operator(conn, job, "no_reviewer_left", {})
     given_up = work.jobs(conn, "operator", cluster=found.id)
     if given_up:
         plan = latest_plan(conn, found.cluster)
