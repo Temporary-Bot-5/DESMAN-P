@@ -127,9 +127,10 @@ class _Unreachable(Exception):
 class _Problem(Exception):
     """The registry refused the request, with its word for why."""
 
-    def __init__(self, error: str) -> None:
+    def __init__(self, error: str, status: int | None = None) -> None:
         super().__init__(error)
         self.error = error
+        self.status = status
 
 
 Problem = _Problem
@@ -269,8 +270,10 @@ def _call(
         try:
             problem = protocol.Problem.model_validate_json(body_bytes)
         except ValidationError:
+            if operator_call:
+                raise _Problem("http_error", reply.status_code) from None
             raise _Unreachable(f"HTTP {reply.status_code}") from None
-        raise _Problem(problem.error[:64])
+        raise _Problem(problem.error[:64], reply.status_code)
     try:
         return answer.model_validate_json(body_bytes)
     except ValidationError:

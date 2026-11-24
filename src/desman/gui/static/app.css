@@ -431,3 +431,26 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 /* The person's nodes of the knowledge tree (K.4): path, what it is for, Remove. */
 .setting-node { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; margin: 0.35rem 0; }
 .setting-node small { color: var(--muted, #888); flex: 1 1 12rem; }
+
+.operator-mode #settings-form { overflow-wrap: anywhere; }
+.operator-mode #settings-form details { margin: .5rem 0; }
+.operator-mode #settings-form button { margin: .3rem .35rem .3rem 0; }
+.operator-mode #settings-form select { max-width: 24rem; }
+.operator-mode #settings-nav { overflow-y: auto; }
+.operator-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .35rem 1rem; }
+.operator-facts dt { font-weight: 600; }
+.operator-facts dd { margin: 0; }
+.operator-quote { white-space: pre-wrap; overflow-wrap: anywhere; margin: .4rem 0 .8rem; }
+.operator-table { overflow-x: auto; }
+.operator-table table { border-collapse: collapse; width: 100%; }
+.operator-table :is(th, td) { padding: .45rem; text-align: start; vertical-align: top; border-bottom: 1px solid var(--settings-border); }
+.operator-table td { min-width: 5rem; max-width: 22rem; }
+.operator-table td.operator-id { min-width: 0; white-space: nowrap; font-family: var(--mono, ui-monospace, monospace); font-size: .85em; }
+.operator-long { cursor: pointer; }
+.operator-long:not(.open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+#settings-result { white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; max-height: 7em; }
+@media (max-width: 650px) {
+  .operator-mode #settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .operator-mode #settings-nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--settings-border); }
+  .operator-mode #settings-nav button { width: auto; flex: 0 0 auto; }
+}

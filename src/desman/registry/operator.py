@@ -159,12 +159,37 @@ def whoami(ctx: Actions, asked: p.OperatorEmpty) -> tuple[p.OperatorIdentity, No
     return ctx.identity, None
 
 
+def _result_output(conn: sqlite3.Connection, id: str) -> str | None:
+    row = conn.execute("SELECT signed_json FROM results WHERE id = ?", (id,)).fetchone()
+    if row is None:
+        return None
+    signed = sign.Signed.model_validate_json(row["signed_json"])
+    return p.Result.model_validate(signed.record.body).output
+
+
 @route(p.OPERATOR_INBOX, p.OperatorEmpty)
 def inbox(ctx: Actions, asked: p.OperatorEmpty) -> tuple[p.OperatorInbox, None]:
     ctx.tick()
+    jobs = work.jobs(ctx.conn, "operator", cluster=None)
+    waiting = clusters.cluster_tasks(ctx.conn, "operator")
+    job_results = {}
+    for job in jobs:
+        if job.result is not None and (output := _result_output(ctx.conn, job.result)) is not None:
+            job_results[job.id] = output[:2000]
+    cluster_results = {}
+    for row in waiting:
+        if row.reason != "result":
+            continue
+        records = clusters.records(ctx.conn, row.cluster, sign.RecordKind.CLUSTER_RESULT)
+        if records:
+            result = p.ClusterResult.model_validate(records[-1].record.body)
+            output = _result_output(ctx.conn, result.result)
+            cluster_results[row.id] = result.summary if output is None else output[:2000]
     return p.OperatorInbox(
-        jobs=_jobs(work.jobs(ctx.conn, "operator", cluster=None)),
-        clusters=[_cluster(ctx, row) for row in clusters.cluster_tasks(ctx.conn, "operator")],
+        jobs=_jobs(jobs),
+        clusters=[_cluster(ctx, row) for row in waiting],
+        job_results=job_results,
+        cluster_results=cluster_results,
     ), None
 
 
@@ -222,15 +247,15 @@ def cluster(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorClusterDetail
     results = clusters.records(ctx.conn, row.cluster, sign.RecordKind.CLUSTER_RESULT)
     jobs = work.jobs(ctx.conn, cluster=id)
     fields = _cluster_fields(ctx, row, jobs=jobs, current=current, plan=plan)
+    result = p.ClusterResult.model_validate(results[-1].record.body) if results else None
     return p.OperatorClusterDetail.model_validate(
         fields
         | {
             "members_list": [] if current is None else current.members,
             "plan": None if plan is None else plan.body,
             "job_list": _jobs(jobs),
-            "result": None
-            if not results
-            else p.ClusterResult.model_validate(results[-1].record.body),
+            "result": result,
+            "output": _result_output(ctx.conn, result.result) if result is not None else None,
         }
     ), id
 
@@ -265,9 +290,9 @@ def complaint(ctx: Actions, asked: p.OperatorRef) -> tuple[p.ComplaintDetail, st
 
 
 @route(p.OPERATOR_COMPLAINT_DISMISS, p.OperatorRef, MODERATION, writes=True)
-def complaint_dismiss(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorRef, str]:
+def complaint_dismiss(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorDismissed, str]:
     id = moderation.dismiss(ctx.conn, asked.id, None, ctx.now)
-    return p.OperatorRef(id=id), id
+    return p.OperatorDismissed(id=id), id
 
 
 @route(p.OPERATOR_MODERATION, p.OperatorRecord, MODERATION, writes=True)
@@ -298,18 +323,26 @@ def reports(ctx: Actions, asked: p.OperatorReportQuery) -> tuple[p.OperatorRepor
 
 @route(p.OPERATOR_REPORT, p.OperatorRef)
 def report(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorReportDetail, str]:
-    row = ctx.conn.execute("SELECT * FROM reports WHERE id = ?", (asked.id,)).fetchone()
-    if row is None:
+    rows = ctx.conn.execute(
+        "SELECT * FROM reports WHERE substr(id,1,?)=? LIMIT 2", (len(asked.id), asked.id)
+    ).fetchall()
+    if not rows:
         raise Refusal("not_found", 404)
-    data = dict(row)
+    if len(rows) > 1:
+        raise Refusal("ambiguous", 409)
+    data = dict(rows[0])
     data["report"] = p.SignedReport.model_validate_json(data.pop("report_json"))
-    return p.OperatorReportDetail.model_validate(data), asked.id
+    return p.OperatorReportDetail.model_validate(data), rows[0]["id"]
 
 
 @route(p.OPERATOR_NODES, p.OperatorEmpty)
 def nodes(ctx: Actions, asked: p.OperatorEmpty) -> tuple[p.OperatorNodes, None]:
+    names = dict(ctx.conn.execute("SELECT node, name FROM messenger_names").fetchall())
     return p.OperatorNodes(
-        nodes=[p.OperatorNode.model_validate(node.as_json()) for node in store.nodes(ctx.conn)]
+        nodes=[
+            p.OperatorNode.model_validate(node.as_json() | {"name": names.get(node.fingerprint)})
+            for node in store.nodes(ctx.conn)
+        ]
     ), None
 
 

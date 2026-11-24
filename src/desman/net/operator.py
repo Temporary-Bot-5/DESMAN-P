@@ -27,6 +27,11 @@ def operator_key_path() -> Path:
     return db.default_db_path().parent / "operator.key"
 
 
+def has_key() -> bool:
+    """Whether operator mode is on: the person installed an operator key (a regular file)."""
+    return operator_key_path().is_file()
+
+
 def load_key() -> sign.NodeKey | None:
     path = operator_key_path()
     try:
@@ -101,8 +106,9 @@ def remove_key() -> None:
 
 
 class OperatorError(Exception):
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, status: int | None = None) -> None:
         self.reason = reason
+        self.status = status
         super().__init__(reason)
 
 
@@ -141,7 +147,7 @@ class OperatorClient:
                     include_nulls=True,
                 )
             except node.Problem as e:
-                raise OperatorError(e.error) from e
+                raise OperatorError(e.error, e.status) from e
             except node.Unreachable as e:
                 raise OperatorError(str(e)) from e
 
@@ -195,8 +201,8 @@ class OperatorClient:
     def complaint(self, id: str) -> p.ComplaintDetail:
         return self._post(p.OPERATOR_COMPLAINT, p.OperatorRef(id=id), p.ComplaintDetail)
 
-    def complaint_dismiss(self, id: str) -> p.OperatorRef:
-        return self._post(p.OPERATOR_COMPLAINT_DISMISS, p.OperatorRef(id=id), p.OperatorRef)
+    def complaint_dismiss(self, id: str) -> p.OperatorDismissed:
+        return self._post(p.OPERATOR_COMPLAINT_DISMISS, p.OperatorRef(id=id), p.OperatorDismissed)
 
     def moderation(self, record: sign.Signed) -> p.ModerationRow:
         return self._post(p.OPERATOR_MODERATION, p.OperatorRecord(record=record), p.ModerationRow)

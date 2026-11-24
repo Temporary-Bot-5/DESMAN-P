@@ -1,5 +1,7 @@
 # Running desman-registry on a server
 
+Operators can use DESMAN remotely. See the [operator mode guide](operator.md).
+
 `desman-registry` is the registry of desman-global (ADR 0004). Nodes register with it, send
 heartbeats and fetch the records signed by the root. It runs on the owner's server and speaks
 plain HTTP on `127.0.0.1`. **TLS comes from a reverse proxy** in front of it (Caddy or nginx,

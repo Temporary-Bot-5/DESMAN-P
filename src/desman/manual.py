@@ -338,13 +338,26 @@ TOPICS: Final = (
     ),
     Topic(
         "operator",
-        "Operator key setup and registry assignment",
+        "Operator setup, network work, moderation and registry records",
         "`/operator status` shows the key fingerprint, public key, registry, scopes and assignment expiry. "
         "Use `/operator key import FILE` for an existing Ed25519 PEM key. "
         "`/operator key create` generates a key and shows its public key "
         "and the assignment command for the root owner. Import and create accept --registry URL. "
         "`/operator key remove` previews removal in the terminal. Add --yes to remove it. "
-        "Key changes requested in chat require confirmation. The private key stays on this machine.",
+        "The private key stays on this machine. The tasks scope can offer and settle work and set "
+        "node owners; moderation covers complaints and suspensions. "
+        "Use `/operator inbox` for work waiting for a decision and its available results, `/operator jobs` and "
+        "`/operator clusters` to list work, and `/operator job show ID` or "
+        "`/operator cluster show ID` for results. Decisions are accept, again or drop. "
+        "`/operator complaints`, `/operator suspensions`, `/operator reports`, "
+        "`/operator nodes` and `/operator log` show registry records. Empty lists show a message. "
+        "A lift targets one suspension. If multiple are in force, the node lift is refused. "
+        "The confirmation warns if a lift ends before its suspension. "
+        "Chat changes requested through the interlocutor require confirmation. "
+        "On the page, manage the key in Settings → desman-global. With a key, the Operator "
+        "section shows Status, Inbox, Work, Network and, with the scope, Moderation. Confirm changes in its windows. "
+        "Chat reads display tables or text. Registry replies containing other people's words "
+        "are shared as untrusted data after agreement. Metadata-only replies need no agreement.",
     ),
     Topic(
         "globalsend",

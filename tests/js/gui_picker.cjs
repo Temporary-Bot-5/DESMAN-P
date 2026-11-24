@@ -170,6 +170,7 @@ assert.deepEqual(taskCards.map(n => n.children[0].children[1].title), ['Unpin', 
 // Settings' 1.5-second refresh defers a requested redraw until the picker loses focus.
 global.settingsData = null; global.settingsPending = null; global.settingsRedraw = false;
 global.ended = false; global.uninstallPending = false;
+global.operatorOpen = false; global.showOperatorButton = () => {};
 global.fetch = async () => ({ok: true, json: async () => ({})});
 let draws = 0; global.drawSettings = () => draws++;
 global.$ = () => panel;

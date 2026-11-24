@@ -67,6 +67,7 @@ def test_settings_snapshot_is_read_only_and_redacted(settings_app: Any) -> None:
         "behaviour",
         "limits",
         "network",
+        "operator_key",
         "protected",
         "result",
     }

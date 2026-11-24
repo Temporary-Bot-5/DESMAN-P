@@ -554,11 +554,11 @@ L.4–L.8 готовят к этому: код, проверенный не на
   проверка назначения и области, отказы в журнале; записи (`task`, `cluster_task`,
   `moderation`) подписывает DESMAN оператора общими с `desman-registry` построителями;
   `desman operator key import|create|remove`, `desman operator status`; клиент `net/operator.py`.
-- [ ] **O.2 Команды и чат.** `desman operator inbox|jobs|job …|clusters|cluster …|complaints|
+- [x] **O.2 Команды и чат.** `desman operator inbox|jobs|job …|clusters|cluster …|complaints|
   complaint …|suspend|lift|suspensions|reports|report show|nodes|owner|log`, записи каталога
   (чтение — показ кодом, изменение — окно с точной записью или решением), тексты других людей
   — как недоверенные; руководство и инструкции.
-- [ ] **O.3 Страница.** Раздел «Оператор» на странице `desman gui` (только когда есть ключ):
+- [x] **O.3 Страница.** Раздел «Оператор» на странице `desman gui` (только когда есть ключ):
   входящие, задания, кластеры, жалобы, узлы; те же тела функций и окна подтверждения.
 
 ## Карта демонстраций
