@@ -45,10 +45,11 @@ NODE is a node fingerprint or its unique prefix.
 | `desman operator owner NODE [NAME] [--clear]` | Set a node's owner name or clear it. |
 | `desman operator log [--limit N] [--json]` | Read recent registry journal entries. |
 
-The same commands work in chat with `/operator`. When the interlocutor proposes a
-change, DESMAN shows the proposed record or decision and asks you to confirm it.
-DESMAN displays registry text directly and asks before sharing other people's words
-with the interlocutor as untrusted data.
+Chat commands under `/operator` display tables or text. The CLI accepts `--json`.
+When the interlocutor proposes a change, DESMAN shows the proposed record or decision
+and asks you to confirm it. DESMAN displays registry text directly and asks before
+sharing other people's words with the interlocutor as untrusted data. Empty and
+metadata-only replies need no consent.
 
 ## Server administration
 

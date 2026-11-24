@@ -758,7 +758,8 @@ def _print_complaints(rows: Iterable[p.ComplaintRow]) -> None:
     )
 
 
-def _print_inbox(client: operator.OperatorClient, reply: p.OperatorInbox) -> None:
+def _print_inbox(client: operator.OperatorClient, reply: p.OperatorInbox) -> dict[str, str]:
+    results: dict[str, str] = {}
     if not reply.jobs and not reply.clusters:
         ui.note(t("Nothing waits for the operator."))
     if reply.jobs:
@@ -772,31 +773,36 @@ def _print_inbox(client: operator.OperatorClient, reply: p.OperatorInbox) -> Non
         for item in job_detail.handed_in:
             output = item.body.get("output")
             if item.id == job.result and isinstance(output, str):
-                _lines(_field(t("Job"), job.job), _field(t("Result"), _result_text(output)))
+                result = _result_text(output)
+                _lines(_field(t("Job"), job.job), _field(t("Result"), result))
+                if result.strip():
+                    results[job.job] = result
     for cluster in reply.clusters:
         if cluster.reason != "result":
             continue
         cluster_detail = call(client, lambda c: c.cluster(cluster.task))  # noqa: B023
         if cluster_detail.result is not None:
-            _lines(
-                _field(t("Cluster task"), cluster.task),
-                _field(t("Result"), _result_text(cluster_detail.result.summary)),
-            )
+            result = _result_text(cluster_detail.result.summary)
+            _lines(_field(t("Cluster task"), cluster.task), _field(t("Result"), result))
+            if result.strip():
+                results[cluster.task] = result
+    return results
 
 
 def print_reply(
     client: operator.OperatorClient, reply: BaseModel, *, as_json: bool = False
-) -> None:
+) -> dict[str, str] | None:
+    """Print the reply, returning any result text fetched to display the inbox."""
     if as_json:
         encoded = json.dumps(reply.model_dump(mode="json"), ensure_ascii=False)
         if ui.is_terminal_front():
             click.echo(encoded)
         else:
             ui.out(Text(encoded))
-        return
+        return None
     match reply:
         case p.OperatorInbox():
-            _print_inbox(client, reply)
+            return _print_inbox(client, reply)
         case p.OperatorJobs():
             _print_jobs(reply.jobs)
         case p.OperatorClusters():
@@ -876,6 +882,8 @@ def print_reply(
                     for r in reply.entries
                 ),
             )
+
+    return None
 
 
 def print_change(reply: BaseModel) -> dict[str, str]:

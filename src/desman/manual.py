@@ -354,8 +354,8 @@ TOPICS: Final = (
         "A lift targets one suspension. If multiple are in force, the node lift is refused. "
         "The confirmation warns if a lift ends before its suspension. "
         "Chat changes requested through the interlocutor require confirmation. "
-        "Registry text is shown by code and is shared with the interlocutor only after agreement, "
-        "as untrusted data.",
+        "Chat reads display tables or text. Registry replies containing other people's words "
+        "are shared as untrusted data after agreement. Metadata-only replies need no agreement.",
     ),
     Topic(
         "globalsend",
