@@ -492,6 +492,10 @@ class LeadArgs(Args):
     state: Literal["on", "off"]
 
 
+class CloudArgs(Args):
+    state: Literal["on", "off"] | None = None
+
+
 class BorrowSearchArgs(Args):
     state: Literal["on", "off"] | None = None
 
@@ -1396,6 +1400,27 @@ def _global_lead(ctx: Context, args: LeadArgs) -> Proposal:
     return Proposal(
         [t("Lead clusters") + ": " + (t("yes") if args.state == "on" else t("off"))], apply
     )
+
+
+def _cloud_kind(args: CloudArgs) -> Kind:
+    return Kind.READ if args.state is None else Kind.CHANGE
+
+
+def _global_cloud(ctx: Context, args: CloudArgs) -> Outcome | Proposal:
+    if args.state is None:
+        on = ctx.config().network.lend_cloud
+        ui.out(global_cli.cloud_text(on))
+        return Outcome({"lend_cloud": on})
+
+    on = args.state == "on"
+
+    def apply() -> Outcome:
+        return Outcome(
+            {"lend_cloud": global_cli.set_lend_cloud(ctx.manager, on, conn=ctx.store.conn)}
+        )
+
+    warnings = [global_cli.cloud_warning()] if on else []
+    return Proposal([global_cli.cloud_text(on)], apply, warnings)
 
 
 def _borrow_search_kind(args: BorrowSearchArgs) -> Kind:
@@ -2766,6 +2791,15 @@ CATALOG: tuple[Entry, ...] = (
         _global_lead,
     ),
     Entry(
+        "global cloud",
+        "Show or change consent to lend free cloud keys to desman-global (on/off, default off). "
+        "The network's operator assigns jobs like for any other module. Enable only when "
+        "the provider's terms allow that use. A change requires confirmation.",
+        CloudArgs,
+        _cloud_kind,
+        _global_cloud,
+    ),
+    Entry(
         "global search",
         "Show whether this node borrows whole-web search, or change it (on/off, default off). "
         "A change requires confirmation. Borrowing is used only without SearXNG and Tavily.",
@@ -2777,8 +2811,8 @@ CATALOG: tuple[Entry, ...] = (
         "global donate",
         "Lend managed SearXNG with a daily search quota, or lend a model provider of this machine "
         "to desman-global with a daily quota of calls "
-        "and tokens (its key never leaves the machine; a local server, or a free provider whose "
-        "terms allow it; never a paid one). Only when the person asks. The person confirms.",
+        "and tokens (its key never leaves the machine; a local server or an eligible free cloud "
+        "provider; never a paid one). Only when the person asks. The person confirms.",
         DonateArgs,
         Kind.CHANGE,
         _global_donate,
@@ -3058,7 +3092,7 @@ def config_changes(before: Config | None, after: Config | None) -> list[tuple[st
     if old.network != new.network:  # which parts, by name; quotas are not secret
         parts = [
             n
-            for n in ("enabled", "registry", "lead", "borrow_search")
+            for n in ("enabled", "registry", "lead", "borrow_search", "lend_cloud")
             if getattr(old.network, n) != getattr(new.network, n)
         ]
         parts += [

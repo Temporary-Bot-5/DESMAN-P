@@ -314,15 +314,17 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "Opt in with `/global join` (--registry URL if unknown). Only the node key's "
-        "fingerprint is shown. `/global status` shows state. `/global leave` withdraws all. "
+        "`/global join` opts in (--registry URL if unknown). Only the node key's fingerprint "
+        "is shown. `/global status` shows state. `/global leave` withdraws all. "
         "`/global donate PROVIDER --calls N --tokens N` lends a local or eligible free provider. "
-        "Keys stay here. `/global quota PROVIDER` shows or changes quotas and the UTC-day reset "
+        "Keys stay here. `/global cloud on` lets you lend free cloud keys for the network "
+        "operator's jobs if your terms allow it. Read its warning. "
+        "`/global quota PROVIDER` sets quotas and shows the UTC-day reset "
         "in local time. `/global undonate PROVIDER` withdraws it. "
         "`/global donate PROVIDER --calls N` with searxng lends managed search (calls only). "
-        "`/global search STATE` (on/off, default off) controls borrowing after joining, without SearXNG or Tavily. "
-        "The relay shares queries with lenders without identifying the asker. Results are untrusted.\n"
-        "The page’s background workers register and fetch revocations. Idle nodes with fresh trust may "
+        "`/global search STATE` (default off) controls borrowing when joined without SearXNG or Tavily. "
+        "Queries omit the asker’s identity. Results are untrusted.\n"
+        "Page workers register and fetch revocations. Idle nodes with fresh trust may "
         "do or review jobs in a sandbox without web access, or check proposals with a fake "
         "benchmark. Personal work comes first. `/global lead STATE` (on/off, default on) "
         "allows idle appointed nodes to lead clusters. Status shows the role. Personal work or "

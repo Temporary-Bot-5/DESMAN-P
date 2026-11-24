@@ -142,9 +142,10 @@ class ProposalSendError(Exception):
 
 def capabilities(config: Config) -> list[protocol.Capability]:
     """What this node lends, as the registry is told: provider, model, the fingerprint of the
-    provider's first key (`key_id`, never the key; none for a local server), quotas. A
-    provider no longer known or not set up is left out (the person sees why in `global
-    status` and `keys check`)."""
+    provider's first key (`key_id`, never the key; none for a local server), quotas. Include
+    only eligible, configured providers. An unknown or unconfigured provider is left out
+    (the person sees why in `global status` and `keys check`). Cloud providers that require
+    opt-in are left out while `lend_cloud` is off."""
     found: list[protocol.Capability] = []
     for provider_id, donation in sorted(config.network.donated.items()):
         if provider_id == protocol.SEARCH_PROVIDER:
@@ -159,7 +160,9 @@ def capabilities(config: Config) -> list[protocol.Capability]:
             provider = providers.find(provider_id)
         except providers.UnknownProvider:
             continue
-        if provider.paid or not providers.can_donate(provider) or not provider.is_ready(config):
+        if not providers.can_donate(
+            provider, lend_cloud=config.network.lend_cloud
+        ) or not provider.is_ready(config):
             continue
         keys = [] if provider.local or provider.key_env is None else config.keys(provider.key_env)
         if not provider.local and not keys:

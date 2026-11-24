@@ -96,7 +96,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 Interface = Literal["terminal", "gui"]
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
@@ -290,6 +290,7 @@ class Network(BaseModel):
     enabled: StrictBool = False
     lead: StrictBool = True
     borrow_search: StrictBool = False
+    lend_cloud: StrictBool = False
     registry: RegistryUrl | None = None
     """None: the address DESMAN ships with (`net.DEFAULT_REGISTRY`)."""
     donated: dict[str, Donation] = Field(default_factory=dict)
@@ -323,7 +324,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[13] = 13
+    schema_version: Literal[14] = 14
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -387,6 +388,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     11: master model and key preferences.
     12: master admissions and revocations.
     13: default startup interface.
+    14: opt-in lending of free cloud keys.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -451,6 +453,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     if version == 12:
         data.setdefault("interface", "terminal")
         version = 13
+
+    if version == 13:
+        version = 14  # lending free cloud keys defaults off
 
     data["schema_version"] = version
     return data

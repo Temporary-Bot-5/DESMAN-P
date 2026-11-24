@@ -252,26 +252,23 @@ def test_a_node_registers_with_what_it_lends_then_says_it_is_alive(
     assert actions(conn) == ["registered", "capabilities_sent"]
 
 
-def test_a_cloud_module_is_named_by_its_key_fingerprint_never_the_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from desman import providers
+def test_a_cloud_module_is_named_by_its_key_fingerprint_never_the_key() -> None:
     from desman.llm.openai_compat import key_id
 
-    groq = providers.find("groq")
-    monkeypatch.setattr(providers, "can_donate", lambda p: not p.paid)
     secret = "gsk_" + "s" * 48
     config = make_config(
         api_keys={"GROQ_API_KEY": secret},
-        network=Network(enabled=True, registry=REGISTRY, donated={groq.id: LENT}),
+        network=Network(enabled=True, registry=REGISTRY, donated={"groq": LENT, "nobody": LENT}),
     )
-    [lent] = node.capabilities(config)
-    assert lent.key == key_id(secret) and secret not in lent.model_dump_json()
-    # Not set up, unknown, or not lendable: left out.
-    config.network.donated["nobody"] = LENT
-    assert len(node.capabilities(config)) == 1
-    monkeypatch.setattr(providers, "can_donate", lambda p: False)
     assert node.capabilities(config) == []
+    config.network.lend_cloud = True
+    [lent] = node.capabilities(config)
+    assert lent.provider == "groq"
+    assert lent.key == key_id(secret) and secret not in lent.model_dump_json()
+    config.network.lend_cloud = False
+    assert node.capabilities(config) == [] and config.network.donated["groq"] == LENT
+    config.network.lend_cloud = True
+    assert node.capabilities(config) == [lent]
 
 
 def test_assignments_and_revocations_are_checked_and_journaled_once(
