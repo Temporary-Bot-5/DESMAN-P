@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "无法启动页面：{error}。终端聊天将继续开放。",
+    "Port {port} is busy.": "端口 {port} 正忙。",
+    "continue an earlier chat / a chat that is not kept": "继续之前的聊天 / 不保存的聊天",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} 按使用量计费。要使用它，请在 {command} 的“{roles}”中选择其模型和密钥。",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "本次未处理。请再次运行 `/worker` 处理剩余任务：{n}",
+    "For options, use {command}.": "使用 {command} 查看选项。",
+    "You have no nodes of your own. For options, use {command}.": "您没有自己的节点。使用 {command} 查看选项。",
+    "Approve: desman protected approve": "批准：desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "尚未收到版本。启用 desman-global 后，浏览器页面会检查新版本。",
     "Also delete my data, keys and chat history": "同时删除我的数据、密钥和聊天记录",
     "Close other DESMAN windows, chats and workers first.": "请先关闭其他 DESMAN 窗口、聊天和工作进程。",
     "Confirm removal.": "确认卸载。",
@@ -1005,7 +1014,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "当没有任何任务还有 worker 可做的工作时停止（默认情况下 worker 会继续等待新工作以及暂停结束）。",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "处理所有任务的子任务，直到被停止（Ctrl+C）。\n\n多个 worker 可以同时运行，在各自的终端中，使用同一个数据库：每个 worker 领取任意任务中最紧急的就绪子任务，并审查等待裁决的结果，绝不会与其他 worker 处理同一个。被停止或被杀死的 worker 不会留下任何东西：其他 worker 或 `resume` 会收回它的子任务。",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "依次处理未完成的任务，直到没有任何任务还有工作（{n}）：",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "本次未处理（请再次请求，或运行 `desman worker`）：{n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "worker 已停止。执行：{executed}，审查：{reviewed}。",
     "Worker {owner} started. Ctrl+C stops it.": "worker {owner} 已启动。按 Ctrl+C 停止。",
     "Take a permission back (repeat for several).": "撤销某项权限（可重复指定）。",
@@ -1285,7 +1293,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL（其编号）：它改了什么、为什么，以及 diff。",
     "Proposal {id}: {status}": "提议 {id}：{status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "读取此时间段内的失败：例如 24h、7d 或 'all'。",
-    "See one: desman proposals show NUMBER": "查看一个：desman proposals show 编号",
+    "See one: desman proposals show NUMBER": "查看一个：desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "分析（任务 {ref}）尚未结束。继续：desman resume {ref}",
     "The diff is also in {path}": "diff 也保存在 {path}",
     "The proposals, newest first.": "提议，最新的在前。",

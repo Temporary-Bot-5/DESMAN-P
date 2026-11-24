@@ -360,10 +360,10 @@ def suggestion_lines(suggestions: list[ModelSuggestion]) -> list[str]:
                     url=page,
                 )
             )
-        lines.append(
-            "    "
-            + t("To use it: {command}", command=f"desman models add {s.model} --server {s.server}")
-        )
+        command = f"desman models add {s.model} --server {s.server}"
+        if ui.in_chat_output():
+            command = f"`{command}`"
+        lines.append("    " + t("To use it: {command}", command=command))
     return lines
 
 
@@ -497,9 +497,17 @@ def print_inbox(items: list[InboxItem], hint: bool = True) -> None:
         if item.reason:
             click.echo(f"{'':<12} {one_line(item.reason, 110)}")
         if setup := search_setup_hint(item):
-            click.echo(" " * 12 + setup)
+            click.echo(" " * 12 + ui.chat_hint(setup))
     if hint:
-        click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
+        if ui.in_chat_output():
+            click.echo(
+                t(
+                    "Decide here: /retry, /accept or /fail <ref> [--note TEXT], "
+                    "the task continues after /retry or /accept.",
+                )
+            )
+        else:
+            click.echo(t("Decide with: desman retry|accept|fail <ref> [--note TEXT]"))
 
 
 def choose_inbox(store: Store, session_id: str | None = None) -> dict[str, Any]:
@@ -694,7 +702,9 @@ def print_decision(decision: Decision, *, resume_hint: bool = True) -> None:
         if not resume_hint:
             return
         click.echo(
-            t("Task is active again. Continue with: desman resume {ref}", ref=decision.short)
+            ui.chat_hint(
+                t("Task is active again. Continue with: desman resume {ref}", ref=decision.short)
+            )
         )
     else:
         click.echo(t("Task is {status}.", status=decision.task_status))

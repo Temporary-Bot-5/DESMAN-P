@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "पेज शुरू नहीं हो सका: {error}। टर्मिनल चैट खुली रहेगी।",
+    "Port {port} is busy.": "पोर्ट {port} व्यस्त है।",
+    "continue an earlier chat / a chat that is not kept": "पिछली कोई चैट जारी रखें / ऐसी चैट जो सहेजी नहीं जाती",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} के इस्तेमाल पर शुल्क लगता है। इसे इस्तेमाल करने के लिए {command} में {roles} के तहत इसका मॉडल और कुंजी चुनें।",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "इस बार छूट गए। बाकी कार्यों के लिए `/worker` फिर चलाएँ: {n}",
+    "For options, use {command}.": "विकल्प देखने के लिए {command} इस्तेमाल करें।",
+    "You have no nodes of your own. For options, use {command}.": "आपका कोई अपना नोड नहीं है। विकल्प देखने के लिए {command} इस्तेमाल करें।",
+    "Approve: desman protected approve": "स्वीकृत करें: desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "अभी कोई रिलीज़ नहीं मिली। desman-global चालू होने पर ब्राउज़र पेज रिलीज़ की जाँच करता है।",
     "Also delete my data, keys and chat history": "मेरे डेटा, कुंजियाँ और चैट इतिहास भी मिटाएँ",
     "Close other DESMAN windows, chats and workers first.": "पहले DESMAN की अन्य विंडो, चैट और वर्कर बंद करें।",
     "Confirm removal.": "हटाने की पुष्टि करें।",
@@ -1048,7 +1057,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "जब किसी भी कार्य में वर्कर के करने लायक काम न बचे तो रुकें (डिफ़ॉल्ट रूप से वर्कर नए काम और रुके हुए काम के फिर शुरू होने की प्रतीक्षा करता रहता है)।",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "रोके जाने तक (Ctrl+C) सभी कार्यों के उप-कार्यों पर काम करें।\n\nकई वर्कर एक साथ, अलग-अलग टर्मिनलों में, एक ही डेटाबेस पर चल सकते हैं: हर वर्कर किसी भी कार्य का सबसे ज़रूरी तैयार उप-कार्य लेता है और फ़ैसले की प्रतीक्षा कर रहे परिणामों की समीक्षा करता है, कभी वही नहीं जो दूसरा वर्कर ले चुका हो। रोका गया या मारा गया वर्कर पीछे कुछ नहीं छोड़ता: उसका उप-कार्य दूसरा वर्कर या `resume` वापस ले लेता है।",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "अधूरे कार्यों पर बारी-बारी से काम करें, जब तक किसी में काम न बचे ({n}):",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "इस बार नहीं लिए गए (फिर से कहें, या `desman worker` चलाएँ): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "वर्कर रुक गया। निष्पादन: {executed}, समीक्षाएँ: {reviewed}।",
     "Worker {owner} started. Ctrl+C stops it.": "वर्कर {owner} शुरू हुआ। Ctrl+C इसे रोकता है।",
     "Take a permission back (repeat for several).": "कोई अनुमति वापस लें (कई बार दे सकते हैं)।",
@@ -1358,7 +1366,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (उसकी संख्या): यह क्या बदलता है, क्यों, और diff।",
     "Proposal {id}: {status}": "प्रस्ताव {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "इस अवधि की विफलताएँ पढ़ें: जैसे 24h, 7d या 'all'।",
-    "See one: desman proposals show NUMBER": "एक देखें: desman proposals show संख्या",
+    "See one: desman proposals show NUMBER": "एक देखें: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "विश्लेषण (कार्य {ref}) समाप्त नहीं हुआ है। जारी रखें: desman resume {ref}",
     "The diff is also in {path}": "diff {path} में भी है",
     "The proposals, newest first.": "प्रस्ताव, सबसे नए पहले।",

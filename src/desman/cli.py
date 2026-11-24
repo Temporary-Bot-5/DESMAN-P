@@ -209,9 +209,14 @@ def _open_page(resume: bool, temporary: bool, session_id: str | None = None) -> 
 
     try:
         run(resume, temporary, 0, True, session_id=session_id)
-    except ServerStartError as e:
+    except (ServerStartError, OSError) as e:
         with ui.chat_output():
-            ui.error(e.format_message())
+            ui.error(
+                t(
+                    "The page could not start: {error}. Staying in the terminal chat.",
+                    error=(e.detail if isinstance(e, ServerStartError) else str(e)).rstrip("."),
+                )
+            )
         return False
     return True
 

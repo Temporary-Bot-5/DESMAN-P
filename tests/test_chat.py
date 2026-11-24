@@ -532,11 +532,10 @@ def test_gui_handoff_follows_chat_cleanup(
     assert len(fake.calls) == 1
 
 
+@pytest.mark.parametrize("permission_denied", [False, True], ids=["port-busy", "permission-denied"])
 def test_gui_start_failure_returns_to_the_same_chat(
-    monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock, permission_denied: bool
 ) -> None:
-    import click
-
     from desman.gui import app
 
     configured()
@@ -546,9 +545,55 @@ def test_gui_start_failure_returns_to_the_same_chat(
 
     def start(*args: object, **kwargs: object) -> None:
         assert kwargs["session_id"] == session_id
-        raise click.ClickException("Port is busy.")
+        if permission_denied:
+            raise PermissionError("Permission denied")
+        raise app.ServerStartError("Port is busy.")
 
     monkeypatch.setattr(app, "run", start)
     result = again("/gui", "/rename Continued", "/exit")
-    assert "Port is busy." in result.output
+    message = "Permission denied" if permission_denied else "Port is busy"
+    assert f"The page could not start: {message}." in result.output
+    assert "--port" not in result.output
     assert stored().get(session_id).title == "Continued"  # type: ignore[union-attr]
+
+
+def test_reply_hints_change_only_on_display(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from desman import runs
+    from desman.llm.fake import FakeLLM
+
+    configured()
+    reply = "See `desman list`.\n```sh\ndesman list\n```"
+    answer = json.dumps({"type": "reply", "text": reply})
+    fake = FakeLLM().on("Chat turn", answer, answer)
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
+
+    result = chat("What can I run?", "/exit")
+    assert "See `/list`." in result.output
+    assert "\ndesman list\n" in result.output
+    with db.open_db() as conn:
+        sessions = Sessions(conn)
+        session = sessions.latest()
+        assert session is not None
+        assert sessions.history(session.id).messages[-1].text == reply
+
+    replay = again("/exit")
+    assert "See `/list`." in replay.output
+    assert "\ndesman list\n" in replay.output
+
+
+def test_adding_paid_key_in_chat_points_to_role_selection() -> None:
+    configured()
+    result = chat("/keys add openai", "sk-example-paid", "/exit")
+    assert "choose its model and key under Models and keys for roles in `/config`" in " ".join(
+        result.output.split()
+    )
+    assert "--provider" not in result.output
+
+
+def test_chat_can_find_out_how_to_receive_a_release() -> None:
+    configured()
+    result = chat("/global update", "/exit")
+    assert "browser page checks for releases" in " ".join(result.output.split())
+    assert "desman worker" not in result.output

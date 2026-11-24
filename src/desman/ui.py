@@ -886,8 +886,30 @@ _chat_output: ContextVar[bool] = ContextVar("chat_output", default=False)
 def _command_hint_pattern() -> re.Pattern[str]:
     from desman.commands import CATALOG
 
-    names = "|".join(re.escape(name) for entry in CATALOG for name in (entry.name, *entry.aliases))
-    return re.compile(r"(?<![\w/.-])desman +(?=(?:" + names + r")(?![\w-]))")
+    names = {name for entry in CATALOG for name in (entry.name, *entry.aliases)}
+    names.add("gui shortcut")
+    paths = "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
+    # Outside backticks, ordinary prose ends a hint. Keep command syntax in the span,
+    # including optional-argument notation, so the parser can reject it when appropriate.
+    word = (
+        r"""(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'"""
+        r"|--?[\w-]+(?:=[^\s`]+)?|[\w.-]+=[^\s`]+"
+        r"|\[(?:--|[A-Z])[^\n\]]*\]"
+        r"|[A-Z][A-Z0-9_]*(?:/[A-Z][A-Z0-9_]*)?"
+        r"|[a-f0-9]{8,}(?:/\d+)?|\d+(?:/\d+)?)"
+    )
+    return re.compile(
+        r"(?<!`)(?P<ticks>`+)(?!`)(?P<quoted>.*?)"
+        r"(?<!`)(?P=ticks)(?!`)|(?<![\w/.-])(?P<bare>desman +(?:"
+        + paths
+        + r")(?![\w/|-])(?:[ \t]+"
+        + word
+        + r")*)(?![\w/|-])"
+    )
+
+
+def in_chat_output() -> bool:
+    return _chat_output.get()
 
 
 @contextmanager
@@ -903,8 +925,37 @@ def chat_output() -> Iterator[None]:
 def _command_hints(text: str) -> Iterator[tuple[int, int]]:
     if not _chat_output.get() or "desman " not in text:
         return
-    for match in _command_hint_pattern().finditer(text):
-        yield match.span()
+    from desman.commands import BadArgs, parse_line
+
+    fence: str | None = None
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        marker = re.match(r"(?: {0,3}>[ \t]?)* {0,3}(`{3,}|~{3,})(.*)", line)
+        if marker:
+            run, tail = marker.groups()
+            if fence is None:
+                fence = run
+            elif run.startswith(fence) and not tail.strip():
+                fence = None
+        elif fence is None:
+            for match in _command_hint_pattern().finditer(line):
+                group = match.lastgroup
+                assert group is not None
+                hint = match[group]
+                prefix = re.match(r"desman +", hint)
+                if prefix is None:
+                    continue
+                command = hint[prefix.end() :].strip()
+                if command.split()[:1] == ["worker"]:
+                    continue
+                try:
+                    parsed = parse_line(command, None, dry_run=True)
+                except (BadArgs, click.ClickException, click.exceptions.Exit):
+                    continue
+                if parsed is not None:
+                    start = offset + match.start(group)
+                    yield start, start + prefix.end()
+        offset += len(line)
 
 
 def chat_hint(text: str) -> str:

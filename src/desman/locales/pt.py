@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "Não foi possível iniciar a página: {error}. O chat do terminal permanece aberto.",
+    "Port {port} is busy.": "A porta {port} está ocupada.",
+    "continue an earlier chat / a chat that is not kept": "continuar um chat anterior / um chat que não é salvo",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "O uso de {name} é cobrado. Para usá-lo, escolha o modelo e a chave em {roles}, no comando {command}.",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "Não processadas desta vez. Execute `/worker` novamente para processar as tarefas restantes: {n}",
+    "For options, use {command}.": "Para ver as opções, use {command}.",
+    "You have no nodes of your own. For options, use {command}.": "Você não tem nós próprios. Para ver as opções, use {command}.",
+    "Approve: desman protected approve": "Aprovar: desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "Nenhuma versão foi recebida ainda. A página no navegador verifica versões quando desman-global está ativado.",
     "Also delete my data, keys and chat history": "Excluir também meus dados, chaves e histórico de conversas",
     "Close other DESMAN windows, chats and workers first.": "Feche primeiro as demais janelas, conversas e processos de trabalho do DESMAN.",
     "Confirm removal.": "Confirme a remoção.",
@@ -1048,7 +1057,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "Parar quando nenhuma tarefa tiver trabalho para um worker (por padrão o worker espera por trabalho novo e pelo fim das pausas).",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "Trabalhar nas subtarefas de todas as tarefas até ser parado (Ctrl+C).\n\nVários workers podem rodar ao mesmo tempo, em terminais separados, sobre um mesmo banco de dados: cada um pega a subtarefa pronta mais urgente de qualquer tarefa e revisa resultados que aguardam veredito, nunca a mesma que outro worker. Um worker parado ou encerrado não deixa nada para trás: outro worker, ou `resume`, retoma sua subtarefa.",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "Trabalhar nas tarefas inacabadas, uma de cada vez, até nenhuma ter trabalho ({n}):",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "Não incluídas desta vez (peça de novo ou execute `desman worker`): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "Worker parado. Execuções: {executed}, revisões: {reviewed}.",
     "Worker {owner} started. Ctrl+C stops it.": "Worker {owner} iniciado. Ctrl+C o para.",
     "Take a permission back (repeat for several).": "Retirar uma permissão (pode repetir).",
@@ -1361,7 +1369,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (o número dela): o que muda, por quê, e o diff.",
     "Proposal {id}: {status}": "Proposta {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "Ler as falhas deste período: por ex. 24h, 7d ou 'all'.",
-    "See one: desman proposals show NUMBER": "Ver uma: desman proposals show NÚMERO",
+    "See one: desman proposals show NUMBER": "Ver uma: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "A análise (tarefa {ref}) não terminou. Continue: desman resume {ref}",
     "The diff is also in {path}": "O diff também está em {path}",
     "The proposals, newest first.": "As propostas, as mais recentes primeiro.",

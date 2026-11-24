@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "La página no pudo iniciarse: {error}. El chat de la terminal sigue abierto.",
+    "Port {port} is busy.": "El puerto {port} está ocupado.",
+    "continue an earlier chat / a chat that is not kept": "continuar un chat anterior / un chat que no se guarda",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} se cobra por uso. Para usarlo, elige su modelo y clave en {roles} dentro de {command}.",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "Quedaron pendientes. Vuelve a ejecutar `/worker` para procesar las tareas restantes: {n}",
+    "For options, use {command}.": "Para ver las opciones, usa {command}.",
+    "You have no nodes of your own. For options, use {command}.": "No tienes nodos propios. Para ver las opciones, usa {command}.",
+    "Approve: desman protected approve": "Aprobar: desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "Aún no se ha recibido ninguna versión. La página del navegador busca versiones cuando desman-global está activado.",
     "Also delete my data, keys and chat history": "Borrar también mis datos, claves e historial de chats",
     "Close other DESMAN windows, chats and workers first.": "Cierra primero las demás ventanas, chats y procesos de trabajo de DESMAN.",
     "Confirm removal.": "Confirma la desinstalación.",
@@ -1048,7 +1057,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "Detenerse cuando ninguna tarea tenga trabajo para un worker (por defecto el worker espera trabajo nuevo y a que terminen las pausas).",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "Trabajar en las subtareas de todas las tareas hasta que se detenga (Ctrl+C).\n\nVarios workers pueden funcionar a la vez, en terminales distintas, sobre una misma base de datos: cada uno toma la subtarea lista más urgente de cualquier tarea y revisa los resultados que esperan veredicto, nunca la misma que otro worker. Un worker detenido o terminado no deja nada atrás: otro worker, o `resume`, retoma su subtarea.",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "Trabajar por turnos en las tareas sin terminar, hasta que ninguna tenga trabajo ({n}):",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "No incluidas esta vez (pídelo otra vez o ejecuta `desman worker`): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "Worker detenido. Ejecuciones: {executed}, revisiones: {reviewed}.",
     "Worker {owner} started. Ctrl+C stops it.": "Worker {owner} iniciado. Ctrl+C lo detiene.",
     "Take a permission back (repeat for several).": "Retirar un permiso (se puede repetir).",
@@ -1361,7 +1369,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (su número): qué cambia, por qué, y el diff.",
     "Proposal {id}: {status}": "Propuesta {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "Leer los fallos de este periodo: p. ej. 24h, 7d o 'all'.",
-    "See one: desman proposals show NUMBER": "Ver una: desman proposals show NÚMERO",
+    "See one: desman proposals show NUMBER": "Ver una: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "El análisis (tarea {ref}) no ha terminado. Continúalo: desman resume {ref}",
     "The diff is also in {path}": "El diff también está en {path}",
     "The proposals, newest first.": "Las propuestas, las más recientes primero.",

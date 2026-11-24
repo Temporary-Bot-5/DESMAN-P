@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "Die Seite konnte nicht starten: {error}. Der Terminal-Chat bleibt geöffnet.",
+    "Port {port} is busy.": "Port {port} ist belegt.",
+    "continue an earlier chat / a chat that is not kept": "einen früheren Chat fortsetzen / ein Chat, der nicht gespeichert wird",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} wird nach Nutzung abgerechnet. Wählen Sie zur Nutzung das Modell und den Schlüssel unter {roles} in {command}.",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "Diesmal nicht übernommen. Führen Sie `/worker` für die übrigen Aufgaben erneut aus: {n}",
+    "For options, use {command}.": "Optionen finden Sie mit {command}.",
+    "You have no nodes of your own. For options, use {command}.": "Sie haben keine eigenen Knoten. Optionen finden Sie mit {command}.",
+    "Approve: desman protected approve": "Genehmigen: desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "Noch kein Release empfangen. Die Browserseite sucht bei aktiviertem desman-global nach Releases.",
     "Also delete my data, keys and chat history": "Auch meine Daten, Schlüssel und den Chatverlauf löschen",
     "Close other DESMAN windows, chats and workers first.": "Schließen Sie zuerst alle anderen DESMAN-Fenster, Chats und Worker.",
     "Confirm removal.": "Entfernung bestätigen.",
@@ -1048,7 +1057,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "Anhalten, sobald keine Aufgabe mehr Arbeit für einen Worker hat (standardmäßig wartet der Worker auf neue Arbeit und auf das Ende von Pausen).",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "An den Teilaufgaben aller Aufgaben arbeiten, bis er gestoppt wird (Strg+C).\n\nMehrere Worker können gleichzeitig laufen, in getrennten Terminals, auf einer Datenbank: Jeder nimmt die dringendste bereite Teilaufgabe irgendeiner Aufgabe und prüft Ergebnisse, die auf ein Urteil warten, nie dieselbe wie ein anderer Worker. Ein gestoppter oder beendeter Worker hinterlässt nichts: Ein anderer Worker oder `resume` übernimmt seine Teilaufgabe.",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "Nacheinander an den unfertigen Aufgaben arbeiten, bis keine mehr Arbeit hat ({n}):",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "Diesmal nicht übernommen (erneut anfragen oder `desman worker` starten): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "Worker gestoppt. Ausführungen: {executed}, Prüfungen: {reviewed}.",
     "Worker {owner} started. Ctrl+C stops it.": "Worker {owner} gestartet. Strg+C stoppt ihn.",
     "Take a permission back (repeat for several).": "Eine Berechtigung entziehen (mehrfach möglich).",
@@ -1361,7 +1369,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (seine Nummer): was er ändert, warum, und der Diff.",
     "Proposal {id}: {status}": "Vorschlag {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "Die Fehlschläge dieses Zeitraums lesen: z. B. 24h, 7d oder 'all'.",
-    "See one: desman proposals show NUMBER": "Einen ansehen: desman proposals show NUMMER",
+    "See one: desman proposals show NUMBER": "Einen ansehen: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "Die Analyse (Aufgabe {ref}) ist nicht beendet. Fortsetzen: desman resume {ref}",
     "The diff is also in {path}": "Der Diff liegt auch in {path}",
     "The proposals, newest first.": "Die Vorschläge, neueste zuerst.",

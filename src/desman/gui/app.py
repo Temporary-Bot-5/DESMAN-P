@@ -25,6 +25,10 @@ from desman.info import print_project_info
 class ServerStartError(click.ClickException):
     """The local page server could not start."""
 
+    def __init__(self, message: str, *, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail if detail is not None else message
+
 
 def run(
     resume: bool,
@@ -43,13 +47,14 @@ def run(
     except OSError as exc:
         # Windows: 10048 in use; 10013 when the port is held by another socket (or reserved).
         if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) not in {10048, 10013}:
-            raise ServerStartError(str(exc)) from exc
+            raise
         raise ServerStartError(
             t(
                 "Port {port} is busy (is another `desman gui` open?). Use another --port, "
                 "or leave it out to pick a free one.",
                 port=port,
-            )
+            ),
+            detail=t("Port {port} is busy.", port=port) if port else (exc.strerror or str(exc)),
         ) from exc
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     try:

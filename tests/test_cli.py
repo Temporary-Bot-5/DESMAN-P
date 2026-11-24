@@ -328,7 +328,8 @@ def test_bare_desman_falls_back_only_when_page_server_cannot_start(
     result = CliRunner().invoke(cli, [])
     if startup_failure:
         assert result.exit_code == 0, result.output
-        assert "is busy" in result.output
+        assert "The page could not start: Address in use." in result.output
+        assert "--port" not in result.output
         chat_run.assert_called_once_with()
     else:
         assert result.exit_code == 1

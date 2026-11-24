@@ -53,7 +53,7 @@ TOPICS: Final = (
         "split for the cluster (unless it must run code or already delegated). Long attached "
         "documents are still read in parts by the cluster. Qualified models: those the catalog "
         "marks (now NVIDIA Nemotron 3 Ultra, Gemini 3.8 Flash, Mistral Medium, Cohere Command "
-        "A; paid ones only with --provider), or a local model with at least 32768 tokens of "
+        "A), or a local model with at least 32768 tokens of "
         "context named with `/tuning --model ROLE=PROVIDER/MODEL` (ROLE master). "
         "`/master list` shows the latest checks. `/master check PROVIDER/MODEL` spends "
         "quota, uses default workflow limits and reports passed, failed or unfinished (try later). "
@@ -121,7 +121,7 @@ TOPICS: Final = (
         "providers",
         "models, API keys, free tiers, limits and local models",
         "Longer requests give models more time to answer. DESMAN uses configured providers. "
-        "Auto chooses free tiers; paid providers require explicit choice. Quotas change "
+        "Auto chooses free tiers. To use a paid provider, choose its model and key for a role under Models and keys for roles in `/config`. Quotas change "
         "and providers may fail.\n"
         "Auto spreads work over fitting free models. Repeated transient failures move models behind healthy ones for 15 minutes, until a success. "
         "Choosing a model for a role pins it first. Limits, outages, refused keys and small contexts move "
@@ -246,7 +246,7 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Starting DESMAN for the first time opens setup, then chat. Set gui with `/interface MODE` for the page. `desman -c` resumes, `/sessions` lists chats. `desman -t` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Command advice without a lookup gets one correction. Explicit /COMMAND (or !COMMAND) runs in place in terminal chat and logs to General Terminal. Chat commands take precedence. `/help` lists both sets. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count unseen events since the chat opened and are hidden in temporary chats. General Terminal takes commands only. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized; failed summaries leave it out of view. Fallback replies name the answering model and skipped models' reasons. Pasted keys are redacted.",
+        "Starting DESMAN for the first time opens setup, then chat. Set gui with `/interface MODE` for the page. `/sessions` lists and opens earlier chats. `/temporary` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Command advice without a lookup gets one correction. Explicit /COMMAND (or !COMMAND) runs in place in terminal chat and logs to General Terminal. Chat commands take precedence. `/help` lists both sets. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count unseen events since the chat opened and are hidden in temporary chats. General Terminal takes commands only. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized; failed summaries leave it out of view. Fallback replies name the answering model and skipped models' reasons. Pasted keys are redacted.",
     ),
     Topic(
         "gui",

@@ -59,7 +59,14 @@ def rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 def print_list(conn: sqlite3.Connection, config: Config | None) -> None:
     found = PersonalNodes(conn).nodes()
     if not found:
-        ui.note(t("You have no nodes of your own. Add one with `desman nodes add PATH`."))
+        ui.note(
+            t(
+                "You have no nodes of your own. For options, use {command}.",
+                command="`/nodes add --help`",
+            )
+            if ui.in_chat_output()
+            else t("You have no nodes of your own. Add one with `desman nodes add PATH`.")
+        )
     else:
         table = ui.table(t("Path"), t("About"), t("Size"))
         for n in found:

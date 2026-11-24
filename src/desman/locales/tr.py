@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "Sayfa başlatılamadı: {error}. Terminal sohbeti açık kalıyor.",
+    "Port {port} is busy.": "{port} bağlantı noktası meşgul.",
+    "continue an earlier chat / a chat that is not kept": "önceki bir sohbete devam et / kaydedilmeyen sohbet",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} kullanıma göre ücretlendirilir. Kullanmak için {command} içindeki {roles} bölümünde modelini ve anahtarını seçin.",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "Bu sefer alınmadı. Kalan görevler için `/worker` komutunu yeniden çalıştırın: {n}",
+    "For options, use {command}.": "Seçenekleri görmek için {command} kullanın.",
+    "You have no nodes of your own. For options, use {command}.": "Size ait düğüm yok. Seçenekleri görmek için {command} kullanın.",
+    "Approve: desman protected approve": "Onayla: desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "Henüz sürüm alınmadı. desman-global açıkken tarayıcıdaki sayfa yeni sürümleri kontrol eder.",
     "Also delete my data, keys and chat history": "Verilerimi, anahtarlarımı ve sohbet geçmişimi de sil",
     "Close other DESMAN windows, chats and workers first.": "Önce diğer DESMAN pencerelerini, sohbetlerini ve işçi süreçlerini kapatın.",
     "Confirm removal.": "Kaldırmayı onaylayın.",
@@ -1015,7 +1024,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "Hiçbir görevde bir worker'ın yapabileceği iş kalmayınca dur (varsayılan olarak worker yeni işi ve duraklamaların bitmesini bekler).",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "Durdurulana kadar (Ctrl+C) tüm görevlerin alt görevleri üzerinde çalış.\n\nBirden çok worker aynı anda, ayrı terminallerde, tek bir veritabanı üzerinde çalışabilir: her biri herhangi bir görevin en acil hazır alt görevini alır ve karar bekleyen sonuçları inceler, asla başka bir worker ile aynısını değil. Durdurulan ya da öldürülen bir worker geride bir şey bırakmaz: alt görevini başka bir worker veya `resume` geri alır.",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "Bitmemiş görevler üzerinde sırayla, hiçbirinde iş kalmayana kadar çalış ({n}):",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "Bu sefer alınmayanlar (yeniden isteyin ya da `desman worker` çalıştırın): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "Worker durduruldu. Yürütmeler: {executed}, incelemeler: {reviewed}.",
     "Worker {owner} started. Ctrl+C stops it.": "Worker {owner} başlatıldı. Ctrl+C onu durdurur.",
     "Take a permission back (repeat for several).": "Bir izni geri al (birden çok kez verilebilir).",
@@ -1297,7 +1305,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (numarası): neyi değiştirdiği, neden ve diff.",
     "Proposal {id}: {status}": "Öneri {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "Bu zaman aralığındaki başarısızlıkları oku: ör. 24h, 7d veya 'all'.",
-    "See one: desman proposals show NUMBER": "Birini gör: desman proposals show NUMARA",
+    "See one: desman proposals show NUMBER": "Birini gör: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "Analiz (görev {ref}) bitmedi. Devam et: desman resume {ref}",
     "The diff is also in {path}": "Diff ayrıca {path} içinde",
     "The proposals, newest first.": "Öneriler, en yenisi önce.",

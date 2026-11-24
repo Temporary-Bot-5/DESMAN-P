@@ -1762,7 +1762,9 @@ def _worker(ctx: Context, args: NoArgs) -> Outcome | Proposal:
     lines = [t("Work on the unfinished tasks in turn, until none has work left ({n}):", n=len(ids))]
     lines += [f"  {ctx.store.short_id(r.id)}  {actions.one_line(r.goal, 100)}" for r in chosen]
     if left > 0:
-        lines.append(t("Not taken this time (ask again, or run `desman worker`): {n}", n=left))
+        lines.append(
+            t("Not taken this time. Run `/worker` again for the remaining tasks: {n}", n=left)
+        )
     return Proposal(lines, apply)
 
 
@@ -3118,7 +3120,7 @@ def _windows_words(line: str) -> list[str]:
 
 
 def parse_line(
-    line: str, config: Config | None, *, windows: bool | None = None
+    line: str, config: Config | None, *, windows: bool | None = None, dry_run: bool = False
 ) -> tuple[Entry, Args] | None:
     """Parse without invoking Click: all execution still goes through the catalog."""
     import shlex
@@ -3127,12 +3129,22 @@ def parse_line(
 
     from desman.cli import cli
 
-    i18n.translate_commands(cli)
+    if not dry_run:
+        i18n.translate_commands(cli)
     try:
         use_windows = os.name == "nt" if windows is None else windows
         words = _windows_words(line) if use_windows else shlex.split(line)
     except ValueError:
         raise BadArgs(t("Invalid quoting in the command.")) from None
+    if dry_run:
+        # Check example arguments against the same option types and constraints as typed input.
+        examples = {
+            "NUMBER": "1",
+            "PORT": "1234",
+            "PROVIDER/MODEL": "provider/model",
+            "URL": "https://example.org",
+        }
+        words = [examples.get(word, word) for word in words]
     if words and words[0] == "desman":
         words.pop(0)
     command: click.Command = cli
@@ -3146,6 +3158,8 @@ def parse_line(
     if entry.name == "gui" and words == ["shortcut"]:
         words = ["--shortcut"]
     if "--help" in words:
+        if dry_run:
+            return None
         if entry.name == "worker":
             ui.note(t("Use /worker to work on unfinished tasks until idle."))
             return None

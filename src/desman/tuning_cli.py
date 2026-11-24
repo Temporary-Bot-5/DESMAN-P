@@ -452,6 +452,8 @@ def print_tuning(tuning: Tuning, config: Config | None = None) -> None:
             "--context-tokens, --max-attempts, --max-transient), `--model ROLE=PROVIDER/MODEL|auto`, `--key ROLE=PROVIDER:KEY|auto`, "
             "or `--reset`."
         )
+        if not ui.in_chat_output()
+        else t("For options, use {command}.", command="`/tuning --help`")
     )
 
 

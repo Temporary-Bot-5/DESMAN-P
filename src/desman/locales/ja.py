@@ -10,6 +10,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "ページを起動できませんでした：{error}。ターミナルのチャットを続けます。",
+    "Port {port} is busy.": "ポート {port} は使用中です。",
+    "continue an earlier chat / a chat that is not kept": "以前のチャットを再開 / 保存されないチャット",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} は従量課金です。使用するには、{command} の {roles} でモデルとキーを選びます。",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "今回は未処理です。残りのタスクにはもう一度 `/worker` を実行してください：{n}",
+    "For options, use {command}.": "オプションを確認するには {command} を使ってください。",
+    "You have no nodes of your own. For options, use {command}.": "自分のノードはありません。オプションを確認するには {command} を使ってください。",
+    "Approve: desman protected approve": "承認するには：desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "まだリリースを受信していません。desman-global が有効な間、ブラウザーのページがリリースを確認します。",
     "Also delete my data, keys and chat history": "データ、キー、チャット履歴も削除する",
     "Close other DESMAN windows, chats and workers first.": "先に DESMAN の他のウィンドウ、チャット、ワーカーを終了してください。",
     "Confirm removal.": "削除を確定します。",
@@ -1013,7 +1022,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "ワーカーにできる作業がどのタスクにも残っていなければ停止します（既定では、ワーカーは新しい作業と一時停止の終了を待ち続けます）。",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "停止されるまで（Ctrl+C）、すべてのタスクのサブタスクに取り組みます。\n\n複数のワーカーを、別々のターミナルで、1 つのデータベースに対して同時に実行できます。各ワーカーは任意のタスクから最も緊急の準備済みサブタスクを取り、判定を待つ結果をレビューします。他のワーカーと同じものを扱うことはありません。停止または強制終了されたワーカーは何も残しません。そのサブタスクは別のワーカーか `resume` が引き取ります。",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "未完了のタスクに順番に取り組み、どのタスクにも作業が残らなくなるまで続けます（{n}）：",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "今回は対象外（もう一度依頼するか、`desman worker` を実行してください）：{n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "ワーカーを停止しました。実行: {executed}、レビュー: {reviewed}。",
     "Worker {owner} started. Ctrl+C stops it.": "ワーカー {owner} を開始しました。Ctrl+C で停止します。",
     "Take a permission back (repeat for several).": "権限を取り消す（繰り返し指定可）。",
@@ -1295,7 +1303,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (その番号): 何を変えるか、なぜか、そして diff。",
     "Proposal {id}: {status}": "提案 {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "この期間の失敗を読みます: 例 24h、7d、または 'all'。",
-    "See one: desman proposals show NUMBER": "1 件を見る: desman proposals show 番号",
+    "See one: desman proposals show NUMBER": "1 件を見る: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "分析 (タスク {ref}) は終わっていません。続けるには: desman resume {ref}",
     "The diff is also in {path}": "diff は {path} にもあります",
     "The proposals, newest first.": "提案、新しい順。",

@@ -15,6 +15,15 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "The page could not start: {error}. Staying in the terminal chat.": "Не удалось открыть страницу: {error}. Чат в терминале остаётся открытым.",
+    "Port {port} is busy.": "Порт {port} занят.",
+    "continue an earlier chat / a chat that is not kept": "продолжить один из прошлых чатов / чат без сохранения",
+    "{name} is billed per use. To use it, choose its model and key under {roles} in {command}.": "{name} оплачивается по мере использования. Чтобы им пользоваться, выберите его модель и ключ в разделе «{roles}» команды {command}.",
+    "Not taken this time. Run `/worker` again for the remaining tasks: {n}": "Не взяты в этот раз. Для оставшихся задач запустите `/worker` ещё раз: {n}",
+    "For options, use {command}.": "Параметры можно посмотреть с помощью {command}.",
+    "You have no nodes of your own. For options, use {command}.": "У вас нет собственных узлов. Параметры можно посмотреть с помощью {command}.",
+    "Approve: desman protected approve": "Одобрить: desman protected approve",
+    "No release received yet. The browser page checks for releases when desman-global is on.": "Релизы ещё не получены. Страница в браузере проверяет наличие релизов, когда включён desman-global.",
     "Also delete my data, keys and chat history": "Также удалить мои данные, ключи и историю чатов",
     "Close other DESMAN windows, chats and workers first.": "Сначала закройте другие окна и чаты DESMAN и остановите его рабочие процессы.",
     "Confirm removal.": "Подтвердить удаление.",
@@ -1279,7 +1288,6 @@ MESSAGES: dict[str, Forms] = {
     "Stop once no task has work left that a worker could do (by default the worker keeps waiting for new work, and for paused work to resume).": "Остановиться, когда ни у одной задачи не останется работы для воркера (по умолчанию воркер ждёт новую работу и окончания пауз).",
     "Work on the subtasks of every task until stopped (Ctrl+C).\n\nSeveral workers may run at once, in separate terminals, on one database: each takes the\nmost urgent ready subtask of any task and reviews results waiting for a verdict, and never\nthe same one as another worker. A worker that is stopped or killed leaves nothing behind:\nanother worker, or `resume`, takes its subtask back.": "Работать над подзадачами всех задач, пока его не остановят (Ctrl+C).\n\nНесколько воркеров могут работать одновременно, в разных терминалах, с одной базой: каждый берёт самую срочную готовую подзадачу любой задачи и проверяет результаты, ждущие вердикта, и никогда не ту же, что другой воркер. Остановленный или убитый воркер ничего не оставляет за собой: его подзадачу забирает другой воркер или `resume`.",
     "Work on the unfinished tasks in turn, until none has work left ({n}):": "Работать над незавершёнными задачами по очереди, пока ни у одной не останется работы ({n}):",
-    "Not taken this time (ask again, or run `desman worker`): {n}": "Не взяты в этот раз (попросите ещё раз или запустите `desman worker`): {n}",
     "Worker stopped. Executions: {executed}, reviews: {reviewed}.": "Воркер остановлен. Выполнений: {executed}, проверок: {reviewed}.",
     "Worker {owner} started. Ctrl+C stops it.": "Воркер {owner} запущен. Ctrl+C останавливает его.",
     "Take a permission back (repeat for several).": "Отозвать разрешение (можно несколько раз).",
@@ -1609,7 +1617,7 @@ MESSAGES: dict[str, Forms] = {
     "PROPOSAL (its number): what it changes, why, and the diff.": "PROPOSAL (номер предложения): что оно меняет, почему, и diff.",
     "Proposal {id}: {status}": "Предложение {id}: {status}",
     "Read the failures of this window: e.g. 24h, 7d, or 'all'.": "Читать сбои за этот период: например 24h, 7d или 'all'.",
-    "See one: desman proposals show NUMBER": "Посмотреть одно: desman proposals show НОМЕР",
+    "See one: desman proposals show NUMBER": "Посмотреть одно: desman proposals show NUMBER",
     "The analysis (task {ref}) has not ended. Continue it: desman resume {ref}": "Анализ (задача {ref}) не закончен. Продолжить: desman resume {ref}",
     "The diff is also in {path}": "Diff также сохранён в {path}",
     "The proposals, newest first.": "Предложения, новые сначала.",

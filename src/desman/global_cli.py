@@ -45,7 +45,7 @@ from desman.core import report as task_reports
 from desman.core import stats as task_stats
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
-from desman.net import cluster, jobs, node, protocol, search_lend, sign
+from desman.net import cluster, jobs, node, protocol, search_lend, sign, updates
 from desman.providers import Provider
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -1142,6 +1142,17 @@ def update_plan(
     action: str,
     release: int | None = None,
 ) -> applying.UpdatePlan:
+    if (
+        ui.in_chat_output()
+        and action != "revert"
+        and release is None
+        and updates.latest(conn) is None
+    ):
+        raise click.ClickException(
+            t(
+                "No release received yet. The browser page checks for releases when desman-global is on."
+            )
+        )
     try:
         return (
             applying.plan_update_revert(conn)

@@ -334,6 +334,19 @@ def test_gui_cli_flags_and_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     assert CliRunner().invoke(cli, ["gui", "-c", "-t"]).exit_code == 2
 
 
+def test_gui_cli_busy_port_still_offers_port_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    import errno
+
+    def busy(*args: object) -> None:
+        raise OSError(errno.EADDRINUSE, "Address in use")
+
+    monkeypatch.setattr("desman.gui.app.http_server", busy)
+    result = CliRunner().invoke(cli, ["gui", "--port", "1234", "--no-browser"])
+    assert result.exit_code == 1
+    assert "Port 1234 is busy" in result.output
+    assert "Use another --port" in result.output
+
+
 def test_strings_follow_language() -> None:
     i18n.set_language("ru")
     try:

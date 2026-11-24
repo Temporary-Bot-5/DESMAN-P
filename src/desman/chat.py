@@ -698,7 +698,6 @@ class Chat:
         return calls.for_(calls.Purpose(role, session_id=self.session_id))
 
     def _say(self, text: str, task_id: str | None = None, *, settle: bool = True) -> None:
-        text = ui.chat_hint(text)
         if self.session_id is None:
             ui.out(Text(text))
             return
@@ -2928,7 +2927,8 @@ def _render(message: Message) -> Text:
         return Text("› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
         return Text(message.text, style="muted")
-    return Text(actions.plain_math(message.text))
+    with ui.chat_output():
+        return Text(ui.chat_hint(actions.plain_math(message.text)))
 
 
 def _paused_until(report: TaskReport) -> str | None:

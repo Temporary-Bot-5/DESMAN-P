@@ -20,10 +20,15 @@ BANNER = """████░░█████░█████░█░░░�
 
 
 def _commands() -> list[tuple[str, str]]:
+    chat = ui.in_chat_output()
     return [
-        ("desman -c / -t", t("continue the last chat / a chat that is not kept")),
+        (
+            ("/sessions / /temporary", t("continue an earlier chat / a chat that is not kept"))
+            if chat
+            else ("desman -c / -t", t("continue the last chat / a chat that is not kept"))
+        ),
         (t('desman run "GOAL"'), t("plan and run a task")),
-        ("desman list / status", t("tasks and their progress")),
+        ("/list / /status" if chat else "desman list / status", t("tasks and their progress")),
         ("desman inbox", t("what waits for your decision")),
         ("desman keys", t("API keys per provider")),
         ("desman config", t("providers, keys, permissions")),
