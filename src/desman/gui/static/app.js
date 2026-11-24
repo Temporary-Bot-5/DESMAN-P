@@ -1440,12 +1440,13 @@ function drawSettings() {
     const cloud = settingInput(root, d.network.cloud_label, d.network.lend_cloud, "checkbox");
     settingAuto(root, () => ({section: "network", operation: "cloud", state: cloud.checked ? "on" : "off"}), [cloud]);
     text("p", d.network.cloud_warning, root);
-    for (const p of d.providers.filter(p => p.lendable)) {
-      const card = text("section", "", root); card.className = "lending-row"; text("strong", p.name, card);
+    for (const p of d.providers.filter(p => p.lendable || Object.hasOwn(d.network.donated, p.id))) {
+      const card = text("section", "", root); card.className = "lending-row"; text("strong", p.lending_label, card);
       const quota = d.network.donated[p.id];
       const calls = settingInput(card, words.calls_daily, quota?.calls_per_day ?? d.network.default_quota.calls_per_day, "number"); calls.min = 1; calls.max = 100000;
-      const tokens = settingInput(card, words.tokens_daily, quota?.tokens_per_day ?? d.network.default_quota.tokens_per_day, "number"); tokens.min = 1000; tokens.max = 100000000;
-      const change = () => ({section: "network", operation: quota ? "quota" : "donate", provider: p.id, calls: Number(calls.value), tokens: Number(tokens.value)});
+      const tokens = p.id === "searxng" ? null : settingInput(card, words.tokens_daily, quota?.tokens_per_day ?? d.network.default_quota.tokens_per_day, "number");
+      if (tokens) { tokens.min = 1000; tokens.max = 100000000; }
+      const change = () => ({section: "network", operation: quota ? "quota" : "donate", provider: p.id, calls: Number(calls.value), ...(tokens ? {tokens: Number(tokens.value)} : {})});
       if (quota) settingAuto(card, change);
       else settingSave(card, change, words.lend);
       if (quota) settingSave(card, {section: "network", operation: "undonate", provider: p.id}, words.unlend);

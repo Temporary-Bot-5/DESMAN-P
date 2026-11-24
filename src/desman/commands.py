@@ -2792,8 +2792,9 @@ CATALOG: tuple[Entry, ...] = (
     ),
     Entry(
         "global cloud",
-        "Show or change permission to lend free cloud keys to the person's own nodes "
-        "(on/off, default off). A change requires confirmation.",
+        "Show or change consent to lend free cloud keys to desman-global (on/off, default off). "
+        "The network's operator assigns jobs like for any other module. Enable only when "
+        "the provider's terms allow that use. A change requires confirmation.",
         CloudArgs,
         _cloud_kind,
         _global_cloud,

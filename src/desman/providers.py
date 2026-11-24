@@ -397,7 +397,8 @@ def by_key_env(env: str) -> Provider | None:
 def can_donate(p: Provider, *, lend_cloud: bool = False) -> bool:
     """Whether the person may lend `p` to desman-global: a local server always (the machine is
     theirs), a free cloud provider if its terms were checked (`donatable`) or the person
-    opted in. Paid providers and non-model services are ineligible."""
+    opted in to work assigned by the network operator. Paid providers and non-model
+    services are ineligible."""
     if p not in PROVIDERS or p.paid:
         return False
     return p.local or p.donatable or lend_cloud

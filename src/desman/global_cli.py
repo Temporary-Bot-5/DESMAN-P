@@ -7,7 +7,8 @@ shown by its fingerprint only) and switches desman-global on; leaving takes back
 lent and switches it off, while the key stays until the person deletes it. A module lent
 (`donate`) is a model provider of this machine with a daily quota of calls and tokens: its key
 never leaves the machine, a paid provider is never lent, and a free cloud provider only once
-its terms were checked or the person opts in (`providers.can_donate`).
+its terms were checked or the person opts in (`providers.can_donate`). The network's
+operator assigns this node jobs like any other module.
 
 Leaving says goodbye to the registry (`farewell`, `node.tell_left`); explicitly confirmed
 proposals and reports also contact it here. The worker handles ongoing contact (`net.node`, G.5). Both get the
@@ -307,7 +308,7 @@ def set_lead(manager: ConfigManager, on: bool, *, conn: sqlite3.Connection | Non
 def set_lend_cloud(
     manager: ConfigManager, on: bool, *, conn: sqlite3.Connection | None = None
 ) -> bool:
-    """Save the person's consent to lend free cloud keys and journal the change."""
+    """Save the person's consent to lend free cloud keys to desman-global and journal it."""
     with _change(manager, conn) as (config, entries):
         if config.network.lend_cloud != on:
             config.network.lend_cloud = on
@@ -317,14 +318,15 @@ def set_lend_cloud(
 
 def cloud_warning() -> str:
     return t(
-        "Most free tiers' terms forbid serving other people. Lend your cloud keys only to "
-        "your own nodes (e.g. testing on your own machines); you are responsible for following "
-        "each provider's terms. Keys never leave this machine: only their fingerprint is sent."
+        "Most free tiers' terms forbid using your key for other people's work. With this on, "
+        "the network's operator gives this node jobs like any other module. Turn it on only "
+        "if that is allowed for you, for example when the network's operator is you (testing "
+        "on your own machines). Keys never leave this machine: only their fingerprint is sent."
     )
 
 
 def cloud_text(on: bool) -> str:
-    return t("Lend my free cloud keys (own nodes only)") + ": " + (t("on") if on else t("off"))
+    return t("Lend my free cloud keys to desman-global") + ": " + (t("on") if on else t("off"))
 
 
 def borrow_search(
@@ -716,7 +718,7 @@ def donatable(config: Config, name: str) -> Provider:
     if not providers.can_donate(provider, lend_cloud=config.network.lend_cloud):
         raise click.ClickException(
             t(
-                "To lend {name}'s free tier to your own nodes, enable `desman global cloud on`.",
+                "To lend {name}'s free tier, enable `desman global cloud on` (read its warning first).",
                 name=provider.name,
             )
         )
@@ -891,7 +893,7 @@ def print_status(found: Status, *, tz: tzinfo | None = None) -> None:
     table.add_row(t("Lead clusters"), t("yes") if found.lead else t("off"))
     table.add_row(t("Borrow web search"), t("on") if found.borrow_search else t("off"))
     table.add_row(
-        t("Lend my free cloud keys (own nodes only)"), t("on") if found.lend_cloud else t("off")
+        t("Lend my free cloud keys to desman-global"), t("on") if found.lend_cloud else t("off")
     )
     if found.cluster:
         table.add_row(cluster_text(found.cluster), "")
