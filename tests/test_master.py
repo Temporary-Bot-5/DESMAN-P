@@ -12,6 +12,7 @@ from click.testing import CliRunner, Result
 from desman import runs
 from desman.agents import MASTER_INSTRUCTIONS, MASTER_TOOL_ROUNDS, MAX_TOOL_ROUNDS, llm_executor
 from desman.cli import EXIT_DONE, cli
+from desman.config import Tuning
 from desman.core import db
 from desman.core.audit import check_history, history
 from desman.core.calls import Role
@@ -318,7 +319,7 @@ def test_a_config_before_masters_upgrades_with_no_master_chosen(tmp_path: Path) 
     from desman.config import SCHEMA_VERSION, upgrade
 
     upgraded = upgrade({"schema_version": 10, "tuning": {"models": {"text": "groq/x"}}})
-    assert upgraded["schema_version"] == SCHEMA_VERSION == 14
+    assert upgraded["schema_version"] == SCHEMA_VERSION == 15
     config = make_config(tuning=upgraded["tuning"])
     assert config.tuning.models.master is None and config.tuning.keys.master is None
 
@@ -354,7 +355,6 @@ def test_a_paid_master_only_with_its_provider_named() -> None:
 
 
 def test_a_master_named_while_the_run_goes_on_serves_the_next_attempt(tmp_path: Path) -> None:
-    from desman.config import Tuning
 
     conn = db.open_db(tmp_path / "d.db")
     try:
@@ -419,3 +419,17 @@ def test_the_no_master_message_tells_an_ollama_user_about_its_context() -> None:
     config = make_config(settings={"OLLAMA_MODEL": "qwen3:32b"})
     with pytest.raises(router.NoProvider, match="OLLAMA_CONTEXT"):
         router.lineup(config, Role.EXECUTOR, kind=catalog.MASTER)
+
+
+@pytest.mark.parametrize(("tuned", "rounds"), [(None, 16), (11, 11)])
+def test_code_subtask_uses_its_own_round_limit(
+    store: Store, tmp_path: Path, tuned: int | None, rounds: int
+) -> None:
+    llm = FakeLLM().on("Execute", list_files(), repeat_last=True)
+    spec = TaskSpec(
+        goal="g", subtasks=[SubtaskSpec(description="d", acceptance_criteria="c", kind=Kind.CODE)]
+    )
+    execute = runs._executor(runs.Models(llm, None), store, lambda: Tuning(code_rounds=tuned))
+    outcome = execute(work_of(store, tmp_path, spec))
+    assert isinstance(outcome, Failure) and f"after {rounds} rounds" in outcome.reason
+    assert len(llm.calls) == rounds + 1

@@ -58,7 +58,7 @@ from desman.core.effects import archive_result, outcome, short_args, tool_result
 from desman.core.models import MAX_DELEGATED_PARTS, Kind, Subtask, SubtaskSpec, TaskSpec
 from desman.core.retry import FailureKind, Strategy
 from desman.core.store import PreemptedError
-from desman.core.tools import TOOL_RESULTS_DIR, untrusted_file
+from desman.core.tools import RUN_TOOL, TOOL_RESULTS_DIR, untrusted_file
 from desman.core.workspace import PathEscapeError
 from desman.llm.base import LLM, Message, ProviderError, Request
 from desman.llm.structured import StructuredOutputError, complete_json
@@ -75,6 +75,8 @@ TOOL_RESULTS = f"{EXECUTE} (tool results)"
 """Prompt headings: fake scripts route on them."""
 MAX_TOOL_ROUNDS = 8
 """Rounds of tool calls in one attempt; a model still calling tools after them has failed it."""
+CODE_TOOL_ROUNDS = 16
+"""Default rounds per code attempt."""
 MASTER_TOOL_ROUNDS = 24
 """The rounds of a master subtask's attempt (ADR 0015): a whole goal, by a qualified model."""
 MAX_CALLS_PER_ROUND = 10
@@ -149,8 +151,9 @@ TOOLS_INSTRUCTIONS = (
     "dates, figures, links) must be taken from them as they are, with the address they came "
     "from: never invent, round or guess one, since a reviewer checks each against the tool "
     "results. What the results do not say, say that you did not find. "
-    "When asked to run or check code and the workspace code is wrong, fix it with write_file, "
-    "run it again, and report what you fixed. "
+    "Prefer edit_file for small changes to existing files when it is available. "
+    "When asked to run or check code and the workspace code is wrong, fix it, run it again, "
+    "and report what you fixed. "
     "A source that does not date its data may be reported as of the tool result's at; say so in "
     "the language of the goal (the time the data was retrieved)."
 )
@@ -245,6 +248,7 @@ def llm_executor(
     other: LLM | None = None,
     *,
     master_rounds: int = MASTER_TOOL_ROUNDS,
+    code_rounds: int = CODE_TOOL_ROUNDS,
     allow_delegation: bool = True,
     by_kind: Mapping[Kind, tuple[LLM, LLM | None]] | None = None,
     format_final: bool = True,
@@ -263,6 +267,7 @@ def llm_executor(
             *(by_kind or {}).get(work.subtask.kind, (llm, other)),
             clock=clock,
             master_rounds=master_rounds,
+            code_rounds=code_rounds,
             allow_delegation=allow_delegation,
             format_final=format_final,
             tz=tz,
@@ -277,6 +282,7 @@ def _execute(
     other: LLM | None,
     *,
     master_rounds: int,
+    code_rounds: int,
     allow_delegation: bool,
     clock: Callable[[], datetime] | None = None,
     format_final: bool = True,
@@ -360,7 +366,7 @@ def _execute(
         system += (
             " This subtask requires running code: its result counts only after a successful "
             "run_command call running the code you report, in this subtask. A run in an "
-            "earlier subtask does not count. Run it before handing in your result."
+            "earlier subtask does not count. The last run_command in this attempt must exit 0. "
         )
     can_delegate = (
         allow_delegation
@@ -368,7 +374,7 @@ def _execute(
         and context.strategy is not Strategy.COMBINE
         and context.delegations_left > 0
     )
-    rounds = MAX_TOOL_ROUNDS
+    rounds = code_rounds if work.subtask.kind is Kind.CODE else MAX_TOOL_ROUNDS
     if work.subtask.master and context.strategy is not Strategy.COMBINE:  # combining is short
         rounds = master_rounds
         if tools:
@@ -483,6 +489,24 @@ class _ToolExchange:
     def render(self) -> str:
         return self.body if self.stub is None else json.dumps(self.stub, ensure_ascii=False)
 
+    def render_run_output(self, budget: int) -> str:
+        """Keep the exit code and stream tails even if JSON escaping inflates their size."""
+        output = self.result.get("output")
+        body = self.body
+        if len(body) <= budget or not isinstance(output, dict):
+            return body
+        display = dict(output)
+        while len(body) > budget:
+            streams = [key for key in ("stdout", "stderr") if display.get(key)]
+            if not streams:
+                break
+            for key in streams:
+                length = len(display[key]) // 2
+                display[key] = display[key][-length:] if length else ""
+                display[f"{key}_cut"] = True
+            body = json.dumps({**self.result, "output": display}, ensure_ascii=False)
+        return body
+
     def fold(self, work: Work, read_file_offered: bool) -> None:
         name = self.call.tool
         tool = work.tools.registry.get(name)
@@ -518,7 +542,7 @@ class _ToolExchange:
 
 
 class _ToolHistory:
-    """Keep complete results for the newest round while they fit the overall allowance."""
+    """Keep the last run's diagnostics and the newest results within the overall allowance."""
 
     def __init__(
         self,
@@ -536,25 +560,37 @@ class _ToolHistory:
 
     def append(self, reply: dict[str, Any], calls: list[ToolCall]) -> list[Message]:
         work = self.work
-        round_number = work.previous_starts * self.max_rounds + len(self.rounds) + 1
+        round_number = len(self.rounds) + 1
+        # Tuning can change between starts of the same execution.
+        start = f"-s{work.previous_starts}" if work.previous_starts else ""
         latest = []
         for index, call in enumerate(calls, 1):
-            path = f"{TOOL_RESULTS_DIR}{work.subtask.seq}-e{work.execution}-r{round_number}-{index}.json"
+            path = f"{TOOL_RESULTS_DIR}{work.subtask.seq}-e{work.execution}{start}-r{round_number}-{index}.json"
             result = work.tools.call(call, archive=path)
             payload = {"tool": call.tool, **result.model_dump(exclude_none=True)}
             latest.append(
                 _ToolExchange(call, path, payload, json.dumps(payload, ensure_ascii=False))
             )
 
-        for exchange in (entry for batch in self.rounds for entry in batch):
+        self.rounds.append(latest)
+        self.replies.append(Message(role="assistant", content=json.dumps(reply)))
+        earlier = [entry for batch in self.rounds[:-1] for entry in batch]
+        latest_run = next(
+            (entry for entry in reversed(earlier + latest) if entry.call.tool == RUN_TOOL),
+            None,
+        )
+        for exchange in earlier:
             if (
-                self.read_file_offered
+                exchange is not latest_run
+                and self.read_file_offered
                 and exchange.stub is None
                 and len(exchange.body) > TOOL_RESULT_FOLD_CHARS
             ):
                 exchange.fold(work, self.read_file_offered)
-        self.rounds.append(latest)
-        self.replies.append(Message(role="assistant", content=json.dumps(reply)))
+
+        run_body = (
+            latest_run.render_run_output(TOOL_RESULT_BUDGET // 2) if latest_run is not None else ""
+        )
 
         compact = {
             pos
@@ -584,7 +620,10 @@ class _ToolHistory:
                         Message(
                             role="user",
                             content=f"{TOOL_RESULTS}:\n["
-                            + ",\n".join(entry.render() for entry in kept)
+                            + ",\n".join(
+                                run_body if entry is latest_run else entry.render()
+                                for entry in kept
+                            )
                             + "]"
                             + (LAST_TOOL_ROUND if pos == self.max_rounds - 1 else ""),
                         ),
@@ -603,8 +642,9 @@ class _ToolHistory:
             if len(self.replies[pos].content) > TOOL_RESULT_FOLD_CHARS:
                 compact.add(pos)
                 rendered = render()
-        earlier = [entry for batch in self.rounds[:-1] for entry in batch]
         for exchange in earlier:
+            if exchange is latest_run:
+                continue
             if used() <= TOOL_RESULT_BUDGET:
                 break
             if exchange.stub is None:
@@ -614,17 +654,23 @@ class _ToolHistory:
         # Drop old pointers before reducing the latest results.
         for pos, batch in enumerate(self.rounds[:-1]):
             for exchange in batch:
+                if exchange is latest_run or exchange.omitted:
+                    continue
                 if used() <= TOOL_RESULT_BUDGET:
                     break
                 exchange.omitted = True
                 compact.add(pos)
                 rendered = render()
         for exchange in latest:
+            if exchange is latest_run:
+                continue
             if used() <= TOOL_RESULT_BUDGET:
                 break
             exchange.fold(work, self.read_file_offered)
             rendered = render()
         for exchange in latest:
+            if exchange is latest_run:
+                continue
             if used() <= TOOL_RESULT_BUDGET:
                 break
             exchange.omitted = True

@@ -20,7 +20,7 @@ Bubblewrap provides:
   namespace (`prlimit`), since there it counts only the sandbox's processes;
 - a wall-clock timeout: the whole process group is killed, and the sandbox's processes die with
   it (`--die-with-parent`, the PID namespace goes with its first process);
-- only so much output is kept (the start of stdout, the end of stderr, where a traceback ends);
+- only so much output is kept (the ends of stdout and stderr, where summaries and tracebacks end);
   the rest is read and dropped, so a chatty program cannot fill memory.
 
 When `bwrap` (or `prlimit`) is missing or cannot create namespaces (some distributions forbid
@@ -977,7 +977,7 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
             preexec_fn=_set_limits(limits),
         )
         assert process.stdout is not None and process.stderr is not None
-        stdout = _Head(limits.stdout_chars)
+        stdout = _Tail(limits.stdout_chars)
         stderr = _Tail(limits.stderr_chars)
         try:
             timed_out = _collect(process, {process.stdout: stdout, process.stderr: stderr}, limits)
@@ -1130,7 +1130,7 @@ class _WslSuspect(Exception):
 
 
 def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[], None]) -> Outcome:
-    stdout = _Head(limits.stdout_chars)
+    stdout = _Tail(limits.stdout_chars)
     stderr = _WslTail(limits.stderr_chars)
     diagnostic = _WslTail(2_000)
     with tempfile.TemporaryFile() as given:
@@ -1202,7 +1202,7 @@ def _execute_docker(
     stop: Callable[[], None],
     inspect_exit: Callable[[], int | None],
 ) -> Outcome:
-    stdout = _Head(limits.stdout_chars)
+    stdout = _Tail(limits.stdout_chars)
     stderr = _Tail(limits.stderr_chars)
     diagnostic = _Tail(2_000)
     with tempfile.TemporaryFile() as given:
@@ -1265,14 +1265,14 @@ def _execute_docker(
     )
 
 
-def _read_output(stream: IO[bytes], *buffers: _Head) -> None:
+def _read_output(stream: IO[bytes], *buffers: _Tail) -> None:
     while chunk := stream.read(_READ_CHUNK):
         for buffer in buffers:
             buffer.add(chunk)
 
 
 def _collect(
-    process: subprocess.Popen[bytes], streams: dict[IO[bytes], _Head | _Tail], limits: Limits
+    process: subprocess.Popen[bytes], streams: dict[IO[bytes], _Tail], limits: Limits
 ) -> bool:
     """Read both streams until they close or time runs out; True if it ran out."""
     keep = {stream.fileno(): kept for stream, kept in streams.items()}
@@ -1318,31 +1318,13 @@ def _exit_code(code: int) -> int:
     return 128 - code if code < 0 else code  # killed outside bwrap: same convention as inside
 
 
-class _Head:
-    """The first `limit` characters (decoded as UTF-8) of a stream."""
+class _Tail:
+    """The last `limit` characters (decoded as UTF-8) of a stream."""
 
     def __init__(self, limit: int) -> None:
         self.limit = limit
         self.data = bytearray()
         self.cut = False
-
-    def add(self, chunk: bytes) -> None:
-        room = 4 * self.limit - len(self.data)  # a character is at most four bytes
-        if room > 0:
-            self.data += chunk[:room]
-        if len(chunk) > max(room, 0):
-            self.cut = True
-
-    def text(self) -> str:
-        text = self.data.decode("utf-8", errors="replace")
-        if len(text) > self.limit:
-            self.cut = True
-            text = text[: self.limit]
-        return text
-
-
-class _Tail(_Head):
-    """The last `limit` characters of a stream."""
 
     def add(self, chunk: bytes) -> None:
         self.data += chunk
@@ -1355,7 +1337,7 @@ class _Tail(_Head):
         text = self.data.decode("utf-8", errors="replace")
         if len(text) > self.limit:
             self.cut = True
-            text = text[-self.limit :]
+            text = text[-self.limit :] if self.limit else ""
         return text
 
 
@@ -1779,13 +1761,12 @@ def _run_wasi_child(config: Path, spec: _WasiSpec, limits: Limits) -> Outcome:
 
     stdout_cut = _wasi_output_over_limit(spec.stdout, limits.stdout_chars, limits)
     stderr_cut = _wasi_output_over_limit(spec.stderr, limits.stderr_chars, limits)
-    stdout, stderr = _Head(limits.stdout_chars), _Tail(limits.stderr_chars)
-    with spec.stdout.open("rb") as stream:
-        stdout.add(stream.read(4 * limits.stdout_chars + 1))
-    with spec.stderr.open("rb") as stream:
-        size = stream.seek(0, os.SEEK_END)
-        stream.seek(max(0, size - 4 * limits.stderr_chars - 1))
-        stderr.add(stream.read())
+    stdout, stderr = _Tail(limits.stdout_chars), _Tail(limits.stderr_chars)
+    for path, tail in ((spec.stdout, stdout), (spec.stderr, stderr)):
+        with path.open("rb") as stream:
+            size = stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, size - 4 * tail.limit - 1))
+            tail.add(stream.read())
     if result.trap:
         stderr.add(result.trap.encode("utf-8"))
     return Outcome(

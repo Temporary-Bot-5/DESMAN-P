@@ -81,6 +81,7 @@ def test_registry_refuses_duplicate_and_bad_names() -> None:
     assert registry.names == [
         "read_file",
         "write_file",
+        "edit_file",
         "list_files",
         "run_command",
         "web_search",
@@ -110,6 +111,7 @@ def test_only_granted_tools_are_offered_and_run(ws: Workspace) -> None:
     assert [s["name"] for s in box.specs()] == [
         "read_file",
         "write_file",
+        "edit_file",
         "list_files",
         "read_node",
     ]
@@ -279,7 +281,13 @@ def test_executor_writes_files_through_tool_calls(
 
     first, second, third = llm.calls
     offered = json.loads(first.prompt.split("\n", 1)[1])["tools"]
-    assert [t["name"] for t in offered] == ["read_file", "write_file", "list_files", "read_node"]
+    assert [t["name"] for t in offered] == [
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "read_node",
+    ]
     assert '"tool_calls"' in first.messages[0].content
     assert second.prompt.startswith(f"{TOOL_RESULTS}:\n")
     assert json.loads(second.prompt.split("\n", 1)[1]) == [
@@ -376,3 +384,33 @@ def test_reviewer_gets_no_tools(store: Store, clock: FakeClock, tmp_path: Path) 
     ).run(task_id)
     review = next(r for r in llm.calls if r.prompt.startswith("Review"))
     assert "tool" not in review.prompt and "tool_calls" not in review.messages[0].content
+
+
+def test_edit_file_requires_the_exact_match_count_and_a_workspace_path(ws: Workspace) -> None:
+    ws.write("app.py", "old\nold\n")
+    box = Toolbox(ws)
+    for fragment, matches in (("missing", 0), ("old", 2)):
+        result = box.call(call("edit_file", path="app.py", old=fragment, new="new"))
+        assert (
+            not result.ok
+            and result.error
+            and f"expected 1 matches, found {matches}" in result.error
+        )
+        assert ws.read_text("app.py") == "old\nold\n"
+
+    result = box.call(call("edit_file", path="../app.py", old="old", new="new"))
+    assert not result.ok and result.error and "PathEscapeError" in result.error
+
+    result = box.call(call("edit_file", path="./app.py", old="old", new="new", count=2))
+    assert result.ok and result.output == {"path": "app.py", "chars": 8, "replacements": 2}
+    assert ws.read_text("app.py") == "new\nnew\n"
+
+
+def test_edit_file_refuses_to_grow_past_the_write_limit(ws: Workspace) -> None:
+    ws.write("app.py", "old\n")
+    box = Toolbox(ws)
+    result = box.call(
+        call("edit_file", path="app.py", old="old", new="x" * tools_module.MAX_WRITE_CHARS)
+    )
+    assert not result.ok and result.error and "edited file must fit" in result.error
+    assert ws.read_text("app.py") == "old\n"

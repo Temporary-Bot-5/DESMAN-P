@@ -469,7 +469,7 @@ def test_reviewer_prompt_checks_prose_dates_named_sources_and_independent_eviden
 def test_executor_is_told_to_fix_broken_code_and_run_again() -> None:
     from desman.agents import TOOLS_INSTRUCTIONS
 
-    assert "fix it with write_file" in TOOLS_INSTRUCTIONS
+    assert "Prefer edit_file" in TOOLS_INSTRUCTIONS
     assert "run it again" in TOOLS_INSTRUCTIONS
 
 

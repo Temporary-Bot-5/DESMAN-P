@@ -19,7 +19,7 @@ from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
 from desman.core.audit import check_history
-from desman.core.coordinator import Coordinator, Review, Verdict
+from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
 from desman.core.models import SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Access, Policy, Role, RolePolicy
 from desman.core.retry import strategy_for
@@ -27,9 +27,10 @@ from desman.core.sessions import Kind, Sessions
 from desman.core.sessions import Role as Said
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
-from desman.core.tools import READ_FILE, WRITE_FILE, Permission, Registry, Tool
+from desman.core.tools import EDIT_FILE, READ_FILE, WRITE_FILE, Permission, Registry, Tool, ToolCall
 from desman.core.workspace import Workspace, workspace_root_for
 from desman.interlocutor import CHAT, RETELL, NewTask, unbacked_code
+from desman.llm.base import Request
 from desman.llm.fake import FakeLLM, RateLimit
 from desman.planner import Plan, Split, planner_system, splitter_system
 from desman.prompting import today
@@ -49,13 +50,20 @@ def run_tool(ran: list[str]) -> Tool[_Code]:
 
     def run(args: _Code, workspace: Workspace) -> dict[str, Any]:
         ran.append(args.command)
+        if args.command == "check edited file":
+            assert workspace.read_text("calc.py") == "broken"
+            return {
+                "exit_code": 1,
+                "stdout": "\x01" * 5_000 + "FAILED test_calc.py",
+                "stderr": "y" * 1_000 + "AssertionError",
+            }
         return {"exit_code": 0, "stdout": "5\n"}
 
     return Tool("run_command", "Run a command.", _Code, Permission.SHELL, run)
 
 
 def access(*switches: Permission) -> Access:
-    tools = ["run_command", "read_file", "write_file"]
+    tools = ["run_command", "read_file", "write_file", "edit_file"]
     return Access(Policy(roles={Role.EXECUTOR: RolePolicy(tools=tools)}), Role.EXECUTOR, switches)
 
 
@@ -84,7 +92,7 @@ def coordinator(
         executor,
         accept,
         workspaces=tmp_path,
-        tools=Registry([run_tool(ran), READ_FILE, WRITE_FILE]),
+        tools=Registry([run_tool(ran), READ_FILE, WRITE_FILE, EDIT_FILE]),
         access=access(*on),
         sleep=clock.sleep,
         strategies=strategy_for,
@@ -511,3 +519,68 @@ def test_file_only_result_is_shown_even_when_retelling_only_names_it(fake: FakeL
         and CODE in text
         for _, _, text in said()
     )
+
+
+def test_last_run_must_pass_and_its_output_survives_later_tool_rounds(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    task_id = store.create_task(runs_code())
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("calc.py", "working")
+
+    def call(tool: str, **args: str) -> str:
+        return json.dumps({"tool_calls": [{"tool": tool, "args": args}]})
+
+    def claim_success(request: Request) -> str:
+        results = [msg.content for msg in request.messages if "(tool results)" in msg.content]
+        assert any(
+            '"exit_code": 1' in result
+            and "FAILED test_calc.py" in result
+            and "AssertionError" in result
+            for result in results
+        )
+        return '{"text": "This should never be accepted."}'
+
+    def retry(request: Request) -> str:
+        assert any("the last run_command failed" in msg.content for msg in request.messages)
+        return call("run_command", command="check repaired program")
+
+    fake = FakeLLM().on(
+        "Execute",
+        call("run_command", command="check original file"),
+        call("edit_file", path="calc.py", old="working", new="broken"),
+        call("run_command", command="check edited file"),
+        call("edit_file", path="calc.py", old="broken", new="working"),
+        claim_success,
+        retry,
+        '{"text": "Passed after repair."}',
+    )
+    ran: list[str] = []
+    run = coordinator(
+        store, llm_executor(fake, format_final=False), tmp_path, clock, ran, Permission.SHELL
+    )
+    assert run.run(task_id).status is TaskStatus.DONE
+    assert store.final_result(task_id) == {"text": "Passed after repair."}
+    assert ran == ["check original file", "check edited file", "check repaired program"]
+
+
+def test_resuming_after_a_checkpoint_keeps_the_run_in_that_attempt(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    ran: list[str] = []
+
+    def execute(work: Work) -> Success:
+        if work.context.checkpoint is None:
+            result = work.tools.call(ToolCall(tool="run_command", args={"command": "check"}))
+            assert result.ok
+            work.heartbeat({"ran": True})
+            raise KeyboardInterrupt
+        return Success(content={"stdout": "5\n"})
+
+    task_id = store.create_task(runs_code())
+    run = coordinator(store, execute, tmp_path, clock, ran, Permission.SHELL)
+    with pytest.raises(KeyboardInterrupt):
+        run.run(task_id)
+    run.abandoned = lambda _: True
+    assert run.run(task_id).status is TaskStatus.DONE
+    assert ran == ["check"]

@@ -43,6 +43,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
     StringConstraints,
     ValidationError,
 )
@@ -80,6 +81,8 @@ def untrusted_file(path: str) -> bool:
 MAX_READ_CHARS: Final = 8_000
 """Text returned by `read_file` (≈2000 tokens); the rest is cut with a marker: free models have
 small contexts."""
+RUN_TOOL: Final = "run_command"
+FILE_WRITE_TOOLS: Final = ("write_file", "edit_file")
 MAX_WRITE_CHARS: Final = 1_000_000
 MAX_LISTED_FILES: Final = 500
 AUDIT_TEXT: Final = 200
@@ -222,6 +225,8 @@ class Toolbox:
         self.journal = journal
         """None: effects are not journaled (a toolbox outside an execution, e.g. in tests)."""
         self._calls: dict[str, int] = {}
+        self.last_run: ToolResult | None = None
+        """Latest run_command reply in this attempt, including validation failures and replays."""
 
     def available(self) -> list[Tool[Any]]:
         return [tool for tool in self.registry if self._refusal(tool) is None]
@@ -246,6 +251,12 @@ class Toolbox:
         return [tool.spec() for tool in self.available()]
 
     def call(self, call: ToolCall, *, archive: str | None = None) -> ToolResult:
+        result = self._call(call, archive=archive)
+        if call.tool == RUN_TOOL:
+            self.last_run = result
+        return result
+
+    def _call(self, call: ToolCall, *, archive: str | None) -> ToolResult:
         tool = self.registry.get(call.tool)
         private = tool.private if tool is not None else frozenset()
         summary = {"tool": call.tool, "args": summarize(call.args, private)}
@@ -365,6 +376,15 @@ class WriteFileArgs(_Args):
     content: str = Field(max_length=MAX_WRITE_CHARS, description="The whole text of the file.")
 
 
+class EditFileArgs(_Args):
+    path: str = Field(description="Relative to the workspace, '/'-separated.")
+    old: str = Field(min_length=1, max_length=MAX_WRITE_CHARS, description="Exact text to replace.")
+    new: str = Field(max_length=MAX_WRITE_CHARS, description="Replacement text.")
+    count: StrictInt = Field(
+        default=1, ge=1, description="Required number of non-overlapping matches."
+    )
+
+
 class ListFilesArgs(_Args):
     offset: int = Field(default=0, ge=0, description="Index of the first path to list.")
 
@@ -396,6 +416,24 @@ def _write_file(args: WriteFileArgs, workspace: Workspace) -> dict[str, Any]:
     return {"path": path, "chars": len(args.content)}
 
 
+def _edit_file(args: EditFileArgs, workspace: Workspace) -> dict[str, Any]:
+    oversized = f"{args.path!r}: edited file must fit within {MAX_WRITE_CHARS} characters"
+    if workspace.size(args.path) > 4 * MAX_WRITE_CHARS:
+        raise ToolError(oversized)
+    try:
+        text = workspace.read_text(args.path)
+    except UnicodeDecodeError as e:
+        raise ToolError(f"{args.path!r} is not a UTF-8 text file") from e
+    matches = text.count(args.old)
+    if matches != args.count:
+        raise ToolError(f"{args.path!r}: expected {args.count} matches, found {matches}")
+    chars = len(text) + matches * (len(args.new) - len(args.old))
+    if chars > MAX_WRITE_CHARS:
+        raise ToolError(oversized)
+    path = workspace.write(args.path, text.replace(args.old, args.new))
+    return {"path": path, "chars": chars, "replacements": matches}
+
+
 def _list_files(args: ListFilesArgs, workspace: Workspace) -> dict[str, Any]:
     files = workspace.files()
     end = args.offset + MAX_LISTED_FILES
@@ -425,6 +463,17 @@ WRITE_FILE: Final = Tool(
     run=_write_file,
     private=frozenset({"content"}),
     repeatable=True,  # the file is replaced atomically, with the same content
+)
+EDIT_FILE: Final = Tool(
+    name="edit_file",
+    description="Replace an exact fragment in an existing UTF-8 workspace file. "
+    "The old text must occur exactly count times (default 1, non-overlapping). "
+    "Returns {path, chars, replacements}.",
+    args=EditFileArgs,
+    permission=Permission.WORKSPACE,
+    run=_edit_file,
+    private=frozenset({"old", "new"}),
+    repeatable=False,  # an interrupted replacement must be checked before trying it again
 )
 LIST_FILES: Final = Tool(
     name="list_files",
@@ -482,15 +531,15 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         return result
 
     return Tool(
-        name="run_command",
+        name=RUN_TOOL,
         description="Run a program in an isolated sandbox: the task's workspace is the "
         "working directory (/workspace, writable; files written there stay for later subtasks), "
         "with no network or access to host files outside the sandbox's mounts. "
         "Time and memory are limited, and file size is limited. The WebAssembly backend runs "
         "only python FILE.py, python -c CODE, python -m pytest, or python -m unittest, without "
         "packages requiring C extensions. Returns {exit_code, stdout, stderr}; timed_out: true "
-        "when it was killed (exit_code null), stdout_cut / "
-        "stderr_cut when output was cut (the start of stdout and the end of stderr are kept). "
+        "when it was killed (exit_code null). Output retains the tail; stdout_cut / "
+        "stderr_cut when the respective stream was cut. "
         "An exit code of 128+N means killed by signal N. python3 -m pytest is available; "
         "there is no network, so nothing can be pip-installed.",
         args=RunCommandArgs,
@@ -774,6 +823,7 @@ def builtin_registry(
         [
             READ_FILE,
             WRITE_FILE,
+            EDIT_FILE,
             LIST_FILES,
             run_command_tool(sandbox if sandbox is not None else Sandbox()),
             *web_tools(web if web is not None else Web()),

@@ -20,6 +20,7 @@ from desman.core.retry import FailureKind
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import StaleStateError, Store
 from desman.core.tools import (
+    EDIT_FILE,
     LIST_FILES,
     READ_FILE,
     WRITE_FILE,
@@ -37,7 +38,7 @@ from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM, ServerError
 
 S = SubtaskStatus
-TOOLS = ["bump", "read_file", "write_file", "list_files"]
+TOOLS = ["edit_file", "bump", "read_file", "write_file", "list_files"]
 ACCESS = Access(Policy(roles={Role.EXECUTOR: RolePolicy(tools=TOOLS)}), Role.EXECUTOR)
 
 
@@ -568,3 +569,20 @@ def test_quote_sources_use_normalized_paths_and_task_wide_write_history(store: S
         fetched,
         page,
     ]
+
+
+def test_completed_edit_is_replayed_without_applying_it_twice(
+    store: Store, claimed: Subtask, tmp_path: Path
+) -> None:
+    tools = Registry([EDIT_FILE])
+    box = toolbox(store, claimed, tmp_path, tools)
+    box.workspace.write("app.py", "old")
+    edit = ToolCall(tool="edit_file", args={"path": "app.py", "old": "old", "new": "old!"})
+    result = box.call(edit)
+    assert result.ok and not EDIT_FILE.repeatable
+    [entry] = store.effects(claimed.id, 0)
+    assert entry["tool"] == "edit_file" and entry["state"] == "done"
+
+    resumed = toolbox(store, crash_and_reclaim(store), tmp_path, tools)
+    assert resumed.call(edit) == result
+    assert resumed.workspace.read_text("app.py") == "old!"

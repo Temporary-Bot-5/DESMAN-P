@@ -35,6 +35,7 @@ from desman.core.report import (
 from desman.core.states import Actor, SubtaskStatus, TaskStatus, allowed_targets
 from desman.core.stats import Stats
 from desman.core.store import StaleStateError, Store
+from desman.core.tools import FILE_WRITE_TOOLS
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.i18n import t, tn
 from desman.llm import hub
@@ -217,7 +218,7 @@ def result_file_texts(store: Store, report: TaskReport) -> list[tuple[str, str]]
         (final[0], final[0]),
     ):
         detail = json.loads(row[0])
-        if detail.get("tool") == "write_file" and detail.get("ok") is True:
+        if detail.get("tool") in FILE_WRITE_TOOLS and detail.get("ok") is True:
             path = detail.get("args", {}).get("path")
             if isinstance(path, str):
                 written.add(str(PurePosixPath(path)))

@@ -55,6 +55,7 @@ from desman.core.context import (
 from desman.core.models import Subtask
 from desman.core.store import Store
 from desman.core.tools import (
+    FILE_WRITE_TOOLS,
     TOOL_RESULTS_DIR,
     Replayed,
     Tool,
@@ -234,10 +235,11 @@ def quote_sources(
     rows = store.effects(subtask.id, execution) if execution >= 0 else []
     earlier = _selected_rows(store, subtask, rows, _latest_start(store, subtask))
     written = set()
-    for saved in store.completed_effects(subtask.task_id, "write_file"):
-        result = ToolResult.model_validate_json(saved)
-        if result.ok and (path := _output_path(result.output)) is not None:
-            written.add(path)
+    for tool in FILE_WRITE_TOOLS:
+        for saved in store.completed_effects(subtask.task_id, tool):
+            result = ToolResult.model_validate_json(saved)
+            if result.ok and (path := _output_path(result.output)) is not None:
+                written.add(path)
     outputs = []
     for row in [*rows, *earlier]:
         if row["state"] != "done" or row["tool"] == "run_command":
@@ -285,7 +287,7 @@ def _written_files(
 ) -> list[dict[str, str]]:
     paths: list[str] = []
     for row in rows:
-        if row["tool"] != "write_file" or row["state"] != "done":
+        if row["tool"] not in FILE_WRITE_TOOLS or row["state"] != "done":
             continue
         result = ToolResult.model_validate_json(row["result_json"])
         if result.ok and isinstance(result.output, dict):
@@ -476,7 +478,7 @@ def workspace_files(
     }
     for execution in range(store.executions(subtask.id)):
         for row in store.effects(subtask.id, execution):
-            if row["tool"] != "write_file" or row["state"] != "done":
+            if row["tool"] not in FILE_WRITE_TOOLS or row["state"] != "done":
                 continue
             result = ToolResult.model_validate_json(row["result_json"])
             if (
@@ -539,7 +541,7 @@ def tool_result_file(workspace: Workspace, tool: str, result: dict[str, Any]) ->
     output = result.get("output")
     if not result["ok"] or not isinstance(output, dict):
         return None
-    field = {"web_fetch": "saved", "write_file": "path"}.get(tool)
+    field = "path" if tool in FILE_WRITE_TOOLS else {"web_fetch": "saved"}.get(tool)
     path = output.get(field) if field else None
     if not isinstance(path, str):
         return None

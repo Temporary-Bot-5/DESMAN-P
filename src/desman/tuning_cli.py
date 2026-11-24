@@ -34,6 +34,7 @@ ROLES = tuple(ModelChoices.model_fields)
 @click.option(
     "--workers", metavar="N|auto", help="Background workers (1–8); applies on the next page start."
 )
+@click.option("--code-rounds", metavar="N|auto", help="Tool rounds per code attempt (8–48).")
 @click.option("--master-rounds", metavar="N|auto", help="Tool rounds per master attempt (8–48).")
 @click.option("--max-subtasks", metavar="N|auto", help="The most subtasks in a plan (1–12).")
 @click.option(
@@ -76,6 +77,7 @@ def tuning(
     chat_turns: str | None,
     workers: str | None,
     master_rounds: str | None,
+    code_rounds: str | None,
     max_subtasks: str | None,
     max_parts: str | None,
     context_tokens: str | None,
@@ -93,6 +95,7 @@ def tuning(
         "chat_turns": chat_turns,
         "workers": workers,
         "master_rounds": master_rounds,
+        "code_rounds": code_rounds,
         "max_subtasks": max_subtasks,
         "max_parts": max_parts,
         "context_tokens": context_tokens,
@@ -349,6 +352,7 @@ def labels() -> dict[str, str]:
         "chat_turns": t("Concurrent page chat turns"),
         "workers": t("Background workers (next page start)"),
         "master_rounds": t("tool rounds per master attempt"),
+        "code_rounds": t("tool rounds per code attempt"),
         "max_subtasks": t("most subtasks in a plan"),
         "max_parts": t("most parts of a split subtask"),
         "context_tokens": t("tokens of dependency results shown"),

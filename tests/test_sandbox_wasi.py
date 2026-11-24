@@ -266,7 +266,7 @@ def test_real_limits_and_isolation(runtime: Path, tmp_path: Path) -> None:
         tmp_path,
     )
     assert output.exit_code == 0, output
-    assert output.stdout == "start" and output.stdout_cut
+    assert output.stdout == "tart\n" and output.stdout_cut
     assert output.stderr == "ending\n" and output.stderr_cut
     memory = _box(runtime, limits=Limits(memory_bytes=64 * 2**20)).run(
         ["python", "-c", "bytearray(128 * 2**20)"], tmp_path
@@ -325,7 +325,7 @@ def test_output_watchdog_kills_writer(runtime: Path, tmp_path: Path) -> None:
         timeout=10,
     )
     assert outcome.exit_code == 1 and not outcome.timed_out and outcome.stdout_cut
-    assert outcome.stdout == "x" * box.limits.stdout_chars
+    assert outcome.stdout == "x" * (box.limits.stdout_chars - 1) + "\n"
     assert "output limit exceeded" in outcome.stderr
 
 

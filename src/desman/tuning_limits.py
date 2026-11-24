@@ -12,5 +12,8 @@ TUNING_BOUNDS: dict[str, tuple[int, int]] = {
 PAGE_TUNING_BOUNDS: dict[str, tuple[int, int]] = {"workers": (1, 8), "chat_turns": (1, 8)}
 """Page concurrency, set only by the person; never lent to network jobs."""
 
-MASTER_TUNING_BOUNDS: dict[str, tuple[int, int]] = {"master_rounds": (8, 48)}
-"""Master-only tuning, set by the person and used on local tasks."""
+LOCAL_TUNING_BOUNDS: dict[str, tuple[int, int]] = {
+    "master_rounds": (8, 48),
+    "code_rounds": (8, 48),
+}
+"""Tool round limits set by the person and used on local tasks."""

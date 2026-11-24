@@ -29,12 +29,12 @@ from pydantic import (
 
 from desman.core import filelock
 from desman.core.atomic import read_text, replace_file, retry_sharing
-from desman.tuning_limits import MASTER_TUNING_BOUNDS, PAGE_TUNING_BOUNDS
+from desman.tuning_limits import LOCAL_TUNING_BOUNDS, PAGE_TUNING_BOUNDS
 from desman.tuning_limits import TUNING_BOUNDS as WORKFLOW_TUNING_BOUNDS
 
 _BINARY: Final = getattr(os, "O_BINARY", 0)
 
-TUNING_BOUNDS = {**PAGE_TUNING_BOUNDS, **WORKFLOW_TUNING_BOUNDS, **MASTER_TUNING_BOUNDS}
+TUNING_BOUNDS = {**PAGE_TUNING_BOUNDS, **WORKFLOW_TUNING_BOUNDS, **LOCAL_TUNING_BOUNDS}
 
 CONFIG_DIR_ENV = "DESMAN_CONFIG_DIR"
 
@@ -96,7 +96,7 @@ def adopt_config(old: Path, new: Path) -> None:
     click.echo(f"Moved the configuration from {old} to {new}.", err=True)
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 Interface = Literal["terminal", "gui"]
 
 # Renamed to the provider's own variable name (schema 0 -> 1).
@@ -227,6 +227,7 @@ class Tuning(BaseModel):
     chat_turns: StrictInt | None = Field(default=None, ge=1, le=8)
     workers: StrictInt | None = Field(default=None, ge=1, le=8)
     master_rounds: StrictInt | None = _bounded("master_rounds")
+    code_rounds: StrictInt | None = _bounded("code_rounds")
     max_subtasks: StrictInt | None = _bounded("max_subtasks")
     """The most subtasks in a plan."""
     max_parts: StrictInt | None = _bounded("max_parts")
@@ -325,7 +326,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[14] = 14
+    schema_version: Literal[15] = 15
     configured: StrictBool = False
     language: Literal[
         "en", "ru", "zh", "es", "pt", "de", "fr", "ja", "ko", "pl", "tr", "uk", "hi"
@@ -390,6 +391,7 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
     12: master admissions and revocations.
     13: default startup interface.
     14: opt-in lending of free cloud keys.
+    15: tool rounds per code attempt.
     """
     version = data.get("schema_version", 0)
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
@@ -457,6 +459,9 @@ def upgrade(data: dict[str, Any]) -> dict[str, Any]:
 
     if version == 13:
         version = 14  # lending free cloud keys defaults off
+
+    if version == 14:
+        version = 15  # code_rounds uses the workflow default unless set by the person
 
     data["schema_version"] = version
     return data
