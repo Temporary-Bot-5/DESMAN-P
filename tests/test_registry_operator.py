@@ -356,7 +356,9 @@ def test_local_key_files(tmp_path: Path) -> None:
         bad_source = tmp_path / "bad.key"
         bad_source.write_text("invalid")
         operator.import_key(bad_source, replace=True)
-    assert path.read_bytes() == other_source.read_bytes()
+    # A refused import leaves the installed key as it was (line endings may differ on Windows).
+    installed = operator.load_key()
+    assert installed is not None and installed.fingerprint == other.fingerprint
     operator.remove_key()
     assert operator.load_key() is None
     public = operator.create_key()
