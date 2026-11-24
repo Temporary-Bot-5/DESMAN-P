@@ -18,7 +18,13 @@ import click
 import httpx
 
 from desman import documents, knowledge, net, providers, ui
-from desman.agents import MASTER_TOOL_ROUNDS, llm_executor, llm_reviewer
+from desman.agents import (
+    CODE_TOOL_ROUNDS,
+    MASTER_TOOL_ROUNDS,
+    MAX_TOOL_ROUNDS,
+    llm_executor,
+    llm_reviewer,
+)
 from desman.config import Config, ConfigError, MasterChoices, Tuning, open_config
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
@@ -51,6 +57,7 @@ PAGE_TUNING_DEFAULTS: Mapping[str, int] = {"workers": 3, "chat_turns": 4}
 
 TUNING_DEFAULTS: Mapping[str, int] = {
     "master_rounds": MASTER_TOOL_ROUNDS,
+    "code_rounds": CODE_TOOL_ROUNDS,
     "max_subtasks": MAX_SUBTASKS,
     "max_parts": MAX_PARTS,
     "context_tokens": DEFAULT_BUDGET_TOKENS,
@@ -819,6 +826,7 @@ def network_crew(
         by_kind=crew_models.kinds,
         clock=store.clock,
         format_final=False,
+        code_rounds=MAX_TOOL_ROUNDS,  # lent models share their owners' quotas
         tz=UTC,  # another node rechecks: one date for both, wherever they are
     )
     return Crew(
@@ -885,11 +893,13 @@ def _executor(
                     {"from": "other_model", "to": "rephrase", "reason": "no other module"},
                 )
                 other = None  # The executor already rephrases when no alternate exists.
+        tuning = read_tuning()
         return llm_executor(
             main,
             other,
             clock=store.clock,
-            master_rounds=tuned(read_tuning(), "master_rounds"),
+            master_rounds=tuned(tuning, "master_rounds"),
+            code_rounds=tuned(tuning, "code_rounds"),
             allow_delegation=not master_check,
         )(work)
 

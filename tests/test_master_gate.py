@@ -7,13 +7,14 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import click
 import httpx
 import pytest
 from click.testing import CliRunner, Result
 from pydantic import ValidationError
 
 from conftest import FakeClock
-from desman import bench, commands, improve, local_models, providers, runs, tuning_cli
+from desman import bench, commands, improve, local_models, master_cli, providers, runs, tuning_cli
 from desman.cli import cli
 from desman.config import Config, MasterChoices, Tuning, open_config, upgrade
 from desman.core import calls, db, operator, proposals
@@ -72,7 +73,7 @@ def test_master_rounds_are_live_and_person_only(store: Store, tmp_path: Path) ->
 
 def test_config_upgrade_from_11_and_label_validation() -> None:
     config = Config.model_validate(upgrade({"schema_version": 11, "configured": True}))
-    assert config.schema_version == 14 and config.configured
+    assert config.schema_version == 15 and config.configured
     assert config.master == MasterChoices() and config.tuning.master_rounds is None
     assert MasterChoices(admitted=[CANDIDATE, CANDIDATE]).admitted == [CANDIDATE]
     with pytest.raises(ValidationError):
@@ -171,6 +172,24 @@ def test_bench_uses_one_master_and_no_planner(
         assert row["tools"] == Tools.NONE.value
         [subtask] = store.list_subtasks(row["id"])
         assert subtask.master
+
+
+def test_master_check_accepts_limits_recorded_before_code_rounds(store: Store) -> None:
+    limits = dict(runs.TUNING_DEFAULTS)
+    del limits["code_rounds"]
+
+    def record() -> None:
+        store.conn.execute(
+            "INSERT INTO master_checks (model, version, outcome, result_json) VALUES (?, ?, ?, ?)",
+            (CANDIDATE, bench.VERSION, "passed", json.dumps({"limits": limits})),
+        )
+
+    record()
+    master_cli.require_pass(store.conn, CANDIDATE)
+    limits["master_rounds"] += 1
+    record()
+    with pytest.raises(click.ClickException, match="needs a passing check"):
+        master_cli.require_pass(store.conn, CANDIDATE)
 
 
 def test_cli_check_admit_revoke_and_latest_version(

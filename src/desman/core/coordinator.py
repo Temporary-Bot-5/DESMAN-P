@@ -81,7 +81,7 @@ from desman.core.store import (
     StaleStateError,
     Store,
 )
-from desman.core.tools import Registry, Toolbox, ToolResult
+from desman.core.tools import RUN_TOOL, Registry, Toolbox, ToolResult
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
@@ -143,9 +143,6 @@ Outcome = Success | Failure | Delegation
 
 ONE_MODEL: Strategies = functools.partial(strategy_for, other_model=False)
 """The coordinator's default: no other model to switch to, so none is claimed in the audit."""
-
-RUN_TOOL = "run_command"
-"""The tool a subtask marked `runs_code` must call: what it reports rests on what that printed."""
 
 ERROR_TYPE = "error"
 """A result `{"type": "error", "reason": ...}` is the executor saying it could not do the work."""
@@ -572,7 +569,7 @@ class Coordinator:
                 goal=goal,
                 final_goal=goal if is_final else None,
                 files=(lambda chars: workspace_files(self.store, subtask, tools.workspace, chars))
-                if {"read_file", "write_file", "list_files"}.intersection(offered)
+                if {"read_file", "write_file", "edit_file", "list_files"}.intersection(offered)
                 else None,
                 continuation=(
                     lambda chars: earlier_results(
@@ -669,15 +666,21 @@ class Coordinator:
         if isinstance(outcome, Success) and is_error_report(outcome.content):
             # Not a result: a failed attempt, never something a reviewer could accept.
             outcome = Failure(kind=FailureKind.QUALITY, reason=_error_reason(outcome.content))
-        elif isinstance(outcome, Success) and subtask.runs_code and not self._ran(journal):
-            # What running the code printed, told without running it, is made up.
-            outcome = Failure(
-                kind=FailureKind.QUALITY,
-                reason=(
-                    f"the result was handed in without a successful {RUN_TOOL} call: this "
-                    f"subtask must run the code with {RUN_TOOL} and report what it printed"
-                ),
-            )
+        elif isinstance(outcome, Success) and subtask.runs_code:
+            run = tools.last_run
+            if run is None:
+                run = self._journal_run(journal)
+            output = run.output if run is not None and run.ok else None
+            if not isinstance(output, dict) or output.get("exit_code") != 0:
+                reason = (
+                    f"the result was handed in without a successful {RUN_TOOL} call"
+                    if run is None
+                    else f"the last {RUN_TOOL} failed"
+                )
+                outcome = Failure(
+                    kind=FailureKind.QUALITY,
+                    reason=f"{reason}: run the code again and report what it printed",
+                )
         if (
             isinstance(outcome, Failure)
             and outcome.kind is FailureKind.QUALITY
@@ -744,11 +747,14 @@ class Coordinator:
             if row["state"] == "done"
         ]
 
-    def _ran(self, journal: Effects) -> bool:
-        """Whether this execution successfully called `run_command`."""
-        return any(
-            tool == RUN_TOOL and result.ok for tool, result in self._execution_results(journal)
-        )
+    def _journal_run(self, journal: Effects) -> ToolResult | None:
+        """The most recent run in this execution, including calls after a checkpoint."""
+        for row in reversed(self.store.effects(journal.subtask_id, journal.execution)):
+            if row["tool"] == RUN_TOOL:
+                if row["state"] == "done":
+                    return ToolResult.model_validate_json(row["result_json"])
+                return ToolResult(ok=False, error="interrupted run_command")
+        return None
 
     def _missing_search(self, journal: Effects) -> bool:
         """A missing whole-web engine was the last kind of tool failure."""

@@ -95,7 +95,7 @@ def test_a_model_no_ready_provider_serves_is_kept_with_a_warning() -> None:
 
 def test_a_config_from_before_has_no_tuning() -> None:
     config = Config.model_validate(upgrade({"schema_version": 3, "language": "de"}))
-    assert config.schema_version == 14 and config.tuning == Tuning()
+    assert config.schema_version == 15 and config.tuning == Tuning()
 
 
 # ── Honoured ─────────────────────────────────────────────────────────────────
@@ -192,3 +192,23 @@ def test_the_chat_tunes_only_on_the_person_s_yes(fake: FakeLLM) -> None:
     assert ("operator_tuning", {"changed": ["max_parts"]}) in [
         (e.action, e.details) for e in operator.entries(conn)
     ]
+
+
+def test_code_rounds_show_set_and_reset() -> None:
+    save(make_config(language="en", configured=True))
+    initial = json.loads(desman("tuning", "--json").output)
+    assert initial["code_rounds"] is None and initial["defaults"]["code_rounds"] == 16
+    updated = desman("tuning", "--code-rounds", "21")
+    assert updated.exit_code == 0, updated.output
+    assert "tool rounds per code attempt: default (16) → 21" in updated.output
+    assert json.loads(desman("tuning", "--json").output)["code_rounds"] == 21
+    assert desman("tuning", "--code-rounds", "49").exit_code == 2
+    assert desman("tuning", "--code-rounds", "auto").exit_code == 0
+    assert saved().code_rounds is None
+
+
+def test_upgrade_from_14_preserves_tuning_and_uses_the_default_for_code_rounds() -> None:
+    config = Config.model_validate(upgrade({"schema_version": 14, "tuning": {"master_rounds": 30}}))
+    assert config.schema_version == 15
+    assert config.tuning == Tuning(master_rounds=30)
+    assert runs.tuned(config.tuning, "code_rounds") == 16

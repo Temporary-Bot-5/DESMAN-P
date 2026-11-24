@@ -364,6 +364,7 @@ class TuningArgs(Args):
     chat_turns: Limit | None = None
     workers: Limit | None = None
     master_rounds: Annotated[int, Field(ge=8, le=48)] | Literal["auto"] | None = None
+    code_rounds: Annotated[int, Field(ge=8, le=48)] | Literal["auto"] | None = None
     max_subtasks: Limit | None = None
     max_parts: Limit | None = None
     context_tokens: Limit | None = None
@@ -408,6 +409,7 @@ class TuningArgs(Args):
             "chat_turns",
             "workers",
             "master_rounds",
+            "code_rounds",
             "max_subtasks",
             "max_parts",
             "context_tokens",

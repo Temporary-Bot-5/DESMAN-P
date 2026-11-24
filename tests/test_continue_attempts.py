@@ -201,19 +201,22 @@ def test_growing_tool_round_skips_a_model_that_was_fit_initially(
 ) -> None:
     task, _ = task_with_book(store, tmp_path)
     small, large = FakeLLM(reading(0)), FakeLLM('{"text":"Done"}')
+    ceiling = 4000
     provider = providers.find("groq")
     spec = (
-        catalog.Model("test-small", context=3500)
+        catalog.Model("test-small", context=ceiling)
         if constraint == "context"
-        else catalog.Model("test-small", request_tokens=3500)
+        else catalog.Model("test-small", request_tokens=ceiling)
     )
     choice = router.Choice(provider, spec.id, spec)
     fallback = router.Fallback([(small, choice), (large, None)])
     assert run_with(fallback, store, tmp_path, clock).run(task).status is TaskStatus.DONE
     assert len(small.calls) == len(large.calls) == 1
-    assert router.estimated_tokens(small.calls[0]) <= 3500 < router.estimated_tokens(large.calls[0])
+    assert (
+        router.estimated_tokens(small.calls[0]) <= ceiling < router.estimated_tokens(large.calls[0])
+    )
     [skipped] = fallback.last_call.skipped
-    assert (skipped.model, skipped.reason, skipped.context) == (choice.label, "context", 3500)
+    assert (skipped.model, skipped.reason, skipped.context) == (choice.label, "context", ceiling)
     assert skipped.needed == router.estimated_tokens(large.calls[0])
 
 
@@ -262,7 +265,7 @@ def test_a_second_resume_keeps_results_from_a_diverged_journal(
     context = json.loads(model.calls[-1].prompt.split(":\n", 1)[1])
     newest, oldest = context["Already done by earlier attempts"]
     assert [newest["file"], oldest["file"]] == [
-        ".tool-results/0-e0-r9-1.json",
+        ".tool-results/0-e0-s1-r1-1.json",
         ".tool-results/0-e0-r1-1.json",
     ]
     assert all(workspace.exists(entry["file"]) for entry in (newest, oldest))

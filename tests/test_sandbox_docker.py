@@ -343,7 +343,7 @@ def test_docker_stops_container_before_client(
     else:
         assert box.run(["nothing"], tmp_path, stdin="input\n", timeout=0.25) == Outcome(
             None,
-            "hello",
+            "world",
             "ing",
             timed_out=True,
             stdout_cut=True,
@@ -576,13 +576,13 @@ def test_real_docker_pytest_and_output_limits(real_docker: Sandbox, tmp_path: Pa
         [
             "python3",
             "-c",
-            "import sys; print('first' + 'x' * 100_000); "
+            "import sys; print('x' * 100_000 + 'summary'); "
             "print('x' * 100_000 + 'last', file=sys.stderr)",
         ],
         tmp_path,
     )
     assert result.exit_code == 0
-    assert result.stdout_cut and result.stdout.startswith("first")
+    assert result.stdout_cut and result.stdout.endswith("summary\n")
     assert len(result.stdout) == real_docker.limits.stdout_chars
     assert result.stderr_cut and result.stderr.endswith("last\n")
     assert len(result.stderr) == real_docker.limits.stderr_chars

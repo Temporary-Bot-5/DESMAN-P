@@ -266,7 +266,7 @@ def test_real_limits_and_isolation(runtime: Path, tmp_path: Path) -> None:
         tmp_path,
     )
     assert output.exit_code == 0, output
-    assert output.stdout == "start" and output.stdout_cut
+    assert output.stdout == "tart\n" and output.stdout_cut
     assert output.stderr == "ending\n" and output.stderr_cut
     memory = _box(runtime, limits=Limits(memory_bytes=64 * 2**20)).run(
         ["python", "-c", "bytearray(128 * 2**20)"], tmp_path
@@ -312,21 +312,29 @@ def test_blocking_guest_times_out_and_child_is_reaped(
     assert child.returncode is not None
 
 
-def test_output_watchdog_kills_writer(runtime: Path, tmp_path: Path) -> None:
-    box = _box(runtime, limits=Limits(file_bytes=64 * 1024))
-    assert box.run(["python", "-c", "pass"], tmp_path).exit_code == 0
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_verbose_wasi_run_keeps_both_tails_and_exit_code(
+    runtime: Path, tmp_path: Path, exit_code: int
+) -> None:
+    box = _box(runtime, limits=Limits(stdout_chars=8, stderr_chars=8))
     outcome = box.run(
         [
             "python",
             "-c",
-            "import sys, time; print('x' * 128 * 1024, flush=True); time.sleep(1000)",
+            "import sys, time\n"
+            "print('x' * (128 * 1024), flush=True)\n"
+            "print('y' * (128 * 1024), file=sys.stderr, flush=True)\n"
+            "time.sleep(1)\n"
+            "print('end')\n"
+            "print('err', file=sys.stderr)\n"
+            f"sys.exit({exit_code})\n",
         ],
         tmp_path,
         timeout=10,
     )
-    assert outcome.exit_code == 1 and not outcome.timed_out and outcome.stdout_cut
-    assert outcome.stdout == "x" * box.limits.stdout_chars
-    assert "output limit exceeded" in outcome.stderr
+    assert outcome.exit_code == exit_code and not outcome.timed_out, outcome
+    assert outcome.stdout == "xxx\nend\n" and outcome.stdout_cut
+    assert outcome.stderr == "yyy\nerr\n" and outcome.stderr_cut
 
 
 def test_real_pytest_and_tool(runtime: Path, tmp_path: Path) -> None:

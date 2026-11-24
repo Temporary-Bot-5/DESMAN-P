@@ -42,14 +42,14 @@ def test_schema_0_file_is_upgraded_on_load_and_save() -> None:
     )
     manager = ConfigManager(path)
     config = manager.load()
-    assert config.schema_version == 14 and config.configured and config.language == "ru"
+    assert config.schema_version == 15 and config.configured and config.language == "ru"
     assert config.permissions == Permissions(shell_execution=True)
     assert flat_keys(config) == {"GROQ_API_KEY": GROQ, "AI_GATEWAY_API_KEY": "vck_x"}
     assert config.settings == {"OLLAMA_HOST": "http://box:11434"}
 
     manager.save(config)
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["schema_version"] == 14
+    assert saved["schema_version"] == 15
     assert "version" not in saved and "local_settings" not in saved
     assert ConfigManager(path).load() == config
 
@@ -125,7 +125,7 @@ def test_config_show_masks_every_secret() -> None:
     assert "OLLAMA_HOST=http://box:11434" in lines["Ollama"]
 
     out = json.loads(js.output)
-    assert out["path"] == str(default_config_path()) and out["schema_version"] == 14
+    assert out["path"] == str(default_config_path()) and out["schema_version"] == 15
     rows = {r["id"]: r for r in out["providers"]}
     assert rows["groq"]["key_env"] == "GROQ_API_KEY"
     assert rows["groq"]["keys"] == [
@@ -212,7 +212,7 @@ def test_schema_12_defaults_to_terminal_and_preserves_other_settings() -> None:
     path = write({"schema_version": 12, "configured": True, "language": "ru"})
     manager = ConfigManager(path)
     config = manager.load()
-    assert config.schema_version == 14
+    assert config.schema_version == 15
     assert config.interface == "terminal"
     assert config.configured and config.language == "ru"
     manager.save(config)
@@ -223,8 +223,8 @@ def test_v13_config_defaults_cloud_lending_off() -> None:
     path = write({"schema_version": 13, "network": {"enabled": True, "lead": False}})
     manager = ConfigManager(path)
     config = manager.load()
-    assert config.schema_version == 14
+    assert config.schema_version == 15
     assert config.network.enabled and not config.network.lead and not config.network.lend_cloud
     manager.save(config)
     saved = json.loads(manager.config_path.read_text(encoding="utf-8"))
-    assert saved["schema_version"] == 14 and saved["network"]["lend_cloud"] is False
+    assert saved["schema_version"] == 15 and saved["network"]["lend_cloud"] is False

@@ -27,7 +27,7 @@ from desman.core.audit import check_history
 from desman.core.coordinator import Coordinator, Review, Verdict
 from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.policy import Permission, executor_access
-from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable
+from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable, _Tail
 from desman.core.states import TaskStatus
 from desman.core.store import Store
 from desman.core.tools import MAX_RUN_SECONDS, Toolbox, ToolCall, builtin_registry
@@ -194,7 +194,7 @@ def test_processes_files_memory_and_cpu_are_limited(ws: Workspace) -> None:
 
 
 @confined
-def test_output_is_cut_keeping_the_start_and_the_end(ws: Workspace) -> None:
+def test_output_is_cut_keeping_the_tails(ws: Workspace) -> None:
     outcome = py(
         ws,
         "import sys\n"
@@ -205,7 +205,9 @@ def test_output_is_cut_keeping_the_start_and_the_end(ws: Workspace) -> None:
     )
     assert outcome.exit_code == 0
     assert (
-        outcome.stdout_cut and outcome.stdout.startswith("0\n1\n2\n") and len(outcome.stdout) == 20
+        outcome.stdout_cut
+        and outcome.stdout.endswith("99998\n99999\n")
+        and len(outcome.stdout) == 20
     )
     assert outcome.stderr_cut and outcome.stderr.endswith("99998\n99999\n")
 
@@ -312,7 +314,7 @@ def test_run_command_needs_the_human_switch(ws: Workspace) -> None:
 
 def test_run_command_needs_a_working_sandbox(ws: Workspace) -> None:
     toolbox, entries = box(ws, missing(), Permission.SHELL)
-    assert names(toolbox) == ["read_file", "write_file", "list_files", "read_node"]
+    assert names(toolbox) == ["read_file", "write_file", "edit_file", "list_files", "read_node"]
     result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
     assert not result.ok and "cannot run here" in (result.error or "")
     [(action, details)] = entries
@@ -424,3 +426,11 @@ def test_run_warns_when_the_switch_is_on_but_there_is_no_sandbox(
         and ("cannot be started" if sys.platform.startswith("linux") else "Docker is not installed")
         in output
     )
+
+
+def test_output_tail_skips_continuation_bytes_at_the_cut() -> None:
+    tail = _Tail(4)
+    tail.add(b"x" + bytes([0x80]) * 18)
+    tail.add("éé".encode())
+    assert tail.cut
+    assert tail.text() == "éé"

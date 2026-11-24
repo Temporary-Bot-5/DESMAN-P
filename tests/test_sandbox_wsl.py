@@ -78,6 +78,6 @@ def test_output_limits(wsl: Sandbox, tmp_path: Path) -> None:
         tmp_path,
     )
     assert result.exit_code == 0 and result.stdout_cut and result.stderr_cut, result
-    assert result.stdout == "A" * 25
+    assert result.stdout in {"A" * 24 + "\n", "A" * 23 + "\r\n"}
     assert len(result.stderr) == 25
     assert result.stderr in {"B" * 24 + "\n", "B" * 23 + "\r\n"}

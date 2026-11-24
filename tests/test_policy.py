@@ -62,6 +62,7 @@ def test_the_shipped_policy_gives_tools_to_the_executor_only() -> None:
     executor = {
         "read_file",
         "write_file",
+        "edit_file",
         "list_files",
         "run_command",
         "web_search",

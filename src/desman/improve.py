@@ -156,7 +156,7 @@ _ROLE_ABOUT = {
 SETTINGS: tuple[Setting, ...] = tuple(
     Setting(f"tuning.{n}", n, _LIMIT_ABOUT[n])
     for n in TUNING_LIMITS
-    if n not in {"workers", "chat_turns", "master_rounds"}
+    if n not in {"workers", "chat_turns", "master_rounds", "code_rounds"}
 ) + tuple(
     Setting(
         f"tuning.model.{r}", r, _ROLE_ABOUT[r] + " It is asked first; the others stay behind it."

@@ -17,6 +17,7 @@ import pytest
 
 from conftest import FakeClock
 from desman import providers, runs
+from desman.agents import MAX_TOOL_ROUNDS, llm_executor
 from desman.config import Config, ConfigError, Donation, Network
 from desman.core import calls, db
 from desman.core.coordinator import Coordinator, Crew, Failure, Review, Success, Verdict, Work
@@ -615,6 +616,21 @@ def test_a_job_s_tools_are_the_network_roles(
         refusal = crew.access.refusal(tool(name))
         assert refusal is not None and "tool policy" in refusal
     assert crew.access.refusal(tool("write_file")) is None
+
+
+def test_lent_code_executor_uses_the_ordinary_round_limit(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings()
+    configured = []
+
+    def capture(*args: Any, **kwargs: Any) -> Any:
+        configured.append(kwargs.get("code_rounds"))
+        return llm_executor(*args, **kwargs)
+
+    monkeypatch.setattr(runs, "llm_executor", capture)
+    assert runs.network_crew(store, settings(), settings, given=runs.Models(FakeLLM(), None))
+    assert configured == [MAX_TOOL_ROUNDS]
 
 
 def test_no_crew_while_off_or_nothing_lent(store: Store) -> None:
