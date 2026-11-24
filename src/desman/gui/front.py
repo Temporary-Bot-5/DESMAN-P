@@ -617,7 +617,10 @@ class WebFront(ui.Front):
     def stop(self) -> None:
         """Interrupt busy work on the main thread, where the chat handles cancellation."""
         if self.runners is not None:
-            self.runners.stop(self.current)
+            try:
+                self.runners.stop(self.current)
+            except click.ClickException as exc:
+                self.error(exc.format_message())
             return
         with self.condition:
             if self.busy:

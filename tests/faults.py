@@ -1170,10 +1170,10 @@ class ClusterSimulation(NetSimulation):
         self.observe()
         problems = self.report.problems
         with registry_store.connection(self.registry_db) as conn:
-            lost_operators: dict[str, set[str]] = {}
+            lost_operators: Counter[str] = Counter()
             for event in registry_store.entries(conn):
-                if event.action == "operator_lost" and event.node is not None:
-                    lost_operators.setdefault(event.details["task"], set()).add(event.node)
+                if event.action == "operator_lost":
+                    lost_operators[event.details["task"]] += 1
             finished = 0
             for t in clusters.cluster_tasks(conn):
                 if t.status == "operator" and t.reason == "result":
@@ -1192,7 +1192,7 @@ class ClusterSimulation(NetSimulation):
                     t.status == "operator"
                     and t.reason == "operators_lost"
                     and t.lost == clusters.MAX_OPERATORS_LOST
-                    and len(lost_operators.get(t.id, set())) == t.lost
+                    and lost_operators[t.id] == t.lost
                 ):
                     self.report.trace.append("inbox operators_lost explained by journaled losses")
                 else:

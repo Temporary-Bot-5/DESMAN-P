@@ -20,8 +20,9 @@ from typing import Protocol
 import click
 
 from desman import runs
+from desman.actions import open_user_db
 from desman.config import ConfigError, ConfigManager
-from desman.core import calls, db
+from desman.core import calls
 from desman.core.store import Store
 from desman.i18n import t
 from desman.llm import router
@@ -129,7 +130,7 @@ class Pool:
         self.thread: threading.Thread | None = None
 
     def _guard(self) -> None:
-        conn = db.open_db(self.path)
+        conn = open_user_db(self.path)
         try:
             runs.guard(Store(conn))
         finally:

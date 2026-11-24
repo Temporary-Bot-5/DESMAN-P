@@ -18,9 +18,9 @@ from rich.console import RenderableType
 from rich.text import Text
 
 from desman import commands, providers, runs, task_files, ui
+from desman.actions import open_user_db
 from desman.chat import Chat, run_turn
 from desman.config import ConfigError, open_config
-from desman.core import db
 from desman.core.sessions import History, Kind, Message, Role, Sessions
 from desman.core.store import Clock
 from desman.gui.front import WebFront
@@ -330,7 +330,7 @@ class Runners:
         conn: sqlite3.Connection | None = None
         sink: SessionFront | None = None
         try:
-            conn = db.open_db(self.path)
+            conn = open_user_db(self.path)
             sessions = (
                 TurnSessions(conn, clock=self.session_clock)
                 if self.session_clock
@@ -464,6 +464,8 @@ class Runners:
                 self.condition.notify_all()
             if sink is not None:
                 sink.error(t("The chat turn failed ({error}).", error=type(exc).__name__))
+            elif isinstance(exc, click.ClickException):
+                self.front.error(exc.format_message())
         finally:
             with self.condition:
                 # Submit and retirement share this lock, so work cannot be stranded.
@@ -524,7 +526,7 @@ class Runners:
             if runner is None:
                 return
             work = runner.current
-            conn = db.open_db(self.path)
+            conn = open_user_db(self.path)
             try:
                 sessions = Sessions(conn)
                 for item in [work, *runner.queue]:
@@ -564,7 +566,7 @@ class Runners:
             work.stopped.set()
         if self.front.ended and any(work.user_seq is not None for work in waiting):
             # An explicit page exit discards queued inputs durably.
-            conn = db.open_db(self.path)
+            conn = open_user_db(self.path)
             try:
                 sessions = Sessions(conn)
                 for work in waiting:

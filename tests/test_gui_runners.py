@@ -534,6 +534,36 @@ def test_claiming_first_slot_wakes_other_eligible_sessions(
     page.done(a)
 
 
+def test_runner_reports_newer_database_before_opening_session_output(page: Harness) -> None:
+    page.conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) + 1}")
+
+    session = page.send("A")
+    page.done(session)
+
+    assert any(
+        "was created by a newer DESMAN" in event.get("html", "") for event in page.front.events
+    )
+
+
+def test_stop_reports_newer_database_on_the_page(page: Harness) -> None:
+    gate = page.gate("A")
+    session = page.send("A")
+    assert page.entered["A"].wait(10)
+    page.front.current = session
+    try:
+        page.conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) + 1}")
+
+        page.front.stop()
+
+        assert any(
+            "was created by a newer DESMAN" in event.get("html", "") for event in page.front.events
+        )
+    finally:
+        page.conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS)}")
+        gate.set()
+    page.done(session)
+
+
 def test_failed_runner_initialization_does_not_strand_fifo_tickets(page: Harness) -> None:
     from desman.gui.runners import runner_chat
 

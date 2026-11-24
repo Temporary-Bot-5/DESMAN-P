@@ -772,6 +772,7 @@ def test_a_job_without_an_independent_reviewer_returns_for_replanning(
     operator: sign.NodeKey,
     appointer: sign.NodeKey,
     clock: FakeClock,
+    root: sign.NodeKey,
 ) -> None:
     _, lead, a, b = formed(registry, db_path, operator, clock)
     state = mine(lead)
@@ -786,11 +787,76 @@ def test_a_job_without_an_independent_reviewer_returns_for_replanning(
     assert given is not None
     assert hand_in(b, given, output="Roses...").json()["status"] == "recheck"
 
+    no_model = Node(registry, clock)
+    assert no_model.register().status_code == 200
+    search = Node(registry, clock)
+    assert (
+        search.register(
+            [{"provider": protocol.SEARCH_PROVIDER, "calls_per_day": 10, "tokens_per_day": 0}]
+        ).status_code
+        == 200
+    )
+    revoked = member(registry, clock)
+    with store.connection(db_path) as conn:
+        admin.revoke(conn, root, revoked.fingerprint, "test", now=clock())
+    offline = member(registry, clock)
+    clock.advance(1000)
+    heartbeat(lead, a, b)
+    with store.connection(db_path) as conn:
+        found = work.job(conn, lent.record.id)
+        assert found is not None and found.status == "recheck"
+    assert offline.call("POST", protocol.LEAVE).status_code == 200
+
     mine(lead)
     with store.connection(db_path) as conn:
         found = work.job(conn, lent.record.id)
     assert found is not None and (found.status, found.reason) == ("operator", "no_reviewer_left")
     assert send(lead, plan(lead, mine(lead), version=2)).status_code == 200
+
+
+def test_settle_again_replans_unreviewable_code_even_with_an_untried_member(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    task, lead, a, b = formed(registry, db_path, operator, clock)
+    nodes = [NODES[0] | {"runs_code": True}]
+    for version in range(1, protocol.MAX_PLAN_VERSIONS + 1):
+        state = mine(lead)
+        planned = plan(lead, state, version=version, nodes=nodes)
+        assert send(lead, planned).status_code == 200
+        lent = job(lead, state, planned.record.id, 0, version=version, runs_code=True)
+        assert send(lead, lent).status_code == 200
+
+        # The second member is still appointed and has never taken this record.
+        assert b.heartbeat([]).status_code == 200
+        given = say(a)
+        assert given is not None
+        assert hand_in(a, given, output="Code ran successfully").json()["status"] == "recheck"
+        assert say(b) is None
+
+        with store.connection(db_path) as conn:
+            found = work.job(conn, lent.record.id)
+            assert found is not None
+            assert (found.status, found.reason) == ("operator", "no_reviewer_left")
+            assert found.result is not None
+            assert b.fingerprint in work.cluster_members(conn, task)
+            if version == protocol.MAX_PLAN_VERSIONS:
+                with pytest.raises(clusters.SettleError, match="no_versions"):
+                    clusters.settle(conn, task, "again", clock())
+                assert work.job(conn, found.id) == found
+                assert row(db_path, task).status == "operator"
+                break
+            again = clusters.settle(conn, task, "again", clock())
+            assert again.status == "waiting" and again.replan
+            dropped = work.job(conn, found.id)
+            assert dropped is not None and dropped.status == "dropped"
+            assert dropped.result == found.result
+        clock.advance(1)
+        assert b.heartbeat([LOCAL]).status_code == 200
+        assert say(b) is None  # allows the registry to appoint the cluster again
 
 
 def test_a_task_its_old_operators_cannot_lead_does_not_hold_up_a_newer_one(
