@@ -5,58 +5,18 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 
 from desman.core import db
 from desman.i18n import t
+from desman.net import operator_records, sign
 from desman.net import protocol as p
-from desman.net import sign
+from desman.net.protocol import ComplaintDetail, ComplaintRow
+from desman.net.protocol import ModerationRow as ModerationRow
 from desman.registry import admin, store
-
-
-class Row(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class ModerationRow(Row):
-    id: str
-    node: str
-    action: Literal["suspend", "lift"]
-    lifts: str | None
-    signer: str
-    issued_at: str
-    expires_at: str
-    lifted: bool
-
-
-class ComplaintRow(Row):
-    id: str
-    from_node: str
-    about_node: str
-    from_name: str | None
-    about_name: str | None
-    message_id: int | None
-    created_at: str
-    status: str
-    count: int
-
-
-class ComplaintDecision(Row):
-    complaint: str
-    decision: str
-    record: str | None
-    note: str | None
-    decided_at: str
-
-
-class ComplaintDetail(ComplaintRow):
-    text: str
-    message_text: str | None
-    decisions: list[ComplaintDecision]
-
 
 _COMPLAINTS = """
     SELECT c.id,c.from_node,c.about_node,f.name AS from_name,a.name AS about_name,
@@ -84,9 +44,9 @@ def find_complaint(conn: sqlite3.Connection, prefix: str) -> str:
         "SELECT id FROM complaints WHERE substr(id,1,?)=?", (len(prefix), prefix)
     ).fetchall()
     if not rows:
-        raise admin.AdminError(t("No complaint {id}.", id=prefix))
+        raise admin.Missing(t("No complaint {id}.", id=prefix))
     if len(rows) > 1:
-        raise admin.AdminError(
+        raise admin.Ambiguous(
             t("More than one complaint starts with {id}; give more of it.", id=prefix)
         )
     return str(rows[0][0])
@@ -114,18 +74,19 @@ def _settle(
         "UPDATE complaints SET status='settled' WHERE id=? AND status='open'", (id,)
     )
     if changed.rowcount != 1:
-        raise admin.AdminError(t("Complaint {id} is already settled.", id=id))
+        raise admin.AlreadySettled(t("Complaint {id} is already settled.", id=id))
     conn.execute(
         "INSERT INTO complaint_decisions VALUES (?,?,?,?,?)",
         (id, decision, record, note, db.to_iso(now)),
     )
 
 
-def dismiss(conn: sqlite3.Connection, id: str, note: str | None, now: datetime) -> None:
-    with db.transaction(conn):
+def dismiss(conn: sqlite3.Connection, id: str, note: str | None, now: datetime) -> str:
+    with store.write_transaction(conn):
         id = find_complaint(conn, id)
         _settle(conn, id, "dismissed", None, note, now)
         store.log(conn, "complaint_dismissed", None, {"complaint": id, "note": note})
+        return id
 
 
 def _node(conn: sqlite3.Connection, ref: str) -> str:
@@ -233,22 +194,68 @@ def _keep(
     root = sign.load_root(sign.ROOT_PUB if root_pub is None else root_pub)
     believed = store.trust(conn, root, now)
     assigned = believed.operator(operator.fingerprint)
-    if assigned is not None:
-        lifetime = min(lifetime, assigned.expires_at - now.replace(microsecond=0))
-    if lifetime <= timedelta(0):
-        raise admin.AdminError(t("A node would refuse it: the assignment has ended."))
-    signed = sign.sign(
-        operator,
-        sign.RecordKind.MODERATION,
-        body.model_dump(mode="json"),
-        issued_at=now,
-        lifetime=lifetime,
-    )
     try:
-        believed.receive(signed.model_dump(mode="json"))
+        signed = operator_records.moderation(
+            operator,
+            body,
+            now=now,
+            lifetime=lifetime,
+            until=None if assigned is None else assigned.expires_at,
+        )
+        return add(conn, signed, root, now)
+    except operator_records.AssignmentEnded:
+        raise admin.AdminError(t("A node would refuse it: the assignment has ended.")) from None
     except sign.Refused as e:
         raise admin.AdminError(t("A node would refuse it: {error}", error=str(e))) from e
+
+
+def add(
+    conn: sqlite3.Connection,
+    signed: sign.Signed,
+    root: Ed25519PublicKey,
+    now: datetime,
+) -> ModerationRow:
+    """Verify and keep a signed suspension or lift, with its complaint decisions."""
+    with store.write_transaction(conn):
+        return _add(conn, signed, root, now)
+
+
+def _add(
+    conn: sqlite3.Connection,
+    signed: sign.Signed,
+    root: Ed25519PublicKey,
+    now: datetime,
+) -> ModerationRow:
     record = signed.record
+    if record.kind is not sign.RecordKind.MODERATION:
+        raise sign.Refused(sign.Reason.MALFORMED, "expected a moderation record")
+    believed = store.trust(conn, root, now)
+    believed.receive(signed.model_dump(mode="json"))
+    if conn.execute("SELECT 1 FROM moderations WHERE id=?", (record.id,)).fetchone():
+        raise sign.Refused(sign.Reason.REPLAY, "record already stored", id=record.id)
+    try:
+        body = p.Moderation.model_validate(record.body)
+    except ValidationError as e:
+        raise sign.Refused(sign.Reason.MALFORMED, "invalid moderation body") from e
+    if store.node(conn, body.node) is None:
+        raise admin.Missing(t("No node {key}.", key=body.node))
+    if len(set(body.complaints)) != len(body.complaints):
+        raise admin.AdminError(t("Cite each complaint only once."))
+    for id in body.complaints:
+        row = conn.execute("SELECT about_node,status FROM complaints WHERE id=?", (id,)).fetchone()
+        if row is None:
+            raise admin.Missing(t("No complaint {id}.", id=id))
+        if body.action != "suspend" or row["about_node"] != body.node or row["status"] != "open":
+            raise admin.AdminError(t("Complaint {id} must be open and about this node.", id=id))
+    if body.lifts is not None:
+        suspension = conn.execute(
+            "SELECT * FROM moderations WHERE id=? AND node=? AND action='suspend'",
+            (body.lifts, body.node),
+        ).fetchone()
+        if suspension is None or _valid(suspension, believed, now) is None:
+            raise admin.Missing(t("No suspension is in effect for {id}.", id=body.lifts))
+        if _lifted(conn, body.lifts, believed, now):
+            raise admin.AlreadySettled(t("No suspension is in effect for {id}.", id=body.lifts))
     conn.execute(
         "INSERT INTO moderations VALUES (?,?,?,?,?,?,?,?)",
         (
@@ -305,14 +312,6 @@ def suspend(
     with db.transaction(conn):
         node = _node(conn, node_prefix_or_name)
         ids = [find_complaint(conn, id) for id in complaints]
-        if len(set(ids)) != len(ids):
-            raise admin.AdminError(t("Cite each complaint only once."))
-        for id in ids:
-            row = conn.execute(
-                "SELECT about_node,status FROM complaints WHERE id=?", (id,)
-            ).fetchone()
-            if row["about_node"] != node or row["status"] != "open":
-                raise admin.AdminError(t("Complaint {id} must be open and about this node.", id=id))
         return _keep(
             conn,
             operator,

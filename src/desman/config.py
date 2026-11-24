@@ -283,7 +283,8 @@ class Donation(BaseModel):
 class Network(BaseModel):
     """desman-global (ADR 0004): off unless the person joined. Like `permissions`, changed by
     the person only (`desman global ...`, the wizard, or a chat request they confirm); agents
-    never write it. While it is off, nothing is sent to the registry (`net.registry()`)."""
+    never write it. Node calls use `net.registry()` only while enabled. Installing an operator
+    key allows operator calls to the same address independently (ADR 0016)."""
 
     model_config = ConfigDict(extra="forbid")
 

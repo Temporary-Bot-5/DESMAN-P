@@ -207,12 +207,18 @@ def _call(
     answer: type[M],
     now: datetime,
     deadline: float,
+    *,
+    include_nulls: bool = False,
 ) -> M:
     """One request, given what is left until `deadline` (`time.monotonic()`)."""
     left = deadline - time.monotonic()
     if left <= 0:
         raise _Unreachable("ContactTimeout")
-    content = b"" if body is None else body.model_dump_json(exclude_none=True).encode("utf-8")
+    content = (
+        b""
+        if body is None
+        else body.model_dump_json(exclude_none=not include_nulls).encode("utf-8")
+    )
     target = _target(registry, path)
     headers = request.sign_request(key, method, target, content, now=now)
     if content:
@@ -245,11 +251,14 @@ def _call(
     except httpx.HTTPError as e:
         raise _Unreachable(type(e).__name__) from e
     body_bytes = bytes(received)
+    operator_call = path.startswith(protocol.OPERATOR_PREFIX)
     if reply.status_code == 429 and not (
-        path == protocol.SEARCH_ASK or re.fullmatch(rf"{protocol.SEARCH_STATE}[a-f0-9]{{32}}", path)
+        operator_call
+        or path == protocol.SEARCH_ASK
+        or re.fullmatch(rf"{protocol.SEARCH_STATE}[a-f0-9]{{32}}", path)
     ):
         raise _Unreachable("HTTP 429")
-    if reply.status_code >= 500:
+    if reply.status_code >= 500 and not operator_call:
         raise _Unreachable(f"HTTP {reply.status_code}")
     if reply.status_code == 404 and path == protocol.RELEASES:
         raise _Problem("not_found")
@@ -263,6 +272,9 @@ def _call(
         return answer.model_validate_json(body_bytes)
     except ValidationError:
         raise _Unreachable("bad_reply") from None
+
+
+signed_call = _call
 
 
 def tell_left(

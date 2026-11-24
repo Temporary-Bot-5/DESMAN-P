@@ -956,3 +956,238 @@ class SearchState(BaseModel):
     state: Literal["waiting", "answered", "expired", "gone"]
     hits: list[SearchHit] | None = Field(default=None, max_length=10)
     error: str | None = Field(default=None, max_length=200)
+
+
+OPERATOR_PREFIX: Final = "/v1/operator/"
+OPERATOR_WHOAMI: Final = OPERATOR_PREFIX + "whoami"
+OPERATOR_INBOX: Final = OPERATOR_PREFIX + "inbox"
+OPERATOR_JOBS: Final = OPERATOR_PREFIX + "jobs"
+OPERATOR_JOB: Final = OPERATOR_PREFIX + "job"
+OPERATOR_JOB_ADD: Final = OPERATOR_PREFIX + "job/add"
+OPERATOR_JOB_SETTLE: Final = OPERATOR_PREFIX + "job/settle"
+OPERATOR_CLUSTERS: Final = OPERATOR_PREFIX + "clusters"
+OPERATOR_CLUSTER: Final = OPERATOR_PREFIX + "cluster"
+OPERATOR_CLUSTER_ADD: Final = OPERATOR_PREFIX + "cluster/add"
+OPERATOR_CLUSTER_SETTLE: Final = OPERATOR_PREFIX + "cluster/settle"
+OPERATOR_COMPLAINTS: Final = OPERATOR_PREFIX + "complaints"
+OPERATOR_COMPLAINT: Final = OPERATOR_PREFIX + "complaint"
+OPERATOR_COMPLAINT_DISMISS: Final = OPERATOR_PREFIX + "complaint/dismiss"
+OPERATOR_MODERATION: Final = OPERATOR_PREFIX + "moderation"
+OPERATOR_SUSPENSIONS: Final = OPERATOR_PREFIX + "suspensions"
+OPERATOR_REPORTS: Final = OPERATOR_PREFIX + "reports"
+OPERATOR_REPORT: Final = OPERATOR_PREFIX + "report"
+OPERATOR_NODES: Final = OPERATOR_PREFIX + "nodes"
+OPERATOR_OWNER: Final = OPERATOR_PREFIX + "owner"
+OPERATOR_LOG: Final = OPERATOR_PREFIX + "log"
+
+OperatorPrefix = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+OperatorDecision = Literal["accept", "again", "drop"]
+JobStatus = Literal["execute", "recheck", "accepted", "operator", "dropped", "expired"]
+ClusterStatus = Literal["waiting", "running", "operator", "accepted", "dropped", "expired"]
+ReportKind = Literal["bug", "memory"]
+
+
+class OperatorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class OperatorEmpty(OperatorBody):
+    pass
+
+
+class OperatorRef(OperatorBody):
+    id: OperatorPrefix
+
+
+class OperatorJobQuery(OperatorBody):
+    status: JobStatus | None = None
+
+
+class OperatorClusterQuery(OperatorBody):
+    status: ClusterStatus | None = None
+
+
+class OperatorRecord(OperatorBody):
+    record: Signed
+
+
+class OperatorSettle(OperatorRef):
+    decision: OperatorDecision
+
+
+class OperatorClusterSettle(OperatorSettle):
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class OperatorComplaintsQuery(OperatorBody):
+    all: bool
+
+
+class OperatorReportQuery(OperatorBody):
+    kind: ReportKind | None = None
+
+
+class OperatorOwner(OperatorBody):
+    node: OperatorPrefix
+    owner: str | None
+
+
+class OperatorLogQuery(OperatorBody):
+    limit: int = Field(ge=1, le=500)
+
+
+class OperatorIdentity(OperatorBody):
+    fingerprint: Fingerprint
+    scopes: list[sign.Scope]
+    until: datetime
+
+
+class OperatorJob(OperatorBody):
+    job: str
+    signer: str
+    status: JobStatus
+    reason: str | None
+    result: str | None
+    created_at: str
+    expires_at: str
+    task: Job
+    cluster: str | None
+
+
+class OperatorHanded(OperatorBody):
+    id: str
+    node: str
+    kind: str
+    outcome: str
+    received_at: str
+    body: dict[str, Any]
+
+
+class OperatorJobDetail(OperatorJob):
+    handed_in: list[OperatorHanded]
+
+
+class OperatorJobs(OperatorBody):
+    jobs: list[OperatorJob]
+
+
+class OperatorCluster(OperatorBody):
+    task: str
+    cluster: str
+    status: ClusterStatus
+    reason: str | None
+    note: str | None
+    signer: str
+    lost: int
+    created_at: str
+    expires_at: str
+    goal: ClusterTask
+    operator: str | None
+    members: int
+    plan_version: int
+    jobs: int
+    accepted: int
+    why: str | None
+    free: int | None
+
+
+class OperatorClusterDetail(OperatorCluster):
+    members_list: list[str]
+    plan: ClusterPlan | None
+    job_list: list[OperatorJob]
+    result: ClusterResult | None
+
+
+class OperatorClusters(OperatorBody):
+    clusters: list[OperatorCluster]
+
+
+class OperatorInbox(OperatorJobs, OperatorClusters):
+    pass
+
+
+class ModerationRow(OperatorBody):
+    id: str
+    node: str
+    action: Literal["suspend", "lift"]
+    lifts: str | None
+    signer: str
+    issued_at: str
+    expires_at: str
+    lifted: bool
+
+
+class ComplaintRow(OperatorBody):
+    id: str
+    from_node: str
+    about_node: str
+    from_name: str | None
+    about_name: str | None
+    message_id: int | None
+    created_at: str
+    status: str
+    count: int
+
+
+class ComplaintDecision(OperatorBody):
+    complaint: str
+    decision: str
+    record: str | None
+    note: str | None
+    decided_at: str
+
+
+class ComplaintDetail(ComplaintRow):
+    text: str
+    message_text: str | None
+    decisions: list[ComplaintDecision]
+
+
+class OperatorComplaints(OperatorBody):
+    complaints: list[ComplaintRow]
+
+
+class OperatorSuspensions(OperatorBody):
+    suspensions: list[ModerationRow]
+
+
+class OperatorReport(OperatorBody):
+    id: str
+    node: str
+    kind: ReportKind
+    created_at: str
+
+
+class OperatorReportDetail(OperatorReport):
+    report: SignedReport
+
+
+class OperatorReports(OperatorBody):
+    reports: list[OperatorReport]
+
+
+class OperatorNode(OperatorBody):
+    node: str
+    status: Literal["active", "left", "revoked"]
+    capabilities: list[Capability]
+    registered_at: str
+    last_seen: str
+    owner: str | None
+    takes_jobs: bool
+    lead: bool
+
+
+class OperatorNodes(OperatorBody):
+    nodes: list[OperatorNode]
+
+
+class OperatorLogEntry(OperatorBody):
+    seq: int
+    ts: str
+    action: str
+    node: str | None
+    details: dict[str, Any]
+
+
+class OperatorLog(OperatorBody):
+    entries: list[OperatorLogEntry]

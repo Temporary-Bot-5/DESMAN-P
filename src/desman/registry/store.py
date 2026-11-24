@@ -494,6 +494,16 @@ def connection(path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+@contextmanager
+def write_transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Join an operator request's write transaction or start a standalone mutation."""
+    if conn.in_transaction:
+        yield conn
+    else:
+        with db.transaction(conn):
+            yield conn
+
+
 # ── Journal ──────────────────────────────────────────────────────────────────
 
 

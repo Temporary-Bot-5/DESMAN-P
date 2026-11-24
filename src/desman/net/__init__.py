@@ -24,3 +24,12 @@ def registry(config: Config) -> str | None:
     if not config.network.enabled:
         return None
     return config.network.registry or DEFAULT_REGISTRY
+
+
+def operator_registry(config: Config) -> str | None:
+    """Registry address for operator mode. Call only when the person installed operator.key.
+
+    The operator key permits operator calls independently of desman-global participation.
+    Ordinary node calls still obtain their address from `registry`.
+    """
+    return config.network.registry or DEFAULT_REGISTRY

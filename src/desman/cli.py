@@ -75,6 +75,7 @@ from desman.models_cli import models
 from desman.modules_cli import modules
 from desman.net import node
 from desman.nodes_cli import nodes_group
+from desman.operator_cli import operator_group
 from desman.planner import Planned, master_plan, must_run, plan, template_plan
 from desman.proposals_cli import proposals_group
 from desman.protected_cli import protected_group
@@ -304,6 +305,7 @@ cli.add_command(nodes_group, name="nodes")
 cli.add_command(proposals_group, name="proposals")
 register_commands(global_group)
 cli.add_command(global_group, name="global")
+cli.add_command(operator_group)
 
 
 @cli.command("init-db")
