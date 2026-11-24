@@ -29,7 +29,7 @@ from desman.core.profile import Profile
 from desman.gui.front import WebFront
 from desman.i18n import t
 from desman.llm.openai_compat import key_id
-from desman.net.operator import operator_key_path
+from desman.net.operator import has_key as has_operator_key
 from desman.settings_actions import (
     Behaviour,
     General,
@@ -157,7 +157,7 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             }
             for n, bounds in TUNING_BOUNDS.items()
         ],
-        "operator_key": operator_key_path().exists(),
+        "operator_key": has_operator_key(),
         "network": {
             **network.as_json(),
             "lead_label": t("Lead clusters"),

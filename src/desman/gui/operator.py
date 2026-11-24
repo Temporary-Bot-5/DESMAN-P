@@ -18,7 +18,7 @@ def snapshot(query: dict[str, list[str]]) -> dict[str, Any]:
     view = query.get("view", ["status"])[0]
     ref = query.get("id", [""])[0]
     status = query.get("status", [""])[0] or None
-    data: dict[str, Any] = {"has_key": operator.operator_key_path().exists()}
+    data: dict[str, Any] = {"has_key": operator.has_key()}
     if not data["has_key"]:
         return data
 

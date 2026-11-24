@@ -2370,20 +2370,9 @@ def _operator_has_text(reply: BaseModel) -> bool:
                 for row in reply.nodes
             )
         case protocol.OperatorLog():
-            for row in reply.entries:
-                if _has_text(*(row.details.get(key) for key in ("name", "owner", "note", "text"))):
-                    return True
-                if row.action == "refused" and _has_text(row.details.get("path")):
-                    return True
-                if row.action == "update_failed" and (
-                    _has_text(row.details.get("reason")) or row.details.get("rollback_errors")
-                ):
-                    return True
-                caps = row.details.get("capabilities")
-                if isinstance(caps, list) and any(
-                    isinstance(cap, dict) and _has_text(cap.get("model")) for cap in caps
-                ):
-                    return True
+            # Journal details hold free text from many sources (names, notes, the root
+            # owner's reasons, refused paths): any entry counts as other people's words.
+            return bool(reply.entries)
     return False
 
 

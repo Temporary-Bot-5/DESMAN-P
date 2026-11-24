@@ -76,7 +76,7 @@ from desman.i18n import CATALOGS
 from desman.llm import base
 from desman.llm.base import LLM, Request
 from desman.llm.structured import StructuredOutputError, complete_json
-from desman.net.operator import operator_key_path
+from desman.net.operator import has_key as has_operator_key
 from desman.prompting import today
 
 MAX_LOOKUP: Final = 3
@@ -735,9 +735,7 @@ class Interlocutor:
     ) -> Request:
         body = json.dumps(payload, ensure_ascii=False, indent=2)
         content = (
-            system.replace(
-                "{commands}", for_model(about=False, operator_access=operator_key_path().is_file())
-            )
+            system.replace("{commands}", for_model(about=False, operator_access=has_operator_key()))
             .replace("{manual}", LOOKED_UP if looked_up else LOOKUP)
             .replace("{again}", AGAIN if again else LAST)
             .replace("{topics}", self._contents())

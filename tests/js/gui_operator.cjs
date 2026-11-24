@@ -90,10 +90,16 @@ assert.deepEqual(actions.splice(0), [
   {section: "operator", operation: "job settle", args: {id: "job", decision: "accept"}},
   {section: "operator", operation: "job settle", args: {id: "job", decision: "again"}},
   {section: "operator", operation: "job settle", args: {id: "job", decision: "drop"}},
-  {section: "operator", operation: "cluster settle", args: {id: "cluster", decision: "accept"}},
+  {section: "operator", operation: "cluster settle", args: {id: "cluster", decision: "accept", note: "Recheck"}},
   {section: "operator", operation: "cluster settle", args: {id: "cluster", decision: "again", note: "Recheck"}},
-  {section: "operator", operation: "cluster settle", args: {id: "cluster", decision: "drop"}},
+  {section: "operator", operation: "cluster settle", args: {id: "cluster", decision: "drop", note: "Recheck"}},
 ]);
+
+// Results read as the CLI prints them.
+assert.equal(run(`operatorText(${JSON.stringify(JSON.stringify({text: "Line 1\nLine 2"}))})`), "Line 1\nLine 2");
+assert.equal(run(`operatorText(${JSON.stringify(JSON.stringify({a: 1, b: "x"}))})`), '{\n  "a": 1,\n  "b": "x"\n}');
+assert.equal(run("operatorText('plain words')"), "plain words");
+assert.equal(run("operatorText(null)"), null);
 
 for (const [kind, label] of [["job", "op_description"], ["cluster", "op_goal"]]) {
   root.replaceChildren();

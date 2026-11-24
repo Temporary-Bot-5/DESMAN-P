@@ -238,6 +238,13 @@ def strings() -> dict[str, str]:
         "op_lift": t("Lift"),
         "op_suspensions": t("Suspensions"),
         "op_reason": t("Reason"),
+        # Why an item waits for the operator, as the CLI says it (operator_cli).
+        "op_why_disputed": t("the recheck rejected the result"),
+        "op_why_failed": t("nodes could not do it"),
+        "op_why_leases_lost": t("nodes took it and fell silent"),
+        "op_why_result": t("its result came"),
+        "op_why_job_given_up": t("a job gave up"),
+        "op_why_operators_lost": t("its operators were lost"),
         "op_nodes": t("Nodes"),
         "op_name": t("Name"),
         "op_owner": t("Owner"),

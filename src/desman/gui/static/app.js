@@ -1651,6 +1651,11 @@ async function refreshOperatorStatus() {
     if (operatorStatusRequest === request) operatorStatusRequest = null;
   }
   if (!operatorOpen || epoch !== operatorEpoch) return;
+  // A failed poll (timeout, 429) says nothing about the assignment: keep what was known, so
+  // the panel is not redrawn and nothing typed in it is lost.
+  if (status.has_key && status.error && !status.scopes && operatorStatus.scopes) {
+    status = {...operatorStatus, error: status.error};
+  }
   const previous = (operatorStatus.scopes || []).join();
   const statusChanged = JSON.stringify(operatorStatus) !== JSON.stringify(status);
   operatorStatus = status;
@@ -1786,11 +1791,13 @@ function operatorInbox(root, data) {
       const id = cluster ? row.task : row.job;
       text("h3", cluster ? row.goal.goal : row.task.description, card);
       text("small", id, card);
+      const why = row.why ?? row.reason;
+      if (why) text("p", `${words.op_reason}: ${words[`op_why_${why}`] || why}`, card);
       text("p", words.op_untrusted, card);
       const results = cluster ? data.cluster_results : data.job_results;
       const preview = results?.[id];
-      if (results) operatorQuote(card, words.op_result, preview ?? "—");
-      if (!results || preview?.length >= 2000) {
+      if (results) operatorQuote(card, words.op_result, preview == null ? "—" : operatorText(preview));
+      if (!results || preview == null || preview.length >= 2000) {
         operatorDetail(card, kind, id, cluster ? operatorClusterResult : operatorJobResult);
       }
       if (!operatorCan("tasks")) continue;
@@ -1798,19 +1805,31 @@ function operatorInbox(root, data) {
       if (note) note.maxLength = 2000;
       for (const decision of ["accept", "again", "drop"]) {
         operatorChange(card, words[`op_${decision}`], `${kind} settle`, () => ({
-          id, decision, ...(note && decision === "again" && note.value ? {note: note.value} : {}),
+          id, decision, ...(note && note.value ? {note: note.value} : {}),
         }));
       }
     }
   }
 }
 
+// A result as the CLI prints it: the text of {"text": ...}, other JSON indented, the rest as is.
+function operatorText(raw) {
+  if (typeof raw !== "string") return raw == null ? null : JSON.stringify(raw, null, 2);
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return raw; }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const keys = Object.keys(parsed);
+    if (keys.length === 1 && typeof parsed.text === "string") return parsed.text;
+  }
+  return typeof parsed === "string" ? parsed : JSON.stringify(parsed, null, 2);
+}
+
 function operatorJobResult(detail) {
-  return detail.handed_in.find(item => item.id === detail.result)?.body.output ?? null;
+  return operatorText(detail.handed_in.find(item => item.id === detail.result)?.body.output ?? null);
 }
 
 function operatorClusterResult(detail) {
-  return detail.output ?? detail.result?.summary ?? null;
+  return operatorText(detail.output ?? detail.result?.summary ?? null);
 }
 
 function operatorDays(parent, value, max) {
@@ -1947,7 +1966,8 @@ function operatorSuspensions(root, data) {
       [words.op_until, operatorDate(row.expires_at)],
       [words.op_lifted, row.lifted ? words.op_yes : words.op_no],
     ]);
-    if (row.action === "suspend" && !row.lifted && new Date(row.expires_at) > new Date()) {
+    const inForce = row.in_force ?? (!row.lifted && new Date(row.expires_at) > new Date());
+    if (row.action === "suspend" && inForce) {
       const reason = settingInput(card, words.op_reason, "", "textarea");
       reason.maxLength = 500;
       operatorChange(card, words.op_lift, "lift", () => ({node: row.node, reason: reason.value}));

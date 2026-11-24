@@ -27,6 +27,11 @@ def operator_key_path() -> Path:
     return db.default_db_path().parent / "operator.key"
 
 
+def has_key() -> bool:
+    """Whether operator mode is on: the person installed an operator key (a regular file)."""
+    return operator_key_path().is_file()
+
+
 def load_key() -> sign.NodeKey | None:
     path = operator_key_path()
     try:
