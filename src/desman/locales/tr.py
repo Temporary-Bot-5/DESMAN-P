@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "{node} düğümünün yürürlükte olan bir askıya alma kaydı yok.",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "{node} düğümünün yürürlükte olan birden çok askıya alma kaydı var. Bir kaldırma işlemi yalnızca bir kaydı hedefleyebilir.",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "Bu kaldırma {lift_end} tarihinde sona erer, askıya alma ise {suspension_end} tarihine kadar sürer. Askıya alma yeniden yürürlüğe girer.",
+    "Shown to you only.": "Yalnızca size gösterildi.",
+    "The registry rate limited the request. Try again later.": "Kayıt sistemi istek sıklığını sınırladı. Daha sonra tekrar deneyin.",
+    "The registry refused the record because its term is invalid.": "Kayıt sistemi, geçerlilik süresi uygun olmadığı için kaydı reddetti.",
+    "The registry refused the record because the signer is not allowed to issue it.": "Kayıt sistemi, imzalayanın düzenleme yetkisi olmadığı için kaydı reddetti.",
+    "The registry refused the record because it was signed by a different key.": "Kayıt sistemi, başka bir anahtarla imzalandığı için kaydı reddetti.",
+    "The registry refused the record because it does not recognize the signer.": "Kayıt sistemi, imzalayanı tanımadığı için kaydı reddetti.",
+    "The registry refused the request ({code}).": "Kayıt sistemi isteği reddetti ({code}).",
     "Accepted": "Kabul edildi",
     "Complaint": "Şikâyet",
     "Decision": "Karar",

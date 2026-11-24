@@ -168,15 +168,14 @@ def moderations(
         for row in conn.execute("SELECT * FROM moderations WHERE action='lift'")
         if _valid(row, believed, now) is not None
     }
-    return [
-        ModerationRow.model_validate(
-            {**dict(row), "lifted": row["action"] == "suspend" and row["id"] in lifted}
-        )
-        for row in conn.execute(
-            "SELECT id,node,action,lifts,signer,issued_at,expires_at "
-            "FROM moderations ORDER BY issued_at DESC,rowid DESC"
-        )
-    ]
+    result = []
+    for row in conn.execute("SELECT * FROM moderations ORDER BY issued_at DESC,rowid DESC"):
+        fields = dict(row)
+        del fields["signed_json"]
+        fields["lifted"] = row["action"] == "suspend" and row["id"] in lifted
+        fields["in_force"] = not fields["lifted"] and _valid(row, believed, now) is not None
+        result.append(ModerationRow.model_validate(fields))
+    return result
 
 
 def _keep(
@@ -293,6 +292,7 @@ def _add(
         issued_at=db.to_iso(record.issued_at),
         expires_at=db.to_iso(record.expires_at),
         lifted=False,
+        in_force=True,
     )
 
 

@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "ノード {node} に有効な停止措置はありません。",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "ノード {node} には有効な停止措置が複数あります。一度の解除で指定できるのは1件だけです。",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "この解除は {lift_end} に失効し、停止措置の終了日 {suspension_end} より早く終了します。停止措置が再び有効になります。",
+    "Shown to you only.": "あなたにのみ表示しました。",
+    "The registry rate limited the request. Try again later.": "レジストリのリクエスト頻度制限に達しました。しばらくしてから再試行してください。",
+    "The registry refused the record because its term is invalid.": "有効期間が無効なため、レジストリがレコードを拒否しました。",
+    "The registry refused the record because the signer is not allowed to issue it.": "署名者に発行権限がないため、レジストリがレコードを拒否しました。",
+    "The registry refused the record because it was signed by a different key.": "別の鍵で署名されていたため、レジストリがレコードを拒否しました。",
+    "The registry refused the record because it does not recognize the signer.": "署名者を認識できないため、レジストリがレコードを拒否しました。",
+    "The registry refused the request ({code}).": "レジストリがリクエストを拒否しました（{code}）。",
     "Accepted": "承認済み",
     "Complaint": "苦情",
     "Decision": "判断",

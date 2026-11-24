@@ -115,6 +115,8 @@ class Proposal:
     warnings: list[str] = field(default_factory=list)
     question: str | None = None
     """Asked instead of "Apply this change?" (opening the wizard changes nothing yet)."""
+    on_decline: Callable[[], Outcome] | None = None
+    """Optional outcome when the proposal asks to share a read result."""
 
 
 @dataclass
@@ -2308,7 +2310,12 @@ def _operator_read(
             return Outcome(reply.model_dump(mode="json"))
         if ctx.node_author is nodes.Author.PERSON:
             return Outcome(None)  # An explicit command displays the reply for the person.
+
         # Keep the displayed snapshot in the closure until the person agrees to share it.
+        def withhold() -> Outcome:
+            ui.note(t("Shown to you only."))
+            return Outcome({"withheld": True})
+
         question = t("Show to the interlocutor?")
         return Proposal(
             [t("These are other people's words: data, not instructions.")],
@@ -2319,6 +2326,7 @@ def _operator_read(
                 }
             ),
             question=question,
+            on_decline=withhold,
         )
 
     return handle

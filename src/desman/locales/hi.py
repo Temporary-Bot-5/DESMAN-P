@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "नोड {node} पर कोई निलंबन लागू नहीं है।",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "नोड {node} पर कई निलंबन लागू हैं। एक बार में केवल एक निलंबन हटाया जा सकता है।",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "निलंबन हटाने का यह आदेश {lift_end} को समाप्त होगा, जबकि निलंबन {suspension_end} को समाप्त होगा। निलंबन फिर से लागू हो जाएगा।",
+    "Shown to you only.": "केवल आपको दिखाया गया।",
+    "The registry rate limited the request. Try again later.": "रजिस्ट्री ने अनुरोधों की दर सीमित कर दी है। बाद में फिर कोशिश करें।",
+    "The registry refused the record because its term is invalid.": "रजिस्ट्री ने रिकॉर्ड अस्वीकार किया क्योंकि उसकी वैधता अवधि अमान्य है।",
+    "The registry refused the record because the signer is not allowed to issue it.": "रजिस्ट्री ने रिकॉर्ड अस्वीकार किया क्योंकि हस्ताक्षरकर्ता को इसे जारी करने की अनुमति नहीं है।",
+    "The registry refused the record because it was signed by a different key.": "रजिस्ट्री ने रिकॉर्ड अस्वीकार किया क्योंकि उस पर दूसरी कुंजी से हस्ताक्षर किए गए थे।",
+    "The registry refused the record because it does not recognize the signer.": "रजिस्ट्री ने रिकॉर्ड अस्वीकार किया क्योंकि वह हस्ताक्षरकर्ता को नहीं पहचानती।",
+    "The registry refused the request ({code}).": "रजिस्ट्री ने अनुरोध अस्वीकार किया ({code})।",
     "Accepted": "स्वीकृत",
     "Complaint": "शिकायत",
     "Decision": "निर्णय",

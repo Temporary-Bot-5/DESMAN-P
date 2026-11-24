@@ -101,8 +101,9 @@ def remove_key() -> None:
 
 
 class OperatorError(Exception):
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, status: int | None = None) -> None:
         self.reason = reason
+        self.status = status
         super().__init__(reason)
 
 
@@ -141,7 +142,7 @@ class OperatorClient:
                     include_nulls=True,
                 )
             except node.Problem as e:
-                raise OperatorError(e.error) from e
+                raise OperatorError(e.error, e.status) from e
             except node.Unreachable as e:
                 raise OperatorError(str(e)) from e
 

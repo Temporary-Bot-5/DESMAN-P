@@ -1115,6 +1115,7 @@ class ModerationRow(OperatorBody):
     issued_at: str
     expires_at: str
     lifted: bool
+    in_force: bool
 
 
 class ComplaintRow(OperatorBody):

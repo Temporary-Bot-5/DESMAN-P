@@ -15,6 +15,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "Для вузла {node} немає чинного блокування.",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "Для вузла {node} є кілька чинних блокувань. За один раз можна зняти лише одне.",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "Зняття блокування втратить чинність {lift_end}, раніше за закінчення блокування {suspension_end}. Блокування набуде чинності знову.",
+    "Shown to you only.": "Показано лише вам.",
+    "The registry rate limited the request. Try again later.": "Реєстр обмежив частоту запитів. Спробуйте пізніше.",
+    "The registry refused the record because its term is invalid.": "Реєстр відхилив запис через неприпустимий строк дії.",
+    "The registry refused the record because the signer is not allowed to issue it.": "Реєстр відхилив запис, бо підписант не має права його видавати.",
+    "The registry refused the record because it was signed by a different key.": "Реєстр відхилив запис, бо його підписано іншим ключем.",
+    "The registry refused the record because it does not recognize the signer.": "Реєстр відхилив запис, бо не розпізнає підписанта.",
+    "The registry refused the request ({code}).": "Реєстр відхилив запит ({code}).",
     "Accepted": "Прийнято",
     "Complaint": "Скарга",
     "Decision": "Рішення",

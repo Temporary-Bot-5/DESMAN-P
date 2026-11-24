@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "Le nœud {node} ne fait l’objet d’aucune suspension en vigueur.",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "Le nœud {node} fait l’objet de plusieurs suspensions en vigueur. Une levée ne peut en viser qu’une.",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "Cette levée cesse de s’appliquer le {lift_end}, avant la fin de la suspension le {suspension_end}. La suspension reprendrait effet.",
+    "Shown to you only.": "Affiché uniquement pour vous.",
+    "The registry rate limited the request. Try again later.": "Le registre a limité la fréquence des requêtes. Réessayez plus tard.",
+    "The registry refused the record because its term is invalid.": "Le registre a refusé l’enregistrement, car sa durée de validité est incorrecte.",
+    "The registry refused the record because the signer is not allowed to issue it.": "Le registre a refusé l’enregistrement, car le signataire ne peut pas l’émettre.",
+    "The registry refused the record because it was signed by a different key.": "Le registre a refusé l’enregistrement, car il a été signé avec une autre clé.",
+    "The registry refused the record because it does not recognize the signer.": "Le registre a refusé l’enregistrement, car il ne reconnaît pas le signataire.",
+    "The registry refused the request ({code}).": "Le registre a refusé la requête ({code}).",
     "Accepted": "Acceptés",
     "Complaint": "Plainte",
     "Decision": "Décision",

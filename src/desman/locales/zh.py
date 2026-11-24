@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "节点 {node} 没有生效的停用措施。",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "节点 {node} 有多项生效的停用措施。每次只能解除其中一项。",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "本次解除于 {lift_end} 失效，早于原停用措施结束的时间 {suspension_end}。停用措施将恢复生效。",
+    "Shown to you only.": "仅向你显示。",
+    "The registry rate limited the request. Try again later.": "注册中心限制了请求频率。请稍后再试。",
+    "The registry refused the record because its term is invalid.": "注册中心拒绝了该记录，因为有效期无效。",
+    "The registry refused the record because the signer is not allowed to issue it.": "注册中心拒绝了该记录，因为签名者无权签发该记录。",
+    "The registry refused the record because it was signed by a different key.": "注册中心拒绝了该记录，因为它是用另一把密钥签名的。",
+    "The registry refused the record because it does not recognize the signer.": "注册中心拒绝了该记录，因为它无法识别签名者。",
+    "The registry refused the request ({code}).": "注册中心拒绝了请求（{code}）。",
     "Accepted": "已接受",
     "Complaint": "投诉",
     "Decision": "决定",

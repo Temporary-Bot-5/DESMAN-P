@@ -259,6 +259,10 @@ def call(
     except ValidationError as e:
         raise click.ClickException(t("Invalid operator request.")) from e
     except operator.OperatorError as e:
+        if e.status == 429:
+            raise click.ClickException(
+                t("The registry rate limited the request. Try again later.")
+            ) from e
         match e.reason:
             case "not_operator" | "revoked":
                 # The command result sent back to the interlocutor contains only the message.
@@ -281,12 +285,30 @@ def call(
                 message = t("Invalid operator request.")
             case "expired":
                 message = t("The operator assignment or record has expired.")
+            case "term":
+                message = t("The registry refused the record because its term is invalid.")
+            case "not_allowed":
+                message = t(
+                    "The registry refused the record because the signer is not allowed to issue it."
+                )
+            case "wrong_signer":
+                message = t(
+                    "The registry refused the record because it was signed by a different key."
+                )
+            case "unknown_signer":
+                message = t(
+                    "The registry refused the record because it does not recognize the signer."
+                )
+            case _ if e.status is not None:
+                message = t("The registry refused the request ({code}).", code=e.status)
             case "bad_reply" | "large_reply":
                 message = t("The registry sent an invalid reply.")
             case reason if "Timeout" in reason:
                 message = t("The registry request timed out.")
-            case _:
+            case "ConnectError" | "ReadError" | "WriteError" | "CloseError" | "ProxyError":
                 message = t("The registry could not be reached.")
+            case _:
+                message = t("The registry sent an invalid reply.")
         raise click.ClickException(message) from e
 
 
@@ -492,6 +514,7 @@ def moderate(
     node = _resolve(node, (row.node for row in nodes.nodes))
     now = client.clock()
     lifts = None
+    suspension_end = None
     lifetime = timedelta(days=days)
     refs = tuple(complaints)
     ids = []
@@ -500,21 +523,24 @@ def moderate(
         ids = [_resolve(ref, (row.id for row in rows.complaints)) for ref in refs]
     if action == "lift":
         suspensions = call(client, lambda c: c.suspensions(), MODERATION)
-        active = next(
-            (
-                row
-                for row in suspensions.suspensions
-                if row.node == node
-                and row.action == "suspend"
-                and not row.lifted
-                and datetime.fromisoformat(row.expires_at) > now
-            ),
-            None,
-        )
-        if active is None:
-            raise click.ClickException(t("No suspension is in effect for {id}.", id=node))
-        lifts = active.id
-        lifetime = datetime.fromisoformat(active.expires_at) - now.replace(microsecond=0)
+        active = [
+            row
+            for row in suspensions.suspensions
+            if row.node == node and row.action == "suspend" and row.in_force
+        ]
+        if not active:
+            raise click.ClickException(t("Node {node} has no suspension in force.", node=node))
+        if len(active) > 1:
+            raise click.ClickException(
+                t(
+                    "Node {node} has multiple suspensions in force. A lift can target only one.",
+                    node=node,
+                )
+            )
+        [suspension] = active
+        lifts = suspension.id
+        suspension_end = datetime.fromisoformat(suspension.expires_at)
+        lifetime = suspension_end - now.replace(microsecond=0)
     body = p.Moderation(node=node, action=action, reason=reason, complaints=ids, lifts=lifts)
     record = operator_records.moderation(client.key, body, now=now, lifetime=lifetime, until=until)
     lines = [
@@ -525,6 +551,15 @@ def moderate(
     ]
     if lifts is not None:
         lines.append(_field(t("ID"), lifts))
+    if suspension_end is not None and record.record.expires_at < suspension_end:
+        lines.append(
+            t(
+                "This lift stops counting on {lift_end}, before the suspension ends on "
+                "{suspension_end}; the suspension would come back.",
+                lift_end=record.record.expires_at.astimezone().isoformat(timespec="seconds"),
+                suspension_end=suspension_end.astimezone().isoformat(timespec="seconds"),
+            )
+        )
     lines.extend(_field(t("Complaint"), id) for id in ids)
     return _change(
         client,

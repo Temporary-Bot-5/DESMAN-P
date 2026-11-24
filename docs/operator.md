@@ -37,7 +37,7 @@ NODE is a node fingerprint or its unique prefix.
 | `desman operator complaint show ID [--json]` | Show a complaint, its quoted message and decisions. |
 | `desman operator complaint dismiss ID` | Dismiss a complaint. |
 | `desman operator suspend NODE --reason TEXT [--days N] [--complaint ID]...` | Sign a suspension, optionally citing complaints. |
-| `desman operator lift NODE --reason TEXT` | Sign a lift of the active suspension. |
+| `desman operator lift NODE --reason TEXT` | Sign a lift when exactly one suspension is in force. The chat confirmation warns if the lift ends sooner than the suspension. |
 | `desman operator suspensions [--json]` | List moderation records. |
 | `desman operator reports [--kind KIND] [--json]` | List shared reports. Kind can be `bug` or `memory`. |
 | `desman operator report show ID [--json]` | Read a shared report. |

@@ -298,12 +298,16 @@ def reports(ctx: Actions, asked: p.OperatorReportQuery) -> tuple[p.OperatorRepor
 
 @route(p.OPERATOR_REPORT, p.OperatorRef)
 def report(ctx: Actions, asked: p.OperatorRef) -> tuple[p.OperatorReportDetail, str]:
-    row = ctx.conn.execute("SELECT * FROM reports WHERE id = ?", (asked.id,)).fetchone()
-    if row is None:
+    rows = ctx.conn.execute(
+        "SELECT * FROM reports WHERE substr(id,1,?)=? LIMIT 2", (len(asked.id), asked.id)
+    ).fetchall()
+    if not rows:
         raise Refusal("not_found", 404)
-    data = dict(row)
+    if len(rows) > 1:
+        raise Refusal("ambiguous", 409)
+    data = dict(rows[0])
     data["report"] = p.SignedReport.model_validate_json(data.pop("report_json"))
-    return p.OperatorReportDetail.model_validate(data), asked.id
+    return p.OperatorReportDetail.model_validate(data), rows[0]["id"]
 
 
 @route(p.OPERATOR_NODES, p.OperatorEmpty)

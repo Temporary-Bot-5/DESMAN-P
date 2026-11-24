@@ -10,6 +10,16 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Node {node} has no suspension in force.": "노드 {node}에 유효한 정지 조치가 없습니다.",
+    "Node {node} has multiple suspensions in force. A lift can target only one.": "노드 {node}에 유효한 정지 조치가 여러 건 있습니다. 한 번에 한 건만 해제할 수 있습니다.",
+    "This lift stops counting on {lift_end}, before the suspension ends on {suspension_end}; the suspension would come back.": "이 해제는 {lift_end}에 효력을 잃으며 정지 조치는 그보다 늦은 {suspension_end}에 끝납니다. 정지 조치가 다시 적용됩니다.",
+    "Shown to you only.": "사용자에게만 표시했습니다.",
+    "The registry rate limited the request. Try again later.": "레지스트리의 요청 빈도 제한에 도달했습니다. 나중에 다시 시도하세요.",
+    "The registry refused the record because its term is invalid.": "유효 기간이 올바르지 않아 레지스트리가 레코드를 거부했습니다.",
+    "The registry refused the record because the signer is not allowed to issue it.": "서명자에게 발급 권한이 없어 레지스트리가 레코드를 거부했습니다.",
+    "The registry refused the record because it was signed by a different key.": "다른 키로 서명되어 레지스트리가 레코드를 거부했습니다.",
+    "The registry refused the record because it does not recognize the signer.": "서명자를 확인할 수 없어 레지스트리가 레코드를 거부했습니다.",
+    "The registry refused the request ({code}).": "레지스트리가 요청을 거부했습니다({code}).",
     "Accepted": "수락됨",
     "Complaint": "신고",
     "Decision": "결정",
