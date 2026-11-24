@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from rich.text import Text
 
 from desman import applying, bench, net, providers, searxng, ui
+from desman.actions import open_user_db
 from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog, operator
@@ -209,10 +210,7 @@ def journal(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
     if conn is not None:
         yield conn
         return
-    try:
-        opened = db.open_db()
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
+    opened = open_user_db()
     try:
         yield opened
     finally:

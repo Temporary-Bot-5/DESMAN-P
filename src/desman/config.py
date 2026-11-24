@@ -520,7 +520,7 @@ class ConfigManager:
                 f.flush()
                 os.fsync(f.fileno())
             if target.exists():
-                os.chmod(target, 0o600)  # the old inode, shared by any other hard link
+                retry_sharing(lambda: os.chmod(target, 0o600))  # also affects any old hard link
             replace_file(tmp, target)
         except BaseException:
             tmp.unlink(missing_ok=True)

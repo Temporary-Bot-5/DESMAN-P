@@ -18,6 +18,7 @@ import click
 from rich.text import Text
 
 from desman import ui
+from desman.actions import open_user_db
 from desman.config_cli import json_option
 from desman.core import db, protected
 from desman.core.protected import Change, Kind
@@ -37,10 +38,7 @@ def db_option(command: F) -> F:
 
 
 def connect(db_path: Path | None) -> sqlite3.Connection:
-    try:
-        return db.open_db(db_path or db.default_db_path())
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
+    return open_user_db(db_path or db.default_db_path())
 
 
 def current(conn: sqlite3.Connection) -> list[Change]:

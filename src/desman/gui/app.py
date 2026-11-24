@@ -11,6 +11,7 @@ from collections.abc import Callable
 import click
 
 from desman import runs, ui
+from desman.actions import open_user_db
 from desman.config_cli import load_config, run_wizard
 from desman.core import db
 from desman.core.sessions import Sessions
@@ -78,10 +79,7 @@ def run(
                     run_wizard(manager)
                 with ui.greeting():
                     print_project_info(manager)
-                try:
-                    conn = db.open_db()
-                except (db.SchemaVersionError, db.SchemaMismatchError) as exc:
-                    raise click.ClickException(str(exc)) from exc
+                conn = open_user_db()
                 try:
                     sessions = Sessions(conn)
                     front.worker_count = runs.tuned(manager.load().tuning, "workers")

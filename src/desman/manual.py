@@ -308,7 +308,8 @@ TOPICS: Final = (
         "Tasks, their history, the chat's sessions, the profile, model calls and limits are "
         "in a SQLite database, ~/.local/share/desman/desman.db; each task's files are in a "
         "folder of its own in workspaces/ next to it. `/init-db` creates the database "
-        "or brings it up to date. Everything stays on the person's machine; only the "
+        "or brings it up to date. If the database is newer than DESMAN, update DESMAN or "
+        "set DESMAN_DATA_DIR to another directory. Everything stays on the person's machine; only the "
         "requests to model providers, to Hugging Face and, when allowed, to the web leave it.",
     ),
     Topic(
@@ -350,6 +351,7 @@ TOPICS: Final = (
         "Use `/operator inbox` for work waiting for a decision and its available results, `/operator jobs` and "
         "`/operator clusters` to list work, and `/operator job show ID` or "
         "`/operator cluster show ID` for results. Decisions are accept, again or drop. "
+        "Jobs with no reviewer return for replanning. "
         "Moderation lists: `/operator complaints`, `/operator suspensions`, `/operator reports`. "
         "`/operator nodes` lists network nodes and owners. `/operator log` shows registry history. "
         "A lift targets one suspension. If multiple are in force, the node lift is refused. "

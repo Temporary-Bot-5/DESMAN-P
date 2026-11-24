@@ -33,7 +33,7 @@ from desman import (
     task_files,
     ui,
 )
-from desman.actions import find_task, open_existing, print_report
+from desman.actions import find_task, open_existing, open_user_db, print_report
 from desman.chat import Chat
 from desman.config import Config, ConfigError, ConfigManager, MasterChoices, Tuning, open_config
 from desman.config_cli import (
@@ -227,10 +227,7 @@ def _terminal_chat(
 ) -> Chat:
     with ui.chat_output():
         print_project_info(manager)
-    try:
-        conn = db.open_db()
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
+    conn = open_user_db()
     try:
         chat = Chat(Sessions(conn), resume=resume, temporary=temporary, session_id=session_id)
         chat.run()
@@ -488,10 +485,7 @@ def run(
     sandbox = Sandbox()
     access = _executor_access(as_json, sandbox)
     path = db_path or db.default_db_path()
-    try:
-        store = Store(db.open_db(path))
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
+    store = Store(open_user_db(path))
     try:
         runs.guard(store)  # before any model is asked
         models = _attach(source, store, cache=not no_cache, as_json=as_json, master=master)
@@ -1030,10 +1024,7 @@ def _load_spec(spec_path: Path, db_path: Path | None = None) -> TaskSpec:
     # Knowledge paths as the tree spells them, like a plan's (`planner.Plan.known`).
     tree = knowledge.task_tree()
     if any(sub.knowledge for sub in spec.subtasks):  # the person's nodes too, when they may
-        try:
-            conn = db.open_db(db_path or db.default_db_path())
-        except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-            raise click.ClickException(str(e)) from e
+        conn = open_user_db(db_path or db.default_db_path())
         try:
             tree = runs.task_tree(conn, _config_or_default().personalize)
         finally:
@@ -1097,10 +1088,7 @@ def analyze(
     sandbox = Sandbox()
     access = _executor_access(as_json, sandbox)
     path = db_path or db.default_db_path()
-    try:
-        store = Store(db.open_db(path))
-    except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-        raise click.ClickException(str(e)) from e
+    store = Store(open_user_db(path))
     try:
         runs.guard(store)  # before any model is asked
         analysis = proposals_cli.prepare(store, start, _config_or_default())

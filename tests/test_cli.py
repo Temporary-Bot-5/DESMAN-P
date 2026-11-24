@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import stat
 import subprocess
+from contextlib import closing
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from click.testing import CliRunner
@@ -23,7 +26,52 @@ from desman.config import (
     open_config,
     project_root,
 )
+from desman.core import db
 from helpers import flat_keys, make_config
+
+
+@pytest.mark.parametrize(
+    ("args", "language", "custom_path"),
+    [
+        (["usage"], "en", False),
+        (["status", "task"], "en", False),
+        (["list"], "en", False),
+        (["run", "Say hello"], "en", False),
+        (["worker"], "en", False),
+        ([], "en", False),
+        (["gui", "--no-browser"], "en", False),
+        (["init-db"], "en", False),
+        (["usage"], "ru", True),
+    ],
+)
+def test_newer_database_reports_one_actionable_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
+    language: str,
+    custom_path: bool,
+) -> None:
+    monkeypatch.setattr("desman.gui.app.http_server", Mock())
+    open_config().save(
+        make_config(
+            configured=True,
+            interface="terminal",
+            language=language,
+            api_keys={"GROQ_API_KEY": "gsk_test"},
+        )
+    )
+    path = tmp_path / "custom.db" if custom_path else db.default_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 5}")
+
+    result = CliRunner().invoke(cli, [*args, *(["--db", str(path)] if custom_path else [])])
+    assert result.exit_code == 1, (result.output, result.exception)
+    assert isinstance(result.exception, SystemExit)
+    assert result.output.count(str(path)) == 1
+    assert "Traceback" not in result.output
+    assert "DESMAN_DATA_DIR" in result.output
+    assert ("Update DESMAN" if language == "en" else "Обновите DESMAN") in result.output
 
 
 def test_default_config_path_honours_env(isolated_config: Path) -> None:

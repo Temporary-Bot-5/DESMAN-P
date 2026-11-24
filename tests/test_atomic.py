@@ -160,3 +160,33 @@ def test_windows_retries_only_sharing_codes(
         assert caught.value is error
         assert attempts == 1
         assert clock.slept == 0
+
+
+def test_config_edit_retries_windows_sharing_violation_before_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
+    from desman.config import Config, ConfigManager
+
+    path = tmp_path / "config.json"
+    manager = ConfigManager(path)
+    manager.save(Config(language="de"))
+    real_chmod = os.chmod
+    attempts = 0
+
+    def chmod(target: Path, mode: int) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            error = PermissionError("configuration is open")
+            monkeypatch.setattr(error, "winerror", 32, raising=False)
+            raise error
+        real_chmod(target, mode)
+
+    monkeypatch.setattr(os, "chmod", chmod)
+    monkeypatch.setattr(atomic, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(atomic, "time", SimpleNamespace(sleep=clock.sleep))
+    with manager.edit() as config:
+        config.language = "fr"
+    assert manager.load().language == "fr"
+    assert attempts == 2
+    assert clock.slept == pytest.approx(0.05)

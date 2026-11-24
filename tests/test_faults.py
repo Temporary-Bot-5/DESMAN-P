@@ -241,7 +241,7 @@ def test_cluster_harness_catches_a_late_record(
     assert "late cluster record accepted" in report.problems, report.explain()
 
 
-@pytest.mark.parametrize("reason", ["versions", "job_given_up"])
+@pytest.mark.parametrize("reason", ["versions", "job_given_up", "operators_lost"])
 def test_cluster_harness_rejects_unexplained_inbox(tmp_path: Path, reason: str) -> None:
     from desman.registry import store
     from faults import ClusterFaults, ClusterShape, ClusterSimulation

@@ -408,10 +408,17 @@ def _cluster_lends_to(
         return False
     if found.status == "execute":
         return caller.fingerprint in json.loads(appointment["members_json"])
+    excluded = cluster_recheck_exclusions(conn, found)
+    return excluded is not None and caller.fingerprint not in excluded
+
+
+def cluster_recheck_exclusions(conn: sqlite3.Connection, found: JobRow) -> set[str] | None:
+    """Nodes that cannot independently recheck this result, or None if it is missing."""
+    assert found.cluster is not None
     done_by = conn.execute("SELECT node FROM results WHERE id = ?", (found.result,)).fetchone()
-    if done_by is None or done_by["node"] == caller.fingerprint:
-        return False
-    return caller.fingerprint not in cluster_operators(conn, found.cluster) | {found.signer}
+    if done_by is None:
+        return None
+    return cluster_operators(conn, found.cluster) | {found.signer, done_by["node"]}
 
 
 def _lend(

@@ -766,6 +766,33 @@ def test_a_job_every_member_took_once_goes_back_to_the_operator(
     assert send(lead, plan(lead, mine(lead), version=2)).status_code == 200
 
 
+def test_a_job_without_an_independent_reviewer_returns_for_replanning(
+    registry: Registry,
+    db_path: Path,
+    operator: sign.NodeKey,
+    appointer: sign.NodeKey,
+    clock: FakeClock,
+) -> None:
+    _, lead, a, b = formed(registry, db_path, operator, clock)
+    state = mine(lead)
+    first = plan(lead, state)
+    send(lead, first)
+    lent = job(lead, state, first.record.id, 0)
+    send(lead, lent)
+    given = say(a)
+    assert given is not None
+    hand_in(a, given, outcome="failed", output="")
+    given = say(b)
+    assert given is not None
+    assert hand_in(b, given, output="Roses...").json()["status"] == "recheck"
+
+    mine(lead)
+    with store.connection(db_path) as conn:
+        found = work.job(conn, lent.record.id)
+    assert found is not None and (found.status, found.reason) == ("operator", "no_reviewer_left")
+    assert send(lead, plan(lead, mine(lead), version=2)).status_code == 200
+
+
 def test_a_task_its_old_operators_cannot_lead_does_not_hold_up_a_newer_one(
     registry: Registry,
     db_path: Path,

@@ -173,9 +173,12 @@ def test_concurrent_key_adds_both_survive(tmp_path: Path) -> None:
         proc.stdin.close()
     codes = [proc.wait(timeout=60) for proc in procs]
     errors = [proc.stderr.read().decode("utf-8", errors="replace") for proc in procs if proc.stderr]
-    assert codes == [0] * 8, errors
+    assert codes == [0] * 8, list(zip(range(8), codes, errors, strict=True))
     values = sorted(k.value for k in saved().load().keys("GROQ_API_KEY"))
-    assert values == sorted(f"gsk_concurrent_{i}" for i in range(8))
+    expected = sorted(f"gsk_concurrent_{i}" for i in range(8))
+    assert values == expected, (
+        f"All key adds reported success. Missing: {sorted(set(expected) - set(values))}"
+    )
 
 
 def test_wizard_does_not_write_over_a_change_made_meanwhile() -> None:

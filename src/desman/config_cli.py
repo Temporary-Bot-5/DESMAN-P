@@ -20,6 +20,7 @@ import httpx
 from rich.text import Text
 
 from desman import i18n, providers, ui, wizard
+from desman.actions import open_user_db
 from desman.config import (
     BEHAVIOUR_CHARS,
     Behaviour,
@@ -211,10 +212,7 @@ def reset_config(manager: ConfigManager) -> None:
         network = None
     if network is not None and (network.enabled or network.donated):
         # Leaving desman-global with it, journaled like `desman global leave`.
-        try:
-            conn = db.open_db()
-        except (db.SchemaVersionError, db.SchemaMismatchError) as e:
-            raise click.ClickException(str(e)) from e
+        conn = open_user_db()
         try:
             with db.transaction(conn):
                 netlog.write(
@@ -715,7 +713,7 @@ def check_keys(
             results += check.check(config, p, client)
     path = db.default_db_path()
     if path.exists():
-        conn = db.open_db(path)
+        conn = open_user_db(path)
         try:
             with db.transaction(conn):
                 for result in results:
@@ -1114,7 +1112,7 @@ def _usage(db_path: Path | None, window: timedelta | None) -> list[calls.KeyUsag
     path = db_path or db.default_db_path()
     if not path.exists():
         return []
-    conn = db.open_db(path)
+    conn = open_user_db(path)
     try:
         return calls.usage(conn, datetime.now(UTC) - window if window else None)
     finally:
@@ -1386,7 +1384,7 @@ def print_model_blocks(db_path: Path | None = None) -> None:
     path = db_path or db.default_db_path()
     if not path.exists():
         return
-    conn = db.open_db(path)
+    conn = open_user_db(path)
     try:
         config = load_config().load()
         for row in conn.execute(

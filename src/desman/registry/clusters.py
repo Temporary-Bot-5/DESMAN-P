@@ -443,6 +443,21 @@ def _untried_members(conn: sqlite3.Connection, found: ClusterTaskRow, job: work.
     return set(current.members) - tried
 
 
+def _untried_reviewers(conn: sqlite3.Connection, job: work.JobRow) -> set[str]:
+    """Registered nodes that could recheck, including those currently offline."""
+    excluded = work.cluster_recheck_exclusions(conn, job)
+    if excluded is None:
+        return set()
+    return {
+        row["fingerprint"]
+        for row in conn.execute(
+            "SELECT fingerprint FROM nodes WHERE NOT EXISTS "
+            "(SELECT 1 FROM leases WHERE job = ? AND node = nodes.fingerprint)",
+            (job.id,),
+        )
+    } - excluded
+
+
 def _drop_job(conn: sqlite3.Connection, job: work.JobRow, why: str, moment: str) -> None:
     for row in conn.execute(
         "SELECT token FROM leases WHERE job = ? AND ended IS NULL", (job.id,)
@@ -511,13 +526,19 @@ def tick(
 def _supervise(
     conn: sqlite3.Connection, found: ClusterTaskRow, now: datetime, online: timedelta
 ) -> None:
-    for job in work.jobs(conn, "execute", cluster=found.id):
+    for job in [
+        *work.jobs(conn, "execute", cluster=found.id),
+        *work.jobs(conn, "recheck", cluster=found.id),
+    ]:
         held = conn.execute(
             "SELECT 1 FROM leases WHERE job = ? AND ended IS NULL", (job.id,)
         ).fetchone()
-        if held is None and not _untried_members(conn, found, job):
-            # Every member took it once and none may take it again: back to the operator.
+        if held is not None:
+            continue
+        if job.status == "execute" and not _untried_members(conn, found, job):
             work.to_operator(conn, job, "no_member_left", {})
+        if job.status == "recheck" and not _untried_reviewers(conn, job):
+            work.to_operator(conn, job, "no_reviewer_left", {})
     given_up = work.jobs(conn, "operator", cluster=found.id)
     if given_up:
         plan = latest_plan(conn, found.cluster)
