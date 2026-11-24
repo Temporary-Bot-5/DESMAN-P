@@ -43,6 +43,7 @@ if ($DryRun) {
         Write-Output "Confirm removal: $App; Desktop/DESMAN.lnk; Start menu/DESMAN.lnk. Preserve config and data."
         if ($Purge) { Write-Output "Separate purge confirmation: $Data; $Config; $App\config.json" }
     } else {
+        Write-Output 'Check for running DESMAN processes in the app .venv before installing.'
         Write-Output "Install to $App; refuse non-DESMAN directories; confirm uv from https://astral.sh/uv/install.ps1"
         Write-Output "Confirm git: winget install --id Git.Git -e --source winget; otherwise official git-for-windows MinGit x64 zip to $MinGit"
         Write-Output "git ls-remote --tags (newest v*, fallback master); override -Ref / DESMAN_REF: $Ref"
@@ -106,6 +107,29 @@ try {
         return
     }
     if ($Purge) { throw '-Purge requires -Uninstall.' }
+    $VenvPrefix = (Join-Path $App '.venv') + '\'
+    $AppPrefix = $App.TrimEnd('\') + '\'
+    $Processes = @(Get-CimInstance Win32_Process)
+    $Running = @($Processes | Where-Object {
+        if ($_.ExecutablePath) {
+            $_.ExecutablePath.StartsWith($VenvPrefix, [StringComparison]::OrdinalIgnoreCase)
+        } elseif ($_.CommandLine -and $_.ProcessId -ne $PID) {
+            $_.CommandLine.IndexOf($AppPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        }
+    })
+    $Unchecked = @($Processes | Where-Object { !$_.ExecutablePath -and !$_.CommandLine })
+    if ($Unchecked.Count -gt 0) {
+        Write-Warning "Could not check $($Unchecked.Count) process(es) for a running DESMAN. Close any open DESMAN windows before continuing."
+    }
+    if ($Running.Count -gt 0) {
+        Write-Host 'Close DESMAN (the page, the chat and any worker), then run the installer again.'
+        foreach ($Process in $Running) {
+            $Location = $Process.ExecutablePath
+            if (!$Location) { $Location = $App }
+            Write-Host ("  PID {0}: {1}" -f $Process.ProcessId, $Location)
+        }
+        exit 1
+    }
     if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
         Confirm-Action 'Install uv (and Python 3.12 as needed) from https://astral.sh/uv/install.ps1.'
         # Only the official uv installer is evaluated as PowerShell source.

@@ -16,7 +16,7 @@ from rich.text import Text
 from desman import global_cli, net, ui
 from desman.config import Config, ConfigManager, open_config
 from desman.config_cli import json_option
-from desman.core import netlog
+from desman.core import db, netlog
 from desman.i18n import t
 from desman.net import messenger, seal, sign
 from desman.net import protocol as p
@@ -64,6 +64,57 @@ def warning() -> str:
     )
 
 
+def _journal_busy(*, succeeded: bool = True) -> click.ClickException:
+    return click.ClickException(
+        t("The request succeeded, but the local journal is busy.")
+        if succeeded
+        else t("The local journal is busy.")
+    )
+
+
+def pending_notice(conn: sqlite3.Connection, *, succeeded: bool = False) -> str | None:
+    try:
+        shown = conn.execute(
+            "SELECT 1 FROM network_log WHERE action = 'messenger_notice' LIMIT 1"
+        ).fetchone()
+    except sqlite3.OperationalError as e:
+        raise _journal_busy(succeeded=succeeded) from e
+    return warning() if shown is None else None
+
+
+def take_notice(conn: sqlite3.Connection) -> str | None:
+    """Record the notice after success, checking again under lock for concurrent readers."""
+    if pending_notice(conn, succeeded=True) is None:
+        return None
+    try:
+        with db.transaction(conn):
+            notice = pending_notice(conn, succeeded=True)
+            if notice is not None:
+                netlog.write(conn, "messenger_notice")
+    except sqlite3.OperationalError as e:
+        raise _journal_busy() from e
+    return notice
+
+
+def show_notice(conn: sqlite3.Connection, result: Response, *, previewed: bool = False) -> None:
+    if isinstance(result, (p.Inbox, ReadInbox)) and result.name is None:
+        return
+    if (notice := take_notice(conn)) is not None and not previewed:
+        ui.note(notice)
+
+
+def short_fingerprint(node: str) -> str:
+    return node[:12]
+
+
+def _no_contact(name: str) -> str:
+    return t("No contact named {name}.", name=name)
+
+
+def _wrong_message(body: p.Complain) -> str:
+    return t("Message #{id} is not from {name}.", id=body.message, name=body.name)
+
+
 def ready(config: Config, body: Request) -> str:
     global_cli._report_ready(config)
     global_cli._refuse_secrets(config, body)
@@ -108,12 +159,8 @@ def perform(
                         clock=clock,
                     )
                     cited = next((m for m in found.messages if m.id == body.message), None)
-                    if cited is None:
-                        raise click.ClickException(
-                            t(
-                                "The message this complaint cites is no longer in your inbox; nothing was sent."
-                            )
-                        )
+                    if cited is None or cited.sender != body.name:
+                        raise click.ClickException(_wrong_message(body))
                     if cited.sealed is not None:
                         body = body.model_copy(
                             update={"content_key": seal.encode(seal.content_key(key, cited.sealed))}
@@ -156,6 +203,8 @@ def perform(
                 result = messenger.set_name(
                     address, key, config, conn, body, transport=transport, clock=clock
                 )
+        except sqlite3.OperationalError as e:
+            raise _journal_busy() from e
         except messenger.KeyChanged as e:
             raise click.ClickException(
                 t(
@@ -166,6 +215,28 @@ def perform(
         except seal.SealError as e:
             raise click.ClickException(t("The message could not be decrypted or verified.")) from e
         except messenger.MessengerError as e:
+            if e.error == "unknown_name":
+                name = (
+                    body.to
+                    if isinstance(body, MessageDraft)
+                    else body.with_name
+                    if isinstance(body, p.InboxQuery)
+                    else body.name
+                )
+                if name is not None:
+                    if isinstance(body, p.ContactAction) and body.action == "add":
+                        raise click.ClickException(
+                            t("No messenger name {name} exists.", name=name)
+                        ) from e
+                    raise click.ClickException(_no_contact(name)) from e
+            if e.error == "no_correspondence" and isinstance(body, p.Complain):
+                raise click.ClickException(
+                    t("You have never corresponded with {name}.", name=body.name)
+                ) from e
+            if e.error == "message_not_from_contact" and isinstance(body, p.Complain):
+                raise click.ClickException(_wrong_message(body)) from e
+            if e.error == "malformed":
+                raise click.ClickException(t("Invalid messenger request; nothing was sent.")) from e
             if e.error == p.SUSPENDED:
                 raise click.ClickException(
                     t(
@@ -191,10 +262,8 @@ def perform(
     if action is not None:
         try:
             netlog.record(conn, action, details)
-        except sqlite3.OperationalError:
-            raise click.ClickException(
-                t("The request succeeded, but the local journal is busy.")
-            ) from None
+        except sqlite3.OperationalError as e:
+            raise _journal_busy() from e
     return result
 
 
@@ -295,13 +364,11 @@ def print_result(result: Response, *, view: str = "", as_json: bool = False) -> 
     if as_json:
         click.echo(json.dumps(data(result, warn=warn), ensure_ascii=False))
         return
-    if warn:
-        ui.note(warning())
     if isinstance(result, (p.Inbox, ReadInbox)):
 
         def named(name: str) -> str:
             fingerprint = result.fingerprints.get(name) if isinstance(result, ReadInbox) else None
-            return clean(name) + (f" ({fingerprint})" if fingerprint else "")
+            return clean(name) + (f" ({short_fingerprint(fingerprint)})" if fingerprint else "")
 
         if result.suspended is not None:
             ui.out(
@@ -327,12 +394,19 @@ def print_result(result: Response, *, view: str = "", as_json: bool = False) -> 
         else:
             for message in result.messages:
                 incoming = message.sender != result.name
-                line = Text(
-                    t("From another person: ") if incoming else t("You: "),
-                    style="bold accent" if incoming else "muted",
+                partner = message.sender if incoming else message.recipient
+                fingerprint = (
+                    result.fingerprints.get(partner) if isinstance(result, ReadInbox) else None
                 )
-                line.append(
-                    f"#{message.id} {message.sent_at.isoformat()} {named(message.sender)}\n"
+                name = clean(partner)
+                direction = (
+                    t("{name} → you", name=name) if incoming else t("You → {name}", name=name)
+                )
+                peer_id = f" ({short_fingerprint(fingerprint)})" if fingerprint else ""
+                moment = ui.when(message.sent_at.isoformat())
+                line = Text(
+                    f"#{message.id} {moment} {direction}{peer_id}\n",
+                    style="bold accent" if incoming else "muted",
                 )
                 line.append(
                     clean(message.text or t("The message could not be decrypted or verified."))
@@ -364,11 +438,27 @@ def print_result(result: Response, *, view: str = "", as_json: bool = False) -> 
 def _run(model: type[BaseModel], fields: dict[str, Any], view: str, as_json: bool) -> None:
     try:
         body = model.model_validate(fields)
-    except ValidationError:
+    except ValidationError as e:
+        # A one- or two-digit name is often a message ID given in place of a contact.
+        for error in e.errors():
+            if error["loc"] in {("name",), ("to",)} and model is not p.SetName:
+                value = error["input"]
+                if (
+                    isinstance(value, str)
+                    and len(value) < 3
+                    and value.isascii()
+                    and value.isdecimal()
+                ):
+                    raise click.ClickException(_no_contact(value)) from None
         raise click.ClickException(t("Invalid messenger request; nothing was sent.")) from None
     assert isinstance(body, (p.SetName, p.ContactAction, MessageDraft, p.InboxQuery, p.Complain))
-    with global_cli.journal(None) as conn:
-        result = perform(open_config(), conn, body)
+    try:
+        with global_cli.journal(None) as conn:
+            result = perform(open_config(), conn, body)
+            if not as_json:
+                show_notice(conn, result)
+    except sqlite3.OperationalError as e:
+        raise _journal_busy(succeeded=False) from e
     print_result(result, view=view, as_json=as_json)
 
 

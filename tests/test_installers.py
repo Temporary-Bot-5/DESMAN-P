@@ -653,3 +653,66 @@ def test_powershell_optional_search_failure_continues(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "search not set up: daemon down" in result.stdout
     assert "GUI reached" in result.stdout
+
+
+def test_windows_busy_install_exits_before_any_install_steps() -> None:
+    source = (ROOT / "install/install.ps1").read_text(encoding="utf-8")
+    guard, install = source.split("    if (!(Get-Command uv", 1)
+    assert "$VenvPrefix = (Join-Path $App '.venv') + '\\'" in guard
+    assert "Get-CimInstance Win32_Process" in guard
+    assert "ExecutablePath.StartsWith($VenvPrefix, [StringComparison]::OrdinalIgnoreCase)" in guard
+    assert "CommandLine.IndexOf($AppPrefix, [StringComparison]::OrdinalIgnoreCase)" in guard
+    assert "!$_.ExecutablePath -and !$_.CommandLine" in guard
+    assert 'Write-Warning "Could not check' in guard
+    busy = guard.split("if ($Running.Count -gt 0)", 1)[1]
+    assert "Close DESMAN (the page, the chat and any worker)" in busy
+    assert "$Process.ProcessId, $Location" in busy and "exit 1" in busy
+    assert "Run 'git' @('checkout'" in install and "Run 'uv' @('pip', 'install'" in install
+
+
+def test_windows_busy_guard_handles_hidden_executable_paths(tmp_path: Path) -> None:
+    powershell = shutil.which("powershell") or shutil.which("pwsh")
+    if powershell is None:
+        pytest.skip("PowerShell not installed")
+    installer = ROOT / "install/install.ps1"
+    source = installer.read_text(encoding="utf-8")
+    start = source.index("    $VenvPrefix =")
+    end = source.index("    if (!(Get-Command uv", start)
+    script = tmp_path / "busy.ps1"
+    script.write_text(
+        "param([string]$Installer)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "$tokens = $null; $errors = $null\n"
+        "[void][System.Management.Automation.Language.Parser]::ParseFile("
+        "$Installer, [ref]$tokens, [ref]$errors)\n"
+        "if ($errors.Count) { throw ($errors -join [Environment]::NewLine) }\n"
+        "$App = Join-Path (Get-Location).Path 'DESMAN app'\n"
+        "function Get-CimInstance {\n"
+        "    [pscustomobject]@{ ProcessId = $PID + 1; ExecutablePath = $null; "
+        "CommandLine = '\"' + $App + '\\.venv\\Scripts\\desman.exe\" -c' }\n"
+        "    [pscustomobject]@{ ProcessId = $PID + 2; ExecutablePath = $null; "
+        "CommandLine = $null }\n"
+        "}\n" + source[start:end] + "\nWrite-Output 'Install reached'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            str(installer),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tmp_path,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Could not check 1 process(es)" in result.stdout
+    assert "Close DESMAN (the page, the chat and any worker)" in result.stdout
+    assert "Install reached" not in result.stdout

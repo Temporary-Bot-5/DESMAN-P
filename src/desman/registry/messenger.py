@@ -345,7 +345,7 @@ def complain(
             (asked.message, other, who),
         ).fetchone()
         if evidence is None:
-            raise Refusal("unknown_name")
+            raise Refusal("message_not_from_contact")
         message_text = evidence[0]
         if evidence[1] is not None:
             try:
@@ -364,7 +364,7 @@ def complain(
         or _has(conn, "messages", "sender = ? AND recipient = ?", (other, who))
     )
     if not known:
-        raise Refusal("unknown_name")
+        raise Refusal("no_correspondence")
     _limit(conn, "complaints", who, "from_node", "created_at", now, p.MAX_COMPLAINTS_PER_DAY)
     id = uuid4().hex
     conn.execute(

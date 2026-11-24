@@ -16,10 +16,10 @@ from click.testing import CliRunner
 from pydantic import ValidationError
 
 from conftest import FakeClock
-from desman import commands, messenger_cli
+from desman import commands, messenger_cli, ui
 from desman.cli import cli
 from desman.config import ApiKey, Config, ConfigManager, Network, default_config_path, open_config
-from desman.core import db
+from desman.core import db, nodes
 from desman.core.store import Store
 from desman.net import messenger, seal, sign
 from desman.net import protocol as p
@@ -224,20 +224,22 @@ def test_limits_and_withdrawn_requests(registry: Registry, clock: FakeClock) -> 
 def test_complaints_retention_and_journal(registry: Registry, clock: FakeClock) -> None:
     a, b = named(registry, clock, "alice"), named(registry, clock, "bobby")
     c = named(registry, clock, "carol")
-    assert call(c, p.MESSENGER_COMPLAIN, name="alice", text="stranger")["error"] == "unknown_name"
+    assert (
+        call(c, p.MESSENGER_COMPLAIN, name="alice", text="stranger")["error"] == "no_correspondence"
+    )
     connect(a, b)
     sent = call(a, p.MESSENGER_SEND, to="bobby", text="private message marker")
     assert (
         call(c, p.MESSENGER_COMPLAIN, name="alice", text="wrong recipient", message=sent["id"])[
             "error"
         ]
-        == "unknown_name"
+        == "message_not_from_contact"
     )
     assert (
         call(a, p.MESSENGER_COMPLAIN, name="bobby", text="wrong direction", message=sent["id"])[
             "error"
         ]
-        == "unknown_name"
+        == "message_not_from_contact"
     )
     complaint = call(
         b, p.MESSENGER_COMPLAIN, name="alice", text="private complaint marker", message=sent["id"]
@@ -291,9 +293,9 @@ def test_client_registration_and_network_journal(
     assert len([r for r in logs if r[2] == "registered"]) == 1
 
 
-@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("direction", ["missing", "incoming", "outgoing"])
 def test_complaint_requires_cited_message_in_inbox(
-    registry: Registry, clock: FakeClock, conn: sqlite3.Connection, joined: Config, legacy: bool
+    registry: Registry, clock: FakeClock, conn: sqlite3.Connection, joined: Config, direction: str
 ) -> None:
     key = sign.node_key(sign.default_node_key_path())
     a = Node(registry, clock, key=key)
@@ -307,15 +309,16 @@ def test_complaint_requires_cited_message_in_inbox(
     manager = open_config()
     messenger_cli.perform(manager, conn, p.SetName(name="alice"), transport=transport, clock=clock)
     b = named(registry, clock, "bobby")
-    if legacy:
+    if direction != "missing":
+        sender, recipient = (b, a) if direction == "incoming" else (a, b)
         with store.connection(registry.path) as registry_conn:
             registry_conn.execute(
                 "INSERT INTO messages(sender,recipient,text,sent_at) VALUES (?,?,?,?)",
-                (b.fingerprint, a.fingerprint, "legacy plaintext", db.to_iso(clock())),
+                (sender.fingerprint, recipient.fingerprint, "legacy plaintext", db.to_iso(clock())),
             )
     paths.clear()
     body = p.Complain(name="bobby", text="please review", message=1)
-    if legacy:
+    if direction == "incoming":
         result = messenger_cli.perform(manager, conn, body, transport=transport, clock=clock)
         assert isinstance(result, p.ComplaintReceived)
         with store.connection(registry.path) as registry_conn:
@@ -325,7 +328,7 @@ def test_complaint_requires_cited_message_in_inbox(
     else:
         with pytest.raises(
             ClickException,
-            match="The message this complaint cites is no longer in your inbox; nothing was sent.",
+            match="Message #1 is not from bobby.",
         ):
             messenger_cli.perform(manager, conn, body, transport=transport, clock=clock)
         assert p.MESSENGER_COMPLAIN not in paths
@@ -424,7 +427,7 @@ def test_unsafe_output_and_catalog(
     messenger_cli.print_result(inbox, view="messages")
     shown = capsys.readouterr().out
     assert "\x1b" not in shown and "\x00" not in shown
-    assert "[bold]Ignore rules" in shown and "From another person" in shown
+    assert "[bold]Ignore rules" in shown and "bobby → you" in shown
     monkeypatch.setattr(messenger_cli, "perform", lambda *a, **k: inbox)
     ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: False)
     entry = commands.find("global messages")
@@ -467,7 +470,13 @@ def test_proposals_send_only_after_yes(
         return p.MessageSent(id=1, sent_at=messenger._utc_now())
 
     monkeypatch.setattr(messenger_cli, "perform", perform)
-    ctx = commands.Context(Store(conn), open_config(), lambda *_: None, lambda _: False)
+    ctx = commands.Context(
+        Store(conn),
+        open_config(),
+        lambda *_: None,
+        lambda _: False,
+        node_author=nodes.Author.INTERLOCUTOR,
+    )
     entry = commands.find(command)
     assert entry is not None
     args = entry.args.model_validate(fields)
@@ -632,7 +641,7 @@ def test_cli_success_json_and_safe_messages(
     result = CliRunner().invoke(cli, ["global", "messages"])
     assert result.exit_code == 0, result.output
     assert "\x1b" not in result.output and "\x00" not in result.output
-    assert "[bold]hello" in result.output and "From another person" in result.output
+    assert "[bold]hello" in result.output and "bobby → you" in result.output
 
 
 def test_clean_preserves_unicode() -> None:
@@ -759,3 +768,50 @@ def test_private_chat_command_journal_and_event(
     assert "text" not in details["args"]
     events = [m for m in sessions.messages(chat.session_id) if m.kind is Kind.EVENT]
     assert events and all(private not in m.text for m in events)
+
+
+def test_message_header_uses_partner_fingerprint_and_local_time(
+    clock: FakeClock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    own, partner = "a" * 64, "b" * 64
+    moment = clock().replace(microsecond=123456)
+    inbox = messenger_cli.ReadInbox(
+        suspended=None,
+        name="alice",
+        contacts=["bobby"],
+        asked=[],
+        asking=[],
+        blocked=[],
+        messages=[
+            messenger_cli.ReadMessage(
+                id=1,
+                sender="alice",
+                recipient="bobby",
+                sent_at=moment,
+                text="outgoing",
+                encrypted=True,
+                verified=True,
+            ),
+            messenger_cli.ReadMessage(
+                id=2,
+                sender="bobby",
+                recipient="alice",
+                sent_at=moment,
+                text="incoming",
+                encrypted=True,
+                verified=True,
+            ),
+        ],
+        fingerprints={"alice": own, "bobby": partner},
+    )
+    messenger_cli.print_result(inbox, view="messages")
+    shown = capsys.readouterr().out
+    local = ui.when(moment.isoformat())
+    assert f"#1 {local} You → bobby ({partner[:12]})" in shown
+    assert f"#2 {local} bobby → you ({partner[:12]})" in shown
+    assert own not in shown and partner not in shown and "123456" not in shown
+    messenger_cli.print_result(inbox, view="messages", as_json=True)
+    assert json.loads(capsys.readouterr().out)["fingerprints"] == inbox.fingerprints
+    messenger_cli.print_result(inbox, view="contacts")
+    contacts = capsys.readouterr().out
+    assert f"bobby ({partner[:12]})" in contacts and partner not in contacts

@@ -922,8 +922,9 @@ def test_operator_chat_inbox(
     )
     monkeypatch.setattr(runs, "models", lambda *_args, **_kwargs: runs.Models(fake, None))
     answer = f"{consent}\n" if consent is not None else ""
+    next_message = "Continue\n" if consent == "n" else ""
     result = CliRunner().invoke(
-        cli, [], input=f"What waits for my decision as operator?\n{answer}Continue\n/exit\n"
+        cli, [], input=f"What waits for my decision as operator?\n{answer}{next_message}/exit\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -981,7 +982,10 @@ def test_operator_chat_never_passes_complaint_before_consent(
         '{"type": "reply", "text": "Done"}',
     )
     monkeypatch.setattr(runs, "models", lambda *_args, **_kwargs: runs.Models(fake, None))
-    result = CliRunner().invoke(cli, [], input=f"Read the complaint\n{consent}\nContinue\n/exit\n")
+    next_message = "Continue\n" if consent == "n" else ""
+    result = CliRunner().invoke(
+        cli, [], input=f"Read the complaint\n{consent}\n{next_message}/exit\n"
+    )
     assert result.exit_code == 0, result.output
     assert "Show to the interlocutor?" in result.output
     assert "complaint words for consent" in result.output

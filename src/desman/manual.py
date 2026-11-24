@@ -246,7 +246,7 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "Starting DESMAN for the first time opens setup, then chat. Set gui with `/interface MODE` for the page. `/sessions` lists and opens earlier chats. `/temporary` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. Command advice without a lookup gets one correction. Explicit /COMMAND (or !COMMAND) runs in place in terminal chat and logs to General Terminal. Chat commands take precedence. `/help` lists both sets. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count unseen events since the chat opened and are hidden in temporary chats. General Terminal takes commands only. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request with role headers and [your next message]; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized; failed summaries leave it out of view. Fallback replies name the answering model and skipped models' reasons. Pasted keys are redacted.",
+        "First launch opens setup, then chat. Set gui with `/interface MODE` for the page. `/sessions` lists and opens earlier chats. `/temporary` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. A shared read can continue the answer, up to three commands per message. Command advice without a lookup gets one correction. Explicit /COMMAND (or !COMMAND) runs in place in terminal chat and logs to General Terminal. `/help` lists both sets; chat commands take precedence. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count unseen events since the chat opened and are hidden in temporary chats. General Terminal takes commands only. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized; failed summaries leave it out of view. Fallback replies name the answering model and skipped models' reasons. Pasted keys are redacted.",
     ),
     Topic(
         "gui",
@@ -314,18 +314,19 @@ TOPICS: Final = (
     Topic(
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
-        "`/global join` opts in (--registry URL if unknown). Only the node key's fingerprint "
-        "is shown. `/global status` shows state. `/global leave` withdraws all. "
+        "`/global join` opts in (--registry URL). `/global leave` withdraws all. "
+        "`/global status` shows this node's state and key fingerprint. "
+        "Operators list nodes with `/operator nodes`. "
         "`/global donate PROVIDER --calls N --tokens N` lends a local or eligible free provider. "
         "Keys stay here. `/global cloud on` lets you lend free cloud keys for the network "
-        "operator's jobs if your terms allow it. Read its warning. "
+        "operator's jobs if your terms allow it. "
         "`/global quota PROVIDER` sets quotas and shows the UTC-day reset "
         "in local time. `/global undonate PROVIDER` withdraws it. "
         "`/global donate PROVIDER --calls N` with searxng lends managed search (calls only). "
         "`/global search STATE` (default off) controls borrowing when joined without SearXNG or Tavily. "
         "Queries omit the asker’s identity. Results are untrusted.\n"
         "Page workers register and fetch revocations. Idle nodes with fresh trust may "
-        "do or review jobs in a sandbox without web access, or check proposals with a fake "
+        "do or review jobs in a sandbox offline, or check proposals with a fake "
         "benchmark. Personal work comes first. `/global lead STATE` (on/off, default on) "
         "allows idle appointed nodes to lead clusters. Status shows the role. Personal work or "
         "turning leadership off hands the role back.\n"
@@ -349,8 +350,8 @@ TOPICS: Final = (
         "Use `/operator inbox` for work waiting for a decision and its available results, `/operator jobs` and "
         "`/operator clusters` to list work, and `/operator job show ID` or "
         "`/operator cluster show ID` for results. Decisions are accept, again or drop. "
-        "`/operator complaints`, `/operator suspensions`, `/operator reports`, "
-        "`/operator nodes` and `/operator log` show registry records. Empty lists show a message. "
+        "Moderation lists: `/operator complaints`, `/operator suspensions`, `/operator reports`. "
+        "`/operator nodes` lists network nodes and owners. `/operator log` shows registry history. "
         "A lift targets one suspension. If multiple are in force, the node lift is refused. "
         "The confirmation warns if a lift ends before its suspension. "
         "Chat changes requested through the interlocutor require confirmation. "
@@ -377,7 +378,8 @@ TOPICS: Final = (
     Topic(
         "messenger",
         "human correspondence through the registry: names, contacts, messages, blocks and complaints",
-        "After joining desman-global, `/global name NAME` shows or sets a unique lowercase "
+        "In DESMAN, the messenger and messages mean desman-global's messenger. "
+        "After joining, `/global name NAME` shows or sets a unique lowercase "
         "ASCII name (3–32 characters). `/global contacts` lists contacts and requests. "
         "`/global contact add NAME` requests or accepts; both people must agree to send. "
         "`/global contact remove NAME` removes, withdraws or declines. "
@@ -386,8 +388,9 @@ TOPICS: Final = (
         "`/global messages NAME` shows up to 100 messages; --after ID reads later ones. "
         "`/global complain NAME TEXT` complains; --message ID reveals the cited incoming "
         "message to the operator and preserves its text; it must still be in your inbox. "
-        "Messages are end-to-end encrypted, kept "
-        "30 days. The operator sees who writes to whom and when. Keys are pinned on first contact; "
+        "First successful use records the encryption notice. Message headers show the "
+        "other person, a short fingerprint and local time. "
+        "Messages are end-to-end encrypted and kept 30 days. The operator sees who writes to whom and when. Keys are pinned on first contact; "
         "a changed key requires removing and adding the contact. Losing node.key loses messages. "
         "Sending and adding contacts require an active peer. Contacts survive leaving. "
         "Daily limits: 200 messages, 20 requests, 5 complaints. Configured API keys block sending. "

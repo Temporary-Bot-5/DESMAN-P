@@ -3,7 +3,7 @@
 It starts a new session (`desman -c` continues the last one, `/sessions` any earlier one;
 `desman -t` opens a temporary chat, erased when it ends). A line starting with `/` is one of the chat's own
 commands (`/help` lists them); anything else is a message, saved in the session and answered by
-the interlocutor (`desman.interlocutor`, C.3) with one turn: a reply, a question back, a task
+the interlocutor (`desman.interlocutor`, C.3) with a reply, a question back, a task
 or a command. A task is an ordinary task of the session: planned, run by the coordinator while
 the chat waits (Ctrl+C stops it, `desman resume` continues), then retold. What waits for the
 operator is shown with the same decisions as `desman inbox`.
@@ -12,7 +12,8 @@ A command is looked up in the catalog (`desman.commands`, C.5) and its arguments
 there. A read runs at once; a change is shown in a window drawn from the command itself and
 applied only on the person's "yes"; input (a key, a section of the wizard) is typed by the
 person into a window. What it did goes back to the interlocutor as an event of the session,
-and changes, declined ones too, into the operator's journal (`core.operator`).
+and changes, declined ones too, into the operator's journal (`core.operator`). A shared read
+can prompt an immediate follow-up, with at most three commands per user message.
 
 When the session's history no longer fits the interlocutor's budget, the older messages are
 summarised first (`desman.compaction`, C.6) by a task of their own, and `/compact` does it at
@@ -193,6 +194,7 @@ class Chat:
         self._outcome_audit: int | None = None
         self.background_tasks = background_tasks
         self.sessions = sessions
+        self._turn_messages: list[Message] | None = None
         self.sleep = sleep
         self.temporary = temporary
         """Nothing said is kept (C.11): the session is erased when the chat ends; no profile
@@ -552,53 +554,110 @@ class Chat:
             self.session_id = self._add_user(text)
         assert self.session_id is not None
         history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
+        self._turn_messages = []
         try:
+            self._answer(history, interlocutor, config, models, personal, notes)
+        finally:
+            self._turn_messages = None
+
+    def _answer(
+        self,
+        history: History,
+        interlocutor: Interlocutor,
+        config: Config,
+        models: runs.Models,
+        personal: bool,
+        notes: list[Note] | None,
+    ) -> None:
+        assert self.session_id is not None and self._turn_messages is not None
+        sent: list[tuple[str, dict[str, JsonValue]]] = []
+        initial = history
+        reply_only = False
+        while not self.exit_requested:
             try:
-                with (
-                    provider_wait.waiting(
-                        sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
-                    ) as waiting,
-                    self._for(calls.Role.INTERLOCUTOR),
-                ):
-                    turn = interlocutor.turn(history)
-            finally:  # what this answer read, also when it failed
-                self._opened[self.session_id] = interlocutor.opened
-        except runs.ModuleWaiting:
-            raise
-        except ProviderError as e:
-            ui.provider_limit(waiting.limited_until)
-            ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
-            return
-        except StructuredOutputError:
-            ui.error(
-                t(
-                    "The model's answer made no sense, even when asked again. Your message is "
-                    "kept: write again or put it differently."
+                try:
+                    with (
+                        provider_wait.waiting(
+                            sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
+                        ) as waiting,
+                        self._for(calls.Role.INTERLOCUTOR),
+                    ):
+                        turn = (
+                            interlocutor.reply_only(history)
+                            if reply_only
+                            else interlocutor.turn(history)
+                        )
+                finally:  # what this answer read, also when it failed
+                    self._opened[self.session_id] = interlocutor.opened
+            except runs.ModuleWaiting as e:
+                if not sent:
+                    raise
+                # The read was already displayed and recorded. Do not run it again on retry.
+                ui.note(e.display())
+                ui.note(t("The read is done. Your message is kept."))
+                return
+            except ProviderError as e:
+                ui.provider_limit(waiting.limited_until)
+                if sent:
+                    ui.note(t("The read is done. Your message is kept."))
+                ui.error(t("The model did not answer ({error}). Your message is kept.", error=e))
+                return
+            except StructuredOutputError:
+                ui.error(
+                    t(
+                        "The model's answer made no sense, even when asked again. Your message is "
+                        "kept: write again or put it differently."
+                    )
                 )
-            )
-            return
-        if personal:  # off: the model was told nothing of it, and nothing is kept
-            self._note(turn.profile, config, notes or [])
-            interlocutor.profile = self.profile.notes()  # a task's retelling follows them
-        if isinstance(turn, Reply):
-            self._say(turn.text)
-            self._fallback_note(interlocutor)
-        elif isinstance(turn, Clarify):
-            self._say(turn.question)
-            self._fallback_note(interlocutor)
-        elif isinstance(turn, NewTask):
-            if personal and turn.node is not None:  # asked now, not after the whole task
+                return
+            stop_commands = False
+            if isinstance(turn, Command) and not reply_only:
+                entry = commands.find(turn.name)
+                call = (entry.name if entry is not None else turn.name, turn.args)
+                stop_commands = len(sent) >= 3 or call in sent
+                if not stop_commands:
+                    sent.append(call)
+            follow_up = False
+            if personal:  # off: the model was told nothing of it, and nothing is kept
+                self._note(turn.profile, config, notes or [])
+                notes = self.profile.notes()
+                interlocutor.profile = notes  # a task's retelling follows them
+            if isinstance(turn, Reply):
+                self._say(turn.text)
+                self._fallback_note(interlocutor)
+            elif isinstance(turn, Clarify):
+                self._say(turn.question)
+                self._fallback_note(interlocutor)
+            elif reply_only:
+                text = turn.text if isinstance(turn, Command) else None
+                self._say(text or t("I could not finish answering; ask again."))
+            elif stop_commands:
+                assert isinstance(turn, Command)
+                if turn.text is not None:
+                    self._say(turn.text, settle=False)
+                follow_up = reply_only = True
+            elif isinstance(turn, NewTask):
+                if personal and turn.node is not None:  # asked now, not after the whole task
+                    self._propose_node(
+                        turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR
+                    )
+                    turn = turn.model_copy(update={"node": None})
+                self._task(turn, config, models, interlocutor)
+            else:
+                if turn.text is not None:
+                    self._say(turn.text, settle=False)
+                follow_up = self._command(turn, config, models, interlocutor)
+            if (
+                not self.exit_requested and personal and turn.node is not None
+            ):  # off: never told how, never taken
                 self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
-                turn = turn.model_copy(update={"node": None})
-            self._task(turn, config, models, interlocutor)
-        else:
-            if turn.text is not None:
-                self._say(turn.text, settle=False)
-            self._command(turn, config, models, interlocutor)
-        if (
-            not self.exit_requested and personal and turn.node is not None
-        ):  # off: never told how, never taken
-            self._propose_node(turn.node, config, models, interlocutor, NodeAuthor.INTERLOCUTOR)
+            if not follow_up:
+                return
+            # Keep the first view and only messages written by this turn. The page
+            # can persist another user input while the current turn is running.
+            history = initial.model_copy(
+                update={"messages": [*initial.messages, *self._turn_messages]}
+            )
 
     def _own_nodes(self, config: Config) -> tuple[knowledge.Node, ...] | None:
         """The person's nodes the interlocutor is given (K.4): none with personalisation off or
@@ -709,6 +768,8 @@ class Chat:
             outcome_audit=self._outcome_audit,
             settle=settle and task_id is None and self._outcome_audit is None,
         )
+        if self._turn_messages is not None:
+            self._turn_messages.append(message)
         if self.turn_sink is not None:
             self.turn_sink(message.session_id)
         else:
@@ -727,6 +788,8 @@ class Chat:
             task_id=task_id,
             outcome_audit=self._outcome_audit,
         )
+        if self._turn_messages is not None:
+            self._turn_messages.append(message)
         if self.turn_sink is not None:
             self.turn_sink(message.session_id)
         else:
@@ -872,9 +935,11 @@ class Chat:
         typed: bool = False,
         typed_entry: commands.Entry | None = None,
         node_author: NodeAuthor | None = None,
-    ) -> None:
+    ) -> bool:
         """The command the interlocutor asked for, through the catalog; never as it was
-        written. Model-requested changes need the person's answer in a code-built window; typed commands keep confirmations and previews required by the CLI."""
+        written. Changes need a code-built window when requested by the model. Typed commands
+        keep confirmations and previews required by the CLI. Return whether a read result was
+        shared with the interlocutor."""
         entry = typed_entry if typed else commands.find(turn.name)
         if entry is None:
             name = providers.redact_keys(turn.name, config)[0]
@@ -884,7 +949,7 @@ class Chat:
                 {"error": "unknown command", "commands": [e.name for e in commands.CATALOG]},
                 config,
             )
-            return
+            return False
         try:
             args = commands.parse(entry, turn.args, config)
         except commands.BadArgs as e:
@@ -894,18 +959,18 @@ class Chat:
                 {"error": str(e)},
                 config,
             )
-            return
+            return False
         command = commands.shown(entry, args)
         attached: list[task_files.Given] = []
         if isinstance(args, commands.RunArgs) and args.file:
             if not typed:
                 ui.error(t("Only you can attach local files. Use /file PATH."))
-                return
+                return False
             try:
                 attached = task_files.given_paths([Path(path) for path in args.file])
             except task_files.GivenFileError as e:
                 ui.error(task_files.attachment_error(e))
-                return
+                return False
         kind = entry.kind_of(args)
         before = self._saved_config()
         if (
@@ -914,7 +979,7 @@ class Chat:
             and models is None
         ):
             ui.error(t("DESMAN needs configuring before this command can use models."))
-            return
+            return False
 
         def start_task(title: str, goal: str, runs_code: bool, master: bool) -> None:
             assert models is not None
@@ -974,6 +1039,7 @@ class Chat:
             temporary=self.temporary,
             node_author=node_author or (NodeAuthor.PERSON if typed else NodeAuthor.INTERLOCUTOR),
         )
+        shared = True
         try:
             made = entry.handler(context, args)
             if isinstance(made, commands.Proposal):
@@ -985,6 +1051,7 @@ class Chat:
                     or isinstance(args, commands.TaskHideArgs)
                     and args.finished
                 ) and not self._confirmed(made):
+                    shared = False
                     made = (
                         made.on_decline()
                         if made.on_decline is not None
@@ -999,7 +1066,7 @@ class Chat:
                 {"error": e.format_message()},
                 config,
             )
-            return
+            return False
         except (ui.Cancelled, click.Abort):
             ui.out("")
             made = commands.Outcome({"declined": True}, done=False)
@@ -1026,6 +1093,15 @@ class Chat:
                 made.data,
                 config,
             )
+
+        return (
+            kind is commands.Kind.READ
+            and shared
+            and made.done
+            and made.data is not None
+            and self.session_id is not None
+            and not self.in_terminal
+        )
 
     def _typed(self, line: str, *, in_place: bool = False) -> None:
         """A person's explicit command line never becomes a model turn or a user message."""
@@ -1107,23 +1183,28 @@ class Chat:
     def _confirmed(self, proposal: commands.Proposal, *, in_prompt: bool = False) -> bool:
         """The window of a change: what it does, as the command worded it, and the person's
         answer. Nothing the model said is shown here or counts as an answer."""
-        if in_prompt:
-            return ui.confirm(
-                "\n".join(
-                    [
-                        *proposal.lines,
-                        *proposal.warnings,
-                        proposal.question or t("Apply this change?"),
-                    ]
-                ),
-                default=False,
-            )
-        ui.section(t("Confirm"))
-        for line in proposal.lines:
-            ui.out(Text("  " + line))
-        for warning in proposal.warnings:
-            ui.warn(warning)
-        return ui.confirm(proposal.question or t("Apply this change?"), default=False)
+        try:
+            if in_prompt:
+                return ui.confirm(
+                    "\n".join(
+                        [
+                            *proposal.lines,
+                            *proposal.warnings,
+                            proposal.question or t("Apply this change?"),
+                        ]
+                    ),
+                    default=False,
+                )
+            ui.section(t("Confirm"))
+            for line in proposal.lines:
+                ui.out(Text("  " + line))
+            for warning in proposal.warnings:
+                ui.warn(warning)
+            return ui.confirm(proposal.question or t("Apply this change?"), default=False)
+        except click.Abort as e:
+            if not in_prompt and isinstance(e.__context__, EOFError):
+                return False
+            raise
 
     def _journal(
         self,
@@ -1180,7 +1261,11 @@ class Chat:
             configs = [config, self._saved_config()]
             budget = COMMAND_RESULT_TOKENS * CHARS_PER_TOKEN
             text += "\n" + commands.for_interlocutor(data, configs, budget)
-        self.sessions.add(self.session_id, Role.DESMAN, text, kind=Kind.EVENT, settle=True)
+        message = self.sessions.add(
+            self.session_id, Role.DESMAN, text, kind=Kind.EVENT, settle=True
+        )
+        if self._turn_messages is not None:
+            self._turn_messages.append(message)
 
     # ── Compaction ───────────────────────────────────────────────────────────
 
@@ -2016,6 +2101,7 @@ class Chat:
             try:
                 body = protocol.InboxQuery(with_name=line.strip()[len(name) :].strip() or None)
                 result = messenger_cli.perform(open_config(), self.store.conn, body)
+                messenger_cli.show_notice(self.store.conn, result)
                 messenger_cli.print_result(result, view="messages")
             except ConfigError as e:
                 ui.error(str(e))

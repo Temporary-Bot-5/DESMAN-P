@@ -220,7 +220,7 @@ def test_config_changes_name_keys_by_fingerprint() -> None:
 def test_a_read_runs_at_once_and_its_data_goes_to_the_interlocutor(fake: FakeLLM) -> None:
     task_id, _ = escalated_task()
     fake.on(CHAT, asks("status", task=task_id[:8]), '{"type": "reply", "text": "It waits."}')
-    result = chat("how is my task?", "and now?")
+    result = chat("how is my task?")
     assert "Goal: the goal" in result.output and "needs_human" in result.output
     assert "Apply this change?" not in result.output  # a read asks nothing
     event = conversation()[1]
@@ -250,10 +250,10 @@ def test_every_read_shows_its_result(
     task_id, _ = escalated_task()
     if name == "audit":
         args = {"task": task_id}
-    fake.on(CHAT, asks(name, **args))
+    fake.on(CHAT, asks(name, **args), '{"type": "reply", "text": "Done."}')
     result = chat("show me")
     assert shown in result.output
-    assert conversation()[-1].text.startswith(f"{name}")
+    assert any(m.kind is Kind.EVENT and m.text.startswith(name) for m in conversation())
 
 
 def test_keys_check_from_the_chat(fake: FakeLLM, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,16 +264,16 @@ def test_keys_check_from_the_chat(fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
         return [check.KeyCheck(p.id, 1, key_id(KEY), False, 401, f"rejected {KEY}")]
 
     monkeypatch.setattr(check, "check", checked)
-    fake.on(CHAT, asks("keys check", provider="groq"))
+    fake.on(CHAT, asks("keys check", provider="groq"), '{"type": "reply", "text": "Done."}')
     result = chat("do my keys work?")
     assert "failed" in result.output
-    assert KEY not in conversation()[-1].text  # a provider's message may quote the key
+    assert all(KEY not in m.text for m in conversation())  # a provider may quote the key
 
 
 def test_shown_data_keeps_keys_and_masks_out(fake: FakeLLM) -> None:
     save(make_config(language="en", configured=True, api_keys={"GROQ_API_KEY": KEY}))
-    fake.on(CHAT, asks("config show"), asks("keys list"))
-    chat("my config?", "my keys?")
+    fake.on(CHAT, asks("config show"), asks("keys list"), '{"type": "reply", "text": "Done."}')
+    chat("my config and keys?")
     for message in conversation():
         assert KEY not in message.text and providers.mask(KEY) not in message.text
 
@@ -656,7 +656,7 @@ def test_usage_event_carries_window_totals(fake: FakeLLM, monkeypatch: pytest.Mo
         KeyUsage("nvidia", "other", 3, 0, 1, 200, 30, None, None, {}),
     ]
     monkeypatch.setattr(config_cli, "usage_since", lambda *args: rows)
-    fake.on(CHAT, asks("usage", since="all"))
+    fake.on(CHAT, asks("usage", since="all"), '{"type": "reply", "text": "Done."}')
     result = chat("how much did I spend?")
     assert "Total: 5 calls" in result.output
     event = next(m for m in conversation() if m.kind is Kind.EVENT)
@@ -670,3 +670,129 @@ def test_usage_event_carries_window_totals(fake: FakeLLM, monkeypatch: pytest.Mo
         "providers": 2,
     }
     assert len(data["rows"]) == 2 and "key" not in data["rows"][0]
+
+
+def test_two_reads_then_reply_in_one_turn(fake: FakeLLM) -> None:
+    fake.on(
+        CHAT,
+        asks("inbox", list=True),
+        asks("list"),
+        '{"type": "reply", "text": "I checked both."}',
+    )
+    result = chat("show my inbox and tasks")
+    assert "I checked both." in result.output
+    first, second, third = map(payload, chat_calls(fake))
+    assert len(first["conversation"]) == 1
+    assert second["conversation"][-1]["text"].startswith("inbox")
+    assert third["conversation"][-1]["text"].startswith("list")
+    assert sum(message.role is Role.USER for message in conversation()) == 1
+
+
+@pytest.mark.parametrize(
+    ("requests", "events", "last", "answer"),
+    [
+        (
+            [asks("inbox", list=True), asks("list"), asks("language"), asks("help")],
+            3,
+            {"type": "reply", "text": "I checked what I could."},
+            "I checked what I could.",
+        ),
+        (
+            [asks("list"), asks("list")],
+            1,
+            {"type": "command", "name": "list", "text": "Here are the results I have."},
+            "Here are the results I have.",
+        ),
+        (
+            [asks("list"), asks("list")],
+            1,
+            {"type": "command", "name": "list"},
+            "I could not finish answering; ask again.",
+        ),
+    ],
+)
+def test_read_chain_stops_at_cap_or_identical_repeat(
+    fake: FakeLLM, requests: list[str], events: int, last: dict[str, Any], answer: str
+) -> None:
+    config = saved()
+    config.personalize = True
+    save(config)
+    blocked = json.loads(requests[-1])
+    blocked.update(text="A partial answer.", profile=[{"add": "Likes brief answers."}])
+    last["profile"] = [{"add": "Prefers plain language."}]
+    fake.on(CHAT, *requests[:-1], json.dumps(blocked), json.dumps(last))
+    result = chat("show me")
+    calls = chat_calls(fake)
+    assert len(calls) == len(requests) + 1
+    assert "No more commands or tasks" in calls[-1].messages[0].content
+    assert "A partial answer." in result.output and answer in result.output
+    assert sum(message.kind is Kind.EVENT for message in conversation()) == events
+    conn = db.open_db()
+    try:
+        from desman.core.profile import Profile
+
+        assert {note.text for note in Profile(conn).notes()} == {
+            "Likes brief answers.",
+            "Prefers plain language.",
+        }
+    finally:
+        conn.close()
+
+
+def test_page_read_followup_keeps_current_turn_context(fake: FakeLLM) -> None:
+    from desman.gui.runners import RunnerChat, TurnSessions
+
+    conn = db.open_db()
+    try:
+        sessions = TurnSessions(conn)
+        current = sessions.add(None, Role.USER, "Show my tasks")
+        sessions.reply_to = sessions.current_user = sessions.user_through = current.seq
+
+        def queue_next(_: Request) -> str:
+            sessions.add(current.session_id, Role.USER, "Answer this later")
+            sessions.add(current.session_id, Role.DESMAN, "Unrelated event", kind=Kind.EVENT)
+            return asks("list")
+
+        fake.on(CHAT, queue_next, '{"type": "reply", "text": "Here are your tasks."}')
+        page = RunnerChat(sessions)
+        page.session_id = current.session_id
+        page._message(current.text, added=True)
+        _, follow_up = map(payload, chat_calls(fake))
+        texts = [item["text"] for item in follow_up["conversation"]]
+        assert texts[0] == current.text
+        assert len(texts) == 2 and texts[1].startswith("list")
+        assert any(m.text == "Answer this later" for m in sessions.messages(current.session_id))
+    finally:
+        conn.close()
+
+
+def test_wait_after_read_reports_that_the_read_finished(fake: FakeLLM) -> None:
+    def wait(_: Request) -> str:
+        raise runs.ModuleWaiting("interlocutor")
+
+    fake.on(CHAT, asks("list"), wait)
+    result = chat("show my tasks")
+    assert "no module left for interlocutor" in result.output
+    assert "The read is done. Your message is kept." in result.output
+    assert sum(message.kind is Kind.EVENT for message in conversation()) == 1
+
+
+def test_eof_in_prompt_aborts_confirmation(fake: FakeLLM) -> None:
+    from desman.chat import Chat
+
+    conn = db.open_db()
+    try:
+        instance = Chat(Sessions(conn))
+        proposal = commands.Proposal(["Confirm the change"], lambda: commands.Outcome(None))
+        with CliRunner().isolation(input=""), pytest.raises(click.Abort):
+            instance._confirmed(proposal, in_prompt=True)
+    finally:
+        conn.close()
+
+
+def test_change_ends_chain_after_a_read(fake: FakeLLM) -> None:
+    fake.on(CHAT, asks("language"), asks("language", code="ru"), asks("list"))
+    result = chat("check the language, then switch to Russian", "y")
+    assert "Apply this change?" in result.output
+    assert saved().language == "ru"
+    assert len(chat_calls(fake)) == 2
