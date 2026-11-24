@@ -394,13 +394,14 @@ def by_key_env(env: str) -> Provider | None:
     return next((p for p in CLOUD + SERVICES if p.key_env is not None and p.key_env == env), None)
 
 
-def can_donate(p: Provider) -> bool:
+def can_donate(p: Provider, *, lend_cloud: bool = False) -> bool:
     """Whether the person may lend `p` to desman-global: a local server always (the machine is
-    theirs), a free cloud provider only if its terms were checked (`donatable`), a paid one
-    or a service that is not a model provider never."""
+    theirs), a free cloud provider if its terms were checked (`donatable`) or the person
+    opted in to work assigned by the network operator. Paid providers and non-model
+    services are ineligible."""
     if p not in PROVIDERS or p.paid:
         return False
-    return p.local or p.donatable
+    return p.local or p.donatable or lend_cloud
 
 
 def search_engines(config: Config) -> list[Provider]:
@@ -526,6 +527,7 @@ def describe(config: Config) -> dict[str, Any]:
         "network": {
             "enabled": config.network.enabled,
             "registry": config.network.registry,
+            "lend_cloud": config.network.lend_cloud,
             "donated": {p: d.model_dump() for p, d in config.network.donated.items()},
         },
         "providers": rows,

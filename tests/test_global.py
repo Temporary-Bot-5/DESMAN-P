@@ -104,7 +104,7 @@ def test_a_schema_4_config_upgrades_to_desman_global_off() -> None:
     data["schema_version"] = 4
     del data["network"]
     config = Config.model_validate(upgrade(data))
-    assert config.schema_version == 13 and config.network == Network()
+    assert config.schema_version == 14 and config.network == Network()
     assert config.language == "ru"
 
 
@@ -143,6 +143,7 @@ def test_a_quota_has_bounds() -> None:
 def test_no_paid_provider_and_no_service_is_ever_lent() -> None:
     for p in providers.PAID + providers.SERVICES:
         assert not providers.can_donate(p), p.id
+        assert not providers.can_donate(p, lend_cloud=True), p.id
     for p in providers.PAID:
         assert not p.donatable, f"{p.id} is paid: it is never lent"
 
@@ -150,8 +151,10 @@ def test_no_paid_provider_and_no_service_is_ever_lent() -> None:
 def test_local_servers_are_lent_and_cloud_providers_only_once_checked() -> None:
     for p in providers.LOCAL:
         assert providers.can_donate(p)
+        assert providers.can_donate(p, lend_cloud=True)
     for p in providers.FREE:
         assert providers.can_donate(p) == p.donatable
+        assert providers.can_donate(p, lend_cloud=True)
 
 
 # ── desman global ────────────────────────────────────────────────────────────
@@ -172,6 +175,7 @@ def test_status_says_it_is_off(monkeypatch: pytest.MonkeyPatch, clock: FakeClock
         "resets_at": "2026-01-02T00:00:00+00:00",
         "lead": True,
         "borrow_search": False,
+        "lend_cloud": False,
         "cluster": None,
     }
     assert ok("global").output == result.output
@@ -245,10 +249,30 @@ def test_donate_lends_a_local_server_with_a_quota() -> None:
     }
 
 
+def test_cloud_consent_controls_lending_and_is_journaled() -> None:
+    configured(api_keys={"GROQ_API_KEY": "gsk_" + "a" * 40, "ANTHROPIC_API_KEY": "sk-ant-x"})
+    ok("global", "join", "--registry", REGISTRY)
+    assert "off" in ok("global", "cloud").output
+    assert "desman global cloud on" in refused("global", "donate", "groq")
+    assert "Most free tiers' terms" in ok("global", "cloud", "on").output
+    assert json.loads(ok("global", "status", "--json").output)["lend_cloud"] is True
+    ok("global", "donate", "groq")
+    assert "paid provider" in refused("global", "donate", providers.PAID[0].id)
+    ok("global", "cloud", "off")
+    ok("global", "cloud", "off")  # No duplicate receipt for the same state.
+    assert "not lent: cloud lending off" in " ".join(ok("global", "status").output.split())
+    status = json.loads(ok("global", "status", "--json").output)
+    assert status["lend_cloud"] is False and "groq" in status["donated"]
+    assert [details for action, details in network_log() if action == "lend_cloud"] == [
+        {"on": True},
+        {"on": False},
+    ]
+
+
 def test_what_cannot_be_lent_is_refused() -> None:
     configured(api_keys={"GROQ_API_KEY": "gsk_" + "a" * 40, "ANTHROPIC_API_KEY": "sk-ant-x"})
     ok("global", "join", "--registry", REGISTRY)
-    assert "has not been checked for serving others" in refused("global", "donate", "groq")
+    assert "desman global cloud on" in refused("global", "donate", "groq")
     paid = providers.PAID[0]
     assert "paid provider" in refused("global", "donate", paid.id)
     assert "not set up yet" in refused("global", "donate", "llamacpp")
@@ -392,6 +416,21 @@ def test_join_and_donate_from_the_chat_wait_for_yes(fake: FakeLLM) -> None:
     assert ("operator_network", {"changed": ["donated.ollama"]}) in journal()
 
 
+def test_cloud_consent_from_chat_shows_warning_and_waits_for_yes(fake: FakeLLM) -> None:
+    configured()
+    fake.on(CHAT, asks("global cloud", state="on"), asks("global cloud", state="on"))
+    result = chat("allow cloud lending", "n")
+    assert "Most free tiers' terms" in result.output
+    assert "Apply this change?" in result.output
+    assert not saved().network.lend_cloud and network_log() == []
+
+    result = chat("allow cloud lending", "y")
+    assert "Most free tiers' terms" in result.output
+    assert saved().network.lend_cloud
+    assert network_log() == [("lend_cloud", {"on": True})]
+    assert ("operator_network", {"changed": ["lend_cloud"]}) in journal()
+
+
 def test_a_declined_join_changes_nothing(fake: FakeLLM) -> None:
     configured()
     fake.on(CHAT, asks("global join", registry=REGISTRY))
@@ -483,6 +522,7 @@ def test_config_show_says_what_desman_global_does() -> None:
         "enabled": True,
         "registry": REGISTRY,
         "donated": {"ollama": LENT.model_dump()},
+        "lend_cloud": False,
     }
 
 

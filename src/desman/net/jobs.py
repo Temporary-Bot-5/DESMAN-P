@@ -39,6 +39,7 @@ from typing import Any, Final, Literal
 
 from pydantic import ValidationError
 
+from desman import providers
 from desman.config import Config
 from desman.core import db
 from desman.core.coordinator import Executor, Reviewer, Success, Work
@@ -345,6 +346,12 @@ def quota_left(conn: sqlite3.Connection, config: Config, provider: str, now: dat
     """Whether `provider` is lent and its day's quota is not spent (calls being made count)."""
     donation = config.network.donated.get(provider)
     if donation is None:
+        return False
+    try:
+        model_provider = providers.find(provider)
+    except providers.UnknownProvider:
+        return False
+    if not providers.can_donate(model_provider, lend_cloud=config.network.lend_cloud):
         return False
     calls, tokens, held = quota_usage(conn, provider, now)
     return calls + held < donation.calls_per_day and tokens < donation.tokens_per_day

@@ -743,3 +743,55 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
         assert "A config backup already exists" in result["message"]
     else:
         assert ("uninstall.log" if approved else "Nothing changed.") in result["message"]
+
+
+def test_network_cloud_setting_uses_catalog_and_updates_lendable_providers(
+    settings_app: Any,
+) -> None:
+    from desman.config import Network
+
+    app, store = settings_app
+    config = make_config(api_keys={"GROQ_API_KEY": "test-groq-key"})
+    config.network = Network(enabled=True, registry="https://registry.example.org")
+    open_config().save(config)
+    chat = Chat(Sessions(store.conn))
+
+    def lendable(provider: str) -> bool:
+        return bool(next(p["lendable"] for p in snapshot(app)["providers"] if p["id"] == provider))
+
+    data = snapshot(app)["network"]
+    assert data["lend_cloud"] is False
+    assert data["cloud_label"] == "Lend my free cloud keys to desman-global"
+    assert "Most free tiers' terms" in data["cloud_warning"]
+    assert not lendable("groq")
+    with ui.use(app.front):
+        chat._action(action({"section": "network", "operation": "cloud", "state": "on"}))
+    assert snapshot(app)["result"]["ok"] and snapshot(app)["network"]["lend_cloud"]
+    assert (
+        open_config().load().network.lend_cloud and lendable("groq") and not lendable("anthropic")
+    )
+    with ui.use(app.front):
+        chat._action(action({"section": "network", "operation": "donate", "provider": "groq"}))
+    assert snapshot(app)["result"]["ok"]
+    with ui.use(app.front):
+        chat._action(action({"section": "network", "operation": "cloud", "state": "off"}))
+    disabled = snapshot(app)
+    assert not disabled["network"]["lend_cloud"]
+    assert "groq" in disabled["network"]["donated"]
+    groq = next(p for p in disabled["providers"] if p["id"] == "groq")
+    assert not groq["lendable"]
+    assert groq["lending_label"] == "GROQ (not lent: cloud lending off)"
+    with ui.use(app.front):
+        chat._action(
+            action({"section": "network", "operation": "quota", "provider": "groq", "calls": 12})
+        )
+    assert snapshot(app)["network"]["donated"]["groq"]["calls_per_day"] == 12
+    with ui.use(app.front):
+        chat._action(action({"section": "network", "operation": "undonate", "provider": "groq"}))
+    assert "groq" not in snapshot(app)["network"]["donated"]
+    assert (
+        store.conn.execute(
+            "SELECT COUNT(*) FROM network_log WHERE action = 'lend_cloud'"
+        ).fetchone()[0]
+        == 2
+    )
