@@ -51,7 +51,9 @@ LONG_CHARS: Final = 12_000
 MAX_REDIRECTS: Final = 5
 MAX_RESULTS: Final = 10
 MAX_LINKS: Final = 100
-"""Links of a page returned with it, in page order (the first ones, duplicates dropped)."""
+"""Links of a page shown with it, in page order (the first ones, duplicates dropped)."""
+ALL_LINKS: Final = 2_000
+"""Links of a page kept (in a saved page, for the executor to read and follow)."""
 MAX_CALLS: Final = 20
 """web_search and web_fetch calls, each, per execution of a subtask."""
 CACHE_TTL: Final = timedelta(days=1)
@@ -131,7 +133,7 @@ class Page:
     cut: bool = False
     """More than MAX_BYTES: only the start was read."""
     links: tuple[str, ...] = ()
-    """Absolute http(s) links of the page (hrefs, then URLs in its text), at most MAX_LINKS."""
+    """Absolute http(s) links of the page (hrefs, then URLs in its text), at most ALL_LINKS."""
 
 
 def fetch_client() -> httpx.Client:
@@ -163,7 +165,7 @@ class Fetcher:
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise WebError("only http:// and https:// URLs can be fetched")
-        if parts.username or parts.password:
+        if parts.username is not None or parts.password is not None:  # even an empty one
             raise WebError("URLs with credentials are not fetched")
         host = parts.hostname
         try:
@@ -242,7 +244,7 @@ class Fetcher:
             title=title,
             cut=cut,
             note=note,
-            links=page_links(url, [*hrefs, *URL_IN_TEXT.findall(text)]),
+            links=page_links(url, [*hrefs, *map(trim_url, URL_IN_TEXT.findall(text))]),
         )
 
 
@@ -340,12 +342,12 @@ def trim_url(url: str) -> str:
 
 
 def page_links(base: str, hrefs: list[str]) -> tuple[str, ...]:
-    """Absolute http(s) links, resolved against `base`, without fragments, first MAX_LINKS."""
+    """Absolute http(s) links, resolved against `base`, without fragments, first ALL_LINKS."""
     links: dict[str, None] = {}
     here = urldefrag(base)[0]
     for href in hrefs:
         try:
-            url = urldefrag(urljoin(base, trim_url(href.strip())))[0]
+            url = urldefrag(urljoin(base, href.strip()))[0]
             parts = urlsplit(url)
         except ValueError:
             continue
@@ -354,7 +356,7 @@ def page_links(base: str, hrefs: list[str]) -> tuple[str, ...]:
         if len(url) > 2_000:
             continue
         links[url] = None
-        if len(links) >= MAX_LINKS:
+        if len(links) >= ALL_LINKS:
             break
     return tuple(links)
 
@@ -467,7 +469,7 @@ class Web:
     def page(self, url: str) -> dict[str, Any]:
         """The whole text of a page (cut by MAX_BYTES only), from the cache when it is there."""
         cached = self.cache.get("page", url) if self.cache else None
-        if cached is not None:
+        if cached is not None and "links" in cached:  # cached before S.1: read again for links
             return cached
         if self.fetcher is None:
             self.fetcher = Fetcher()

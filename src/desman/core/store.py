@@ -1483,6 +1483,20 @@ class Store:
         ]
         return person, web
 
+    def web_private_texts(self, task_id: str) -> list[str]:
+        """The task's data an executor holds besides its workspace (core/webguard.py): the
+        subtasks' inputs (documents given) and accepted results."""
+        return [
+            row[0]
+            for row in self.conn.execute(
+                """SELECT inputs_json FROM subtasks WHERE task_id = ? AND inputs_json != '{}'
+                   UNION ALL
+                   SELECT a.content_json FROM artifacts a JOIN subtasks s ON s.id = a.subtask_id
+                   WHERE s.task_id = ? AND a.attempt = s.accepted_attempt""",
+                (task_id, task_id),
+            )
+        ]
+
     def start_effect(
         self,
         subtask_id: str,

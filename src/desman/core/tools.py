@@ -54,13 +54,16 @@ from desman.core.sandbox import Limits, Sandbox
 from desman.core.web import (
     LONG_CHARS,
     MAX_CALLS,
+    MAX_LINKS,
     MAX_RESULTS,
     MAX_TEXT_CHARS,
     SOURCES,
     UNTRUSTED,
+    URL_IN_TEXT,
     MissingSearchEngine,
     Web,
     WebError,
+    trim_url,
 )
 from desman.core.workspace import MAX_NAME_BYTES, PathEscapeError, Workspace, check_path
 from desman.llm import hub
@@ -299,6 +302,7 @@ class Toolbox:
         if self.screen is not None and not replayed_call:
             refused = self.screen(tool, args)
             if refused is not None:
+                self._calls[tool.name] = used  # nothing ran: the call is not counted
                 refused = refused[:MAX_ERROR_CHARS]
                 self.record("web_refused", {**summary, "reason": refused})
                 return ToolResult(ok=False, error=f"refused: {refused}")
@@ -627,22 +631,25 @@ def web_tools(web: Web) -> list[Tool[Any]]:
         }
         if page["url"] != args.url:
             read["asked"] = args.url  # seen too after a redirect (core/webguard.py)
-        links = [link for link in page.get("links", []) if link not in content]
+        written = {trim_url(url) for url in URL_IN_TEXT.findall(content)}
+        links: list[str] = [link for link in page.get("links", []) if link not in written]
         if links and args.offset == 0:
-            read["links"] = links
+            read["links"] = links[:MAX_LINKS]
         if args.offset or end < len(text):
             read["offset"] = args.offset
             read["chars"] = len(text)
         if end < len(text):
             read["truncated"] = True
             read["next_offset"] = end
-        if len(text) > LONG_CHARS:
+        if len(text) > LONG_CHARS or len(links) > MAX_LINKS:
             host = urlsplit(args.url).hostname or "page"
             suffix = f"-{sha256(args.url.encode()).hexdigest()[:8]}.txt"
             host = re.sub(r"[^a-zA-Z0-9.-]", "_", host)[: MAX_NAME_BYTES - len(suffix)]
             file = f"web/{host}{suffix}"
+            every = page.get("links", [])
+            whole = text + ("\n\nLinks:\n" + "\n".join(every) + "\n" if every else "")
             try:
-                data = text.encode()
+                data = whole.encode()
                 if (
                     not workspace.exists(file)
                     or workspace.size(file) != len(data)
@@ -653,9 +660,10 @@ def web_tools(web: Web) -> list[Tool[Any]]:
                 pass
             else:
                 read["saved"] = file
+                read["saved_sha256"] = sha256(data).hexdigest()  # core/webguard.py checks it
                 read["hint"] = (
-                    "The whole page is in this file of the task's workspace; "
-                    "read_file it by offset instead of fetching again."
+                    "The whole page is in this file of the task's workspace, all its links "
+                    "at the end; read_file it by offset instead of fetching again."
                 )
         if page["cut"]:
             read["page_cut"] = True
