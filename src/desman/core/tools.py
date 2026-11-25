@@ -643,13 +643,16 @@ def web_tools(web: Web) -> list[Tool[Any]]:
             read["next_offset"] = end
         if len(text) > LONG_CHARS or len(links) > MAX_LINKS:
             host = urlsplit(args.url).hostname or "page"
-            suffix = f"-{sha256(args.url.encode()).hexdigest()[:8]}.txt"
-            host = re.sub(r"[^a-zA-Z0-9.-]", "_", host)[: MAX_NAME_BYTES - len(suffix)]
-            file = f"web/{host}{suffix}"
             every = page.get("links", [])
             whole = text + ("\n\nLinks:\n" + "\n".join(every) + "\n" if every else "")
+            data = whole.encode()
+            # Named by the URL and the content: a page read again in another version gets a file
+            # of its own, so the hash an earlier result recorded still finds its file.
+            name = sha256(args.url.encode()).hexdigest()[:8] + "-" + sha256(data).hexdigest()[:8]
+            suffix = f"-{name}.txt"
+            host = re.sub(r"[^a-zA-Z0-9.-]", "_", host)[: MAX_NAME_BYTES - len(suffix)]
+            file = f"web/{host}{suffix}"
             try:
-                data = whole.encode()
                 if (
                     not workspace.exists(file)
                     or workspace.size(file) != len(data)

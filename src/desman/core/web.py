@@ -224,9 +224,12 @@ class Fetcher:
         title = ""
         note = None
         hrefs: list[str] = []
+        base = url
         if content_type in ("text/html", "application/xhtml+xml"):
             raw = text
-            title, text, hrefs = html_page(raw)
+            title, text, hrefs, declared = html_page(raw)
+            if declared:
+                base = urljoin(url, declared)
             noscript = re.search(r"<noscript\b[^>]*>(.*?)</noscript\s*>", raw, re.I | re.S)
             if len(text) < 200 and (
                 (noscript and "javascript" in noscript[1].lower())
@@ -244,7 +247,10 @@ class Fetcher:
             title=title,
             cut=cut,
             note=note,
-            links=page_links(url, [*hrefs, *map(trim_url, URL_IN_TEXT.findall(text))]),
+            links=(
+                *page_links(base, hrefs),
+                *page_links(url, list(map(trim_url, URL_IN_TEXT.findall(text)))),
+            )[:ALL_LINKS],
         )
 
 
@@ -285,14 +291,17 @@ class _Text(HTMLParser):
         self.parts: list[str] = []
         self.title: list[str] = []
         self.hrefs: list[str] = []
+        self.base: str | None = None
         self._skip = 0
         self._in_title = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in ("a", "area"):
+        if tag in ("a", "area", "base"):
             href = dict(attrs).get("href")
-            if href:
+            if href and tag != "base":
                 self.hrefs.append(href)
+            elif href and self.base is None:
+                self.base = href  # the first <base href> only, as browsers do
         if tag == "title":
             self._in_title = True
         elif tag in _SKIPPED:
@@ -317,18 +326,20 @@ class _Text(HTMLParser):
 
 def html_text(html: str) -> tuple[str, str]:
     """(title, readable text) of an HTML page: no scripts, styles or markup."""
-    title, text, _ = html_page(html)
+    title, text, _, _ = html_page(html)
     return title, text
 
 
-def html_page(html: str) -> tuple[str, str, list[str]]:
-    """(title, readable text, hrefs of its links as written) of an HTML page."""
+def html_page(html: str) -> tuple[str, str, list[str], str | None]:
+    """(title, readable text, hrefs of its links as written, its <base href>) of an HTML
+    page."""
     parser = _Text()
     parser.feed(html)
     parser.close()
     lines = (_SPACES.sub(" ", line).strip() for line in "".join(parser.parts).split("\n"))
     text = _LINES.sub("\n\n", "\n".join(lines)).strip()
-    return _SPACES.sub(" ", "".join(parser.title)).strip(), text, parser.hrefs
+    title = _SPACES.sub(" ", "".join(parser.title)).strip()
+    return title, text, parser.hrefs, parser.base
 
 
 URL_IN_TEXT: Final = re.compile(r"https?://[^\s\"'<>\\`^{}|]+", re.IGNORECASE)

@@ -18,6 +18,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
@@ -52,6 +53,20 @@ DEFAULT_PAUSE_SECONDS = 60
 """Pause used when a provider hits its limits without saying when they reset."""
 DEFAULT_REVIEW_SECONDS = 120
 """How long a reservation of a review lasts (`reserve_review`): a review is one model call."""
+
+
+@dataclass(frozen=True)
+class WebTexts:
+    """A task's texts as core/webguard.py weighs a URL against them (ROADMAP S.1)."""
+
+    person: list[str]
+    """Written by the person or the plan: the goal, the subtasks with their inputs, the
+    person's notes on a retry. URLs in them may always be opened."""
+    private: list[str]
+    """The task's data besides its workspace: the goal, the subtasks with their inputs, the
+    accepted results. Before the task has used the web, no URL may carry a piece of them."""
+    web: list[tuple[str, str]]
+    """(tool, result JSON) of the task's successful web calls."""
 
 
 class StaleStateError(RuntimeError):
@@ -1451,51 +1466,47 @@ class Store:
             )
         ]
 
-    def web_seen_texts(
-        self, task_id: str, web_tools: tuple[str, ...]
-    ) -> tuple[list[str], list[str]]:
-        """Texts whose URLs a task may fetch once it has used the web (core/webguard.py):
-        (what the person and the plan wrote: the goal, the subtasks with their inputs, the
-        person's notes on a retry; what the task's web tools returned). Accepted results are
-        not among them: a model wrote those."""
-        person = [
+    def web_seen_texts(self, task_id: str, web_tools: tuple[str, ...]) -> WebTexts:
+        """What core/webguard.py weighs a URL against, as stored (JSON values undecoded)."""
+        plan = [
             row[0]
             for row in self.conn.execute(
                 """SELECT goal FROM tasks WHERE id = ?
-                   UNION ALL
-                   SELECT description || char(10) || acceptance_criteria || char(10)
-                          || inputs_json FROM subtasks WHERE task_id = ?
-                   UNION ALL
-                   SELECT a.details_json FROM audit_log a JOIN subtasks s ON s.id = a.subtask_id
+                   UNION ALL SELECT description FROM subtasks WHERE task_id = ?
+                   UNION ALL SELECT acceptance_criteria FROM subtasks WHERE task_id = ?
+                   UNION ALL SELECT inputs_json FROM subtasks WHERE task_id = ?""",
+                (task_id, task_id, task_id, task_id),
+            )
+        ]
+        notes = [
+            row[0]
+            for row in self.conn.execute(
+                """SELECT a.details_json FROM audit_log a JOIN subtasks s ON s.id = a.subtask_id
                    WHERE s.task_id = ? AND a.actor = 'human'""",
-                (task_id, task_id, task_id),
+                (task_id,),
+            )
+        ]
+        results = [
+            row[0]
+            for row in self.conn.execute(
+                """SELECT a.content_json FROM artifacts a JOIN subtasks s ON s.id = a.subtask_id
+                   WHERE s.task_id = ? AND a.attempt = s.accepted_attempt""",
+                (task_id,),
             )
         ]
         marks = ", ".join("?" for _ in web_tools)
         web = [
-            row[0]
+            (row[0], row[1])
             for row in self.conn.execute(
-                f"""SELECT e.result_json FROM effects e JOIN subtasks s ON s.id = e.subtask_id
+                f"""SELECT e.tool, e.result_json FROM effects e
+                    JOIN subtasks s ON s.id = e.subtask_id
                     WHERE s.task_id = ? AND e.tool IN ({marks}) AND e.state = 'done'
-                      AND json_extract(e.result_json, '$.ok') = 1""",
+                      AND json_extract(e.result_json, '$.ok') = 1
+                    ORDER BY e.subtask_id, e.execution, e.ordinal""",
                 (task_id, *web_tools),
             )
         ]
-        return person, web
-
-    def web_private_texts(self, task_id: str) -> list[str]:
-        """The task's data an executor holds besides its workspace (core/webguard.py): the
-        subtasks' inputs (documents given) and accepted results."""
-        return [
-            row[0]
-            for row in self.conn.execute(
-                """SELECT inputs_json FROM subtasks WHERE task_id = ? AND inputs_json != '{}'
-                   UNION ALL
-                   SELECT a.content_json FROM artifacts a JOIN subtasks s ON s.id = a.subtask_id
-                   WHERE s.task_id = ? AND a.attempt = s.accepted_attempt""",
-                (task_id, task_id),
-            )
-        ]
+        return WebTexts(person=plan + notes, private=plan + results, web=web)
 
     def start_effect(
         self,
