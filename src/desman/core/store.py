@@ -64,8 +64,9 @@ class WebTexts:
     person's notes on a retry. URLs in them may always be opened."""
     private: list[str]
     """The task's data besides its workspace: the goal, the subtasks with their inputs, the
-    accepted results, the person's nodes of the knowledge tree (the profile among them). Before
-    the task has used the web, no URL may carry a piece of them."""
+    person's notes, every attempt's result and checkpoint, the person's nodes of the knowledge
+    tree (the profile among them). Before the task has used the web, no URL may carry a piece
+    of them."""
     web: list[tuple[str, str]]
     """(tool, result JSON) of the task's successful web calls."""
 
@@ -1491,12 +1492,14 @@ class Store:
             if isinstance(row[0], str)
         ]
         personal = [row[0] for row in self.conn.execute("SELECT text FROM personal_nodes")]
-        results = [
+        results = [  # every attempt's result and checkpoint: an executor may see them all
             row[0]
             for row in self.conn.execute(
                 """SELECT a.content_json FROM artifacts a JOIN subtasks s ON s.id = a.subtask_id
-                   WHERE s.task_id = ? AND a.attempt = s.accepted_attempt""",
-                (task_id,),
+                   WHERE s.task_id = ?
+                   UNION ALL SELECT checkpoint_json FROM subtasks
+                   WHERE task_id = ? AND checkpoint_json IS NOT NULL""",
+                (task_id, task_id),
             )
         ]
         marks = ", ".join("?" for _ in web_tools)
@@ -1517,7 +1520,7 @@ class Store:
                 (task_id, *web_tools, task_id, *web_tools),
             )
         ]
-        return WebTexts(person=plan + notes, private=plan + results + personal, web=web)
+        return WebTexts(person=plan + notes, private=plan + notes + results + personal, web=web)
 
     def start_effect(
         self,

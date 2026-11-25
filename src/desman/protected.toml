@@ -16,7 +16,7 @@
 # Security rules: the sandbox for generated code, the workspace guard for files.
 "core/sandbox.py" = "95ab70214b842937bd7ef42099434721f46cb82f1d712dd0b3b5f0a388c41444"
 "core/wasi_runner.py" = "59d420da9882693cf93ec2d0c4587983f6d20ac46ddb15ea6ebdf9e34a6d9934"
-"core/workspace.py" = "924c8d96a2a57c6360eae4b2df9ceed98ec0d364d04830ab062159a3c8ebc324"
+"core/workspace.py" = "925ee7f5b8d733c8db77cfa5576399f33d43397239b59e651ccead0c94e6dabe"
 "core/atomic.py" = "cbfaa6ef20fc9923426f115893ccda1f7eaf8dbe8290a987a5d8d09d438dc48a"
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"

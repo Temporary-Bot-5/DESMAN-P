@@ -50,8 +50,6 @@ MIN_PIECE: Final = 16
 MAX_BYTES: Final = 32_000_000
 MAX_FILES: Final = 2_000
 """A workspace bigger than these (bytes, files) cannot be checked: fetching waits for the web."""
-_PIECES: Final = re.compile(r"[/?&=;,]+")
-"""What splits a URL into its parts. Not spaces: data in a URL is often prose."""
 
 CARRIES_HINT: Final = " To find a page about it, use web_search."
 UNSEEN: Final = (
@@ -88,12 +86,25 @@ def normal(url: str) -> str | None:
         host = f"[{host}]"
     if port is not None and port != (443 if scheme == "https" else 80):
         host = f"{host}:{port}"
-    path = quote(unquote(parts.path or "/"), safe=_SAFE)
-    query = quote(unquote(parts.query), safe=_SAFE + "?")
-    return urlunsplit((scheme, host, path, query, ""))
+    return urlunsplit((scheme, host, _escaped(parts.path or "/"), _escaped(parts.query), ""))
 
 
-_SAFE: Final = "/:@!$&'()*+,;=-._~"
+_KEPT: Final = "/:@!$&'()*+,;=-._~?%"
+_UNRESERVED: Final = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_ESCAPE: Final = re.compile(r"%([0-9A-Fa-f]{2})")
+
+
+def _escaped(text: str) -> str:
+    """One spelling of a path or query: characters written raw are percent-encoded (UTF-8),
+    an escape of an unreserved character is decoded, every other escape kept (upper-case), so
+    `/` and `%2F` stay different, as they are to the server."""
+    text = quote(text, safe=_KEPT)
+
+    def one(match: re.Match[str]) -> str:
+        char = chr(int(match[1], 16))
+        return char if char in _UNRESERVED else "%" + match[1].upper()
+
+    return _ESCAPE.sub(one, text)
 
 
 def urls_in(texts: Iterable[str]) -> set[str]:
@@ -119,9 +130,10 @@ def screen(store: Store, task_id: str, workspace: Workspace, url: str) -> str | 
             userinfo = parts.username is not None or parts.password is not None
         except ValueError:
             userinfo = False
-        # web_fetch refuses the rest itself; a user part, even an empty one, is refused here
-        # too, so no URL is let through only because it could not be compared.
-        return "URLs with a user part (user@host) are not fetched" if userinfo else None
+        # No URL is let through only because it could not be compared.
+        if userinfo:
+            return "URLs with a user part (user@host) are not fetched"
+        return "only http:// and https:// URLs that can be read are fetched"
     texts = store.web_seen_texts(task_id, WEB_TOOLS)
     person = [text for raw in texts.person for text in strings(raw)]
     if texts.web:
@@ -185,9 +197,10 @@ def returned(tool: str, raw: str) -> list[str]:
         return []
     found: list[str] = []
     if tool == "web_search":
+        # Only the results' addresses: titles and snippets often echo the query.
         for result in output.get("results") or []:
             if isinstance(result, dict):
-                _walk([result.get(key) for key in ("url", "title", "snippet")], found)
+                _walk([result.get("url")], found)
     elif tool == "web_fetch":
         # `asked`: the address before a redirect, opened only after this guard allowed it.
         _walk([output.get(key) for key in ("url", "asked", "title", "content", "links")], found)
@@ -220,8 +233,10 @@ def carried(url: str, sources: list[tuple[str, str]]) -> str | None:
     URL (path and query decoded, host labels; not the fragment, which is never sent), spaces
     compared as one space."""
     parts = urlsplit(url)
-    text = unquote_plus(f"{parts.path}?{parts.query}")
-    pieces = [_spaced(p) for p in _PIECES.split(text)]
+    raw = f"{parts.path}?{parts.query}"
+    # The whole of it in two decodings: data with separators in it (a CSV row, a path, base64)
+    # is found whole, not cut into pieces too short to count.
+    pieces = [_spaced(unquote_plus(raw)), _spaced(unquote(raw))]
     pieces = [p for p in pieces if len(p) >= MIN_PIECE]
     pieces += [label for label in (parts.hostname or "").split(".") if len(label) >= MIN_PIECE]
     if not pieces:
@@ -273,7 +288,11 @@ def _shares(piece: str, content: str) -> bool:
             hits += 1
             at = content.find(chunk, at + 1)
         if at >= 0:
-            return True  # too many places to look at: counted as found
+            # A chunk found too often to walk: every run of MIN_PIECE holding it, looked up.
+            for first in range(max(0, start + _CHUNK - MIN_PIECE), start + 1):
+                window = piece[first : first + MIN_PIECE]
+                if len(window) == MIN_PIECE and window in content:
+                    return True
     return False
 
 
