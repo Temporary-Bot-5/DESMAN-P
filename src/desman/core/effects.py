@@ -439,6 +439,14 @@ class Effects:
         )
         return Replayed(result.model_copy(update={"at": self._at(ordinal)}), interrupted=True)
 
+    def replays(self, tool: Tool[Any], args: BaseModel) -> bool:
+        past = self._past.get(self._next) if self._replaying else None
+        return (
+            past is not None
+            and past["key"] == effect_key(tool.name, args)
+            and (past["state"] != "started" or not tool.repeatable)
+        )
+
     def _at(self, ordinal: int) -> str | None:
         row = self.store.conn.execute(
             "SELECT finished_at FROM effects WHERE subtask_id = ? AND execution = ? AND ordinal = ?",

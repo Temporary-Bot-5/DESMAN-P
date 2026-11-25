@@ -199,6 +199,40 @@ class Workspace:
             return False
         return stat.S_ISREG(mode)
 
+    def scan(self, max_files: int, max_bytes: int) -> tuple[list[tuple[str, bytes]], bool]:
+        """Every regular file's bytes, for code that checks what the workspace holds (never
+        for a model): hard-linked files and names `files()` refuses included, since generated
+        code can make them to hide a file; symlinks never followed, pipes never waited on.
+        Also whether that is all of it (False past `max_files` files or `max_bytes` bytes, or
+        when a file or directory could not be read)."""
+        found: list[tuple[str, bytes]] = []
+        if self.root.is_symlink() or not self.root.is_dir():
+            return found, True
+        total = 0
+        unread: list[OSError] = []
+        for dirpath, _dirnames, filenames in os.walk(
+            self.root, onerror=unread.append, followlinks=False
+        ):
+            base = Path(dirpath)
+            relative = base.relative_to(self.root).as_posix()
+            prefix = "" if relative == "." else relative + "/"
+            for name in filenames:
+                if len(found) >= max_files:
+                    return found, False
+                try:
+                    data = _read_regular(base / name, max_bytes - total + 1)
+                except FileNotFoundError:
+                    continue  # gone meanwhile
+                except OSError:
+                    return found, False  # e.g. made unreadable: it may hide anything
+                if data is None:
+                    continue
+                total += len(data)
+                if total > max_bytes:
+                    return found, False
+                found.append((prefix + name, data))
+        return found, not unread
+
     def files(self) -> list[str]:
         """Regular files in the workspace, as sorted `/`-separated relative paths.
 
@@ -288,3 +322,17 @@ def _is_link(name: str, dir_fd: int | None) -> bool:
         return stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
     except OSError:
         return False
+
+
+def _read_regular(path: Path, limit: int) -> bytes | None:
+    """At most `limit` bytes of a regular file; None for a symlink, pipe, device or socket."""
+    if path.is_symlink():
+        return None
+    fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _BINARY | getattr(os, "O_NONBLOCK", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as file:
+            return file.read(limit)
+    finally:
+        os.close(fd)

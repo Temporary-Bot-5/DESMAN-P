@@ -18,6 +18,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
@@ -52,6 +53,22 @@ DEFAULT_PAUSE_SECONDS = 60
 """Pause used when a provider hits its limits without saying when they reset."""
 DEFAULT_REVIEW_SECONDS = 120
 """How long a reservation of a review lasts (`reserve_review`): a review is one model call."""
+
+
+@dataclass(frozen=True)
+class WebTexts:
+    """A task's texts as core/webguard.py weighs a URL against them (ROADMAP S.1)."""
+
+    person: list[str]
+    """Written by the person or the plan: the goal, the subtasks with their inputs, the
+    person's notes on a retry. URLs in them may always be opened."""
+    private: list[str]
+    """The task's data besides its workspace: the goal, the subtasks with their inputs, the
+    person's notes, every attempt's result and checkpoint, the person's nodes of the knowledge
+    tree (the profile among them). Before the task has used the web, no URL may carry a piece
+    of them."""
+    web: list[tuple[str, str]]
+    """(tool, result JSON) of the task's successful web calls."""
 
 
 class StaleStateError(RuntimeError):
@@ -1450,6 +1467,60 @@ class Store:
                 (task_id, tool),
             )
         ]
+
+    def web_seen_texts(self, task_id: str, web_tools: tuple[str, ...]) -> WebTexts:
+        """What core/webguard.py weighs a URL against, as stored (JSON values undecoded)."""
+        plan = [
+            row[0]
+            for row in self.conn.execute(
+                """SELECT goal FROM tasks WHERE id = ?
+                   UNION ALL SELECT description FROM subtasks WHERE task_id = ?
+                   UNION ALL SELECT acceptance_criteria FROM subtasks WHERE task_id = ?
+                   UNION ALL SELECT inputs_json FROM subtasks WHERE task_id = ?""",
+                (task_id, task_id, task_id, task_id),
+            )
+        ]
+        notes = [  # what the person typed when sending a subtask back (`last_feedback`)
+            row[0]
+            for row in self.conn.execute(
+                """SELECT coalesce(json_extract(a.details_json, '$.cause'),
+                                   json_extract(a.details_json, '$.reason'))
+                   FROM audit_log a JOIN subtasks s ON s.id = a.subtask_id
+                   WHERE s.task_id = ? AND a.actor = 'human' AND a.to_status = 'ready'""",
+                (task_id,),
+            )
+            if isinstance(row[0], str)
+        ]
+        personal = [row[0] for row in self.conn.execute("SELECT text FROM personal_nodes")]
+        results = [  # every attempt's result and checkpoint: an executor may see them all
+            row[0]
+            for row in self.conn.execute(
+                """SELECT a.content_json FROM artifacts a JOIN subtasks s ON s.id = a.subtask_id
+                   WHERE s.task_id = ?
+                   UNION ALL SELECT checkpoint_json FROM subtasks
+                   WHERE task_id = ? AND checkpoint_json IS NOT NULL""",
+                (task_id, task_id),
+            )
+        ]
+        marks = ", ".join("?" for _ in web_tools)
+        web = [
+            (row[0], row[1])
+            for row in self.conn.execute(
+                # Calls a rerun replaced were still seen by the model (it may continue from
+                # them): they count as much as the journal's own.
+                f"""SELECT e.tool, e.result_json FROM effects e
+                    JOIN subtasks s ON s.id = e.subtask_id
+                    WHERE s.task_id = ? AND e.tool IN ({marks}) AND e.state = 'done'
+                      AND json_extract(e.result_json, '$.ok') = 1
+                    UNION ALL
+                    SELECT d.tool, d.result_json FROM discarded_effects d
+                    JOIN subtasks s ON s.id = d.subtask_id
+                    WHERE s.task_id = ? AND d.tool IN ({marks})
+                      AND json_extract(d.result_json, '$.ok') = 1""",
+                (task_id, *web_tools, task_id, *web_tools),
+            )
+        ]
+        return WebTexts(person=plan + notes, private=plan + notes + results + personal, web=web)
 
     def start_effect(
         self,
