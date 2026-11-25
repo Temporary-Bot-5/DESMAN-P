@@ -64,7 +64,8 @@ class WebTexts:
     person's notes on a retry. URLs in them may always be opened."""
     private: list[str]
     """The task's data besides its workspace: the goal, the subtasks with their inputs, the
-    accepted results. Before the task has used the web, no URL may carry a piece of them."""
+    accepted results, the person's nodes of the knowledge tree (the profile among them). Before
+    the task has used the web, no URL may carry a piece of them."""
     web: list[tuple[str, str]]
     """(tool, result JSON) of the task's successful web calls."""
 
@@ -1478,14 +1479,18 @@ class Store:
                 (task_id, task_id, task_id, task_id),
             )
         ]
-        notes = [
+        notes = [  # what the person typed when sending a subtask back (`last_feedback`)
             row[0]
             for row in self.conn.execute(
-                """SELECT a.details_json FROM audit_log a JOIN subtasks s ON s.id = a.subtask_id
-                   WHERE s.task_id = ? AND a.actor = 'human'""",
+                """SELECT coalesce(json_extract(a.details_json, '$.cause'),
+                                   json_extract(a.details_json, '$.reason'))
+                   FROM audit_log a JOIN subtasks s ON s.id = a.subtask_id
+                   WHERE s.task_id = ? AND a.actor = 'human' AND a.to_status = 'ready'""",
                 (task_id,),
             )
+            if isinstance(row[0], str)
         ]
+        personal = [row[0] for row in self.conn.execute("SELECT text FROM personal_nodes")]
         results = [
             row[0]
             for row in self.conn.execute(
@@ -1498,15 +1503,21 @@ class Store:
         web = [
             (row[0], row[1])
             for row in self.conn.execute(
+                # Calls a rerun replaced were still seen by the model (it may continue from
+                # them): they count as much as the journal's own.
                 f"""SELECT e.tool, e.result_json FROM effects e
                     JOIN subtasks s ON s.id = e.subtask_id
                     WHERE s.task_id = ? AND e.tool IN ({marks}) AND e.state = 'done'
                       AND json_extract(e.result_json, '$.ok') = 1
-                    ORDER BY e.subtask_id, e.execution, e.ordinal""",
-                (task_id, *web_tools),
+                    UNION ALL
+                    SELECT d.tool, d.result_json FROM discarded_effects d
+                    JOIN subtasks s ON s.id = d.subtask_id
+                    WHERE s.task_id = ? AND d.tool IN ({marks})
+                      AND json_extract(d.result_json, '$.ok') = 1""",
+                (task_id, *web_tools, task_id, *web_tools),
             )
         ]
-        return WebTexts(person=plan + notes, private=plan + results, web=web)
+        return WebTexts(person=plan + notes, private=plan + results + personal, web=web)
 
     def start_effect(
         self,

@@ -641,7 +641,9 @@ def web_tools(web: Web) -> list[Tool[Any]]:
         if end < len(text):
             read["truncated"] = True
             read["next_offset"] = end
-        if len(text) > LONG_CHARS or len(links) > MAX_LINKS:
+        # Saved whole (with every link) when not all of it is shown: long, more links than
+        # shown, or read from past its start (links come with the first part only).
+        if len(text) > LONG_CHARS or len(links) > MAX_LINKS or (args.offset and links):
             host = urlsplit(args.url).hostname or "page"
             every = page.get("links", [])
             whole = text + ("\n\nLinks:\n" + "\n".join(every) + "\n" if every else "")

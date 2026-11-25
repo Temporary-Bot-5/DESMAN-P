@@ -10,9 +10,12 @@ So code decides which URLs may be fetched, before the request leaves:
   task (search results, the address and links of a page read, URLs in its text). A model can
   follow links as far as it likes, but cannot make up an address that carries data.
 - **Before that**, any URL may be opened unless it carries a piece of the task's data:
-  `MIN_PIECE` characters in a row of a part of the URL found in a file of the workspace (outside
-  `web/` and the tool results), in the subtasks' inputs or in accepted results. A source that
-  writes the URL out whole (a list of links the person gave) does not count for that URL.
+  `MIN_PIECE` characters in a row of a part of the URL (spaces compared as one) found in a file
+  of the workspace, in the goal, the subtasks and their inputs, accepted results or the person's
+  nodes of the knowledge tree. Where a source writes this very URL out (a list of links the
+  person gave), that place does not count. This check is a best effort: it catches data copied
+  into a URL, not data encoded, cut into short parts or retyped. A workspace too big to read
+  (`MAX_FILES`, `MAX_BYTES`) counts as carrying it.
 - A URL with a user part (`https://@host/`) is never opened.
 
 Seen URLs come from the database (the goal, the plan, the effects journal) and from pages
@@ -23,8 +26,8 @@ through the web result it came from, and one a model wrote is what this guard ex
 Search queries are not checked: they go to the search engines the person chose, not to an
 address a page could name, and searching for what the task is about is the point of a search.
 
-Known limits: data encoded (base64, hex) or cut into short parts passes the check before the
-task has used the web; a planner that has seen web results (a decomposer, a continuation) could write an
+Known limits: before the task has used the web, data encoded, cut into short parts or retyped
+passes; a planner that has seen web results (a decomposer, a continuation) could write an
 address into a subtask; the choice among seen URLs carries a few bits.
 """
 
@@ -32,16 +35,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import stat
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any, Final
 from urllib.parse import quote, unquote, unquote_plus, urldefrag, urlsplit, urlunsplit
 
 from desman.core.store import Store
-from desman.core.tools import TOOL_RESULTS_DIR
 from desman.core.web import URL_IN_TEXT, trim_url
 from desman.core.workspace import PathEscapeError, Workspace
 
@@ -51,11 +50,8 @@ MIN_PIECE: Final = 16
 MAX_BYTES: Final = 32_000_000
 MAX_FILES: Final = 2_000
 """A workspace bigger than these (bytes, files) cannot be checked: fetching waits for the web."""
-_NOFOLLOW: Final = getattr(os, "O_NOFOLLOW", 0)
-_NONBLOCK: Final = getattr(os, "O_NONBLOCK", 0)
-SKIPPED_DIRS: Final = ("web/", TOOL_RESULTS_DIR)
-"""Pages saved by web_fetch and archived tool results: what came from outside, not the task's."""
-_PIECES: Final = re.compile(r"[/?&=#;,+\s]+")
+_PIECES: Final = re.compile(r"[/?&=;,]+")
+"""What splits a URL into its parts. Not spaces: data in a URL is often prose."""
 
 CARRIES_HINT: Final = " To find a page about it, use web_search."
 UNSEEN: Final = (
@@ -221,17 +217,24 @@ def _without(text: str, wanted: str) -> str:
 
 def carried(url: str, sources: list[tuple[str, str]]) -> str | None:
     """The first source whose text shares MIN_PIECE characters in a row with a part of the
-    URL (path, query, fragment decoded; host labels)."""
+    URL (path and query decoded, host labels; not the fragment, which is never sent), spaces
+    compared as one space."""
     parts = urlsplit(url)
-    text = unquote_plus(f"{parts.path}?{parts.query}#{parts.fragment}")
-    pieces = [p for p in _PIECES.split(text) if len(p) >= MIN_PIECE]
+    text = unquote_plus(f"{parts.path}?{parts.query}")
+    pieces = [_spaced(p) for p in _PIECES.split(text)]
+    pieces = [p for p in pieces if len(p) >= MIN_PIECE]
     pieces += [label for label in (parts.hostname or "").split(".") if len(label) >= MIN_PIECE]
     if not pieces:
         return None
     for name, content in sources:
-        if any(_shares(piece, content) for piece in pieces):
+        spaced = _spaced(content)
+        if any(_shares(piece, spaced) for piece in pieces):
             return name
     return None
+
+
+def _spaced(text: str) -> str:
+    return " ".join(text.split())
 
 
 _CHUNK: Final = MIN_PIECE // 2
@@ -275,50 +278,12 @@ def _shares(piece: str, content: str) -> bool:
 
 
 def _files(workspace: Workspace) -> tuple[list[tuple[str, str]], bool]:
-    """The workspace's regular files outside SKIPPED_DIRS as (path, text), and whether that is
-    all of them. Read directly, not through Workspace.files(): that one leaves out names it
-    refuses and hard-linked files, which generated code can make to hide a file here."""
-    found: list[tuple[str, str]] = []
-    root = workspace.root
-    if root.is_symlink() or not root.is_dir():
-        return found, True
-    total = 0
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        base = Path(dirpath)
-        relative = base.relative_to(root).as_posix()
-        prefix = "" if relative == "." else relative + "/"
-        if any(prefix.startswith(skipped) for skipped in SKIPPED_DIRS):
-            dirnames.clear()
-            continue
-        for name in filenames:
-            if len(found) >= MAX_FILES:
-                return found, False
-            try:
-                data = _read(base / name)
-            except OSError:
-                continue  # a link, a pipe, gone: nothing of the task's to read
-            if data is None:
-                continue
-            total += len(data)
-            if total > MAX_BYTES:
-                return found, False
-            found.append((prefix + name, data.decode("utf-8", errors="replace")))
-    return found, True
-
-
-def _read(path: Path) -> bytes | None:
-    """A regular file's bytes, never through a symlink and never waiting on a pipe; None for
-    anything else."""
-    if path.is_symlink():
-        return None
-    fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _NONBLOCK)
+    """Every file of the workspace as (path, text), and whether that is all of them."""
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        with os.fdopen(fd, "rb", closefd=False) as file:
-            return file.read(MAX_BYTES + 1)
-    finally:
-        os.close(fd)
+        found, complete = workspace.scan(MAX_FILES, MAX_BYTES)
+    except (OSError, PathEscapeError):
+        return [], False
+    return [(path, data.decode("utf-8", errors="replace")) for path, data in found], complete
 
 
 def _short(url: str) -> str:
