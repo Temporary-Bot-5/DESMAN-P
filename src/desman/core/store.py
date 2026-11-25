@@ -1451,6 +1451,38 @@ class Store:
             )
         ]
 
+    def web_seen_texts(
+        self, task_id: str, web_tools: tuple[str, ...]
+    ) -> tuple[list[str], list[str]]:
+        """Texts whose URLs a task may fetch once it has used the web (core/webguard.py):
+        (what the person and the plan wrote: the goal, the subtasks with their inputs, the
+        person's notes on a retry; what the task's web tools returned). Accepted results are
+        not among them: a model wrote those."""
+        person = [
+            row[0]
+            for row in self.conn.execute(
+                """SELECT goal FROM tasks WHERE id = ?
+                   UNION ALL
+                   SELECT description || char(10) || acceptance_criteria || char(10)
+                          || inputs_json FROM subtasks WHERE task_id = ?
+                   UNION ALL
+                   SELECT a.details_json FROM audit_log a JOIN subtasks s ON s.id = a.subtask_id
+                   WHERE s.task_id = ? AND a.actor = 'human'""",
+                (task_id, task_id, task_id),
+            )
+        ]
+        marks = ", ".join("?" for _ in web_tools)
+        web = [
+            row[0]
+            for row in self.conn.execute(
+                f"""SELECT e.result_json FROM effects e JOIN subtasks s ON s.id = e.subtask_id
+                    WHERE s.task_id = ? AND e.tool IN ({marks}) AND e.state = 'done'
+                      AND json_extract(e.result_json, '$.ok') = 1""",
+                (task_id, *web_tools),
+            )
+        ]
+        return person, web
+
     def start_effect(
         self,
         subtask_id: str,

@@ -46,7 +46,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from desman.core import calls, db
+from desman.core import calls, db, webguard
 from desman.core.context import (
     DEFAULT_BUDGET_TOKENS,
     Context,
@@ -81,7 +81,7 @@ from desman.core.store import (
     StaleStateError,
     Store,
 )
-from desman.core.tools import RUN_TOOL, Registry, Toolbox, ToolResult
+from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
@@ -730,13 +730,21 @@ class Coordinator:
         granted = (
             self.store.tools(subtask.task_id) is Tools.GRANTED and "document" not in subtask.inputs
         )
+        workspace = Workspace(self.workspaces, subtask.task_id)
+
+        def screen(tool: Tool[Any], args: BaseModel) -> str | None:
+            if tool.name != "web_fetch" or not isinstance(url := getattr(args, "url", None), str):
+                return None
+            return webguard.screen(self.store, subtask.task_id, workspace, url)
+
         return Toolbox(
-            Workspace(self.workspaces, subtask.task_id),
+            workspace,
             self.tools if granted else Registry(),
             access=access if granted else None,
             record=record,
             guard=lambda: heartbeat(None),  # a lost lease stops the work before any effect
             journal=journal,
+            screen=screen,  # what web_fetch may open (ROADMAP S.1)
         )
 
     def _execution_results(self, journal: Effects) -> list[tuple[str, ToolResult]]:
@@ -768,7 +776,8 @@ class Coordinator:
         last = self.store.conn.execute(
             "SELECT details_json FROM audit_log WHERE subtask_id = ? "
             "AND json_extract(details_json, '$.execution') = ? "
-            "AND (action = 'tool_refused' OR (action IN ('tool_called', 'tool_replayed') "
+            "AND (action IN ('tool_refused', 'web_refused') "
+            "OR (action IN ('tool_called', 'tool_replayed') "
             "AND json_extract(details_json, '$.ok') = 0)) ORDER BY seq DESC LIMIT 1",
             (journal.subtask_id, journal.execution),
         ).fetchone()

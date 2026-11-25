@@ -12,6 +12,9 @@
 - Only text comes back: HTML is reduced to its readable text; other content types are refused.
 - Results are cached in the database (`web_cache`) for a day: pages read again, by a later
   subtask or another task, cost no request.
+- A page's links come back with its text (`links`, absolute http(s) URLs, at most MAX_LINKS):
+  the executor follows them, and once a task has read the web only such URLs may be opened
+  (core/webguard.py, ROADMAP S.1).
 - Everything returned is marked `untrusted`: page text is data from strangers, never
   instructions. The executor's prompt says so, and the text cannot run anything by itself: tools
   are only called by the model, under the same policy and permissions as any other call.
@@ -30,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from typing import Any, Final, Protocol
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urldefrag, urljoin, urlsplit
 
 import httpx
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -47,6 +50,8 @@ LONG_CHARS: Final = 12_000
 """Above this length a page is saved whole, and a task input is read in parts."""
 MAX_REDIRECTS: Final = 5
 MAX_RESULTS: Final = 10
+MAX_LINKS: Final = 100
+"""Links of a page returned with it, in page order (the first ones, duplicates dropped)."""
 MAX_CALLS: Final = 20
 """web_search and web_fetch calls, each, per execution of a subtask."""
 CACHE_TTL: Final = timedelta(days=1)
@@ -125,6 +130,8 @@ class Page:
     note: str | None = None
     cut: bool = False
     """More than MAX_BYTES: only the start was read."""
+    links: tuple[str, ...] = ()
+    """Absolute http(s) links of the page (hrefs, then URLs in its text), at most MAX_LINKS."""
 
 
 def fetch_client() -> httpx.Client:
@@ -214,9 +221,10 @@ class Fetcher:
         text = bytes(body).decode(response.encoding or "utf-8", errors="replace")
         title = ""
         note = None
+        hrefs: list[str] = []
         if content_type in ("text/html", "application/xhtml+xml"):
             raw = text
-            title, text = html_text(raw)
+            title, text, hrefs = html_page(raw)
             noscript = re.search(r"<noscript\b[^>]*>(.*?)</noscript\s*>", raw, re.I | re.S)
             if len(text) < 200 and (
                 (noscript and "javascript" in noscript[1].lower())
@@ -227,7 +235,15 @@ class Fetcher:
                 or (not text.strip() and "__NEXT_DATA__" in raw)
             ):
                 note = "the page needs JavaScript; no readable text"
-        return Page(url=url, content_type=content_type, text=text, title=title, cut=cut, note=note)
+        return Page(
+            url=url,
+            content_type=content_type,
+            text=text,
+            title=title,
+            cut=cut,
+            note=note,
+            links=page_links(url, [*hrefs, *URL_IN_TEXT.findall(text)]),
+        )
 
 
 _NAT64: Final = ipaddress.IPv6Network("64:ff9b::/96")
@@ -266,10 +282,15 @@ class _Text(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.title: list[str] = []
+        self.hrefs: list[str] = []
         self._skip = 0
         self._in_title = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("a", "area"):
+            href = dict(attrs).get("href")
+            if href:
+                self.hrefs.append(href)
         if tag == "title":
             self._in_title = True
         elif tag in _SKIPPED:
@@ -294,12 +315,48 @@ class _Text(HTMLParser):
 
 def html_text(html: str) -> tuple[str, str]:
     """(title, readable text) of an HTML page: no scripts, styles or markup."""
+    title, text, _ = html_page(html)
+    return title, text
+
+
+def html_page(html: str) -> tuple[str, str, list[str]]:
+    """(title, readable text, hrefs of its links as written) of an HTML page."""
     parser = _Text()
     parser.feed(html)
     parser.close()
     lines = (_SPACES.sub(" ", line).strip() for line in "".join(parser.parts).split("\n"))
     text = _LINES.sub("\n\n", "\n".join(lines)).strip()
-    return _SPACES.sub(" ", "".join(parser.title)).strip(), text
+    return _SPACES.sub(" ", "".join(parser.title)).strip(), text, parser.hrefs
+
+
+URL_IN_TEXT: Final = re.compile(r"https?://[^\s\"'<>\\`^{}|]+", re.IGNORECASE)
+"""A URL written out in text (its trailing punctuation is trimmed by `trim_url`)."""
+_URL_TRAIL: Final = ".,;:!?)]}'\"*>"
+
+
+def trim_url(url: str) -> str:
+    """A URL found in text without the punctuation that usually follows one."""
+    return url.rstrip(_URL_TRAIL)
+
+
+def page_links(base: str, hrefs: list[str]) -> tuple[str, ...]:
+    """Absolute http(s) links, resolved against `base`, without fragments, first MAX_LINKS."""
+    links: dict[str, None] = {}
+    here = urldefrag(base)[0]
+    for href in hrefs:
+        try:
+            url = urldefrag(urljoin(base, trim_url(href.strip())))[0]
+            parts = urlsplit(url)
+        except ValueError:
+            continue
+        if parts.scheme not in ("http", "https") or not parts.hostname or url == here:
+            continue
+        if len(url) > 2_000:
+            continue
+        links[url] = None
+        if len(links) >= MAX_LINKS:
+            break
+    return tuple(links)
 
 
 # ── Cache ────────────────────────────────────────────────────────────────────
@@ -421,6 +478,7 @@ class Web:
             "content_type": page.content_type,
             "text": page.text,
             "cut": page.cut,
+            "links": list(page.links),
         }
         if page.note:
             body["note"] = page.note

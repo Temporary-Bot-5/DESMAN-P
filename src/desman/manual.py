@@ -183,13 +183,15 @@ TOPICS: Final = (
         "`/sandbox setup --wasi --yes` installs the WebAssembly sandbox. "
         "`/sandbox remove --wsl --yes` deletes its sandbox distribution. "
         "web_search and web_fetch (network_access) read public pages and mark results untrusted. "
+        "After a task reads the web, web_fetch opens only URLs seen in it, never ones carrying "
+        "workspace text. "
         "Search covers Wikipedia, Stack Overflow, arXiv and GitHub. Whole-web search needs local "
         "SearXNG (`/search setup`), a Tavily key in `/config`, or borrowing via "
-        "`/global search STATE`. If missing search setup blocks work, the subtask waits "
-        "without spending a retry. Set it up and retry. "
+        "`/global search STATE`. Missing search setup pauses the subtask without spending a "
+        "retry. "
         "suggest_model records a suggestion for the person. read_node reads the knowledge tree "
-        "and is always allowed. Every tool call and refusal is recorded, including the reason "
-        "for refusal. The planner, reviewer and interlocutor have no tools. admin_rights is for "
+        "and is always allowed. Every tool call and refusal is recorded with its reason. "
+        "The planner, reviewer and interlocutor have no tools. admin_rights is for "
         "test machines and warns on every run.",
     ),
     Topic(
