@@ -671,16 +671,39 @@ class Coordinator:
             if run is None:
                 run = self._journal_run(journal)
             output = run.output if run is not None and run.ok else None
-            if not isinstance(output, dict) or output.get("exit_code") != 0:
-                reason = (
-                    f"the result was handed in without a successful {RUN_TOOL} call"
-                    if run is None
-                    else f"the last {RUN_TOOL} failed"
-                )
-                outcome = Failure(
-                    kind=FailureKind.QUALITY,
-                    reason=f"{reason}: run the code again and report what it printed",
-                )
+            if (
+                not isinstance(output, dict)
+                or output.get("exit_code") != 0
+                or output.get("workspace_full")
+            ):
+                kind = FailureKind.QUALITY
+                if isinstance(output, dict) and output.get("workspace_full"):
+                    reason = (
+                        f"the last {RUN_TOOL} left the workspace over its quota "
+                        f"({output['workspace_full']}), then run the code again and report "
+                        "what it printed"
+                    )
+                elif isinstance(output, dict) and output.get("disk_low"):
+                    # Other programs' writes lower the free space too: not the code's fault the
+                    # first time; again (e.g. writing to files it deleted), it is the code's.
+                    if subtask.attempts.transient == 0:
+                        kind = FailureKind.TRANSIENT
+                    reason = (
+                        f"the last {RUN_TOOL} was stopped ({output.get('stopped', '')}): "
+                        "run the code again and report what it printed"
+                    )
+                elif isinstance(output, dict) and output.get("stopped"):
+                    reason = (
+                        f"the last {RUN_TOOL} was stopped ({output['stopped']}): run the code "
+                        "again and report what it printed"
+                    )
+                else:
+                    reason = (
+                        f"the result was handed in without a successful {RUN_TOOL} call"
+                        if run is None
+                        else f"the last {RUN_TOOL} failed"
+                    ) + ": run the code again and report what it printed"
+                outcome = Failure(kind=kind, reason=reason)
         if (
             isinstance(outcome, Failure)
             and outcome.kind is FailureKind.QUALITY

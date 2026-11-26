@@ -554,6 +554,12 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         for flag in ("timed_out", "stdout_cut", "stderr_cut"):
             if getattr(outcome, flag):
                 result[flag] = True
+        if outcome.stopped:
+            result["stopped"] = outcome.stopped
+        if outcome.disk_low:
+            result["disk_low"] = True
+        if outcome.workspace_full:
+            result["workspace_full"] = outcome.workspace_full
         return result
 
     return Tool(
@@ -566,7 +572,10 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         "packages requiring C extensions. Returns {exit_code, stdout, stderr}; timed_out: true "
         "when it was killed (exit_code null). Output retains the tail; stdout_cut / "
         "stderr_cut when the respective stream was cut. "
-        "An exit code of 128+N means killed by signal N. python3 -m pytest is available; "
+        "An exit code of 128+N means killed by signal N. The workspace has a quota of files "
+        "and bytes: workspace_full says it is over and what to do; stopped says why a run was "
+        "stopped (the workspace grew past the quota, or the disk ran low). python3 -m pytest "
+        "is available; "
         "there is no network, so nothing can be pip-installed.",
         args=RunCommandArgs,
         permission=Permission.SHELL,

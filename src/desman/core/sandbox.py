@@ -18,6 +18,9 @@ Bubblewrap provides:
 - resource limits: CPU time, address space, size of a written file, open files, no core dumps,
   set before `bwrap` starts; the number of processes is limited inside the sandbox's own user
   namespace (`prlimit`), since there it counts only the sandbox's processes;
+- a system-call filter (`--seccomp`, `core/seccomp.py`, ADR 0018): the kernel interfaces no
+  ordinary program needs (BPF, userfaultfd, perf events, io_uring, keyrings, ptrace, mounts,
+  modules...) are refused (in WSL too; Docker applies its own default profile);
 - a wall-clock timeout: the whole process group is killed, and the sandbox's processes die with
   it (`--die-with-parent`, the PID namespace goes with its first process);
 - only so much output is kept (the ends of stdout and stderr, where summaries and tracebacks end);
@@ -35,8 +38,16 @@ A standalone Python tree holds only the interpreter and its standard library. Wh
 DESMAN uses one outside /usr, it is bound at /opt/desman/runtime so pytest runs with
 the Python version it was installed for.
 
-Known limits: the workspace is the disk the code may fill (each file is capped, the number of
-files is not); `/usr` is readable (system files only, nothing of the person's).
+The workspace has a quota (files and bytes, `Limits.workspace_*`) on every backend: it is
+measured after each run, and a run over it says so (`Outcome.workspace_full`); under bwrap and
+in WSL the run is also watched and stopped (`Outcome.stopped`) once the workspace grows past
+it, or the disk under it loses more free space than twice the quota (what a count cannot see:
+unreadable folders, files deleted while kept open).
+
+Known limits: the quota is measured, not enforced by the file system, so a run may overshoot it
+by what it writes in about a second; the disk's free space also falls with what other programs
+write meanwhile, which may stop a run that did not cause it (the reason says so); `/usr` is readable (system files only, nothing of the
+person's).
 """
 
 from __future__ import annotations
@@ -75,7 +86,7 @@ from typing import IO, Final
 import httpx
 from pydantic import BaseModel
 
-from desman.core import filelock
+from desman.core import filelock, seccomp
 from desman.core.db import default_db_path
 
 _WINDOWS_PROCESS_GROUP: Final = 0x00000200  # CREATE_NEW_PROCESS_GROUP
@@ -97,6 +108,11 @@ _WSL_SETUP: Final = "Run `desman sandbox setup`."
 _WSL_REPAIR: Final = "run `desman sandbox setup --wsl --yes` to repair it"
 _WSL_CONF: Final = ("[interop]", "enabled=false", "appendWindowsPath=false")
 _WSL_ROOT: Final = ("-d", WSL_DISTRO, "-u", "root", "--cd", "/", "--exec")
+_WSL_SECCOMP: Final = (
+    'f=$(mktemp) && printf "$1" > "$f" && exec 3< "$f" && rm -f "$f" && shift && exec "$@"'
+)
+"""Gives bwrap the system-call filter on fd 3 inside WSL, where no descriptor can be passed
+in: the filter's bytes come as the first argument, every byte an octal escape."""
 WslRunner = Callable[[list[str], float, bool], subprocess.CompletedProcess[bytes]]
 
 MOUNT_POINT: Final = "/workspace"
@@ -164,6 +180,10 @@ class Limits:
     open_files: int = 256
     stdout_chars: int = 6_000
     stderr_chars: int = 2_000
+    workspace_files: int = 10_000
+    """Files, directories and links the workspace may hold after a run."""
+    workspace_bytes: int = 512 * 2**20
+    """Total size of the workspace's files after a run."""
 
 
 @dataclass(frozen=True)
@@ -175,6 +195,234 @@ class Outcome:
     timed_out: bool = False
     stdout_cut: bool = False
     stderr_cut: bool = False
+    workspace_full: str = ""
+    """How much the workspace holds when it is over its quota after the run (empty when not)."""
+    stopped: str = ""
+    """Why the watch stopped the run (bwrap and WSL): the workspace grew past its quota, or the
+    disk under it lost too much free space. Empty when it was not stopped."""
+    disk_low: bool = False
+    """It was stopped for the disk's free space, which other programs' writes lower too: not
+    necessarily the code's doing."""
+
+
+@dataclass(frozen=True)
+class Usage:
+    entries: int
+    size: int
+    complete: bool = True
+    """False when something could not be listed: it may hide anything, so it counts as over."""
+
+    def over(self, limits: Limits) -> bool:
+        return (
+            not self.complete
+            or self.entries > limits.workspace_files
+            or self.size > limits.workspace_bytes
+        )
+
+    def describe(self, limits: Limits) -> str:
+        """What the workspace holds and what to do about it, for the model."""
+        quota = (
+            f"the quota is {limits.workspace_files} files and directories and "
+            f"{_size(limits.workspace_bytes)}"
+        )
+        if not self.complete:
+            return (
+                "part of the workspace cannot be read (or is nested deeper than "
+                f"{_DEPTH} folders), so what it holds is unknown; {quota}: make that folder "
+                'readable (e.g. ["chmod", "-R", "u+rwX", "."]) or delete it before going on'
+            )
+        # Counting stops once either limit is passed: both numbers are then only a floor.
+        floor = "at least " if self.over(limits) else ""
+        return (
+            f"the workspace holds {floor}{self.entries} files and directories and "
+            f"{floor}{_size(self.size)}; {quota}: delete files you do not need "
+            '(e.g. ["rm", "-r", "build"]) before going on'
+        )
+
+
+def _widened(limits: Limits, times: int = 4) -> Limits:
+    """`times` the quota: how far a workspace is counted before a run (so what it already
+    holds is known, but never without end)."""
+    return dataclasses.replace(
+        limits,
+        workspace_files=times * limits.workspace_files,
+        workspace_bytes=times * limits.workspace_bytes,
+    )
+
+
+def _size(size: int) -> str:
+    if size < 2**10:
+        return f"{size} bytes"
+    if size < 2**20:
+        return f"{size / 2**10:.1f} KiB"
+    return f"{size / 2**20:.1f} MiB"
+
+
+_DEPTH: Final = 64
+"""Deepest folder counted; a deeper one makes the count incomplete."""
+
+
+def workspace_usage(root: Path, limits: Limits) -> Usage:
+    """Entries and bytes under `root`, links and junctions never followed. Stops counting once
+    the quota is passed (the answer is then only "over"), so a huge tree costs no more than the
+    quota. Something that cannot be listed makes the count incomplete (generated code could
+    hide files in a folder it made unreadable)."""
+    if sys.platform == "win32":
+        return _usage_by_path(root, limits)
+    return _usage_by_fd(root, limits)
+
+
+def _usage_by_fd(root: Path, limits: Limits) -> Usage:
+    """Each folder opened by its parent's descriptor without following links: code running at
+    the same time cannot swap a folder for a link and lead the count out of the workspace."""
+    if sys.platform == "win32":
+        raise RuntimeError("Windows counts by path")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    entries = size = 0
+    frames: list[tuple[int, Iterator[os.DirEntry[str]]]] = []
+    try:
+        top = os.open(root, flags)
+        try:
+            frames.append((top, os.scandir(top)))
+        except BaseException:
+            os.close(top)
+            raise
+        while frames:
+            fd, items = frames[-1]
+            item = next(items, None)
+            if item is None:
+                frames.pop()
+                _close_frame(fd, items)
+                continue
+            entries += 1
+            try:
+                info = item.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue  # gone meanwhile
+            if stat.S_ISDIR(info.st_mode):
+                if len(frames) >= _DEPTH:
+                    return Usage(entries, size, complete=False)
+                try:
+                    child = os.open(item.name, flags, dir_fd=fd)
+                except FileNotFoundError:
+                    continue
+                try:
+                    frames.append((child, os.scandir(child)))
+                except BaseException:
+                    os.close(child)
+                    raise
+            elif stat.S_ISREG(info.st_mode):
+                size += info.st_size
+            if entries > limits.workspace_files or size > limits.workspace_bytes:
+                return Usage(entries, size)
+    except FileNotFoundError:
+        if not frames:
+            return Usage(0, 0)  # no workspace yet
+        return Usage(entries, size, complete=False)
+    except OSError:
+        return Usage(entries, size, complete=False)
+    finally:
+        for fd, items in frames:
+            _close_frame(fd, items)
+    return Usage(entries, size)
+
+
+def _close_frame(fd: int, items: Iterator[os.DirEntry[str]]) -> None:
+    close = getattr(items, "close", None)
+    if close is not None:
+        close()
+    os.close(fd)
+
+
+def _usage_by_path(root: Path, limits: Limits) -> Usage:
+    """Windows has no descriptor-relative opening: junctions are skipped by their attribute.
+    The root is counted by its extended-length form, so a folder past MAX_PATH (WSL makes them
+    freely) is still listed."""
+    if sys.platform == "win32":
+        text = str(root.absolute())
+        if not text.startswith("\\\\"):
+            root = Path("\\\\?\\" + text)
+    entries = size = 0
+    stack = [(root, 1)]
+    while stack:
+        folder, depth = stack.pop()
+        try:
+            with os.scandir(folder) as items:
+                for item in items:
+                    entries += 1
+                    try:
+                        info = item.stat(follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue  # gone meanwhile
+                    reparse = getattr(info, "st_file_attributes", 0)
+                    if stat.S_ISDIR(info.st_mode):
+                        if not reparse & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                            if depth >= _DEPTH:
+                                return Usage(entries, size, complete=False)
+                            stack.append((Path(item.path), depth + 1))
+                    elif stat.S_ISREG(info.st_mode):
+                        size += info.st_size
+                    if entries > limits.workspace_files or size > limits.workspace_bytes:
+                        return Usage(entries, size)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return Usage(entries, size, complete=False)
+    return Usage(entries, size)
+
+
+def _watch(workdir: Path, limits: Limits) -> Callable[[], Stop | None]:
+    """What stops a run (asked about once a second): the workspace growing past the quota, or
+    past what it already held (so a full one can still be cleaned up); and, since a count
+    misses folders made unreadable and files deleted while kept open, the disk under the
+    workspace losing more free space than twice the quota."""
+    widened = _widened(limits)
+    start = workspace_usage(workdir, widened)
+    allowed = dataclasses.replace(
+        limits,
+        workspace_files=max(limits.workspace_files, start.entries),
+        workspace_bytes=max(limits.workspace_bytes, start.size),
+    )
+    count = start.complete and not start.over(widened)  # else no baseline to grow from
+    disk = 2 * limits.workspace_bytes
+    before = _free(workdir)
+
+    def check() -> Stop | None:
+        if count:
+            usage = workspace_usage(workdir, allowed)
+            if usage.complete and usage.over(allowed):
+                return Stop(
+                    f"the workspace grew past {allowed.workspace_files} files and "
+                    f"directories or {_size(allowed.workspace_bytes)}"
+                )
+        now = _free(workdir)
+        if before is None or now is None:
+            return None  # cannot be read now (a drive that dropped): only the count holds
+        lost = before - now
+        if lost > disk:
+            return Stop(
+                f"the disk holding the workspace lost {_size(lost)} of free space during the "
+                f"run, more than {_size(disk)} (writes of other programs count too)",
+                disk_low=True,
+            )
+        return None
+
+    return check
+
+
+@dataclass(frozen=True)
+class Stop:
+    """Why the watch stops a run."""
+
+    reason: str
+    disk_low: bool = False
+
+
+def _free(path: Path) -> int | None:
+    try:
+        return shutil.disk_usage(path).free
+    except OSError:
+        return None
 
 
 def windows_program_files() -> str:
@@ -220,6 +468,12 @@ def _system_wsl() -> str:
 def find_wsl() -> str | None:
     executable = _system_wsl()
     return executable if os.path.isfile(executable) else shutil.which("wsl.exe")
+
+
+def _wsl_filter() -> str:
+    code = seccomp.program("x86_64")  # the distribution is x86-64 (WSL_PIN)
+    assert code is not None
+    return "".join(f"\\{byte:03o}" for byte in code)
 
 
 def _wsl_workspace(workdir: Path) -> str:
@@ -401,6 +655,13 @@ class Sandbox:
         limits = self.limits
         if timeout is not None:
             limits = _with(limits, min(timeout, limits.timeout))
+        outcome = self._run(command, workdir, stdin, limits)
+        usage = workspace_usage(workdir, limits)
+        if usage.over(limits):
+            outcome = dataclasses.replace(outcome, workspace_full=usage.describe(limits))
+        return outcome
+
+    def _run(self, command: Sequence[str], workdir: Path, stdin: str, limits: Limits) -> Outcome:
         if self.backend == "docker":
             name = _DOCKER_NAME + uuid.uuid4().hex
             try:
@@ -419,7 +680,9 @@ class Sandbox:
             name = f"desman-{uuid.uuid4().hex}"
             argv = self._wsl_argv(command, workdir, limits.timeout, hostname=name)
             try:
-                return _execute_wsl(argv, stdin, limits, lambda: self._stop_wsl(name))
+                return _execute_wsl(
+                    argv, stdin, limits, lambda: self._stop_wsl(name), _watch(workdir, limits)
+                )
             except _WslSuspect as suspect:
                 # The code itself may print what looks like a WSL error: only a failing probe
                 # makes it the sandbox's failure.
@@ -431,7 +694,14 @@ class Sandbox:
             except SandboxUnavailable:
                 self._retry_at = self._monotonic()
                 raise
-        return _execute(self._argv(command, workdir), stdin, limits)
+        with seccomp.program_fd() as fd:
+            return _execute(
+                self._argv(command, workdir, seccomp_fd=fd),
+                stdin,
+                limits,
+                pass_fds=() if fd is None else (fd,),
+                full=_watch(workdir, limits),
+            )
 
     def _wsl_argv(
         self,
@@ -459,7 +729,15 @@ class Sandbox:
             "-s",
             "KILL",
             str(math.ceil(seconds) + 2),
+            "/bin/busybox",
+            "sh",
+            "-c",
+            _WSL_SECCOMP,
+            "sh",
+            _wsl_filter(),
             "/usr/bin/bwrap",
+            "--seccomp",
+            "3",
             "--unshare-all",
             "--unshare-user",
             "--disable-userns",
@@ -581,10 +859,14 @@ class Sandbox:
             detail = str(exc)
         return f"The WSL sandbox could not start: {detail}; {_WSL_REPAIR}"
 
-    def _argv(self, command: Sequence[str], workdir: Path) -> list[str]:
+    def _argv(
+        self, command: Sequence[str], workdir: Path, *, seccomp_fd: int | None = None
+    ) -> list[str]:
         assert self.bwrap is not None and self.prlimit is not None
-        argv = [
-            self.bwrap,
+        argv = [self.bwrap]
+        if seccomp_fd is not None:
+            argv += ["--seccomp", str(seccomp_fd)]
+        argv += [
             "--unshare-all",
             "--unshare-user",
             "--disable-userns",
@@ -672,9 +954,17 @@ class Sandbox:
             return "bubblewrap (bwrap) is not installed"
         if self.prlimit is None:
             return "prlimit (util-linux) is not installed"
-        with tempfile.TemporaryDirectory(prefix="desman-probe-") as empty:
+        with (
+            tempfile.TemporaryDirectory(prefix="desman-probe-") as empty,
+            seccomp.program_fd() as fd,  # the kernel must take the filter, or nothing runs
+        ):
             try:
-                outcome = _execute(self._argv(["true"], Path(empty)), "", _with(self.limits, 10.0))
+                outcome = _execute(
+                    self._argv(["true"], Path(empty), seccomp_fd=fd),
+                    "",
+                    _with(self.limits, 10.0),
+                    pass_fds=() if fd is None else (fd,),
+                )
             except OSError as e:
                 return f"bwrap cannot be started: {e}"
         if outcome.exit_code != 0:
@@ -961,7 +1251,14 @@ def _set_limits(limits: Limits) -> Callable[[], None]:
     return apply
 
 
-def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
+def _execute(
+    argv: list[str],
+    stdin: str,
+    limits: Limits,
+    *,
+    pass_fds: Sequence[int] = (),
+    full: Callable[[], Stop | None] | None = None,
+) -> Outcome:
     with tempfile.TemporaryFile() as given:
         # From a file, not a pipe: writing a large stdin while reading output could deadlock.
         given.write(stdin.encode("utf-8"))
@@ -973,6 +1270,7 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
             stderr=subprocess.PIPE,
             env={},
             close_fds=True,
+            pass_fds=tuple(pass_fds),
             start_new_session=True,  # its own process group, killed as a whole on timeout
             preexec_fn=_set_limits(limits),
         )
@@ -980,7 +1278,9 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
         stdout = _Tail(limits.stdout_chars)
         stderr = _Tail(limits.stderr_chars)
         try:
-            timed_out = _collect(process, {process.stdout: stdout, process.stderr: stderr}, limits)
+            timed_out, stop = _collect(
+                process, {process.stdout: stdout, process.stderr: stderr}, limits, full
+            )
         finally:
             if process.poll() is None:
                 _kill(process)  # interrupted (Ctrl+C) or timed out: nothing is left running
@@ -994,6 +1294,8 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
         timed_out=timed_out,
         stdout_cut=stdout.cut,
         stderr_cut=stderr.cut,
+        stopped="" if stop is None else stop.reason,
+        disk_low=stop is not None and stop.disk_low,
     )
 
 
@@ -1129,7 +1431,13 @@ class _WslSuspect(Exception):
         self.outcome = outcome
 
 
-def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[], None]) -> Outcome:
+def _execute_wsl(
+    argv: list[str],
+    stdin: str,
+    limits: Limits,
+    stop: Callable[[], None],
+    full: Callable[[], Stop | None] | None = None,
+) -> Outcome:
     stdout = _Tail(limits.stdout_chars)
     stderr = _WslTail(limits.stderr_chars)
     diagnostic = _WslTail(2_000)
@@ -1152,21 +1460,36 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[],
             threading.Thread(target=_read_output, args=(process.stdout, stdout)),
             threading.Thread(target=_read_output, args=(process.stderr, stderr, diagnostic)),
         ]
-        timed_out = interrupted = False
+        timed_out = interrupted = killed = False
+        stop_for: Stop | None = None
         try:
             for reader in readers:
                 reader.start()
-            process.wait(timeout=limits.timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+            deadline = time.monotonic() + limits.timeout
+            while True:
+                try:
+                    if full is None:
+                        process.wait(timeout=limits.timeout)
+                    else:
+                        left = deadline - time.monotonic()
+                        process.wait(timeout=max(0.0, min(left, _WATCH_SECONDS)))
+                    break
+                except subprocess.TimeoutExpired:
+                    if full is None or time.monotonic() >= deadline:
+                        timed_out = True
+                        break
+                    stop_for = full()
+                    if stop_for is not None:
+                        break
         except KeyboardInterrupt:
             interrupted = True
             raise
         finally:
             if process.poll() is None:
+                killed = True
                 process.kill()
                 process.wait()
-            if timed_out or interrupted:
+            if timed_out or interrupted or stop_for is not None:
                 stop()
             for reader in readers:
                 if reader.ident is not None:
@@ -1174,14 +1497,16 @@ def _execute_wsl(argv: list[str], stdin: str, limits: Limits, stop: Callable[[],
             process.stdout.close()
             process.stderr.close()
     outcome = Outcome(
-        exit_code=None if timed_out else process.returncode,
+        exit_code=None if timed_out else 128 + 9 if killed else process.returncode,
         stdout=stdout.text(),
         stderr=stderr.text(),
         timed_out=timed_out,
         stdout_cut=stdout.cut,
         stderr_cut=stderr.cut,
+        stopped="" if stop_for is None else stop_for.reason,
+        disk_low=stop_for is not None and stop_for.disk_low,
     )
-    if not timed_out:
+    if not timed_out and not killed:
         detail = diagnostic.text().strip()
         if not 0 <= process.returncode <= 255:
             # No code inside bwrap can exit so: wsl.exe itself failed.
@@ -1271,39 +1596,75 @@ def _read_output(stream: IO[bytes], *buffers: _Tail) -> None:
             buffer.add(chunk)
 
 
+_WATCH_SECONDS: Final = 1.0
+
+
 def _collect(
-    process: subprocess.Popen[bytes], streams: dict[IO[bytes], _Tail], limits: Limits
-) -> bool:
-    """Read both streams until they close or time runs out; True if it ran out."""
+    process: subprocess.Popen[bytes],
+    streams: dict[IO[bytes], _Tail],
+    limits: Limits,
+    full: Callable[[], Stop | None] | None = None,
+) -> tuple[bool, Stop | None]:
+    """Read both streams until they close or time runs out, then wait for the process. Whether
+    time ran out, and why `full` stopped the run: asked about once a second until the process
+    ends, it kills the run (which is not a timeout) by giving a reason."""
     keep = {stream.fileno(): kept for stream, kept in streams.items()}
     deadline = time.monotonic() + limits.timeout
-    timed_out = False
+    timed_out = stopped = False
+    reason: Stop | None = None
+    watch_at = time.monotonic() + _WATCH_SECONDS
+
+    def watch(now: float) -> float:
+        """Checks the workspace when due; how long to wait before the next check."""
+        nonlocal watch_at, stopped, deadline, reason
+        if full is None or stopped or timed_out:
+            return math.inf
+        if now >= watch_at:
+            watch_at = now + _WATCH_SECONDS
+            reason = full()
+            if reason is not None:
+                stopped = True
+                _kill(process)
+                deadline = now + 5.0  # the pipes close once the group is gone
+                return math.inf
+        return max(0.0, watch_at - now)
+
     with selectors.DefaultSelector() as selector:
         for stream in streams:
             selector.register(stream, selectors.EVENT_READ)
         while selector.get_map():
-            left = deadline - time.monotonic()
-            if left <= 0 and not timed_out:
+            now = time.monotonic()
+            until_watch = watch(now)
+            left = deadline - now
+            if left <= 0 and not timed_out and not stopped:
                 timed_out = True
                 _kill(process)
                 deadline = time.monotonic() + 5.0  # the pipes close once the group is gone
                 continue
             if left <= 0:
                 break  # something outlived the kill: stop reading, never hang
-            for key, _ in selector.select(timeout=left):
+            for key, _ in selector.select(timeout=min(left, until_watch)):
                 chunk = os.read(key.fd, _READ_CHUNK)
                 if chunk:
                     keep[key.fd].add(chunk)
                 else:
                     selector.unregister(key.fileobj)
     if timed_out:
-        return True
-    try:
-        process.wait(timeout=max(0.0, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:  # closed its output but still runs
-        _kill(process)
-        return True
-    return False
+        return True, reason
+    while True:  # its output is closed: it may still run, and still fill the workspace
+        now = time.monotonic()
+        until_watch = watch(now)
+        left = deadline - now
+        if left <= 0:
+            if stopped:
+                return False, reason  # the caller kills what is left
+            _kill(process)
+            return True, reason
+        try:
+            process.wait(timeout=min(left, until_watch))
+            return False, reason
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _kill(process: subprocess.Popen[bytes]) -> None:

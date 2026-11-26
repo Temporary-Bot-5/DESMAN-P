@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 import time
 from collections.abc import Sequence
@@ -157,6 +158,189 @@ def test_it_cannot_make_namespaces_or_escape_through_links(ws: Workspace) -> Non
 
 
 # ── Limits ──────────────────────────────────────────────────────────────────
+
+
+@confined
+def test_system_calls_a_program_never_needs_are_refused(ws: Workspace) -> None:
+    code = (
+        "import ctypes, errno, os\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "for nr in (101, 321, 323, 298, 425, 250, 165, 272):\n"  # x86-64 numbers
+        "    ctypes.set_errno(0)\n"
+        "    print(libc.syscall(nr, 0, 0, 0, 0), errno.errorcode.get(ctypes.get_errno()))\n"
+        "print(os.getpid() > 0)\n"
+    )
+    if platform.machine() != "x86_64":
+        pytest.skip("the numbers in this test are x86-64's")
+    outcome = py(ws, code)
+    assert outcome.exit_code == 0, outcome.stderr
+    assert outcome.stdout.splitlines() == ["-1 EPERM"] * 8 + ["True"]
+
+
+@confined
+def test_a_run_that_fills_the_workspace_is_stopped(ws: Workspace) -> None:
+    ws.write("kept.txt", "x")
+    endless = "i=0; while true; do i=$((i+1)); echo x > f$i; done"
+    outcome = Sandbox(Limits(workspace_files=200)).run(["sh", "-c", endless], ws.root, timeout=30)
+    assert not outcome.timed_out and outcome.exit_code == 128 + 9
+    assert outcome.stopped == "the workspace grew past 200 files and directories or 512.0 MiB"
+    assert outcome.workspace_full.startswith("the workspace holds at least 201 files")
+    assert ws.read_text("kept.txt") == "x"  # stopped, nothing removed
+
+
+@confined
+def test_a_run_that_closes_its_output_is_still_watched(ws: Workspace) -> None:
+    endless = "exec >&- 2>&-; i=0; while true; do i=$((i+1)); echo x > f$i; done"
+    outcome = Sandbox(Limits(workspace_files=200)).run(["sh", "-c", endless], ws.root, timeout=30)
+    assert not outcome.timed_out and outcome.exit_code == 128 + 9
+    assert outcome.stopped and "at least 201 files" in outcome.workspace_full
+
+
+@confined
+def test_a_folder_made_unreadable_hides_nothing_from_the_quota(ws: Workspace) -> None:
+    hide = "mkdir d && echo x > d/f && chmod 0 d && sleep 1.5 && echo done"
+    outcome = Sandbox(Limits()).run(["sh", "-c", hide], ws.root, timeout=30)
+    assert outcome.exit_code == 0 and not outcome.stopped  # an unfinished count stops nothing
+    assert outcome.workspace_full.startswith("part of the workspace cannot be read")
+    assert outcome.workspace_full.endswith(
+        "make that folder readable "
+        '(e.g. ["chmod", "-R", "u+rwX", "."]) or delete it before going on'
+    )
+    # The next run is still watched, by the disk's free space.
+    write = "head -c 3000000 /dev/zero > d2; sleep 3; echo done"
+    stopped = Sandbox(Limits(workspace_bytes=10**6)).run(["sh", "-c", write], ws.root, timeout=30)
+    assert stopped.exit_code == 128 + 9
+    assert stopped.stopped.startswith("the disk holding the workspace lost") and stopped.disk_low
+    cleaned = Sandbox(Limits()).run(["sh", "-c", "chmod 700 d && rm -r d d2"], ws.root)
+    assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
+
+
+@confined
+def test_a_workspace_already_over_its_quota_can_still_be_cleaned(ws: Workspace) -> None:
+    for i in range(5):
+        ws.write(f"f{i}", "x" * 100)
+    limits = Limits(workspace_files=3, workspace_bytes=10**6)
+    full = Sandbox(limits).run(["sh", "-c", "sleep 1.5; echo ok"], ws.root)
+    assert full.exit_code == 0 and full.stdout == "ok\n"  # not grown: not stopped
+    assert "holds at least 4 files" in full.workspace_full
+    cleaned = Sandbox(limits).run(["sh", "-c", "rm f1 f2 f3"], ws.root)
+    assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
+
+
+def test_the_quota_is_measured_after_every_backend(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fill(*args: Any) -> Outcome:
+        ws.write("big", "x" * 2048)
+        return Outcome(exit_code=0, stdout="", stderr="")
+
+    box = Sandbox(Limits(workspace_bytes=1024), docker="docker", platform="win32")
+    monkeypatch.setattr(box, "unavailable", lambda: None)
+    monkeypatch.setattr(box, "_run", fill)
+    outcome = box.run(["true"], ws.root)
+    assert outcome.workspace_full == (
+        "the workspace holds at least 1 files and directories and at least 2.0 KiB; "
+        "the quota is 10000 files and directories and 1.0 KiB: delete files you do not need "
+        '(e.g. ["rm", "-r", "build"]) before going on'
+    )
+
+
+def test_the_watch_stops_a_run_the_disk_shows_but_a_count_cannot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.core import sandbox as module
+
+    free = [10**9]
+    monkeypatch.setattr("shutil.disk_usage", lambda path: shutil_usage(free[-1]))
+    check = module._watch(tmp_path, Limits(workspace_files=10, workspace_bytes=4096))
+    assert check() is None
+    free.append(10**9 - 8192)  # twice the quota
+    assert check() is None
+    free.append(10**9 - 8193)
+    assert check() == module.Stop(
+        "the disk holding the workspace lost 8.0 KiB of free space during the run, "
+        "more than 8.0 KiB (writes of other programs count too)",
+        disk_low=True,
+    )
+    free.append(10**9)
+    for i in range(11):
+        (tmp_path / f"f{i}").write_text("x")
+    assert check() == module.Stop("the workspace grew past 10 files and directories or 4.0 KiB")
+
+    def unreadable(path: Any) -> Any:
+        raise OSError("the drive dropped")
+
+    monkeypatch.setattr("shutil.disk_usage", unreadable)
+    assert module._watch(tmp_path / "f0", Limits())() is None  # nothing to compare: no stop
+
+
+def shutil_usage(free: int) -> Any:
+    import shutil
+
+    return shutil._ntuple_diskusage(10**12, 10**12 - free, free)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="counted by path on Windows")
+def test_a_folder_swapped_for_a_link_leads_the_count_nowhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.core.sandbox import Usage, workspace_usage
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "big").write_bytes(b"x" * 1000)
+    root = tmp_path / "ws"
+    (root / "d").mkdir(parents=True)
+    real_open = os.open
+
+    def swap(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if path == "d" and (root / "d").is_dir():  # swapped between listing and opening
+            (root / "d").rmdir()
+            (root / "d").symlink_to(outside, target_is_directory=True)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr("os.open", swap)
+    usage = workspace_usage(root, Limits())
+    assert usage == Usage(1, 0, complete=False)  # refused to follow it, never counted outside
+
+
+def test_a_tree_deeper_than_the_count_goes_is_unfinished(tmp_path: Path) -> None:
+    from desman.core.sandbox import Usage, workspace_usage
+
+    deep = tmp_path / "ws"
+    for _ in range(100):
+        deep = deep / "d"
+    try:
+        deep.mkdir(parents=True)
+    except OSError:
+        pytest.skip("paths past MAX_PATH are not enabled here")
+    assert not workspace_usage(tmp_path / "ws", Limits()).complete
+    assert workspace_usage(tmp_path / "missing", Limits()) == Usage(0, 0)
+    assert not module_usage_by_path(tmp_path / "ws").complete
+
+
+def module_usage_by_path(root: Path) -> Any:
+    from desman.core import sandbox as module
+
+    return module._usage_by_path(root, Limits())
+
+
+def test_workspace_usage_counts_without_following_links(tmp_path: Path) -> None:
+    from desman.core.sandbox import workspace_usage
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "a").write_bytes(b"x" * 10)
+    (tmp_path / "b").write_bytes(b"y" * 5)
+    outside = tmp_path.parent / (tmp_path.name + "-outside")
+    outside.mkdir()
+    (outside / "huge").write_bytes(b"z" * 1000)
+    try:
+        (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("links need Developer Mode on Windows")
+    usage = workspace_usage(tmp_path, Limits())
+    assert (usage.entries, usage.size) == (4, 15)
+    assert workspace_usage(tmp_path, Limits(workspace_files=2)).over(Limits(workspace_files=2))
 
 
 @confined
@@ -343,6 +527,20 @@ def test_the_result_the_model_gets_and_the_audit(ws: Workspace) -> None:
     [(action, details)] = entries
     assert action == "tool_called" and details["permission"] == "shell_execution"
     assert details["args"]["stdin"] == "[12 chars]"  # what was typed in is not kept
+
+
+def test_the_model_is_told_when_the_workspace_is_over_its_quota(ws: Workspace) -> None:
+    sandbox = Scripted(Outcome(exit_code=0, stdout="", stderr="", workspace_full="it holds 9"))
+    toolbox, _ = box(ws, sandbox, Permission.SHELL)
+    result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
+    assert result.ok and isinstance(result.output, dict)
+    assert result.output["workspace_full"] == "it holds 9"
+    stopped = Scripted(Outcome(exit_code=137, stdout="", stderr="", stopped="disk", disk_low=True))
+    toolbox, _ = box(ws, stopped, Permission.SHELL)
+    result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
+    assert result.ok and isinstance(result.output, dict)
+    assert result.output["stopped"] == "disk" and result.output["disk_low"] is True
+    assert "workspace_full" not in result.output
 
 
 @pytest.mark.parametrize(

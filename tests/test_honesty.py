@@ -57,6 +57,10 @@ def run_tool(ran: list[str]) -> Tool[_Code]:
                 "stdout": "\x01" * 5_000 + "FAILED test_calc.py",
                 "stderr": "y" * 1_000 + "AssertionError",
             }
+        if args.command == "fill the workspace":
+            return {"exit_code": 0, "stdout": "5\n", "workspace_full": "over"}
+        if args.command == "while the disk fills":
+            return {"exit_code": 137, "stdout": "", "stopped": "disk", "disk_low": True}
         return {"exit_code": 0, "stdout": "5\n"}
 
     return Tool("run_command", "Run a command.", _Code, Permission.SHELL, run)
@@ -139,6 +143,79 @@ def test_a_result_handed_in_without_running_the_code_is_not_a_result(
     assert len(failed) == 1 and "without a successful run_command call" in json.loads(
         failed[0]["details_json"]
     ).get("reason", "")
+    assert check_history(store.conn, task_id) == []
+
+
+def test_a_run_that_leaves_the_workspace_over_its_quota_is_not_a_result(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    ran: list[str] = []
+
+    def call(command: str) -> str:
+        return json.dumps({"tool_calls": [{"tool": "run_command", "args": {"command": command}}]})
+
+    fake = FakeLLM().on(
+        "Execute",
+        call("fill the workspace"),
+        '{"stdout": "5"}',
+        call("python calc.py"),
+        '{"stdout": "5"}',
+    )
+    task_id = store.create_task(runs_code())
+    run = coordinator(store, llm_executor(fake), tmp_path, clock, ran, Permission.SHELL)
+    assert run.run(task_id).status is TaskStatus.DONE
+    assert ran == ["fill the workspace", "python calc.py"]
+    failed = [r for r in store.audit_log(task_id) if r["action"] == "execution_failed"]
+    reason = json.loads(failed[0]["details_json"]).get("reason", "") if failed else ""
+    assert len(failed) == 1 and "over its quota (over), then run the code again" in reason
+    assert check_history(store.conn, task_id) == []
+
+
+def test_a_run_stopped_for_the_disk_is_not_the_codes_failure(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    ran: list[str] = []
+
+    def call(command: str) -> str:
+        return json.dumps({"tool_calls": [{"tool": "run_command", "args": {"command": command}}]})
+
+    fake = FakeLLM().on(
+        "Execute",
+        call("while the disk fills"),
+        '{"stdout": "5"}',
+        call("python calc.py"),
+        '{"stdout": "5"}',
+    )
+    task_id = store.create_task(runs_code())
+    run = coordinator(store, llm_executor(fake), tmp_path, clock, ran, Permission.SHELL)
+    assert run.run(task_id).status is TaskStatus.DONE
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts.quality == 0 and subtask.attempts.transient == 1
+    assert check_history(store.conn, task_id) == []
+
+
+def test_a_run_stopped_for_the_disk_again_is_the_codes_failure(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    ran: list[str] = []
+
+    def call(command: str) -> str:
+        return json.dumps({"tool_calls": [{"tool": "run_command", "args": {"command": command}}]})
+
+    fake = FakeLLM().on(
+        "Execute",
+        call("while the disk fills"),
+        '{"stdout": "5"}',
+        call("while the disk fills"),
+        '{"stdout": "5"}',
+        call("python calc.py"),
+        '{"stdout": "5"}',
+    )
+    task_id = store.create_task(runs_code())
+    run = coordinator(store, llm_executor(fake), tmp_path, clock, ran, Permission.SHELL)
+    assert run.run(task_id).status is TaskStatus.DONE
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts.transient == 1 and subtask.attempts.quality == 1
     assert check_history(store.conn, task_id) == []
 
 
