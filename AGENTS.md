@@ -242,7 +242,7 @@ src/desman/
     │              #   key), the human's SearXNG, Tavily. Official APIs only, never pages for people
     ├── sandbox.py # Generated code runs only under bwrap: no network, only /usr (read-only) and
     │              #   the workspace, cleared env, rlimits, timeout; unavailable → nothing runs
-    │              #   workspace quota measured after each run (watched under bwrap; ADR 0018)
+    │              #   workspace quota measured after each run (watched under bwrap and WSL; ADR 0018)
     ├── seccomp.py # The bwrap sandbox's system-call filter: classic BPF written here (deny list,
     │              #   other ABIs killed), x86-64 and aarch64 numbers. Protected
     └── coordinator.py # Loop driving one task (`run`) or every task (`work`, a worker);

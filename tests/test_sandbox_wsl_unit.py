@@ -559,7 +559,7 @@ def test_a_wsl_run_that_fills_the_workspace_is_stopped(
         def kill(self) -> None:
             events.append("kill")
 
-    answers = iter([None, "the workspace grew past 10 files"])
+    answers = iter([None, sandbox.Stop("the workspace grew past 10 files")])
     monkeypatch.setattr(sandbox, "_watch", lambda *_: lambda: next(answers))
     monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: Running(1))
     outcome = box.run(["true"], tmp_path, timeout=30)

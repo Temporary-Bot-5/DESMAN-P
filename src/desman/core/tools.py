@@ -556,11 +556,10 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
                 result[flag] = True
         if outcome.stopped:
             result["stopped"] = outcome.stopped
+        if outcome.disk_low:
+            result["disk_low"] = True
         if outcome.workspace_full:
-            result["workspace_full"] = (
-                f"{outcome.workspace_full}: delete files you do not need "
-                '(e.g. ["rm", "-r", "build"]) before going on'
-            )
+            result["workspace_full"] = outcome.workspace_full
         return result
 
     return Tool(
@@ -574,8 +573,9 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         "when it was killed (exit_code null). Output retains the tail; stdout_cut / "
         "stderr_cut when the respective stream was cut. "
         "An exit code of 128+N means killed by signal N. The workspace has a quota of files "
-        "and bytes: workspace_full says it is over; stopped says why a run that grew it was "
-        "stopped. python3 -m pytest is available; "
+        "and bytes: workspace_full says it is over and what to do; stopped says why a run was "
+        "stopped (the workspace grew past the quota, or the disk ran low). python3 -m pytest "
+        "is available; "
         "there is no network, so nothing can be pip-installed.",
         args=RunCommandArgs,
         permission=Permission.SHELL,

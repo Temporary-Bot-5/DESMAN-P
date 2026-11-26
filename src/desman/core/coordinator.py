@@ -676,10 +676,19 @@ class Coordinator:
                 or output.get("exit_code") != 0
                 or output.get("workspace_full")
             ):
+                kind = FailureKind.QUALITY
                 if isinstance(output, dict) and output.get("workspace_full"):
                     reason = (
-                        f"the last {RUN_TOOL} left the workspace over its quota: delete files "
-                        "you do not need, then run the code again and report what it printed"
+                        f"the last {RUN_TOOL} left the workspace over its quota "
+                        f"({output['workspace_full']}), then run the code again and report "
+                        "what it printed"
+                    )
+                elif isinstance(output, dict) and output.get("disk_low"):
+                    # Other programs' writes lower the free space too: not the code's fault.
+                    kind = FailureKind.TRANSIENT
+                    reason = (
+                        f"the last {RUN_TOOL} was stopped ({output.get('stopped', '')}): "
+                        "run the code again and report what it printed"
                     )
                 elif isinstance(output, dict) and output.get("stopped"):
                     reason = (
@@ -692,7 +701,7 @@ class Coordinator:
                         if run is None
                         else f"the last {RUN_TOOL} failed"
                     ) + ": run the code again and report what it printed"
-                outcome = Failure(kind=FailureKind.QUALITY, reason=reason)
+                outcome = Failure(kind=kind, reason=reason)
         if (
             isinstance(outcome, Failure)
             and outcome.kind is FailureKind.QUALITY

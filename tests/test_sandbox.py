@@ -202,11 +202,15 @@ def test_a_folder_made_unreadable_hides_nothing_from_the_quota(ws: Workspace) ->
     outcome = Sandbox(Limits()).run(["sh", "-c", hide], ws.root, timeout=30)
     assert outcome.exit_code == 0 and not outcome.stopped  # an unfinished count stops nothing
     assert outcome.workspace_full.startswith("part of the workspace cannot be read")
+    assert outcome.workspace_full.endswith(
+        "make that folder readable "
+        '(e.g. ["chmod", "-R", "u+rwX", "."]) or delete it before going on'
+    )
     # The next run is still watched, by the disk's free space.
     write = "head -c 3000000 /dev/zero > d2; sleep 3; echo done"
     stopped = Sandbox(Limits(workspace_bytes=10**6)).run(["sh", "-c", write], ws.root, timeout=30)
     assert stopped.exit_code == 128 + 9
-    assert stopped.stopped.startswith("the disk holding the workspace lost")
+    assert stopped.stopped.startswith("the disk holding the workspace lost") and stopped.disk_low
     cleaned = Sandbox(Limits()).run(["sh", "-c", "chmod 700 d && rm -r d d2"], ws.root)
     assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
 
@@ -236,7 +240,8 @@ def test_the_quota_is_measured_after_every_backend(
     outcome = box.run(["true"], ws.root)
     assert outcome.workspace_full == (
         "the workspace holds at least 1 files and directories and at least 2.0 KiB; "
-        "the quota is 10000 files and directories and 1.0 KiB"
+        "the quota is 10000 files and directories and 1.0 KiB: delete files you do not need "
+        '(e.g. ["rm", "-r", "build"]) before going on'
     )
 
 
@@ -252,14 +257,21 @@ def test_the_watch_stops_a_run_the_disk_shows_but_a_count_cannot(
     free.append(10**9 - 8192)  # twice the quota
     assert check() is None
     free.append(10**9 - 8193)
-    assert check() == (
+    assert check() == module.Stop(
         "the disk holding the workspace lost 8.0 KiB of free space during the run, "
-        "more than 8.0 KiB (writes of other programs count too)"
+        "more than 8.0 KiB (writes of other programs count too)",
+        disk_low=True,
     )
     free.append(10**9)
     for i in range(11):
         (tmp_path / f"f{i}").write_text("x")
-    assert check() == "the workspace grew past 10 files and directories or 4.0 KiB"
+    assert check() == module.Stop("the workspace grew past 10 files and directories or 4.0 KiB")
+
+    def unreadable(path: Any) -> Any:
+        raise OSError("the drive dropped")
+
+    monkeypatch.setattr("shutil.disk_usage", unreadable)
+    assert module._watch(tmp_path / "f0", Limits())() is None  # nothing to compare: no stop
 
 
 def shutil_usage(free: int) -> Any:
@@ -516,12 +528,13 @@ def test_the_model_is_told_when_the_workspace_is_over_its_quota(ws: Workspace) -
     toolbox, _ = box(ws, sandbox, Permission.SHELL)
     result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
     assert result.ok and isinstance(result.output, dict)
-    assert result.output["workspace_full"].startswith("it holds 9: delete files")
-    stopped = Scripted(Outcome(exit_code=137, stdout="", stderr="", stopped="it grew"))
+    assert result.output["workspace_full"] == "it holds 9"
+    stopped = Scripted(Outcome(exit_code=137, stdout="", stderr="", stopped="disk", disk_low=True))
     toolbox, _ = box(ws, stopped, Permission.SHELL)
     result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
     assert result.ok and isinstance(result.output, dict)
-    assert result.output["stopped"] == "it grew" and "workspace_full" not in result.output
+    assert result.output["stopped"] == "disk" and result.output["disk_low"] is True
+    assert "workspace_full" not in result.output
 
 
 @pytest.mark.parametrize(
