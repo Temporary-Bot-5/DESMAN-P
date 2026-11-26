@@ -35,11 +35,14 @@ import dataclasses
 import functools
 import hashlib
 import json
+import os
 import shutil
+import site
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +51,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from desman import bench, improve, providers
-from desman.config import Config, ConfigManager, Tuning, open_config
+from desman.config import Config, ConfigError, ConfigManager, Tuning, open_config
 from desman.core import proposals
 from desman.core.proposals import Evaluation, Proposal, Status
 from desman.core.sandbox import SANDBOX_PATH, Limits, Sandbox, SandboxUnavailable
@@ -68,9 +71,18 @@ class Unconfined(EvaluationError):
     """No version can be run confined here (no bubblewrap): nothing is evaluated."""
 
 
+REPROBE_AFTER = 60.0
+"""Seconds after which a sandbox found unavailable is probed again (bwrap installed since,
+or a probe that failed while the machine was busy)."""
+
+
 @functools.cache
 def _sandbox() -> Sandbox:
     return Sandbox()
+
+
+_failed_at: dict[int, float] = {}
+_monotonic = time.monotonic
 
 
 def isolation(box: Sandbox | None = None) -> str | None:
@@ -78,7 +90,14 @@ def isolation(box: Sandbox | None = None) -> str | None:
     box = _sandbox() if box is None else box
     if not box.platform.startswith("linux"):
         return "proposals are evaluated only on Linux, under bubblewrap"
-    return box.unavailable()
+    problem = box.unavailable()
+    if problem is not None:
+        now = _monotonic()
+        failed = _failed_at.setdefault(id(box), now)
+        if now - failed >= REPROBE_AFTER:
+            del _failed_at[id(box)]
+            problem = box.reprobe()
+    return problem
 
 
 def evaluate(
@@ -331,8 +350,11 @@ def _check_changes(base: Path, candidate: Path, changes: list[dict[str, Any]]) -
 
 
 def _without(text: str, names: set[str]) -> list[str]:
-    """The module, as its syntax, without the assignments to `names`."""
-    return [ast.dump(n) for n in _parse(text).body if _assigned(n) not in names]
+    """The module, as its syntax, with each assignment to `names` only marked where it stands:
+    its value may differ, not how many there are or what comes before and after them."""
+    return [
+        f"<{name}>" if (name := _assigned(n)) in names else ast.dump(n) for n in _parse(text).body
+    ]
 
 
 def _parse(text: str) -> ast.Module:
@@ -410,21 +432,34 @@ def _run(
     data, home, config = (folder / f"{tree.name}-{name}" for name in ("data", "home", "config"))
     for made in (data, home, config):
         made.mkdir(mode=0o700)
-    if mode == "real":  # only what the benchmark may use; the fake needs none
-        ConfigManager(config / "config.json").save(
-            bench_config(open_config().load(), provider, model)
-        )
+    read_only = [*_runtime(), tree, config]
     env = {
         "PATH": SANDBOX_PATH,
         "LANG": "C.UTF-8",
         "HOME": str(home),
         "TMPDIR": str(data),  # on disk: the benchmark's database is made in it
-        "PYTHONPATH": str(tree / "src"),
+        "PYTHONPATH": os.pathsep.join([str(tree / "src"), *map(str, _user_site())]),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
         "DESMAN_DATA_DIR": str(data),
         "DESMAN_CONFIG_DIR": str(config),
     }
+    if mode == "real":  # only what the benchmark may use; the fake needs none
+        try:
+            given = bench_config(open_config().load(), provider, model)
+            ConfigManager(config / "config.json").save(given)
+        except (ConfigError, OSError) as e:
+            raise RunFailed(f"cannot read the config: {e}") from e
+        # How this machine reaches the network: a proxy, its own certificates.
+        for name in NETWORK_ENV:
+            value = os.environ.get(name) or os.environ.get(name.lower())
+            if value:
+                env[name] = value
+        for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):
+            if env.get(name) and Path(env[name]).exists():
+                read_only.append(Path(env[name]).resolve())
+            else:
+                env.pop(name, None)
     argv = [python, "-m", "desman.bench", "--mode", mode, "--tuning", tuning.model_dump_json()]
     if provider is not None:
         argv += ["--provider", provider]
@@ -434,7 +469,7 @@ def _run(
     try:
         done = box.program(
             argv,
-            read_only=[*_runtime(), tree, config],
+            read_only=read_only,
             writable=[data, home],
             env=env,
             cwd=tree,
@@ -472,16 +507,35 @@ def _limits(seconds: float) -> Limits:
     )
 
 
+NETWORK_ENV = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
+"""What a run on real models keeps of the environment: how to reach the network, no more."""
+
+
 def _runtime() -> list[Path]:
-    """The Python DESMAN runs on and its packages (a venv, the interpreter outside /usr), shown
-    read-only; never more of the person's files than those folders."""
+    """The Python DESMAN runs on and its packages (a venv, the interpreter outside /usr, the
+    user's site-packages), shown read-only at their own paths, also through a link (the command
+    names the interpreter by the path it was started with); never more of the person's files."""
     found: list[Path] = []
-    for prefix in (sys.prefix, sys.base_prefix):
-        path = Path(prefix).resolve()
-        if path.is_relative_to("/usr") or any(path.is_relative_to(p) for p in found):
-            continue
-        found = [p for p in found if not p.is_relative_to(path)] + [path]
+    prefixes: list[Path] = [Path(sys.prefix), Path(sys.base_prefix), *_user_site()]
+    for prefix in prefixes:
+        for path in (prefix.absolute(), prefix.resolve()):
+            if path.is_relative_to("/usr") or any(path.is_relative_to(p) for p in found):
+                continue
+            found = [p for p in found if not p.is_relative_to(path)] + [path]
     return found
+
+
+def _user_site() -> list[Path]:
+    """The user's site-packages, when DESMAN's packages may be there (`pip install --user`)."""
+    folder = site.getusersitepackages() if site.ENABLE_USER_SITE else None
+    return [Path(folder)] if folder and folder in sys.path and Path(folder).is_dir() else []
 
 
 def bench_config(config: Config, provider: str | None, model: str | None) -> Config:

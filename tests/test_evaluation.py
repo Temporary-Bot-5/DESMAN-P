@@ -333,7 +333,6 @@ def test_the_current_version_runs_with_the_persons_tuning(checkout: Path) -> Non
     assert old["subtasks"] == new["subtasks"] == len(bench.CASES)
 
 
-@confined
 def test_a_proposal_made_from_other_files_is_not_evaluated(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
@@ -343,7 +342,7 @@ def test_a_proposal_made_from_other_files_is_not_evaluated(checkout: Path) -> No
     )
     git(checkout, "commit", "-q", "-am", "later")
     with pytest.raises(evaluation.EvaluationError, match="other versions of src/desman/planner"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
     assert proposals.evaluations(s.conn, p.id) == []
     assert len(worktrees(checkout)) == 1
 
@@ -360,7 +359,6 @@ def edited_diff(repo: Path, edit: Any) -> tuple[str, dict[str, Any]]:
     return f"diff --git a/{name} b/{name}\n" + "".join(lines), details
 
 
-@confined
 def test_a_diff_changing_more_than_the_targets_is_refused(checkout: Path) -> None:
     s = store()
     diff, details = edited_diff(
@@ -368,21 +366,19 @@ def test_a_diff_changing_more_than_the_targets_is_refused(checkout: Path) -> Non
     )
     p = proposal(s, diff, details)
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
     assert proposals.evaluations(s.conn, p.id) == []
 
 
-@confined
 def test_a_diff_giving_other_texts_than_proposed_is_refused(checkout: Path) -> None:
     s = store()
     diff, details = improve.render([rules_change(checkout)], package(checkout))
     details["changes"][0]["new"] += " Something else."
     p = proposal(s, diff, details)
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
 
 
-@confined
 def test_a_diff_touching_another_file_is_refused(checkout: Path) -> None:
     s = store()
     name = "src/desman/agents.py"
@@ -393,10 +389,9 @@ def test_a_diff_touching_another_file_is_refused(checkout: Path) -> None:
     )
     p = proposal(s, f"diff --git a/{name} b/{name}\n" + "".join(lines), {"changes": []})
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
 
 
-@confined
 def test_a_patch_is_never_applied(checkout: Path) -> None:
     """A diff that git would apply to more than it shows (here: a new file beside the change)
     is not what code builds from the proposal's texts, so nothing of it runs."""
@@ -409,17 +404,16 @@ def test_a_patch_is_never_applied(checkout: Path) -> None:
     )
     p = proposal(s, diff + extra, details)
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
 
 
-@confined
 def test_a_target_text_that_may_not_be_one_is_refused(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
     details = p.details | {"changes": [p.details["changes"][0] | {"new": "no format"}]}
     q = proposal(s, p.diff or "", details)
     with pytest.raises(evaluation.EvaluationError, match="must still contain"):
-        evaluate(s, q, checkout)
+        evaluate(s, q, checkout, box=Box())
 
 
 @confined
@@ -797,7 +791,8 @@ def swapped(text: str, name: str, source: str) -> str:
         ("RULES = 'new'\nPLANNER_RULES = 'new'\n", "more than the targets"),
         ("PLANNER_RULE = 'new'\n", "more than the targets"),
         ("PLANNER_RULES = 'new'\nimport os\n", "more than the targets"),
-        ("PLANNER_RULES = 'new'\nPLANNER_RULES = PLANNER_RULES.upper()\n", "not a plain value"),
+        ("PLANNER_RULES = 'new'\nPLANNER_RULES = PLANNER_RULES.upper()\n", "more than the targets"),
+        ("PLANNER_RULES = 'evil'\nPLANNER_RULES = 'new'\n", "more than the targets"),
         ("PLANNER_RULES = KIND_RULES = 'new'\n", "more than the targets"),
         ("PLANNER_RULES = 'new'\nPLANNER_RULES += '!'\n", "more than the targets"),
         ("PLANNER_RULES = ('new'\n", "not valid Python"),
@@ -834,3 +829,80 @@ def test_the_same_text_written_otherwise_is_still_that_text(checkout: Path, tmp_
     path = candidate / "src" / "desman" / "planner.py"
     path.write_text(swapped(path.read_text(), "PLANNER_RULES", 'PLANNER_RULES = """ne""" "w"\n'))
     evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
+
+
+def test_a_target_moved_is_refused(checkout: Path, tmp_path: Path) -> None:
+    """Its value may change, not where it stands: moved after another statement, an earlier
+    reader of the name would see something else."""
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    text = swapped(path.read_text(), "PLANNER_RULES", "")
+    path.write_text(text + "PLANNER_RULES = 'new'\n")
+    with pytest.raises(evaluation.EvaluationError, match="more than the targets"):
+        evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
+
+
+def test_the_runtime_is_shown_also_through_a_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real-venv"
+    real.mkdir()
+    link = tmp_path / "venv"
+    link.symlink_to(real)
+    monkeypatch.setattr(sys, "prefix", str(link))
+    found = evaluation._runtime()
+    assert link in found and real.resolve() in found
+
+
+def test_a_real_run_keeps_how_to_reach_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ConfigManager(default_config_path()).save(Config())
+    bundle = tmp_path / "ca.pem"
+    bundle.write_text("certificates")
+    monkeypatch.setenv("https_proxy", "http://proxy.invalid:3128")
+    monkeypatch.setenv("NO_PROXY", "localhost")
+    monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "missing"))
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    with pytest.raises(evaluation.RunFailed):
+        evaluation._run(
+            tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
+        )
+    [call] = box.calls
+    assert call["env"]["HTTPS_PROXY"] == "http://proxy.invalid:3128"
+    assert call["env"]["NO_PROXY"] == "localhost"
+    assert call["env"]["SSL_CERT_FILE"] == str(bundle)
+    assert "SSL_CERT_DIR" not in call["env"]  # a folder that is not there is not passed
+    assert bundle.resolve() in call["read_only"]
+
+
+def test_a_config_that_cannot_be_read_fails_the_run(tmp_path: Path) -> None:
+    default_config_path().parent.mkdir(parents=True, exist_ok=True)
+    default_config_path().write_text("{not json")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    with pytest.raises(evaluation.RunFailed, match="cannot read the config"):
+        evaluation._run(
+            tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
+        )
+    assert box.calls == []
+
+
+def test_an_unavailable_sandbox_is_probed_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    box = Sandbox(platform="linux")
+    probes: list[str] = []
+    monkeypatch.setattr(box, "unavailable", lambda: "no bubblewrap")
+    monkeypatch.setattr(box, "reprobe", lambda: probes.append("again"))
+    assert evaluation.isolation(box) is not None
+    now[0] += evaluation.REPROBE_AFTER - 1
+    assert evaluation.isolation(box) is not None and probes == []
+    now[0] += 1
+    evaluation.isolation(box)
+    assert probes == ["again"]
