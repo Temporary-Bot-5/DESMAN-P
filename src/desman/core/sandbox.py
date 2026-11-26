@@ -974,14 +974,14 @@ class Sandbox:
         cwd: Path,
         limits: Limits,
         network: bool = False,
-        watch: Path | None = None,
+        scratch: Sequence[Path] = (),
     ) -> Outcome:
         """Run a program that may not be trusted (not generated code: a version of DESMAN being
         evaluated) under bubblewrap: the system's /usr, the given folders at their own paths
         (read-only, except `writable`), a private /tmp, only `env`; no network unless
-        `network`. `watch`: a writable folder held to the workspace quota while it runs
-        (`Outcome.stopped`). Linux only: raises SandboxUnavailable elsewhere, or when bwrap
-        cannot run.
+        `network`. `scratch`: folders of its own, in memory (`limits.tmp_bytes` each), gone
+        with it: it writes nothing to the disk there. Linux only: raises SandboxUnavailable
+        elsewhere, or when bwrap cannot run.
 
         The network, when given, is the host's: its loopback services and abstract Unix sockets
         too. Only a run the person asked for on real models gets it."""
@@ -1000,12 +1000,12 @@ class Sandbox:
                     cwd=cwd,
                     limits=limits,
                     network=network,
+                    scratch=scratch,
                     seccomp_fd=fd,
                 ),
                 "",
                 limits,
                 pass_fds=() if fd is None else (fd,),
-                full=None if watch is None else _watch(watch, limits),
             )
 
     def _program_argv(
@@ -1019,6 +1019,7 @@ class Sandbox:
         limits: Limits,
         network: bool,
         seccomp_fd: int | None,
+        scratch: Sequence[Path] = (),
     ) -> list[str]:
         assert self.bwrap is not None and self.prlimit is not None
         argv = [self.bwrap]
@@ -1054,6 +1055,8 @@ class Sandbox:
             argv += ["--ro-bind", str(path), str(path)]
         for path in writable:
             argv += ["--bind", str(path), str(path)]
+        for path in scratch:
+            argv += ["--size", str(limits.tmp_bytes), "--tmpfs", str(path)]
         argv += [
             "--chdir",
             str(cwd),

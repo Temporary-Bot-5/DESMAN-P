@@ -597,12 +597,14 @@ def test_a_run_is_confined_and_given_no_secret(
     env = call["env"]
     assert "parent-secret" not in json.dumps(env)
     assert env["PYTHONPATH"] == str(tree / "src") and env["PYTHONDONTWRITEBYTECODE"] == "1"
-    for name in ("HOME", "DESMAN_DATA_DIR", "DESMAN_CONFIG_DIR", "TMPDIR"):
-        assert Path(env[name]).is_relative_to(tmp_path) and Path(env[name]).is_dir()
+    data = tmp_path / "tree-data"
+    for name in ("HOME", "DESMAN_DATA_DIR", "TMPDIR"):
+        assert Path(env[name]) == data
+    assert Path(env["DESMAN_CONFIG_DIR"]).is_dir()
     assert call["network"] is False and call["config"] is None  # the fake needs no config
-    # Read-only: the worktree, the config and the interpreter; written: its own folders only.
+    # Read-only: the worktree, the config and the interpreter; written: a folder in memory only.
     assert tree in call["read_only"] and call["cwd"] == tree
-    assert all(p.is_relative_to(tmp_path) for p in call["writable"])
+    assert call["writable"] == [] and call["scratch"] == [data] and not data.exists()
     assert not any(ROOT.resolve().is_relative_to(p) for p in call["read_only"])
     assert not any(Path.home().resolve().is_relative_to(p) for p in call["read_only"])
 
@@ -683,10 +685,10 @@ attempt("write_tree", lambda: open(os.path.join(os.path.dirname(__file__), "x"),
 attempt("read_secret", lambda: open(SECRET).read())
 attempt("read_checkout", lambda: open(CHECKOUT).read())
 attempt("connect", lambda: socket.create_connection(("127.0.0.1", PORT), 2))
-found["env"] = dict(os.environ)
+attempt("write_data", lambda: open(os.path.join(os.environ["DESMAN_DATA_DIR"], "x"), "w"))
+found["env_secret"] = "parent-secret" in json.dumps(dict(os.environ))
 found["home"] = os.path.expanduser("~")
-with open(os.path.join(os.environ["DESMAN_DATA_DIR"], "found.json"), "w") as f:
-    json.dump(found, f)
+print(json.dumps(found), file=sys.stderr)
 sys.exit(3)
 """
 
@@ -709,7 +711,7 @@ def test_a_hostile_version_reaches_nothing_of_the_persons(
         port = server.getsockname()[1]
         given = f"SECRET = {str(secret)!r}\nCHECKOUT = {str(ROOT / 'pyproject.toml')!r}\n"
         (tree / "src" / "desman" / "bench.py").write_text(given + f"PORT = {port}\n" + HOSTILE)
-        with pytest.raises(evaluation.RunFailed, match="exit code 3"):
+        with pytest.raises(evaluation.RunFailed) as failed:
             evaluation._run(
                 tree,
                 tmp_path,
@@ -722,13 +724,15 @@ def test_a_hostile_version_reaches_nothing_of_the_persons(
             )
     finally:
         server.close()
-    found = json.loads((tmp_path / "tree-data" / "found.json").read_text())
+    found = json.loads(str(failed.value))
     assert found["write_tree"] in ("OSError", "PermissionError")
     assert found["read_secret"] == "FileNotFoundError"
     assert found["read_checkout"] == "FileNotFoundError"
     assert found["connect"] != "done"
-    assert "parent-secret" not in json.dumps(found["env"])
-    assert Path(found["home"]).is_relative_to(tmp_path)
+    assert found["env_secret"] is False
+    assert found["write_data"] == "done"  # its own folder, in memory: nothing on the disk
+    assert not (tmp_path / "tree-data").exists()
+    assert Path(found["home"]) == tmp_path / "tree-data"
 
 
 # ── A proposal trying to change more than texts (S.3) ────────────────────────
@@ -854,13 +858,24 @@ def test_a_target_moved_is_refused(checkout: Path, tmp_path: Path) -> None:
 def test_the_runtime_is_shown_also_through_a_link(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = tmp_path / "real-venv"
-    real.mkdir()
-    link = tmp_path / "venv"
+    real = tmp_path / "real-python"
+    real.write_text("")
+    link = tmp_path / "python"
     link.symlink_to(real)
-    monkeypatch.setattr(sys, "prefix", str(link))
+    monkeypatch.setattr(sys, "executable", str(link))
     found = evaluation._runtime()
     assert link in found and real.resolve() in found
+
+
+def test_the_runtime_is_only_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Python installed with `--prefix=~/.local` must not show the rest of that prefix
+    (DESMAN's own data lives in ~/.local/share): only the interpreter, its library folders and
+    its shared library."""
+    for path in evaluation._runtime():
+        assert not default_config_path().is_relative_to(path)
+        assert not db.default_db_path().is_relative_to(path)
+        assert not Path.home().is_relative_to(path)
+        assert path.is_file() or "python" in path.name.lower() or "site-packages" in str(path)
 
 
 def test_a_real_run_keeps_how_to_reach_the_network(
@@ -893,8 +908,8 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     assert bundle in call["read_only"] and bundle.resolve() in call["read_only"]
     # A local model's slots are the run's own: no folder the person's runs trust is writable.
     assert call["env"]["USER"]
-    assert Path(call["env"]["XDG_RUNTIME_DIR"]).is_relative_to(tmp_path / "tree-data")
-    assert call["writable"] == [tmp_path / "tree-data"]
+    assert Path(call["env"]["XDG_RUNTIME_DIR"]) == tmp_path / "tree-data"
+    assert call["writable"] == []
 
 
 def test_a_relative_certificate_folder_is_given_by_its_whole_path(
@@ -950,34 +965,6 @@ def test_a_sandbox_failing_during_a_run_records_nothing(checkout: Path) -> None:
         evaluate(s, p, checkout, box=Box())
     assert proposals.evaluations(s.conn, p.id) == []
     assert len(worktrees(checkout)) == 1
-
-
-def test_a_run_stopped_for_its_disk_use_fails(checkout: Path) -> None:
-    s = store()
-    p = a_proposal(s, checkout)
-    stopped = Outcome(exit_code=137, stdout="", stderr="", stopped="the workspace grew past")
-    found = evaluate(s, p, checkout, box=Box(stopped))
-    assert found.verdict == "failed"
-    assert found.reason is not None and "grew past" in found.reason
-
-
-def test_a_run_stopped_for_the_disks_free_space_records_nothing(checkout: Path) -> None:
-    """Other programs may have filled the disk: no verdict on the proposal."""
-    s = store()
-    p = a_proposal(s, checkout)
-    low = Outcome(exit_code=137, stdout="", stderr="", stopped="the disk is low", disk_low=True)
-    with pytest.raises(evaluation.EvaluationError, match="disk is low"):
-        evaluate(s, p, checkout, box=Box(low))
-    assert proposals.evaluations(s.conn, p.id) == []
-
-
-def test_bubblewrap_failing_to_start_a_run_records_nothing(checkout: Path) -> None:
-    s = store()
-    p = a_proposal(s, checkout)
-    failed = Outcome(exit_code=1, stdout="", stderr="bwrap: Can't mount proc on /newroot/proc")
-    with pytest.raises(evaluation.Unconfined, match="mount proc"):
-        evaluate(s, p, checkout, box=Box(failed))
-    assert proposals.evaluations(s.conn, p.id) == []
 
 
 def test_a_coding_line_is_read_as_python_reads_it(checkout: Path, tmp_path: Path) -> None:

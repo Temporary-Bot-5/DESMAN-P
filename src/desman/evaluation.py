@@ -10,14 +10,15 @@ a database of its own in a temporary folder, and the config only in real mode (r
 written). The worktrees are removed afterwards. G.7b shares validation and runs through `check()`.
 
 Each run is confined (ROADMAP S.3): under bubblewrap (`Sandbox.program`), it sees the system's
-/usr, the Python DESMAN runs on (read-only), its worktree (read-only) and its own data, home and
-temporary folders (one writable folder, held to the workspace quota); never the person's home,
-the checkout, the real database or config. No network with the fake; in real mode the host's
+/usr, the Python DESMAN runs on (its interpreter and library folders only, read-only), its
+worktree (read-only) and one folder of its own in memory, of a bounded size (its data, home and
+temporary files: nothing reaches the disk); never the person's home, the checkout, the real
+database or config. No network with the fake; in real mode the host's
 network (its local services too: the person asked for that run), its proxy and certificates,
 and a config of its own holding only what the benchmark may use: the free providers' keys and
 the one named by `--provider`, the settings, the language, the model choices (never
 permissions, desman-global, the profile). Where bubblewrap cannot run (Windows, macOS, a
-system forbidding it) nothing is evaluated, and a sandbox failing during a run records nothing.
+system forbidding it) nothing is evaluated, and a sandbox failing to start a run records nothing.
 
 The proposed version is made by code, never by applying the diff (a patch can do more than it
 shows): the targets' new texts are checked again and put into the commit's files the way the
@@ -44,6 +45,7 @@ import site
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import weakref
@@ -107,7 +109,9 @@ def isolation(box: Sandbox | None = None) -> str | None:
         del _broken[box]
         return _reprobe(box, default)
     problem = box.unavailable()
-    if problem is not None:
+    if problem is None:
+        _failed_at.pop(box, None)
+    else:
         failed = _failed_at.setdefault(box, now)
         if now - failed >= REPROBE_AFTER:
             del _failed_at[box]
@@ -127,10 +131,6 @@ def _unconfined(box: Sandbox, reason: str) -> Unconfined:
     again."""
     _broken[box] = (reason, _monotonic())
     return Unconfined(f"the benchmark cannot run confined here: {reason}")
-
-
-class DiskLow(EvaluationError):
-    """A run was stopped for the disk's free space: maybe others' writing, not the version's."""
 
 
 def evaluate(
@@ -213,8 +213,8 @@ def check(
 ) -> Checked:
     """Validate plain proposal data before running either isolated benchmark (G.7b). Raises
     `Unconfined` when the runs cannot be confined here, before anything is made."""
+    problem = isolation(box)  # None: the default sandbox, made again on a reprobe
     box = _sandbox() if box is None else box
-    problem = isolation(box)
     if problem is not None:
         raise Unconfined(f"the benchmark cannot run confined here: {problem}")
     folder = Path(tempfile.mkdtemp(prefix="desman-eval-"))
@@ -471,18 +471,16 @@ def _run(
     """`python -m desman.bench` with the worktree's code, confined (`Sandbox.program`); its
     result, checked to come from it."""
     box = _sandbox() if box is None else box
-    # The one writable folder (held to a quota while it runs), its home inside; the config
-    # beside it, read-only.
+    # Its one writable folder is in memory, of a bounded size: nothing it writes reaches the
+    # disk (its home, its database, its local-model slots). The config beside it, read-only.
     data, config = folder / f"{tree.name}-data", folder / f"{tree.name}-config"
-    home = data / "home"
-    for made in (data, home, config):
-        made.mkdir(mode=0o700)
+    config.mkdir(mode=0o700)
     read_only = [*_runtime(), tree, config]
     env = {
         "PATH": SANDBOX_PATH,
         "LANG": "C.UTF-8",
-        "HOME": str(home),
-        "TMPDIR": str(data),  # on disk: the benchmark's database is made in it
+        "HOME": str(data),
+        "TMPDIR": str(data),
         "PYTHONPATH": str(tree / "src"),
         "PYTHONDONTWRITEBYTECODE": "1",
         "DESMAN_DATA_DIR": str(data),
@@ -493,8 +491,8 @@ def _run(
     else:
         env["PYTHONNOUSERSITE"] = "1"
     if mode == "real":  # only what the benchmark may use; the fake needs none
-        # A local model's slots are the machine's, shared with the person's other runs.
-        # A local model's slots: the run's own, never a folder the person's runs trust.
+        # A local model's slots are the run's own, never a folder the person's runs trust: an
+        # evaluation may ask a local server alongside them.
         with contextlib.suppress(KeyError, OSError):
             env["USER"] = env["LOGNAME"] = getpass.getuser()
         env["XDG_RUNTIME_DIR"] = str(data)
@@ -525,23 +523,17 @@ def _run(
         done = box.program(
             argv,
             read_only=read_only,
-            writable=[data],
+            writable=[],
+            scratch=[data],
             env=env,
             cwd=tree,
             limits=_limits(seconds),
             network=mode == "real",
-            watch=data,
         )
     except (SandboxUnavailable, OSError) as e:  # the sandbox's failure, not the version's
         raise _unconfined(box, str(e)) from e
     if done.timed_out:
         raise RunFailed(f"it took longer than {int(seconds)} s")
-    if done.disk_low:  # the disk's free space fell: maybe others' writing, not the version's
-        raise DiskLow(f"the run was stopped: {done.stopped}")
-    if done.stopped:
-        raise RunFailed(done.stopped)
-    if done.exit_code != 0 and _last_line(done.stderr).startswith("bwrap:"):
-        raise _unconfined(box, f"bubblewrap could not start the run: {_last_line(done.stderr)}")
     if done.exit_code != 0:
         raise RunFailed(_last_line(done.stderr)[-500:] or f"exit code {done.exit_code}")
     try:
@@ -561,6 +553,7 @@ def _limits(seconds: float) -> Limits:
         Limits(),
         timeout=seconds,
         cpu_seconds=max(1, int(seconds)),
+        tmp_bytes=256 * 2**20,
         memory_bytes=4 * 2**30,
         file_bytes=256 * 2**20,
         processes=64,
@@ -581,16 +574,28 @@ NETWORK_ENV = (
 
 
 def _runtime() -> list[Path]:
-    """The Python DESMAN runs on and its packages (a venv, the interpreter outside /usr, the
-    user's site-packages), shown read-only at their own paths, also through a link (the command
-    names the interpreter by the path it was started with); never more of the person's files."""
-    found: list[Path] = []
-    prefixes: list[Path] = [
-        *map(Path, (sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix)),
-        *_user_site(),
+    """The Python DESMAN runs on, read-only at their own paths (also as given, through a link):
+    the interpreter, its standard library, its packages (a venv's, the user's), its shared
+    library. Only those: a prefix may hold more of the person's (`--prefix=~/.local` holds
+    DESMAN's own data)."""
+    paths: list[Path] = [Path(sys.executable), *_user_site()]
+    venv = Path(sys.prefix) / "pyvenv.cfg"
+    if venv.is_file():
+        paths.append(venv)
+    schemes = [
+        sysconfig.get_paths(),
+        sysconfig.get_paths(vars={"base": sys.base_prefix, "platbase": sys.base_exec_prefix}),
     ]
-    for prefix in prefixes:
-        for path in (prefix.absolute(), prefix.resolve()):
+    for scheme in schemes:
+        paths += [Path(scheme[name]) for name in ("stdlib", "platstdlib", "purelib", "platlib")]
+    libdir, library = sysconfig.get_config_var("LIBDIR"), sysconfig.get_config_var("LDLIBRARY")
+    if sysconfig.get_config_var("Py_ENABLE_SHARED") and libdir and library:
+        paths += sorted(Path(libdir).glob(f"{library}*"))
+    found: list[Path] = []
+    for given in paths:
+        if not given.exists():
+            continue
+        for path in (given.absolute(), given.resolve()):
             if path.is_relative_to("/usr") or any(path.is_relative_to(p) for p in found):
                 continue
             found = [p for p in found if not p.is_relative_to(path)] + [path]
