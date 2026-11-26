@@ -166,6 +166,15 @@ _NETWORK_FILES: Final = (
 )
 """What name lookup and TLS need from /etc, shown only to a program given the network."""
 _READ_CHUNK: Final = 65_536
+_READ_ONLY_ROOT: Final = ("--remount-ro", "/dev", "--remount-ro", "/")
+"""bwrap's own root and /dev are folders in memory with no size of their own: read-only once
+everything is mounted, so the code writes only where it was given room (sized, or the
+workspace)."""
+
+
+def _shm(limits: Limits) -> list[str]:
+    """/dev/shm (shared memory) sized like /tmp: memory the code may fill, bounded."""
+    return ["--size", str(limits.tmp_bytes), "--tmpfs", "/dev/shm"]
 
 
 class SandboxUnavailable(RuntimeError):
@@ -947,6 +956,7 @@ class Sandbox:
             "/proc",
             "--dev",
             "/dev",
+            *_shm(self.limits),
             "--size",
             str(self.limits.tmp_bytes),
             "--tmpfs",
@@ -954,6 +964,7 @@ class Sandbox:
             "--bind",
             str(workdir),
             MOUNT_POINT,
+            *_READ_ONLY_ROOT,
             "--chdir",
             MOUNT_POINT,
             "--",
@@ -1048,7 +1059,7 @@ class Sandbox:
                 argv += ["--ro-bind", name, name]
         for name in _SYSTEM_FILES + (_NETWORK_FILES if network else ()):
             argv += ["--ro-bind-try", name, name]
-        argv += ["--proc", "/proc", "--dev", "/dev"]
+        argv += ["--proc", "/proc", "--dev", "/dev", *_shm(limits)]
         argv += ["--size", str(limits.tmp_bytes), "--tmpfs", "/tmp"]
         # After /tmp: a folder given may be in it.
         for path in read_only:
@@ -1058,6 +1069,7 @@ class Sandbox:
         for path in scratch:
             argv += ["--size", str(limits.tmp_bytes), "--tmpfs", str(path)]
         argv += [
+            *_READ_ONLY_ROOT,
             "--chdir",
             str(cwd),
             "--",

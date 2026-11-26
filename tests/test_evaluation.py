@@ -706,6 +706,7 @@ attempt("write_tree", lambda: open(os.path.join(os.path.dirname(__file__), "x"),
 attempt("read_secret", lambda: open(SECRET).read())
 attempt("read_checkout", lambda: open(CHECKOUT).read())
 attempt("connect", lambda: socket.create_connection(("127.0.0.1", PORT), 2))
+attempt("write_root", lambda: open("/rootfile", "w"))
 attempt("write_data", lambda: open(os.path.join(os.environ["DESMAN_DATA_DIR"], "x"), "w"))
 found["env_secret"] = "parent-secret" in json.dumps(dict(os.environ))
 found["home"] = os.path.expanduser("~")
@@ -751,6 +752,7 @@ def test_a_hostile_version_reaches_nothing_of_the_persons(
     assert found["read_checkout"] == "FileNotFoundError"
     assert found["connect"] != "done"
     assert found["env_secret"] is False
+    assert found["write_root"] in ("OSError", "PermissionError")
     assert found["write_data"] == "done"  # its own folder, in memory: nothing on the disk
     assert not (tmp_path / "tree-data").exists()
     assert Path(found["home"]) == tmp_path / "tree-data"
@@ -940,8 +942,10 @@ def test_a_relative_certificate_folder_is_given_by_its_whole_path(
 ) -> None:
     ConfigManager(default_config_path()).save(Config())
     (tmp_path / "certs").mkdir()
+    (tmp_path / "more").mkdir()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("SSL_CERT_DIR", os.pathsep.join(["certs", "missing", str(tmp_path)]))
+    listed = ["certs", "missing", str(tmp_path / "more"), str(tmp_path)]  # the last holds all
+    monkeypatch.setenv("SSL_CERT_DIR", os.pathsep.join(listed))
     tree = tmp_path / "tree"
     tree.mkdir()
     box = Box()
@@ -949,7 +953,7 @@ def test_a_relative_certificate_folder_is_given_by_its_whole_path(
         evaluation._run(
             tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
         )
-    given = os.pathsep.join([str((tmp_path / "certs").absolute()), str(tmp_path)])
+    given = os.pathsep.join([str((tmp_path / "certs").absolute()), str(tmp_path / "more")])
     assert box.calls[0]["env"]["SSL_CERT_DIR"] == given
 
 
@@ -1041,3 +1045,49 @@ def test_the_default_sandbox_is_made_again_to_find_bwrap_installed_since(
         assert evaluation._sandbox() is not first
     finally:
         evaluation._sandbox.cache_clear()
+
+
+def test_a_model_the_tuning_puts_first_brings_its_providers_key() -> None:
+    """As the router reads it: a model chosen for a role is asked first, paid or not."""
+    config = Config()
+    config.add_key("OPENAI_API_KEY", "sk-paid-key-0000000000000")
+    config.add_key("ANTHROPIC_API_KEY", "sk-ant-paid-key-000000000000")
+    tuning = Tuning(models=ModelChoices(code="openai/gpt-x"))
+    assert set(evaluation.bench_config(config, None, None, tuning).api_keys) == {"OPENAI_API_KEY"}
+    assert evaluation.bench_config(config, None, None, Tuning()).api_keys == {}
+
+
+def test_a_certificate_folder_holding_the_persons_files_is_not_shown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "eval"
+    folder.mkdir()
+    certs = tmp_path / "certs"
+    certs.mkdir()
+    bundle = certs / "ca.pem"
+    bundle.write_text("certificates")
+    assert evaluation._harmless(certs, folder) and evaluation._harmless(bundle, folder)
+    for shown in (ROOT, Path.home(), default_config_path().parent, tmp_path, Path("/")):
+        assert not evaluation._harmless(shown, folder)
+    default_config_path().parent.mkdir(parents=True, exist_ok=True)
+    ConfigManager(default_config_path()).save(Config())
+    assert not evaluation._harmless(default_config_path(), folder)
+
+
+def test_a_python_failing_confined_is_checked_again_with_the_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    box = Box()
+    monkeypatch.setattr(box, "reprobe", lambda: None)
+    evaluation._broken[box] = ("the Python DESMAN runs on does not start there", now[0])
+    now[0] += evaluation.REPROBE_AFTER
+
+    def failing(*args: Any, **kwargs: Any) -> None:
+        raise evaluation._unconfined(box, "still failing")
+
+    monkeypatch.setattr(evaluation, "_probe_runtime", failing)
+    assert evaluation.isolation(box) is not None and "still failing" in str(
+        evaluation.isolation(box)
+    )

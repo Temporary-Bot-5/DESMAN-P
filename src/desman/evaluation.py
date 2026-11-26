@@ -57,8 +57,16 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from desman import bench, improve, providers
-from desman.config import Config, ConfigError, ConfigManager, Tuning, open_config
+from desman.config import (
+    Config,
+    ConfigError,
+    ConfigManager,
+    Tuning,
+    default_config_path,
+    open_config,
+)
 from desman.core import proposals
+from desman.core.db import default_db_path
 from desman.core.proposals import Evaluation, Proposal, Status
 from desman.core.sandbox import SANDBOX_PATH, Limits, Sandbox, SandboxUnavailable
 
@@ -107,7 +115,15 @@ def isolation(box: Sandbox | None = None) -> str | None:
         if now - since < REPROBE_AFTER:
             return reason
         del _broken[box]
-        return _reprobe(box, default)
+        problem = _reprobe(box, default)
+        if problem is None:  # and the Python it runs, which may be what failed
+            box = _sandbox() if default else box
+            probe = Path(tempfile.gettempdir()) / f"desman-probe-{os.getpid()}"
+            try:
+                _probe_runtime(box, sys.executable, probe)
+            except Unconfined as e:
+                return str(e)
+        return problem
     problem = box.unavailable()
     if problem is None:
         _failed_at.pop(box, None)
@@ -491,7 +507,7 @@ def _run(
             env["USER"] = env["LOGNAME"] = getpass.getuser()
         env["XDG_RUNTIME_DIR"] = str(data)
         try:
-            given = bench_config(open_config().load(), provider, model)
+            given = bench_config(open_config().load(), provider, model, tuning)
             ConfigManager(config / "config.json").save(given)
         except (ConfigError, OSError) as e:  # the person's to fix: no proposal's failure
             raise EvaluationError(f"cannot read the config: {e}") from e
@@ -501,7 +517,11 @@ def _run(
             if value:
                 env[name] = value
         for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):  # a folder list: OpenSSL's way
-            kept = [Path(p) for p in env.pop(name, "").split(os.pathsep) if p and Path(p).exists()]
+            kept = [
+                Path(p)
+                for p in env.pop(name, "").split(os.pathsep)
+                if p and Path(p).exists() and _harmless(Path(p), folder)
+            ]
             if kept and (name == "SSL_CERT_DIR" or len(kept) == 1):
                 env[name] = os.pathsep.join(str(p.absolute()) for p in kept)  # from its worktree
                 read_only += [q for p in kept for q in (p.absolute(), p.resolve())]
@@ -537,6 +557,17 @@ def _run(
     if result.version != bench.VERSION or result.mode != mode:
         raise RunFailed("it ran another benchmark")
     return result
+
+
+def _harmless(path: Path, folder: Path) -> bool:
+    """A folder named for certificates may be shown only if it holds none of the person's: not
+    their home, the checkout, the config, DESMAN's data, nor the evaluation's own folder."""
+    forms = (path.absolute(), path.resolve())
+    if path.is_file():  # a bundle: anything but the config or a file of DESMAN's data
+        secret = [default_config_path().resolve(), default_db_path().parent.resolve()]
+        return not any(f == s or f.is_relative_to(s) for f in forms for s in secret)
+    held = [Path.home(), improve.PACKAGE, default_config_path(), default_db_path(), folder]
+    return not any(h.resolve().is_relative_to(f) for h in held for f in forms)
 
 
 def _python_env(home: Path) -> dict[str, str]:
@@ -647,15 +678,24 @@ def _user_site() -> list[Path]:
     return [Path(folder)] if folder and folder in sys.path and Path(folder).is_dir() else []
 
 
-def bench_config(config: Config, provider: str | None, model: str | None = None) -> Config:
-    """What a confined benchmark on real models is given of the person's config: the free
-    providers' keys and the one named (a paid one is only ever asked by name), the settings
-    (hosts of local servers, account ids), the language, the model choices and master marks.
-    Never the permissions, desman-global, the profile or another key."""
+def bench_config(
+    config: Config,
+    provider: str | None,
+    model: str | None = None,
+    tuning: Tuning | None = None,
+) -> Config:
+    """What a confined benchmark on real models is given of the person's config: the keys of
+    the providers its run may ask, as the router chooses them (the free ones, the one named by
+    `--provider`, those of the models `tuning` puts first for a role, paid or not), the
+    settings (hosts of local servers, account ids), the language, the model choices and master
+    marks. Never the permissions, desman-global, the profile or another key."""
+    names = [provider] if provider else []  # `--model` alone: a model of a free provider
+    chosen = (tuning or config.tuning).models.model_dump().values()
+    names += [str(label).split("/", 1)[0] for label in chosen if label]
     keep = {p.key_env for p in providers.FREE if p.key_env}
-    if provider:  # as the router reads them: `--model` alone is a model of a free provider
+    for name in names:
         with contextlib.suppress(providers.UnknownProvider):
-            if env := providers.find(provider).key_env:
+            if env := providers.find(name).key_env:
                 keep.add(env)
     return Config(
         configured=config.configured,
