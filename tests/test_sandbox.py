@@ -183,7 +183,10 @@ def test_a_run_that_fills_the_workspace_is_stopped(ws: Workspace) -> None:
     endless = "i=0; while true; do i=$((i+1)); echo x > f$i; done"
     outcome = Sandbox(Limits(workspace_files=200)).run(["sh", "-c", endless], ws.root, timeout=30)
     assert not outcome.timed_out and outcome.exit_code == 128 + 9
-    assert outcome.workspace_full.startswith("the workspace holds at least 201 files")
+    assert outcome.workspace_full.startswith(
+        "the run was stopped: it grew the workspace past 200 files and directories or 512.0 MiB"
+        "; the workspace holds at least 201 files"
+    )
     assert ws.read_text("kept.txt") == "x"  # stopped, nothing removed
 
 
@@ -199,8 +202,15 @@ def test_a_run_that_closes_its_output_is_still_watched(ws: Workspace) -> None:
 def test_a_folder_made_unreadable_hides_nothing_from_the_quota(ws: Workspace) -> None:
     hide = "mkdir d && echo x > d/f && chmod 0 d && sleep 1.5 && echo done"
     outcome = Sandbox(Limits()).run(["sh", "-c", hide], ws.root, timeout=30)
-    assert outcome.exit_code == 128 + 9  # stopped once it could not be counted
+    assert outcome.exit_code == 0  # not stopped for a count it could not finish
     assert outcome.workspace_full.startswith("part of the workspace cannot be read")
+    # The next run is still watched (by the disk's free space).
+    write = "head -c 3000000 /dev/zero > d2; sleep 3; echo done"
+    limits = Limits(workspace_bytes=10**6)
+    stopped = Sandbox(limits).run(["sh", "-c", write], ws.root, timeout=30)
+    assert stopped.exit_code == 128 + 9 and "the disk holding the workspace lost" in (
+        stopped.workspace_full
+    )
     cleaned = Sandbox(Limits()).run(["sh", "-c", "chmod 700 d && rm -r d"], ws.root)
     assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
 
@@ -229,9 +239,65 @@ def test_the_quota_is_measured_after_every_backend(
     monkeypatch.setattr(box, "_run", fill)
     outcome = box.run(["true"], ws.root)
     assert outcome.workspace_full == (
-        "the workspace holds at least 1 files and directories and at least 0.0 MiB; "
-        "the quota is 10000 and 0.0 MiB"
+        "the workspace holds at least 1 files and directories and at least 2.0 KiB; "
+        "the quota is 10000 files and directories and 1.0 KiB"
     )
+
+
+def test_the_watch_stops_a_run_the_disk_shows_but_a_count_cannot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from desman.core import sandbox as module
+
+    class Disk:
+        def __init__(self, bavail: int, favail: int, files: int = 10**6) -> None:
+            self.f_bavail, self.f_favail, self.f_files, self.f_frsize = bavail, favail, files, 4096
+
+    disks = [Disk(10**6, 10**5)]
+    monkeypatch.setattr("os.statvfs", lambda path: disks[-1])
+    check = module._watch(tmp_path, Limits(workspace_files=10, workspace_bytes=4096 * 100))
+    assert check() is None
+    disks.append(Disk(10**6 - 200, 10**5))  # 200 blocks: under twice the quota
+    assert check() is None
+    disks.append(Disk(10**6 - 201, 10**5))
+    assert check() == (
+        "the disk holding the workspace lost 804.0 KiB of free space during the run, "
+        "more than 800.0 KiB"
+    )
+    disks.append(Disk(10**6, 10**5 - 21))
+    assert check() == "the disk holding the workspace lost more than 20 free inodes during the run"
+    disks.append(Disk(10**6, 10**5))
+    for i in range(11):
+        (tmp_path / f"f{i}").write_text("x")
+    assert check() == "it grew the workspace past 10 files and directories or 400.0 KiB"
+    disks[:] = [Disk(10**6, 0, files=0)]  # a file system without inode counts
+    other = module._watch(tmp_path / "f0", Limits(workspace_files=10))
+    disks.append(Disk(10**6, 0, files=0))
+    assert other() is None
+
+
+def test_a_folder_swapped_for_a_link_leads_the_count_nowhere(tmp_path: Path) -> None:
+    from desman.core.sandbox import workspace_usage
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "big").write_bytes(b"x" * 1000)
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "d").mkdir()
+    deep = root / "d"
+    for _ in range(300):
+        deep = deep / "d"
+    deep.mkdir(parents=True)
+    usage = workspace_usage(root, Limits())
+    assert not usage.complete  # deeper than it counts
+    assert workspace_usage(outside / "missing", Limits()) == sandbox_usage(0, 0)
+
+
+def sandbox_usage(entries: int, size: int) -> Any:
+    from desman.core.sandbox import Usage
+
+    return Usage(entries, size)
 
 
 def test_workspace_usage_counts_without_following_links(tmp_path: Path) -> None:

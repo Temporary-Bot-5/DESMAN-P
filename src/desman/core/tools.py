@@ -572,8 +572,8 @@ def run_command_tool(sandbox: Sandbox) -> Tool[RunCommandArgs]:
         "when it was killed (exit_code null). Output retains the tail; stdout_cut / "
         "stderr_cut when the respective stream was cut. "
         "An exit code of 128+N means killed by signal N. The workspace has a quota of files "
-        "and bytes: workspace_full says it is over (a run that grows it past the quota is "
-        "stopped). python3 -m pytest is available; "
+        "and bytes: workspace_full says it is over (a run that grows it past the quota may "
+        "be stopped). python3 -m pytest is available; "
         "there is no network, so nothing can be pip-installed.",
         args=RunCommandArgs,
         permission=Permission.SHELL,

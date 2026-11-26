@@ -40,11 +40,13 @@ the Python version it was installed for.
 
 The workspace has a quota (files and bytes, `Limits.workspace_*`) on every backend: it is
 measured after each run, and a run over it says so (`Outcome.workspace_full`); under bwrap the
-run is also watched and stopped once the workspace grows past it.
+run is also watched and stopped once the workspace grows past it, or the disk under it loses
+more free space or inodes than twice the quota (what a count cannot see: unreadable folders,
+files deleted while kept open).
 
 Known limits: the quota is measured, not enforced by the file system, so a run may overshoot it
-by what it writes in about a second, and files it deleted but keeps open are not seen until it
-ends (at most `open_files` × `file_bytes`); `/usr` is readable (system files only, nothing of the
+by what it writes in about a second; the disk's free space also falls with what other programs
+write meanwhile, which may stop a run that did not cause it (the reason says so); `/usr` is readable (system files only, nothing of the
 person's).
 """
 
@@ -194,8 +196,8 @@ class Outcome:
     stdout_cut: bool = False
     stderr_cut: bool = False
     workspace_full: str = ""
-    """After the run the workspace is over its quota: how much it holds (empty when it is
-    not). Under bwrap the run was stopped when it grew past the quota."""
+    """Why the run was stopped for the quota (bwrap only), and how much the workspace holds when
+    it is over the quota after the run; empty when neither."""
 
 
 @dataclass(frozen=True)
@@ -213,7 +215,10 @@ class Usage:
         )
 
     def describe(self, limits: Limits) -> str:
-        quota = f"the quota is {limits.workspace_files} and {_mib(limits.workspace_bytes)}"
+        quota = (
+            f"the quota is {limits.workspace_files} files and directories and "
+            f"{_size(limits.workspace_bytes)}"
+        )
         if not self.complete:
             return (
                 "part of the workspace cannot be read, so what it holds is unknown "
@@ -223,22 +228,30 @@ class Usage:
         floor = "at least " if self.over(limits) else ""
         return (
             f"the workspace holds {floor}{self.entries} files and directories and "
-            f"{floor}{_mib(self.size)}; {quota}"
+            f"{floor}{_size(self.size)}; {quota}"
         )
 
 
-def _widened(limits: Limits) -> Limits:
-    """How far a workspace is counted before a run: past the quota, so what it already holds
-    is known, but never without end."""
+def _widened(limits: Limits, times: int = 4) -> Limits:
+    """`times` the quota: how far a workspace is counted before a run (so what it already
+    holds is known, but never without end), and how much free space a run may cost the disk."""
     return dataclasses.replace(
         limits,
-        workspace_files=4 * limits.workspace_files,
-        workspace_bytes=4 * limits.workspace_bytes,
+        workspace_files=times * limits.workspace_files,
+        workspace_bytes=times * limits.workspace_bytes,
     )
 
 
-def _mib(size: int) -> str:
+def _size(size: int) -> str:
+    if size < 2**10:
+        return f"{size} bytes"
+    if size < 2**20:
+        return f"{size / 2**10:.1f} KiB"
     return f"{size / 2**20:.1f} MiB"
+
+
+_DEPTH: Final = 256
+"""Deepest folder counted; a deeper one makes the count incomplete."""
 
 
 def workspace_usage(root: Path, limits: Limits) -> Usage:
@@ -246,6 +259,71 @@ def workspace_usage(root: Path, limits: Limits) -> Usage:
     the quota is passed (the answer is then only "over"), so a huge tree costs no more than the
     quota. Something that cannot be listed makes the count incomplete (generated code could
     hide files in a folder it made unreadable)."""
+    if sys.platform == "win32" or os.open not in os.supports_dir_fd:
+        return _usage_by_path(root, limits)
+    return _usage_by_fd(root, limits)
+
+
+def _usage_by_fd(root: Path, limits: Limits) -> Usage:
+    """Each folder opened by its parent's descriptor without following links: code running at
+    the same time cannot swap a folder for a link and lead the count out of the workspace."""
+    if sys.platform == "win32":
+        raise RuntimeError("Windows counts by path")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    entries = size = 0
+    frames: list[tuple[int, Iterator[os.DirEntry[str]]]] = []
+    try:
+        top = os.open(root, flags)
+        frames.append((top, os.scandir(top)))
+        while frames:
+            fd, items = frames[-1]
+            item = next(items, None)
+            if item is None:
+                frames.pop()
+                _close_frame(fd, items)
+                continue
+            entries += 1
+            try:
+                info = item.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue  # gone meanwhile
+            if stat.S_ISDIR(info.st_mode):
+                if len(frames) >= _DEPTH:
+                    return Usage(entries, size, complete=False)
+                try:
+                    child = os.open(item.name, flags, dir_fd=fd)
+                except FileNotFoundError:
+                    continue
+                try:
+                    frames.append((child, os.scandir(child)))
+                except BaseException:
+                    os.close(child)
+                    raise
+            elif stat.S_ISREG(info.st_mode):
+                size += info.st_size
+            if entries > limits.workspace_files or size > limits.workspace_bytes:
+                return Usage(entries, size)
+    except FileNotFoundError:
+        if not frames:
+            return Usage(0, 0)  # no workspace yet
+        return Usage(entries, size, complete=False)
+    except OSError:
+        return Usage(entries, size, complete=False)
+    finally:
+        for fd, items in frames:
+            _close_frame(fd, items)
+    return Usage(entries, size)
+
+
+def _close_frame(fd: int, items: Iterator[os.DirEntry[str]]) -> None:
+    close = getattr(items, "close", None)
+    if close is not None:
+        close()
+    os.close(fd)
+
+
+def _usage_by_path(root: Path, limits: Limits) -> Usage:
+    """Windows has no descriptor-relative opening: junctions are skipped by their attribute."""
     entries = size = 0
     stack = [root]
     while stack:
@@ -270,6 +348,48 @@ def workspace_usage(root: Path, limits: Limits) -> Usage:
         except OSError:
             return Usage(entries, size, complete=False)
     return Usage(entries, size)
+
+
+def _watch(workdir: Path, limits: Limits) -> Callable[[], str | None]:
+    """What stops a bwrap run (asked about once a second): the workspace growing past the
+    quota, or past what it already held (so a full one can still be cleaned up); and, since a
+    count misses folders made unreadable and files deleted while kept open, the disk under the
+    workspace losing more free space or inodes than twice the quota."""
+    widened = _widened(limits)
+    start = workspace_usage(workdir, widened)
+    allowed = dataclasses.replace(
+        limits,
+        workspace_files=max(limits.workspace_files, start.entries),
+        workspace_bytes=max(limits.workspace_bytes, start.size),
+    )
+    count = start.complete and not start.over(widened)  # else no baseline to grow from
+    disk = _widened(limits, 2)
+    if sys.platform == "win32":
+        raise RuntimeError("the watch is for bwrap (Linux)")
+    before = os.statvfs(workdir)
+
+    def check() -> str | None:
+        if count:
+            usage = workspace_usage(workdir, allowed)
+            if usage.complete and usage.over(allowed):
+                return f"it grew the workspace past {allowed.workspace_files} files and " + (
+                    f"directories or {_size(allowed.workspace_bytes)}"
+                )
+        now = os.statvfs(workdir)
+        lost = (before.f_bavail - now.f_bavail) * now.f_frsize
+        if lost > disk.workspace_bytes:
+            return (
+                f"the disk holding the workspace lost {_size(lost)} of free space during the "
+                f"run, more than {_size(disk.workspace_bytes)}"
+            )
+        if before.f_files and before.f_favail - now.f_favail > disk.workspace_files:
+            return (
+                "the disk holding the workspace lost more than "
+                f"{disk.workspace_files} free inodes during the run"
+            )
+        return None
+
+    return check
 
 
 def windows_program_files() -> str:
@@ -505,7 +625,8 @@ class Sandbox:
         outcome = self._run(command, workdir, stdin, limits)
         usage = workspace_usage(workdir, limits)
         if usage.over(limits):
-            outcome = dataclasses.replace(outcome, workspace_full=usage.describe(limits))
+            full = "; ".join(filter(None, (outcome.workspace_full, usage.describe(limits))))
+            outcome = dataclasses.replace(outcome, workspace_full=full)
         return outcome
 
     def _run(self, command: Sequence[str], workdir: Path, stdin: str, limits: Limits) -> Outcome:
@@ -539,22 +660,13 @@ class Sandbox:
             except SandboxUnavailable:
                 self._retry_at = self._monotonic()
                 raise
-        # Stopped once the workspace grows past the quota, or past what it already held (so
-        # a full one can still be cleaned up); one far past it is only measured afterwards.
-        start = workspace_usage(workdir, _widened(limits))
-        allowed = dataclasses.replace(
-            limits,
-            workspace_files=max(limits.workspace_files, start.entries),
-            workspace_bytes=max(limits.workspace_bytes, start.size),
-        )
-        watch = None if start.over(_widened(limits)) else allowed
         with seccomp.program_fd() as fd:
             return _execute(
                 self._argv(command, workdir, seccomp_fd=fd),
                 stdin,
                 limits,
                 pass_fds=() if fd is None else (fd,),
-                full=None if watch is None else lambda: workspace_usage(workdir, watch).over(watch),
+                full=_watch(workdir, limits),
             )
 
     def _wsl_argv(
@@ -1111,7 +1223,7 @@ def _execute(
     limits: Limits,
     *,
     pass_fds: Sequence[int] = (),
-    full: Callable[[], bool] | None = None,
+    full: Callable[[], str | None] | None = None,
 ) -> Outcome:
     with tempfile.TemporaryFile() as given:
         # From a file, not a pipe: writing a large stdin while reading output could deadlock.
@@ -1132,7 +1244,7 @@ def _execute(
         stdout = _Tail(limits.stdout_chars)
         stderr = _Tail(limits.stderr_chars)
         try:
-            timed_out = _collect(
+            timed_out, stopped = _collect(
                 process, {process.stdout: stdout, process.stderr: stderr}, limits, full
             )
         finally:
@@ -1148,6 +1260,7 @@ def _execute(
         timed_out=timed_out,
         stdout_cut=stdout.cut,
         stderr_cut=stderr.cut,
+        workspace_full=f"the run was stopped: {stopped}" if stopped else "",
     )
 
 
@@ -1432,24 +1545,26 @@ def _collect(
     process: subprocess.Popen[bytes],
     streams: dict[IO[bytes], _Tail],
     limits: Limits,
-    full: Callable[[], bool] | None = None,
-) -> bool:
-    """Read both streams until they close or time runs out, then wait for the process; True if
-    time ran out. `full`, asked about once a second until the process ends, stops the run when
-    it says True (killed, which is not a timeout)."""
+    full: Callable[[], str | None] | None = None,
+) -> tuple[bool, str]:
+    """Read both streams until they close or time runs out, then wait for the process. Whether
+    time ran out, and why `full` stopped the run: asked about once a second until the process
+    ends, it kills the run (which is not a timeout) by giving a reason."""
     keep = {stream.fileno(): kept for stream, kept in streams.items()}
     deadline = time.monotonic() + limits.timeout
     timed_out = stopped = False
+    reason = ""
     watch_at = time.monotonic() + _WATCH_SECONDS
 
     def watch(now: float) -> float:
         """Checks the workspace when due; how long to wait before the next check."""
-        nonlocal watch_at, stopped, deadline
+        nonlocal watch_at, stopped, deadline, reason
         if full is None or stopped:
             return math.inf
         if now >= watch_at:
             watch_at = now + _WATCH_SECONDS
-            if full():
+            reason = full() or ""
+            if reason:
                 stopped = True
                 _kill(process)
                 deadline = now + 5.0  # the pipes close once the group is gone
@@ -1477,19 +1592,19 @@ def _collect(
                 else:
                     selector.unregister(key.fileobj)
     if timed_out:
-        return True
+        return True, reason
     while True:  # its output is closed: it may still run, and still fill the workspace
         now = time.monotonic()
         until_watch = watch(now)
         left = deadline - now
         if left <= 0:
             if stopped:
-                return False  # the caller kills what is left
+                return False, reason  # the caller kills what is left
             _kill(process)
-            return True
+            return True, reason
         try:
             process.wait(timeout=min(left, until_watch))
-            return False
+            return False, reason
         except subprocess.TimeoutExpired:
             continue
 
