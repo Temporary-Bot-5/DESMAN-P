@@ -18,6 +18,9 @@ Bubblewrap provides:
 - resource limits: CPU time, address space, size of a written file, open files, no core dumps,
   set before `bwrap` starts; the number of processes is limited inside the sandbox's own user
   namespace (`prlimit`), since there it counts only the sandbox's processes;
+- a system-call filter (`--seccomp`, `core/seccomp.py`, ADR 0018): the kernel interfaces no
+  ordinary program needs (BPF, userfaultfd, perf events, io_uring, keyrings, ptrace, mounts,
+  modules...) are refused (in WSL too; Docker applies its own default profile);
 - a wall-clock timeout: the whole process group is killed, and the sandbox's processes die with
   it (`--die-with-parent`, the PID namespace goes with its first process);
 - only so much output is kept (the ends of stdout and stderr, where summaries and tracebacks end);
@@ -35,8 +38,13 @@ A standalone Python tree holds only the interpreter and its standard library. Wh
 DESMAN uses one outside /usr, it is bound at /opt/desman/runtime so pytest runs with
 the Python version it was installed for.
 
-Known limits: the workspace is the disk the code may fill (each file is capped, the number of
-files is not); `/usr` is readable (system files only, nothing of the person's).
+The workspace has a quota (files and bytes, `Limits.workspace_*`) on every backend: it is
+measured after each run, and a run over it says so (`Outcome.workspace_full`); under bwrap the
+run is also watched and stopped once the workspace grows past it.
+
+Known limits: the quota is measured, not enforced by the file system, so a run may overshoot it
+by what it writes in about a second; `/usr` is readable (system files only, nothing of the
+person's).
 """
 
 from __future__ import annotations
@@ -75,7 +83,7 @@ from typing import IO, Final
 import httpx
 from pydantic import BaseModel
 
-from desman.core import filelock
+from desman.core import filelock, seccomp
 from desman.core.db import default_db_path
 
 _WINDOWS_PROCESS_GROUP: Final = 0x00000200  # CREATE_NEW_PROCESS_GROUP
@@ -97,6 +105,11 @@ _WSL_SETUP: Final = "Run `desman sandbox setup`."
 _WSL_REPAIR: Final = "run `desman sandbox setup --wsl --yes` to repair it"
 _WSL_CONF: Final = ("[interop]", "enabled=false", "appendWindowsPath=false")
 _WSL_ROOT: Final = ("-d", WSL_DISTRO, "-u", "root", "--cd", "/", "--exec")
+_WSL_SECCOMP: Final = (
+    'f=$(mktemp) && printf "$1" > "$f" && exec 3< "$f" && rm -f "$f" && shift && exec "$@"'
+)
+"""Gives bwrap the system-call filter on fd 3 inside WSL, where no descriptor can be passed
+in: the filter's bytes come as the first argument, every byte an octal escape."""
 WslRunner = Callable[[list[str], float, bool], subprocess.CompletedProcess[bytes]]
 
 MOUNT_POINT: Final = "/workspace"
@@ -164,6 +177,10 @@ class Limits:
     open_files: int = 256
     stdout_chars: int = 6_000
     stderr_chars: int = 2_000
+    workspace_files: int = 10_000
+    """Files, directories and links the workspace may hold after a run."""
+    workspace_bytes: int = 512 * 2**20
+    """Total size of the workspace's files after a run."""
 
 
 @dataclass(frozen=True)
@@ -175,6 +192,74 @@ class Outcome:
     timed_out: bool = False
     stdout_cut: bool = False
     stderr_cut: bool = False
+    workspace_full: str = ""
+    """After the run the workspace is over its quota: how much it holds (empty when it is
+    not). Under bwrap the run was stopped when it grew past the quota."""
+
+
+@dataclass(frozen=True)
+class Usage:
+    entries: int
+    size: int
+
+    def over(self, limits: Limits) -> bool:
+        return self.entries > limits.workspace_files or self.size > limits.workspace_bytes
+
+    def describe(self, limits: Limits) -> str:
+        """Counting stops past the quota, so an exceeded count is only "more than" it."""
+        entries = (
+            f"more than {limits.workspace_files}"
+            if self.entries > limits.workspace_files
+            else str(self.entries)
+        )
+        size = (
+            f"more than {_mib(limits.workspace_bytes)}"
+            if self.size > limits.workspace_bytes
+            else _mib(self.size)
+        )
+        return (
+            f"the workspace holds {entries} files and directories, {size}; the quota is "
+            f"{limits.workspace_files} and {_mib(limits.workspace_bytes)}"
+        )
+
+
+def _widened(limits: Limits) -> Limits:
+    """How far a workspace is counted before a run: past the quota, so what it already holds
+    is known, but never without end."""
+    return dataclasses.replace(
+        limits,
+        workspace_files=4 * limits.workspace_files,
+        workspace_bytes=4 * limits.workspace_bytes,
+    )
+
+
+def _mib(size: int) -> str:
+    return f"{size / 2**20:.1f} MiB"
+
+
+def workspace_usage(root: Path, limits: Limits) -> Usage:
+    """Entries and bytes under `root`, links never followed. Stops counting once the quota is
+    passed (the answer is then only "over"), so a huge tree costs no more than the quota."""
+    entries = size = 0
+    stack = [root]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as items:
+                for item in items:
+                    entries += 1
+                    try:
+                        info = item.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    if stat.S_ISDIR(info.st_mode):
+                        stack.append(Path(item.path))
+                    elif stat.S_ISREG(info.st_mode):
+                        size += info.st_size
+                    if entries > limits.workspace_files or size > limits.workspace_bytes:
+                        return Usage(entries, size)
+        except OSError:
+            continue  # gone or unreadable: what cannot be listed cannot be counted
+    return Usage(entries, size)
 
 
 def windows_program_files() -> str:
@@ -220,6 +305,12 @@ def _system_wsl() -> str:
 def find_wsl() -> str | None:
     executable = _system_wsl()
     return executable if os.path.isfile(executable) else shutil.which("wsl.exe")
+
+
+def _wsl_filter() -> str:
+    code = seccomp.program("x86_64")  # the distribution is x86-64 (WSL_PIN)
+    assert code is not None
+    return "".join(f"\\{byte:03o}" for byte in code)
 
 
 def _wsl_workspace(workdir: Path) -> str:
@@ -401,6 +492,16 @@ class Sandbox:
         limits = self.limits
         if timeout is not None:
             limits = _with(limits, min(timeout, limits.timeout))
+        start = workspace_usage(workdir, _widened(limits))
+        outcome = self._run(command, workdir, stdin, limits, start)
+        usage = workspace_usage(workdir, limits)
+        if usage.over(limits):
+            outcome = dataclasses.replace(outcome, workspace_full=usage.describe(limits))
+        return outcome
+
+    def _run(
+        self, command: Sequence[str], workdir: Path, stdin: str, limits: Limits, start: Usage
+    ) -> Outcome:
         if self.backend == "docker":
             name = _DOCKER_NAME + uuid.uuid4().hex
             try:
@@ -431,7 +532,22 @@ class Sandbox:
             except SandboxUnavailable:
                 self._retry_at = self._monotonic()
                 raise
-        return _execute(self._argv(command, workdir), stdin, limits)
+        # Stopped once the workspace grows past the quota, or past what it already held (so
+        # a full one can still be cleaned up); one far past it is only measured afterwards.
+        allowed = dataclasses.replace(
+            limits,
+            workspace_files=max(limits.workspace_files, start.entries),
+            workspace_bytes=max(limits.workspace_bytes, start.size),
+        )
+        watch = None if start.over(_widened(limits)) else allowed
+        with seccomp.program_fd() as fd:
+            return _execute(
+                self._argv(command, workdir, seccomp_fd=fd),
+                stdin,
+                limits,
+                pass_fds=() if fd is None else (fd,),
+                full=None if watch is None else lambda: workspace_usage(workdir, watch).over(watch),
+            )
 
     def _wsl_argv(
         self,
@@ -459,7 +575,15 @@ class Sandbox:
             "-s",
             "KILL",
             str(math.ceil(seconds) + 2),
+            "/bin/busybox",
+            "sh",
+            "-c",
+            _WSL_SECCOMP,
+            "sh",
+            _wsl_filter(),
             "/usr/bin/bwrap",
+            "--seccomp",
+            "3",
             "--unshare-all",
             "--unshare-user",
             "--disable-userns",
@@ -581,10 +705,14 @@ class Sandbox:
             detail = str(exc)
         return f"The WSL sandbox could not start: {detail}; {_WSL_REPAIR}"
 
-    def _argv(self, command: Sequence[str], workdir: Path) -> list[str]:
+    def _argv(
+        self, command: Sequence[str], workdir: Path, *, seccomp_fd: int | None = None
+    ) -> list[str]:
         assert self.bwrap is not None and self.prlimit is not None
-        argv = [
-            self.bwrap,
+        argv = [self.bwrap]
+        if seccomp_fd is not None:
+            argv += ["--seccomp", str(seccomp_fd)]
+        argv += [
             "--unshare-all",
             "--unshare-user",
             "--disable-userns",
@@ -672,9 +800,17 @@ class Sandbox:
             return "bubblewrap (bwrap) is not installed"
         if self.prlimit is None:
             return "prlimit (util-linux) is not installed"
-        with tempfile.TemporaryDirectory(prefix="desman-probe-") as empty:
+        with (
+            tempfile.TemporaryDirectory(prefix="desman-probe-") as empty,
+            seccomp.program_fd() as fd,  # the kernel must take the filter, or nothing runs
+        ):
             try:
-                outcome = _execute(self._argv(["true"], Path(empty)), "", _with(self.limits, 10.0))
+                outcome = _execute(
+                    self._argv(["true"], Path(empty), seccomp_fd=fd),
+                    "",
+                    _with(self.limits, 10.0),
+                    pass_fds=() if fd is None else (fd,),
+                )
             except OSError as e:
                 return f"bwrap cannot be started: {e}"
         if outcome.exit_code != 0:
@@ -961,7 +1097,14 @@ def _set_limits(limits: Limits) -> Callable[[], None]:
     return apply
 
 
-def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
+def _execute(
+    argv: list[str],
+    stdin: str,
+    limits: Limits,
+    *,
+    pass_fds: Sequence[int] = (),
+    full: Callable[[], bool] | None = None,
+) -> Outcome:
     with tempfile.TemporaryFile() as given:
         # From a file, not a pipe: writing a large stdin while reading output could deadlock.
         given.write(stdin.encode("utf-8"))
@@ -973,6 +1116,7 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
             stderr=subprocess.PIPE,
             env={},
             close_fds=True,
+            pass_fds=tuple(pass_fds),
             start_new_session=True,  # its own process group, killed as a whole on timeout
             preexec_fn=_set_limits(limits),
         )
@@ -980,7 +1124,9 @@ def _execute(argv: list[str], stdin: str, limits: Limits) -> Outcome:
         stdout = _Tail(limits.stdout_chars)
         stderr = _Tail(limits.stderr_chars)
         try:
-            timed_out = _collect(process, {process.stdout: stdout, process.stderr: stderr}, limits)
+            timed_out = _collect(
+                process, {process.stdout: stdout, process.stderr: stderr}, limits, full
+            )
         finally:
             if process.poll() is None:
                 _kill(process)  # interrupted (Ctrl+C) or timed out: nothing is left running
@@ -1271,18 +1417,34 @@ def _read_output(stream: IO[bytes], *buffers: _Tail) -> None:
             buffer.add(chunk)
 
 
+_WATCH_SECONDS: Final = 1.0
+
+
 def _collect(
-    process: subprocess.Popen[bytes], streams: dict[IO[bytes], _Tail], limits: Limits
+    process: subprocess.Popen[bytes],
+    streams: dict[IO[bytes], _Tail],
+    limits: Limits,
+    full: Callable[[], bool] | None = None,
 ) -> bool:
-    """Read both streams until they close or time runs out; True if it ran out."""
+    """Read both streams until they close or time runs out; True if it ran out. `full`, asked
+    about once a second, stops the run (killed, not a timeout) when it says True."""
     keep = {stream.fileno(): kept for stream, kept in streams.items()}
     deadline = time.monotonic() + limits.timeout
     timed_out = False
+    watch_at = time.monotonic() + _WATCH_SECONDS
     with selectors.DefaultSelector() as selector:
         for stream in streams:
             selector.register(stream, selectors.EVENT_READ)
         while selector.get_map():
-            left = deadline - time.monotonic()
+            now = time.monotonic()
+            if full is not None and now >= watch_at:
+                watch_at = now + _WATCH_SECONDS
+                if full():
+                    _kill(process)
+                    full = None
+                    deadline = min(deadline, now + 5.0)
+                    continue
+            left = deadline - now
             if left <= 0 and not timed_out:
                 timed_out = True
                 _kill(process)
@@ -1290,7 +1452,8 @@ def _collect(
                 continue
             if left <= 0:
                 break  # something outlived the kill: stop reading, never hang
-            for key, _ in selector.select(timeout=left):
+            wait = left if full is None else min(left, max(0.0, watch_at - now))
+            for key, _ in selector.select(timeout=wait):
                 chunk = os.read(key.fd, _READ_CHUNK)
                 if chunk:
                     keep[key.fd].add(chunk)

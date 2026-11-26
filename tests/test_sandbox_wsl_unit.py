@@ -14,7 +14,7 @@ from click.testing import CliRunner
 from desman import docker_cli, sandbox_cli, ui, wizard
 from desman.cli import cli
 from desman.config import Permissions, open_config
-from desman.core import sandbox
+from desman.core import sandbox, seccomp
 from desman.core.sandbox import WSL_DISTRO, WSL_PIN, Limits, Sandbox, SandboxUnavailable
 
 WINDOWS_PATH = Path(r"D:\Task folders\one")
@@ -128,6 +128,10 @@ def test_workspace_and_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     argv = box._wsl_argv(["python3", "-c", code], WINDOWS_PATH, 2.2)
     assert argv[:8] == ["wsl.exe", "-d", WSL_DISTRO, "-u", "sandbox", "--cd", "/", "--exec"]
     assert argv[8:13] == ["/bin/busybox", "timeout", "-s", "KILL", "5"]
+    assert argv[13:17] == ["/bin/busybox", "sh", "-c", sandbox._WSL_SECCOMP]
+    assert argv[17] == "sh" and argv[19:22] == ["/usr/bin/bwrap", "--seccomp", "3"]
+    escaped = argv[18].split("\\")[1:]
+    assert bytes(int(byte, 8) for byte in escaped) == seccomp.program("x86_64")
     assert argv[argv.index("--bind") + 1 : argv.index("--bind") + 3] == [
         "/mnt/d/Task folders/one",
         "/workspace",

@@ -671,10 +671,16 @@ class Coordinator:
             if run is None:
                 run = self._journal_run(journal)
             output = run.output if run is not None and run.ok else None
-            if not isinstance(output, dict) or output.get("exit_code") != 0:
+            if (
+                not isinstance(output, dict)
+                or output.get("exit_code") != 0
+                or output.get("workspace_full")
+            ):
                 reason = (
                     f"the result was handed in without a successful {RUN_TOOL} call"
                     if run is None
+                    else f"the last {RUN_TOOL} left the workspace over its quota"
+                    if isinstance(output, dict) and output.get("workspace_full")
                     else f"the last {RUN_TOOL} failed"
                 )
                 outcome = Failure(

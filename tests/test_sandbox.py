@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 import time
 from collections.abc import Sequence
@@ -157,6 +158,81 @@ def test_it_cannot_make_namespaces_or_escape_through_links(ws: Workspace) -> Non
 
 
 # ── Limits ──────────────────────────────────────────────────────────────────
+
+
+@confined
+def test_system_calls_a_program_never_needs_are_refused(ws: Workspace) -> None:
+    code = (
+        "import ctypes, errno, os\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "for nr in (101, 321, 323, 298, 425, 250, 165):\n"  # x86-64 numbers
+        "    ctypes.set_errno(0)\n"
+        "    print(libc.syscall(nr, 0, 0, 0, 0), errno.errorcode.get(ctypes.get_errno()))\n"
+        "try:\n"
+        "    os.unshare(os.CLONE_NEWNS)\n"
+        "except PermissionError:\n"
+        "    print('unshare refused')\n"
+        "print(os.getpid() > 0)\n"
+    )
+    if platform.machine() != "x86_64":
+        pytest.skip("the numbers in this test are x86-64's")
+    outcome = py(ws, code)
+    assert outcome.exit_code == 0, outcome.stderr
+    assert outcome.stdout.splitlines() == ["-1 EPERM"] * 7 + ["unshare refused", "True"]
+
+
+@confined
+def test_a_run_that_fills_the_workspace_is_stopped(ws: Workspace) -> None:
+    ws.write("kept.txt", "x")
+    endless = "i=0; while true; do i=$((i+1)); echo x > f$i; done"
+    outcome = Sandbox(Limits(workspace_files=200)).run(["sh", "-c", endless], ws.root, timeout=30)
+    assert not outcome.timed_out and outcome.exit_code == 128 + 9
+    assert outcome.workspace_full.startswith("the workspace holds more than 200 files")
+    assert ws.read_text("kept.txt") == "x"  # stopped, nothing removed
+
+
+@confined
+def test_a_workspace_already_over_its_quota_can_still_be_cleaned(ws: Workspace) -> None:
+    for i in range(5):
+        ws.write(f"f{i}", "x" * 100)
+    limits = Limits(workspace_files=3, workspace_bytes=10**6)
+    full = Sandbox(limits).run(["sh", "-c", "sleep 1.5; echo ok"], ws.root)
+    assert full.exit_code == 0 and full.stdout == "ok\n"  # not grown: not stopped
+    assert "holds more than 3 files" in full.workspace_full
+    cleaned = Sandbox(limits).run(["sh", "-c", "rm f1 f2 f3"], ws.root)
+    assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
+
+
+def test_the_quota_is_measured_after_every_backend(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fill(*args: Any) -> Outcome:
+        ws.write("big", "x" * 2048)
+        return Outcome(exit_code=0, stdout="", stderr="")
+
+    box = Sandbox(Limits(workspace_bytes=1024), docker="docker", platform="win32")
+    monkeypatch.setattr(box, "unavailable", lambda: None)
+    monkeypatch.setattr(box, "_run", fill)
+    outcome = box.run(["true"], ws.root)
+    assert outcome.workspace_full == (
+        "the workspace holds 1 files and directories, more than 0.0 MiB; "
+        "the quota is 10000 and 0.0 MiB"
+    )
+
+
+def test_workspace_usage_counts_without_following_links(tmp_path: Path) -> None:
+    from desman.core.sandbox import workspace_usage
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "a").write_bytes(b"x" * 10)
+    (tmp_path / "b").write_bytes(b"y" * 5)
+    outside = tmp_path.parent / (tmp_path.name + "-outside")
+    outside.mkdir()
+    (outside / "huge").write_bytes(b"z" * 1000)
+    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    usage = workspace_usage(tmp_path, Limits())
+    assert (usage.entries, usage.size) == (4, 15)
+    assert workspace_usage(tmp_path, Limits(workspace_files=2)).over(Limits(workspace_files=2))
 
 
 @confined
@@ -343,6 +419,14 @@ def test_the_result_the_model_gets_and_the_audit(ws: Workspace) -> None:
     [(action, details)] = entries
     assert action == "tool_called" and details["permission"] == "shell_execution"
     assert details["args"]["stdin"] == "[12 chars]"  # what was typed in is not kept
+
+
+def test_the_model_is_told_when_the_workspace_is_over_its_quota(ws: Workspace) -> None:
+    sandbox = Scripted(Outcome(exit_code=0, stdout="", stderr="", workspace_full="it holds 9"))
+    toolbox, _ = box(ws, sandbox, Permission.SHELL)
+    result = toolbox.call(ToolCall(tool="run_command", args={"command": ["true"]}))
+    assert result.ok and isinstance(result.output, dict)
+    assert result.output["workspace_full"].startswith("it holds 9: delete files")
 
 
 @pytest.mark.parametrize(
