@@ -310,7 +310,10 @@ def test_a_tree_deeper_than_the_count_goes_is_unfinished(tmp_path: Path) -> None
     deep = tmp_path / "ws"
     for _ in range(100):
         deep = deep / "d"
-    deep.mkdir(parents=True)
+    try:
+        deep.mkdir(parents=True)
+    except OSError:
+        pytest.skip("paths past MAX_PATH are not enabled here")
     assert not workspace_usage(tmp_path / "ws", Limits()).complete
     assert workspace_usage(tmp_path / "missing", Limits()) == Usage(0, 0)
     assert not module_usage_by_path(tmp_path / "ws").complete
@@ -331,7 +334,10 @@ def test_workspace_usage_counts_without_following_links(tmp_path: Path) -> None:
     outside = tmp_path.parent / (tmp_path.name + "-outside")
     outside.mkdir()
     (outside / "huge").write_bytes(b"z" * 1000)
-    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    try:
+        (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("links need Developer Mode on Windows")
     usage = workspace_usage(tmp_path, Limits())
     assert (usage.entries, usage.size) == (4, 15)
     assert workspace_usage(tmp_path, Limits(workspace_files=2)).over(Limits(workspace_files=2))

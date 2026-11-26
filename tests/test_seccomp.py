@@ -119,7 +119,7 @@ def test_the_numbers_are_the_kernels(machine: str) -> None:
         known.setdefault(match.group(1), int(match.group(2)))
     numbers = seccomp.NUMBERS[machine][1]
     newer = {name for name in numbers if name not in known}  # newer than these headers
-    assert newer <= {"open_tree_attr"}
+    assert newer <= {"open_tree_attr", "statmount", "listmount"}  # 6.8 and later
     assert {name: known[name] for name in numbers if name in known} == {
         name: nr for name, nr in numbers.items() if name not in newer
     }

@@ -194,6 +194,31 @@ def test_a_run_stopped_for_the_disk_is_not_the_codes_failure(
     assert check_history(store.conn, task_id) == []
 
 
+def test_a_run_stopped_for_the_disk_again_is_the_codes_failure(
+    store: Store, clock: FakeClock, tmp_path: Path
+) -> None:
+    ran: list[str] = []
+
+    def call(command: str) -> str:
+        return json.dumps({"tool_calls": [{"tool": "run_command", "args": {"command": command}}]})
+
+    fake = FakeLLM().on(
+        "Execute",
+        call("while the disk fills"),
+        '{"stdout": "5"}',
+        call("while the disk fills"),
+        '{"stdout": "5"}',
+        call("python calc.py"),
+        '{"stdout": "5"}',
+    )
+    task_id = store.create_task(runs_code())
+    run = coordinator(store, llm_executor(fake), tmp_path, clock, ran, Permission.SHELL)
+    assert run.run(task_id).status is TaskStatus.DONE
+    [subtask] = store.list_subtasks(task_id)
+    assert subtask.attempts.transient == 1 and subtask.attempts.quality == 1
+    assert check_history(store.conn, task_id) == []
+
+
 def test_no_tool_hint_never_tells_a_runs_code_subtask_to_skip_running(
     store: Store, clock: FakeClock, tmp_path: Path
 ) -> None:

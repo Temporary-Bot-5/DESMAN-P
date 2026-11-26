@@ -684,8 +684,10 @@ class Coordinator:
                         "what it printed"
                     )
                 elif isinstance(output, dict) and output.get("disk_low"):
-                    # Other programs' writes lower the free space too: not the code's fault.
-                    kind = FailureKind.TRANSIENT
+                    # Other programs' writes lower the free space too: not the code's fault the
+                    # first time; again (e.g. writing to files it deleted), it is the code's.
+                    if subtask.attempts.transient == 0:
+                        kind = FailureKind.TRANSIENT
                     reason = (
                         f"the last {RUN_TOOL} was stopped ({output.get('stopped', '')}): "
                         "run the code again and report what it printed"

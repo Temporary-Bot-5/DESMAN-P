@@ -244,7 +244,7 @@ src/desman/
     │              #   the workspace, cleared env, rlimits, timeout; unavailable → nothing runs
     │              #   workspace quota measured after each run (watched under bwrap and WSL; ADR 0018)
     ├── seccomp.py # The bwrap sandbox's system-call filter: classic BPF written here (deny list,
-    │              #   other ABIs killed), x86-64 and aarch64 numbers. Protected
+    │              #   other ABIs killed, x32 refused), x86-64 and aarch64 numbers. Protected
     └── coordinator.py # Loop driving one task (`run`) or every task (`work`, a worker);
                        #   executor/reviewer are pluggable callables; a review is reserved first
                        #   (`Store.reserve_review`), so two workers never pay for one verdict
