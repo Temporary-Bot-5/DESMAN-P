@@ -11,11 +11,13 @@ written). The worktrees are removed afterwards. G.7b shares validation and runs 
 
 Each run is confined (ROADMAP S.3): under bubblewrap (`Sandbox.program`), it sees the system's
 /usr, the Python DESMAN runs on (read-only), its worktree (read-only) and its own data, home and
-temporary folders; never the person's home, the checkout, the real database or config. No
-network with the fake; in real mode the network, and a config of its own holding only what the
-benchmark may use: the free providers' keys and the one named by `--provider`/`--model`, the
-settings, the language, the model choices (never permissions, desman-global, the profile).
-Where bubblewrap cannot run (Windows, macOS, a system forbidding it) nothing is evaluated.
+temporary folders (one writable folder, held to the workspace quota); never the person's home,
+the checkout, the real database or config. No network with the fake; in real mode the host's
+network (its local services too: the person asked for that run), its proxy and certificates,
+and a config of its own holding only what the benchmark may use: the free providers' keys and
+the one named by `--provider`, the settings, the language, the model choices (never
+permissions, desman-global, the profile). Where bubblewrap cannot run (Windows, macOS, a
+system forbidding it) nothing is evaluated, and a sandbox failing during a run records nothing.
 
 The proposed version is made by code, never by applying the diff (a patch can do more than it
 shows): the targets' new texts are checked again and put into the commit's files the way the
@@ -43,6 +45,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,7 +84,7 @@ def _sandbox() -> Sandbox:
     return Sandbox()
 
 
-_failed_at: dict[int, float] = {}
+_failed_at: weakref.WeakKeyDictionary[Sandbox, float] = weakref.WeakKeyDictionary()
 _monotonic = time.monotonic
 
 
@@ -93,9 +96,9 @@ def isolation(box: Sandbox | None = None) -> str | None:
     problem = box.unavailable()
     if problem is not None:
         now = _monotonic()
-        failed = _failed_at.setdefault(id(box), now)
+        failed = _failed_at.setdefault(box, now)
         if now - failed >= REPROBE_AFTER:
-            del _failed_at[id(box)]
+            del _failed_at[box]
             problem = box.reprobe()
     return problem
 
@@ -429,7 +432,10 @@ def _run(
     """`python -m desman.bench` with the worktree's code, confined (`Sandbox.program`); its
     result, checked to come from it."""
     box = _sandbox() if box is None else box
-    data, home, config = (folder / f"{tree.name}-{name}" for name in ("data", "home", "config"))
+    # The one writable folder (held to a quota while it runs), its home inside; the config
+    # beside it, read-only.
+    data, config = folder / f"{tree.name}-data", folder / f"{tree.name}-config"
+    home = data / "home"
     for made in (data, home, config):
         made.mkdir(mode=0o700)
     read_only = [*_runtime(), tree, config]
@@ -438,26 +444,30 @@ def _run(
         "LANG": "C.UTF-8",
         "HOME": str(home),
         "TMPDIR": str(data),  # on disk: the benchmark's database is made in it
-        "PYTHONPATH": os.pathsep.join([str(tree / "src"), *map(str, _user_site())]),
+        "PYTHONPATH": str(tree / "src"),
         "PYTHONDONTWRITEBYTECODE": "1",
-        "PYTHONNOUSERSITE": "1",
         "DESMAN_DATA_DIR": str(data),
         "DESMAN_CONFIG_DIR": str(config),
     }
+    if _user_site():  # after the standard library, as outside; found without the real home
+        env["PYTHONUSERBASE"] = site.getuserbase()
+    else:
+        env["PYTHONNOUSERSITE"] = "1"
     if mode == "real":  # only what the benchmark may use; the fake needs none
         try:
             given = bench_config(open_config().load(), provider, model)
             ConfigManager(config / "config.json").save(given)
-        except (ConfigError, OSError) as e:
-            raise RunFailed(f"cannot read the config: {e}") from e
+        except (ConfigError, OSError) as e:  # the person's to fix: no proposal's failure
+            raise EvaluationError(f"cannot read the config: {e}") from e
         # How this machine reaches the network: a proxy, its own certificates.
         for name in NETWORK_ENV:
             value = os.environ.get(name) or os.environ.get(name.lower())
             if value:
                 env[name] = value
         for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):
-            if env.get(name) and Path(env[name]).exists():
-                read_only.append(Path(env[name]).resolve())
+            given_path = Path(env.get(name, ""))
+            if env.get(name) and given_path.exists():
+                read_only += [given_path.absolute(), given_path.resolve()]
             else:
                 env.pop(name, None)
     argv = [python, "-m", "desman.bench", "--mode", mode, "--tuning", tuning.model_dump_json()]
@@ -470,16 +480,19 @@ def _run(
         done = box.program(
             argv,
             read_only=read_only,
-            writable=[data, home],
+            writable=[data],
             env=env,
             cwd=tree,
             limits=_limits(seconds),
             network=mode == "real",
+            watch=data,
         )
-    except (SandboxUnavailable, OSError) as e:
-        raise RunFailed(str(e)) from e
+    except (SandboxUnavailable, OSError) as e:  # the sandbox's failure, not the version's
+        raise Unconfined(f"the benchmark cannot run confined here: {e}") from e
     if done.timed_out:
         raise RunFailed(f"it took longer than {int(seconds)} s")
+    if done.stopped:
+        raise RunFailed(done.stopped)
     if done.exit_code != 0:
         raise RunFailed(_last_line(done.stderr)[-500:] or f"exit code {done.exit_code}")
     try:
@@ -538,17 +551,16 @@ def _user_site() -> list[Path]:
     return [Path(folder)] if folder and folder in sys.path and Path(folder).is_dir() else []
 
 
-def bench_config(config: Config, provider: str | None, model: str | None) -> Config:
+def bench_config(config: Config, provider: str | None, model: str | None = None) -> Config:
     """What a confined benchmark on real models is given of the person's config: the free
     providers' keys and the one named (a paid one is only ever asked by name), the settings
     (hosts of local servers, account ids), the language, the model choices and master marks.
     Never the permissions, desman-global, the profile or another key."""
     keep = {p.key_env for p in providers.FREE if p.key_env}
-    for name in (provider, model.split("/", 1)[0] if model and "/" in model else None):
-        if name:
-            with contextlib.suppress(providers.UnknownProvider):
-                if env := providers.find(name).key_env:
-                    keep.add(env)
+    if provider:  # as the router reads them: `--model` alone is a model of a free provider
+        with contextlib.suppress(providers.UnknownProvider):
+            if env := providers.find(provider).key_env:
+                keep.add(env)
     return Config(
         configured=config.configured,
         language=config.language,

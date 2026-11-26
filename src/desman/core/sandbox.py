@@ -974,11 +974,17 @@ class Sandbox:
         cwd: Path,
         limits: Limits,
         network: bool = False,
+        watch: Path | None = None,
     ) -> Outcome:
         """Run a program that may not be trusted (not generated code: a version of DESMAN being
         evaluated) under bubblewrap: the system's /usr, the given folders at their own paths
         (read-only, except `writable`), a private /tmp, only `env`; no network unless
-        `network`. Linux only: raises SandboxUnavailable elsewhere, or when bwrap cannot run."""
+        `network`. `watch`: a writable folder held to the workspace quota while it runs
+        (`Outcome.stopped`). Linux only: raises SandboxUnavailable elsewhere, or when bwrap
+        cannot run.
+
+        The network, when given, is the host's: its loopback services and abstract Unix sockets
+        too. Only a run the person asked for on real models gets it."""
         if not self.platform.startswith("linux"):
             raise SandboxUnavailable("this needs Linux with bubblewrap")
         problem = self.unavailable()
@@ -999,6 +1005,7 @@ class Sandbox:
                 "",
                 limits,
                 pass_fds=() if fd is None else (fd,),
+                full=None if watch is None else _watch(watch, limits),
             )
 
     def _program_argv(

@@ -28,7 +28,7 @@ from desman.config import Config, ConfigManager, ModelChoices, Tuning, default_c
 from desman.core import db, proposals
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.proposals import Proposal, Status
-from desman.core.sandbox import Sandbox
+from desman.core.sandbox import Outcome, Sandbox, SandboxUnavailable
 from desman.core.store import Store
 from desman.improve import BY_ID, Change
 
@@ -564,9 +564,10 @@ def test_the_analyst_sees_the_values_an_earlier_proposal_gave(
 class Box(Sandbox):
     """Stands in for the sandbox: keeps what a run would be given, then fails it."""
 
-    def __init__(self) -> None:
+    def __init__(self, outcome: Outcome | None = None) -> None:
         super().__init__(platform="linux")
         self.calls: list[dict[str, Any]] = []
+        self.outcome = outcome
 
     def unavailable(self) -> str | None:
         return None
@@ -575,7 +576,9 @@ class Box(Sandbox):
         config = Path(kwargs["env"]["DESMAN_CONFIG_DIR"]) / "config.json"
         kwargs["config"] = json.loads(config.read_text()) if config.exists() else None
         self.calls.append({"command": command, **kwargs})
-        raise OSError("checked")
+        if self.outcome is not None:
+            return self.outcome
+        raise SandboxUnavailable("checked")
 
 
 def test_a_run_is_confined_and_given_no_secret(
@@ -586,7 +589,7 @@ def test_a_run_is_confined_and_given_no_secret(
     tree = tmp_path / "tree"
     tree.mkdir()
     box = Box()
-    with pytest.raises(evaluation.RunFailed, match="checked"):
+    with pytest.raises(evaluation.Unconfined, match="checked"):
         evaluation._run(
             tree, tmp_path, "fake", Tuning(), provider=None, model=None, python="python", box=box
         )
@@ -621,7 +624,7 @@ def test_a_real_run_gets_the_network_and_only_the_keys_it_may_use(
     box = Box()
     for provider, folder in ((None, "a"), ("openai", "b")):
         (tmp_path / folder).mkdir()
-        with pytest.raises(evaluation.RunFailed):
+        with pytest.raises(evaluation.Unconfined):
             evaluation._run(
                 tree,
                 tmp_path / folder,
@@ -646,12 +649,14 @@ def test_a_real_run_gets_the_network_and_only_the_keys_it_may_use(
     assert config_dir not in box.calls[0]["writable"]
 
 
-def test_a_paid_model_named_brings_its_key() -> None:
+def test_only_a_provider_named_brings_a_paid_key() -> None:
+    """As the router reads them: `--model` alone names a model of a free provider (an id with a
+    slash, OpenRouter's way, is no provider); `--provider` names the provider."""
     config = Config()
     config.add_key("OPENAI_API_KEY", "sk-paid-key-0000000000000")
-    given = evaluation.bench_config(config, None, "openai/gpt-x")
-    assert set(given.api_keys) == {"OPENAI_API_KEY"}
-    assert evaluation.bench_config(config, None, "gpt-x").api_keys == {}
+    assert set(evaluation.bench_config(config, "openai").api_keys) == {"OPENAI_API_KEY"}
+    assert evaluation.bench_config(config, None, "openai/gpt-x").api_keys == {}
+    assert evaluation.bench_config(config, "openrouter", "openai/gpt-x").api_keys == {}
 
 
 def test_nothing_is_evaluated_where_runs_cannot_be_confined(checkout: Path) -> None:
@@ -843,6 +848,7 @@ def test_a_target_moved_is_refused(checkout: Path, tmp_path: Path) -> None:
         evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="links need Developer Mode on Windows")
 def test_the_runtime_is_shown_also_through_a_link(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -861,6 +867,9 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     ConfigManager(default_config_path()).save(Config())
     bundle = tmp_path / "ca.pem"
     bundle.write_text("certificates")
+    if sys.platform != "win32":
+        (tmp_path / "linked.pem").symlink_to(bundle)
+        bundle = tmp_path / "linked.pem"
     monkeypatch.setenv("https_proxy", "http://proxy.invalid:3128")
     monkeypatch.setenv("NO_PROXY", "localhost")
     monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
@@ -868,7 +877,7 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     tree = tmp_path / "tree"
     tree.mkdir()
     box = Box()
-    with pytest.raises(evaluation.RunFailed):
+    with pytest.raises(evaluation.Unconfined):
         evaluation._run(
             tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
         )
@@ -877,7 +886,7 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     assert call["env"]["NO_PROXY"] == "localhost"
     assert call["env"]["SSL_CERT_FILE"] == str(bundle)
     assert "SSL_CERT_DIR" not in call["env"]  # a folder that is not there is not passed
-    assert bundle.resolve() in call["read_only"]
+    assert bundle in call["read_only"] and bundle.resolve() in call["read_only"]
 
 
 def test_a_config_that_cannot_be_read_fails_the_run(tmp_path: Path) -> None:
@@ -886,7 +895,7 @@ def test_a_config_that_cannot_be_read_fails_the_run(tmp_path: Path) -> None:
     tree = tmp_path / "tree"
     tree.mkdir()
     box = Box()
-    with pytest.raises(evaluation.RunFailed, match="cannot read the config"):
+    with pytest.raises(evaluation.EvaluationError, match="cannot read the config"):
         evaluation._run(
             tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
         )
@@ -906,3 +915,22 @@ def test_an_unavailable_sandbox_is_probed_again(monkeypatch: pytest.MonkeyPatch)
     now[0] += 1
     evaluation.isolation(box)
     assert probes == ["again"]
+
+
+def test_a_sandbox_failing_during_a_run_records_nothing(checkout: Path) -> None:
+    """bwrap stopping working after its probe is the machine's failure, not the proposal's."""
+    s = store()
+    p = a_proposal(s, checkout)
+    with pytest.raises(evaluation.Unconfined, match="checked"):
+        evaluate(s, p, checkout, box=Box())
+    assert proposals.evaluations(s.conn, p.id) == []
+    assert len(worktrees(checkout)) == 1
+
+
+def test_a_run_stopped_for_its_disk_use_fails(checkout: Path) -> None:
+    s = store()
+    p = a_proposal(s, checkout)
+    stopped = Outcome(exit_code=137, stdout="", stderr="", stopped="the workspace grew past")
+    found = evaluate(s, p, checkout, box=Box(stopped))
+    assert found.verdict == "failed"
+    assert found.reason is not None and "grew past" in found.reason
