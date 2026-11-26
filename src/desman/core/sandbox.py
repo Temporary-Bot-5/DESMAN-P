@@ -48,6 +48,11 @@ Known limits: the quota is measured, not enforced by the file system, so a run m
 by what it writes in about a second; the disk's free space also falls with what other programs
 write meanwhile, which may stop a run that did not cause it (the reason says so); `/usr` is readable (system files only, nothing of the
 person's).
+
+`Sandbox.program` runs a program that is not generated code but must not be trusted either: a
+version of DESMAN being evaluated (`desman.evaluation`, ROADMAP S.3). The same confinement,
+with the folders it is given bound at their own paths (read-only unless writable) instead of a
+workspace, and the network kept only when asked for (a benchmark on real models). Linux only.
 """
 
 from __future__ import annotations
@@ -78,7 +83,7 @@ import threading
 import time
 import uuid
 import zipfile
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import IO, Final
@@ -150,6 +155,16 @@ _SYSTEM_FILES: Final = (
     "/etc/localtime",
 )
 """What the dynamic loader and common programs need from /etc; nothing else of it is shown."""
+_NETWORK_FILES: Final = (
+    "/etc/resolv.conf",
+    "/etc/hosts",
+    "/etc/nsswitch.conf",
+    "/etc/gai.conf",
+    "/etc/ssl",
+    "/etc/ca-certificates",
+    "/etc/pki",
+)
+"""What name lookup and TLS need from /etc, shown only to a program given the network."""
 _READ_CHUNK: Final = 65_536
 
 
@@ -944,6 +959,100 @@ class Sandbox:
             "--",
             self.prlimit,
             f"--nproc={self.limits.processes}",
+            "--",
+            *command,
+        ]
+        return argv
+
+    def program(
+        self,
+        command: Sequence[str],
+        *,
+        read_only: Sequence[Path],
+        writable: Sequence[Path],
+        env: Mapping[str, str],
+        cwd: Path,
+        limits: Limits,
+        network: bool = False,
+    ) -> Outcome:
+        """Run a program that may not be trusted (not generated code: a version of DESMAN being
+        evaluated) under bubblewrap: the system's /usr, the given folders at their own paths
+        (read-only, except `writable`), a private /tmp, only `env`; no network unless
+        `network`. Linux only: raises SandboxUnavailable elsewhere, or when bwrap cannot run."""
+        if not self.platform.startswith("linux"):
+            raise SandboxUnavailable("this needs Linux with bubblewrap")
+        problem = self.unavailable()
+        if problem is not None:
+            raise SandboxUnavailable(problem)
+        with seccomp.program_fd() as fd:
+            return _execute(
+                self._program_argv(
+                    command,
+                    read_only=read_only,
+                    writable=writable,
+                    env=env,
+                    cwd=cwd,
+                    limits=limits,
+                    network=network,
+                    seccomp_fd=fd,
+                ),
+                "",
+                limits,
+                pass_fds=() if fd is None else (fd,),
+            )
+
+    def _program_argv(
+        self,
+        command: Sequence[str],
+        *,
+        read_only: Sequence[Path],
+        writable: Sequence[Path],
+        env: Mapping[str, str],
+        cwd: Path,
+        limits: Limits,
+        network: bool,
+        seccomp_fd: int | None,
+    ) -> list[str]:
+        assert self.bwrap is not None and self.prlimit is not None
+        argv = [self.bwrap]
+        if seccomp_fd is not None:
+            argv += ["--seccomp", str(seccomp_fd)]
+        argv += [
+            "--unshare-all",
+            "--unshare-user",
+            "--disable-userns",
+            "--die-with-parent",
+            "--new-session",
+            "--cap-drop",
+            "ALL",
+        ]
+        if network:
+            argv += ["--share-net"]
+        argv += ["--clearenv"]
+        for name, value in env.items():
+            argv += ["--setenv", name, value]
+        argv += ["--ro-bind", "/usr", "/usr"]
+        for name in _SYSTEM_LINKS:
+            path = Path(name)
+            if path.is_symlink():
+                argv += ["--symlink", os.readlink(path), name]
+            elif path.is_dir():
+                argv += ["--ro-bind", name, name]
+        for name in _SYSTEM_FILES + (_NETWORK_FILES if network else ()):
+            argv += ["--ro-bind-try", name, name]
+        argv += ["--proc", "/proc", "--dev", "/dev"]
+        argv += ["--size", str(limits.tmp_bytes), "--tmpfs", "/tmp"]
+        # After /tmp: a folder given may be in it.
+        for path in read_only:
+            argv += ["--ro-bind", str(path), str(path)]
+        for path in writable:
+            argv += ["--bind", str(path), str(path)]
+        argv += [
+            "--chdir",
+            str(cwd),
+            "--",
+            self.prlimit,
+            f"--nproc={limits.processes}",
             "--",
             *command,
         ]

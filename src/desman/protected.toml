@@ -14,7 +14,7 @@
 # The reviewer (and the executor it judges).
 "agents.py" = "53b642a91054ddbd19748e467fbcbefaf479489162f9361acc604d23bb2da033"
 # Security rules: the sandbox for generated code, the workspace guard for files.
-"core/sandbox.py" = "be6f5644b08bdfab7f249b44666bf5cf41fb711d699ed4aa1bc1580e2a742534"
+"core/sandbox.py" = "701f5e4eb0ba073d7a52d8fe6c537d539c63244c4845283742420c8a73bb5c99"
 "core/seccomp.py" = "ad8bdca57118b7f2af27ad445525f8182d6ae7918c6e4ed79ec7aa9c0e3ef93a"
 "core/wasi_runner.py" = "59d420da9882693cf93ec2d0c4587983f6d20ac46ddb15ea6ebdf9e34a6d9934"
 "core/workspace.py" = "925ee7f5b8d733c8db77cfa5576399f33d43397239b59e651ccead0c94e6dabe"
@@ -24,7 +24,7 @@
 "core/protected.py" = "9b7f56ba6e407822e5b9e2e8419ea612edeba1597f9ab4e2aa7ddac652410c19"
 # How a proposal of the Improvement Analyst is judged: the benchmark and its comparison.
 "bench.py" = "9539ba652ceec2b684567bb873ea17ac36c003f7e51d9f63469e64ebf18d7a4d"
-"evaluation.py" = "a931fe78c83dda1117b4dcf2ec1937126987ad8fb0c82746cdc3a3ffb67b7d96"
+"evaluation.py" = "346fb2986f928aa59a7c7b1dd27c4a7eb03f1399c5b12211d19e34e563676fc8"
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
 "applying.py" = "655a1ac6db3304e4d031a4fcdd627ae046f67c322b9e339cbf5d403bfb21f368"
 # desman-global (ADR 0004): the root of trust and the code that checks signatures by it,

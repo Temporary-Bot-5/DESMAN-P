@@ -9,6 +9,14 @@ is a process of its own (`python -m desman.bench`) with the worktree's code firs
 a database of its own in a temporary folder, and the config only in real mode (read, never
 written). The worktrees are removed afterwards. G.7b shares validation and runs through `check()`.
 
+Each run is confined (ROADMAP S.3): under bubblewrap (`Sandbox.program`), it sees the system's
+/usr, the Python DESMAN runs on (read-only), its worktree (read-only) and its own data, home and
+temporary folders; never the person's home, the checkout, the real database or config. No
+network with the fake; in real mode the network, and a config of its own holding only what the
+benchmark may use: the free providers' keys and the one named by `--provider`/`--model`, the
+settings, the language, the model choices (never permissions, desman-global, the profile).
+Where bubblewrap cannot run (Windows, macOS, a system forbidding it) nothing is evaluated.
+
 The proposed version is made by code, never by applying the diff (a patch can do more than it
 shows): the targets' new texts are checked again and put into the commit's files the way the
 diff was built, and the diff that makes must be the proposal's exactly. Then git must see only
@@ -23,9 +31,10 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import dataclasses
+import functools
 import hashlib
 import json
-import os
 import shutil
 import sqlite3
 import subprocess
@@ -38,10 +47,11 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from desman import bench, improve
-from desman.config import Tuning, default_config_path
+from desman import bench, improve, providers
+from desman.config import Config, ConfigManager, Tuning, open_config
 from desman.core import proposals
 from desman.core.proposals import Evaluation, Proposal, Status
+from desman.core.sandbox import SANDBOX_PATH, Limits, Sandbox, SandboxUnavailable
 
 Side = Literal["base", "candidate"]
 
@@ -52,6 +62,23 @@ GIT_TIMEOUT = 120.0
 
 class EvaluationError(Exception):
     """The proposal cannot be evaluated (nothing is recorded): the reason, for the person."""
+
+
+class Unconfined(EvaluationError):
+    """No version can be run confined here (no bubblewrap): nothing is evaluated."""
+
+
+@functools.cache
+def _sandbox() -> Sandbox:
+    return Sandbox()
+
+
+def isolation(box: Sandbox | None = None) -> str | None:
+    """Why a run of the benchmark cannot be confined here, or None when it can."""
+    box = _sandbox() if box is None else box
+    if not box.platform.startswith("linux"):
+        return "proposals are evaluated only on Linux, under bubblewrap"
+    return box.unavailable()
 
 
 def evaluate(
@@ -65,6 +92,7 @@ def evaluate(
     repo: Path | None = None,
     python: str = sys.executable,
     on_run: Callable[[Side], None] | None = None,
+    box: Sandbox | None = None,
 ) -> Evaluation:
     """Run the benchmark on both versions and record what was found. `tuning`: the person's,
     which the current version runs with and the proposal's settings change. Raises
@@ -87,6 +115,7 @@ def evaluate(
         on_run=on_run,
         provider=provider,
         model=model,
+        box=box,
     )
     if checked.outcome == "refused":
         raise EvaluationError(checked.reason)
@@ -128,8 +157,14 @@ def check(
     on_run: Callable[[Side], None] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    box: Sandbox | None = None,
 ) -> Checked:
-    """Validate plain proposal data before running either isolated benchmark (G.7b)."""
+    """Validate plain proposal data before running either isolated benchmark (G.7b). Raises
+    `Unconfined` when the runs cannot be confined here, before anything is made."""
+    box = _sandbox() if box is None else box
+    problem = isolation(box)
+    if problem is not None:
+        raise Unconfined(f"the benchmark cannot run confined here: {problem}")
     folder = Path(tempfile.mkdtemp(prefix="desman-eval-"))
     trees: list[Path] = []
     try:
@@ -143,7 +178,9 @@ def check(
                 _build(candidate_tree, changes, diff)
                 _check_changes(base_tree, candidate_tree, changes)
         except (EvaluationError, OSError, ValueError, SyntaxError) as e:
-            if isinstance(e, EvaluationError) and str(e).startswith("git "):
+            if isinstance(e, Unconfined) or (
+                isinstance(e, EvaluationError) and str(e).startswith("git ")
+            ):
                 raise
             return Checked("refused", str(e))
         results: dict[Side, bench.Result] = {}
@@ -164,6 +201,7 @@ def check(
                     model=model,
                     python=python,
                     timeout=timeout,
+                    box=box,
                 )
             except RunFailed as e:
                 return Checked(
@@ -294,16 +332,28 @@ def _check_changes(base: Path, candidate: Path, changes: list[dict[str, Any]]) -
 
 def _without(text: str, names: set[str]) -> list[str]:
     """The module, as its syntax, without the assignments to `names`."""
-    return [ast.dump(n) for n in ast.parse(text).body if _assigned(n) not in names]
+    return [ast.dump(n) for n in _parse(text).body if _assigned(n) not in names]
+
+
+def _parse(text: str) -> ast.Module:
+    try:
+        return ast.parse(text)
+    except (SyntaxError, ValueError, MemoryError, RecursionError) as e:
+        raise EvaluationError(f"a changed file is not valid Python: {e}") from e
 
 
 def _values(text: str, names: set[str]) -> dict[str, str]:
     found = {}
-    for node in ast.parse(text).body:
+    for node in _parse(text).body:
         name = _assigned(node)
         if name in names:
-            assert isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None
-            value = ast.literal_eval(node.value)
+            assert isinstance(node, ast.Assign | ast.AnnAssign)
+            if node.value is None:
+                raise EvaluationError(f"{name} is given no value")
+            try:  # a text only: an f-string, a call or a name is code
+                value = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError) as e:
+                raise EvaluationError(f"{name} is not a plain value") from e
             found[name] = value if isinstance(value, str) else repr(value)
     return found
 
@@ -352,51 +402,51 @@ def _run(
     model: str | None,
     python: str,
     timeout: float | None = None,
+    box: Sandbox | None = None,
 ) -> bench.Result:
-    """`python -m desman.bench` with the worktree's code; its result, checked to come from it."""
-    data = folder / f"{tree.name}-data"
-    data.mkdir(mode=0o700)
-    env = (
-        dict(os.environ)
-        if mode == "real"
-        else {name: os.environ[name] for name in ("PATH", "LANG", "LC_ALL") if name in os.environ}
-    )
-    env["PYTHONPATH"] = str(tree / "src")
-    env["DESMAN_DATA_DIR"] = str(data)
-    if mode == "real":
-        env["DESMAN_CONFIG_DIR"] = str(default_config_path().parent)
-    else:  # the fake needs no config: an empty one, never the person's
-        home = folder / f"{tree.name}-home"
-        home.mkdir(mode=0o700)
-        env["HOME"] = str(home)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        empty = folder / f"{tree.name}-config"
-        empty.mkdir(mode=0o700)
-        env["DESMAN_CONFIG_DIR"] = str(empty)
+    """`python -m desman.bench` with the worktree's code, confined (`Sandbox.program`); its
+    result, checked to come from it."""
+    box = _sandbox() if box is None else box
+    data, home, config = (folder / f"{tree.name}-{name}" for name in ("data", "home", "config"))
+    for made in (data, home, config):
+        made.mkdir(mode=0o700)
+    if mode == "real":  # only what the benchmark may use; the fake needs none
+        ConfigManager(config / "config.json").save(
+            bench_config(open_config().load(), provider, model)
+        )
+    env = {
+        "PATH": SANDBOX_PATH,
+        "LANG": "C.UTF-8",
+        "HOME": str(home),
+        "TMPDIR": str(data),  # on disk: the benchmark's database is made in it
+        "PYTHONPATH": str(tree / "src"),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "DESMAN_DATA_DIR": str(data),
+        "DESMAN_CONFIG_DIR": str(config),
+    }
     argv = [python, "-m", "desman.bench", "--mode", mode, "--tuning", tuning.model_dump_json()]
     if provider is not None:
         argv += ["--provider", provider]
     if model is not None:
         argv += ["--model", model]
+    seconds = TIMEOUT[mode] if timeout is None else timeout
     try:
-        done = subprocess.run(
+        done = box.program(
             argv,
-            cwd=tree,
+            read_only=[*_runtime(), tree, config],
+            writable=[data, home],
             env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=TIMEOUT[mode] if timeout is None else timeout,
-            check=False,
+            cwd=tree,
+            limits=_limits(seconds),
+            network=mode == "real",
         )
-    except subprocess.TimeoutExpired as e:
-        raise RunFailed(
-            f"it took longer than {int(TIMEOUT[mode] if timeout is None else timeout)} s"
-        ) from e
-    except OSError as e:
+    except (SandboxUnavailable, OSError) as e:
         raise RunFailed(str(e)) from e
-    if done.returncode != 0:
-        raise RunFailed(_last_line(done.stderr)[-500:] or f"exit code {done.returncode}")
+    if done.timed_out:
+        raise RunFailed(f"it took longer than {int(seconds)} s")
+    if done.exit_code != 0:
+        raise RunFailed(_last_line(done.stderr)[-500:] or f"exit code {done.exit_code}")
     try:
         result = bench.Result.model_validate(json.loads(_last_line(done.stdout)))
     except (ValueError, ValidationError) as e:
@@ -406,6 +456,53 @@ def _run(
     if result.version != bench.VERSION or result.mode != mode:
         raise RunFailed("it ran another benchmark")
     return result
+
+
+def _limits(seconds: float) -> Limits:
+    """A whole DESMAN runs: more memory, processes and output than a generated program gets."""
+    return dataclasses.replace(
+        Limits(),
+        timeout=seconds,
+        cpu_seconds=max(1, int(seconds)),
+        memory_bytes=4 * 2**30,
+        file_bytes=256 * 2**20,
+        processes=64,
+        stdout_chars=200_000,
+        stderr_chars=4_000,
+    )
+
+
+def _runtime() -> list[Path]:
+    """The Python DESMAN runs on and its packages (a venv, the interpreter outside /usr), shown
+    read-only; never more of the person's files than those folders."""
+    found: list[Path] = []
+    for prefix in (sys.prefix, sys.base_prefix):
+        path = Path(prefix).resolve()
+        if path.is_relative_to("/usr") or any(path.is_relative_to(p) for p in found):
+            continue
+        found = [p for p in found if not p.is_relative_to(path)] + [path]
+    return found
+
+
+def bench_config(config: Config, provider: str | None, model: str | None) -> Config:
+    """What a confined benchmark on real models is given of the person's config: the free
+    providers' keys and the one named (a paid one is only ever asked by name), the settings
+    (hosts of local servers, account ids), the language, the model choices and master marks.
+    Never the permissions, desman-global, the profile or another key."""
+    keep = {p.key_env for p in providers.FREE if p.key_env}
+    for name in (provider, model.split("/", 1)[0] if model and "/" in model else None):
+        if name:
+            with contextlib.suppress(providers.UnknownProvider):
+                if env := providers.find(name).key_env:
+                    keep.add(env)
+    return Config(
+        configured=config.configured,
+        language=config.language,
+        api_keys={env: keys for env, keys in config.api_keys.items() if env in keep},
+        settings=config.settings,
+        tuning=config.tuning,
+        master=config.master,
+    )
 
 
 def _last_line(text: str) -> str:

@@ -21,7 +21,7 @@ from desman.registry import admin, store, work
 from desman.registry import checks as registry_checks
 from desman.registry.cli import cli
 from desman.registry.server import Registry
-from test_evaluation import checkout, git, origin, package, rules_change, worktrees
+from test_evaluation import checkout, confined, git, origin, package, rules_change, worktrees
 from test_registry import Node, db_path, registry, registry_dir, root, root_pub
 from test_registry_work import add_job, claim, hand_in, operator
 
@@ -351,6 +351,7 @@ def test_node_upgrade(tmp_path: Path, version: int) -> None:
     conn.close()
 
 
+@confined
 def test_plain_check_refuses_before_running_and_cleans_up(checkout: Path, tmp_path: Path) -> None:
     diff, details = improve.render([rules_change(checkout)], package(checkout))
     spy = tmp_path / "python-spy"
@@ -372,6 +373,7 @@ def test_plain_check_refuses_before_running_and_cleans_up(checkout: Path, tmp_pa
     assert len(worktrees(checkout)) == 1
 
 
+@confined
 def test_plain_check_failed_and_done(checkout: Path, tmp_path: Path) -> None:
     diff, details = improve.render([rules_change(checkout)], package(checkout))
     args: dict[str, Any] = dict(
@@ -390,6 +392,7 @@ def test_plain_check_failed_and_done(checkout: Path, tmp_path: Path) -> None:
     assert len(worktrees(checkout)) == 1
 
 
+@confined
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -852,3 +855,19 @@ def test_invalid_limits_refused_before_running(
     lent = local_work(key, clock).model_copy(update={"submission": signed_submission(key, item)})
     monkeypatch.setattr(evaluation, "_run", lambda *a, **kw: pytest.fail("benchmark ran"))
     assert checks.run(lent, checkout, clock()).outcome == "refused"
+
+
+def test_a_node_that_cannot_confine_runs_is_unable(
+    checkout: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S.3: another node's proposal runs only confined; without bubblewrap the node says it
+    cannot check and does not offer to (`can_check`)."""
+    monkeypatch.setattr(evaluation, "isolation", lambda box=None: "no bubblewrap")
+    monkeypatch.setattr(evaluation, "_run", lambda *a, **kw: pytest.fail("benchmark ran"))
+    key = sign.NodeKey.generate()
+    lent = local_work(key, clock).model_copy(update={"submission": submission(key, checkout)})
+    result = checks.run(lent, checkout, clock())
+    assert result.outcome == "unable"
+    assert result.reason == "This node cannot run the benchmark confined (bubblewrap)."
+    assert len(worktrees(checkout)) == 1
+    assert not checks.can_check()

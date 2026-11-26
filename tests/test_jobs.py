@@ -32,7 +32,7 @@ from desman.llm import limiter, router
 from desman.llm.base import BudgetExhausted, Message, QuotaExhausted, Request
 from desman.llm.fake import FakeLLM
 from desman.llm.openai_compat import CallRecord, OpenAICompatible
-from desman.net import jobs, node, protocol, sign
+from desman.net import checks, jobs, node, protocol, sign
 from desman.net.node import Change, Node
 from desman.registry import admin, store, work
 from desman.registry.server import Registry
@@ -445,8 +445,14 @@ def test_work_is_asked_for_only_when_idle_and_not_too_often(
 
 
 def test_a_worker_without_a_crew_never_takes_jobs(
-    tmp_path: Path, world: World, clock: FakeClock, root_pub: Path, add_job: Callable[..., str]
+    tmp_path: Path,
+    world: World,
+    clock: FakeClock,
+    root_pub: Path,
+    add_job: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(checks, "can_check", lambda: True)  # a checkout with bubblewrap
     add_job()
     conn = db.open_db(tmp_path / "desman.db")
     sign.create_node_key(tmp_path / "node.key")
@@ -470,7 +476,9 @@ def test_no_job_is_taken_once_the_day_s_quota_is_spent(
     add_job: Callable[..., str],
     world: World,
     clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(checks, "can_check", lambda: True)  # a checkout with bubblewrap
     add_job()
     a = machine("a", doer())
     a.settings.config.network.donated["ollama"] = Donation(calls_per_day=1, tokens_per_day=1000)
