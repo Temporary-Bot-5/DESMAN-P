@@ -13,7 +13,8 @@ the command starts. A program built for another ABI on the same machine (32-bit 
 `int 0x80`, x32) would use other system-call numbers, so a call of any architecture but the
 machine's own is refused too.
 
-`program()` is None on an architecture whose numbers are not listed here: the sandbox then
+`program()` is None on an architecture whose numbers are not listed here, or under a 32-bit
+userland on a 64-bit kernel (the kernel's name is not the programs' ABI): the sandbox then
 runs as before, without the filter.
 """
 
@@ -58,6 +59,8 @@ DENIED: Final = (
     "process_vm_readv",
     "process_vm_writev",
     "kcmp",
+    "pidfd_getfd",
+    "process_madvise",
     "migrate_pages",
     "move_pages",
     # Mounts and namespaces (bwrap has set them up already).
@@ -126,6 +129,8 @@ NUMBERS: Final[dict[str, tuple[int, dict[str, int]]]] = {
             "process_vm_readv": 310,
             "process_vm_writev": 311,
             "kcmp": 312,
+            "pidfd_getfd": 438,
+            "process_madvise": 440,
             "migrate_pages": 256,
             "move_pages": 279,
             "mount": 165,
@@ -188,6 +193,8 @@ NUMBERS: Final[dict[str, tuple[int, dict[str, int]]]] = {
             "process_vm_readv": 270,
             "process_vm_writev": 271,
             "kcmp": 272,
+            "pidfd_getfd": 438,
+            "process_madvise": 440,
             "migrate_pages": 238,
             "move_pages": 239,
             "mount": 40,
@@ -243,7 +250,11 @@ def _insn(code: int, k: int, jt: int = 0, jf: int = 0) -> bytes:
 def program(machine: str | None = None) -> bytes | None:
     """The filter for `machine` (this one by default) as a `struct sock_filter` array, or None
     when its system-call numbers are not known here."""
-    name = (machine or platform.machine()).lower()
+    if machine is None:
+        if struct.calcsize("P") != 8:
+            return None  # e.g. 32-bit Raspberry Pi OS on an aarch64 kernel
+        machine = platform.machine()
+    name = machine.lower()
     entry = NUMBERS.get(_MACHINES.get(name, name))
     if entry is None:
         return None

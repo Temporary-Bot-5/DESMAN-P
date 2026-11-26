@@ -164,9 +164,8 @@ def test_a_run_that_leaves_the_workspace_over_its_quota_is_not_a_result(
     assert run.run(task_id).status is TaskStatus.DONE
     assert ran == ["fill the workspace", "python calc.py"]
     failed = [r for r in store.audit_log(task_id) if r["action"] == "execution_failed"]
-    assert len(failed) == 1 and "left the workspace over its quota" in json.loads(
-        failed[0]["details_json"]
-    ).get("reason", "")
+    reason = json.loads(failed[0]["details_json"]).get("reason", "") if failed else ""
+    assert len(failed) == 1 and "over its quota: delete files you do not need" in reason
     assert check_history(store.conn, task_id) == []
 
 

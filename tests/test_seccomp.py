@@ -82,6 +82,15 @@ def test_an_unknown_machine_has_no_filter() -> None:
         assert fd is None
 
 
+def test_a_32_bit_userland_on_a_64_bit_kernel_gets_no_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("platform.machine", lambda: "aarch64")
+    assert seccomp.program() == seccomp.program("aarch64")
+    monkeypatch.setattr("struct.calcsize", lambda fmt: 4)
+    assert seccomp.program() is None
+
+
 def test_the_descriptor_holds_the_program() -> None:
     import os
 

@@ -43,7 +43,8 @@ measured after each run, and a run over it says so (`Outcome.workspace_full`); u
 run is also watched and stopped once the workspace grows past it.
 
 Known limits: the quota is measured, not enforced by the file system, so a run may overshoot it
-by what it writes in about a second; `/usr` is readable (system files only, nothing of the
+by what it writes in about a second, and files it deleted but keeps open are not seen until it
+ends (at most `open_files` × `file_bytes`); `/usr` is readable (system files only, nothing of the
 person's).
 """
 
@@ -201,25 +202,28 @@ class Outcome:
 class Usage:
     entries: int
     size: int
+    complete: bool = True
+    """False when something could not be listed: it may hide anything, so it counts as over."""
 
     def over(self, limits: Limits) -> bool:
-        return self.entries > limits.workspace_files or self.size > limits.workspace_bytes
+        return (
+            not self.complete
+            or self.entries > limits.workspace_files
+            or self.size > limits.workspace_bytes
+        )
 
     def describe(self, limits: Limits) -> str:
-        """Counting stops past the quota, so an exceeded count is only "more than" it."""
-        entries = (
-            f"more than {limits.workspace_files}"
-            if self.entries > limits.workspace_files
-            else str(self.entries)
-        )
-        size = (
-            f"more than {_mib(limits.workspace_bytes)}"
-            if self.size > limits.workspace_bytes
-            else _mib(self.size)
-        )
+        quota = f"the quota is {limits.workspace_files} and {_mib(limits.workspace_bytes)}"
+        if not self.complete:
+            return (
+                "part of the workspace cannot be read, so what it holds is unknown "
+                f"(make it readable or delete it); {quota}"
+            )
+        # Counting stops once either limit is passed: both numbers are then only a floor.
+        floor = "at least " if self.over(limits) else ""
         return (
-            f"the workspace holds {entries} files and directories, {size}; the quota is "
-            f"{limits.workspace_files} and {_mib(limits.workspace_bytes)}"
+            f"the workspace holds {floor}{self.entries} files and directories and "
+            f"{floor}{_mib(self.size)}; {quota}"
         )
 
 
@@ -238,8 +242,10 @@ def _mib(size: int) -> str:
 
 
 def workspace_usage(root: Path, limits: Limits) -> Usage:
-    """Entries and bytes under `root`, links never followed. Stops counting once the quota is
-    passed (the answer is then only "over"), so a huge tree costs no more than the quota."""
+    """Entries and bytes under `root`, links and junctions never followed. Stops counting once
+    the quota is passed (the answer is then only "over"), so a huge tree costs no more than the
+    quota. Something that cannot be listed makes the count incomplete (generated code could
+    hide files in a folder it made unreadable)."""
     entries = size = 0
     stack = [root]
     while stack:
@@ -249,16 +255,20 @@ def workspace_usage(root: Path, limits: Limits) -> Usage:
                     entries += 1
                     try:
                         info = item.stat(follow_symlinks=False)
-                    except OSError:
-                        continue
+                    except FileNotFoundError:
+                        continue  # gone meanwhile
+                    reparse = getattr(info, "st_file_attributes", 0)
                     if stat.S_ISDIR(info.st_mode):
-                        stack.append(Path(item.path))
+                        if not reparse & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                            stack.append(Path(item.path))
                     elif stat.S_ISREG(info.st_mode):
                         size += info.st_size
                     if entries > limits.workspace_files or size > limits.workspace_bytes:
                         return Usage(entries, size)
+        except FileNotFoundError:
+            continue
         except OSError:
-            continue  # gone or unreadable: what cannot be listed cannot be counted
+            return Usage(entries, size, complete=False)
     return Usage(entries, size)
 
 
@@ -492,16 +502,13 @@ class Sandbox:
         limits = self.limits
         if timeout is not None:
             limits = _with(limits, min(timeout, limits.timeout))
-        start = workspace_usage(workdir, _widened(limits))
-        outcome = self._run(command, workdir, stdin, limits, start)
+        outcome = self._run(command, workdir, stdin, limits)
         usage = workspace_usage(workdir, limits)
         if usage.over(limits):
             outcome = dataclasses.replace(outcome, workspace_full=usage.describe(limits))
         return outcome
 
-    def _run(
-        self, command: Sequence[str], workdir: Path, stdin: str, limits: Limits, start: Usage
-    ) -> Outcome:
+    def _run(self, command: Sequence[str], workdir: Path, stdin: str, limits: Limits) -> Outcome:
         if self.backend == "docker":
             name = _DOCKER_NAME + uuid.uuid4().hex
             try:
@@ -534,6 +541,7 @@ class Sandbox:
                 raise
         # Stopped once the workspace grows past the quota, or past what it already held (so
         # a full one can still be cleaned up); one far past it is only measured afterwards.
+        start = workspace_usage(workdir, _widened(limits))
         allowed = dataclasses.replace(
             limits,
             workspace_files=max(limits.workspace_files, start.entries),
@@ -1426,34 +1434,43 @@ def _collect(
     limits: Limits,
     full: Callable[[], bool] | None = None,
 ) -> bool:
-    """Read both streams until they close or time runs out; True if it ran out. `full`, asked
-    about once a second, stops the run (killed, not a timeout) when it says True."""
+    """Read both streams until they close or time runs out, then wait for the process; True if
+    time ran out. `full`, asked about once a second until the process ends, stops the run when
+    it says True (killed, which is not a timeout)."""
     keep = {stream.fileno(): kept for stream, kept in streams.items()}
     deadline = time.monotonic() + limits.timeout
-    timed_out = False
+    timed_out = stopped = False
     watch_at = time.monotonic() + _WATCH_SECONDS
+
+    def watch(now: float) -> float:
+        """Checks the workspace when due; how long to wait before the next check."""
+        nonlocal watch_at, stopped, deadline
+        if full is None or stopped:
+            return math.inf
+        if now >= watch_at:
+            watch_at = now + _WATCH_SECONDS
+            if full():
+                stopped = True
+                _kill(process)
+                deadline = now + 5.0  # the pipes close once the group is gone
+                return math.inf
+        return max(0.0, watch_at - now)
+
     with selectors.DefaultSelector() as selector:
         for stream in streams:
             selector.register(stream, selectors.EVENT_READ)
         while selector.get_map():
             now = time.monotonic()
-            if full is not None and now >= watch_at:
-                watch_at = now + _WATCH_SECONDS
-                if full():
-                    _kill(process)
-                    full = None
-                    deadline = min(deadline, now + 5.0)
-                    continue
+            until_watch = watch(now)
             left = deadline - now
-            if left <= 0 and not timed_out:
+            if left <= 0 and not timed_out and not stopped:
                 timed_out = True
                 _kill(process)
                 deadline = time.monotonic() + 5.0  # the pipes close once the group is gone
                 continue
             if left <= 0:
                 break  # something outlived the kill: stop reading, never hang
-            wait = left if full is None else min(left, max(0.0, watch_at - now))
-            for key, _ in selector.select(timeout=wait):
+            for key, _ in selector.select(timeout=min(left, until_watch)):
                 chunk = os.read(key.fd, _READ_CHUNK)
                 if chunk:
                     keep[key.fd].add(chunk)
@@ -1461,12 +1478,20 @@ def _collect(
                     selector.unregister(key.fileobj)
     if timed_out:
         return True
-    try:
-        process.wait(timeout=max(0.0, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:  # closed its output but still runs
-        _kill(process)
-        return True
-    return False
+    while True:  # its output is closed: it may still run, and still fill the workspace
+        now = time.monotonic()
+        until_watch = watch(now)
+        left = deadline - now
+        if left <= 0:
+            if stopped:
+                return False  # the caller kills what is left
+            _kill(process)
+            return True
+        try:
+            process.wait(timeout=min(left, until_watch))
+            return False
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _kill(process: subprocess.Popen[bytes]) -> None:

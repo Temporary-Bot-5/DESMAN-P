@@ -165,20 +165,16 @@ def test_system_calls_a_program_never_needs_are_refused(ws: Workspace) -> None:
     code = (
         "import ctypes, errno, os\n"
         "libc = ctypes.CDLL(None, use_errno=True)\n"
-        "for nr in (101, 321, 323, 298, 425, 250, 165):\n"  # x86-64 numbers
+        "for nr in (101, 321, 323, 298, 425, 250, 165, 272):\n"  # x86-64 numbers
         "    ctypes.set_errno(0)\n"
         "    print(libc.syscall(nr, 0, 0, 0, 0), errno.errorcode.get(ctypes.get_errno()))\n"
-        "try:\n"
-        "    os.unshare(os.CLONE_NEWNS)\n"
-        "except PermissionError:\n"
-        "    print('unshare refused')\n"
         "print(os.getpid() > 0)\n"
     )
     if platform.machine() != "x86_64":
         pytest.skip("the numbers in this test are x86-64's")
     outcome = py(ws, code)
     assert outcome.exit_code == 0, outcome.stderr
-    assert outcome.stdout.splitlines() == ["-1 EPERM"] * 7 + ["unshare refused", "True"]
+    assert outcome.stdout.splitlines() == ["-1 EPERM"] * 8 + ["True"]
 
 
 @confined
@@ -187,8 +183,26 @@ def test_a_run_that_fills_the_workspace_is_stopped(ws: Workspace) -> None:
     endless = "i=0; while true; do i=$((i+1)); echo x > f$i; done"
     outcome = Sandbox(Limits(workspace_files=200)).run(["sh", "-c", endless], ws.root, timeout=30)
     assert not outcome.timed_out and outcome.exit_code == 128 + 9
-    assert outcome.workspace_full.startswith("the workspace holds more than 200 files")
+    assert outcome.workspace_full.startswith("the workspace holds at least 201 files")
     assert ws.read_text("kept.txt") == "x"  # stopped, nothing removed
+
+
+@confined
+def test_a_run_that_closes_its_output_is_still_watched(ws: Workspace) -> None:
+    endless = "exec >&- 2>&-; i=0; while true; do i=$((i+1)); echo x > f$i; done"
+    outcome = Sandbox(Limits(workspace_files=200)).run(["sh", "-c", endless], ws.root, timeout=30)
+    assert not outcome.timed_out and outcome.exit_code == 128 + 9
+    assert "at least 201 files" in outcome.workspace_full
+
+
+@confined
+def test_a_folder_made_unreadable_hides_nothing_from_the_quota(ws: Workspace) -> None:
+    hide = "mkdir d && echo x > d/f && chmod 0 d && sleep 1.5 && echo done"
+    outcome = Sandbox(Limits()).run(["sh", "-c", hide], ws.root, timeout=30)
+    assert outcome.exit_code == 128 + 9  # stopped once it could not be counted
+    assert outcome.workspace_full.startswith("part of the workspace cannot be read")
+    cleaned = Sandbox(Limits()).run(["sh", "-c", "chmod 700 d && rm -r d"], ws.root)
+    assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
 
 
 @confined
@@ -198,7 +212,7 @@ def test_a_workspace_already_over_its_quota_can_still_be_cleaned(ws: Workspace) 
     limits = Limits(workspace_files=3, workspace_bytes=10**6)
     full = Sandbox(limits).run(["sh", "-c", "sleep 1.5; echo ok"], ws.root)
     assert full.exit_code == 0 and full.stdout == "ok\n"  # not grown: not stopped
-    assert "holds more than 3 files" in full.workspace_full
+    assert "holds at least 4 files" in full.workspace_full
     cleaned = Sandbox(limits).run(["sh", "-c", "rm f1 f2 f3"], ws.root)
     assert cleaned.exit_code == 0 and cleaned.workspace_full == ""
 
@@ -215,7 +229,7 @@ def test_the_quota_is_measured_after_every_backend(
     monkeypatch.setattr(box, "_run", fill)
     outcome = box.run(["true"], ws.root)
     assert outcome.workspace_full == (
-        "the workspace holds 1 files and directories, more than 0.0 MiB; "
+        "the workspace holds at least 1 files and directories and at least 0.0 MiB; "
         "the quota is 10000 and 0.0 MiB"
     )
 

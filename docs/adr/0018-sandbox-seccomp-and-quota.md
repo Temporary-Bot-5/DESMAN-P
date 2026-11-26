@@ -33,10 +33,12 @@ or keeps the workspace in memory; disk quotas need the file system's support and
    Docker does, so a program that probes gets an error, not a crash); everything else is
    allowed. Numbers are listed for x86-64 and aarch64; a test compares them with the kernel's
    headers when they are installed, and a small BPF interpreter in the tests runs the program.
-   On another machine there is no filter and the sandbox runs as before (it is defence in
+   On another machine, or under a 32-bit userland on a 64-bit kernel (the kernel's name is not
+   the programs' ABI), there is no filter and the sandbox runs as before (it is defence in
    depth, not the boundary).
 2. **The denied calls** (`seccomp.DENIED`): bpf, userfaultfd, perf_event_open, io_uring_*,
-   keyctl/add_key/request_key, ptrace, process_vm_*, kcmp, migrate_pages, move_pages, every
+   keyctl/add_key/request_key, ptrace, process_vm_*, kcmp, pidfd_getfd, process_madvise,
+   migrate_pages, move_pages, every
    mount call and the new mount API, chroot, setns, unshare, handles (name_to_handle_at,
    open_by_handle_at), fanotify_init, kexec_*, module loading, reboot, swap, acct, quotactl,
    syslog, vhangup, the clock and host-name setters, and on x86 iopl, ioperm, modify_ldt,
@@ -51,17 +53,20 @@ or keeps the workspace in memory; disk quotas need the file system's support and
    has no system calls.
 4. **A workspace quota** (`Limits.workspace_files` = 10 000 entries, `workspace_bytes` =
    512 MiB), measured by code on the host after every run on every backend (links never
-   followed, counting stops past the quota). Over it, the run's result says so
+   followed, counting stops past the quota; a folder that cannot be listed counts as over,
+   since it could hide anything). Over it, the run's result says so
    (`workspace_full`, with the counts) and a subtask that must run code is not done on such a
    run. Under bwrap the run is also watched about once a second and killed once the workspace
    grows past the quota, or past what it already held, so a full workspace can still be
-   cleaned with `rm`. Nothing is deleted by DESMAN.
+   cleaned with `rm`; the watch goes on after the program closes its output. Nothing is
+   deleted by DESMAN.
 
 ## Consequences
 
 - A program that needs a denied call (a debugger, `strace`, `perf`, io_uring-based servers)
   gets `EPERM` in the sandbox. None is needed by the tasks DESMAN runs.
 - The quota is measured, not enforced by the file system: a run can overshoot it by what it
-  writes in about a second (bounded per file by `RLIMIT_FSIZE`); other backends than bwrap are
-  only measured after the run.
+  writes in about a second (bounded per file by `RLIMIT_FSIZE`), and files it deleted while
+  keeping them open are not seen until it ends (at most `open_files` × `file_bytes`); other
+  backends than bwrap are only measured after the run.
 - `core/seccomp.py` is protected, like the sandbox.

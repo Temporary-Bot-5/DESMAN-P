@@ -676,17 +676,18 @@ class Coordinator:
                 or output.get("exit_code") != 0
                 or output.get("workspace_full")
             ):
-                reason = (
-                    f"the result was handed in without a successful {RUN_TOOL} call"
-                    if run is None
-                    else f"the last {RUN_TOOL} left the workspace over its quota"
-                    if isinstance(output, dict) and output.get("workspace_full")
-                    else f"the last {RUN_TOOL} failed"
-                )
-                outcome = Failure(
-                    kind=FailureKind.QUALITY,
-                    reason=f"{reason}: run the code again and report what it printed",
-                )
+                if isinstance(output, dict) and output.get("workspace_full"):
+                    reason = (
+                        f"the last {RUN_TOOL} left the workspace over its quota: delete files "
+                        "you do not need, then run the code again and report what it printed"
+                    )
+                else:
+                    reason = (
+                        f"the result was handed in without a successful {RUN_TOOL} call"
+                        if run is None
+                        else f"the last {RUN_TOOL} failed"
+                    ) + ": run the code again and report what it printed"
+                outcome = Failure(kind=FailureKind.QUALITY, reason=reason)
         if (
             isinstance(outcome, Failure)
             and outcome.kind is FailureKind.QUALITY
