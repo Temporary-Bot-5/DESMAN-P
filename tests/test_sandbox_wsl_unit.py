@@ -527,6 +527,7 @@ def test_wsl_kills_only_timed_out_or_interrupted_run(
 
     monkeypatch.setattr(box, "_wsl_runner", run_wsl)
     monkeypatch.setattr(subprocess, "Popen", start)
+    monkeypatch.setattr(sandbox, "_watch", lambda *_: None)
     for _ in range(2):
         if interrupted:
             with pytest.raises(KeyboardInterrupt):
@@ -536,6 +537,36 @@ def test_wsl_kills_only_timed_out_or_interrupted_run(
             assert outcome.timed_out and outcome.exit_code is None
     assert events == ["kill", "cleanup"] * 2
     assert len(set(names)) == 2
+
+
+def test_a_wsl_run_that_fills_the_workspace_is_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wsl = Wsl(present=True)
+    box = wsl.box(tmp_path)
+    events: list[str] = []
+
+    class Running(Process):
+        def wait(self, timeout: float | None = None) -> int:
+            if timeout is not None and events[-1:] != ["kill"]:
+                assert timeout <= 1.0
+                raise subprocess.TimeoutExpired("wsl.exe", timeout)
+            return super().wait()
+
+        def poll(self) -> int | None:
+            return self.returncode if events[-1:] == ["kill"] else None
+
+        def kill(self) -> None:
+            events.append("kill")
+
+    answers = iter([None, "the workspace grew past 10 files"])
+    monkeypatch.setattr(sandbox, "_watch", lambda *_: lambda: next(answers))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: Running(1))
+    outcome = box.run(["true"], tmp_path, timeout=30)
+    assert outcome.stopped == "the workspace grew past 10 files"
+    assert outcome.exit_code == 128 + 9 and not outcome.timed_out
+    assert events == ["kill"]
+    assert any("/usr/bin/pkill" in argv for argv, _, _ in wsl.calls)  # the instance stopped
 
 
 @pytest.mark.parametrize(

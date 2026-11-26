@@ -681,6 +681,11 @@ class Coordinator:
                         f"the last {RUN_TOOL} left the workspace over its quota: delete files "
                         "you do not need, then run the code again and report what it printed"
                     )
+                elif isinstance(output, dict) and output.get("stopped"):
+                    reason = (
+                        f"the last {RUN_TOOL} was stopped ({output['stopped']}): run the code "
+                        "again and report what it printed"
+                    )
                 else:
                     reason = (
                         f"the result was handed in without a successful {RUN_TOOL} call"

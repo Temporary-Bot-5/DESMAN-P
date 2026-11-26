@@ -38,13 +38,14 @@ or keeps the workspace in memory; disk quotas need the file system's support and
    depth, not the boundary).
 2. **The denied calls** (`seccomp.DENIED`): bpf, userfaultfd, perf_event_open, io_uring_*,
    keyctl/add_key/request_key, ptrace, process_vm_*, kcmp, pidfd_getfd, process_madvise,
-   migrate_pages, move_pages, every
-   mount call and the new mount API, chroot, setns, unshare, handles (name_to_handle_at,
+   migrate_pages, move_pages, every mount call and the new mount API (with open_tree_attr,
+   statmount, listmount), chroot, setns, unshare, handles (name_to_handle_at,
    open_by_handle_at), fanotify_init, kexec_*, module loading, reboot, swap, acct, quotactl,
    syslog, vhangup, the clock and host-name setters, and on x86 iopl, ioperm, modify_ldt,
-   uselib, _sysctl. `personality` and the NUMA policy calls stay allowed (numeric libraries use
-   them), and so do `adjtimex` and `clock_adjtime` (`ntp_gettime` reads the clock with them;
-   changing it needs a capability the sandbox does not have); `clone` stays allowed (`--disable-userns` already stops new user namespaces).
+   uselib, _sysctl. `personality` and the NUMA policy calls stay allowed (numeric libraries
+   use them), and so do `adjtimex` and `clock_adjtime` (`ntp_gettime` reads the clock with
+   them; changing it needs a capability the sandbox does not have); `clone` stays allowed
+   (`--disable-userns` already stops new user namespaces).
 3. **Where it applies.** bwrap on Linux gets it through a temporary file's descriptor passed to
    the child (`pass_fds`). The availability probe runs with the filter too, so a kernel that
    refuses it makes the sandbox unavailable instead of silently unfiltered. In WSL no
@@ -57,25 +58,26 @@ or keeps the workspace in memory; disk quotas need the file system's support and
    followed, counting stops past the quota; a folder that cannot be listed counts as over,
    since it could hide anything). Over it, the run's result says so
    (`workspace_full`, with the counts) and a subtask that must run code is not done on such a
-   run. Under bwrap the run is also watched about once a second and killed once the workspace
-   grows past the quota, or past what it already held, so a full workspace can still be
-   cleaned with `rm`; the watch goes on after the program closes its output. A count misses
-   what a folder made unreadable holds and files deleted while kept open, so the watch also
-   stops a run once the file system under the workspace has lost more free space or inodes
-   than twice the quota since it began (`statvfs`). The count walks folders by descriptor
-   (`O_NOFOLLOW`, relative to the parent), so code running at the same time cannot swap a
-   folder for a link and lead it outside; on Windows junctions are skipped by their
-   attribute. The reason a run was stopped goes back with its result. Nothing is deleted by
-   DESMAN.
+   run. Under bwrap and in WSL the run is also watched about once a second and stopped
+   (`stopped`, with the reason, apart from `workspace_full`) once the workspace grows past
+   the quota, or past what it already held, so a full workspace can still be cleaned with
+   `rm`; the watch goes on after the program closes its output, and a count it could not
+   finish stops nothing. A count misses what a folder made unreadable holds and files
+   deleted while kept open, so the watch also stops a run once the disk under the workspace
+   has lost more free space than twice the quota since it began (`shutil.disk_usage`; free
+   inodes are not compared, since ZFS and XFS derive them from free space). The count walks
+   folders by descriptor (`O_NOFOLLOW`, relative to the parent, at most 64 deep), so code
+   running at the same time cannot swap a folder for a link and lead it outside; on Windows
+   junctions are skipped by their attribute. Nothing is deleted by DESMAN.
 
 ## Consequences
 
 - A program that needs a denied call (a debugger, `strace`, `perf`, io_uring-based servers)
   gets `EPERM` in the sandbox. None is needed by the tasks DESMAN runs.
 - The quota is measured, not enforced by the file system: a run can overshoot it by what it
-  writes in about a second; other backends than bwrap are only measured after the run.
+  writes in about a second; Docker and WebAssembly runs are only measured after the run.
 - The disk's free space also falls with what other programs write (another task's sandbox,
   a download): a run may be stopped for writes it did not make; its result says what was
-  seen. Subtasks of one task share the workspace, so one may find it over the quota because
+  seen, and the model is not told to delete files for it. Subtasks of one task share the workspace, so one may find it over the quota because
   of another; it is then asked to clean up like any other run.
 - `core/seccomp.py` is protected, like the sandbox.

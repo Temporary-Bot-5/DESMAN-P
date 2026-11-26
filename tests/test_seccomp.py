@@ -118,7 +118,11 @@ def test_the_numbers_are_the_kernels(machine: str) -> None:
     for match in re.finditer(r"#define __NR(?:3264)?_(\w+)\s+(\d+)", header.read_text()):
         known.setdefault(match.group(1), int(match.group(2)))
     numbers = seccomp.NUMBERS[machine][1]
-    assert {name: known.get(name) for name in numbers} == numbers
+    newer = {name for name in numbers if name not in known}  # newer than these headers
+    assert newer <= {"open_tree_attr"}
+    assert {name: known[name] for name in numbers if name in known} == {
+        name: nr for name, nr in numbers.items() if name not in newer
+    }
     for name in seccomp.DENIED:
         if name not in numbers:
             assert name not in known  # missing only where the call does not exist
