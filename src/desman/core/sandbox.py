@@ -939,6 +939,8 @@ class Sandbox:
                     "--symlink",
                     f"python{sys.version_info.major}.{sys.version_info.minor}",
                     target + "/bin/python3",
+                    "--remount-ro",  # a folder in memory, of no size of its own
+                    target + "/bin",
                 ]
         for name in _SYSTEM_LINKS:
             path = Path(name)

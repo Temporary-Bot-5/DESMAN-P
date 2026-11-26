@@ -1072,6 +1072,9 @@ def test_a_certificate_folder_holding_the_persons_files_is_not_shown(
     default_config_path().parent.mkdir(parents=True, exist_ok=True)
     ConfigManager(default_config_path()).save(Config())
     assert not evaluation._harmless(default_config_path(), folder)
+    inside = db.default_db_path().parent / "workspaces"
+    inside.mkdir(parents=True, exist_ok=True)
+    assert not evaluation._harmless(inside, folder)
 
 
 def test_a_python_failing_confined_is_checked_again_with_the_sandbox(
@@ -1088,6 +1091,4 @@ def test_a_python_failing_confined_is_checked_again_with_the_sandbox(
         raise evaluation._unconfined(box, "still failing")
 
     monkeypatch.setattr(evaluation, "_probe_runtime", failing)
-    assert evaluation.isolation(box) is not None and "still failing" in str(
-        evaluation.isolation(box)
-    )
+    assert evaluation.isolation(box) == "still failing"

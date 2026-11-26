@@ -121,8 +121,8 @@ def isolation(box: Sandbox | None = None) -> str | None:
             probe = Path(tempfile.gettempdir()) / f"desman-probe-{os.getpid()}"
             try:
                 _probe_runtime(box, sys.executable, probe)
-            except Unconfined as e:
-                return str(e)
+            except Unconfined:
+                return _broken[box][0]
         return problem
     problem = box.unavailable()
     if problem is None:
@@ -567,7 +567,10 @@ def _harmless(path: Path, folder: Path) -> bool:
         secret = [default_config_path().resolve(), default_db_path().parent.resolve()]
         return not any(f == s or f.is_relative_to(s) for f in forms for s in secret)
     held = [Path.home(), improve.PACKAGE, default_config_path(), default_db_path(), folder]
-    return not any(h.resolve().is_relative_to(f) for h in held for f in forms)
+    data = default_db_path().parent.resolve()
+    return not any(h.resolve().is_relative_to(f) for h in held for f in forms) and not any(
+        f.is_relative_to(data) for f in forms
+    )
 
 
 def _python_env(home: Path) -> dict[str, str]:
@@ -605,7 +608,9 @@ def _probe_runtime(box: Sandbox, python: str, home: Path) -> None:
         )
     except (SandboxUnavailable, OSError) as e:
         raise _unconfined(box, str(e)) from e
-    if done.timed_out or done.exit_code != 0:
+    if done.timed_out:
+        raise _unconfined(box, "the Python DESMAN runs on took longer than 60 s to start there")
+    if done.exit_code != 0:
         detail = _last_line(done.stderr)[-300:] or f"exit code {done.exit_code}"
         raise _unconfined(box, f"the Python DESMAN runs on does not start there: {detail}")
 
