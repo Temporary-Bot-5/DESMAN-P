@@ -35,7 +35,16 @@ from desman.net import node, protocol, sign
 from desman.registry import admin, checks, releases, work
 from desman.registry import store as registry_store
 from desman.registry.server import Registry
-from test_evaluation import checkout, git, origin, package, proposal, rules_change, worktrees
+from test_evaluation import (
+    checkout,
+    confined,
+    git,
+    origin,
+    package,
+    proposal,
+    rules_change,
+    worktrees,
+)
 from test_registry import _write_key
 
 __all__ = ["checkout", "origin"]
@@ -106,6 +115,7 @@ class Machine:
             self.closed = True
 
 
+@confined
 def test_d10(
     checkout: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

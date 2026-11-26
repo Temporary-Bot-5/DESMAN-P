@@ -104,8 +104,10 @@ src/desman/
 │                  #   its own, no tools; `python -m desman.bench` reports a Result; compare()
 │                  #   says which run went better. Protected, like evaluation.py
 ├── evaluation.py  # `proposals evaluate`: current version and proposed one (diff + settings)
-│                  #   in git worktrees of HEAD, each run as its own process; the diff checked
-│                  #   to change only the targets' texts; recorded once in `evaluations`
+│                  #   in git worktrees of HEAD, each run as its own process under bwrap
+│                  #   (`Sandbox.program`, S.3: no home, checkout or real DB; real mode: net +
+│                  #   a config with only usable keys; no bwrap → nothing evaluated); the diff
+│                  #   checked to change only the targets' texts; recorded once in `evaluations`
 ├── global_cli.py  # `global [status]|join [--registry]|leave|donate P|undonate P|quota P`
 │                  #   (G.3): consent to desman-global, the node key, modules lent with daily
 │                  #   quotas (`providers.can_donate`: local always, free cloud only if

@@ -138,6 +138,22 @@ def test_the_environment_is_cleared(ws: Workspace, monkeypatch: pytest.MonkeyPat
 
 
 @confined
+def test_only_the_room_given_can_be_filled(ws: Workspace) -> None:
+    """bwrap's own root and /dev are in memory with no size: read-only, and /dev/shm sized."""
+    limits = Limits(tmp_bytes=1 << 20)
+    outcome = Sandbox(limits).run(
+        [
+            "sh",
+            "-c",
+            "touch /x 2>/dev/null; echo $?; touch /dev/x 2>/dev/null; echo $?; "
+            "head -c 2000000 /dev/zero > /dev/shm/big 2>/dev/null; echo $?; echo ok > /dev/null",
+        ],
+        ws.root,
+    )
+    assert outcome.stdout.splitlines() == ["1", "1", "1"]
+
+
+@confined
 def test_the_system_is_read_only_and_tmp_is_private(ws: Workspace) -> None:
     name = f"/tmp/desman-test-{os.getpid()}-{time.monotonic_ns()}"
     outcome = run(

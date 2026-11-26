@@ -6,12 +6,16 @@ folder), and the benchmark runs in real subprocesses on the scripted fake model.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import difflib
 import json
 import os
 import shutil
+import socket
 import subprocess
+import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -20,14 +24,20 @@ from click.testing import CliRunner, Result
 
 from desman import bench, evaluation, improve, runs
 from desman.cli import cli
-from desman.config import Config, ModelChoices, Tuning, default_config_path
+from desman.config import Config, ConfigManager, ModelChoices, Tuning, default_config_path
 from desman.core import db, proposals
 from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.proposals import Proposal, Status
+from desman.core.sandbox import Outcome, Sandbox, SandboxUnavailable
 from desman.core.store import Store
 from desman.improve import BY_ID, Change
 
 ROOT = Path(__file__).parent.parent
+UNCONFINED = evaluation.isolation()
+if UNCONFINED is not None and os.environ.get("DESMAN_REQUIRE_SANDBOX"):  # set in CI
+    raise RuntimeError(f"DESMAN_REQUIRE_SANDBOX is set, but runs cannot be confined: {UNCONFINED}")
+confined = pytest.mark.skipif(UNCONFINED is not None, reason=f"not confined here: {UNCONFINED}")
+"""Evaluating runs the benchmark under bubblewrap only (S.3): elsewhere nothing is evaluated."""
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.invalid",
@@ -252,6 +262,7 @@ def test_compare(base: dict[str, int], candidate: dict[str, int], verdict: str) 
 # ── In worktrees ─────────────────────────────────────────────────────────────
 
 
+@confined
 def test_a_proposal_is_evaluated_in_worktrees_and_recorded(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
@@ -283,6 +294,7 @@ def broken_rules(monkeypatch: pytest.MonkeyPatch, repo: Path) -> Change:
     return Change(target="planner.rules", value="Split the goal into steps.")
 
 
+@confined
 def test_a_proposal_that_breaks_planning_does_worse(
     checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -295,6 +307,7 @@ def test_a_proposal_that_breaks_planning_does_worse(
     assert found.verdict == "worse"
 
 
+@confined
 def test_the_proposed_settings_are_what_the_proposed_version_runs_with(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout, [Change(target="tuning.max_subtasks", value=1)])
@@ -308,6 +321,7 @@ def test_the_proposed_settings_are_what_the_proposed_version_runs_with(checkout:
     assert found.verdict == "better"
 
 
+@confined
 def test_the_current_version_runs_with_the_persons_tuning(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
@@ -328,7 +342,7 @@ def test_a_proposal_made_from_other_files_is_not_evaluated(checkout: Path) -> No
     )
     git(checkout, "commit", "-q", "-am", "later")
     with pytest.raises(evaluation.EvaluationError, match="other versions of src/desman/planner"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
     assert proposals.evaluations(s.conn, p.id) == []
     assert len(worktrees(checkout)) == 1
 
@@ -352,7 +366,7 @@ def test_a_diff_changing_more_than_the_targets_is_refused(checkout: Path) -> Non
     )
     p = proposal(s, diff, details)
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
     assert proposals.evaluations(s.conn, p.id) == []
 
 
@@ -362,7 +376,7 @@ def test_a_diff_giving_other_texts_than_proposed_is_refused(checkout: Path) -> N
     details["changes"][0]["new"] += " Something else."
     p = proposal(s, diff, details)
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
 
 
 def test_a_diff_touching_another_file_is_refused(checkout: Path) -> None:
@@ -375,7 +389,7 @@ def test_a_diff_touching_another_file_is_refused(checkout: Path) -> None:
     )
     p = proposal(s, f"diff --git a/{name} b/{name}\n" + "".join(lines), {"changes": []})
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
 
 
 def test_a_patch_is_never_applied(checkout: Path) -> None:
@@ -390,7 +404,7 @@ def test_a_patch_is_never_applied(checkout: Path) -> None:
     )
     p = proposal(s, diff + extra, details)
     with pytest.raises(evaluation.EvaluationError, match="not the one the proposal's texts make"):
-        evaluate(s, p, checkout)
+        evaluate(s, p, checkout, box=Box())
 
 
 def test_a_target_text_that_may_not_be_one_is_refused(checkout: Path) -> None:
@@ -399,16 +413,36 @@ def test_a_target_text_that_may_not_be_one_is_refused(checkout: Path) -> None:
     details = p.details | {"changes": [p.details["changes"][0] | {"new": "no format"}]}
     q = proposal(s, p.diff or "", details)
     with pytest.raises(evaluation.EvaluationError, match="must still contain"):
-        evaluate(s, q, checkout)
+        evaluate(s, q, checkout, box=Box())
 
 
-def test_a_run_that_fails_is_recorded_as_failed(checkout: Path, tmp_path: Path) -> None:
+def test_a_run_that_fails_is_recorded_as_failed(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
-    found = evaluate(s, p, checkout, python=str(tmp_path / "no-python"))
+    crashed = Outcome(exit_code=1, stdout="", stderr="Traceback\nValueError: boom")
+    found = evaluate(s, p, checkout, box=Box(crashed))
     assert found.verdict == "failed" and found.base is None and found.candidate is None
     assert found.reason is not None and "current version's run failed" in found.reason
+    assert "boom" in found.reason
     assert len(worktrees(checkout)) == 1
+
+
+@confined
+def test_a_python_that_does_not_start_confined_records_nothing(
+    checkout: Path, tmp_path: Path
+) -> None:
+    """The machine's problem (a Python missing its libraries there), never the proposal's."""
+    s = store()
+    p = a_proposal(s, checkout)
+    with pytest.raises(evaluation.Unconfined, match="does not start there"):
+        evaluate(s, p, checkout, python=str(tmp_path / "no-python"), box=Sandbox())
+    assert proposals.evaluations(s.conn, p.id) == []
+    assert len(worktrees(checkout)) == 1
+
+
+@confined
+def test_the_runtime_probe_passes_here() -> None:
+    evaluation._probe_runtime(Sandbox(), sys.executable, Path("/tmp/desman-probe-test"))
 
 
 def test_only_a_proposed_change_is_evaluated(checkout: Path) -> None:
@@ -462,6 +496,7 @@ def test_a_v22_database_upgrades_to_evaluations(tmp_path: Path) -> None:
 # ── The command ──────────────────────────────────────────────────────────────
 
 
+@confined
 def test_evaluate_command(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(evaluation, "repository", lambda: checkout)
     s = store()
@@ -545,33 +580,515 @@ def test_the_analyst_sees_the_values_an_earlier_proposal_gave(
     assert earlier["settings"] == [{"setting": "tuning.max_subtasks", "old": None, "new": 3}]
 
 
-def test_fake_child_environment_has_no_inherited_secrets(
+class Box(Sandbox):
+    """Stands in for the sandbox: keeps what a run would be given, then fails it."""
+
+    def __init__(self, outcome: Outcome | None = None) -> None:
+        super().__init__(platform="linux")
+        self.calls: list[dict[str, Any]] = []
+        self.outcome = outcome
+
+    def unavailable(self) -> str | None:
+        return None
+
+    def program(self, command: Sequence[str], **kwargs: Any) -> Any:
+        if "-c" in command:  # the runtime's probe passes
+            return Outcome(exit_code=0, stdout="", stderr="")
+        config = Path(kwargs["env"]["DESMAN_CONFIG_DIR"]) / "config.json"
+        kwargs["config"] = json.loads(config.read_text()) if config.exists() else None
+        self.calls.append({"command": command, **kwargs})
+        if self.outcome is not None:
+            return self.outcome
+        raise SandboxUnavailable("checked")
+
+
+def test_a_run_is_confined_and_given_no_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "parent-secret")
     monkeypatch.setenv("HF_TOKEN", "parent-secret")
     tree = tmp_path / "tree"
     tree.mkdir()
-
-    def child(*args: Any, **kwargs: Any) -> Any:
-        env = kwargs["env"]
-        assert set(env) <= {
-            "PATH",
-            "LANG",
-            "LC_ALL",
-            "HOME",
-            "PYTHONPATH",
-            "DESMAN_DATA_DIR",
-            "DESMAN_CONFIG_DIR",
-            "PYTHONDONTWRITEBYTECODE",
-        }
-        assert Path(env["HOME"]).is_relative_to(tmp_path)
-        assert Path(env["HOME"]).is_dir()
-        assert env["PYTHONDONTWRITEBYTECODE"] == "1"
-        raise OSError("checked environment")
-
-    monkeypatch.setattr(subprocess, "run", child)
-    with pytest.raises(evaluation.RunFailed, match="checked environment"):
+    box = Box()
+    with pytest.raises(evaluation.Unconfined, match="checked"):
         evaluation._run(
-            tree, tmp_path, "fake", Tuning(), provider=None, model=None, python="python"
+            tree, tmp_path, "fake", Tuning(), provider=None, model=None, python="python", box=box
         )
+    [call] = box.calls
+    env = call["env"]
+    assert "parent-secret" not in json.dumps(env)
+    assert env["PYTHONPATH"] == str(tree / "src") and env["PYTHONDONTWRITEBYTECODE"] == "1"
+    data = tmp_path / "tree-data"
+    for name in ("HOME", "DESMAN_DATA_DIR", "TMPDIR"):
+        assert Path(env[name]) == data
+    assert Path(env["DESMAN_CONFIG_DIR"]).is_dir()
+    assert call["network"] is False and call["config"] is None  # the fake needs no config
+    # Read-only: the worktree, the config and the interpreter; written: a folder in memory only.
+    assert tree in call["read_only"] and call["cwd"] == tree
+    assert call["writable"] == [] and call["scratch"] == [data] and not data.exists()
+    assert not any(ROOT.resolve().is_relative_to(p) for p in call["read_only"])
+    assert not any(Path.home().resolve().is_relative_to(p) for p in call["read_only"])
+
+
+def test_a_real_run_gets_the_network_and_only_the_keys_it_may_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = Config(configured=True, language="ru", personalize=True)
+    config.add_key("GROQ_API_KEY", "gsk_free-key-000000000000")
+    config.add_key("OPENAI_API_KEY", "sk-paid-key-0000000000000")
+    config.add_key("HF_TOKEN", "hf_token-00000000000000000")
+    config.add_key("TAVILY_API_KEY", "tvly-search-00000000000000")
+    config.settings["OLLAMA_HOST"] = "http://127.0.0.1:11434"
+    config.permissions.network_access = True
+    config.network.enabled = True
+    ConfigManager(default_config_path()).save(config)
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    for provider, folder in ((None, "a"), ("openai", "b")):
+        (tmp_path / folder).mkdir()
+        with pytest.raises(evaluation.Unconfined):
+            evaluation._run(
+                tree,
+                tmp_path / folder,
+                "real",
+                Tuning(),
+                provider=provider,
+                model=None,
+                python="python",
+                box=box,
+            )
+    free, named = (Config.model_validate(c["config"]) for c in box.calls)
+    assert all(c["network"] for c in box.calls)
+    assert set(free.api_keys) == {"GROQ_API_KEY"}
+    assert set(named.api_keys) == {"GROQ_API_KEY", "OPENAI_API_KEY"}
+    for given in (free, named):
+        assert given.language == "ru" and given.settings == config.settings
+        assert given.permissions == Config().permissions and given.network == Config().network
+        assert not given.personalize
+    # The config is given read-only.
+    config_dir = Path(box.calls[0]["env"]["DESMAN_CONFIG_DIR"])
+    assert config_dir in box.calls[0]["read_only"]
+    assert config_dir not in box.calls[0]["writable"]
+
+
+def test_only_a_provider_named_brings_a_paid_key() -> None:
+    """As the router reads them: `--model` alone names a model of a free provider (an id with a
+    slash, OpenRouter's way, is no provider); `--provider` names the provider."""
+    config = Config()
+    config.add_key("OPENAI_API_KEY", "sk-paid-key-0000000000000")
+    assert set(evaluation.bench_config(config, "openai").api_keys) == {"OPENAI_API_KEY"}
+    assert evaluation.bench_config(config, None, "openai/gpt-x").api_keys == {}
+    assert evaluation.bench_config(config, "openrouter", "openai/gpt-x").api_keys == {}
+
+
+def test_nothing_is_evaluated_where_runs_cannot_be_confined(checkout: Path) -> None:
+    s = store()
+    p = a_proposal(s, checkout)
+    box = Sandbox(platform="darwin", docker="/nonexistent/docker")
+    assert evaluation.isolation(box) is not None
+    with pytest.raises(evaluation.Unconfined, match="Linux"):
+        evaluate(s, p, checkout, box=box)
+    assert len(worktrees(checkout)) == 1
+    assert proposals.evaluations(s.conn, p.id) == []
+
+
+HOSTILE = """\
+import json, os, socket, sys
+found = {}
+def attempt(name, action):
+    try:
+        action()
+        found[name] = "done"
+    except Exception as e:
+        found[name] = type(e).__name__
+attempt("write_tree", lambda: open(os.path.join(os.path.dirname(__file__), "x"), "w"))
+attempt("read_secret", lambda: open(SECRET).read())
+attempt("read_checkout", lambda: open(CHECKOUT).read())
+attempt("connect", lambda: socket.create_connection(("127.0.0.1", PORT), 2))
+attempt("write_root", lambda: open("/rootfile", "w"))
+attempt("write_data", lambda: open(os.path.join(os.environ["DESMAN_DATA_DIR"], "x"), "w"))
+found["env_secret"] = "parent-secret" in json.dumps(dict(os.environ))
+found["home"] = os.path.expanduser("~")
+print(json.dumps(found), file=sys.stderr)
+sys.exit(3)
+"""
+
+
+@confined
+def test_a_hostile_version_reaches_nothing_of_the_persons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The benchmark of a version is code that may not be trusted: under bubblewrap it cannot
+    write its worktree, read a file outside the folders it was given (the person's, the
+    checkout's), reach a server on this machine, or see the caller's environment."""
+    monkeypatch.setenv("OPENAI_API_KEY", "parent-secret")
+    tree = tmp_path / "tree"
+    (tree / "src" / "desman").mkdir(parents=True)
+    (tree / "src" / "desman" / "__init__.py").write_text("")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("secret")
+    server = socket.create_server(("127.0.0.1", 0))
+    try:
+        port = server.getsockname()[1]
+        given = f"SECRET = {str(secret)!r}\nCHECKOUT = {str(ROOT / 'pyproject.toml')!r}\n"
+        (tree / "src" / "desman" / "bench.py").write_text(given + f"PORT = {port}\n" + HOSTILE)
+        with pytest.raises(evaluation.RunFailed) as failed:
+            evaluation._run(
+                tree,
+                tmp_path,
+                "fake",
+                Tuning(),
+                provider=None,
+                model=None,
+                python=sys.executable,
+                timeout=60,
+            )
+    finally:
+        server.close()
+    found = json.loads(str(failed.value))
+    assert found["write_tree"] in ("OSError", "PermissionError")
+    assert found["read_secret"] == "FileNotFoundError"
+    assert found["read_checkout"] == "FileNotFoundError"
+    assert found["connect"] != "done"
+    assert found["env_secret"] is False
+    assert found["write_root"] in ("OSError", "PermissionError")
+    assert found["write_data"] == "done"  # its own folder, in memory: nothing on the disk
+    assert not (tmp_path / "tree-data").exists()
+    assert Path(found["home"]) == tmp_path / "tree-data"
+
+
+# ── A proposal trying to change more than texts (S.3) ────────────────────────
+
+
+def proposed(checkout: Path, tmp_path: Path, value: str) -> tuple[Path, list[dict[str, Any]]]:
+    """The proposed version of `checkout` giving the planner's rules `value`, built as an
+    evaluation builds it (from the proposal's texts), and checked against the current one."""
+    diff, details = improve.render(
+        [Change(target="planner.rules", value=value)],
+        package(checkout),
+        shown=improve.settings_shown(Config()),
+    )
+    candidate = tmp_path / "candidate"
+    git(checkout, "worktree", "add", "-q", "--detach", str(candidate), "HEAD")
+    evaluation._build(candidate, details["changes"], diff)
+    evaluation._check_changes(checkout, candidate, details["changes"])
+    return candidate, details["changes"]
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        ' """) ; import os ; ("""',
+        " ''' + __import__('os').getcwd() + '''",
+        ' " + __import__("os").getcwd() + "',
+        " {__import__('os').getcwd()} {0} {{}}",
+        " \\N{BULLET} \\x00 \\u2028 \\ end",
+        " trailing backslash \\",
+        " \U0001f600 é ı",
+    ],
+)
+def test_any_text_stays_a_text(checkout: Path, tmp_path: Path, tail: str) -> None:
+    """Quotes, braces, escapes and backslashes in a proposed text never become code: the
+    proposed file holds exactly that text, and nothing else of it changed."""
+    old = improve.current(BY_ID["planner.rules"], package(checkout))
+    candidate, _ = proposed(checkout, tmp_path, old + tail)
+    assert improve.current(BY_ID["planner.rules"], package(candidate)) == old + tail
+    assert git(candidate, "status", "--porcelain") == " M src/desman/planner.py\n"
+
+
+@pytest.mark.parametrize("tail", ["\nimport os", " x", "\x00", "\r", "\x1b[2J", "\x85"])
+def test_a_text_with_breaks_or_control_characters_is_refused(checkout: Path, tail: str) -> None:
+    old = improve.current(BY_ID["planner.rules"], package(checkout))
+    changes = [{"target": "planner.rules", "new": old + tail + " more"}]
+    with pytest.raises(evaluation.EvaluationError, match="control characters"):
+        evaluation._build(checkout, changes, "")
+
+
+def swapped(text: str, name: str, source: str) -> str:
+    """`text` with the statement assigning `name` replaced by `source`."""
+    [node] = [n for n in ast.parse(text).body if evaluation._assigned(n) == name]
+    assert node.end_lineno is not None
+    lines = text.splitlines(keepends=True)
+    return "".join([*lines[: node.lineno - 1], source, *lines[node.end_lineno :]])
+
+
+@pytest.mark.parametrize(
+    ("source", "reason"),
+    [
+        ("PLANNER_RULES = f\"{__import__('os').getcwd()}\"\n", "not a plain value"),
+        ("PLANNER_RULES = str(__import__('os').getcwd())\n", "not a plain value"),
+        ("PLANNER_RULES = KIND_RULES\n", "not a plain value"),
+        ("PLANNER_RULES: str\n", "more than the targets"),
+        ("RULES = 'new'\nPLANNER_RULES = 'new'\n", "more than the targets"),
+        ("PLANNER_RULE = 'new'\n", "more than the targets"),
+        ("PLANNER_RULES = 'new'\nimport os\n", "more than the targets"),
+        ("PLANNER_RULES = 'new'\nPLANNER_RULES = PLANNER_RULES.upper()\n", "more than the targets"),
+        ("PLANNER_RULES = 'evil'\nPLANNER_RULES = 'new'\n", "more than the targets"),
+        ("PLANNER_RULES = KIND_RULES = 'new'\n", "more than the targets"),
+        ("PLANNER_RULES = 'new'\nPLANNER_RULES += '!'\n", "more than the targets"),
+        ("PLANNER_RULES = ('new'\n", "not valid Python"),
+        ("PLANNER_RULES = b'new'\n", "not a text"),
+        ("PLANNER_RULES: __import__('os').getcwd() = 'new'\n", "more than the targets"),
+    ],
+)
+def test_a_version_changing_more_than_the_text_is_refused(
+    checkout: Path, tmp_path: Path, source: str, reason: str
+) -> None:
+    """What the proposed version must not be, whoever made its files: code where a text was, an
+    assignment renamed or doubled, another statement. Refused with a reason, never a crash."""
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    path.write_text(swapped(path.read_text("utf-8"), "PLANNER_RULES", source), "utf-8")
+    changes = [{"target": "planner.rules", "new": "new"}]
+    with pytest.raises(evaluation.EvaluationError, match=reason):
+        evaluation._check_changes(checkout, candidate, changes)
+
+
+def test_a_neighbouring_text_changed_is_refused(checkout: Path, tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    text = swapped(path.read_text("utf-8"), "PLANNER_RULES", "PLANNER_RULES = 'new'\n")
+    path.write_text(swapped(text, "KIND_RULES", "KIND_RULES = 'other'\n"), "utf-8")
+    with pytest.raises(evaluation.EvaluationError, match="more than the targets"):
+        evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
+
+
+def test_the_same_text_written_otherwise_is_still_that_text(checkout: Path, tmp_path: Path) -> None:
+    """Concatenated or triple-quoted, a text is a text: the check reads values, not spelling."""
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    source = 'PLANNER_RULES = """ne""" "w"\n'
+    path.write_text(swapped(path.read_text("utf-8"), "PLANNER_RULES", source), "utf-8")
+    evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
+
+
+def test_a_target_moved_is_refused(checkout: Path, tmp_path: Path) -> None:
+    """Its value may change, not where it stands: moved after another statement, an earlier
+    reader of the name would see something else."""
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    text = swapped(path.read_text("utf-8"), "PLANNER_RULES", "")
+    path.write_text(text + "PLANNER_RULES = 'new'\n", "utf-8")
+    with pytest.raises(evaluation.EvaluationError, match="more than the targets"):
+        evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need Developer Mode on Windows")
+def test_the_runtime_is_shown_also_through_a_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real-python"
+    real.write_text("")
+    link = tmp_path / "python"
+    link.symlink_to(real)
+    monkeypatch.setattr(sys, "executable", str(link))
+    found = evaluation._runtime()
+    assert link in found and real.resolve() in found
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="evaluated under bwrap only")
+def test_the_runtime_is_only_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Python installed with `--prefix=~/.local` must not show the rest of that prefix
+    (DESMAN's own data lives in ~/.local/share): only the interpreter, its library folders and
+    its shared library."""
+    for path in evaluation._runtime():
+        assert not default_config_path().is_relative_to(path)
+        assert not db.default_db_path().is_relative_to(path)
+        assert not Path.home().is_relative_to(path)
+        assert path.is_file() or "python" in str(path).lower() or "site-packages" in str(path)
+
+
+def test_a_real_run_keeps_how_to_reach_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ConfigManager(default_config_path()).save(Config())
+    bundle = tmp_path / "ca.pem"
+    bundle.write_text("certificates")
+    if sys.platform != "win32":
+        (tmp_path / "linked.pem").symlink_to(bundle)
+        bundle = tmp_path / "linked.pem"
+    monkeypatch.setenv("https_proxy", "http://proxy.invalid:3128")
+    monkeypatch.setenv("NO_PROXY", "localhost")
+    monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
+    monkeypatch.setenv("SSL_CERT_DIR", "missing")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.chdir(tmp_path)
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    with pytest.raises(evaluation.Unconfined):
+        evaluation._run(
+            tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
+        )
+    [call] = box.calls
+    assert call["env"]["HTTPS_PROXY"] == "http://proxy.invalid:3128"
+    assert call["env"]["NO_PROXY"] == "localhost"
+    assert call["env"]["SSL_CERT_FILE"] == str(bundle)
+    assert "SSL_CERT_DIR" not in call["env"]  # a folder that is not there is not passed
+    assert bundle in call["read_only"] and bundle.resolve() in call["read_only"]
+    # A local model's slots are the run's own: no folder the person's runs trust is writable.
+    assert call["env"]["USER"]
+    assert Path(call["env"]["XDG_RUNTIME_DIR"]) == tmp_path / "tree-data"
+    assert call["writable"] == []
+
+
+def test_a_relative_certificate_folder_is_given_by_its_whole_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ConfigManager(default_config_path()).save(Config())
+    (tmp_path / "certs").mkdir()
+    (tmp_path / "more").mkdir()
+    monkeypatch.chdir(tmp_path)
+    listed = ["certs", "missing", str(tmp_path / "more"), str(tmp_path)]  # the last holds all
+    monkeypatch.setenv("SSL_CERT_DIR", os.pathsep.join(listed))
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    with pytest.raises(evaluation.Unconfined):
+        evaluation._run(
+            tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
+        )
+    given = os.pathsep.join([str((tmp_path / "certs").absolute()), str(tmp_path / "more")])
+    assert box.calls[0]["env"]["SSL_CERT_DIR"] == given
+
+
+def test_a_config_that_cannot_be_read_fails_the_run(tmp_path: Path) -> None:
+    default_config_path().parent.mkdir(parents=True, exist_ok=True)
+    default_config_path().write_text("{not json")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    with pytest.raises(evaluation.EvaluationError, match="cannot read the config"):
+        evaluation._run(
+            tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
+        )
+    assert box.calls == []
+
+
+def test_an_unavailable_sandbox_is_probed_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    box = Sandbox(platform="linux")
+    probes: list[str] = []
+    monkeypatch.setattr(box, "unavailable", lambda: "no bubblewrap")
+    monkeypatch.setattr(box, "reprobe", lambda: probes.append("again"))
+    assert evaluation.isolation(box) is not None
+    now[0] += evaluation.REPROBE_AFTER - 1
+    assert evaluation.isolation(box) is not None and probes == []
+    now[0] += 1
+    evaluation.isolation(box)
+    assert probes == ["again"]
+
+
+def test_a_sandbox_failing_during_a_run_records_nothing(checkout: Path) -> None:
+    """bwrap stopping working after its probe is the machine's failure, not the proposal's."""
+    s = store()
+    p = a_proposal(s, checkout)
+    with pytest.raises(evaluation.Unconfined, match="checked"):
+        evaluate(s, p, checkout, box=Box())
+    assert proposals.evaluations(s.conn, p.id) == []
+    assert len(worktrees(checkout)) == 1
+
+
+def test_a_coding_line_is_read_as_python_reads_it(checkout: Path, tmp_path: Path) -> None:
+    """A comment naming another encoding changes what the file runs: it is checked as decoded
+    on import, where this text holds line breaks and code."""
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    hidden = "a+AAo-import os+AAo-"
+    text = swapped(path.read_text("utf-8"), "PLANNER_RULES", f"PLANNER_RULES = {hidden!r}\n")
+    path.write_bytes(b"# -*- coding: utf-7 -*-\n" + text.encode("ascii", "replace"))
+    with pytest.raises(evaluation.EvaluationError, match=r"planner\.py|not valid Python"):
+        evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": hidden}])
+    # Alone, the same text and file read as UTF-8 would pass: the coding line is what is refused.
+    path.write_text(text, "utf-8")
+    evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": hidden}])
+
+
+def test_a_sandbox_failing_a_run_is_not_offered_until_probed_again(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    s = store()
+    p = a_proposal(s, checkout)
+    box = Box()
+    probes: list[str] = []
+    monkeypatch.setattr(box, "reprobe", lambda: probes.append("again"))
+    assert evaluation.isolation(box) is None
+    with pytest.raises(evaluation.Unconfined):
+        evaluate(s, p, checkout, box=box)
+    assert evaluation.isolation(box) == "checked" and probes == []
+    now[0] += evaluation.REPROBE_AFTER
+    assert evaluation.isolation(box) is None and probes == ["again"]
+
+
+def test_the_default_sandbox_is_made_again_to_find_bwrap_installed_since(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    evaluation._sandbox.cache_clear()
+    try:
+        first = evaluation._sandbox()
+        monkeypatch.setattr(first, "platform", "linux")
+        monkeypatch.setattr(first, "unavailable", lambda: "bubblewrap (bwrap) is not installed")
+        assert evaluation.isolation() is not None
+        now[0] += evaluation.REPROBE_AFTER
+        evaluation.isolation()
+        assert evaluation._sandbox() is not first
+    finally:
+        evaluation._sandbox.cache_clear()
+
+
+def test_a_model_the_tuning_puts_first_brings_its_providers_key() -> None:
+    """As the router reads it: a model chosen for a role is asked first, paid or not."""
+    config = Config()
+    config.add_key("OPENAI_API_KEY", "sk-paid-key-0000000000000")
+    config.add_key("ANTHROPIC_API_KEY", "sk-ant-paid-key-000000000000")
+    tuning = Tuning(models=ModelChoices(code="openai/gpt-x"))
+    assert set(evaluation.bench_config(config, None, None, tuning).api_keys) == {"OPENAI_API_KEY"}
+    assert evaluation.bench_config(config, None, None, Tuning()).api_keys == {}
+
+
+def test_a_certificate_folder_holding_the_persons_files_is_not_shown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "eval"
+    folder.mkdir()
+    certs = tmp_path / "certs"
+    certs.mkdir()
+    bundle = certs / "ca.pem"
+    bundle.write_text("certificates")
+    assert evaluation._harmless(certs, folder) and evaluation._harmless(bundle, folder)
+    for shown in (ROOT, Path.home(), default_config_path().parent, tmp_path, Path("/")):
+        assert not evaluation._harmless(shown, folder)
+    default_config_path().parent.mkdir(parents=True, exist_ok=True)
+    ConfigManager(default_config_path()).save(Config())
+    assert not evaluation._harmless(default_config_path(), folder)
+    inside = db.default_db_path().parent / "workspaces"
+    inside.mkdir(parents=True, exist_ok=True)
+    assert not evaluation._harmless(inside, folder)
+
+
+def test_a_python_failing_confined_is_checked_again_with_the_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    box = Box()
+    monkeypatch.setattr(box, "reprobe", lambda: None)
+    evaluation._broken[box] = ("the Python DESMAN runs on does not start there", now[0])
+    now[0] += evaluation.REPROBE_AFTER
+
+    def failing(*args: Any, **kwargs: Any) -> None:
+        raise evaluation._unconfined(box, "still failing")
+
+    monkeypatch.setattr(evaluation, "_probe_runtime", failing)
+    assert evaluation.isolation(box) == "still failing"

@@ -29,11 +29,12 @@ submission_hash = protocol.submission_hash
 
 
 def can_check() -> bool:
+    """A checkout to make worktrees from, and a sandbox to run their versions in (S.3)."""
     try:
         evaluation.repository()
     except evaluation.EvaluationError:
         return False
-    return True
+    return evaluation.isolation() is None
 
 
 def verify(
@@ -112,6 +113,12 @@ def run(work: protocol.ProposalWork, repo: Path, now: datetime) -> protocol.Prop
             if comparable
             else Tuning(),
             timeout=RUN_TIMEOUT,
+        )
+    except evaluation.Unconfined:
+        return protocol.ProposalCheck(
+            **common,
+            outcome="unable",
+            reason="This node cannot run the benchmark confined (bubblewrap).",
         )
     except evaluation.EvaluationError:
         return protocol.ProposalCheck(
