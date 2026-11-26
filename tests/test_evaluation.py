@@ -811,7 +811,7 @@ def test_a_version_changing_more_than_the_text_is_refused(
     candidate = tmp_path / "candidate"
     shutil.copytree(checkout / "src", candidate / "src")
     path = candidate / "src" / "desman" / "planner.py"
-    path.write_text(swapped(path.read_text(), "PLANNER_RULES", source))
+    path.write_text(swapped(path.read_text("utf-8"), "PLANNER_RULES", source), "utf-8")
     changes = [{"target": "planner.rules", "new": "new"}]
     with pytest.raises(evaluation.EvaluationError, match=reason):
         evaluation._check_changes(checkout, candidate, changes)
@@ -821,8 +821,8 @@ def test_a_neighbouring_text_changed_is_refused(checkout: Path, tmp_path: Path) 
     candidate = tmp_path / "candidate"
     shutil.copytree(checkout / "src", candidate / "src")
     path = candidate / "src" / "desman" / "planner.py"
-    text = swapped(path.read_text(), "PLANNER_RULES", "PLANNER_RULES = 'new'\n")
-    path.write_text(swapped(text, "KIND_RULES", "KIND_RULES = 'other'\n"))
+    text = swapped(path.read_text("utf-8"), "PLANNER_RULES", "PLANNER_RULES = 'new'\n")
+    path.write_text(swapped(text, "KIND_RULES", "KIND_RULES = 'other'\n"), "utf-8")
     with pytest.raises(evaluation.EvaluationError, match="more than the targets"):
         evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
 
@@ -832,7 +832,8 @@ def test_the_same_text_written_otherwise_is_still_that_text(checkout: Path, tmp_
     candidate = tmp_path / "candidate"
     shutil.copytree(checkout / "src", candidate / "src")
     path = candidate / "src" / "desman" / "planner.py"
-    path.write_text(swapped(path.read_text(), "PLANNER_RULES", 'PLANNER_RULES = """ne""" "w"\n'))
+    source = 'PLANNER_RULES = """ne""" "w"\n'
+    path.write_text(swapped(path.read_text("utf-8"), "PLANNER_RULES", source), "utf-8")
     evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
 
 
@@ -842,8 +843,8 @@ def test_a_target_moved_is_refused(checkout: Path, tmp_path: Path) -> None:
     candidate = tmp_path / "candidate"
     shutil.copytree(checkout / "src", candidate / "src")
     path = candidate / "src" / "desman" / "planner.py"
-    text = swapped(path.read_text(), "PLANNER_RULES", "")
-    path.write_text(text + "PLANNER_RULES = 'new'\n")
+    text = swapped(path.read_text("utf-8"), "PLANNER_RULES", "")
+    path.write_text(text + "PLANNER_RULES = 'new'\n", "utf-8")
     with pytest.raises(evaluation.EvaluationError, match="more than the targets"):
         evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": "new"}])
 
