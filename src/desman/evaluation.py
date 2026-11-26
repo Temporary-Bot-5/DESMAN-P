@@ -220,6 +220,7 @@ def check(
     folder = Path(tempfile.mkdtemp(prefix="desman-eval-"))
     trees: list[Path] = []
     try:
+        _probe_runtime(box, python, folder / "probe")
         base_tree, candidate_tree = folder / "current", folder / "proposed"
         for tree in (base_tree, candidate_tree):
             trees.append(tree)
@@ -418,7 +419,9 @@ def _values(text: str | bytes, names: set[str]) -> dict[str, str]:
                 value = ast.literal_eval(node.value)
             except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError) as e:
                 raise EvaluationError(f"{name} is not a plain value") from e
-            found[name] = value if isinstance(value, str) else repr(value)
+            if not isinstance(value, str):  # every target is a text
+                raise EvaluationError(f"{name} is not a text")
+            found[name] = value
     return found
 
 
@@ -475,21 +478,12 @@ def _run(
     # disk (its home, its database, its local-model slots). The config beside it, read-only.
     data, config = folder / f"{tree.name}-data", folder / f"{tree.name}-config"
     config.mkdir(mode=0o700)
-    read_only = [*_runtime(), tree, config]
-    env = {
-        "PATH": SANDBOX_PATH,
-        "LANG": "C.UTF-8",
-        "HOME": str(data),
-        "TMPDIR": str(data),
+    read_only = [*_runtime(python), tree, config]
+    env = _python_env(data) | {
         "PYTHONPATH": str(tree / "src"),
-        "PYTHONDONTWRITEBYTECODE": "1",
         "DESMAN_DATA_DIR": str(data),
         "DESMAN_CONFIG_DIR": str(config),
     }
-    if _user_site():  # after the standard library, as outside; found without the real home
-        env["PYTHONUSERBASE"] = site.getuserbase()
-    else:
-        env["PYTHONNOUSERSITE"] = "1"
     if mode == "real":  # only what the benchmark may use; the fake needs none
         # A local model's slots are the run's own, never a folder the person's runs trust: an
         # evaluation may ask a local server alongside them.
@@ -506,13 +500,11 @@ def _run(
             value = os.environ.get(name) or os.environ.get(name.lower())
             if value:
                 env[name] = value
-        for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):
-            given_path = Path(env.get(name, ""))
-            if env.get(name) and given_path.exists():  # the run starts in its worktree
-                env[name] = str(given_path.absolute())
-                read_only += [given_path.absolute(), given_path.resolve()]
-            else:
-                env.pop(name, None)
+        for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):  # a folder list: OpenSSL's way
+            kept = [Path(p) for p in env.pop(name, "").split(os.pathsep) if p and Path(p).exists()]
+            if kept and (name == "SSL_CERT_DIR" or len(kept) == 1):
+                env[name] = os.pathsep.join(str(p.absolute()) for p in kept)  # from its worktree
+                read_only += [q for p in kept for q in (p.absolute(), p.resolve())]
     argv = [python, "-m", "desman.bench", "--mode", mode, "--tuning", tuning.model_dump_json()]
     if provider is not None:
         argv += ["--provider", provider]
@@ -547,6 +539,46 @@ def _run(
     return result
 
 
+def _python_env(home: Path) -> dict[str, str]:
+    env = {
+        "PATH": SANDBOX_PATH,
+        "LANG": "C.UTF-8",
+        "HOME": str(home),
+        "TMPDIR": str(home),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    if _user_site():  # after the standard library, as outside; found without the real home
+        env["PYTHONUSERBASE"] = site.getuserbase()
+    else:
+        env["PYTHONNOUSERSITE"] = "1"
+    return env
+
+
+PROBE = "import sqlite3, ssl, json, pydantic, httpx, click, cryptography"
+"""What the benchmark needs of the Python it runs on: checked confined before any run."""
+
+
+def _probe_runtime(box: Sandbox, python: str, home: Path) -> None:
+    """The Python DESMAN runs on starts confined, with its libraries, before any version runs:
+    a Python whose own libraries are missing there (some builds keep them beside it) is this
+    machine's problem, never a proposal's failure."""
+    try:
+        done = box.program(
+            [python, "-c", PROBE],
+            read_only=_runtime(python),
+            writable=[],
+            scratch=[home],
+            env=_python_env(home),
+            cwd=home,
+            limits=_limits(60.0),
+        )
+    except (SandboxUnavailable, OSError) as e:
+        raise _unconfined(box, str(e)) from e
+    if done.timed_out or done.exit_code != 0:
+        detail = _last_line(done.stderr)[-300:] or f"exit code {done.exit_code}"
+        raise _unconfined(box, f"the Python DESMAN runs on does not start there: {detail}")
+
+
 def _limits(seconds: float) -> Limits:
     """A whole DESMAN runs: more memory, processes and output than a generated program gets."""
     return dataclasses.replace(
@@ -573,12 +605,14 @@ NETWORK_ENV = (
 """What a run on real models keeps of the environment: how to reach the network, no more."""
 
 
-def _runtime() -> list[Path]:
+def _runtime(python: str | None = None) -> list[Path]:
     """The Python DESMAN runs on, read-only at their own paths (also as given, through a link):
     the interpreter, its standard library, its packages (a venv's, the user's), its shared
     library. Only those: a prefix may hold more of the person's (`--prefix=~/.local` holds
     DESMAN's own data)."""
     paths: list[Path] = [Path(sys.executable), *_user_site()]
+    if python is not None and Path(python).is_absolute():
+        paths.append(Path(python))
     venv = Path(sys.prefix) / "pyvenv.cfg"
     if venv.is_file():
         paths.append(venv)
@@ -591,6 +625,11 @@ def _runtime() -> list[Path]:
     libdir, library = sysconfig.get_config_var("LIBDIR"), sysconfig.get_config_var("LDLIBRARY")
     if sysconfig.get_config_var("Py_ENABLE_SHARED") and libdir and library:
         paths += sorted(Path(libdir).glob(f"{library}*"))
+    # A Python of its own (conda, standalone builds) keeps the libraries its modules load
+    # beside it: those files, never the folder.
+    for prefix in {Path(sys.base_prefix), Path(sys.base_exec_prefix)}:
+        if not prefix.resolve().is_relative_to("/usr"):
+            paths += sorted(p for p in (prefix / "lib").glob("*.so*") if p.is_file())
     found: list[Path] = []
     for given in paths:
         if not given.exists():

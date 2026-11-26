@@ -416,14 +416,33 @@ def test_a_target_text_that_may_not_be_one_is_refused(checkout: Path) -> None:
         evaluate(s, q, checkout, box=Box())
 
 
-@confined
-def test_a_run_that_fails_is_recorded_as_failed(checkout: Path, tmp_path: Path) -> None:
+def test_a_run_that_fails_is_recorded_as_failed(checkout: Path) -> None:
     s = store()
     p = a_proposal(s, checkout)
-    found = evaluate(s, p, checkout, python=str(tmp_path / "no-python"))
+    crashed = Outcome(exit_code=1, stdout="", stderr="Traceback\nValueError: boom")
+    found = evaluate(s, p, checkout, box=Box(crashed))
     assert found.verdict == "failed" and found.base is None and found.candidate is None
     assert found.reason is not None and "current version's run failed" in found.reason
+    assert "boom" in found.reason
     assert len(worktrees(checkout)) == 1
+
+
+@confined
+def test_a_python_that_does_not_start_confined_records_nothing(
+    checkout: Path, tmp_path: Path
+) -> None:
+    """The machine's problem (a Python missing its libraries there), never the proposal's."""
+    s = store()
+    p = a_proposal(s, checkout)
+    with pytest.raises(evaluation.Unconfined, match="does not start there"):
+        evaluate(s, p, checkout, python=str(tmp_path / "no-python"), box=Sandbox())
+    assert proposals.evaluations(s.conn, p.id) == []
+    assert len(worktrees(checkout)) == 1
+
+
+@confined
+def test_the_runtime_probe_passes_here() -> None:
+    evaluation._probe_runtime(Sandbox(), sys.executable, Path("/tmp/desman-probe-test"))
 
 
 def test_only_a_proposed_change_is_evaluated(checkout: Path) -> None:
@@ -573,6 +592,8 @@ class Box(Sandbox):
         return None
 
     def program(self, command: Sequence[str], **kwargs: Any) -> Any:
+        if "-c" in command:  # the runtime's probe passes
+            return Outcome(exit_code=0, stdout="", stderr="")
         config = Path(kwargs["env"]["DESMAN_CONFIG_DIR"]) / "config.json"
         kwargs["config"] = json.loads(config.read_text()) if config.exists() else None
         self.calls.append({"command": command, **kwargs})
@@ -805,6 +826,7 @@ def swapped(text: str, name: str, source: str) -> str:
         ("PLANNER_RULES = KIND_RULES = 'new'\n", "more than the targets"),
         ("PLANNER_RULES = 'new'\nPLANNER_RULES += '!'\n", "more than the targets"),
         ("PLANNER_RULES = ('new'\n", "not valid Python"),
+        ("PLANNER_RULES = b'new'\n", "not a text"),
         ("PLANNER_RULES: __import__('os').getcwd() = 'new'\n", "more than the targets"),
     ],
 )
@@ -867,6 +889,7 @@ def test_the_runtime_is_shown_also_through_a_link(
     assert link in found and real.resolve() in found
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="evaluated under bwrap only")
 def test_the_runtime_is_only_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A Python installed with `--prefix=~/.local` must not show the rest of that prefix
     (DESMAN's own data lives in ~/.local/share): only the interpreter, its library folders and
@@ -875,7 +898,7 @@ def test_the_runtime_is_only_python(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         assert not default_config_path().is_relative_to(path)
         assert not db.default_db_path().is_relative_to(path)
         assert not Path.home().is_relative_to(path)
-        assert path.is_file() or "python" in path.name.lower() or "site-packages" in str(path)
+        assert path.is_file() or "python" in str(path).lower() or "site-packages" in str(path)
 
 
 def test_a_real_run_keeps_how_to_reach_the_network(
@@ -918,7 +941,7 @@ def test_a_relative_certificate_folder_is_given_by_its_whole_path(
     ConfigManager(default_config_path()).save(Config())
     (tmp_path / "certs").mkdir()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("SSL_CERT_DIR", "certs")
+    monkeypatch.setenv("SSL_CERT_DIR", os.pathsep.join(["certs", "missing", str(tmp_path)]))
     tree = tmp_path / "tree"
     tree.mkdir()
     box = Box()
@@ -926,7 +949,8 @@ def test_a_relative_certificate_folder_is_given_by_its_whole_path(
         evaluation._run(
             tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
         )
-    assert box.calls[0]["env"]["SSL_CERT_DIR"] == str((tmp_path / "certs").absolute())
+    given = os.pathsep.join([str((tmp_path / "certs").absolute()), str(tmp_path)])
+    assert box.calls[0]["env"]["SSL_CERT_DIR"] == given
 
 
 def test_a_config_that_cannot_be_read_fails_the_run(tmp_path: Path) -> None:

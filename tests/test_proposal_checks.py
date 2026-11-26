@@ -16,6 +16,7 @@ from conftest import FakeClock
 from desman import bench, evaluation, improve
 from desman.config import Config, Donation, Network, Tuning
 from desman.core import db
+from desman.core.sandbox import Sandbox
 from desman.net import checks, jobs, node, protocol, sign
 from desman.registry import admin, store, work
 from desman.registry import checks as registry_checks
@@ -385,7 +386,15 @@ def test_plain_check_failed_and_done(checkout: Path, tmp_path: Path) -> None:
         candidate_tuning=Tuning(),
     )
     commit = git(checkout, "rev-parse", "HEAD").strip()
-    failed = evaluation.check(checkout, commit, **args, python=str(tmp_path / "missing"))
+    with pytest.raises(evaluation.Unconfined):  # a Python that cannot start: this machine's
+        evaluation.check(checkout, commit, **args, python=str(tmp_path / "missing"), box=Sandbox())
+
+    def crash(*args: Any, **kwargs: Any) -> Any:
+        raise evaluation.RunFailed("boom")
+
+    with pytest.MonkeyPatch.context() as context:
+        context.setattr(evaluation, "_run", crash)
+        failed = evaluation.check(checkout, commit, **args)
     assert failed.outcome == "failed" and failed.base is None
     done = evaluation.check(checkout, commit, **args)
     assert done.outcome == "done" and done.verdict == "same"
