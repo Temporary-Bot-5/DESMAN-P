@@ -31,6 +31,7 @@ from desman.core.proposals import Proposal, Status
 from desman.core.sandbox import Outcome, Sandbox, SandboxUnavailable
 from desman.core.store import Store
 from desman.improve import BY_ID, Change
+from desman.llm import limiter
 
 ROOT = Path(__file__).parent.parent
 UNCONFINED = evaluation.isolation()
@@ -792,7 +793,7 @@ def swapped(text: str, name: str, source: str) -> str:
         ("PLANNER_RULES = f\"{__import__('os').getcwd()}\"\n", "not a plain value"),
         ("PLANNER_RULES = str(__import__('os').getcwd())\n", "not a plain value"),
         ("PLANNER_RULES = KIND_RULES\n", "not a plain value"),
-        ("PLANNER_RULES: str\n", "given no value"),
+        ("PLANNER_RULES: str\n", "more than the targets"),
         ("RULES = 'new'\nPLANNER_RULES = 'new'\n", "more than the targets"),
         ("PLANNER_RULE = 'new'\n", "more than the targets"),
         ("PLANNER_RULES = 'new'\nimport os\n", "more than the targets"),
@@ -801,6 +802,7 @@ def swapped(text: str, name: str, source: str) -> str:
         ("PLANNER_RULES = KIND_RULES = 'new'\n", "more than the targets"),
         ("PLANNER_RULES = 'new'\nPLANNER_RULES += '!'\n", "more than the targets"),
         ("PLANNER_RULES = ('new'\n", "not valid Python"),
+        ("PLANNER_RULES: __import__('os').getcwd() = 'new'\n", "more than the targets"),
     ],
 )
 def test_a_version_changing_more_than_the_text_is_refused(
@@ -874,7 +876,9 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     monkeypatch.setenv("https_proxy", "http://proxy.invalid:3128")
     monkeypatch.setenv("NO_PROXY", "localhost")
     monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
-    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "missing"))
+    monkeypatch.setenv("SSL_CERT_DIR", "missing")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.chdir(tmp_path)
     tree = tmp_path / "tree"
     tree.mkdir()
     box = Box()
@@ -888,6 +892,26 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     assert call["env"]["SSL_CERT_FILE"] == str(bundle)
     assert "SSL_CERT_DIR" not in call["env"]  # a folder that is not there is not passed
     assert bundle in call["read_only"] and bundle.resolve() in call["read_only"]
+    # A local model's slots stay shared with the person's other runs.
+    assert call["env"]["USER"] and call["env"]["XDG_RUNTIME_DIR"] == str(tmp_path / "run")
+    assert limiter.lock_dir() in call["writable"]
+
+
+def test_a_relative_certificate_folder_is_given_by_its_whole_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ConfigManager(default_config_path()).save(Config())
+    (tmp_path / "certs").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SSL_CERT_DIR", "certs")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    box = Box()
+    with pytest.raises(evaluation.Unconfined):
+        evaluation._run(
+            tree, tmp_path, "real", Tuning(), provider=None, model=None, python="py", box=box
+        )
+    assert box.calls[0]["env"]["SSL_CERT_DIR"] == str((tmp_path / "certs").absolute())
 
 
 def test_a_config_that_cannot_be_read_fails_the_run(tmp_path: Path) -> None:
@@ -935,3 +959,38 @@ def test_a_run_stopped_for_its_disk_use_fails(checkout: Path) -> None:
     found = evaluate(s, p, checkout, box=Box(stopped))
     assert found.verdict == "failed"
     assert found.reason is not None and "grew past" in found.reason
+
+
+def test_a_run_stopped_for_the_disks_free_space_records_nothing(checkout: Path) -> None:
+    """Other programs may have filled the disk: no verdict on the proposal."""
+    s = store()
+    p = a_proposal(s, checkout)
+    low = Outcome(exit_code=137, stdout="", stderr="", stopped="the disk is low", disk_low=True)
+    with pytest.raises(evaluation.EvaluationError, match="disk is low"):
+        evaluate(s, p, checkout, box=Box(low))
+    assert proposals.evaluations(s.conn, p.id) == []
+
+
+def test_bubblewrap_failing_to_start_a_run_records_nothing(checkout: Path) -> None:
+    s = store()
+    p = a_proposal(s, checkout)
+    failed = Outcome(exit_code=1, stdout="", stderr="bwrap: Can't mount proc on /newroot/proc")
+    with pytest.raises(evaluation.Unconfined, match="mount proc"):
+        evaluate(s, p, checkout, box=Box(failed))
+    assert proposals.evaluations(s.conn, p.id) == []
+
+
+def test_a_coding_line_is_read_as_python_reads_it(checkout: Path, tmp_path: Path) -> None:
+    """A comment naming another encoding changes what the file runs: it is checked as decoded
+    on import, where this text holds line breaks and code."""
+    candidate = tmp_path / "candidate"
+    shutil.copytree(checkout / "src", candidate / "src")
+    path = candidate / "src" / "desman" / "planner.py"
+    hidden = "a+AAo-import os+AAo-"
+    text = swapped(path.read_text("utf-8"), "PLANNER_RULES", f"PLANNER_RULES = {hidden!r}\n")
+    path.write_bytes(b"# -*- coding: utf-7 -*-\n" + text.encode("ascii", "replace"))
+    with pytest.raises(evaluation.EvaluationError, match=r"planner\.py|not valid Python"):
+        evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": hidden}])
+    # Alone, the same text and file read as UTF-8 would pass: the coding line is what is refused.
+    path.write_text(text, "utf-8")
+    evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": hidden}])

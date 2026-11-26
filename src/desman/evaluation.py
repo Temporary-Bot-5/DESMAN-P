@@ -35,6 +35,7 @@ import ast
 import contextlib
 import dataclasses
 import functools
+import getpass
 import hashlib
 import json
 import os
@@ -58,6 +59,7 @@ from desman.config import Config, ConfigError, ConfigManager, Tuning, open_confi
 from desman.core import proposals
 from desman.core.proposals import Evaluation, Proposal, Status
 from desman.core.sandbox import SANDBOX_PATH, Limits, Sandbox, SandboxUnavailable
+from desman.llm import limiter
 
 Side = Literal["base", "candidate"]
 
@@ -342,8 +344,9 @@ def _check_changes(base: Path, candidate: Path, changes: list[dict[str, Any]]) -
         by_file.setdefault(target.path, {})[target.name] = str(change.get("new"))
     for path in {t.path for t in improve.TARGETS}:
         package = improve.SOURCE_PREFIX + path
-        old = (base / package).read_text(encoding="utf-8")
-        new = (candidate / package).read_text(encoding="utf-8")
+        # As bytes: read as Python reads them on import (a coding line, a BOM), not as UTF-8.
+        old = (base / package).read_bytes()
+        new = (candidate / package).read_bytes()
         values = by_file.get(path, {})
         if _without(old, set(values)) != _without(new, set(values)):
             raise EvaluationError(f"the diff changes more than the targets in {package}")
@@ -352,22 +355,30 @@ def _check_changes(base: Path, candidate: Path, changes: list[dict[str, Any]]) -
             raise EvaluationError(f"the diff does not give {package} the proposed texts")
 
 
-def _without(text: str, names: set[str]) -> list[str]:
+def _without(text: str | bytes, names: set[str]) -> list[str]:
     """The module, as its syntax, with each assignment to `names` only marked where it stands:
     its value may differ, not how many there are or what comes before and after them."""
     return [
-        f"<{name}>" if (name := _assigned(n)) in names else ast.dump(n) for n in _parse(text).body
+        _marked(n, name) if (name := _assigned(n)) in names else ast.dump(n)
+        for n in _parse(text).body
     ]
 
 
-def _parse(text: str) -> ast.Module:
+def _marked(node: ast.stmt, name: str | None) -> str:
+    """A target's assignment without its value: its name, and its annotation (code too)."""
+    if isinstance(node, ast.AnnAssign):
+        return f"<{name}: {ast.dump(node.annotation)}>"
+    return f"<{name}>"
+
+
+def _parse(text: str | bytes) -> ast.Module:
     try:
         return ast.parse(text)
     except (SyntaxError, ValueError, MemoryError, RecursionError) as e:
         raise EvaluationError(f"a changed file is not valid Python: {e}") from e
 
 
-def _values(text: str, names: set[str]) -> dict[str, str]:
+def _values(text: str | bytes, names: set[str]) -> dict[str, str]:
     found = {}
     for node in _parse(text).body:
         name = _assigned(node)
@@ -453,7 +464,15 @@ def _run(
         env["PYTHONUSERBASE"] = site.getuserbase()
     else:
         env["PYTHONNOUSERSITE"] = "1"
+    writable = [data]
     if mode == "real":  # only what the benchmark may use; the fake needs none
+        # A local model's slots are the machine's, shared with the person's other runs.
+        env["USER"] = env["LOGNAME"] = getpass.getuser()
+        if runtime := os.environ.get("XDG_RUNTIME_DIR"):
+            env["XDG_RUNTIME_DIR"] = runtime
+            slots = limiter.lock_dir()
+            slots.mkdir(parents=True, exist_ok=True, mode=0o700)
+            writable.append(slots)
         try:
             given = bench_config(open_config().load(), provider, model)
             ConfigManager(config / "config.json").save(given)
@@ -466,7 +485,8 @@ def _run(
                 env[name] = value
         for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):
             given_path = Path(env.get(name, ""))
-            if env.get(name) and given_path.exists():
+            if env.get(name) and given_path.exists():  # the run starts in its worktree
+                env[name] = str(given_path.absolute())
                 read_only += [given_path.absolute(), given_path.resolve()]
             else:
                 env.pop(name, None)
@@ -480,7 +500,7 @@ def _run(
         done = box.program(
             argv,
             read_only=read_only,
-            writable=[data],
+            writable=writable,
             env=env,
             cwd=tree,
             limits=_limits(seconds),
@@ -491,8 +511,12 @@ def _run(
         raise Unconfined(f"the benchmark cannot run confined here: {e}") from e
     if done.timed_out:
         raise RunFailed(f"it took longer than {int(seconds)} s")
+    if done.disk_low:  # the disk's free space fell: maybe others' writing, not the version's
+        raise EvaluationError(f"the run was stopped: {done.stopped}")
     if done.stopped:
         raise RunFailed(done.stopped)
+    if done.exit_code != 0 and _last_line(done.stderr).startswith("bwrap:"):
+        raise Unconfined(f"the sandbox could not start the run: {_last_line(done.stderr)}")
     if done.exit_code != 0:
         raise RunFailed(_last_line(done.stderr)[-500:] or f"exit code {done.exit_code}")
     try:
