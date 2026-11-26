@@ -31,7 +31,6 @@ from desman.core.proposals import Proposal, Status
 from desman.core.sandbox import Outcome, Sandbox, SandboxUnavailable
 from desman.core.store import Store
 from desman.improve import BY_ID, Change
-from desman.llm import limiter
 
 ROOT = Path(__file__).parent.parent
 UNCONFINED = evaluation.isolation()
@@ -892,9 +891,10 @@ def test_a_real_run_keeps_how_to_reach_the_network(
     assert call["env"]["SSL_CERT_FILE"] == str(bundle)
     assert "SSL_CERT_DIR" not in call["env"]  # a folder that is not there is not passed
     assert bundle in call["read_only"] and bundle.resolve() in call["read_only"]
-    # A local model's slots stay shared with the person's other runs.
-    assert call["env"]["USER"] and call["env"]["XDG_RUNTIME_DIR"] == str(tmp_path / "run")
-    assert limiter.lock_dir() in call["writable"]
+    # A local model's slots are the run's own: no folder the person's runs trust is writable.
+    assert call["env"]["USER"]
+    assert Path(call["env"]["XDG_RUNTIME_DIR"]).is_relative_to(tmp_path / "tree-data")
+    assert call["writable"] == [tmp_path / "tree-data"]
 
 
 def test_a_relative_certificate_folder_is_given_by_its_whole_path(
@@ -994,3 +994,39 @@ def test_a_coding_line_is_read_as_python_reads_it(checkout: Path, tmp_path: Path
     # Alone, the same text and file read as UTF-8 would pass: the coding line is what is refused.
     path.write_text(text, "utf-8")
     evaluation._check_changes(checkout, candidate, [{"target": "planner.rules", "new": hidden}])
+
+
+def test_a_sandbox_failing_a_run_is_not_offered_until_probed_again(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    s = store()
+    p = a_proposal(s, checkout)
+    box = Box()
+    probes: list[str] = []
+    monkeypatch.setattr(box, "reprobe", lambda: probes.append("again"))
+    assert evaluation.isolation(box) is None
+    with pytest.raises(evaluation.Unconfined):
+        evaluate(s, p, checkout, box=box)
+    assert evaluation.isolation(box) == "checked" and probes == []
+    now[0] += evaluation.REPROBE_AFTER
+    assert evaluation.isolation(box) is None and probes == ["again"]
+
+
+def test_the_default_sandbox_is_made_again_to_find_bwrap_installed_since(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(evaluation, "_monotonic", lambda: now[0])
+    evaluation._sandbox.cache_clear()
+    try:
+        first = evaluation._sandbox()
+        monkeypatch.setattr(first, "platform", "linux")
+        monkeypatch.setattr(first, "unavailable", lambda: "bubblewrap (bwrap) is not installed")
+        assert evaluation.isolation() is not None
+        now[0] += evaluation.REPROBE_AFTER
+        evaluation.isolation()
+        assert evaluation._sandbox() is not first
+    finally:
+        evaluation._sandbox.cache_clear()

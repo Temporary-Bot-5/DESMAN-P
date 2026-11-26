@@ -871,3 +871,18 @@ def test_a_node_that_cannot_confine_runs_is_unable(
     assert result.reason == "This node cannot run the benchmark confined (bubblewrap)."
     assert len(worktrees(checkout)) == 1
     assert not checks.can_check()
+
+
+def test_a_node_whose_disk_ran_low_is_unable(
+    checkout: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def low(*args: Any, **kwargs: Any) -> Any:
+        raise evaluation.DiskLow("the run was stopped: the disk is low")
+
+    monkeypatch.setattr(evaluation, "isolation", lambda box=None: None)
+    monkeypatch.setattr(evaluation, "_run", low)
+    key = sign.NodeKey.generate()
+    lent = local_work(key, clock).model_copy(update={"submission": submission(key, checkout)})
+    result = checks.run(lent, checkout, clock())
+    assert result.outcome == "unable"
+    assert result.reason == "This node's disk ran low during the benchmark."

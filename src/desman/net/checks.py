@@ -120,6 +120,12 @@ def run(work: protocol.ProposalWork, repo: Path, now: datetime) -> protocol.Prop
             outcome="unable",
             reason="This node cannot run the benchmark confined (bubblewrap).",
         )
+    except evaluation.DiskLow:
+        return protocol.ProposalCheck(
+            **common,
+            outcome="unable",
+            reason="This node's disk ran low during the benchmark.",
+        )
     except evaluation.EvaluationError:
         return protocol.ProposalCheck(
             **common,

@@ -59,7 +59,6 @@ from desman.config import Config, ConfigError, ConfigManager, Tuning, open_confi
 from desman.core import proposals
 from desman.core.proposals import Evaluation, Proposal, Status
 from desman.core.sandbox import SANDBOX_PATH, Limits, Sandbox, SandboxUnavailable
-from desman.llm import limiter
 
 Side = Literal["base", "candidate"]
 
@@ -87,22 +86,51 @@ def _sandbox() -> Sandbox:
 
 
 _failed_at: weakref.WeakKeyDictionary[Sandbox, float] = weakref.WeakKeyDictionary()
+"""When a sandbox was first found unavailable."""
+_broken: weakref.WeakKeyDictionary[Sandbox, tuple[str, float]] = weakref.WeakKeyDictionary()
+"""A sandbox that passed its probe, then failed to run: why, and when."""
 _monotonic = time.monotonic
 
 
 def isolation(box: Sandbox | None = None) -> str | None:
-    """Why a run of the benchmark cannot be confined here, or None when it can."""
+    """Why a run of the benchmark cannot be confined here, or None when it can. A sandbox found
+    unavailable, or failing a run, is probed again after `REPROBE_AFTER`."""
+    default = box is None
     box = _sandbox() if box is None else box
     if not box.platform.startswith("linux"):
         return "proposals are evaluated only on Linux, under bubblewrap"
+    now = _monotonic()
+    if box in _broken:
+        reason, since = _broken[box]
+        if now - since < REPROBE_AFTER:
+            return reason
+        del _broken[box]
+        return _reprobe(box, default)
     problem = box.unavailable()
     if problem is not None:
-        now = _monotonic()
         failed = _failed_at.setdefault(box, now)
         if now - failed >= REPROBE_AFTER:
             del _failed_at[box]
-            problem = box.reprobe()
+            problem = _reprobe(box, default)
     return problem
+
+
+def _reprobe(box: Sandbox, default: bool) -> str | None:
+    if default:  # a new one looks for bwrap and prlimit again (installed since)
+        _sandbox.cache_clear()
+        return _sandbox().unavailable()
+    return box.reprobe()
+
+
+def _unconfined(box: Sandbox, reason: str) -> Unconfined:
+    """The sandbox failed a run after passing its probe: no run is offered until it is probed
+    again."""
+    _broken[box] = (reason, _monotonic())
+    return Unconfined(f"the benchmark cannot run confined here: {reason}")
+
+
+class DiskLow(EvaluationError):
+    """A run was stopped for the disk's free space: maybe others' writing, not the version's."""
 
 
 def evaluate(
@@ -464,15 +492,12 @@ def _run(
         env["PYTHONUSERBASE"] = site.getuserbase()
     else:
         env["PYTHONNOUSERSITE"] = "1"
-    writable = [data]
     if mode == "real":  # only what the benchmark may use; the fake needs none
         # A local model's slots are the machine's, shared with the person's other runs.
-        env["USER"] = env["LOGNAME"] = getpass.getuser()
-        if runtime := os.environ.get("XDG_RUNTIME_DIR"):
-            env["XDG_RUNTIME_DIR"] = runtime
-            slots = limiter.lock_dir()
-            slots.mkdir(parents=True, exist_ok=True, mode=0o700)
-            writable.append(slots)
+        # A local model's slots: the run's own, never a folder the person's runs trust.
+        with contextlib.suppress(KeyError, OSError):
+            env["USER"] = env["LOGNAME"] = getpass.getuser()
+        env["XDG_RUNTIME_DIR"] = str(data)
         try:
             given = bench_config(open_config().load(), provider, model)
             ConfigManager(config / "config.json").save(given)
@@ -500,7 +525,7 @@ def _run(
         done = box.program(
             argv,
             read_only=read_only,
-            writable=writable,
+            writable=[data],
             env=env,
             cwd=tree,
             limits=_limits(seconds),
@@ -508,15 +533,15 @@ def _run(
             watch=data,
         )
     except (SandboxUnavailable, OSError) as e:  # the sandbox's failure, not the version's
-        raise Unconfined(f"the benchmark cannot run confined here: {e}") from e
+        raise _unconfined(box, str(e)) from e
     if done.timed_out:
         raise RunFailed(f"it took longer than {int(seconds)} s")
     if done.disk_low:  # the disk's free space fell: maybe others' writing, not the version's
-        raise EvaluationError(f"the run was stopped: {done.stopped}")
+        raise DiskLow(f"the run was stopped: {done.stopped}")
     if done.stopped:
         raise RunFailed(done.stopped)
     if done.exit_code != 0 and _last_line(done.stderr).startswith("bwrap:"):
-        raise Unconfined(f"the sandbox could not start the run: {_last_line(done.stderr)}")
+        raise _unconfined(box, f"bubblewrap could not start the run: {_last_line(done.stderr)}")
     if done.exit_code != 0:
         raise RunFailed(_last_line(done.stderr)[-500:] or f"exit code {done.exit_code}")
     try:
@@ -560,7 +585,10 @@ def _runtime() -> list[Path]:
     user's site-packages), shown read-only at their own paths, also through a link (the command
     names the interpreter by the path it was started with); never more of the person's files."""
     found: list[Path] = []
-    prefixes: list[Path] = [Path(sys.prefix), Path(sys.base_prefix), *_user_site()]
+    prefixes: list[Path] = [
+        *map(Path, (sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix)),
+        *_user_site(),
+    ]
     for prefix in prefixes:
         for path in (prefix.absolute(), prefix.resolve()):
             if path.is_relative_to("/usr") or any(path.is_relative_to(p) for p in found):
