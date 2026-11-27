@@ -38,7 +38,8 @@ permissions. The reviewer has no tools.
      A timed-out test also goes back to the executor when the innermost workspace frame in its
      last faulthandler dump is in a copied executor file. The ini requests a stack dump after 50 s of one test (the whole run has 60 s), so a dump
      belongs to the test still running when the run was stopped; a hang that starts later goes
-     to the reviewer (C).
+     to the reviewer (C). A run the produced code kills (a segfault or abort: pytest's
+     faulthandler prints the stack, no report is written) goes to the executor the same way.
    - C. Ambiguous results (reviewer collection or setup errors, zero tests, missing reports,
      other timeouts, stopped runs and full workspaces) → back to the reviewer, who fixes its
      test or names the executor's defect. The note keeps the reason.
@@ -56,6 +57,11 @@ permissions. The reviewer has no tools.
 
 - A correct program can still be sent back by a wrong reviewer test; the prompt limits tests to
   stated behaviour, and the next reviewer sees its previous tests and their output.
+- A dump at 50 s can still belong to a test that then finished, if the next one hangs in
+  the last seconds; the blame is then wrong once and the next review sees why.
+- The copy is read from the live workspace without a lock: a sibling subtask running at the
+  same time may be changing a file being copied (as it already could during the executor's
+  own runs).
 - Code under test shares the process and folder with pytest, so deliberate tampering with the
   report is made harder, not impossible.
 - Under the WebAssembly sandbox (WASI) faulthandler cannot run (no threads), so a run that hits

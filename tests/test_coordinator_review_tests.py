@@ -2364,3 +2364,47 @@ def test_recorded_pytest_hang(
         assert re.fullmatch(r"test test_answer hung in calc\.py:[23]", note["hang"])
     else:
         assert sub.attempts.transient == 1 and note["hang"] is None
+
+
+@pytest.mark.parametrize("executor_crashes", [True, False])
+def test_recorded_interpreter_crash(
+    store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executor_crashes: bool
+) -> None:
+    # A segfault in the produced code kills pytest before its report: the executor's crash.
+    task_id = submitted(store)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("calc.py", "import ctypes\ndef calculate():\n    ctypes.string_at(0)\n")
+    module = "from calc import calculate\ndef test_answer():\n    calculate()\n"
+    sandbox = Sandbox()
+
+    def run(command: list[str], cwd: Path, **_: object) -> Outcome:
+        reviewer = f"/workspace/{command[-1]}"
+        frames = (
+            '  File "/workspace/calc.py", line 3 in calculate\n' if executor_crashes else ""
+        ) + f'  File "{reviewer}", line 3 in test_answer\n'
+        stderr = (
+            "Fatal Python error: Segmentation fault\n\n"
+            "Current thread 0x00007f0000000000 (most recent call first):\n" + frames
+        )
+        return Outcome(139, "", stderr)
+
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+    monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    note = last_review_tests(store, sub.id)
+    assert note is not None and note["report_missing"]
+    if executor_crashes:
+        assert sub.attempts.quality == 1
+        assert note["hang"] == "test test_answer crashed in calc.py:3"
+    else:
+        assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
+        assert note["hang"] is None

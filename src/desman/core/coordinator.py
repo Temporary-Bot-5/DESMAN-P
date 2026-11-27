@@ -1096,6 +1096,8 @@ class Coordinator:
             if not result.hang:
                 return Failure(kind=FailureKind.TRANSIENT, reason=REVIEW_TEST_TIMEOUT_REASON)
             reason = result.hang
+        elif result.report_missing and result.hang:
+            reason = result.hang  # the produced code crashed the interpreter
         elif verified and (result.failed or result.executor_setup_error):
             reason = (
                 result.executor_setup_error

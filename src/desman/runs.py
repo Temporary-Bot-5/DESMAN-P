@@ -856,10 +856,27 @@ def _review_hang(output: str, root: Path, copied_files: set[str], reviewer_file:
     dumps = re.split(r"(?m)^Timeout \(\d+:\d{2}:\d{2}(?:\.\d+)?\)!\s*$", output)
     if len(dumps) == 1:
         return None
+    return _blame_stack(dumps[-1], root, copied_files, reviewer_file, "hung")
+
+
+def _review_crash(
+    output: str, root: Path, copied_files: set[str], reviewer_file: str
+) -> str | None:
+    """A run killed by the code under test (segfault, abort): pytest's faulthandler prints the
+    stack after "Fatal Python error", and no report is written."""
+    dumps = re.split(r"(?m)^Fatal Python error: [^\n]*$", output)
+    if len(dumps) == 1:
+        return None
+    return _blame_stack(dumps[-1], root, copied_files, reviewer_file, "crashed")
+
+
+def _blame_stack(
+    dump: str, root: Path, copied_files: set[str], reviewer_file: str, what: str
+) -> str | None:
     stacks = re.findall(
         r"(?m)^(?:Current thread|Thread) [^\n]+ \(most recent call first\):\n"
         r"((?:  File [^\n]+\n?)+)",
-        dumps[-1],
+        dump,
     )
     for stack in stacks:
         frames = []
@@ -878,7 +895,8 @@ def _review_hang(output: str, root: Path, copied_files: set[str], reviewer_file:
             continue
         path, line, _ = frames[0]
         test = next((name for name in reviewer_frames if name.startswith("test")), None)
-        return f"test {test} hung in {path}:{line}" if test else f"test hung in {path}:{line}"
+        where = f"{path}:{line}"
+        return f"test {test} {what} in {where}" if test else f"test {what} in {where}"
     return None
 
 
@@ -1240,9 +1258,12 @@ def _run_review_tests(
                 timeout=REVIEW_TEST_TIMEOUT,
                 limits=review_limits,
             )
+            output = f"{outcome.stdout}\n{outcome.stderr}"
             hang = (
-                _review_hang(f"{outcome.stdout}\n{outcome.stderr}", copy.root, copied_files, file)
+                _review_hang(output, copy.root, copied_files, file)
                 if outcome.timed_out
+                else _review_crash(output, copy.root, copied_files, file)
+                if outcome.exit_code != 0
                 else None
             )
             parsed = _read_review_report(

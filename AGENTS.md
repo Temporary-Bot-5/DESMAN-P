@@ -407,7 +407,8 @@ preemption, self-improvement or network features before their phase).
   (HTTP goes through `httpx.MockTransport`)
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
   except in lock-contention tests, the subprocess crash and reassignment tests (`tests/test_crash.py`, `tests/test_reassign.py`, `tests/test_gui_workers.py`) and the
-  real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI, and
+  real sandbox runs (`tests/test_sandbox.py` and the reviewer's test runs in
+  `tests/test_coordinator_review_tests.py`, skipped without bubblewrap except in CI, and
   `tests/test_sandbox_wasi.py`, skipped without wasmtime or the pinned files, and
   `tests/test_sandbox_wsl.py`, skipped unless Windows has the desman-sandbox distribution)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)
