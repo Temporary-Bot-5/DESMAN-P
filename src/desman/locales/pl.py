@@ -16,8 +16,6 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) could not be verified.": "Nie udało się zweryfikować testów recenzenta (próba {attempt}).",
-    "Reviewer's tests need package {name}.": "Testy recenzenta wymagają pakietu {name}.",
-    "Reviewer's tests import {name}, which the task does not name.": "Testy recenzenta importują {name}, którego zadanie nie wymienia.",
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "Testy recenzenta (próba {attempt}) — zaliczone: {passed}, niezaliczone: {failed}, błędy: {errors}",
     "document parts work without tools": "części dokumentu są przetwarzane bez narzędzi",
     "Reviewer's tests (attempt {attempt}) did not run.": "Testy recenzenta (próba {attempt}) nie zostały uruchomione.",

@@ -11,8 +11,6 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) could not be verified.": "无法验证审核者的测试（第 {attempt} 次尝试）。",
-    "Reviewer's tests need package {name}.": "审核者的测试需要 {name} 软件包。",
-    "Reviewer's tests import {name}, which the task does not name.": "审核者的测试导入了任务中未提及的 {name}。",
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "审核者的测试 (第 {attempt} 次) — 通过：{passed}，失败：{failed}，错误：{errors}",
     "document parts work without tools": "文档各部分均在不使用工具的情况下处理",
     "Reviewer's tests (attempt {attempt}) did not run.": "审核者的测试 (第 {attempt} 次)未运行。",

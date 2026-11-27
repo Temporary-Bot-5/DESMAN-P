@@ -67,18 +67,18 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Executor tools use workspaces/TASK next to the database. Chat lists the files and folder and skips repeated, untrusted text. Chat and run/status show "
-        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). Same-chat follow-up tasks get copies in from-TASK/; originals stay. Retries and interrupted runs reuse saved tool results. "
+        "Tools use workspaces/TASK next to the DB. Chat lists files and their folder and skips repeated, untrusted text. Chat and run/status show "
+        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). Same-chat follow-ups get copies in from-TASK/. Originals stay. Retries and interrupted runs reuse saved tool results. "
         "Retries see work files and rewrite stale demonstration files.\n"
         "Running code needs run_command, shell_execution (`/permissions`) and a sandbox. "
         "If the planner or `/run --runs-code` requires execution, the last run must "
         "exit 0. If unavailable, the subtask waits for the person. "
         "Code subtasks default to 16 tool rounds (8–48 via `/tuning --code-rounds N`). "
-        "edit_file replaces exact fragments; each run shows the executor its exit code and output tails. Prose goes in the result; files are extra. Review checks sources, dates, language "
-        "(names/translations allowed) and coverage. Live data may have fewer items with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
+        "edit_file replaces exact fragments. Runs show the executor exit codes and output tails. Prose goes in the result; files are extra. Review checks sources, dates, language "
+        "(names/translations allowed) and coverage. Live data may have fewer items, with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
         "the combine step. For blocked pages, use snippets or another official source. "
-        "Review tests runs or Python outputs in an offline copy and checks test names and counts. "
-        "Required reviews pause for one minute on sandbox outages, and any review pauses on low disk space. Reviewer setup or collection errors retry the review. Oversized copies and missing packages on optional collection/setup can skip tests.\n"
+        "Review tests runs or Python outputs in offline copies and checks names and counts. Verified passes allow acceptance. Call failures retry execution. Ambiguity retries review. "
+        "Required sandbox outages and low disk pause review for 60s without spending attempts. Oversized copies and known third-party packages missing during collection/setup can skip tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code and use your latest message’s language.",
     ),

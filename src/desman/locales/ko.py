@@ -11,8 +11,6 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) could not be verified.": "검토자의 테스트(시도 {attempt})를 검증할 수 없습니다.",
-    "Reviewer's tests need package {name}.": "검토자의 테스트에 {name} 패키지가 필요합니다.",
-    "Reviewer's tests import {name}, which the task does not name.": "검토자의 테스트가 작업에 명시되지 않은 {name}을 가져옵니다.",
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "검토자 테스트 (시도 {attempt}) — 통과: {passed}, 실패: {failed}, 오류: {errors}",
     "document parts work without tools": "문서의 각 부분은 도구 없이 처리합니다",
     "Reviewer's tests (attempt {attempt}) did not run.": "검토자 테스트 (시도 {attempt})가 실행되지 않았습니다.",

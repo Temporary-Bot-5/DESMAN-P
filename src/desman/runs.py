@@ -787,9 +787,7 @@ def _missing_review_import(
     workspace: Workspace,
     copied_python: set[str],
     local_names: set[str],
-    reviewer_file: str,
-    reviewer_tree: ast.Module,
-) -> tuple[str, bool] | None:
+) -> str | None:
     trace = (issue.text or "").strip()
     pattern = r"(?:E +)?ModuleNotFoundError: No module named '([^'\n]+)'"
     match = re.fullmatch(pattern, issue.get("message", "")) or next(
@@ -805,30 +803,15 @@ def _missing_review_import(
     if frame is None:
         return None
     path, lineno = frame
-    in_reviewer = path == reviewer_file
-    if in_reviewer:
-        tree = reviewer_tree
-    else:
-        if path not in copied_python or not workspace.exists(path):
+    if path not in copied_python:
+        return None
+    try:
+        if not 1 <= lineno <= len(workspace.read(path).splitlines()):
             return None
-        try:
-            tree = ast.parse(workspace.read(path))
-        except (OSError, PathEscapeError, SyntaxError, ValueError, RecursionError):
-            return None
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)) and node.lineno <= lineno <= (
-            node.end_lineno or node.lineno
-        ):
-            if isinstance(node, ast.Import) and any(
-                alias.name.partition(".")[0] == name for alias in node.names
-            ):
-                return name, in_reviewer
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.level == 0
-                and (node.module or "").partition(".")[0] == name
-            ):
-                return name, in_reviewer
+    except (OSError, PathEscapeError):
+        return None
+    if name in _COMMON_REVIEW_PACKAGES or name in packages_distributions():
+        return name
     return None
 
 
@@ -837,8 +820,7 @@ class _ReviewReport:
     counts: dict[str, int]
     failing: list[str]
     executor_packages: set[str]
-    reviewer_import: str | None
-    reviewer_error: str | None
+    collection_setup_error: str | None
     verified: bool
 
 
@@ -895,7 +877,6 @@ _COMMON_REVIEW_PACKAGES = frozenset(
 def _read_review_report(
     workspace: Workspace,
     report: str,
-    source: Workspace,
     copied_python: set[str],
     local_names: set[str],
     reviewer_file: str,
@@ -923,13 +904,11 @@ def _read_review_report(
     failing: list[str] = []
     missing_packages: set[str] = set()
     all_issues_need_packages = True
-    reviewer_imports: set[str] = set()
-    all_issues_from_reviewer_imports = True
     declared_names = review_test_names(reviewer_tree)
     collection_errors = 0
     matching_name = False
     all_cases_in_module = True
-    reviewer_errors: list[str] = []
+    collection_setup_error = None
     for case in suite.iterfind("testcase"):
         error = case.find("error")
         failure = case.find("failure")
@@ -964,54 +943,38 @@ def _read_review_report(
         setup_error = error is not None and error.get("message", "").startswith(
             "failed on setup with "
         )
-        reviewer_side = False
-        if error is not None and (collection_error or setup_error):
-            trace = error.text or ""
-            frame = _review_trace_frame(trace)
-            if frame is not None and frame[0] == reviewer_file:
-                reviewer_side = True
-                reason = next(
-                    (
-                        line.removeprefix("E").strip()
-                        for line in reversed(trace.splitlines())
-                        if line.startswith("E ") and line[1:].strip()
-                    ),
-                    error.get("message", ""),
-                )
-                reviewer_errors.append(reason[:500])
+        if error is not None and collection_setup_error is None:
+            collection_setup_error = next(
+                (
+                    line.removeprefix("E").strip()
+                    for line in reversed((error.text or "").splitlines())
+                    if line.startswith("E ") and line[1:].strip()
+                ),
+                error.get("message", "pytest error outside the test call"),
+            )[:500]
+        if failure is not None and len(failing) < 20:
+            failing.append((f"{group}::{name}" if group else name)[:250])
         if issue is None:
             continue
-        if len(failing) < 20:
-            failing.append((f"{group}::{name}" if group else name)[:250])
-        missing = _missing_review_import(
-            issue, source, copied_python, local_names, reviewer_file, reviewer_tree
+        missing = (
+            _missing_review_import(issue, workspace, copied_python, local_names)
+            if collection_error or setup_error
+            else None
         )
-        if missing is not None and missing[1] and reviewer_side:
-            reviewer_imports.add(missing[0])
-        else:
-            all_issues_from_reviewer_imports = False
-        if missing is not None and not missing[1] and (collection_error or setup_error):
-            missing_packages.add(missing[0])
-        else:
+        if missing is None:
             all_issues_need_packages = False
-    reviewer_import = (
-        next(iter(reviewer_imports))
-        if all_issues_from_reviewer_imports and len(reviewer_imports) == 1
-        else None
-    )
+        else:
+            missing_packages.add(missing)
     names_match = (
         collection_errors == 1 and sum(counts.values()) == 1 and exit_code == 2
         if collection_errors
-        else all_cases_in_module and matching_name
+        else all_cases_in_module and (matching_name or not any(counts.values()))
     )
     return _ReviewReport(
         counts,
         failing,
         missing_packages if all_issues_need_packages else set(),
-        reviewer_import,
-        reviewer_errors[0]
-        if reviewer_errors and len(reviewer_errors) == counts["errors"] and counts["failed"] == 0
-        else None,
+        collection_setup_error,
         names_match and _summary_matches(stdout, counts),
     )
 
@@ -1166,8 +1129,7 @@ def _run_review_tests(
             parsed = _read_review_report(
                 copy,
                 report,
-                workspace,
-                copied_python if not subtask.runs_code else set(),
+                copied_python,
                 local_names,
                 file,
                 reviewer_tree,
@@ -1184,7 +1146,6 @@ def _run_review_tests(
         )
     counts = parsed.counts if parsed else {}
     missing_packages = parsed.executor_packages if parsed and parsed.verified else set()
-    reviewer_import = parsed.reviewer_import if parsed and parsed.verified else None
     if missing_packages and not (
         outcome.timed_out or outcome.stopped or outcome.workspace_full or outcome.disk_low
     ):
@@ -1212,13 +1173,7 @@ def _run_review_tests(
         skipped=counts.get("skipped", 0),
         report_missing=parsed is None,
         report_unverified=parsed is not None and not parsed.verified,
-        reviewer_error=parsed.reviewer_error if parsed and parsed.verified else None,
-        reviewer_missing_import=reviewer_import,
-        reviewer_import_is_package=reviewer_import is not None
-        and (
-            reviewer_import in _COMMON_REVIEW_PACKAGES
-            or reviewer_import in packages_distributions()
-        ),
+        collection_setup_error=parsed.collection_setup_error if parsed else None,
         failing=parsed.failing if parsed else [],
         tail=tail[-4_000:],
         timed_out=outcome.timed_out,
@@ -1238,9 +1193,9 @@ def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
         if isinstance(source, str) and len(source) > 8_000:
             marker = "\n[truncated]"
             previous["source"] = source[: 8_000 - len(marker)] + marker
-        tail = previous.get("tail")
+        tail = previous.pop("tail", None)
         if isinstance(tail, str):
-            previous["tail"] = tail[-1_000:]
+            previous["program_output_untrusted"] = tail[-1_000:]
     return {
         **({} if is_final else {"task_goal": goal}),
         "previous_review_tests": previous,

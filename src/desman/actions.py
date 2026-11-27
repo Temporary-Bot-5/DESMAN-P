@@ -365,22 +365,11 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
                     "Reviewer's tests (attempt {attempt}) could not be verified.",
                     attempt=review_tests.attempt,
                 )
-            elif review_tests.reviewer_missing_import and (
-                review_tests.reviewer_import_is_package or not review_tests.reviewer_error
-            ):
-                name = review_tests.reviewer_missing_import
-                test_line = (
-                    t("Reviewer's tests need package {name}.", name=name)
-                    if review_tests.reviewer_import_is_package
-                    else t(
-                        "Reviewer's tests import {name}, which the task does not name.", name=name
-                    )
-                )
-            elif review_tests.reviewer_error:
+            elif review_tests.collection_setup_error:
                 test_line = t(
                     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}",
                     attempt=review_tests.attempt,
-                    reason=one_line(review_tests.reviewer_error, 250),
+                    reason=one_line(review_tests.collection_setup_error, 250),
                 )
             elif review_tests.exit_code and review_tests.failed == review_tests.errors == 0:
                 test_line = t(

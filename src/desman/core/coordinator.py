@@ -121,7 +121,7 @@ class Failure(BaseModel):
     kind: FailureKind
     reason: str
     paused_until: str | None = None
-    """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
+    """When to retry a paused failure. Any timezone-aware ISO-8601 timestamp."""
     unfit_provider: str | None = None
     """The model that cannot answer this kind of request (`ProviderError.unfit_model`), as
     `provider/model` (the provider alone when the error does not say): the task's next attempts
@@ -195,19 +195,30 @@ class Review(BaseModel):
             except (SyntaxError, ValueError, RecursionError) as error:
                 raise ValueError(f"tests must be valid Python: {error}") from error
             if not review_test_names(module):
-                raise ValueError("tests must define a top-level test function or class method")
+                raise ValueError(
+                    "tests must define a synchronous top-level test function or Test class method"
+                )
         return tests
 
 
 def review_test_names(module: ast.Module) -> set[str]:
     scopes: list[ast.Module | ast.ClassDef] = [module]
-    scopes.extend(node for node in module.body if isinstance(node, ast.ClassDef))
+    scopes.extend(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef)
+        and node.name.startswith("Test")
+        and not any(
+            isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and member.name == "__init__"
+            for member in node.body
+        )
+    )
     return {
         node.name
         for scope in scopes
         for node in scope.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name.startswith("test")
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test")
     }
 
 
@@ -224,9 +235,7 @@ class ReviewTestRun(BaseModel):
     skipped: int = Field(default=0, ge=0)
     report_missing: bool = False
     report_unverified: bool = False
-    reviewer_error: str | None = None
-    reviewer_missing_import: str | None = None
-    reviewer_import_is_package: bool = False
+    collection_setup_error: str | None = None
     failing: list[Annotated[str, Field(max_length=250)]] = Field(
         default_factory=list, max_length=20
     )
@@ -1029,36 +1038,41 @@ class Coordinator:
         }
         if skipped is None:
             note["source"] = review.tests
-        return self._review_test_verdict(subtask, review, result), note
+        verdict = self._review_test_verdict(subtask, review, result)
+        if isinstance(verdict, Failure) and verdict.kind is FailureKind.TRANSIENT:
+            note["could_not_run"] = verdict.reason
+        return verdict, note
 
     def _review_test_verdict(
         self, subtask: Subtask, review: Review, result: ReviewTestRun
     ) -> Review | Failure:
         if result.disk_low or (result.sandbox_unavailable and subtask.runs_code):
             return self._review_sandbox_failure(result)
-        elif result.stopped or result.workspace_full:
-            feedback = f"reviewer's tests failed: {result.stopped or result.workspace_full}"
-        elif not result.ran:
+        if not result.ran:
             return review
-        elif result.timed_out:
-            feedback = "reviewer's tests failed: timed out"
-        elif result.report_missing:
-            feedback = "reviewer's tests produced no report"
-        elif result.report_unverified:
-            feedback = "reviewer's tests could not be verified"
-        elif result.reviewer_error:
-            if result.reviewer_missing_import and result.reviewer_import_is_package:
-                reason = f"reviewer's tests need package {result.reviewer_missing_import}"
-            else:
-                reason = f"reviewer's tests could not collect or set up: {result.reviewer_error}"
-            return Failure(kind=FailureKind.TRANSIENT, reason=reason)
-        elif result.exit_code == 0 and result.failed == result.errors == 0:
-            if result.passed > 0:
-                return review
-            feedback = "reviewer's tests verified nothing: 0 passed"
-        else:
+
+        if result.timed_out or result.stopped or result.workspace_full:
+            reason = result.stopped or result.workspace_full or "timed out"
+        elif not (result.report_missing or result.report_unverified) and result.failed:
             reason = ", ".join(result.failing) or f"pytest exited {result.exit_code}"
-            feedback = f"reviewer's tests failed: {reason}"
+        else:
+            if result.report_missing:
+                reason = "pytest produced no report"
+            elif result.report_unverified:
+                reason = "pytest report could not be verified"
+            elif result.errors:
+                reason = (
+                    result.collection_setup_error or "pytest reported errors outside the test call"
+                )
+            elif not result.passed:
+                reason = "pytest verified nothing: 0 passed"
+            elif result.exit_code != 0:
+                reason = f"pytest exited {result.exit_code}"
+            else:
+                return review
+            return Failure(kind=FailureKind.TRANSIENT, reason=f"your tests could not run: {reason}")
+
+        feedback = f"reviewer's tests failed: {reason}"
         if result.skipped_files:
             names = ", ".join(repr(name) for name in result.skipped_names)
             feedback += f"\n{result.skipped_files} files could not be copied"
@@ -1075,7 +1089,7 @@ class Coordinator:
             else result.reason_not_run or "review sandbox unavailable"
         )
         return Failure(
-            kind=FailureKind.TRANSIENT,
+            kind=FailureKind.OUTAGE,
             reason=reason,
             paused_until=db.to_iso(self.store.clock() + timedelta(seconds=SANDBOX_RETRY_SECONDS)),
         )
@@ -1163,9 +1177,10 @@ class Coordinator:
                     self.store.note(subtask.id, Actor.REVIEWER, "review_tests", note)
             if isinstance(review, Review):
                 details = {"verdict": review.verdict.value, "feedback": review.feedback}
+                if note is not None and not note["ran"]:
+                    details["tests"] = f"not run: {note['reason_not_run'] or 'unspecified'}"
             if isinstance(review, Failure):
-                # Counts against the subtask's budget, so a reviewer that keeps failing cannot
-                # loop forever. A transient interruption retries the review of the same artifact.
+                # Transient interruptions spend budget while sandbox outages simply pause.
                 moved = self.store.record_failure(
                     subtask.id,
                     S.REVIEW,
@@ -1177,8 +1192,6 @@ class Coordinator:
                     review=token,
                 )
             elif review.verdict is Verdict.ACCEPT:
-                if note is not None and not note["ran"]:
-                    details["tests"] = f"not run: {note['reason_not_run'] or 'unspecified'}"
                 moved = self.store.transition(
                     subtask.id,
                     S.REVIEW,

@@ -11,7 +11,7 @@ import re
 import sqlite3
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from desman.core import db
 from desman.core.effects import last_review_tests
@@ -35,9 +35,9 @@ class ReviewTestSummary(BaseModel):
     timed_out: bool = False
     report_missing: bool = False
     report_unverified: bool = False
-    reviewer_error: str | None = None
-    reviewer_missing_import: str | None = None
-    reviewer_import_is_package: bool = False
+    collection_setup_error: str | None = Field(
+        default=None, validation_alias=AliasChoices("collection_setup_error", "reviewer_error")
+    )
     stopped: str = ""
 
 
