@@ -140,3 +140,23 @@ def test_cloud_on_lists_free_verdicts() -> None:
         assert f"{provider.name}: lending {providers.verdict_text(terms.lending)}" in output
     for provider in providers.PAID:
         assert f"{provider.name}: lending" not in output
+
+
+def test_typed_chat_donation_warns_before_confirmation(fake: FakeLLM) -> None:
+    setup_lending()
+    declined = chat("/global donate groq", "n").output
+    assert declined.index("GROQ's terms forbid") < declined.index("Apply this change?")
+    assert "groq" not in saved().network.donated and network_log() == []
+
+    accepted = chat("/global donate groq", "y").output
+    assert accepted.count("GROQ's terms forbid") == 1
+    assert "groq" in saved().network.donated
+    assert [action for action, _ in network_log()] == ["donated"]
+
+
+def test_typed_chat_cloud_on_lists_lending_verdicts(fake: FakeLLM) -> None:
+    configured()
+    output = chat("/global cloud on").output
+    assert "GROQ: lending forbidden" in output
+    assert "Apply this change?" not in output
+    assert saved().network.lend_cloud

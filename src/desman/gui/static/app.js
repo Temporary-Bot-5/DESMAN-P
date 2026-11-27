@@ -1459,7 +1459,7 @@ function drawSettings() {
     settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registry.value || null})}), d.network.enabled ? words.leave : words.join);
     const cloud = settingInput(root, d.network.cloud_label, d.network.lend_cloud, "checkbox");
     settingAuto(root, () => ({section: "network", operation: "cloud", state: cloud.checked ? "on" : "off"}), [cloud]);
-    for (const line of d.network.cloud_warnings || [d.network.cloud_warning]) text("p", line, root);
+    for (const line of d.network.cloud_warnings) text("p", line, root);
     for (const p of d.providers.filter(p => p.lendable || Object.hasOwn(d.network.donated, p.id))) {
       const card = text("section", "", root); card.className = "lending-row"; text("strong", p.lending_label, card);
       if (p.terms_url) {

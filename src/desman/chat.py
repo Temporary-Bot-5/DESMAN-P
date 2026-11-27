@@ -1043,14 +1043,16 @@ class Chat:
         try:
             made = entry.handler(context, args)
             if isinstance(made, commands.Proposal):
-                if (
+                needs_confirmation = (
                     not typed
                     or entry.typed_confirm
+                    or made.confirm
                     or isinstance(args, commands.TaskPauseArgs)
                     and args.all
                     or isinstance(args, commands.TaskHideArgs)
                     and args.finished
-                ) and not self._confirmed(made):
+                )
+                if needs_confirmation and not self._confirmed(made):
                     shared = False
                     made = (
                         made.on_decline()
@@ -1058,6 +1060,9 @@ class Chat:
                         else commands.Outcome({"declined": True}, done=False)
                     )
                 else:
+                    if not needs_confirmation:
+                        for warning in made.warnings:
+                            ui.warn(warning)
                     made = made.apply()
         except click.ClickException as e:
             ui.error(e.format_message())
