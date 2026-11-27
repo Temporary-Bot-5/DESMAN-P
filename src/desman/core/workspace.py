@@ -152,6 +152,9 @@ class Workspace:
         if target.stat().st_nlink > 1:
             raise PathEscapeError(f"{path!r} has other hard links")
 
+        if limit < 0:
+            return retry_sharing(target.read_bytes)
+
         def read_file() -> bytes:
             with target.open("rb") as file:
                 return file.read(limit)

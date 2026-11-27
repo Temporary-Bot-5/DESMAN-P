@@ -17,7 +17,7 @@
 "core/sandbox.py" = "7a5aa2ae8c109fd56ae74083585763649250fc1c2b695250f2abe72370a00a47"
 "core/seccomp.py" = "ad8bdca57118b7f2af27ad445525f8182d6ae7918c6e4ed79ec7aa9c0e3ef93a"
 "core/wasi_runner.py" = "59d420da9882693cf93ec2d0c4587983f6d20ac46ddb15ea6ebdf9e34a6d9934"
-"core/workspace.py" = "9214f55ecd197e25363bc6465ccdbcda19ca78ad369e8c88e76b71b37114eb56"
+"core/workspace.py" = "54b729c5faf67ac150c18d149ec195890b3ec05ba531bc7dfba644ccf447aa8a"
 "core/atomic.py" = "cbfaa6ef20fc9923426f115893ccda1f7eaf8dbe8290a987a5d8d09d438dc48a"
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"
