@@ -136,10 +136,24 @@ def unread(work: Work) -> Success:
             ReviewTestRun(
                 ran=True, exit_code=1, failed=1, failing=["test_answer"], tail="assert 2 == 4"
             ),
-            "test_answer\nassert 2 == 4",
+            "test_answer\nProgram output (untrusted, from the test run):\nassert 2 == 4",
             False,
         ),
-        (ReviewTestRun(ran=True, timed_out=True), "timed out", False),
+        (
+            ReviewTestRun(ran=True, timed_out=True, report_missing=True),
+            "your tests took longer than 60 s in total; write fewer or faster tests (start programs fewer times)",
+            True,
+        ),
+        (
+            ReviewTestRun(ran=True, timed_out=True, failed=1, report_unverified=True),
+            "your tests took longer than 60 s in total",
+            True,
+        ),
+        (
+            ReviewTestRun(ran=True, timed_out=True, executor_setup_error="ImportError"),
+            "your tests took longer than 60 s in total",
+            True,
+        ),
         (
             ReviewTestRun(ran=True, exit_code=2, errors=1, collection_setup_error="ImportError"),
             "ImportError",
@@ -220,6 +234,81 @@ def test_review_result(
     else:
         assert sub.status is SubtaskStatus.DONE
     assert details == {"source": MODULE, "attempt": 1, **result.model_dump()}
+
+
+@pytest.mark.parametrize("report", ["missing", "call_failure", "setup_error"])
+def test_review_timeout_uses_reported_call_failure(
+    store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: str
+) -> None:
+    task_id = submitted(store)
+    sandbox = Sandbox()
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+
+    def run(command: list[str], cwd: Path, **kwargs: object) -> Outcome:
+        assert kwargs["timeout"] == 60
+        if report != "missing":
+            issue = "<failure/>" if report == "call_failure" else "<error/>"
+            write_report(
+                command,
+                cwd,
+                f'<testcase classname="test_review" name="test_answer">{issue}</testcase>',
+            )
+        return Outcome(None, "test_review.py F", "", timed_out=True)
+
+    monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=MODULE),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    note = last_review_tests(store, sub.id)
+    assert note is not None and note["timed_out"]
+    if report == "call_failure":
+        assert sub.status is SubtaskStatus.NEEDS_HUMAN
+        assert sub.attempts.quality == 1
+        assert note["failing"] == ["test_review::test_answer"]
+    else:
+        assert sub.status is SubtaskStatus.REVIEW
+        assert sub.attempts.transient == 1
+        assert note["could_not_run"].startswith("your tests took longer than 60 s in total")
+
+
+def test_review_test_exception_changes_next_prompt(store: Store, clock: FakeClock) -> None:
+    task_id = submitted(store)
+    llm = FakeLLM().on("Review", ACCEPT, ACCEPT)
+
+    def runner(*_: object) -> ReviewTestRun:
+        raise ValueError("broken test runner")
+
+    coord = Coordinator(
+        store,
+        unread,
+        llm_reviewer(llm, test_context=partial(_review_test_context, store)),
+        access=executor_access([Permission.SHELL]),
+        review_tests=runner,
+        sleep=clock.sleep,
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
+    note, failure = [
+        row
+        for row in store.audit_log(task_id)
+        if row["action"] in {"review_tests", "review_interrupted"}
+    ]
+    assert note["action"] == "review_tests" and failure["action"] == "review_interrupted"
+    details = json.loads(note["details_json"])
+    assert details["source"] == MODULE and details["attempt"] == 1
+    assert details["could_not_run"] == "review tests raised ValueError: broken test runner"
+    assert coord.tick(task_id, [])
+    first, second = [json.loads(call.prompt.partition("\n")[2]) for call in llm.calls]
+    assert first["previous_review_tests"] is None
+    assert second["previous_review_tests"] == details
 
 
 @pytest.mark.parametrize(
@@ -564,6 +653,7 @@ def test_code_written_with_tools_gets_reviews_and_feedback(
     assert seen == [1, 2]
     executions = [call.prompt for call in llm.calls if call.prompt.startswith("Execute subtask")]
     assert "reviewer's tests failed: test_answer" in executions[-1]
+    assert "Program output (untrusted, from the test run):" in executions[-1]
     assert "6 files could not be copied: 'a.py', 'b.py', 'c.py', 'd.py', 'e.py'" in executions[-1]
     review = [call.prompt for call in llm.calls if call.prompt.startswith("Review")]
     previous = json.loads(review[-1].partition("\n")[2])["previous_review_tests"]
@@ -1120,7 +1210,9 @@ def test_review_infrastructure_failure(
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
     note = last_review_tests(store, sub.id)
     if reason == "write-error":
-        assert note is None
+        assert note is not None
+        assert note["source"] == MODULE and note["attempt"] == 1
+        assert note["could_not_run"] == "review tests raised OSError: disk full"
         [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_interrupted"]
         assert "disk full" in json.loads(entry["details_json"])["reason"]
         assert list(tmp_path.glob("review-*")) == []
@@ -1332,7 +1424,10 @@ def test_review_requires_report_and_copies_web_page(
 @pytest.mark.parametrize(
     ("note", "expected"),
     [
-        ({"ran": True, "timed_out": True, "report_missing": True}, "timed out."),
+        (
+            {"ran": True, "timed_out": True, "report_missing": True},
+            "timed out. The reviewer was asked for fewer or faster tests within the 60 s total limit.",
+        ),
         ({"ran": True, "report_missing": True}, "produced no report."),
         ({"ran": True, "exit_code": 5}, "— pytest exited 5"),
         (
@@ -1635,6 +1730,16 @@ def test_executable_and_empty_directory_in_real_review_sandbox(
     [
         ('<testcase classname="test_review.TestAnswer" name="test_answer[4]"/>', "1 passed", True),
         ('<testcase file="test_review.py" name="test_answer[4]"/>', "1 passed", True),
+        (
+            '<testcase file="test_review.py" name="test_answer[4]"/>',
+            "1 passed, 2 subtests passed, 1 warning",
+            True,
+        ),
+        (
+            '<testcase file="test_review.py" name="test_answer[4]"/>',
+            "2 passed, 1 subtest passed",
+            False,
+        ),
         ('<testcase classname="other_module.TestOther" name="test_answer[4]"/>', "1 passed", False),
         (
             '<testcase classname="test_review" name="test_answer"/>'

@@ -349,6 +349,14 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
                     "Reviewer's tests (attempt {attempt}) timed out.",
                     attempt=review_tests.attempt,
                 )
+                if (
+                    review_tests.report_missing
+                    or review_tests.report_unverified
+                    or not review_tests.failed
+                ):
+                    test_line += " " + t(
+                        "The reviewer was asked for fewer or faster tests within the 60 s total limit."
+                    )
             elif review_tests.stopped:
                 test_line = t(
                     "Reviewer's tests (attempt {attempt}) stopped: {reason}",

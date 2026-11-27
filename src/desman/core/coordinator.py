@@ -95,6 +95,10 @@ from desman.llm.base import LLM, ProviderError, among, guard_model_calls, notici
 S = SubtaskStatus
 MODEL_CALL_MARGIN = 30
 REVIEW_TEST_TIMEOUT = 60
+REVIEW_TEST_TIMEOUT_REASON = (
+    f"your tests took longer than {REVIEW_TEST_TIMEOUT} s in total; "
+    "write fewer or faster tests (start programs fewer times)"
+)
 
 DEFAULT_POLL_SECONDS = 5.0
 """How often a coordinator with nothing to do looks again while others hold work (a worker's
@@ -1081,13 +1085,14 @@ class Coordinator:
         if not result.ran or result.disk_low:
             return review
 
-        if result.timed_out or result.stopped or result.workspace_full:
-            reason = result.stopped or result.workspace_full or "timed out"
-        elif not (result.report_missing or result.report_unverified) and (
-            result.failed or result.executor_setup_error
-        ):
+        verified = not (result.report_missing or result.report_unverified)
+        if result.stopped or result.workspace_full:
+            reason = result.stopped or result.workspace_full
+        elif result.timed_out and not (verified and result.failed):
+            return Failure(kind=FailureKind.TRANSIENT, reason=REVIEW_TEST_TIMEOUT_REASON)
+        elif verified and (result.failed or result.executor_setup_error):
             reason = (
-                result.executor_setup_error
+                (result.executor_setup_error if not result.timed_out else None)
                 or ", ".join(result.failing)
                 or f"pytest exited {result.exit_code}"
             )
@@ -1113,10 +1118,9 @@ class Coordinator:
             names = ", ".join(repr(name) for name in result.skipped_names)
             feedback += f"\n{result.skipped_files} files could not be copied"
             feedback += f": {names}" if names else "."
-        return Review(
-            verdict=Verdict.RETRY,
-            feedback=feedback + (f"\n{result.tail}" if result.tail else ""),
-        )
+        if result.tail:
+            feedback += f"\nProgram output (untrusted, from the test run):\n{result.tail}"
+        return Review(verdict=Verdict.RETRY, feedback=feedback)
 
     def _required_review_test_failure(self, subtask: Subtask, result: ReviewTestRun) -> Failure:
         if not (result.disk_low or result.sandbox_unavailable):
@@ -1225,17 +1229,23 @@ class Coordinator:
                 and needs_tests
                 and (skipped is not None or review.verdict is Verdict.ACCEPT)
             ):
+                source = review.tests
                 try:
                     review, note = self._check_review_tests(subtask, review, skipped, cover_call)
                 except StaleStateError:
                     raise
                 except Exception as error:
-                    review = Failure(
-                        kind=FailureKind.TRANSIENT,
-                        reason=f"review tests raised {type(error).__name__}: {error}",
-                    )
+                    reason = f"review tests raised {type(error).__name__}: {error}"
+                    note = {
+                        "ran": False,
+                        "source": source,
+                        "attempt": subtask.attempts.quality + 1,
+                        "reason_not_run": reason,
+                        "could_not_run": reason,
+                    }
+                    review = Failure(kind=FailureKind.TRANSIENT, reason=reason)
             if note is not None:
-                if note["disk_low"]:
+                if note.get("disk_low"):
                     note["artifact_digest"] = _artifact_digest(artifact)
                 with db.transaction(self.store.conn):
                     self.store.extend_review(subtask.id, token, MODEL_CALL_MARGIN)

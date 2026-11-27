@@ -15,6 +15,7 @@ MESSAGES: dict[str, Forms] = {
     "document parts work without tools": "文档各部分均在不使用工具的情况下处理",
     "Reviewer's tests (attempt {attempt}) did not run.": "审核者的测试 (第 {attempt} 次)未运行。",
     "Reviewer's tests (attempt {attempt}) timed out.": "审核者的测试（第 {attempt} 次）超时。",
+    "The reviewer was asked for fewer or faster tests within the 60 s total limit.": "已要求审查者减少测试数量或加快测试速度，使总耗时不超过 60 秒。",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "审核者的测试（第 {attempt} 次）已停止：{reason}",
     "needs package {name}, not installed in the sandbox": "需要软件包 {name}，沙箱中未安装此包",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "无法收集或准备审核者的测试（第 {attempt} 次尝试）：{reason}",

@@ -829,14 +829,20 @@ def _summary_matches(stdout: str, counts: dict[str, int]) -> bool:
         summary = dict.fromkeys(counts, 0)
         fields = match[1].split(", ")
         if fields != ["no tests ran"]:
+            recognized = False
             for field in fields:
-                item = re.fullmatch(r"([0-9]{1,9}) ([a-z]+)", field)
-                if not item or item[2] not in {*categories, "warning", "warnings", "deselected"}:
+                item = re.fullmatch(r"([0-9]{1,9}) ([a-z]+(?: [a-z]+)*)", field)
+                if not item:
                     break
-                if item[2] in categories:
-                    summary[categories[item[2]]] += int(item[1])
+                label = item[2]
+                if label in categories:
+                    summary[categories[label]] += int(item[1])
+                    recognized = True
+                elif label in {"warning", "warnings", "deselected"}:
+                    recognized = True
             else:
-                summaries.append(summary)
+                if recognized:
+                    summaries.append(summary)
             continue
         summaries.append(summary)
     return summaries == [counts]
@@ -851,6 +857,8 @@ def _read_review_report(
     reviewer_tree: ast.Module,
     stdout: str,
     exit_code: int | None,
+    *,
+    timed_out: bool,
 ) -> _ReviewReport | None:
     try:
         data = workspace.read(report, limit=_REVIEW_REPORT_LIMIT + 1)
@@ -968,7 +976,8 @@ def _read_review_report(
         missing_packages if all_issues_need_packages else set(),
         collection_setup_error,
         executor_setup_error,
-        names_match and _summary_matches(stdout, counts),
+        # A timeout can interrupt the terminal summary after pytest writes its XML report.
+        names_match and (timed_out or _summary_matches(stdout, counts)),
     )
 
 
@@ -1128,6 +1137,7 @@ def _run_review_tests(
                 reviewer_tree,
                 outcome.stdout,
                 outcome.exit_code,
+                timed_out=outcome.timed_out,
             )
     except SandboxUnavailable as error:
         return ReviewTestRun(

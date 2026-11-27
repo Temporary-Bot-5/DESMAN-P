@@ -330,7 +330,7 @@ through `Workspace`, and let executors act only through tool calls (`Work.tools`
 capability is a new `Tool` with the permission it needs, never a direct call in an agent.
 A commit that changes a file listed in `src/desman/protected.toml` updates its hash there
 (`tests/test_protected.py` prints the line); agents never touch that list or its approvals. Every tool call is journaled (`core/effects.py`); a tool safe to run twice declares `repeatable`. Generated code runs only through `Sandbox` (the `run_command` tool), never with `subprocess` directly.
-For L.5, `runs.py` creates and removes its own disposable scratch directory under the
+For L.5 (ADR 0019), `runs.py` creates and removes its own disposable scratch directory under the
 workspaces root, separate from the agent's workspace. It writes the copied files and the
 reviewer's tests through `Workspace`, runs the tests through the same Sandbox, and records
 their source and outcome in `review_tests` notes. A verified pass allows acceptance. A test call

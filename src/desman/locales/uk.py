@@ -20,6 +20,7 @@ MESSAGES: dict[str, Forms] = {
     "document parts work without tools": "частини документа опрацьовуються без інструментів",
     "Reviewer's tests (attempt {attempt}) did not run.": "Тести перевіряльника (спроба {attempt}) не запускалися.",
     "Reviewer's tests (attempt {attempt}) timed out.": "Тести перевіряльника (спроба {attempt}) перевищили ліміт часу.",
+    "The reviewer was asked for fewer or faster tests within the 60 s total limit.": "Рецензента попросили написати менше тестів або пришвидшити їх, щоб укластися в загальний ліміт 60 с.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Тести перевіряльника (спроба {attempt}) зупинено: {reason}",
     "needs package {name}, not installed in the sandbox": "Потрібен пакет {name}, якого немає в пісочниці",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "Не вдалося зібрати або підготувати тести рецензента (спроба {attempt}): {reason}",
