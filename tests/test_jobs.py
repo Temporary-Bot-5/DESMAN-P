@@ -28,6 +28,7 @@ from desman.core.retry import FailureKind
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.core.tools import builtin_registry
+from desman.core.workspace import Workspace, workspace_root_for
 from desman.llm import limiter, router
 from desman.llm.base import BudgetExhausted, Message, QuotaExhausted, Request
 from desman.llm.fake import FakeLLM
@@ -263,6 +264,9 @@ def test_a_job_is_done_here_and_rechecked_by_another_node(
 
     a.work()
     assert a.store.task_status(task_id) is TaskStatus.DONE
+    workspace = Workspace(workspace_root_for(a.store.conn), task_id)
+    workspace.write("answer.txt", "5")
+    workspace.write(".review/old.py", "old reviewer module")
     handed = a.poll(idle=False)
     assert handed is not None and handed.change is Change.WORK_HANDED_IN
     assert handed.detail == "done"
@@ -271,6 +275,7 @@ def test_a_job_is_done_here_and_rechecked_by_another_node(
     record = sign.Signed.model_validate_json(a.held()[0]["record_json"])
     assert record.record.signer == a.key.fingerprint
     assert json.loads(record.record.body["output"]) == {"answer": "5"}
+    assert record.record.body["files"] == [{"path": "answer.txt", "text": "5"}]
 
     clock.advance(node.CLAIM_EVERY.total_seconds())
     checking = b.poll()

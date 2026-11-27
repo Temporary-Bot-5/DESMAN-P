@@ -222,6 +222,7 @@ class TestRun(BaseModel):
     sandbox_unavailable: bool = False
     copy_over_quota: str = ""
     skipped_files: int = Field(default=0, ge=0)
+    skipped_names: list[str] = Field(default_factory=list, max_length=5)
 
 
 ReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], TestRun]
@@ -991,6 +992,7 @@ class Coordinator:
         note = {
             **result.model_dump(exclude={"tail"}),
             "tail": result.tail[-2_000:],
+            "attempt": attempt,
         }
         if skip_reason is None:
             note.update(file=review_test_file(subtask.id, attempt), source=review.tests)
@@ -999,17 +1001,17 @@ class Coordinator:
     @staticmethod
     def _review_test_verdict(subtask: Subtask, review: Review, result: TestRun) -> Review | Failure:
         if result.copy_over_quota:
-            return Review(verdict=Verdict.RETRY, feedback=result.copy_over_quota)
-        if result.disk_low:
+            feedback = result.copy_over_quota
+        elif result.disk_low:
             return Failure(
                 kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
             )
-        if result.sandbox_unavailable and subtask.runs_code:
+        elif result.sandbox_unavailable and subtask.runs_code:
             return Failure(
                 kind=FailureKind.TRANSIENT,
                 reason=result.reason_not_run or "review sandbox unavailable",
             )
-        if result.stopped or result.workspace_full:
+        elif result.stopped or result.workspace_full:
             feedback = f"reviewer's tests failed: {result.stopped or result.workspace_full}"
         elif not result.ran:
             return review
@@ -1022,6 +1024,10 @@ class Coordinator:
         else:
             reason = ", ".join(result.failing) or f"pytest exited {result.exit_code}"
             feedback = f"reviewer's tests failed: {reason}"
+        if result.skipped_files:
+            names = ", ".join(repr(name) for name in result.skipped_names)
+            feedback += f"\n{result.skipped_files} files could not be copied"
+            feedback += f": {names}" if names else "."
         return Review(
             verdict=Verdict.RETRY,
             feedback=feedback + (f"\n{result.tail}" if result.tail else ""),

@@ -250,7 +250,7 @@ class Workspace:
                 found.append((prefix + name, data))
         return found, not unread
 
-    def files(self, *, on_skip: Callable[[], None] | None = None) -> list[str]:
+    def files(self, *, on_skip: Callable[[str], None] | None = None) -> list[str]:
         """Regular files in the workspace, as sorted `/`-separated relative paths.
 
         Names the guard would refuse (generated code can create any name) and files with other
@@ -270,9 +270,13 @@ class Workspace:
                     info = full.lstat()
                     if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
                         raise PathEscapeError(f"{relative!r} is not a regular, unlinked file")
-                except (OSError, PathEscapeError):
+                except (OSError, PathEscapeError) as error:
                     if on_skip is not None:
-                        on_skip()
+                        if isinstance(error, OSError) and not isinstance(
+                            error, (FileNotFoundError, PermissionError)
+                        ):
+                            raise
+                        on_skip(relative)
                     continue
                 found.append(relative)
         return sorted(found)

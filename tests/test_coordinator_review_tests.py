@@ -144,6 +144,7 @@ def test_review_result(
     assert json.loads(note["details_json"]) == {
         "file": f".review/{sub.id}/test_review_1.py",
         "source": MODULE,
+        "attempt": 1,
         **result.model_dump(),
     }
     if reason is not None:
@@ -271,7 +272,7 @@ def test_runner_writes_module_and_parses_pytest(
     os.utime(stale, (1, 1))
     fresh = tmp_path / "review-fresh"
     fresh.mkdir()
-    for changing_file in ("gone.py", "forbidden.py", "linked.py", "io.py"):
+    for changing_file in ("gone.py", "forbidden.py", "linked.py"):
         workspace.write(changing_file, "temporary")
     original_read = workspace.read
 
@@ -280,7 +281,6 @@ def test_runner_writes_module_and_parses_pytest(
             "gone.py": FileNotFoundError,
             "forbidden.py": PermissionError,
             "linked.py": PathEscapeError,
-            "io.py": OSError,
         }
         if path in problems:
             raise problems[path](path)
@@ -290,7 +290,7 @@ def test_runner_writes_module_and_parses_pytest(
     locations: list[Path] = []
     covered: list[float] = []
 
-    def run(command: list[str], cwd: Path, *, timeout: float) -> Outcome:
+    def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
         assert command == [
             "python3",
             "-I",
@@ -328,15 +328,34 @@ def test_runner_writes_module_and_parses_pytest(
 
     monkeypatch.setattr(sandbox, "run", run)
     result = _run_review_tests(sandbox, sub, workspace, MODULE, 2, covered.append)
-    assert result.skipped_files == 4
+    assert result.skipped_files == 3
+    assert result.skipped_names == ["forbidden.py", "gone.py", "linked.py"]
     assert (result.exit_code, result.passed, result.failed, result.errors) == (1, 2, 1, 1)
     assert result.failing == [f"{path}::test_answer"]
     assert result.workspace_full == "over quota"
     assert result.stopped == "watch stopped"
-    assert workspace.read_text(path) == MODULE
+    assert not workspace.exists(path)
     assert workspace.read_text("answer.py") == "answer = 4"
     assert workspace.read_text("delete.txt") == "keep me"
     assert not locations[0].exists()
+
+
+def test_copy_refreshes_review_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    sandbox = Sandbox()
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+    monkeypatch.setattr(sandbox, "run", lambda *args, **kwargs: Outcome(0, "1 passed in 0.01s", ""))
+    workspace = Workspace(tmp_path, "task")
+    for index in range(501):
+        workspace.write(f"{index}.txt", b"")
+
+    [sub] = store.list_subtasks(submitted(store))
+    covered: list[float] = []
+    result = _run_review_tests(sandbox, sub, workspace, MODULE, 1, covered.append)
+
+    assert result.passed == 1
+    assert covered == pytest.approx([30, 55.05, 30.05, 60])
 
 
 def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: FakeClock) -> None:
@@ -370,13 +389,14 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
         cover: Callable[[float], None],
     ) -> ReviewTestResult:
         seen.append(attempt)
-        workspace.write(review_test_file(sub.id, attempt), module)
         if attempt == 1:
             return ReviewTestResult(
                 ran=True,
                 exit_code=1,
                 failed=1,
                 failing=["test_answer"],
+                skipped_files=6,
+                skipped_names=["a.py", "b.py", "c.py", "d.py", "e.py"],
                 tail="x" * 3_000 + "assertion details",
             )
         return ReviewTestResult(ran=True, exit_code=0, passed=1)
@@ -384,10 +404,6 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
     executor = llm_executor(llm, format_final=False)
 
     def execute(work: Work) -> Success | Failure:
-        if seen:
-            Workspace(workspace_root_for(store.conn), task_id).write(
-                review_test_file(work.subtask.id, 1), "changed by executor"
-            )
         result = executor(work)
         assert isinstance(result, (Success, Failure))
         return result
@@ -409,6 +425,7 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
     assert seen == [1, 2]
     executions = [call.prompt for call in llm.calls if call.prompt.startswith("Execute subtask")]
     assert "reviewer's tests failed: test_answer" in executions[-1]
+    assert "6 files could not be copied: 'a.py', 'b.py', 'c.py', 'd.py', 'e.py'" in executions[-1]
     review = [call.prompt for call in llm.calls if call.prompt.startswith("Review")]
     previous = json.loads(review[-1].partition("\n")[2])["previous_review_tests"]
     assert previous["source"] == MODULE
@@ -429,12 +446,19 @@ def test_normal_run_wires_review_to_command_sandbox(
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     commands: list[list[str]] = []
 
-    def run(command: list[str], cwd: Path, *, stdin: str = "", timeout: float) -> Outcome:
+    def run(
+        command: list[str],
+        cwd: Path,
+        *,
+        stdin: str = "",
+        timeout: float,
+        limits: Limits | None = None,
+    ) -> Outcome:
         commands.append(command)
         if command[-1] == "main.py":
             return Outcome(0, "4", "")
         assert command[-1] == review_test_file(sub.id, 1)
-        return Outcome(0, "1 passed in 0.01s", "")
+        return Outcome(0, "1 passed in 0.01s\natexit: closing", "")
 
     monkeypatch.setattr(sandbox, "run", run)
     llm = (
@@ -476,8 +500,14 @@ def test_normal_run_wires_review_to_command_sandbox(
     report = task_report(store, task_id)
     print_report(report, store)
     output = capsys.readouterr().out
-    assert "Reviewer's tests — passed: 1, failed: 0, errors: 0" in output
+    assert "Reviewer's tests (attempt 1) — passed: 1, failed: 0, errors: 0" in output
+    assert not (Workspace(workspace_root_for(store.conn), task_id).root / ".review").exists()
     assert review_test_file(sub.id, 1) not in output
+    [subreport] = report.subtasks
+    attempts = subreport.attempts.model_copy(update={"quality": 1})
+    report.subtasks[0] = subreport.model_copy(update={"attempts": attempts})
+    print_report(report, store)
+    assert "Reviewer's tests" not in capsys.readouterr().out
 
 
 # This small fixture reproduces the four live probe failures while its smoke tests pass.
@@ -803,7 +833,10 @@ def test_review_mutations_stay_in_sandbox_copy(store: Store, tmp_path: Path) -> 
     workspace.write("answer.py", "answer = 4")
     workspace.write("delete.txt", "keep me")
     module = """
+import atexit
 from pathlib import Path
+
+atexit.register(print, "atexit: review finished")
 
 def test_changes():
     answer = Path("answer.py")
@@ -813,23 +846,37 @@ def test_changes():
 """
     result = _run_review_tests(Sandbox(), sub, workspace, module, 1)
     assert result.passed == 1, result.tail
+    assert result.tail.endswith("atexit: review finished\n")
+    assert not (workspace.root / ".review").exists()
     assert workspace.read_text("answer.py") == "answer = 4"
     assert workspace.read_text("delete.txt") == "keep me"
     assert list(tmp_path.glob("review-*")) == []
 
 
-@pytest.mark.parametrize("reason", ["disk", "outage", "quota"])
+@pytest.mark.parametrize("reason", ["disk", "outage", "quota", "write-error", "fits"])
 def test_review_infrastructure_failure(
     store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
     task_id = submitted(store)
-    sandbox = Sandbox(limits=Limits(workspace_bytes=100) if reason == "quota" else Limits())
+    sandbox = Sandbox(limits=Limits(workspace_bytes=100, workspace_files=1))
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     workspace = Workspace(tmp_path, task_id)
-    workspace.write("answer.py", "x" * 100)
+    workspace.write("answer.py", "x" * (101 if reason == "quota" else 100))
+    if reason == "write-error":
 
-    def run(command: list[str], cwd: Path, *, timeout: float) -> Outcome:
-        assert reason != "quota"
+        def disk_full(self: Workspace, path: str, data: bytes | str) -> str:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Workspace, "write", disk_full)
+
+    def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
+        assert reason not in {"quota", "write-error"}
+        assert limits.workspace_files == 5
+        assert limits.workspace_bytes == 100 + len(MODULE.encode()) + len(
+            "[pytest]\npythonpath = ..\n"
+        )
+        if reason == "fits":
+            return Outcome(0, "===== 1 passed in 0.01s =====\natexit: closing", "")
         if reason == "outage":
             raise SandboxUnavailable("backend went away")
         return Outcome(None, "", "", stopped="disk space too low", disk_low=True)
@@ -848,12 +895,20 @@ def test_review_infrastructure_failure(
     [sub] = store.list_subtasks(task_id)
     if reason == "quota":
         assert sub.status is SubtaskStatus.NEEDS_HUMAN and sub.attempts.quality == 1
+    elif reason == "fits":
+        assert sub.status is SubtaskStatus.DONE
     else:
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
     note = last_review_tests(store, sub.id)
+    if reason == "write-error":
+        assert note is None
+        [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_interrupted"]
+        assert "disk full" in json.loads(entry["details_json"])["reason"]
+        assert list(tmp_path.glob("review-*")) == []
+        return
     assert note is not None
     assert note["disk_low"] is (reason == "disk")
-    assert note["ran"] is (reason == "disk")
+    assert note["ran"] is (reason in {"disk", "fits"})
     if reason == "quota":
         assert "quota: " in note["copy_over_quota"]
         [entry] = [row for row in store.audit_log(task_id) if row["action"] == "verdict"]

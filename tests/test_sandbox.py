@@ -483,6 +483,7 @@ class Scripted(Sandbox):
         *,
         stdin: str = "",
         timeout: float | None = None,
+        limits: Limits | None = None,
     ) -> Outcome:
         self.calls.append((list(command), stdin, timeout))
         return self.outcome

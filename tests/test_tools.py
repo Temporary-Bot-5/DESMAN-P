@@ -162,6 +162,7 @@ def test_files_round_trip_through_the_tools(ws: Workspace) -> None:
         "path": "out/a.md",
         "content": "# hi",
     }
+    ws.write(".review/old.py", "old reviewer module")
     assert box.call(call("list_files")).output == {"files": ["out/a.md"]}
 
 

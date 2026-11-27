@@ -327,18 +327,25 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
-        if sub.review_tests and sub.review_tests["ran"]:
+        review_tests = sub.review_tests
+        attempt = sub.attempts.quality + 1
+        if review_tests and review_tests.get("attempt") != attempt:
+            review_tests = None
+        if review_tests and review_tests["ran"]:
             click.echo(
                 "      "
                 + t(
-                    "Reviewer's tests — passed: {passed}, failed: {failed}, errors: {errors}",
-                    passed=sub.review_tests["passed"],
-                    failed=sub.review_tests["failed"],
-                    errors=sub.review_tests["errors"],
+                    "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}",
+                    attempt=attempt,
+                    passed=review_tests["passed"],
+                    failed=review_tests["failed"],
+                    errors=review_tests["errors"],
                 )
             )
-        elif sub.review_tests:
-            click.echo("      " + t("Reviewer's tests did not run."))
+        elif review_tests:
+            click.echo(
+                "      " + t("Reviewer's tests (attempt {attempt}) did not run.", attempt=attempt)
+            )
         if hint := search_setup_hint(sub):
             click.echo("      " + hint)
         if sub.knowledge:

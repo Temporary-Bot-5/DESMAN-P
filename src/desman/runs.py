@@ -16,7 +16,7 @@ import stat
 import time
 from collections.abc import Callable, Collection, Mapping, Set
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -779,13 +779,15 @@ def _run_review_tests(
 ) -> TestRun:
     cover(30)
     file = review_test_file(subtask.id, attempt)
-    workspace.write(file, module)
     config = "[pytest]\npythonpath = ..\n"
     skipped = 0
+    skipped_names: list[str] = []
 
-    def skip() -> None:
+    def skip(path: str) -> None:
         nonlocal skipped
         skipped += 1
+        if len(skipped_names) < 5:
+            skipped_names.append(path)
 
     def over_quota(entries: int, size: int) -> TestRun:
         limits = sandbox.limits
@@ -796,7 +798,11 @@ def _run_review_tests(
             "Remove files the reviewer's run does not need."
         )
         return TestRun(
-            ran=False, reason_not_run=message, copy_over_quota=message, skipped_files=skipped
+            ran=False,
+            reason_not_run=message,
+            copy_over_quota=message,
+            skipped_files=skipped,
+            skipped_names=skipped_names,
         )
 
     try:
@@ -805,31 +811,32 @@ def _run_review_tests(
         root = workspace.root.parent
         _sweep_review_copies(root)
         paths = []
-        size = len(module.encode()) + len(config)
-        estimated = size
+        estimated = 0
         for path in workspace.files(on_skip=skip):
             if not is_work_file(path) or path.startswith(("web/", TOOL_RESULTS_DIR)):
                 continue
             try:
                 estimated += workspace.size(path)
-            except (OSError, PathEscapeError):
-                skip()
+            except (FileNotFoundError, PermissionError, PathEscapeError):
+                skip(path)
                 continue
             paths.append(path)
-        cover(30 + min(estimated, sandbox.limits.workspace_bytes) / 10_000_000)
+        limits = sandbox.limits
+
+        def copy_seconds(remaining: int) -> float:
+            return 30 + min(estimated, limits.workspace_bytes) / 10_000_000 + 0.05 * remaining
+
+        cover(copy_seconds(len(paths)))
         with TemporaryDirectory(
             prefix=_REVIEW_COPY_PREFIX, dir=root, ignore_cleanup_errors=True
         ) as directory:
             location = Path(directory)
             copy = Workspace(location.parent, location.name)
-            directories = {PurePosixPath(".review"), PurePosixPath(file).parent}
-            entries = 4
-            limits = sandbox.limits
-            if entries > limits.workspace_files or size > limits.workspace_bytes:
-                return over_quota(entries, size)
-            copy.write(file, module)
-            copy.write(".review/pytest.ini", config)
-            for path in paths:
+            directories: set[PurePosixPath] = set()
+            entries = size = 0
+            for index, path in enumerate(paths):
+                if index and index % 500 == 0:
+                    cover(copy_seconds(len(paths) - index))
                 parents = set(PurePosixPath(path).parents) - {PurePosixPath(".")}
                 next_entries = entries + 1 + len(parents - directories)
                 try:
@@ -837,15 +844,22 @@ def _run_review_tests(
                     if next_entries > limits.workspace_files or next_size > limits.workspace_bytes:
                         return over_quota(next_entries, next_size)
                     data = workspace.read(path, limit=limits.workspace_bytes - size + 1)
-                    next_size = size + len(data)
-                    if next_size > limits.workspace_bytes:
-                        return over_quota(next_entries, next_size)
-                    copy.write(path, data)
-                except (OSError, PathEscapeError):
-                    skip()
+                except (FileNotFoundError, PermissionError, PathEscapeError):
+                    skip(path)
                     continue
+                next_size = size + len(data)
+                if next_size > limits.workspace_bytes:
+                    return over_quota(next_entries, next_size)
+                copy.write(path, data)
                 entries, size = next_entries, next_size
                 directories.update(parents)
+            copy.write(file, module)
+            copy.write(".review/pytest.ini", config)
+            review_limits = replace(
+                limits,
+                workspace_files=limits.workspace_files + len(PurePosixPath(file).parents) + 1,
+                workspace_bytes=limits.workspace_bytes + len(module.encode()) + len(config),
+            )
             cover(REVIEW_TEST_TIMEOUT)
             # python3 is the interpreter name supplied by every Sandbox backend.
             outcome = sandbox.run(
@@ -868,6 +882,7 @@ def _run_review_tests(
                 ],
                 copy.root,
                 timeout=REVIEW_TEST_TIMEOUT,
+                limits=review_limits,
             )
     except SandboxUnavailable as error:
         return TestRun(
@@ -875,16 +890,22 @@ def _run_review_tests(
             reason_not_run=str(error)[:1_000],
             sandbox_unavailable=True,
             skipped_files=skipped,
+            skipped_names=skipped_names,
         )
     summary = outcome.stdout.splitlines()
     counts: dict[str, int] = {}
-    if summary:
-        counts = {
-            status: int(count)
-            for count, status in re.findall(
-                r"\b([0-9]{1,9}) (passed|failed|errors?)\b", summary[-1]
-            )
-        }
+    for line in reversed(summary):
+        if match := re.fullmatch(
+            r"(?:=+\s+)?(\d+ [a-z][a-z ]*(?:, \d+ [a-z][a-z ]*)*) in \d+\.\d+s(?:\s+=+)?",
+            line.strip(),
+        ):
+            counts = {
+                status: int(count)
+                for count, status in re.findall(
+                    r"\b([0-9]{1,9}) (passed|failed|errors?)\b", match[1]
+                )
+            }
+            break
     failing = [
         match.group(1)[:250]
         for line in summary
@@ -908,6 +929,7 @@ def _run_review_tests(
         stopped=outcome.stopped,
         disk_low=outcome.disk_low,
         skipped_files=skipped,
+        skipped_names=skipped_names,
     )
 
 

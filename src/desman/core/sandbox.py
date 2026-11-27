@@ -671,12 +671,13 @@ class Sandbox:
         *,
         stdin: str = "",
         timeout: float | None = None,
+        limits: Limits | None = None,
     ) -> Outcome:
         """Run `command` with `workdir` as /workspace. Raises SandboxUnavailable."""
         problem = self.unavailable()
         if problem is not None:
             raise SandboxUnavailable(problem)
-        limits = self.limits
+        limits = self.limits if limits is None else limits
         if timeout is not None:
             limits = _with(limits, min(timeout, limits.timeout))
         outcome = self._run(command, workdir, stdin, limits)

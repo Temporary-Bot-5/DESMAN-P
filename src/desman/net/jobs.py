@@ -502,7 +502,7 @@ def _result(store: Store, held: Held, workspaces: Path) -> protocol.Result:
     files: list[protocol.ResultFile] = []
     space = Workspace(workspaces, held.task_id)
     for path in space.files():
-        if path.startswith(TOOL_RESULTS_DIR):
+        if path.startswith(TOOL_RESULTS_DIR) or ".review" in path.split("/")[:-1]:
             continue
         if len(files) >= MAX_FILES:
             break
