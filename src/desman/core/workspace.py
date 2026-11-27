@@ -293,6 +293,12 @@ class Workspace:
                     dirnames.clear()
                     continue
                 on_directory(relative)
+            if on_skip is not None:
+                # followlinks=False never enters a linked directory: say it was left out.
+                for name in list(dirnames):
+                    if (base / name).is_symlink():
+                        dirnames.remove(name)
+                        on_skip((base / name).relative_to(self.root).as_posix())
             for name in filenames:
                 full = base / name
                 if name.startswith(_TMP_PREFIX):

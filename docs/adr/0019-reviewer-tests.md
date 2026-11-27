@@ -56,6 +56,9 @@ permissions. The reviewer has no tools.
   stated behaviour, and the next reviewer sees its previous tests and their output.
 - Code under test shares the process and folder with pytest, so deliberate tampering with the
   report is made harder, not impossible.
+- Under the WebAssembly sandbox (WASI) faulthandler cannot run (no threads), so a run that hits
+  the time limit there always goes back to the reviewer, never to the executor; a standard
+  module the sandbox lacks (e.g. `_sqlite3` under WASI) means the tests cannot run (row D).
 - Python only: other languages are tested only when they must run (`runs_code`), by starting
   the program from a test.
 - Packages beyond the standard library arrive with L.6.

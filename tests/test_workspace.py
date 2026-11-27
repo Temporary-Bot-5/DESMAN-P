@@ -464,3 +464,15 @@ def test_portable_read_does_not_retry_link_checks(
         space.read("answer")
     assert caught.value is error
     assert clock.slept == 0
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_iter_files_reports_linked_directories_as_skipped(tmp_path: Path) -> None:
+    # The reviewer's copy (L.5) names what it left out; a linked folder is never entered.
+    space = Workspace(tmp_path, "task")
+    space.write("data/v2/input.csv", "1\n")
+    (space.root / "current").symlink_to(space.root / "data" / "v2", target_is_directory=True)
+    skipped: list[str] = []
+    files = list(space.iter_files(on_skip=skipped.append))
+    assert files == ["data/v2/input.csv"]
+    assert skipped == ["current"]

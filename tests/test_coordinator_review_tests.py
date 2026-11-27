@@ -519,7 +519,7 @@ def test_runner_writes_module_and_parses_pytest(
             "python_files = test_*.py *_test.py",
             "python_classes = Test*",
             "python_functions = test*",
-            "faulthandler_timeout = 20",
+            "faulthandler_timeout = 15",
         ]
         copy.write("answer.py", "changed")
         (cwd / "delete.txt").unlink()
@@ -1512,6 +1512,7 @@ def test_status_shows_review_test_outcome(
         "reviewer-frame-expected",
         pytest.param("real", marks=confined),
         "executor-syntax",
+        "executor-stdlib-frame",
         pytest.param("executor-syntax-real", marks=confined),
         pytest.param("reviewer-calc", marks=confined),
         pytest.param("reviewer-desman_absent_review_package", marks=confined),
@@ -1562,6 +1563,8 @@ def test_missing_package_in_review(
             importlib.metadata, "packages_distributions", lambda: {"utils": ["utils"]}
         )
     source = "from helpers import x\n" if mode == "helpers" else f"import {package}\n"
+    if mode == "executor-stdlib-frame":
+        source = "import re\nPATTERN = re.compile('(')\n"
     if mode.startswith("executor-syntax"):
         source = "from calc import answer\n"
         workspace.write("calc.py", "answer = (]\n")
@@ -1599,6 +1602,17 @@ def test_missing_package_in_review(
                     '<testcase name="test_review"><error message="collection failure">'
                     'fetch.py:1: in &lt;module&gt;\nE     File "calc.py", line 1\n'
                     "E   SyntaxError: invalid syntax</error></testcase>"
+                )
+            if mode == "executor-stdlib-frame":
+                # Raised inside the standard library, called from the executor's file.
+                cases = (
+                    '<testcase name="test_review"><error message="collection failure">'
+                    f"{command[-1]}:1: in &lt;module&gt;\n    import fetch\n"
+                    "fetch.py:2: in &lt;module&gt;\n    PATTERN = re.compile('(')\n"
+                    "/usr/lib/python3.12/re/__init__.py:228: in compile\n"
+                    "    return _compile(pattern, flags)\n"
+                    "E   re.error: missing ), unterminated subpattern at position 0"
+                    "</error></testcase>"
                 )
             if mode.startswith("reviewer-frame-"):
                 missing = mode.removeprefix("reviewer-frame-")
@@ -1644,9 +1658,11 @@ def test_missing_package_in_review(
     note = last_review_tests(store, sub.id)
     assert note is not None and note["source"] == module
     rows = store.audit_log(task_id)
-    if mode in {"missing", "flask", "real"}:
+    if mode in {"missing", "flask", "real", "stdlib"}:
         assert not note["ran"]
-        assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
+        # A standard module the sandbox lacks is not the executor's doing either.
+        named = f"{package} (a standard module)" if mode == "stdlib" else package
+        assert note["reason_not_run"] == f"needs package {named}, not installed in the sandbox"
         if runs_code:
             assert store.get_subtask(sub.id).status is SubtaskStatus.NEEDS_HUMAN
             [failure] = [row for row in rows if row["action"] == "review_failed"]
@@ -1668,11 +1684,10 @@ def test_missing_package_in_review(
             "mixed",
             "local",
             "nested",
-            "stdlib",
             "helpers",
             "utils",
             "jsn",
-        } or mode.startswith("executor-syntax"):
+        } or mode.startswith(("executor-syntax", "executor-stdlib")):
             [verdict] = [row for row in rows if row["action"] == "verdict"]
             details = json.loads(verdict["details_json"])
             assert details["verdict"] == "retry"
@@ -1683,6 +1698,8 @@ def test_missing_package_in_review(
                 ) in details["feedback"]
             if mode.startswith("executor-syntax"):
                 assert "SyntaxError" in details["feedback"]
+            if mode == "executor-stdlib-frame":
+                assert "re.error" in details["feedback"]
             assert store.get_subtask(sub.id).attempts.quality == 1
         else:
             [failure] = [row for row in rows if row["action"] == "review_interrupted"]
@@ -2299,7 +2316,7 @@ def test_recorded_pytest_hang(
     def run(command: list[str], cwd: Path, *, limits: Limits, **_: object) -> Outcome:
         ini = cwd / command[command.index("-c") + 1]
         config = ini.read_text()
-        assert "faulthandler_timeout = 20" in config
+        assert "faulthandler_timeout = 15" in config
         # Captured faulthandler excerpts with paths and thread IDs normalized.
         reviewer = f"/workspace/{command[-1]}"
         header = "Timeout (0:00:00.080000)!\nThread 0x00007f0000000000 (most recent call first):\n"

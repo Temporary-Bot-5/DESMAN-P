@@ -43,6 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints,
 
 from desman.core.context import DependencyResult, is_document_combine
 from desman.core.coordinator import (
+    REVIEW_TEST_TIMEOUT,
     Delegation,
     Executor,
     Failure,
@@ -201,7 +202,9 @@ REVIEWER_TESTS = (
     "no network. Tests must not need other packages or network access. "
     "Write independent tests; do not copy or invoke the executor's tests. "
     "For required runs of non-Python code, you may launch the program with subprocess "
-    "inside the same networkless sandbox and check its output and exit code. "
+    "inside the same networkless sandbox and check its output and exit code; always pass "
+    "timeout= (at most 10 seconds) to subprocess calls. Each test should finish within a "
+    f"few seconds; all of them together have {REVIEW_TEST_TIMEOUT} seconds. "
     "Cover the acceptance criteria and every concrete input and expected output example in "
     "the goal, subtask and inputs, with a test for each example. Test only behaviour stated "
     "in the goal, subtask, inputs or acceptance criteria, plus behaviour no reading of the "

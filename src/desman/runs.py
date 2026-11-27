@@ -776,12 +776,14 @@ def _review_trace_frame(trace: str) -> tuple[str, int] | None:
         r"|([^\n]+?):([0-9]{1,9})(?:: (?:in .+|[A-Za-z_][\w.]*))?)$",
         trace,
     )
-    if not frames:
-        return None
-    syntax_path, syntax_line, path, line = frames[-1]
-    # The ini's `pythonpath = ..` makes paths like /workspace/.desman-review-X/../calc.py.
-    path = posixpath.normpath(syntax_path or path).removeprefix(f"{MOUNT_POINT}/")
-    return path, int(syntax_line or line)
+    # The innermost frame inside the workspace: an error raised in the standard library or a
+    # package still belongs to the workspace file that called it.
+    for syntax_path, syntax_line, path, line in reversed(frames):
+        # The ini's `pythonpath = ..` makes paths like /workspace/.desman-review-X/../calc.py.
+        relative = posixpath.normpath(syntax_path or path).removeprefix(f"{MOUNT_POINT}/")
+        if not relative.startswith(("/", "<", "..")):
+            return relative, int(syntax_line or line)
+    return None
 
 
 _COMMON_PYPI_IMPORTS = frozenset(
@@ -885,6 +887,10 @@ def _missing_review_import(error_text: str, local_names: set[str]) -> tuple[str 
         return None, error_text
     name = match[1]
     root = name.partition(".")[0]
+    if root in sys.stdlib_module_names and all(part.isidentifier() for part in name.split(".")):
+        # The sandbox's Python lacks a standard module (e.g. _sqlite3 under WASI): the code
+        # cannot be tested here, which is not the executor's doing.
+        return f"{name} (a standard module)", error_text
     if (
         all(part.isidentifier() for part in name.split("."))
         and root not in sys.stdlib_module_names
@@ -1195,7 +1201,7 @@ def _run_review_tests(
             report = f"{review_dir}/{secrets.token_hex(16)}.xml"
             config = (
                 "[pytest]\npythonpath = ..\npython_files = test_*.py *_test.py\n"
-                "python_classes = Test*\npython_functions = test*\nfaulthandler_timeout = 20\n"
+                "python_classes = Test*\npython_functions = test*\nfaulthandler_timeout = 15\n"
                 f"addopts = --junitxml={report}\n"
             )
             copy.write(file, module)
