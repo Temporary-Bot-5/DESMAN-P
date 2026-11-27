@@ -29,7 +29,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Final
 
-from desman.core import db
+from desman.core import db, filelock
 from desman.core.atomic import replace_file, retry_sharing
 
 WORKSPACES_DIR: Final = "workspaces"
@@ -97,8 +97,10 @@ def check_path(path: str) -> tuple[str, ...]:
 
 
 def is_work_file(path: str) -> bool:
-    """Exclude runtime caches from task file inventories."""
-    return not any(part in {"__pycache__", ".pytest_cache"} for part in Path(path).parts[:-1])
+    """Exclude runtime caches and reviewer tests from task file inventories."""
+    return not any(
+        part in {"__pycache__", ".pytest_cache", ".review"} for part in Path(path).parts[:-1]
+    )
 
 
 class Workspace:
@@ -112,6 +114,18 @@ class Workspace:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink() or not self.root.is_dir():
             raise PathEscapeError(f"workspace {self.root} is not a plain directory")
+
+    @contextmanager
+    def review_lock(self) -> Iterator[None]:
+        """Serialize reviewer test runs sharing this task's attempt filenames."""
+        # Keep the lock outside the sandbox's writable mount.
+        path = self.root.with_name(f".review-{self.task_id}.lock")
+        with path.open("ab") as lock:
+            filelock.lock(lock.fileno())
+            try:
+                yield
+            finally:
+                filelock.unlock(lock.fileno())
 
     # There is deliberately no method returning an absolute path to a file: a path checked now
     # can be swapped for a symlink before the caller opens it. Use read/write/exists/files.

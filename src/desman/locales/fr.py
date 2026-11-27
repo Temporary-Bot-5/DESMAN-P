@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Reviewer's tests: {passed} passed, {failed} failed, {errors} errors": "Tests de vérification : {passed} réussis, {failed} échoués, {errors} erreurs",
+    "Reviewer's tests did not run.": "Les tests de vérification n’ont pas été exécutés.",
     "Checked": "Vérifié le",
     "Confirm lending a new cloud provider.": "Confirmer le premier prêt d’un fournisseur cloud.",
     "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN n’a pas lu les conditions de {name}. Vérifiez-les avant tout prêt : {url}.",

@@ -38,6 +38,8 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from itertools import islice
+from pathlib import Path
 from typing import Any, Final
 
 from pydantic import BaseModel
@@ -52,7 +54,7 @@ from desman.core.context import (
     is_document_combine,
     truncate,
 )
-from desman.core.models import Subtask
+from desman.core.models import Kind, Subtask
 from desman.core.store import Store
 from desman.core.tools import (
     FILE_WRITE_TOOLS,
@@ -282,9 +284,7 @@ def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:
     return texts
 
 
-def _written_files(
-    rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
-) -> list[dict[str, str]]:
+def _written_paths(rows: list[Any]) -> list[str]:
     paths: list[str] = []
     for row in rows:
         if row["tool"] not in FILE_WRITE_TOOLS or row["state"] != "done":
@@ -294,13 +294,55 @@ def _written_files(
             path = result.output.get("path")
             if isinstance(path, str) and path not in paths:
                 paths.append(path)
-    if not paths:
-        return []
+    return paths
+
+
+def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
+    row = store.conn.execute(
+        """SELECT details_json FROM audit_log WHERE subtask_id = ? AND action = 'review_tests'
+           ORDER BY seq DESC LIMIT 1""",
+        (subtask_id,),
+    ).fetchone()
+    return dict(json.loads(row[0])) if row else None
+
+
+def _workspace_outputs(workspace: Workspace) -> Iterator[str]:
+    return (
+        path
+        for path in workspace.files()
+        if is_work_file(path) and not path.startswith(("input/", "web/", TOOL_RESULTS_DIR))
+    )
+
+
+def has_written_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
+    """Check journaled writes and workspace output created by commands inside the sandbox."""
+    if any(
+        _written_paths(store.effects(subtask.id, execution))
+        for execution in range(store.executions(subtask.id) - 1, -1, -1)
+    ):
+        return True
+    workspace = Workspace(
+        root if root is not None else workspace_root_for(store.conn), subtask.task_id
+    )
+    return next(_workspace_outputs(workspace), None) is not None
+
+
+def _written_files(
+    rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
+) -> list[dict[str, str]]:
+    paths = _written_paths(rows)
+    from_workspace = not paths and (subtask.kind is Kind.CODE or subtask.runs_code)
+    if from_workspace:
+        workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
+        paths = list(islice(_workspace_outputs(workspace), 12))
     files = []
     for path in paths:
         try:
             workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
-            text = workspace.read_text(path)
+            if from_workspace and workspace.size(path) > EVIDENCE_TOKENS * CHARS_PER_TOKEN:
+                text = "File exceeds the evidence budget: content unavailable."
+            else:
+                text = workspace.read_text(path)
             if "\x00" in text:
                 text = "Binary file: content unavailable."
         except (OSError, UnicodeError, PathEscapeError):

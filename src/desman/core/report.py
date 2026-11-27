@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from desman.core import db
+from desman.core.effects import last_review_tests
 from desman.core.models import Kind, Subtask
 from desman.core.retry import Attempts
 from desman.core.states import SubtaskStatus, TaskStatus, derive_task_status
@@ -42,6 +43,7 @@ class SubtaskReport(BaseModel):
     paused_until: str | None
     action: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
+    review_tests: dict[str, Any] | None = None
     reason: str | None
     """Why it reached its current status, from the audit log (e.g. the escalation reason)."""
 
@@ -112,6 +114,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     paused_until=sub.paused_until,
                     **_status_details(store, sub),
                     reason=reason,
+                    review_tests=last_review_tests(store, sub.id),
                 )
             )
         report = _report(row, [s.status for s in subtasks], reports)

@@ -327,6 +327,18 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
+        if sub.review_tests and sub.review_tests["ran"]:
+            click.echo(
+                "      "
+                + t(
+                    "Reviewer's tests: {passed} passed, {failed} failed, {errors} errors",
+                    passed=sub.review_tests["passed"],
+                    failed=sub.review_tests["failed"],
+                    errors=sub.review_tests["errors"],
+                )
+            )
+        elif sub.review_tests:
+            click.echo("      " + t("Reviewer's tests did not run."))
         if hint := search_setup_hint(sub):
             click.echo("      " + hint)
         if sub.knowledge:

@@ -10,6 +10,8 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Reviewer's tests: {passed} passed, {failed} failed, {errors} errors": "レビュー担当のテスト: {passed} 件成功、{failed} 件失敗、{errors} 件のエラー",
+    "Reviewer's tests did not run.": "レビュー担当のテストは実行されませんでした。",
     "Checked": "確認日",
     "Confirm lending a new cloud provider.": "クラウドプロバイダーを初めて貸し出すことを確認します。",
     "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN は {name} の規約を読んでいません。貸し出す前に確認してください: {url}。",

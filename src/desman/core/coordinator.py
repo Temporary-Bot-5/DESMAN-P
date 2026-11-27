@@ -33,6 +33,7 @@ that a rerun of an interrupted execution does not repeat them (core/effects.py).
 
 from __future__ import annotations
 
+import ast
 import functools
 import json
 import math
@@ -42,7 +43,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -60,18 +61,20 @@ from desman.core.effects import (
     Effects,
     earlier_lookups,
     earlier_results,
+    has_written_files,
     workspace_files,
 )
 from desman.core.models import (
     MAX_DELEGATED_PARTS,
     MAX_DELEGATIONS,
+    Kind,
     Origin,
     Priority,
     Subtask,
     SubtaskSpec,
     Tools,
 )
-from desman.core.policy import Access
+from desman.core.policy import Access, executor_access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import (
@@ -81,12 +84,13 @@ from desman.core.store import (
     StaleStateError,
     Store,
 )
-from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult
+from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult, builtin_registry
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
 S = SubtaskStatus
 MODEL_CALL_MARGIN = 30
+REVIEW_TEST_TIMEOUT = 60
 
 DEFAULT_POLL_SECONDS = 5.0
 """How often a coordinator with nothing to do looks again while others hold work (a worker's
@@ -178,6 +182,49 @@ class Review(BaseModel):
 
     verdict: Verdict
     feedback: str = ""
+    tests: str | None = Field(default=None, max_length=20_000)
+
+    @field_validator("tests")
+    @classmethod
+    def _test_module(cls, tests: str | None) -> str | None:
+        if tests is not None:
+            try:
+                module = ast.parse(tests)
+            except (SyntaxError, ValueError, RecursionError) as error:
+                raise ValueError(f"tests must be valid Python: {error}") from error
+            if not any(
+                isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+                for node in module.body
+            ):
+                raise ValueError("tests must define a top-level test_ function")
+        return tests
+
+
+class TestRun(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    ran: bool
+    reason_not_run: str | None = Field(default=None, max_length=1_000)
+    exit_code: int | None = None
+    passed: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    errors: int = Field(default=0, ge=0)
+    failing: list[Annotated[str, Field(max_length=250)]] = Field(
+        default_factory=list, max_length=20
+    )
+    tail: str = Field(default="", max_length=4_000)
+    timed_out: bool = False
+
+
+ReviewTests = Callable[[Subtask, Workspace, str, int], TestRun]
+
+
+def review_test_file(attempt: int) -> str:
+    return f".review/test_review_{attempt}.py"
+
+
+def needs_review_tests(subtask: Subtask, *, written_files: bool) -> bool:
+    return subtask.runs_code or (subtask.kind is Kind.CODE and written_files)
 
 
 class Work(BaseModel):
@@ -276,6 +323,7 @@ class Coordinator:
         gate: Callable[[], None] | None = None,
         network: Crew | None = None,
         knowledge: Knowledge | None = None,
+        review_tests: ReviewTests | None = None,
     ) -> None:
         self.store = store
         self.knowledge = knowledge
@@ -283,6 +331,7 @@ class Coordinator:
         nobody is given any. A job from desman-global never is."""
         self.executor = executor
         self.reviewer = reviewer
+        self.review_tests = review_tests
         self.owner = owner
         """Lease and review reservations are taken under this name: unique per process when
         several share a database (`core.owner.current_owner`)."""
@@ -290,7 +339,7 @@ class Coordinator:
         self._review_seconds = review_seconds
         self.context_budget_tokens = context_budget_tokens
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
-        self.tools = tools
+        self.tools = builtin_registry() if tools is None and review_tests is not None else tools
         """The registry executors may call into; the built-in tools by default."""
         self.access = access
         """What the executor may use: its tool policy within the human's permissions. By
@@ -893,6 +942,60 @@ class Coordinator:
         self.store.note(subtask.id, Actor.EXECUTOR, "decomposition_failed", {"reason": reason})
         return False
 
+    def _check_review_tests(
+        self, subtask: Subtask, review: Review, cover_call: Callable[[float], None]
+    ) -> Review | Failure:
+        runner = self.review_tests
+        if runner is None or not needs_review_tests(
+            subtask,
+            written_files=subtask.kind is Kind.CODE
+            and not subtask.runs_code
+            and has_written_files(self.store, subtask, root=self.workspaces),
+        ):
+            return review
+        attempt = subtask.attempts.quality + 1
+        if review.tests is None and subtask.runs_code:
+            return Failure(kind=FailureKind.TRANSIENT, reason="reviewer gave no tests")
+
+        tool = self.tools.get(RUN_TOOL) if self.tools is not None else None
+        access = self._crew(subtask).access or executor_access()
+        if self.store.tools(subtask.task_id) is not Tools.GRANTED or "document" in subtask.inputs:
+            result = TestRun(ran=False, reason_not_run="task does not grant tools")
+        elif tool is None:
+            result = TestRun(ran=False, reason_not_run="run_command unavailable")
+        elif reason := access.refusal(tool):
+            result = TestRun(ran=False, reason_not_run=reason)
+        elif review.tests is None:
+            result = TestRun(ran=False, reason_not_run="reviewer gave no tests")
+        else:
+            workspace = Workspace(self.workspaces, subtask.task_id)
+            with workspace.review_lock():
+                # A worker's permissions can change while a sibling runs its tests.
+                if reason := access.refusal(tool):
+                    result = TestRun(ran=False, reason_not_run=reason)
+                else:
+                    cover_call(REVIEW_TEST_TIMEOUT)
+                    result = TestRun.model_validate(
+                        runner(subtask, workspace, review.tests, attempt)
+                    )
+
+        self.store.note(
+            subtask.id,
+            Actor.REVIEWER,
+            "review_tests",
+            {"file": review_test_file(attempt), **result.model_dump(exclude={"tail"})},
+        )
+        if not result.ran or (result.exit_code == 0 and not result.timed_out):
+            return review
+        reason = ", ".join(result.failing)
+        if not reason:
+            reason = "timed out" if result.timed_out else f"pytest exited {result.exit_code}"
+        return Review(
+            verdict=Verdict.RETRY,
+            feedback=f"reviewer's tests failed: {reason}"
+            + (f"\n{result.tail}" if result.tail else ""),
+        )
+
     def _review(self, subtask: Subtask, token: str, events: list[str]) -> bool:
         """Review the submitted result under the reservation `token`; the verdict is written
         only while the reservation is still ours."""
@@ -928,9 +1031,19 @@ class Coordinator:
                 feedback=f"{_error_reason(artifact)} (accepted by the reviewer, overruled)",
             )
         verdict: dict[str, Any] = {}
-        if isinstance(review, Review):
-            verdict = {"verdict": review.verdict.value, "feedback": review.feedback}
         try:
+            if isinstance(review, Review) and review.verdict is Verdict.ACCEPT:
+                try:
+                    review = self._check_review_tests(subtask, review, cover_call)
+                except StaleStateError:
+                    raise
+                except Exception as error:
+                    review = Failure(
+                        kind=FailureKind.TRANSIENT,
+                        reason=f"review tests raised {type(error).__name__}: {error}",
+                    )
+            if isinstance(review, Review):
+                verdict = {"verdict": review.verdict.value, "feedback": review.feedback}
             if isinstance(review, Failure):
                 # Counts against the subtask's budget, so a reviewer that keeps failing cannot
                 # loop forever. A transient one keeps the subtask in REVIEW: the submitted work is

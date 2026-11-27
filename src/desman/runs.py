@@ -9,10 +9,12 @@ access (the tool policy within the human's permissions) and its tools.
 from __future__ import annotations
 
 import functools
+import re
 import sqlite3
 from collections.abc import Callable, Collection, Mapping, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 import click
 import httpx
@@ -29,18 +31,32 @@ from desman.config import Config, ConfigError, MasterChoices, Tuning, open_confi
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
-from desman.core.coordinator import Coordinator, Crew, Executor, Failure, Labels, Outcome, Work
-from desman.core.effects import evidence, quote_sources
+from desman.core.coordinator import (
+    REVIEW_TEST_TIMEOUT,
+    Coordinator,
+    Crew,
+    Executor,
+    Failure,
+    Labels,
+    Outcome,
+    ReviewTests,
+    TestRun,
+    Work,
+    needs_review_tests,
+    review_test_file,
+)
+from desman.core.effects import evidence, has_written_files, last_review_tests, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
-from desman.core.sandbox import Sandbox
+from desman.core.sandbox import Sandbox, SandboxUnavailable
 from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
+from desman.core.workspace import Workspace
 from desman.i18n import t
 from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
@@ -736,6 +752,68 @@ def _personalize() -> bool:
         return False
 
 
+def _run_review_tests(
+    sandbox: Sandbox, subtask: Subtask, workspace: Workspace, module: str, attempt: int
+) -> TestRun:
+    try:
+        if problem := sandbox.unavailable():
+            return TestRun(ran=False, reason_not_run=problem[:1_000])
+        file = review_test_file(attempt)
+        workspace.write(file, module)
+        # python3 is the interpreter name supplied by every Sandbox backend.
+        outcome = sandbox.run(
+            ["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", file],
+            workspace.root,
+            timeout=REVIEW_TEST_TIMEOUT,
+        )
+    except SandboxUnavailable as error:
+        return TestRun(ran=False, reason_not_run=str(error)[:1_000])
+    summary = outcome.stdout.splitlines()
+    counts: dict[str, int] = {}
+    if summary:
+        counts = {
+            status: int(count)
+            for count, status in re.findall(
+                r"\b([0-9]{1,9}) (passed|failed|errors?)\b", summary[-1]
+            )
+        }
+    failing = [
+        match.group(1)[:250]
+        for line in summary
+        if (match := re.match(r"^(?:FAILED|ERROR) (.*?)(?: - |$)", line))
+    ]
+    tail = "\n".join(
+        part
+        for part in (outcome.stdout, outcome.stderr, outcome.stopped, outcome.workspace_full)
+        if part
+    )
+    return TestRun(
+        ran=True,
+        exit_code=outcome.exit_code,
+        passed=counts.get("passed", 0),
+        failed=counts.get("failed", 0),
+        errors=counts.get("errors", counts.get("error", 0)),
+        failing=failing[:20],
+        tail=tail[-4_000:],
+        timed_out=outcome.timed_out,
+    )
+
+
+def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
+    if not needs_review_tests(
+        subtask,
+        written_files=subtask.kind is Kind.CODE
+        and not subtask.runs_code
+        and has_written_files(store, subtask),
+    ):
+        return {}
+    goal, is_final = store.subtask_goal(subtask)
+    return {
+        **({} if is_final else {"task_goal": goal}),
+        "previous_review_tests": last_review_tests(store, subtask.id),
+    }
+
+
 def coordinator(
     store: Store,
     models: Models,
@@ -755,6 +833,7 @@ def coordinator(
     # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
     # only while personalisation is on (turned off mid-run: no longer given).
     tree = knowledge.reader(lambda: task_tree(store.conn, _personalize()))
+    sandbox = sandbox if sandbox is not None else Sandbox()
     return _coordinator(
         store,
         models,
@@ -768,6 +847,7 @@ def coordinator(
             models=lambda ref: hub.inspect(ref, http),
             knowledge=tree,
         ),
+        review_tests=functools.partial(_run_review_tests, sandbox),
         knowledge=tree,
         lease_seconds=lease_seconds,
         watch=watch,
@@ -919,6 +999,7 @@ def _coordinator(
     knowledge: Knowledge | None = None,
     read_tuning: Callable[[], Tuning] | None = None,
     master_check: bool = False,
+    review_tests: ReviewTests | None = None,
 ) -> Coordinator:
     tuning = tuning or Tuning()
     guard(store)
@@ -933,6 +1014,7 @@ def _coordinator(
             evidence=functools.partial(evidence, store, knowledge=knowledge),
             dependencies=store.dependency_results,
             was_decomposed=store.was_decomposed,
+            test_context=functools.partial(_review_test_context, store) if review_tests else None,
             quote_evidence=functools.partial(
                 quote_sources,
                 store,
@@ -960,4 +1042,5 @@ def _coordinator(
         gate=functools.partial(guard, store),  # a running worker stops at a later change too
         network=network,
         knowledge=knowledge,
+        review_tests=review_tests,
     )

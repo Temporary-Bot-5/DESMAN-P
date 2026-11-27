@@ -53,6 +53,7 @@ from desman.core.coordinator import (
     Work,
     _error_reason,
     is_error_report,
+    needs_review_tests,
 )
 from desman.core.effects import archive_result, outcome, short_args, tool_result_file
 from desman.core.models import MAX_DELEGATED_PARTS, Kind, Subtask, SubtaskSpec, TaskSpec
@@ -191,6 +192,17 @@ REVIEWER_SYSTEM = (
     "(or the subtask description when no goal is given), not an invented detail."
     " A stated total, range or summary figure that contradicts the result's own itemised "
     "numbers means retry: name the mismatch. Check this from the result alone."
+)
+REVIEWER_TESTS = (
+    ' On accept, include "tests": a Python pytest module (at most 20000 characters with '
+    "top-level test_ functions). Import the produced code from the workspace root, the "
+    "working directory. Write independent tests; do not copy or invoke the executor's tests. "
+    "Cover the acceptance criteria and every concrete input and expected output example in "
+    "the goal, subtask and inputs, with a test for each example. Test relevant edge cases: "
+    "empty and whitespace input, trailing spaces, negative and zero values, huge values, "
+    "invalid input, wrong input types and wrong result types such as complex numbers. "
+    "Check previous_review_tests and any explanation in the executor's result. If an earlier "
+    "review test was wrong, correct it and explain why in feedback."
 )
 REVIEWER_EVIDENCE = (
     " For a categorical claim that a software feature or product does not exist or is "
@@ -976,6 +988,7 @@ def llm_reviewer(
     dependencies: Callable[[str], list[DependencyResult]] | None = None,
     quote_evidence: Callable[[Subtask], list[object]] | None = None,
     was_decomposed: Callable[[str], bool] | None = None,
+    test_context: Callable[[Subtask], dict[str, Any]] | None = None,
     clock: Callable[[], datetime] | None = None,
     tz: tzinfo | None = None,
 ) -> Reviewer:
@@ -1054,6 +1067,19 @@ def llm_reviewer(
             )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an
         # interrupted review, so the work is reviewed again, not redone.
+        context = test_context(subtask) if test_context is not None else {}
+        check_code = needs_review_tests(
+            subtask, written_files=bool(shown.get("written_files")) or bool(context)
+        )
+        if check_code:
+            prompt["inputs"] = subtask.inputs
+            prompt.update(context)
+            verdict_with_tests = _ask(llm, system + REVIEWER_TESTS, REVIEW, prompt, _CodeVerdict)
+            return Review(
+                verdict=verdict_with_tests.verdict,
+                feedback=verdict_with_tests.feedback,
+                tests=verdict_with_tests.tests,
+            )
         verdict = _ask(llm, system, REVIEW, prompt, _Verdict)
         return Review(verdict=verdict.verdict, feedback=verdict.feedback)
 
@@ -1071,6 +1097,10 @@ class _Verdict(BaseModel):
         if self.verdict is not Verdict.ACCEPT and not self.feedback:
             raise ValueError(f'a "{self.verdict.value}" verdict needs feedback: what is wrong')
         return self
+
+
+class _CodeVerdict(_Verdict, Review):
+    """Review verdict with an independently written pytest module."""
 
 
 def _plain_result(text: str) -> _Result | None:
