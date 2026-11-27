@@ -519,7 +519,7 @@ def test_runner_writes_module_and_parses_pytest(
             "python_files = test_*.py *_test.py",
             "python_classes = Test*",
             "python_functions = test*",
-            "faulthandler_timeout = 15",
+            "faulthandler_timeout = 50",
         ]
         copy.write("answer.py", "changed")
         (cwd / "delete.txt").unlink()
@@ -1513,6 +1513,7 @@ def test_status_shows_review_test_outcome(
         pytest.param("real", marks=confined),
         "executor-syntax",
         "executor-stdlib-frame",
+        "executor-colon-message",
         pytest.param("executor-syntax-real", marks=confined),
         pytest.param("reviewer-calc", marks=confined),
         pytest.param("reviewer-desman_absent_review_package", marks=confined),
@@ -1565,6 +1566,8 @@ def test_missing_package_in_review(
     source = "from helpers import x\n" if mode == "helpers" else f"import {package}\n"
     if mode == "executor-stdlib-frame":
         source = "import re\nPATTERN = re.compile('(')\n"
+    if mode == "executor-colon-message":
+        source = "raise ValueError('bad time 10:30')\n"
     if mode.startswith("executor-syntax"):
         source = "from calc import answer\n"
         workspace.write("calc.py", "answer = (]\n")
@@ -1613,6 +1616,14 @@ def test_missing_package_in_review(
                     "    return _compile(pattern, flags)\n"
                     "E   re.error: missing ), unterminated subpattern at position 0"
                     "</error></testcase>"
+                )
+            if mode == "executor-colon-message":
+                # The message ends in ":30" like a frame does; it must not be read as one.
+                cases = (
+                    '<testcase name="test_review"><error message="collection failure">'
+                    f"{command[-1]}:1: in &lt;module&gt;\n    import fetch\n"
+                    "fetch.py:1: in &lt;module&gt;\n    raise ValueError('bad time 10:30')\n"
+                    "E   ValueError: bad time 10:30</error></testcase>"
                 )
             if mode.startswith("reviewer-frame-"):
                 missing = mode.removeprefix("reviewer-frame-")
@@ -1687,7 +1698,7 @@ def test_missing_package_in_review(
             "helpers",
             "utils",
             "jsn",
-        } or mode.startswith(("executor-syntax", "executor-stdlib")):
+        } or mode.startswith(("executor-syntax", "executor-stdlib", "executor-colon")):
             [verdict] = [row for row in rows if row["action"] == "verdict"]
             details = json.loads(verdict["details_json"])
             assert details["verdict"] == "retry"
@@ -2316,7 +2327,7 @@ def test_recorded_pytest_hang(
     def run(command: list[str], cwd: Path, *, limits: Limits, **_: object) -> Outcome:
         ini = cwd / command[command.index("-c") + 1]
         config = ini.read_text()
-        assert "faulthandler_timeout = 15" in config
+        assert "faulthandler_timeout = 50" in config
         # Captured faulthandler excerpts with paths and thread IDs normalized.
         reviewer = f"/workspace/{command[-1]}"
         header = "Timeout (0:00:00.080000)!\nThread 0x00007f0000000000 (most recent call first):\n"

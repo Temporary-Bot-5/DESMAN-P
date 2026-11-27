@@ -773,7 +773,8 @@ def _review_trace_frame(trace: str) -> tuple[str, int] | None:
     # Pytest renders collection frames, failure locations and syntax errors differently.
     frames = re.findall(
         r'(?m)^(?:(?:E +| +)File "([^"\n]+)", line ([0-9]{1,9})(?:, in .+)?'
-        r"|([^\n]+?):([0-9]{1,9})(?:: (?:in .+|[A-Za-z_][\w.]*))?)$",
+        # A frame is a .py path, never pytest's `E   ...` message (e.g. "bad time 10:30").
+        r"|([^\sE][^\n]*?\.py|E[^\s][^\n]*?\.py):([0-9]{1,9})(?:: (?:in .+|[A-Za-z_][\w.]*))?)$",
         trace,
     )
     # The innermost frame inside the workspace: an error raised in the standard library or a
@@ -1201,7 +1202,7 @@ def _run_review_tests(
             report = f"{review_dir}/{secrets.token_hex(16)}.xml"
             config = (
                 "[pytest]\npythonpath = ..\npython_files = test_*.py *_test.py\n"
-                "python_classes = Test*\npython_functions = test*\nfaulthandler_timeout = 15\n"
+                "python_classes = Test*\npython_functions = test*\nfaulthandler_timeout = 50\n"
                 f"addopts = --junitxml={report}\n"
             )
             copy.write(file, module)

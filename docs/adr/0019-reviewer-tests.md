@@ -36,7 +36,9 @@ permissions. The reviewer has no tools.
    - A. A verified pass → accept.
    - B. A test failure or an import error in the executor's own file → back to the executor.
      A timed-out test also goes back to the executor when the innermost workspace frame in its
-     last faulthandler dump is in a copied executor file. The ini requests a stack dump after 20 s.
+     last faulthandler dump is in a copied executor file. The ini requests a stack dump after 50 s of one test (the whole run has 60 s), so a dump
+     belongs to the test still running when the run was stopped; a hang that starts later goes
+     to the reviewer (C).
    - C. Ambiguous results (reviewer collection or setup errors, zero tests, missing reports,
      other timeouts, stopped runs and full workspaces) → back to the reviewer, who fixes its
      test or names the executor's defect. The note keeps the reason.
