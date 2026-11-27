@@ -22,7 +22,6 @@ from desman.core.coordinator import (
     Success,
     Verdict,
     Work,
-    review_test_file,
     review_tests_enabled,
 )
 from desman.core.coordinator import TestRun as ReviewTestResult
@@ -45,6 +44,18 @@ from test_sandbox import confined
 
 MODULE = "def test_answer():\n    assert True\n"
 ACCEPT = json.dumps({"verdict": "accept", "tests": MODULE})
+
+
+def write_report(
+    command: list[str], cwd: Path, cases: str = '<testcase name="test_answer"/>'
+) -> None:
+    path = command[command.index("--junitxml") + 1]
+    review_dir = Path(command[-1]).parent
+    assert review_dir.name.startswith(".desman-review-")
+    assert Path(path).parent == review_dir and Path(path).suffix == ".xml"
+    (cwd / path).write_text(
+        f"<testsuites><testsuite>{cases}</testsuite></testsuites>", encoding="utf-8"
+    )
 
 
 def submitted(store: Store, *, runs_code: bool = True, tools: Tools = Tools.GRANTED) -> str:
@@ -140,9 +151,7 @@ def test_review_result(
     rows = store.audit_log(task_id)
     [note] = [row for row in rows if row["action"] == "review_tests"]
     assert note["actor"] == "reviewer" and note["to_status"] is None
-    [sub] = store.list_subtasks(task_id)
     assert json.loads(note["details_json"]) == {
-        "file": f".review/{sub.id}/test_review_1.py",
         "source": MODULE,
         "attempt": 1,
         **result.model_dump(),
@@ -255,18 +264,14 @@ def test_runner_writes_module_and_parses_pytest(
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
 
     [sub] = store.list_subtasks(submitted(store))
-    path = f".review/{sub.id}/test_review_2.py"
 
     workspace.write("answer.py", "answer = 4")
     workspace.write("delete.txt", "keep me")
-    for excluded in (
-        ".review/old.py",
-        "__pycache__/x.pyc",
-        ".pytest_cache/cache",
-        "web/page",
-        ".tool-results/result",
-    ):
-        workspace.write(excluded, "skip")
+    included = [".review/old.py", "web/page.html", ".tool-results/result"]
+    for path in included:
+        workspace.write(path, "keep")
+    for path in ("__pycache__/x.pyc", ".pytest_cache/cache"):
+        workspace.write(path, "skip")
     stale = tmp_path / "review-stale"
     stale.mkdir()
     os.utime(stale, (1, 1))
@@ -291,21 +296,27 @@ def test_runner_writes_module_and_parses_pytest(
     covered: list[float] = []
 
     def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
+        path = command[-1]
+        review_dir = Path(path).parent.as_posix()
+        ini = f"{review_dir}/pytest.ini"
+        report = command[-2]
         assert command == [
             "python3",
             "-I",
             "-m",
             "pytest",
             "-c",
-            ".review/pytest.ini",
+            ini,
             "--rootdir",
-            ".review",
+            review_dir,
             "--noconftest",
             "-p",
             "no:cacheprovider",
             "-o",
             "addopts=",
             "-q",
+            "--junitxml",
+            report,
             path,
         ]
         assert cwd.parent == workspace.root.parent and cwd != workspace.root and timeout == 60
@@ -313,14 +324,22 @@ def test_runner_writes_module_and_parses_pytest(
         assert not stale.exists() and fresh.exists()
         locations.append(cwd)
         copy = Workspace(cwd.parent, cwd.name)
-        assert copy.files() == sorted([path, ".review/pytest.ini", "answer.py", "delete.txt"])
+        assert copy.files() == sorted([path, ini, "answer.py", "delete.txt", *included])
         assert copy.read_text(path) == MODULE
-        assert copy.read_text(".review/pytest.ini") == "[pytest]\npythonpath = ..\n"
+        assert copy.read_text(ini) == "[pytest]\npythonpath = ..\n"
         copy.write("answer.py", "changed")
         (cwd / "delete.txt").unlink()
+        write_report(
+            command,
+            cwd,
+            '<testcase classname="test_review" name="test_answer"><failure/></testcase>'
+            '<testcase name="test_cleanup"><error/></testcase>'
+            '<testcase name="test_one"/><testcase name="test_two"/>'
+            '<testcase name="test_skip"><skipped/></testcase>',
+        )
         return Outcome(
             1,
-            f"FAILED {path}::test_answer - assert 1\n1 failed, 2 passed, 1 error in 0.02s\n",
+            "99 passed in 0.02s\n",
             "",
             workspace_full="over quota",
             stopped="watch stopped",
@@ -331,10 +350,11 @@ def test_runner_writes_module_and_parses_pytest(
     assert result.skipped_files == 3
     assert result.skipped_names == ["forbidden.py", "gone.py", "linked.py"]
     assert (result.exit_code, result.passed, result.failed, result.errors) == (1, 2, 1, 1)
-    assert result.failing == [f"{path}::test_answer"]
+    assert result.failing == ["test_review::test_answer", "test_cleanup"]
+    assert result.skipped == 1
     assert result.workspace_full == "over quota"
     assert result.stopped == "watch stopped"
-    assert not workspace.exists(path)
+    assert not list(workspace.root.glob(".desman-review-*"))
     assert workspace.read_text("answer.py") == "answer = 4"
     assert workspace.read_text("delete.txt") == "keep me"
     assert not locations[0].exists()
@@ -345,7 +365,12 @@ def test_copy_refreshes_review_reservation(
 ) -> None:
     sandbox = Sandbox()
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
-    monkeypatch.setattr(sandbox, "run", lambda *args, **kwargs: Outcome(0, "1 passed in 0.01s", ""))
+
+    def run(command: list[str], cwd: Path, **kwargs: object) -> Outcome:
+        write_report(command, cwd)
+        return Outcome(0, "", "")
+
+    monkeypatch.setattr(sandbox, "run", run)
     workspace = Workspace(tmp_path, "task")
     for index in range(501):
         workspace.write(f"{index}.txt", b"")
@@ -457,7 +482,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         commands.append(command)
         if command[-1] == "main.py":
             return Outcome(0, "4", "")
-        assert command[-1] == review_test_file(sub.id, 1)
+        write_report(command, cwd)
         return Outcome(0, "1 passed in 0.01s\natexit: closing", "")
 
     monkeypatch.setattr(sandbox, "run", run)
@@ -487,7 +512,6 @@ def test_normal_run_wires_review_to_command_sandbox(
             ],
         )
     )
-    [sub] = store.list_subtasks(task_id)
     coord = coordinator(
         store,
         Models(llm, None),
@@ -496,18 +520,39 @@ def test_normal_run_wires_review_to_command_sandbox(
         sandbox=sandbox,
     )
     assert coord.run(task_id).status is TaskStatus.DONE
-    assert [command[-1] for command in commands] == ["main.py", review_test_file(sub.id, 1)]
+    assert len(commands) == 2 and commands[0][-1] == "main.py"
+    assert Path(commands[1][-1]).name == "test_review.py"
     report = task_report(store, task_id)
     print_report(report, store)
     output = capsys.readouterr().out
     assert "Reviewer's tests (attempt 1) — passed: 1, failed: 0, errors: 0" in output
     assert not (Workspace(workspace_root_for(store.conn), task_id).root / ".review").exists()
-    assert review_test_file(sub.id, 1) not in output
+    assert commands[1][-1] not in output
     [subreport] = report.subtasks
+    assert subreport.model_dump()["review_tests"] == {
+        "attempt": 1,
+        "ran": True,
+        "reason_not_run": None,
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "timed_out": False,
+    }
     attempts = subreport.attempts.model_copy(update={"quality": 1})
     report.subtasks[0] = subreport.model_copy(update={"attempts": attempts})
     print_report(report, store)
-    assert "Reviewer's tests" not in capsys.readouterr().out
+    assert "Reviewer's tests (attempt 1)" in capsys.readouterr().out
+
+
+def test_status_recovers_attempt_from_legacy_review_note(store: Store) -> None:
+    task_id = submitted(store)
+    [sub] = store.list_subtasks(task_id)
+    store.note(sub.id, Actor.EXECUTOR, "attempt_started", {"attempt": 2})
+    store.note(sub.id, Actor.REVIEWER, "review_tests", {"ran": False})
+    store.note(sub.id, Actor.EXECUTOR, "attempt_started", {"attempt": 3})
+    [reported] = task_report(store, task_id).subtasks
+    assert reported.review_tests is not None and reported.review_tests.attempt == 2
 
 
 # This small fixture reproduces the four live probe failures while its smoke tests pass.
@@ -546,7 +591,7 @@ def test_negative_power():
     assert calculate("2^-1") == 0.5
 
 def test_complex_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         calculate("(-8)^0.5")
 
 def test_huge_integer():
@@ -582,7 +627,7 @@ def test_calculator_in_real_sandbox(
     assert coord.run(task_id).status is (TaskStatus.DONE if fixed else TaskStatus.NEEDS_HUMAN)
     [sub] = store.list_subtasks(task_id)
     note = last_review_tests(store, sub.id)
-    assert note is not None and workspace.read_text(note["file"]) == REVIEWER_TESTS
+    assert note is not None and note["source"] == REVIEWER_TESTS
     if fixed:
         assert note["passed"] == 4
     else:
@@ -744,7 +789,7 @@ def test_reviews_ignore_workspace_pytest_configuration(
     result = _run_review_tests(Sandbox(), sub, workspace, module, 1)
     assert result.ran and result.exit_code == 0, result.tail
     assert result.passed == (0 if skipped else 1), result.tail
-    assert ("1 skipped" in result.tail) == skipped
+    assert result.skipped == int(skipped), result.tail
 
 
 def test_code_fallback_ignores_earlier_subtask_and_copied_inputs(
@@ -872,10 +917,11 @@ def test_review_infrastructure_failure(
     def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
         assert reason not in {"quota", "write-error"}
         assert limits.workspace_files == 5
-        assert limits.workspace_bytes == 100 + len(MODULE.encode()) + len(
-            "[pytest]\npythonpath = ..\n"
+        assert limits.workspace_bytes == (
+            100 + len(MODULE.encode()) + len("[pytest]\npythonpath = ..\n") + 1024 * 1024
         )
         if reason == "fits":
+            write_report(command, cwd)
             return Outcome(0, "===== 1 passed in 0.01s =====\natexit: closing", "")
         if reason == "outage":
             raise SandboxUnavailable("backend went away")
@@ -977,3 +1023,72 @@ def test_command_fallback_ends_at_submit(store: Store, tmp_path: Path, clock: Fa
     path.unlink()
     assert not has_written_files(store, sub, root=tmp_path)
     assert "written_files_timing" not in evidence(store, sub, workspace=workspace)
+
+
+@pytest.mark.parametrize("report", [None, "<bad xml", "x" * (1024 * 1024 + 1)])
+def test_invalid_report_cannot_verify_fake_summary(
+    store: Store,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    report: str | None,
+) -> None:
+    task_id = submitted(store)
+    sandbox = Sandbox()
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+
+    def run(command: list[str], cwd: Path, **kwargs: object) -> Outcome:
+        if report is not None:
+            (cwd / command[-2]).write_text(report, encoding="utf-8")
+        return Outcome(0, "1 passed in 0.01s", "")
+
+    monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        llm_reviewer(FakeLLM().on("Review", ACCEPT)),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.run(task_id).status is TaskStatus.NEEDS_HUMAN
+    [verdict] = [row for row in store.audit_log(task_id) if row["action"] == "verdict"]
+    assert json.loads(verdict["details_json"])["feedback"] == (
+        "reviewer's tests produced no report\n1 passed in 0.01s"
+    )
+
+
+@confined
+@pytest.mark.parametrize("fake_summary", [False, True])
+def test_review_requires_report_and_copies_web_page(
+    store: Store, tmp_path: Path, clock: FakeClock, fake_summary: bool
+) -> None:
+    task_id = submitted(store)
+    sandbox = Sandbox()
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("web/page.html", "<p>4</p>")
+    source = "from pathlib import Path\nanswer = Path('web/page.html').read_text()\n"
+    if fake_summary:
+        source += "import os\nprint('1 passed in 0.01s', flush=True)\nos._exit(0)\n"
+    workspace.write("answer.py", source)
+    module = "from answer import answer\ndef test_answer():\n    assert answer == '<p>4</p>'\n"
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        tools=builtin_registry(sandbox),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+        sleep=clock.sleep,
+    )
+    expected = TaskStatus.NEEDS_HUMAN if fake_summary else TaskStatus.DONE
+    assert coord.run(task_id).status is expected
+    [sub] = store.list_subtasks(task_id)
+    note = last_review_tests(store, sub.id)
+    assert note is not None and note["exit_code"] == 0
+    assert note["passed"] == (0 if fake_summary else 1)
+    if fake_summary:
+        [verdict] = [row for row in store.audit_log(task_id) if row["action"] == "verdict"]
+        assert json.loads(verdict["details_json"])["feedback"].startswith(
+            "reviewer's tests produced no report"
+        )

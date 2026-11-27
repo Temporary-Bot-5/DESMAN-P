@@ -9,17 +9,18 @@ access (the tool policy within the human's permissions) and its tools.
 from __future__ import annotations
 
 import functools
-import re
+import secrets
 import shutil
 import sqlite3
 import stat
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Collection, Mapping, Set
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from typing import Any
 
 import click
@@ -48,7 +49,6 @@ from desman.core.coordinator import (
     ReviewTests,
     TestRun,
     Work,
-    review_test_file,
 )
 from desman.core.effects import evidence, last_review_tests, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
@@ -59,7 +59,7 @@ from desman.core.sandbox import Sandbox, SandboxUnavailable
 from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
-from desman.core.tools import TOOL_RESULTS_DIR, Registry, builtin_registry
+from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
 from desman.core.workspace import PathEscapeError, Workspace, is_work_file
 from desman.i18n import t
@@ -758,6 +758,44 @@ def _personalize() -> bool:
 
 
 _REVIEW_COPY_PREFIX = "review-"
+_REVIEW_REPORT_LIMIT = 1024 * 1024
+
+
+def _read_review_report(
+    workspace: Workspace, report: str
+) -> tuple[dict[str, int], list[str]] | None:
+    try:
+        data = workspace.read(report, limit=_REVIEW_REPORT_LIMIT + 1)
+        if len(data) > _REVIEW_REPORT_LIMIT:
+            return None
+        content = data.decode("utf-8")
+        if "<!DOCTYPE" in content or "\x00" in content:
+            return None
+        root = ET.fromstring(content)
+    except (OSError, PathEscapeError, UnicodeError, ET.ParseError):
+        return None
+    if root.tag != "testsuites":
+        return None
+    suite = root.find("testsuite")
+    if suite is None:
+        return None
+    counts = dict.fromkeys(("passed", "failed", "errors", "skipped"), 0)
+    failing: list[str] = []
+    for case in suite.iterfind("testcase"):
+        if case.find("error") is not None:
+            status = "errors"
+        elif case.find("failure") is not None:
+            status = "failed"
+        elif case.find("skipped") is not None:
+            status = "skipped"
+        else:
+            status = "passed"
+        counts[status] += 1
+        if status in {"failed", "errors"} and len(failing) < 20:
+            name = case.get("name", "")
+            group = case.get("classname", "")
+            failing.append((f"{group}::{name}" if group else name)[:250])
+    return counts, failing
 
 
 def _sweep_review_copies(root: Path) -> None:
@@ -771,14 +809,13 @@ def _sweep_review_copies(root: Path) -> None:
 
 def _run_review_tests(
     sandbox: Sandbox,
-    subtask: Subtask,
+    _subtask: Subtask,
     workspace: Workspace,
     module: str,
-    attempt: int,
+    _attempt: int,
     cover: Callable[[float], None] = lambda _: None,
 ) -> TestRun:
     cover(30)
-    file = review_test_file(subtask.id, attempt)
     config = "[pytest]\npythonpath = ..\n"
     skipped = 0
     skipped_names: list[str] = []
@@ -813,7 +850,7 @@ def _run_review_tests(
         paths = []
         estimated = 0
         for path in workspace.files(on_skip=skip):
-            if not is_work_file(path) or path.startswith(("web/", TOOL_RESULTS_DIR)):
+            if not is_work_file(path):
                 continue
             try:
                 estimated += workspace.size(path)
@@ -853,12 +890,19 @@ def _run_review_tests(
                 copy.write(path, data)
                 entries, size = next_entries, next_size
                 directories.update(parents)
+            review_dir = Path(mkdtemp(prefix=".desman-review-", dir=copy.root)).name
+            file = f"{review_dir}/test_review.py"
+            ini = f"{review_dir}/pytest.ini"
+            report = f"{review_dir}/{secrets.token_hex(16)}.xml"
             copy.write(file, module)
-            copy.write(".review/pytest.ini", config)
+            copy.write(ini, config)
             review_limits = replace(
                 limits,
-                workspace_files=limits.workspace_files + len(PurePosixPath(file).parents) + 1,
-                workspace_bytes=limits.workspace_bytes + len(module.encode()) + len(config),
+                workspace_files=limits.workspace_files + 4,
+                workspace_bytes=limits.workspace_bytes
+                + len(module.encode())
+                + len(config)
+                + _REVIEW_REPORT_LIMIT,
             )
             cover(REVIEW_TEST_TIMEOUT)
             # python3 is the interpreter name supplied by every Sandbox backend.
@@ -869,21 +913,24 @@ def _run_review_tests(
                     "-m",
                     "pytest",
                     "-c",
-                    ".review/pytest.ini",
+                    ini,
                     "--rootdir",
-                    ".review",
+                    review_dir,
                     "--noconftest",
                     "-p",
                     "no:cacheprovider",
                     "-o",
                     "addopts=",
                     "-q",
+                    "--junitxml",
+                    report,
                     file,
                 ],
                 copy.root,
                 timeout=REVIEW_TEST_TIMEOUT,
                 limits=review_limits,
             )
+            parsed = _read_review_report(copy, report)
     except SandboxUnavailable as error:
         return TestRun(
             ran=False,
@@ -892,25 +939,7 @@ def _run_review_tests(
             skipped_files=skipped,
             skipped_names=skipped_names,
         )
-    summary = outcome.stdout.splitlines()
-    counts: dict[str, int] = {}
-    for line in reversed(summary):
-        if match := re.fullmatch(
-            r"(?:=+\s+)?(\d+ [a-z][a-z ]*(?:, \d+ [a-z][a-z ]*)*) in \d+\.\d+s(?:\s+=+)?",
-            line.strip(),
-        ):
-            counts = {
-                status: int(count)
-                for count, status in re.findall(
-                    r"\b([0-9]{1,9}) (passed|failed|errors?)\b", match[1]
-                )
-            }
-            break
-    failing = [
-        match.group(1)[:250]
-        for line in summary
-        if (match := re.match(r"^(?:FAILED|ERROR) (.*?)(?: - |$)", line))
-    ]
+    counts, failing = parsed if parsed is not None else ({}, [])
     tail = "\n".join(
         part
         for part in (outcome.stdout, outcome.stderr, outcome.stopped, outcome.workspace_full)
@@ -921,8 +950,10 @@ def _run_review_tests(
         exit_code=outcome.exit_code,
         passed=counts.get("passed", 0),
         failed=counts.get("failed", 0),
-        errors=counts.get("errors", counts.get("error", 0)),
-        failing=failing[:20],
+        errors=counts.get("errors", 0),
+        skipped=counts.get("skipped", 0),
+        report_missing=parsed is None,
+        failing=failing,
         tail=tail[-4_000:],
         timed_out=outcome.timed_out,
         workspace_full=outcome.workspace_full,

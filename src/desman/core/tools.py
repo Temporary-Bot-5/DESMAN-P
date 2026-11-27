@@ -461,7 +461,7 @@ def _edit_file(args: EditFileArgs, workspace: Workspace) -> dict[str, Any]:
 
 
 def _list_files(args: ListFilesArgs, workspace: Workspace) -> dict[str, Any]:
-    files = [path for path in workspace.files() if ".review" not in path.split("/")[:-1]]
+    files = workspace.files()
     end = args.offset + MAX_LISTED_FILES
     listed: dict[str, Any] = {"files": files[args.offset : end]}
     if len(files) > end:

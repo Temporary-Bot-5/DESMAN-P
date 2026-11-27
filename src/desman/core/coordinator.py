@@ -211,6 +211,8 @@ class TestRun(BaseModel):
     passed: int = Field(default=0, ge=0)
     failed: int = Field(default=0, ge=0)
     errors: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    report_missing: bool = False
     failing: list[Annotated[str, Field(max_length=250)]] = Field(
         default_factory=list, max_length=20
     )
@@ -228,10 +230,6 @@ class TestRun(BaseModel):
 ReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], TestRun]
 # Scope the test contract to the current call while keeping the two-argument Reviewer API.
 review_tests_enabled: ContextVar[bool] = ContextVar("review_tests_enabled", default=False)
-
-
-def review_test_file(subtask_id: str, attempt: int) -> str:
-    return f".review/{subtask_id}/test_review_{attempt}.py"
 
 
 def needs_review_tests(subtask: Subtask, *, written_files: bool) -> bool:
@@ -995,7 +993,7 @@ class Coordinator:
             "attempt": attempt,
         }
         if skip_reason is None:
-            note.update(file=review_test_file(subtask.id, attempt), source=review.tests)
+            note["source"] = review.tests
         return self._review_test_verdict(subtask, review, result), note
 
     @staticmethod
@@ -1017,6 +1015,8 @@ class Coordinator:
             return review
         elif result.timed_out:
             feedback = "reviewer's tests failed: timed out"
+        elif result.report_missing:
+            feedback = "reviewer's tests produced no report"
         elif result.exit_code == 0 and result.failed == result.errors == 0:
             if result.passed > 0:
                 return review

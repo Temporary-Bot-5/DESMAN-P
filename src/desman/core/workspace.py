@@ -97,10 +97,8 @@ def check_path(path: str) -> tuple[str, ...]:
 
 
 def is_work_file(path: str) -> bool:
-    """Exclude runtime caches and reviewer tests from task file inventories."""
-    return not any(
-        part in {"__pycache__", ".pytest_cache", ".review"} for part in Path(path).parts[:-1]
-    )
+    """Exclude runtime caches from task file inventories."""
+    return not any(part in {"__pycache__", ".pytest_cache"} for part in Path(path).parts[:-1])
 
 
 class Workspace:

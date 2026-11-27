@@ -328,23 +328,24 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
         review_tests = sub.review_tests
-        attempt = sub.attempts.quality + 1
-        if review_tests and review_tests.get("attempt") != attempt:
-            review_tests = None
-        if review_tests and review_tests["ran"]:
+        if review_tests and review_tests.ran:
             click.echo(
                 "      "
                 + t(
                     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}",
-                    attempt=attempt,
-                    passed=review_tests["passed"],
-                    failed=review_tests["failed"],
-                    errors=review_tests["errors"],
+                    attempt=review_tests.attempt,
+                    passed=review_tests.passed,
+                    failed=review_tests.failed,
+                    errors=review_tests.errors,
                 )
             )
         elif review_tests:
             click.echo(
-                "      " + t("Reviewer's tests (attempt {attempt}) did not run.", attempt=attempt)
+                "      "
+                + t(
+                    "Reviewer's tests (attempt {attempt}) did not run.",
+                    attempt=review_tests.attempt,
+                )
             )
         if hint := search_setup_hint(sub):
             click.echo("      " + hint)

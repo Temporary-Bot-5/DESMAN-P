@@ -21,6 +21,19 @@ from desman.core.states import SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.store import Store
 
 
+class ReviewTestSummary(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    attempt: int
+    ran: bool
+    reason_not_run: str | None = None
+    exit_code: int | None = None
+    passed: int = 0
+    failed: int = 0
+    errors: int = 0
+    timed_out: bool = False
+
+
 class SubtaskReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -43,7 +56,7 @@ class SubtaskReport(BaseModel):
     paused_until: str | None
     action: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
-    review_tests: dict[str, Any] | None = None
+    review_tests: ReviewTestSummary | None = None
     reason: str | None
     """Why it reached its current status, from the audit log (e.g. the escalation reason)."""
 
@@ -97,6 +110,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
         reports = []
         for sub in subtasks:
             reason = _reason(store, sub, by_id)
+            tests = last_review_tests(store, sub.id)
             reports.append(
                 SubtaskReport(
                     id=sub.id,
@@ -114,7 +128,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     paused_until=sub.paused_until,
                     **_status_details(store, sub),
                     reason=reason,
-                    review_tests=last_review_tests(store, sub.id),
+                    review_tests=ReviewTestSummary.model_validate(tests) if tests else None,
                 )
             )
         report = _report(row, [s.status for s in subtasks], reports)
