@@ -305,27 +305,13 @@ def _written_paths(rows: list[Any]) -> Iterator[str]:
 
 def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
     row = store.conn.execute(
-        """SELECT seq, details_json FROM audit_log WHERE subtask_id = ? AND action = 'review_tests'
+        """SELECT details_json FROM audit_log WHERE subtask_id = ? AND action = 'review_tests'
            ORDER BY seq DESC LIMIT 1""",
         (subtask_id,),
     ).fetchone()
     if row is None:
         return None
     note: dict[str, Any] = json.loads(row["details_json"])
-    if "attempt" not in note:
-        # Earlier L.5 notes stored the attempt in the file name, if there was a file.
-        file = Path(note.get("file") or "").stem
-        suffix = file.removeprefix("test_review_")
-        if file != suffix and suffix.isascii() and suffix.isdecimal():
-            note["attempt"] = int(suffix)
-        else:
-            started = store.conn.execute(
-                """SELECT details_json FROM audit_log
-                   WHERE subtask_id = ? AND action = 'attempt_started' AND seq < ?
-                   ORDER BY seq DESC LIMIT 1""",
-                (subtask_id, row["seq"]),
-            ).fetchone()
-            note["attempt"] = json.loads(started[0])["attempt"] if started else 1
     return note
 
 

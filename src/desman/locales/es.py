@@ -15,7 +15,7 @@ MESSAGES: dict[str, Forms] = {
     "document parts work without tools": "las partes del documento se procesan sin herramientas",
     "Reviewer's tests (attempt {attempt}) did not run.": "Las pruebas del revisor no se ejecutaron (intento {attempt}).",
     "Reviewer's tests (attempt {attempt}) timed out.": "Las pruebas del revisor (intento {attempt}) agotaron el tiempo.",
-    "The reviewer was asked for fewer or faster tests within the 60 s total limit.": "Se pidió al revisor que escribiera menos pruebas o pruebas más rápidas dentro del límite total de 60 s.",
+    "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "Se pidió al revisor que escribiera menos pruebas o pruebas más rápidas dentro del límite total de {seconds} s.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Pruebas del revisor (intento {attempt}) detenidas: {reason}",
     "needs package {name}, not installed in the sandbox": "Se necesita el paquete {name}, que no está instalado en el entorno aislado",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "No se pudieron recopilar o preparar las pruebas del revisor (intento {attempt}): {reason}",

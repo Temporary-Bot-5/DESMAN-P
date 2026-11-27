@@ -15,7 +15,7 @@ MESSAGES: dict[str, Forms] = {
     "document parts work without tools": "文書の各部分はツールを使わずに処理します",
     "Reviewer's tests (attempt {attempt}) did not run.": "レビュー担当のテスト (試行 {attempt})は実行されませんでした。",
     "Reviewer's tests (attempt {attempt}) timed out.": "レビュー担当者のテスト（試行 {attempt}）がタイムアウトしました。",
-    "The reviewer was asked for fewer or faster tests within the 60 s total limit.": "レビュー担当には、合計60秒以内に収まるよう、テストの数を減らすか高速化するよう求めました。",
+    "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "レビュー担当には、合計{seconds}秒以内に収まるよう、テストの数を減らすか高速化するよう求めました。",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "レビュー担当者のテスト（試行 {attempt}）を停止しました：{reason}",
     "needs package {name}, not installed in the sandbox": "必要なパッケージ {name} がサンドボックスにインストールされていません",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "レビュー担当のテスト（試行 {attempt}）を収集または準備できませんでした: {reason}",

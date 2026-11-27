@@ -248,6 +248,7 @@ class ReviewTestRun(BaseModel):
     )
     tail: str = Field(default="", max_length=4_000)
     timed_out: bool = False
+    hang: str | None = None
     workspace_full: str = ""
     stopped: str = ""
     disk_low: bool = False
@@ -1080,19 +1081,24 @@ class Coordinator:
     def _review_test_verdict(
         self, subtask: Subtask, review: Review, result: ReviewTestRun
     ) -> Review | Failure:
-        if subtask.runs_code and (not result.ran or result.disk_low):
+        if result.disk_low or (subtask.runs_code and not result.ran):
             return self._required_review_test_failure(subtask, result)
-        if not result.ran or result.disk_low:
+        if not result.ran:
             return review
 
         verified = not (result.report_missing or result.report_unverified)
         if result.stopped or result.workspace_full:
-            reason = result.stopped or result.workspace_full
-        elif result.timed_out and not (verified and result.failed):
-            return Failure(kind=FailureKind.TRANSIENT, reason=REVIEW_TEST_TIMEOUT_REASON)
+            return Failure(
+                kind=FailureKind.TRANSIENT,
+                reason=f"your tests could not run: {result.stopped or result.workspace_full}",
+            )
+        if result.timed_out:
+            if not result.hang:
+                return Failure(kind=FailureKind.TRANSIENT, reason=REVIEW_TEST_TIMEOUT_REASON)
+            reason = result.hang
         elif verified and (result.failed or result.executor_setup_error):
             reason = (
-                (result.executor_setup_error if not result.timed_out else None)
+                result.executor_setup_error
                 or ", ".join(result.failing)
                 or f"pytest exited {result.exit_code}"
             )
@@ -1143,8 +1149,8 @@ class Coordinator:
                       WHERE subtask_id = pause.subtask_id AND action = 'attempt_started'), 0)""",
             (subtask.id,),
         ).fetchone()
-        if previous + 1 >= 10:
-            minutes = (previous + 1) * SANDBOX_RETRY_SECONDS // 60
+        if previous >= 10:
+            minutes = previous * SANDBOX_RETRY_SECONDS // 60
             return Failure(
                 kind=FailureKind.PERMANENT,
                 reason=f"the sandbox has been unavailable for {minutes} minutes: {reason}",
@@ -1179,11 +1185,10 @@ class Coordinator:
                 )
             )
             if needs_tests:
-                if subtask.runs_code:
-                    skipped = self._review_disk_skip(subtask, artifact)
+                skipped = self._review_disk_skip(subtask, artifact)
                 if skipped is None:
                     skipped = self._review_test_skip(subtask, cover_call)
-            if skipped is not None and subtask.runs_code:
+            if skipped is not None and (subtask.runs_code or skipped.disk_low):
                 review = self._required_review_test_failure(subtask, skipped)
             else:
                 reviewer = self._crew(subtask).reviewer
@@ -1221,7 +1226,7 @@ class Coordinator:
             )
         try:
             note = None
-            if skipped is not None and subtask.runs_code:
+            if skipped is not None and (subtask.runs_code or skipped.disk_low):
                 if not skipped.disk_low:
                     note = {**skipped.model_dump(), "attempt": subtask.attempts.quality + 1}
             elif (

@@ -15,7 +15,7 @@ MESSAGES: dict[str, Forms] = {
     "document parts work without tools": "belge bölümleri araç kullanılmadan işlenir",
     "Reviewer's tests (attempt {attempt}) did not run.": "İnceleyenin testleri (deneme {attempt}) çalıştırılmadı.",
     "Reviewer's tests (attempt {attempt}) timed out.": "İnceleyenin testleri (deneme {attempt}) zaman aşımına uğradı.",
-    "The reviewer was asked for fewer or faster tests within the 60 s total limit.": "İnceleyiciden toplam 60 saniyelik sınır içinde daha az veya daha hızlı test yazması istendi.",
+    "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "İnceleyiciden toplam {seconds} saniyelik sınır içinde daha az veya daha hızlı test yazması istendi.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "İnceleyenin testleri (deneme {attempt}) durduruldu: {reason}",
     "needs package {name}, not installed in the sandbox": "Gerekli {name} paketi korumalı alanda kurulu değil",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "İnceleyicinin testleri (deneme {attempt}) toplanamadı veya hazırlanamadı: {reason}",

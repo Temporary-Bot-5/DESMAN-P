@@ -31,14 +31,22 @@ permissions. The reviewer has no tools.
    (counts, the reviewer's module, a bounded output tail, the attempt), not in the call journal:
    nothing is repeated on a rerun, and an interrupted review simply runs it again. This is the one
    exception to "generated code runs only through the `run_command` tool"; AGENTS.md says so.
-4. **One decision table.** A verified pass → accept. A test that failed while running, a stop or
-   a full workspace → back to the executor with the failing tests. Anything ambiguous (collection
-   or setup errors in the reviewer's module, zero tests, no report, the whole run timed out) →
-   back to the reviewer, who fixes its test or itself names the executor's defect. An import
-   error in the executor's own file → the executor's, except a third-party package the sandbox
-   lacks → not run. Not runnable (no permission, no sandbox, a package missing, a copy over the
-   quota) → the model's verdict stands with the reason recorded, except for `runs_code`, which
-   then goes to the person; sandbox outages pause it (ten pauses → the person).
+4. **One decision table.**
+   - A. A verified pass → accept.
+   - B. A test failure or an import error in the executor's own file → back to the executor.
+     A timed-out test also goes back to the executor when the innermost workspace frame in its
+     faulthandler stack is in a copied executor file. The ini requests a stack dump after 20 s.
+   - C. Ambiguous results (reviewer collection or setup errors, zero tests, missing reports,
+     other timeouts, stopped runs and full workspaces) → back to the reviewer, who fixes its
+     test or names the executor's defect. The note keeps the reason.
+   - D. Tests that cannot run (permissions, sandbox unavailable, missing package, copy over
+     quota) → the model's verdict stands with the reason recorded. Required runs (`runs_code`)
+     go to the person. A missing import counts as a package only when its top-level name is
+     known from host distribution metadata or the common PyPI import list.
+   - Low disk space pauses every qualifying review, including when copying fails. Reviews
+     skip the model call while free space remains below the recorded threshold. An unavailable
+     sandbox also pauses required reviews. After ten pauses, a continuing outage goes to
+     the person.
 
 ## Consequences
 

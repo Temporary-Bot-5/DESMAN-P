@@ -22,6 +22,7 @@ from desman import knowledge, providers, task_files, ui
 from desman.config import ConfigError, open_config
 from desman.core import db, operator
 from desman.core.audit import AuditEntry, check_history, history
+from desman.core.coordinator import REVIEW_TEST_TIMEOUT
 from desman.core.models import Subtask
 from desman.core.report import (
     InboxItem,
@@ -349,13 +350,12 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
                     "Reviewer's tests (attempt {attempt}) timed out.",
                     attempt=review_tests.attempt,
                 )
-                if (
-                    review_tests.report_missing
-                    or review_tests.report_unverified
-                    or not review_tests.failed
-                ):
+                if review_tests.hang:
+                    test_line += " " + one_line(review_tests.hang, 250)
+                else:
                     test_line += " " + t(
-                        "The reviewer was asked for fewer or faster tests within the 60 s total limit."
+                        "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.",
+                        seconds=REVIEW_TEST_TIMEOUT,
                     )
             elif review_tests.stopped:
                 test_line = t(

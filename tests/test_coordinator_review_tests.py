@@ -5,6 +5,8 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -168,12 +170,12 @@ def unread(work: Work) -> Success:
         (
             ReviewTestRun(ran=True, exit_code=0, passed=1, stopped="watch stopped"),
             "watch stopped",
-            False,
+            True,
         ),
         (
             ReviewTestRun(ran=True, exit_code=0, passed=1, workspace_full="quota exceeded"),
             "quota exceeded",
-            False,
+            True,
         ),
         (
             ReviewTestRun(ran=True, exit_code=0, skipped=1, tail="1 skipped"),
@@ -237,7 +239,7 @@ def test_review_result(
 
 
 @pytest.mark.parametrize("report", ["missing", "call_failure", "setup_error"])
-def test_review_timeout_uses_reported_call_failure(
+def test_review_timeout_without_executor_hang_retries_review(
     store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: str
 ) -> None:
     task_id = submitted(store)
@@ -268,14 +270,11 @@ def test_review_timeout_uses_reported_call_failure(
     [sub] = store.list_subtasks(task_id)
     note = last_review_tests(store, sub.id)
     assert note is not None and note["timed_out"]
+    assert sub.status is SubtaskStatus.REVIEW
+    assert sub.attempts.transient == 1
+    assert note["could_not_run"].startswith("your tests took longer than 60 s in total")
     if report == "call_failure":
-        assert sub.status is SubtaskStatus.NEEDS_HUMAN
-        assert sub.attempts.quality == 1
         assert note["failing"] == ["test_review::test_answer"]
-    else:
-        assert sub.status is SubtaskStatus.REVIEW
-        assert sub.attempts.transient == 1
-        assert note["could_not_run"].startswith("your tests took longer than 60 s in total")
 
 
 def test_review_test_exception_changes_next_prompt(store: Store, clock: FakeClock) -> None:
@@ -521,6 +520,7 @@ def test_runner_writes_module_and_parses_pytest(
             "python_files = test_*.py *_test.py",
             "python_classes = Test*",
             "python_functions = test*",
+            "faulthandler_timeout = 20",
         ]
         copy.write("answer.py", "changed")
         (cwd / "delete.txt").unlink()
@@ -757,6 +757,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         "report_missing": False,
         "report_unverified": False,
         "collection_setup_error": None,
+        "hang": None,
         "stopped": "",
     }
     attempts = subreport.attempts.model_copy(update={"quality": 1})
@@ -765,11 +766,11 @@ def test_normal_run_wires_review_to_command_sandbox(
     assert "Reviewer's tests (attempt 1)" in capsys.readouterr().out
 
 
-def test_status_recovers_attempt_from_legacy_review_note(store: Store) -> None:
+def test_status_uses_attempt_recorded_in_review_note(store: Store) -> None:
     task_id = submitted(store)
     [sub] = store.list_subtasks(task_id)
     store.note(sub.id, Actor.EXECUTOR, "attempt_started", {"attempt": 2})
-    store.note(sub.id, Actor.REVIEWER, "review_tests", {"ran": False})
+    store.note(sub.id, Actor.REVIEWER, "review_tests", {"ran": False, "attempt": 2})
     store.note(sub.id, Actor.EXECUTOR, "attempt_started", {"attempt": 3})
     [reported] = task_report(store, task_id).subtasks
     assert reported.review_tests is not None and reported.review_tests.attempt == 2
@@ -1146,6 +1147,9 @@ def test_review_infrastructure_failure(
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     workspace = Workspace(tmp_path, task_id)
     workspace.write("answer.py", "x" * (101 if quota else 100))
+    if reason in {"copy-enospc", "optional-copy-edquot"}:
+        disk_usage = shutil.disk_usage(tmp_path)
+        monkeypatch.setattr(shutil, "disk_usage", lambda _: disk_usage)
     if reason in {"write-error", "copy-enospc", "optional-copy-edquot"}:
 
         def disk_full(
@@ -1177,10 +1181,11 @@ def test_review_infrastructure_failure(
         return Outcome(None, "", "", stopped="disk space too low", disk_low=True)
 
     monkeypatch.setattr(sandbox, "run", run)
+    llm = FakeLLM().on("Review", *([ACCEPT] * 6))
     coord = Coordinator(
         store,
         unread,
-        llm_reviewer(FakeLLM().on("Review", *([ACCEPT] * 6))),
+        llm_reviewer(llm),
         access=executor_access([Permission.SHELL]),
         workspaces=tmp_path,
         review_tests=partial(_run_review_tests, sandbox),
@@ -1188,10 +1193,10 @@ def test_review_infrastructure_failure(
     )
     assert coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
-    if reason in {"fits", "optional-quota", "optional-disk", "optional-copy-edquot"}:
+    if reason in {"fits", "optional-quota"}:
         assert sub.status is SubtaskStatus.DONE
         assert sub.attempts.transient == 0
-    elif reason in {"disk", "outage", "copy-enospc"}:
+    elif reason in {"disk", "outage", "copy-enospc", "optional-disk", "optional-copy-edquot"}:
         assert_sandbox_retry(coord, task_id, clock)
         for _ in range(5):
             clock.sleep(60)
@@ -1222,6 +1227,9 @@ def test_review_infrastructure_failure(
         reason in {"disk", "optional-disk", "copy-enospc", "optional-copy-edquot"}
     )
     assert note["ran"] is (reason in {"disk", "optional-disk", "fits"})
+    if reason in {"copy-enospc", "optional-copy-edquot"}:
+        assert note["disk_free_minimum"] > 0
+        assert len(llm.calls) == 1
     if quota:
         assert "quota: " in note["copy_over_quota"]
         assert sub.attempts.quality == 0
@@ -1278,7 +1286,7 @@ def test_low_disk_pauses_without_asking_reviewer_again(
         assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
         assert len(llm.calls) == 2
     else:
-        for _ in range(8):
+        for _ in range(9):
             clock.sleep(60)
             assert coord.tick(task_id, [])
         settled = store.get_subtask(sub.id)
@@ -1431,7 +1439,7 @@ def test_review_requires_report_and_copies_web_page(
         ({"ran": True, "report_missing": True}, "produced no report."),
         ({"ran": True, "exit_code": 5}, "— pytest exited 5"),
         (
-            {"ran": True, "reviewer_error": "NameError: unknown_name"},
+            {"ran": True, "collection_setup_error": "NameError: unknown_name"},
             "could not collect or set up: NameError: unknown_name",
         ),
         (
@@ -1509,7 +1517,7 @@ def test_missing_package_in_review(
     output_path = f"{module_name}.py"
     # The real run needs a package the host's /usr surely lacks (requests may be there).
     package = {
-        "real": "desman_absent_package",
+        "real": "flask",
         "stdlib": "sqlite3",
         "reviewer-frame-hypothesis": "hypothesis",
         "helpers": "helpers",
@@ -1522,8 +1530,6 @@ def test_missing_package_in_review(
         source = "from calc import answer\n"
         workspace.write("calc.py", "answer = (]\n")
     workspace.write(output_path, source)
-    if mode == "helpers":
-        workspace.write("helpers.py", "y = 1\n")
     if mode in {"reviewer-calc", "reviewer-frame-calc"}:
         workspace.write("src/calc.py", "answer = 4\n")
     if not runs_code:
@@ -1557,10 +1563,6 @@ def test_missing_package_in_review(
                     '<testcase name="test_review"><error message="collection failure">'
                     'fetch.py:1: in &lt;module&gt;\nE     File "calc.py", line 1\n'
                     "E   SyntaxError: invalid syntax</error></testcase>"
-                )
-            if mode == "helpers":
-                cases = cases.replace(
-                    "ModuleNotFoundError: No module named", "ImportError: cannot import name"
                 )
             if mode.startswith("reviewer-frame-"):
                 missing = mode.removeprefix("reviewer-frame-")
@@ -1606,7 +1608,7 @@ def test_missing_package_in_review(
     note = last_review_tests(store, sub.id)
     assert note is not None and note["source"] == module
     rows = store.audit_log(task_id)
-    if mode in {"missing", "flask", "jsn", "real"}:
+    if mode in {"missing", "flask", "real"}:
         assert not note["ran"]
         assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
         if runs_code:
@@ -1625,12 +1627,23 @@ def test_missing_package_in_review(
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
         assert note["ran"] and note["errors"] + note["failed"] == (2 if mode == "mixed" else 1)
         assert not note["report_unverified"], note["tail"]
-        if mode in {"call", "mixed", "local", "nested", "stdlib", "helpers"} or mode.startswith(
-            "executor-syntax"
-        ):
+        if mode in {
+            "call",
+            "mixed",
+            "local",
+            "nested",
+            "stdlib",
+            "helpers",
+            "jsn",
+        } or mode.startswith("executor-syntax"):
             [verdict] = [row for row in rows if row["action"] == "verdict"]
             details = json.loads(verdict["details_json"])
             assert details["verdict"] == "retry"
+            if mode in {"helpers", "jsn"}:
+                assert (
+                    f"your code imports {package}, which is not in the workspace "
+                    "and is not an installable package known here"
+                ) in details["feedback"]
             if mode.startswith("executor-syntax"):
                 assert "SyntaxError" in details["feedback"]
             assert store.get_subtask(sub.id).attempts.quality == 1
@@ -2094,13 +2107,13 @@ def test_sandbox_outage_limit_and_wait_reason(
         on_sandbox_pause=lambda seconds, reason: waits.append((seconds, reason)),
     )
     assert result.status is TaskStatus.NEEDS_HUMAN
-    assert waits == [(60, "backend went away")] * 9
+    assert waits == [(60, "backend went away")] * 10
     failures = [
         json.loads(row["details_json"])
         for row in store.audit_log(task_id)
         if row["action"] == "review_failed"
     ]
-    assert [f["failure"] for f in failures] == ["outage"] * 9 + ["permanent"]
+    assert [f["failure"] for f in failures] == ["outage"] * 10 + ["permanent"]
     assert (
         failures[-1]["cause"]
         == "the sandbox has been unavailable for 10 minutes: backend went away"
@@ -2188,3 +2201,61 @@ def test_real_pytest_teardown_error(
     else:
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
         assert "RuntimeError: teardown broke" in note["could_not_run"]
+
+
+@pytest.mark.parametrize("executor_hangs", [True, False])
+def test_real_pytest_hang(
+    store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executor_hangs: bool
+) -> None:
+    task_id = submitted(store)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("calc.py", "def calculate():\n    while True:\n        pass\n")
+    module = (
+        "from calc import calculate\ndef test_answer():\n    calculate()\n"
+        if executor_hangs
+        else "def test_answer():\n    while True:\n        pass\n"
+    )
+    sandbox = Sandbox()
+
+    def run(command: list[str], cwd: Path, *, limits: Limits, **_: object) -> Outcome:
+        ini = cwd / command[command.index("-c") + 1]
+        config = ini.read_text()
+        assert "faulthandler_timeout = 20" in config
+        ini.write_text(config.replace("faulthandler_timeout = 20", "faulthandler_timeout = 0.1"))
+        with pytest.raises(subprocess.TimeoutExpired) as timed_out:
+            subprocess.run(
+                [sys.executable, *command[1:]],
+                cwd=cwd,
+                env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+                capture_output=True,
+                timeout=2,
+            )
+        error = timed_out.value
+        stderr = (error.stderr or b"").decode()
+        assert "Timeout (" in stderr[-limits.stderr_chars :]
+        return Outcome(
+            None,
+            (error.stdout or b"").decode(),
+            stderr[-limits.stderr_chars :],
+            timed_out=True,
+        )
+
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+    monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    note = last_review_tests(store, sub.id)
+    assert note is not None and note["timed_out"]
+    if executor_hangs:
+        assert sub.attempts.quality == 1
+        assert re.fullmatch(r"test test_answer hung in calc\.py:[23]", note["hang"])
+    else:
+        assert sub.attempts.transient == 1 and note["hang"] is None

@@ -76,8 +76,8 @@ TOPICS: Final = (
         "Code defaults to 16 tool rounds per subtask (8–48 via `/tuning --code-rounds N`). "
         "edit_file replaces exact fragments. Runs show exit codes and output tails. Results hold prose plus files. Review checks sources, dates, language "
         "(names/translations allowed) and coverage. Cite sources and gaps for partial live data. Split parts keep the request's language and feed honest partial findings into the combine step. Use snippets or other official sources for blocked pages. "
-        "Review tests runs or Python outputs in offline copies of latest writes. Acceptance needs a verified pass. Call failures and workspace stops retry execution. Ambiguity or a 60s timeout without a reported call failure retries review. "
-        "Outages or low disk pause required runs for 60s. Optional tests skip. Status says why. Ten outages or blocked required tests need a person. Network jobs skip tests. Large copies or missing packages can block tests.\n"
+        "Review tests run offline on workspace copies. Acceptance needs a verified pass. Test failures and executor hangs retry execution. Stops, quota overruns and ambiguity retry review. "
+        "Low disk pauses reviews for 60s. Sandbox outages pause required runs. Status says why. After ten pauses or if required tests are blocked, the person decides. Network jobs skip tests. Large copies or missing packages can block tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code in your latest message’s language.",
     ),

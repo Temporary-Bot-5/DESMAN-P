@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import errno
 import functools
+import importlib.metadata
 import posixpath
 import re
 import secrets
@@ -784,10 +785,108 @@ def _review_trace_frame(trace: str) -> tuple[str, int] | None:
     return path, int(syntax_line or line)
 
 
-def _missing_review_import(error_text: str, local_names: set[str]) -> str | None:
+_COMMON_PYPI_IMPORTS = frozenset(
+    [
+        "flask",
+        "django",
+        "fastapi",
+        "numpy",
+        "pandas",
+        "scipy",
+        "matplotlib",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "bs4",
+        "lxml",
+        "yaml",
+        "toml",
+        "pydantic",
+        "sqlalchemy",
+        "torch",
+        "tensorflow",
+        "sklearn",
+        "PIL",
+        "cv2",
+        "click",
+        "typer",
+        "rich",
+        "tqdm",
+        "jinja2",
+        "boto3",
+        "redis",
+        "psycopg2",
+        "pymongo",
+        "openai",
+        "anthropic",
+        "transformers",
+        "seaborn",
+        "plotly",
+        "dash",
+        "streamlit",
+        "nltk",
+        "spacy",
+        "sympy",
+        "networkx",
+        "dateutil",
+        "pytz",
+        "arrow",
+        "ujson",
+        "orjson",
+        "msgpack",
+        "websockets",
+        "paramiko",
+        "cryptography",
+        "jwt",
+        "markdown",
+        "docx",
+        "openpyxl",
+        "xlrd",
+        "reportlab",
+        "pygame",
+        "kivy",
+    ]
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _installed_import_names() -> set[str]:
+    return set(importlib.metadata.packages_distributions())
+
+
+def _review_hang(output: str, root: Path, copied_files: set[str], reviewer_file: str) -> str | None:
+    # Faulthandler prints each thread's innermost frame first.
+    for dump in re.split(r"(?m)^Timeout \(0:\d{2}:\d{2}(?:\.\d+)?\)!\s*$", output)[1:]:
+        stacks = re.findall(
+            r"(?m)^(?:Current thread|Thread) [^\n]+ \(most recent call first\):\n"
+            r"((?:  File [^\n]+\n?)+)",
+            dump,
+        )
+        for stack in stacks:
+            frames = []
+            for path, line, function in re.findall(
+                r'(?m)^  File "([^"\n]+)", line ([0-9]{1,9}) in ([^\n]+)$', stack
+            ):
+                normalized = posixpath.normpath(path.replace("\\", "/"))
+                relative = normalized.removeprefix(f"{MOUNT_POINT}/")
+                relative = relative.removeprefix(f"{root.as_posix()}/")
+                if relative != normalized or relative in copied_files or relative == reviewer_file:
+                    frames.append((relative, line, function))
+            if not frames or frames[0][0] not in copied_files:
+                continue
+            reviewer_frames = [name for file, _, name in frames if file == reviewer_file]
+            if not reviewer_frames:
+                continue
+            path, line, _ = frames[0]
+            test = next((name for name in reviewer_frames if name.startswith("test")), None)
+            return f"test {test} hung in {path}:{line}" if test else f"test hung in {path}:{line}"
+    return None
+
+
+def _missing_review_import(error_text: str, local_names: set[str]) -> tuple[str | None, str]:
     match = re.fullmatch(r"ModuleNotFoundError: No module named '([^'\n]+)'", error_text)
     if match is None:
-        return None
+        return None, error_text
     name = match[1]
     root = name.partition(".")[0]
     if (
@@ -795,8 +894,13 @@ def _missing_review_import(error_text: str, local_names: set[str]) -> str | None
         and root not in sys.stdlib_module_names
         and root not in local_names
     ):
-        return name
-    return None
+        if root in _COMMON_PYPI_IMPORTS or root in _installed_import_names():
+            return name, error_text
+        return None, (
+            f"your code imports {name}, which is not in the workspace "
+            "and is not an installable package known here"
+        )
+    return None, error_text
 
 
 @dataclass
@@ -958,9 +1062,9 @@ def _read_review_report(
                 if path in copied_files:
                     with suppress(OSError, PathEscapeError):
                         if 1 <= lineno <= len(workspace.read(path).splitlines()):
-                            missing = _missing_review_import(error_text, local_names)
+                            missing, feedback = _missing_review_import(error_text, local_names)
                             if missing is None and executor_setup_error is None:
-                                executor_setup_error = error_text
+                                executor_setup_error = feedback
         if missing is None:
             all_issues_need_packages = False
         else:
@@ -1024,13 +1128,13 @@ def _run_review_tests(
             skipped_names=skipped_names,
         )
 
+    estimated = 0
     try:
         if problem := sandbox.unavailable():
             raise SandboxUnavailable(problem)
         root = workspace.root.parent
         _sweep_review_copies(root)
         paths = []
-        estimated = 0
         directories: list[str] = []
         for path in workspace.iter_files(on_skip=skip, on_directory=directories.append):
             if not is_work_file(path):
@@ -1092,13 +1196,15 @@ def _run_review_tests(
             report = f"{review_dir}/{secrets.token_hex(16)}.xml"
             config = (
                 "[pytest]\npythonpath = ..\npython_files = test_*.py *_test.py\n"
-                "python_classes = Test*\npython_functions = test*\n"
+                "python_classes = Test*\npython_functions = test*\nfaulthandler_timeout = 20\n"
                 f"addopts = --junitxml={report}\n"
             )
             copy.write(file, module)
             copy.write(ini, config)
             review_limits = replace(
                 limits,
+                # A faulthandler traceback lists its innermost frames before pytest's stack.
+                stderr_chars=max(limits.stderr_chars, 128_000),
                 workspace_files=limits.workspace_files + 4,
                 workspace_bytes=limits.workspace_bytes
                 + len(module.encode())
@@ -1128,6 +1234,11 @@ def _run_review_tests(
                 timeout=REVIEW_TEST_TIMEOUT,
                 limits=review_limits,
             )
+            hang = (
+                _review_hang(f"{outcome.stdout}\n{outcome.stderr}", copy.root, copied_files, file)
+                if outcome.timed_out
+                else None
+            )
             parsed = _read_review_report(
                 copy,
                 report,
@@ -1151,11 +1262,17 @@ def _run_review_tests(
         if error.errno not in {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}:
             raise
         reason = f"disk space too low: {error.strerror or error}"
+        minimum = estimated + len(module.encode()) + _REVIEW_REPORT_LIMIT
+        with suppress(OSError):
+            # Cleanup may have freed space. Require an increase from the post-cleanup reading
+            # before paying for another review, even if the size estimate already fits.
+            minimum = max(minimum, shutil.disk_usage(workspace.root.parent).free + 1)
         return ReviewTestRun(
             ran=False,
             reason_not_run=reason,
             stopped=reason,
             disk_low=True,
+            disk_free_minimum=minimum,
             skipped_files=skipped,
             skipped_names=skipped_names,
         )
@@ -1193,6 +1310,7 @@ def _run_review_tests(
         failing=parsed.failing if parsed else [],
         tail=tail[-4_000:],
         timed_out=outcome.timed_out,
+        hang=hang,
         workspace_full=outcome.workspace_full,
         stopped=outcome.stopped,
         disk_low=outcome.disk_low,
