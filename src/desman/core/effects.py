@@ -164,9 +164,9 @@ def evidence(
     items += [("call", row) for row in rows]
     items += [("earlier_call", row) for row in earlier_rows]
     files, used_attempt_start = _written_files([*rows, *earlier_rows], workspace, store, subtask)
-    if used_attempt_start:
+    if used_attempt_start and files:
         out["written_files_timing"] = (
-            "No usable run_command journal times. File evidence uses the attempt start time."
+            "No usable run_command journal times. File evidence uses the attempt start and submit times."
         )
     if files:
         out["written_files"] = []
@@ -329,11 +329,18 @@ def _command_windows(store: Store, subtask: Subtask) -> tuple[list[tuple[float, 
     if windows or not commands:
         return windows, False
     row = store.conn.execute(
-        """SELECT ts FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
-           ORDER BY seq DESC LIMIT 1""",
-        (subtask.id,),
+        """SELECT start.ts, submitted.ts FROM audit_log AS start
+           JOIN audit_log AS submitted ON submitted.subtask_id = start.subtask_id
+               AND submitted.action = 'submit' AND submitted.seq > start.seq
+           WHERE start.subtask_id = ? AND start.seq = (
+               SELECT max(seq) FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
+           )
+           ORDER BY submitted.seq LIMIT 1""",
+        (subtask.id, subtask.id),
     ).fetchone()
-    return ([(db.parse_iso(row[0]).timestamp(), float("inf"))], True) if row else ([], False)
+    if row is None:
+        return [], False
+    return [(db.parse_iso(row[0]).timestamp(), db.parse_iso(row[1]).timestamp() + 0.001)], True
 
 
 def _workspace_outputs(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -14,7 +15,16 @@ from conftest import FakeClock
 from desman.actions import print_report
 from desman.agents import llm_executor, llm_reviewer
 from desman.core import db
-from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work, review_test_file
+from desman.core.coordinator import (
+    Coordinator,
+    Failure,
+    Review,
+    Success,
+    Verdict,
+    Work,
+    review_test_file,
+    review_tests_enabled,
+)
 from desman.core.coordinator import TestRun as ReviewTestResult
 from desman.core.effects import evidence, has_written_files, last_review_tests
 from desman.core.models import Kind, Subtask, SubtaskSpec, TaskSpec, Tools
@@ -22,10 +32,10 @@ from desman.core.policy import Permission, executor_access
 from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
 from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable
-from desman.core.states import SubtaskStatus, TaskStatus
+from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.core.tools import builtin_registry
-from desman.core.workspace import Workspace
+from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM
 from desman.llm.structured import StructuredOutputError
@@ -99,8 +109,15 @@ def test_review_result(
 ) -> None:
     task_id = submitted(store)
 
-    def runner(sub: Subtask, workspace: Workspace, module: str, attempt: int) -> ReviewTestResult:
+    def runner(
+        sub: Subtask,
+        workspace: Workspace,
+        module: str,
+        attempt: int,
+        cover: Callable[[float], None],
+    ) -> ReviewTestResult:
         assert module == MODULE and attempt == 1
+        cover(60)
         current = store.get_subtask(sub.id)
         assert current.review_until is not None
         assert db.parse_iso(current.review_until) >= clock() + timedelta(seconds=90)
@@ -126,6 +143,7 @@ def test_review_result(
     [sub] = store.list_subtasks(task_id)
     assert json.loads(note["details_json"]) == {
         "file": f".review/{sub.id}/test_review_1.py",
+        "source": MODULE,
         **result.model_dump(),
     }
     if reason is not None:
@@ -134,7 +152,9 @@ def test_review_result(
         assert json.loads(verdict["details_json"])["feedback"] == f"reviewer's tests {message}"
 
 
-@pytest.mark.parametrize("mode", ["non-code", "permission", "tools", "sandbox", "missing"])
+@pytest.mark.parametrize(
+    "mode", ["non-code", "permission", "tools", "sandbox", "missing", "no-runner"]
+)
 def test_skips_and_missing_module(
     store: Store, clock: FakeClock, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -145,7 +165,7 @@ def test_skips_and_missing_module(
         runs_code=mode != "non-code",
         tools=Tools.NONE if mode == "tools" else Tools.GRANTED,
     )
-    replies = ('{"verdict":"accept"}',) * 4 if mode == "missing" else (ACCEPT,)
+    replies = (ACCEPT,) if mode == "sandbox" else ('{"verdict":"accept"}',) * 4
     llm = FakeLLM().on("Review", *replies)
     coord = Coordinator(
         store,
@@ -153,7 +173,7 @@ def test_skips_and_missing_module(
         llm_reviewer(llm),
         tools=builtin_registry(sandbox),
         access=executor_access([] if mode == "permission" else [Permission.SHELL]),
-        review_tests=partial(_run_review_tests, sandbox),
+        review_tests=None if mode == "no-runner" else partial(_run_review_tests, sandbox),
         sleep=clock.sleep,
     )
     if mode in ("missing", "sandbox"):
@@ -162,6 +182,9 @@ def test_skips_and_missing_module(
         assert coord.run(task_id).status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
     note = last_review_tests(store, sub.id)
+    assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (
+        mode in ("missing", "sandbox")
+    )
     if mode in ("non-code", "missing"):
         assert note is None
         assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (
@@ -186,6 +209,7 @@ def test_skips_and_missing_module(
             "permission": "shell_execution",
             "tools": "does not grant",
             "sandbox": "no sandbox here",
+            "no-runner": "runner unavailable",
         }
         assert reason[mode] in note["reason_not_run"]
         if mode == "sandbox":
@@ -207,7 +231,14 @@ def test_invalid_module_gets_one_repair(
     reply = json.dumps({"verdict": "accept", "tests": bad})
     llm = FakeLLM().on("Review", reply, reply, ACCEPT)
     task_id = submitted(store)
-    coord = Coordinator(store, unread, llm_reviewer(llm), sleep=clock.sleep)
+    coord = Coordinator(
+        store,
+        unread,
+        llm_reviewer(llm),
+        sleep=clock.sleep,
+        access=executor_access([Permission.SHELL]),
+        review_tests=lambda *_: ReviewTestResult(ran=True, exit_code=0, passed=1),
+    )
     assert coord.run(task_id).status is TaskStatus.DONE
     assert len(llm.calls) == 3
     assert any(problem in message.content for message in llm.calls[1].messages)
@@ -235,7 +266,29 @@ def test_runner_writes_module_and_parses_pytest(
         ".tool-results/result",
     ):
         workspace.write(excluded, "skip")
+    stale = tmp_path / "review-stale"
+    stale.mkdir()
+    os.utime(stale, (1, 1))
+    fresh = tmp_path / "review-fresh"
+    fresh.mkdir()
+    for changing_file in ("gone.py", "forbidden.py", "linked.py", "io.py"):
+        workspace.write(changing_file, "temporary")
+    original_read = workspace.read
+
+    def read(path: str, limit: int = -1) -> bytes:
+        problems = {
+            "gone.py": FileNotFoundError,
+            "forbidden.py": PermissionError,
+            "linked.py": PathEscapeError,
+            "io.py": OSError,
+        }
+        if path in problems:
+            raise problems[path](path)
+        return original_read(path, limit=limit)
+
+    monkeypatch.setattr(workspace, "read", read)
     locations: list[Path] = []
+    covered: list[float] = []
 
     def run(command: list[str], cwd: Path, *, timeout: float) -> Outcome:
         assert command == [
@@ -256,6 +309,8 @@ def test_runner_writes_module_and_parses_pytest(
             path,
         ]
         assert cwd.parent == workspace.root.parent and cwd != workspace.root and timeout == 60
+        assert covered[0] == 30 and 30 < covered[1] < 31 and covered[2:] == [timeout]
+        assert not stale.exists() and fresh.exists()
         locations.append(cwd)
         copy = Workspace(cwd.parent, cwd.name)
         assert copy.files() == sorted([path, ".review/pytest.ini", "answer.py", "delete.txt"])
@@ -272,7 +327,8 @@ def test_runner_writes_module_and_parses_pytest(
         )
 
     monkeypatch.setattr(sandbox, "run", run)
-    result = _run_review_tests(sandbox, sub, workspace, MODULE, 2)
+    result = _run_review_tests(sandbox, sub, workspace, MODULE, 2, covered.append)
+    assert result.skipped_files == 4
     assert (result.exit_code, result.passed, result.failed, result.errors) == (1, 2, 1, 1)
     assert result.failing == [f"{path}::test_answer"]
     assert result.workspace_full == "over quota"
@@ -306,7 +362,13 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
     )
     seen: list[int] = []
 
-    def runner(sub: Subtask, workspace: Workspace, module: str, attempt: int) -> ReviewTestResult:
+    def runner(
+        sub: Subtask,
+        workspace: Workspace,
+        module: str,
+        attempt: int,
+        cover: Callable[[float], None],
+    ) -> ReviewTestResult:
         seen.append(attempt)
         workspace.write(review_test_file(sub.id, attempt), module)
         if attempt == 1:
@@ -319,9 +381,20 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
             )
         return ReviewTestResult(ran=True, exit_code=0, passed=1)
 
+    executor = llm_executor(llm, format_final=False)
+
+    def execute(work: Work) -> Success | Failure:
+        if seen:
+            Workspace(workspace_root_for(store.conn), task_id).write(
+                review_test_file(work.subtask.id, 1), "changed by executor"
+            )
+        result = executor(work)
+        assert isinstance(result, (Success, Failure))
+        return result
+
     coord = Coordinator(
         store,
-        llm_executor(llm, format_final=False),
+        execute,
         llm_reviewer(
             llm,
             evidence=partial(evidence, store),
@@ -334,8 +407,8 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
     )
     assert coord.run(task_id).status is TaskStatus.DONE
     assert seen == [1, 2]
-    execute = [call.prompt for call in llm.calls if call.prompt.startswith("Execute subtask")]
-    assert "reviewer's tests failed: test_answer" in execute[-1]
+    executions = [call.prompt for call in llm.calls if call.prompt.startswith("Execute subtask")]
+    assert "reviewer's tests failed: test_answer" in executions[-1]
     review = [call.prompt for call in llm.calls if call.prompt.startswith("Review")]
     previous = json.loads(review[-1].partition("\n")[2])["previous_review_tests"]
     assert previous["source"] == MODULE
@@ -346,7 +419,7 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
         for row in store.audit_log(task_id)
         if row["action"] == "review_tests"
     ]
-    assert "source" not in first and first["tail"] == previous["tail"]
+    assert first["source"] == MODULE and first["tail"] == previous["tail"]
 
 
 def test_normal_run_wires_review_to_command_sandbox(
@@ -403,7 +476,7 @@ def test_normal_run_wires_review_to_command_sandbox(
     report = task_report(store, task_id)
     print_report(report, store)
     output = capsys.readouterr().out
-    assert "Reviewer's tests: 1 passed, 0 failed, 0 errors" in output
+    assert "Reviewer's tests — passed: 1, failed: 0, errors: 0" in output
     assert review_test_file(sub.id, 1) not in output
 
 
@@ -503,7 +576,13 @@ def test_error_artifact_overrules_accept_before_tests(store: Store, clock: FakeC
     store.submit(sub.id, sub.lease_token, {"type": "error", "message": "gave up"})
     llm = FakeLLM().on("Review", ACCEPT)
 
-    def runner(sub: Subtask, workspace: Workspace, module: str, attempt: int) -> ReviewTestResult:
+    def runner(
+        sub: Subtask,
+        workspace: Workspace,
+        module: str,
+        attempt: int,
+        cover: Callable[[float], None],
+    ) -> ReviewTestResult:
         pytest.fail("an error artifact must never be tested for acceptance")
 
     coord = Coordinator(
@@ -558,7 +637,9 @@ def test_code_with_command_outputs_is_reviewed(
 
     llm = FakeLLM().on("Review", ACCEPT)
 
-    def runner(sub: Subtask, ws: Workspace, module: str, attempt: int) -> ReviewTestResult:
+    def runner(
+        sub: Subtask, ws: Workspace, module: str, attempt: int, cover: Callable[[float], None]
+    ) -> ReviewTestResult:
         assert ws.read_text("script.py") == "answer = 4"
         assert mode != "missing"
         if mode == "outage":
@@ -669,7 +750,9 @@ def test_code_fallback_ignores_earlier_subtask_and_copied_inputs(
             assert not has_written_files(store, work.subtask, root=tmp_path)
         return Success(content={"summary": "ready"})
 
-    def runner(sub: Subtask, ws: Workspace, module: str, attempt: int) -> ReviewTestResult:
+    def runner(
+        sub: Subtask, ws: Workspace, module: str, attempt: int, cover: Callable[[float], None]
+    ) -> ReviewTestResult:
         pytest.fail("the prose-only subtask did not write output files")
 
     llm = FakeLLM().on("Review", '{"verdict":"accept"}', '{"verdict":"accept"}')
@@ -698,11 +781,15 @@ def test_missing_tests_are_repaired_without_caching(store: Store, runs_code: boo
     cached = Cached(llm, store.conn, "reviewer")
     reviewer = llm_reviewer(cached, evidence=lambda *_: {"written_files": [{"path": "main.py"}]})
 
-    with pytest.raises(StructuredOutputError, match="reviewer gave no tests"):
-        reviewer(sub, {"summary": "Ready"})
-    assert len(llm.calls) == 2
-    assert store.conn.execute("SELECT COUNT(*) FROM response_cache").fetchone()[0] == 0
-    repaired = reviewer(sub, {"summary": "Ready"})
+    setting = review_tests_enabled.set(True)
+    try:
+        with pytest.raises(StructuredOutputError, match="reviewer gave no tests"):
+            reviewer(sub, {"summary": "Ready"})
+        assert len(llm.calls) == 2
+        assert store.conn.execute("SELECT COUNT(*) FROM response_cache").fetchone()[0] == 0
+        repaired = reviewer(sub, {"summary": "Ready"})
+    finally:
+        review_tests_enabled.reset(setting)
     assert isinstance(repaired, Review) and repaired.tests == MODULE
     assert len(llm.calls) == 4 and cached.hits == 0
     assert [row[0] for row in store.conn.execute("SELECT text FROM response_cache")] == [ACCEPT]
@@ -759,25 +846,32 @@ def test_review_infrastructure_failure(
     )
     assert coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
-    assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
+    if reason == "quota":
+        assert sub.status is SubtaskStatus.NEEDS_HUMAN and sub.attempts.quality == 1
+    else:
+        assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
     note = last_review_tests(store, sub.id)
     assert note is not None
     assert note["disk_low"] is (reason == "disk")
     assert note["ran"] is (reason == "disk")
     if reason == "quota":
-        assert "quota" in note["reason_not_run"]
+        assert "quota: " in note["copy_over_quota"]
+        [entry] = [row for row in store.audit_log(task_id) if row["action"] == "verdict"]
+        assert "Remove files" in json.loads(entry["details_json"])["feedback"]
     assert list(tmp_path.glob("review-*")) == []
 
 
-def test_lost_reservation_keeps_model_verdict_without_test_note(
+def test_lost_reservation_keeps_final_verdict_without_test_note(
     store: Store, clock: FakeClock
 ) -> None:
     task_id = submitted(store)
 
-    def runner(sub: Subtask, ws: Workspace, module: str, attempt: int) -> ReviewTestResult:
+    def runner(
+        sub: Subtask, ws: Workspace, module: str, attempt: int, cover: Callable[[float], None]
+    ) -> ReviewTestResult:
         clock.advance(120)
         assert store.reserve_review(sub.id, "other reviewer", seconds=60)
-        return ReviewTestResult(ran=True, exit_code=0, passed=1)
+        return ReviewTestResult(ran=True, exit_code=1, failed=1, failing=["test_answer"])
 
     coord = Coordinator(
         store,
@@ -793,4 +887,38 @@ def test_lost_reservation_keeps_model_verdict_without_test_note(
     assert last_review_tests(store, sub.id) is None
     [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_discarded"]
     details = json.loads(entry["details_json"])
-    assert (details["verdict"], details["feedback"]) == ("accept", "looks good")
+    assert (details["verdict"], details["feedback"]) == (
+        "retry",
+        "reviewer's tests failed: test_answer",
+    )
+
+
+def test_command_fallback_ends_at_submit(store: Store, tmp_path: Path, clock: FakeClock) -> None:
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Produce a module",
+            subtasks=[
+                SubtaskSpec(description="write code", acceptance_criteria="works", kind=Kind.CODE)
+            ],
+        )
+    )
+    sub = store.claim("executor", task_id=task_id)
+    assert sub is not None and sub.lease_token is not None
+    store.note(sub.id, Actor.EXECUTOR, "attempt_started", {})
+    store.start_effect(sub.id, sub.lease_token, 0, 0, "run_command", "key")
+    workspace = Workspace(tmp_path, task_id)
+    path = workspace.root / workspace.write("during.py", "included")
+    at = clock().timestamp()
+    os.utime(path, (at, at))
+    clock.advance(1)
+    store.submit(sub.id, sub.lease_token, {"summary": "ready"})
+    clock.advance(1)
+    late = workspace.root / workspace.write("after.py", "excluded")
+    at = clock().timestamp()
+    os.utime(late, (at, at))
+    result = evidence(store, sub, workspace=workspace)
+    assert [file["path"] for file in result["written_files"]] == ["during.py"]
+    assert "submit times" in result["written_files_timing"]
+    path.unlink()
+    assert not has_written_files(store, sub, root=tmp_path)
+    assert "written_files_timing" not in evidence(store, sub, workspace=workspace)

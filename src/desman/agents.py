@@ -53,7 +53,7 @@ from desman.core.coordinator import (
     Work,
     _error_reason,
     is_error_report,
-    needs_review_tests,
+    review_tests_enabled,
 )
 from desman.core.effects import archive_result, outcome, short_args, tool_result_file
 from desman.core.models import MAX_DELEGATED_PARTS, Kind, Subtask, SubtaskSpec, TaskSpec
@@ -1067,11 +1067,8 @@ def llm_reviewer(
             )
         # A StructuredOutputError is not the work's fault: the coordinator counts it as an
         # interrupted review, so the work is reviewed again, not redone.
-        context = test_context(subtask) if test_context is not None else {}
-        check_code = needs_review_tests(
-            subtask, written_files=bool(shown.get("written_files")) or bool(context)
-        )
-        if check_code:
+        if review_tests_enabled.get():
+            context = test_context(subtask) if test_context is not None else {}
             if evidence is None:
                 prompt["inputs"] = subtask.inputs
             prompt.update(context)

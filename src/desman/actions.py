@@ -331,7 +331,7 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
             click.echo(
                 "      "
                 + t(
-                    "Reviewer's tests: {passed} passed, {failed} failed, {errors} errors",
+                    "Reviewer's tests — passed: {passed}, failed: {failed}, errors: {errors}",
                     passed=sub.review_tests["passed"],
                     failed=sub.review_tests["failed"],
                     errors=sub.review_tests["errors"],

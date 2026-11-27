@@ -15,7 +15,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
-    "Reviewer's tests: {passed} passed, {failed} failed, {errors} errors": "Тести перевіряльника: пройдено {passed}, провалено {failed}, помилок {errors}",
+    "Reviewer's tests — passed: {passed}, failed: {failed}, errors: {errors}": "Тести перевіряльника — пройдено: {passed}, провалено: {failed}, помилки: {errors}",
     "Reviewer's tests did not run.": "Тести перевіряльника не запускалися.",
     "Checked": "Дата перевірки",
     "Confirm lending a new cloud provider.": "Підтвердити перше позичання хмарного провайдера.",

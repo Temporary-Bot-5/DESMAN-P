@@ -24,7 +24,7 @@ import re
 import secrets
 import sqlite3
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Final
@@ -250,7 +250,7 @@ class Workspace:
                 found.append((prefix + name, data))
         return found, not unread
 
-    def files(self) -> list[str]:
+    def files(self, *, on_skip: Callable[[], None] | None = None) -> list[str]:
         """Regular files in the workspace, as sorted `/`-separated relative paths.
 
         Names the guard would refuse (generated code can create any name) and files with other
@@ -262,14 +262,17 @@ class Workspace:
             base = Path(dirpath)  # followlinks=False: linked directories are not entered
             for name in filenames:
                 full = base / name
-                if name.startswith(_TMP_PREFIX) or full.is_symlink() or not full.is_file():
-                    continue
-                if full.lstat().st_nlink > 1:  # never read back (see `read`)
+                if name.startswith(_TMP_PREFIX):
                     continue
                 relative = full.relative_to(self.root).as_posix()
                 try:
                     check_path(relative)
-                except PathEscapeError:
+                    info = full.lstat()
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
+                        raise PathEscapeError(f"{relative!r} is not a regular, unlinked file")
+                except (OSError, PathEscapeError):
+                    if on_skip is not None:
+                        on_skip()
                     continue
                 found.append(relative)
         return sorted(found)

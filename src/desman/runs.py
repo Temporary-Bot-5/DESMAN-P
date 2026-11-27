@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import functools
 import re
+import shutil
 import sqlite3
+import stat
+import time
 from collections.abc import Callable, Collection, Mapping, Set
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -44,10 +48,9 @@ from desman.core.coordinator import (
     ReviewTests,
     TestRun,
     Work,
-    needs_review_tests,
     review_test_file,
 )
-from desman.core.effects import evidence, has_written_files, last_review_tests, quote_sources
+from desman.core.effects import evidence, last_review_tests, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
@@ -58,7 +61,7 @@ from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import TOOL_RESULTS_DIR, Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
-from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
+from desman.core.workspace import PathEscapeError, Workspace, is_work_file
 from desman.i18n import t
 from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
@@ -754,39 +757,96 @@ def _personalize() -> bool:
         return False
 
 
+_REVIEW_COPY_PREFIX = "review-"
+
+
+def _sweep_review_copies(root: Path) -> None:
+    cutoff = time.time() - 3_600
+    for path in root.glob(f"{_REVIEW_COPY_PREFIX}*"):
+        with suppress(OSError):
+            info = path.lstat()
+            if stat.S_ISDIR(info.st_mode) and info.st_mtime < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+
+
 def _run_review_tests(
-    sandbox: Sandbox, subtask: Subtask, workspace: Workspace, module: str, attempt: int
+    sandbox: Sandbox,
+    subtask: Subtask,
+    workspace: Workspace,
+    module: str,
+    attempt: int,
+    cover: Callable[[float], None] = lambda _: None,
 ) -> TestRun:
+    cover(30)
     file = review_test_file(subtask.id, attempt)
     workspace.write(file, module)
     config = "[pytest]\npythonpath = ..\n"
+    skipped = 0
+
+    def skip() -> None:
+        nonlocal skipped
+        skipped += 1
+
+    def over_quota(entries: int, size: int) -> TestRun:
+        limits = sandbox.limits
+        message = (
+            f"The workspace is too large for the reviewer's test run "
+            f"(at least {entries} entries and {size} bytes; sandbox quota: "
+            f"{limits.workspace_files} entries and {limits.workspace_bytes} bytes). "
+            "Remove files the reviewer's run does not need."
+        )
+        return TestRun(
+            ran=False, reason_not_run=message, copy_over_quota=message, skipped_files=skipped
+        )
+
     try:
         if problem := sandbox.unavailable():
             raise SandboxUnavailable(problem)
-        with TemporaryDirectory(prefix="review-", dir=workspace.root.parent) as directory:
+        root = workspace.root.parent
+        _sweep_review_copies(root)
+        paths = []
+        size = len(module.encode()) + len(config)
+        estimated = size
+        for path in workspace.files(on_skip=skip):
+            if not is_work_file(path) or path.startswith(("web/", TOOL_RESULTS_DIR)):
+                continue
+            try:
+                estimated += workspace.size(path)
+            except (OSError, PathEscapeError):
+                skip()
+                continue
+            paths.append(path)
+        cover(30 + min(estimated, sandbox.limits.workspace_bytes) / 10_000_000)
+        with TemporaryDirectory(
+            prefix=_REVIEW_COPY_PREFIX, dir=root, ignore_cleanup_errors=True
+        ) as directory:
             location = Path(directory)
             copy = Workspace(location.parent, location.name)
-            # Count the test module, pytest configuration and both of their parent directories.
             directories = {PurePosixPath(".review"), PurePosixPath(file).parent}
             entries = 4
-            remaining = sandbox.limits.workspace_bytes - len(module.encode()) - len(config)
-            if entries > sandbox.limits.workspace_files or remaining < 0:
-                raise SandboxUnavailable("review workspace copy would exceed the sandbox quota")
+            limits = sandbox.limits
+            if entries > limits.workspace_files or size > limits.workspace_bytes:
+                return over_quota(entries, size)
             copy.write(file, module)
             copy.write(".review/pytest.ini", config)
-            for path in workspace.files():
-                if not is_work_file(path) or path.startswith(("web/", TOOL_RESULTS_DIR)):
-                    continue
+            for path in paths:
                 parents = set(PurePosixPath(path).parents) - {PurePosixPath(".")}
-                entries += 1 + len(parents - directories)
-                if entries > sandbox.limits.workspace_files or workspace.size(path) > remaining:
-                    raise SandboxUnavailable("review workspace copy would exceed the sandbox quota")
-                data = workspace.read(path, limit=remaining + 1)
-                remaining -= len(data)
-                if remaining < 0:
-                    raise SandboxUnavailable("review workspace copy would exceed the sandbox quota")
-                copy.write(path, data)
+                next_entries = entries + 1 + len(parents - directories)
+                try:
+                    next_size = size + workspace.size(path)
+                    if next_entries > limits.workspace_files or next_size > limits.workspace_bytes:
+                        return over_quota(next_entries, next_size)
+                    data = workspace.read(path, limit=limits.workspace_bytes - size + 1)
+                    next_size = size + len(data)
+                    if next_size > limits.workspace_bytes:
+                        return over_quota(next_entries, next_size)
+                    copy.write(path, data)
+                except (OSError, PathEscapeError):
+                    skip()
+                    continue
+                entries, size = next_entries, next_size
                 directories.update(parents)
+            cover(REVIEW_TEST_TIMEOUT)
             # python3 is the interpreter name supplied by every Sandbox backend.
             outcome = sandbox.run(
                 [
@@ -810,7 +870,12 @@ def _run_review_tests(
                 timeout=REVIEW_TEST_TIMEOUT,
             )
     except SandboxUnavailable as error:
-        return TestRun(ran=False, reason_not_run=str(error)[:1_000])
+        return TestRun(
+            ran=False,
+            reason_not_run=str(error)[:1_000],
+            sandbox_unavailable=True,
+            skipped_files=skipped,
+        )
     summary = outcome.stdout.splitlines()
     counts: dict[str, int] = {}
     if summary:
@@ -842,30 +907,15 @@ def _run_review_tests(
         workspace_full=outcome.workspace_full,
         stopped=outcome.stopped,
         disk_low=outcome.disk_low,
+        skipped_files=skipped,
     )
 
 
 def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
-    if not needs_review_tests(
-        subtask,
-        written_files=subtask.kind is Kind.CODE
-        and not subtask.runs_code
-        and has_written_files(store, subtask),
-    ):
-        return {}
     goal, is_final = store.subtask_goal(subtask)
-    previous = last_review_tests(store, subtask.id)
-    if previous is not None and previous["ran"]:
-        try:
-            workspace = Workspace(workspace_root_for(store.conn), subtask.task_id)
-            previous["source"] = workspace.read(previous["file"], limit=32_000).decode(
-                errors="replace"
-            )[:8_000]
-        except (OSError, PathEscapeError):
-            pass
     return {
         **({} if is_final else {"task_goal": goal}),
-        "previous_review_tests": previous,
+        "previous_review_tests": last_review_tests(store, subtask.id),
     }
 
 

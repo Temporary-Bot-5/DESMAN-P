@@ -10,7 +10,7 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
-    "Reviewer's tests: {passed} passed, {failed} failed, {errors} errors": "검토자 테스트: {passed}개 통과, {failed}개 실패, 오류 {errors}개",
+    "Reviewer's tests — passed: {passed}, failed: {failed}, errors: {errors}": "검토자 테스트 — 통과: {passed}, 실패: {failed}, 오류: {errors}",
     "Reviewer's tests did not run.": "검토자 테스트가 실행되지 않았습니다.",
     "Checked": "확인일",
     "Confirm lending a new cloud provider.": "클라우드 제공업체의 서비스를 처음 대여하는 데 동의합니다.",
