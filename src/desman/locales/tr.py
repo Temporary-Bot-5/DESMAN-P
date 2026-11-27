@@ -14,6 +14,8 @@ MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) did not run.": "İnceleyenin testleri (deneme {attempt}) çalıştırılmadı.",
     "Reviewer's tests (attempt {attempt}) timed out.": "İnceleyenin testleri (deneme {attempt}) zaman aşımına uğradı.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "İnceleyenin testleri (deneme {attempt}) durduruldu: {reason}",
+    "needs package {name}, not installed in the sandbox": "Gerekli {name} paketi korumalı alanda kurulu değil",
+    "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "İnceleyenin testleri (deneme {attempt}) — pytest {exit_code} koduyla sonlandı",
     "Reviewer's tests (attempt {attempt}) produced no report.": "İnceleyenin testleri (deneme {attempt}) rapor oluşturmadı.",
     "Checked": "İnceleme tarihi",
     "Confirm lending a new cloud provider.": "Bir bulut sağlayıcısını ilk kez ödünç vermeyi onayla.",

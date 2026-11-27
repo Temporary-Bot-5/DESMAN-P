@@ -19,6 +19,8 @@ MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) did not run.": "Тесты проверяющего (попытка {attempt}) не запускались.",
     "Reviewer's tests (attempt {attempt}) timed out.": "Тесты проверяющего (попытка {attempt}) превысили лимит времени.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Тесты проверяющего (попытка {attempt}) остановлены: {reason}",
+    "needs package {name}, not installed in the sandbox": "Требуется пакет {name}, который не установлен в песочнице",
+    "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Тесты проверяющего (попытка {attempt}) — pytest завершился с кодом {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "Тесты проверяющего (попытка {attempt}) не сформировали отчёт.",
     "Checked": "Дата проверки",
     "Confirm lending a new cloud provider.": "Подтвердить первое одалживание облачного провайдера.",

@@ -207,6 +207,7 @@ class TestRun(BaseModel):
 
     ran: bool
     reason_not_run: str | None = Field(default=None, max_length=1_000)
+    missing_packages: list[str] = Field(default_factory=list)
     exit_code: int | None = None
     passed: int = Field(default=0, ge=0)
     failed: int = Field(default=0, ge=0)
@@ -1018,7 +1019,7 @@ class Coordinator:
     @staticmethod
     def _review_test_verdict(subtask: Subtask, review: Review, result: TestRun) -> Review | Failure:
         if result.copy_over_quota:
-            return Failure(kind=FailureKind.TRANSIENT, reason=result.copy_over_quota)
+            return Failure(kind=FailureKind.PERMANENT, reason=result.copy_over_quota)
         elif result.disk_low:
             return Failure(
                 kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
@@ -1071,18 +1072,26 @@ class Coordinator:
                 and has_written_python_files(self.store, subtask, root=self.workspaces),
             )
             skipped = self._review_test_skip(subtask, cover_call) if needs_tests else None
-            reviewer = self._crew(subtask).reviewer
-            setting = review_tests_enabled.set(needs_tests and skipped is None)
-            try:
-                with (
-                    calls.for_(self._for(calls.Role.REVIEWER, subtask)),
-                    guard_model_calls(cover_call),
-                ):
-                    returned = reviewer(subtask, artifact)
-            finally:
-                review_tests_enabled.reset(setting)
-            # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
-            review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
+            if skipped and skipped.sandbox_unavailable and subtask.runs_code:
+                review = Failure(
+                    kind=FailureKind.TRANSIENT,
+                    reason=skipped.reason_not_run or "review sandbox unavailable",
+                )
+            else:
+                reviewer = self._crew(subtask).reviewer
+                setting = review_tests_enabled.set(needs_tests and skipped is None)
+                try:
+                    with (
+                        calls.for_(self._for(calls.Role.REVIEWER, subtask)),
+                        guard_model_calls(cover_call),
+                    ):
+                        returned = reviewer(subtask, artifact)
+                finally:
+                    review_tests_enabled.reset(setting)
+                # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
+                review = (
+                    returned if isinstance(returned, Failure) else Review.model_validate(returned)
+                )
         except ProviderError as e:
             review = self._provider_failure(e)
             if review.kind is FailureKind.QUALITY:
@@ -1103,7 +1112,10 @@ class Coordinator:
                 feedback=f"{_error_reason(artifact)} (accepted by the reviewer, overruled)",
             )
         try:
-            if (
+            note = None
+            if skipped and skipped.sandbox_unavailable and subtask.runs_code:
+                note = {**skipped.model_dump(), "attempt": subtask.attempts.quality + 1}
+            elif (
                 isinstance(review, Review)
                 and needs_tests
                 and (skipped is not None or review.verdict is Verdict.ACCEPT)
@@ -1117,11 +1129,10 @@ class Coordinator:
                         kind=FailureKind.TRANSIENT,
                         reason=f"review tests raised {type(error).__name__}: {error}",
                     )
-                else:
-                    if note is not None:
-                        with db.transaction(self.store.conn):
-                            self.store.extend_review(subtask.id, token, MODEL_CALL_MARGIN)
-                            self.store.note(subtask.id, Actor.REVIEWER, "review_tests", note)
+            if note is not None:
+                with db.transaction(self.store.conn):
+                    self.store.extend_review(subtask.id, token, MODEL_CALL_MARGIN)
+                    self.store.note(subtask.id, Actor.REVIEWER, "review_tests", note)
             if isinstance(review, Review):
                 details = {"verdict": review.verdict.value, "feedback": review.feedback}
             if isinstance(review, Failure):

@@ -14,6 +14,8 @@ MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) did not run.": "Les tests de vérification n’ont pas été exécutés (tentative {attempt}).",
     "Reviewer's tests (attempt {attempt}) timed out.": "Les tests de vérification (tentative {attempt}) ont dépassé le délai.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Tests de vérification arrêtés (tentative {attempt}) : {reason}",
+    "needs package {name}, not installed in the sandbox": "Le paquet {name} est requis et n’est pas installé dans le bac à sable",
+    "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Tests de vérification (tentative {attempt}) — pytest a quitté avec le code {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "Les tests de vérification (tentative {attempt}) n’ont produit aucun rapport.",
     "Checked": "Vérifié le",
     "Confirm lending a new cloud provider.": "Confirmer le premier prêt d’un fournisseur cloud.",

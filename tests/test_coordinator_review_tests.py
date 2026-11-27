@@ -197,7 +197,12 @@ def test_skips_and_missing_module(
         assert coord.run(task_id).status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
     note = last_review_tests(store, sub.id)
-    assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (mode == "missing")
+    if mode == "sandbox":
+        assert not llm.calls
+    else:
+        assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (
+            mode == "missing"
+        )
     if mode in ("non-code", "missing"):
         assert note is None
         assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (
@@ -545,6 +550,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         "attempt": 1,
         "ran": True,
         "reason_not_run": None,
+        "missing_packages": [],
         "exit_code": 0,
         "passed": 1,
         "failed": 0,
@@ -718,7 +724,7 @@ def test_code_with_command_outputs_is_reviewed(
             os.utime(path, (at, at))
         clock.advance(1)
         store.finish_effect(work.subtask.id, lease, 0, 0, {"ok": True})
-        clock.advance(1)
+        clock.advance(3)
         late = workspace.root / workspace.write("late.py", "different subtask")
         at = clock().timestamp()
         os.utime(late, (at, at))
@@ -955,6 +961,9 @@ def test_review_infrastructure_failure(
     [sub] = store.list_subtasks(task_id)
     if reason == "fits":
         assert sub.status is SubtaskStatus.DONE
+    elif reason == "quota":
+        assert sub.status is SubtaskStatus.NEEDS_HUMAN
+        assert sub.attempts.transient == 0
     else:
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
     note = last_review_tests(store, sub.id)
@@ -970,10 +979,10 @@ def test_review_infrastructure_failure(
     if reason == "quota":
         assert "quota: " in note["copy_over_quota"]
         assert sub.attempts.quality == 0
-        [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_interrupted"]
-        assert "at least 1 entries, 101 bytes" in json.loads(entry["details_json"])["reason"]
-        assert coord.run(task_id).status is TaskStatus.NEEDS_HUMAN
-        assert store.get_subtask(sub.id).attempts.quality == 0
+        [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_failed"]
+        details = json.loads(entry["details_json"])
+        assert details["failure"] == "permanent"
+        assert "at least 1 entries, 101 bytes" in details["reason"]
     assert list(tmp_path.glob("review-*")) == []
 
 
@@ -1028,7 +1037,7 @@ def test_command_fallback_ends_at_submit(store: Store, tmp_path: Path, clock: Fa
     os.utime(path, (at, at))
     clock.advance(1)
     store.submit(sub.id, sub.lease_token, {"summary": "ready"})
-    clock.advance(1)
+    clock.advance(3)
     late = workspace.root / workspace.write("after.py", "excluded")
     at = clock().timestamp()
     os.utime(late, (at, at))
@@ -1114,6 +1123,11 @@ def test_review_requires_report_and_copies_web_page(
     [
         ({"ran": True, "timed_out": True, "report_missing": True}, "timed out."),
         ({"ran": True, "report_missing": True}, "produced no report."),
+        ({"ran": True, "exit_code": 5}, "— pytest exited 5"),
+        (
+            {"ran": False, "missing_packages": ["requests"]},
+            "did not run. needs package requests, not installed in the sandbox",
+        ),
         ({"ran": True, "stopped": "disk space too low"}, "stopped: disk space too low"),
         ({"ran": True, "workspace_full": "quota exceeded"}, "stopped: quota exceeded"),
         ({"ran": False, "reason_not_run": "no sandbox here"}, "did not run. no sandbox here"),
@@ -1127,3 +1141,134 @@ def test_status_shows_review_test_outcome(
     store.note(sub.id, Actor.REVIEWER, "review_tests", {"attempt": 1, **note})
     print_report(task_report(store, task_id), store)
     assert f"Reviewer's tests (attempt 1) {expected}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("runs_code", [False, True])
+@pytest.mark.parametrize(
+    "mode", ["missing", "call", "local", "mixed", "nested", pytest.param("real", marks=confined)]
+)
+def test_missing_requests_in_review(
+    store: Store,
+    tmp_path: Path,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+    runs_code: bool,
+    mode: str,
+) -> None:
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Produce a fetch module",
+            retry=RetryPolicy(max_attempts=1),
+            subtasks=[
+                SubtaskSpec(
+                    description="write fetch.py",
+                    acceptance_criteria="produce the module",
+                    kind=Kind.CODE,
+                    runs_code=runs_code,
+                )
+            ],
+        )
+    )
+    sub = store.claim("executor", task_id=task_id)
+    assert sub is not None and sub.lease_token is not None
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("fetch.py", "import requests\n")
+    if not runs_code:
+        store.start_effect(sub.id, sub.lease_token, 0, 0, "write_file", "key")
+        store.finish_effect(
+            sub.id, sub.lease_token, 0, 0, {"ok": True, "output": {"path": "fetch.py"}}
+        )
+    store.submit(sub.id, sub.lease_token, {"summary": "ready"})
+    sandbox = Sandbox()
+    if mode == "local":
+        workspace.write("requests/__init__.py", "")
+    if mode != "real":
+        monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+
+        def run(command: list[str], cwd: Path, **_: object) -> Outcome:
+            assert (cwd / "fetch.py").read_text() == "import requests\n"
+            name = "requests.api" if mode == "nested" else "requests"
+            cases = (
+                '<testcase name="test_review"><error message="collection failure">'
+                "fetch.py:1: in &lt;module&gt;\n    import requests\n"
+                f"E   ModuleNotFoundError: No module named '{name}'</error></testcase>"
+            )
+            if mode == "call":
+                cases = (
+                    '<testcase name="test_fetch"><failure '
+                    'message="ModuleNotFoundError: No module named &apos;requests&apos;">'
+                    "E   ModuleNotFoundError: No module named 'requests'\n\n"
+                    "fetch.py:1: ModuleNotFoundError</failure></testcase>"
+                )
+            if mode == "mixed":
+                cases += '<testcase name="test_other"><failure>AssertionError</failure></testcase>'
+            write_report(command, cwd, cases)
+            return Outcome(2, "", "")
+
+        monkeypatch.setattr(sandbox, "run", run)
+    module = "import fetch\n\ndef test_fetch():\n    assert fetch.requests\n"
+    llm = FakeLLM().on("Review", json.dumps({"verdict": "accept", "tests": module}))
+    coord = Coordinator(
+        store,
+        unread,
+        llm_reviewer(llm),
+        access=executor_access([Permission.SHELL]),
+        workspaces=tmp_path,
+        review_tests=ReviewTestRunner(partial(_run_review_tests, sandbox), sandbox.unavailable),
+        sleep=clock.sleep,
+    )
+    assert coord.tick(task_id, [])
+    note = last_review_tests(store, sub.id)
+    assert note is not None and note["source"] == module
+    if mode in {"missing", "call", "real"}:
+        assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
+        assert not note["ran"]
+        assert note["reason_not_run"] == "needs package requests, not installed in the sandbox"
+    else:
+        assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
+        assert note["ran"] and note["errors"] == 1
+    assert len(llm.calls) == 1
+
+
+def test_command_evidence_uses_earlier_execution_and_reads_only_top_candidates(
+    store: Store, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Produce a module",
+            subtasks=[
+                SubtaskSpec(description="write code", acceptance_criteria="works", kind=Kind.CODE)
+            ],
+        )
+    )
+    sub = store.claim("executor", task_id=task_id)
+    assert sub is not None and sub.lease_token is not None
+    workspace = Workspace(tmp_path, task_id)
+    store.start_effect(sub.id, sub.lease_token, 0, 0, "run_command", "key")
+    started = clock().timestamp()
+    clock.advance(1)
+    store.finish_effect(sub.id, sub.lease_token, 0, 0, {"ok": True})
+    for name in ("script.py", *(f"extra-{i:02}.txt" for i in range(13))):
+        path = workspace.root / workspace.write(name, "answer")
+        at = started - 2 if name == "script.py" else started + 3
+        os.utime(path, (at, at))
+    store.submit(sub.id, sub.lease_token, {"summary": "first"})
+    store.transition(sub.id, SubtaskStatus.REVIEW, SubtaskStatus.READY, Actor.REVIEWER)
+    clock.advance(10)
+    again = store.claim("executor", task_id=task_id)
+    assert again is not None and again.lease_token is not None
+    store.submit(again.id, again.lease_token, {"summary": "second"})
+
+    read = Workspace.read
+    reads: list[str] = []
+
+    def track_read(ws: Workspace, path: str, *, limit: int = -1) -> bytes:
+        reads.append(path)
+        return read(ws, path, limit=limit)
+
+    monkeypatch.setattr(Workspace, "read", track_read)
+    assert has_written_python_files(store, again, root=tmp_path)
+    assert reads == []
+    shown = evidence(store, again, workspace=workspace)["written_files"]
+    assert reads == ["script.py", *(f"extra-{i:02}.txt" for i in range(11))]
+    assert [file["path"] for file in shown] == reads

@@ -9,6 +9,7 @@ access (the tool policy within the human's permissions) and its tools.
 from __future__ import annotations
 
 import functools
+import re
 import secrets
 import shutil
 import sqlite3
@@ -764,7 +765,7 @@ _REVIEW_REPORT_LIMIT = 1024 * 1024
 
 def _read_review_report(
     workspace: Workspace, report: str
-) -> tuple[dict[str, int], list[str]] | None:
+) -> tuple[dict[str, int], list[str], set[str]] | None:
     try:
         data = workspace.read(report, limit=_REVIEW_REPORT_LIMIT + 1)
         if len(data) > _REVIEW_REPORT_LIMIT:
@@ -782,21 +783,47 @@ def _read_review_report(
         return None
     counts = dict.fromkeys(("passed", "failed", "errors", "skipped"), 0)
     failing: list[str] = []
+    missing_packages: set[str] = set()
+    all_issues_need_packages = True
     for case in suite.iterfind("testcase"):
-        if case.find("error") is not None:
+        error = case.find("error")
+        failure = case.find("failure")
+        if error is not None:
             status = "errors"
-        elif case.find("failure") is not None:
+            issue = error
+        elif failure is not None:
             status = "failed"
+            issue = failure
         elif case.find("skipped") is not None:
             status = "skipped"
+            issue = None
         else:
             status = "passed"
+            issue = None
         counts[status] += 1
-        if status in {"failed", "errors"} and len(failing) < 20:
+        if issue is None:
+            continue
+        if len(failing) < 20:
             name = case.get("name", "")
             group = case.get("classname", "")
             failing.append((f"{group}::{name}" if group else name)[:250])
-    return counts, failing
+        pattern = r"(?:E +)?ModuleNotFoundError: No module named '([a-zA-Z_][a-zA-Z_0-9]*)'"
+        # Test failures carry the exception in the message. Collection errors put it
+        # at the end of the traceback and use a generic message.
+        match = re.fullmatch(pattern, issue.get("message", "")) or re.fullmatch(
+            pattern, (issue.text or "").strip().rsplit("\n", 1)[-1]
+        )
+        if match:
+            name = match[1]
+            if (
+                not (workspace.root / f"{name}.py").exists()
+                and not (workspace.root / name).is_dir()
+            ):
+                missing_packages.add(name)
+                continue
+        # An unrelated failure still needs to be judged.
+        all_issues_need_packages = False
+    return counts, failing, missing_packages if all_issues_need_packages else set()
 
 
 def _sweep_review_copies(root: Path) -> None:
@@ -940,7 +967,20 @@ def _run_review_tests(
             skipped_files=skipped,
             skipped_names=skipped_names,
         )
-    counts, failing = parsed if parsed is not None else ({}, [])
+    counts, failing, missing_packages = parsed if parsed is not None else ({}, [], set())
+    if missing_packages and not (
+        outcome.timed_out or outcome.stopped or outcome.workspace_full or outcome.disk_low
+    ):
+        packages = sorted(missing_packages)[:20]
+        return TestRun(
+            ran=False,
+            missing_packages=packages,
+            reason_not_run="; ".join(
+                f"needs package {name}, not installed in the sandbox" for name in packages
+            )[:1_000],
+            skipped_files=skipped,
+            skipped_names=skipped_names,
+        )
     tail = "\n".join(
         part
         for part in (outcome.stdout, outcome.stderr, outcome.stopped, outcome.workspace_full)

@@ -14,6 +14,8 @@ MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) did not run.": "审核者的测试 (第 {attempt} 次)未运行。",
     "Reviewer's tests (attempt {attempt}) timed out.": "审核者的测试（第 {attempt} 次）超时。",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "审核者的测试（第 {attempt} 次）已停止：{reason}",
+    "needs package {name}, not installed in the sandbox": "需要软件包 {name}，沙箱中未安装此包",
+    "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "审核者的测试（第 {attempt} 次）— pytest 退出，退出代码为 {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "审核者的测试（第 {attempt} 次）未生成报告。",
     "Checked": "核查日期",
     "Confirm lending a new cloud provider.": "确认首次出借云服务商的服务。",

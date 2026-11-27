@@ -289,17 +289,17 @@ def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:
     return texts
 
 
-def _written_paths(rows: list[Any]) -> list[str]:
-    paths: list[str] = []
+def _written_paths(rows: list[Any]) -> Iterator[str]:
+    seen: set[str] = set()
     for row in rows:
         if row["tool"] not in FILE_WRITE_TOOLS or row["state"] != "done":
             continue
         result = ToolResult.model_validate_json(row["result_json"])
         if result.ok and isinstance(result.output, dict):
             path = result.output.get("path")
-            if isinstance(path, str) and path not in paths:
-                paths.append(path)
-    return paths
+            if isinstance(path, str) and path not in seen:
+                seen.add(path)
+                yield path
 
 
 def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
@@ -329,43 +329,54 @@ def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
 
 
 def _command_windows(store: Store, subtask: Subtask) -> tuple[list[tuple[float, float]], bool]:
-    execution = store.executions(subtask.id) - 1
-    commands = [row for row in store.effects(subtask.id, execution) if row["tool"] == RUN_TOOL]
-    windows = []
-    for row in commands:
-        if row["state"] != "done":
+    executions = store.executions(subtask.id)
+    windows: list[tuple[float, float]] = []
+    used_attempt_start = False
+    for execution in range(executions - 1, -1, -1):
+        commands = [row for row in store.effects(subtask.id, execution) if row["tool"] == RUN_TOOL]
+        before = len(windows)
+        for row in commands:
+            if row["state"] != "done":
+                continue
+            try:
+                started = db.parse_iso(row["started_at"]).timestamp()
+                finished = db.parse_iso(row["finished_at"]).timestamp()
+            except (IndexError, TypeError, ValueError, OverflowError, OSError):
+                continue
+            if started <= finished:
+                windows.append((started - 2, finished + 2))
+        if len(windows) != before or not commands:
             continue
-        try:
-            started = db.parse_iso(row["started_at"]).timestamp()
-            finished = db.parse_iso(row["finished_at"]).timestamp()
-        except (IndexError, TypeError, ValueError, OverflowError, OSError):
-            continue
-        if started <= finished:
-            # The journal stores millisecond precision, while filesystem mtimes can be finer.
-            windows.append((started, finished + 0.001))
-    if windows or not commands:
-        return windows, False
-    row = store.conn.execute(
-        """SELECT start.ts, submitted.ts FROM audit_log AS start
-           JOIN audit_log AS submitted ON submitted.subtask_id = start.subtask_id
-               AND submitted.action = 'submit' AND submitted.seq > start.seq
-           WHERE start.subtask_id = ? AND start.seq = (
-               SELECT max(seq) FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
-           )
-           ORDER BY submitted.seq LIMIT 1""",
-        (subtask.id, subtask.id),
-    ).fetchone()
-    if row is None:
-        return [], False
-    return [(db.parse_iso(row[0]).timestamp(), db.parse_iso(row[1]).timestamp() + 0.001)], True
+        row = store.conn.execute(
+            """SELECT start.ts, submitted.ts FROM audit_log AS start
+               JOIN audit_log AS submitted ON submitted.subtask_id = start.subtask_id
+                   AND submitted.action = 'submit' AND submitted.seq > start.seq
+               WHERE start.subtask_id = ? AND start.action = 'attempt_started'
+                 AND coalesce(json_extract(start.details_json, '$.execution'), ?) = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM audit_log AS later
+                     WHERE later.subtask_id = start.subtask_id AND later.action = 'attempt_started'
+                         AND later.seq > start.seq AND later.seq < submitted.seq
+                 )
+               ORDER BY start.seq DESC, submitted.seq LIMIT 1""",
+            (subtask.id, executions - 1, execution),
+        ).fetchone()
+        if row is not None:
+            windows.append(
+                (db.parse_iso(row[0]).timestamp() - 2, db.parse_iso(row[1]).timestamp() + 2)
+            )
+            used_attempt_start = True
+    return windows, used_attempt_start
 
 
 def _workspace_outputs(
-    workspace: Workspace, windows: list[tuple[float, float]]
+    workspace: Workspace, windows: list[tuple[float, float]], *, python_only: bool = False
 ) -> Iterator[tuple[str, float]]:
     if not windows:
         return
-    for path in workspace.files():
+    for path in workspace.iter_files():
+        if python_only and Path(path).suffix.lower() != ".py":
+            continue
         folder, slash, _ = path.partition("/")
         if slash and folder.startswith("from-"):
             continue
@@ -375,29 +386,17 @@ def _workspace_outputs(
             modified = workspace.mtime(path)
         except (OSError, PathEscapeError):
             continue
-        if any(started <= modified < finished for started, finished in windows):
+        if any(started <= modified <= finished for started, finished in windows):
             yield path, modified
 
 
-def _output_order(workspace: Workspace, item: tuple[str, float]) -> tuple[int, float, str]:
+def _output_order(item: tuple[str, float]) -> tuple[int, float, str]:
     path, modified = item
     suffix = Path(path).suffix.lower()
     if suffix == ".py":
         return 0, -modified, path
-    priority = 2
-    if suffix not in {".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".parquet"}:
-        try:
-            sample = workspace.read(path, limit=1024)
-            # Ignore an incomplete last character when sampling a UTF-8 file.
-            sample.decode("utf-8", errors="strict")
-            if b"\x00" not in sample:
-                priority = 1
-        except UnicodeDecodeError as error:
-            if error.reason == "unexpected end of data" and b"\x00" not in sample:
-                priority = 1
-        except (OSError, PathEscapeError):
-            pass
-    return priority, -modified, path
+    data_suffixes = {".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".parquet"}
+    return (2 if suffix in data_suffixes else 1), -modified, path
 
 
 def has_written_python_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
@@ -412,15 +411,13 @@ def has_written_python_files(store: Store, subtask: Subtask, *, root: Path | Non
         root if root is not None else workspace_root_for(store.conn), subtask.task_id
     )
     windows, _ = _command_windows(store, subtask)
-    return any(
-        Path(path).suffix.lower() == ".py" for path, _ in _workspace_outputs(workspace, windows)
-    )
+    return next(_workspace_outputs(workspace, windows, python_only=True), None) is not None
 
 
 def _written_files(
     rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
 ) -> tuple[list[dict[str, str]], bool]:
-    paths = _written_paths(rows)
+    paths = list(_written_paths(rows))
     used_attempt_start = False
     from_workspace = not paths and (subtask.kind is Kind.CODE or subtask.runs_code)
     if from_workspace:
@@ -430,7 +427,7 @@ def _written_files(
             path
             for path, _ in sorted(
                 _workspace_outputs(output_workspace, windows),
-                key=lambda item: _output_order(output_workspace, item),
+                key=_output_order,
             )[:12]
         ]
         workspace = output_workspace

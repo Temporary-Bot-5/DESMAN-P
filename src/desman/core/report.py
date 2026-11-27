@@ -27,6 +27,7 @@ class ReviewTestSummary(BaseModel):
     attempt: int
     ran: bool
     reason_not_run: str | None = None
+    missing_packages: list[str] = Field(default_factory=list)
     exit_code: int | None = None
     passed: int = 0
     failed: int = 0

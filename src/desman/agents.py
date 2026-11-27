@@ -196,7 +196,9 @@ REVIEWER_SYSTEM = (
 REVIEWER_TESTS = (
     ' On accept, include "tests": a Python pytest module (at most 20000 characters with '
     "top-level test_ functions). Import the produced code from the workspace root, the "
-    "working directory. Write independent tests; do not copy or invoke the executor's tests. "
+    "working directory. The sandbox has only Python's standard library and pytest, with "
+    "no network. Tests must not need other packages or network access. "
+    "Write independent tests; do not copy or invoke the executor's tests. "
     "For required runs of non-Python code, you may launch the program with subprocess "
     "inside the same networkless sandbox and check its output and exit code. "
     "Cover the acceptance criteria and every concrete input and expected output example in "

@@ -253,9 +253,12 @@ class Workspace:
 
         Names the guard would refuse (generated code can create any name) and files with other
         hard links are left out, so everything listed can be read back."""
+        return sorted(self.iter_files(on_skip=on_skip))
+
+    def iter_files(self, *, on_skip: Callable[[str], None] | None = None) -> Iterator[str]:
+        """Yield guarded regular files in traversal order."""
         if self.root.is_symlink():  # os.walk would follow the top directory
-            return []
-        found = []
+            return
         for dirpath, _dirnames, filenames in os.walk(self.root, followlinks=False):
             base = Path(dirpath)  # followlinks=False: linked directories are not entered
             for name in filenames:
@@ -276,8 +279,7 @@ class Workspace:
                             raise
                         on_skip(relative)
                     continue
-                found.append(relative)
-        return sorted(found)
+                yield relative
 
     @contextmanager
     def _parent(self, parts: tuple[str, ...], *, create: bool) -> Iterator[int]:
