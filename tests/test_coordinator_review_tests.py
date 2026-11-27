@@ -1172,7 +1172,9 @@ def test_missing_requests_in_review(
     sub = store.claim("executor", task_id=task_id)
     assert sub is not None and sub.lease_token is not None
     workspace = Workspace(tmp_path, task_id)
-    workspace.write("fetch.py", "import requests\n")
+    # The real run needs a package the host's /usr surely lacks (requests may be there).
+    package = "desman_absent_package" if mode == "real" else "requests"
+    workspace.write("fetch.py", f"import {package}\n")
     if not runs_code:
         store.start_effect(sub.id, sub.lease_token, 0, 0, "write_file", "key")
         store.finish_effect(
@@ -1206,7 +1208,7 @@ def test_missing_requests_in_review(
             return Outcome(2, "", "")
 
         monkeypatch.setattr(sandbox, "run", run)
-    module = "import fetch\n\ndef test_fetch():\n    assert fetch.requests\n"
+    module = f"import fetch\n\ndef test_fetch():\n    assert fetch.{package}\n"
     llm = FakeLLM().on("Review", json.dumps({"verdict": "accept", "tests": module}))
     coord = Coordinator(
         store,
@@ -1223,7 +1225,7 @@ def test_missing_requests_in_review(
     if mode in {"missing", "call", "real"}:
         assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
         assert not note["ran"]
-        assert note["reason_not_run"] == "needs package requests, not installed in the sandbox"
+        assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
     else:
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
         assert note["ran"] and note["errors"] == 1
