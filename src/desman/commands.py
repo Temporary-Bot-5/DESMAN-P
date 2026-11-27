@@ -117,6 +117,8 @@ class Proposal:
     """Asked instead of "Apply this change?" (opening the wizard changes nothing yet)."""
     on_decline: Callable[[], Outcome] | None = None
     """Optional outcome when the proposal asks to share a read result."""
+    confirm: bool = False
+    """Ask even after the person submits a settings form."""
 
 
 @dataclass
@@ -504,6 +506,10 @@ class CloudArgs(Args):
 
 class BorrowSearchArgs(Args):
     state: Literal["on", "off"] | None = None
+
+
+class TermsArgs(Args):
+    provider: ProviderName | None = None
 
 
 class DonateArgs(Args):
@@ -1452,7 +1458,7 @@ def _global_cloud(ctx: Context, args: CloudArgs) -> Outcome | Proposal:
             {"lend_cloud": global_cli.set_lend_cloud(ctx.manager, on, conn=ctx.store.conn)}
         )
 
-    warnings = [global_cli.cloud_warning()] if on else []
+    warnings = global_cli.cloud_warnings() if on else []
     return Proposal([global_cli.cloud_text(on)], apply, warnings)
 
 
@@ -1473,9 +1479,17 @@ def _global_search(ctx: Context, args: BorrowSearchArgs) -> Outcome | Proposal:
     return Proposal([global_cli.search_text(args.state == "on")], apply)
 
 
+def _global_terms(ctx: Context, args: TermsArgs) -> Outcome:
+    rows, without_terms = global_cli.provider_terms(args.provider)
+    global_cli.print_terms(rows, without_terms)
+    local = without_terms.id if without_terms is not None and without_terms.local else None
+    return Outcome({"terms": global_cli.terms_json(rows), "local": local})
+
+
 def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
     config = ctx.config()
     provider = global_cli.donatable(config, args.provider)
+    needs_terms = global_cli.terms_to_accept(config, provider) is not None
     old = config.network.donated.get(provider.id)
     new = global_cli.donation(
         old or global_cli.DEFAULT_DONATION, args.calls, args.tokens, provider.id
@@ -1486,7 +1500,12 @@ def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
 
     def apply() -> Outcome:
         lent = global_cli.donate(
-            ctx.manager, args.provider, args.calls, args.tokens, conn=ctx.store.conn
+            ctx.manager,
+            args.provider,
+            args.calls,
+            args.tokens,
+            conn=ctx.store.conn,
+            accepted_terms=needs_terms,
         )
         global_cli.print_lent(lent)
         return _lent_outcome(lent)
@@ -1508,7 +1527,9 @@ def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
         if provider.id == protocol.SEARCH_PROVIDER
         else [t("Others' tasks will use it, up to the quota; its key stays on this machine.")]
     )
-    return Proposal(lines, apply, warnings)
+    if needs_terms:
+        warnings.append(providers.lending_note(provider))
+    return Proposal(lines, apply, warnings, confirm=needs_terms)
 
 
 def _global_undonate(ctx: Context, args: UndonateArgs) -> Proposal:
@@ -3251,6 +3272,13 @@ CATALOG: tuple[Entry, ...] = (
         BorrowSearchArgs,
         _borrow_search_kind,
         _global_search,
+    ),
+    Entry(
+        "global terms",
+        "Show cloud providers' terms on key sharing and lending, optionally for one provider.",
+        TermsArgs,
+        Kind.READ,
+        _global_terms,
     ),
     Entry(
         "global donate",

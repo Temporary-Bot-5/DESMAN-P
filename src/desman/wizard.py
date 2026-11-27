@@ -709,6 +709,12 @@ def ask_network(config: Config) -> NetworkChoice:
             "model provider to lend, and its daily quota, with `desman global donate PROVIDER`."
         )
     )
+    ui.note(
+        t(
+            "Local models can always be lent. Most free cloud tiers forbid lending "
+            "under their terms (see `desman global terms`)."
+        )
+    )
     if not ui.confirm(t("Take part in desman-global?"), default=config.network.enabled):
         return NetworkChoice(join=False)
     if config.network.registry is not None or net.DEFAULT_REGISTRY is not None:

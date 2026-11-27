@@ -15,6 +15,29 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "Дата проверки",
+    "Confirm lending a new cloud provider.": "Подтвердить первое одалживание облачного провайдера.",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN не читал условия {name}. Проверьте их перед одалживанием: {url}.",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN никому не отправляет ключ. При одалживании эта машина делает вызовы для чужих заданий. Прочитайте условия сами: они меняются.",
+    "Key sharing": "Передача ключа",
+    "Lending": "Одалживание",
+    "Lending may get your key or account suspended.": "За одалживание ваш ключ или аккаунт могут заблокировать.",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "Локальные модели можно одалживать всегда. Условия большинства бесплатных облачных тарифов запрещают одалживание (см. `desman global terms`).",
+    "Nothing lent. Run it again with --yes to lend {name}.": "Ничего не одолжено. Запустите команду ещё раз с --yes, чтобы одолжить {name}.",
+    "See `desman global terms` for provider terms.": "Условия провайдеров можно посмотреть командой `desman global terms`.",
+    "Show terms for cloud providers, or for one PROVIDER.": "Показать условия всех облачных провайдеров или одного PROVIDER.",
+    "Terms": "Условия",
+    "allowed": "разрешено",
+    "forbidden": "запрещено",
+    "not checked": "не проверено",
+    "unclear": "неясно",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} работает на вашей машине. Условия облачных провайдеров не применяются.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} не является поставщиком облачных моделей: условия поставщика не применяются.",
+    "{name}'s terms allow using your key for other people's work.": "Условия {name} разрешают использовать ваш ключ для чужих заданий.",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "Из условий {name} неясно, можно ли использовать ваш ключ для чужих заданий.",
+    "{name}'s terms forbid using your key for other people's work.": "Условия {name} запрещают использовать ваш ключ для чужих заданий.",
+    "{name}: lending {verdict}": "{name}: одалживание — {verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} См. {clauses} на {url} (прочитано {checked}).",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "База данных по пути {path} создана более новой версией DESMAN. Обновите DESMAN или укажите другой каталог в DESMAN_DATA_DIR."

@@ -321,27 +321,27 @@ TOPICS: Final = (
         "global",
         "desman-global: the opt-in network of DESMANs, joining, leaving, lending providers",
         "`/global join` opts in (--registry URL). `/global leave` withdraws all. "
-        "`/global status` shows this node's state and key fingerprint. "
-        "Operators list nodes with `/operator nodes`. "
+        "`/global status` shows status and key fingerprint. `/operator nodes` lists nodes. "
         "`/global donate PROVIDER --calls N --tokens N` lends a local or eligible free provider. "
-        "Keys stay here. `/global cloud on` lets you lend free cloud keys for the network "
-        "operator's jobs if your terms allow it. "
-        "`/global quota PROVIDER` sets quotas and shows the UTC-day reset "
-        "in local time. `/global undonate PROVIDER` withdraws it. "
-        "`/global donate PROVIDER --calls N` with searxng lends managed search (calls only). "
-        "`/global search STATE` (default off) controls borrowing when joined without SearXNG or Tavily. "
+        "New cloud loans show provider terms and need consent (--yes in CLI, confirmation "
+        "window in chat or on the page). See `/global terms`. "
+        "Keys stay here. `/global cloud on` allows free cloud loans for operator jobs if terms allow. "
+        "`/global quota PROVIDER` sets daily quotas and shows local time of UTC reset. "
+        "`/global undonate PROVIDER` ends the loan. "
+        "`/global donate PROVIDER --calls N` lends managed searxng search (calls only). "
+        "`/global search STATE` (default off) controls borrowing if joined without SearXNG or Tavily. "
         "Queries omit the asker’s identity. Results are untrusted.\n"
-        "Page workers register and fetch revocations. Idle nodes with fresh trust may "
-        "do or review jobs in a sandbox offline, or check proposals with a fake "
+        "Page workers register and fetch revocations. Idle nodes with fresh trust can "
+        "run or review jobs offline in a sandbox, or check proposals with a fake "
         "benchmark. Personal work comes first. `/global lead STATE` (on/off, default on) "
-        "allows idle appointed nodes to lead clusters. Status shows the role. Personal work or "
-        "turning leadership off hands the role back.\n"
+        "lets idle appointees lead clusters. Status shows the role. Personal work or "
+        "disabling leadership returns it.\n"
         "`/global submit-proposal N` previews texts and benchmarks (5/day, no private "
-        "evidence or settings). Use --confirm HASH to send it. For reports and memory see globalsend. "
+        "evidence or settings). Send with --confirm HASH. See globalsend for reports and memory. "
         "`/global update --show N` inspects root-signed releases (omit N for latest); "
-        "--apply N installs the release. --revert undoes the latest install if HEAD and schema still match. "
-        "Restart workers/chats after updating. Approve protected changes and reinstall changed "
-        "dependencies. Chat changes require confirmation.",
+        "--apply N installs it. --revert undoes latest install if HEAD and schema match. "
+        "Restart workers/chats, approve protected changes, reinstall updated "
+        "dependencies. Chat changes need confirmation.",
     ),
     Topic(
         "operator",

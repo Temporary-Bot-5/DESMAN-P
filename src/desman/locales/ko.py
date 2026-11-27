@@ -10,6 +10,29 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "확인일",
+    "Confirm lending a new cloud provider.": "클라우드 제공업체의 서비스를 처음 대여하는 데 동의합니다.",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN은 {name}의 약관을 읽지 않았습니다. 대여하기 전에 확인하세요: {url}.",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN은 누구에게도 키를 보내지 않습니다. 대여하면 이 컴퓨터가 다른 사람의 작업을 위해 API를 호출합니다. 약관은 바뀔 수 있으니 직접 읽어 보세요.",
+    "Key sharing": "키 공유",
+    "Lending": "대여",
+    "Lending may get your key or account suspended.": "대여하면 키나 계정이 정지될 수 있습니다.",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "로컬 모델은 언제든지 대여할 수 있습니다. 대부분의 무료 클라우드 요금제는 약관에서 대여를 금지합니다(`desman global terms` 참고).",
+    "Nothing lent. Run it again with --yes to lend {name}.": "대여한 항목이 없습니다. {name}을(를) 대여하려면 --yes를 붙여 다시 실행하세요.",
+    "See `desman global terms` for provider terms.": "제공업체 약관은 `desman global terms`에서 확인하세요.",
+    "Show terms for cloud providers, or for one PROVIDER.": "모든 클라우드 제공업체 또는 지정한 PROVIDER의 약관을 표시합니다.",
+    "Terms": "약관",
+    "allowed": "허용",
+    "forbidden": "금지",
+    "not checked": "미확인",
+    "unclear": "불명확",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name}은(는) 본인의 컴퓨터에서 실행됩니다. 클라우드 제공업체 약관이 적용되지 않습니다.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name}은(는) 클라우드 모델 제공업체가 아니므로 제공업체 약관이 적용되지 않습니다.",
+    "{name}'s terms allow using your key for other people's work.": "{name}의 약관은 다른 사람의 작업에 본인의 키를 사용하는 것을 허용합니다.",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "{name}의 약관에는 다른 사람의 작업에 본인의 키를 사용해도 되는지 명확히 나와 있지 않습니다.",
+    "{name}'s terms forbid using your key for other people's work.": "{name}의 약관은 다른 사람의 작업에 본인의 키를 사용하는 것을 금지합니다.",
+    "{name}: lending {verdict}": "{name}: 대여 {verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} {url}의 {clauses} 항목을 참고하세요({checked}에 확인).",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "{path}의 데이터베이스는 더 최신 버전의 DESMAN에서 생성되었습니다. DESMAN을 업데이트하거나 DESMAN_DATA_DIR을 다른 디렉터리로 설정하세요."

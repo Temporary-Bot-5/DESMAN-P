@@ -15,6 +15,29 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "Data sprawdzenia",
+    "Confirm lending a new cloud provider.": "Potwierdź pierwsze udostępnienie dostawcy chmurowego.",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN nie przeczytał regulaminu {name}. Sprawdź go przed udostępnieniem: {url}.",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN nikomu nie wysyła klucza; po udostępnieniu ta maszyna wykonuje wywołania na potrzeby cudzych zadań. Przeczytaj regulamin, ponieważ się zmienia.",
+    "Key sharing": "Przekazywanie klucza",
+    "Lending": "Udostępnianie",
+    "Lending may get your key or account suspended.": "Udostępnianie może skutkować zawieszeniem klucza lub konta.",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "Modele lokalne zawsze można udostępniać. Większość bezpłatnych planów chmurowych zabrania tego w regulaminie (zobacz `desman global terms`).",
+    "Nothing lent. Run it again with --yes to lend {name}.": "Nic nie udostępniono. Uruchom polecenie ponownie z --yes, aby udostępnić {name}.",
+    "See `desman global terms` for provider terms.": "Regulaminy dostawców znajdziesz pod poleceniem `desman global terms`.",
+    "Show terms for cloud providers, or for one PROVIDER.": "Wyświetl regulaminy wszystkich dostawców chmurowych lub jednego PROVIDER.",
+    "Terms": "Regulamin",
+    "allowed": "dozwolone",
+    "forbidden": "zabronione",
+    "not checked": "niesprawdzone",
+    "unclear": "niejasne",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} działa na Twojej maszynie. Nie obowiązuje regulamin dostawcy chmurowego.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} nie jest dostawcą modeli w chmurze: warunki dostawcy nie mają zastosowania.",
+    "{name}'s terms allow using your key for other people's work.": "Regulamin {name} pozwala używać Twojego klucza do wykonywania cudzych zadań.",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "Regulamin {name} nie zezwala jednoznacznie na używanie Twojego klucza do wykonywania cudzych zadań.",
+    "{name}'s terms forbid using your key for other people's work.": "Regulamin {name} zabrania używania Twojego klucza do wykonywania cudzych zadań.",
+    "{name}: lending {verdict}": "{name}: udostępnianie {verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} Zobacz {clauses} w {url} (przeczytano {checked}).",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "Baza danych w {path} została utworzona przez nowszą wersję programu DESMAN. Zaktualizuj DESMAN lub ustaw DESMAN_DATA_DIR na inny katalog."

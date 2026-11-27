@@ -10,6 +10,29 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "İnceleme tarihi",
+    "Confirm lending a new cloud provider.": "Bir bulut sağlayıcısını ilk kez ödünç vermeyi onayla.",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN, {name} koşullarını okumadı. Ödünç vermeden önce koşulları inceleyin: {url}.",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN kimseye anahtar göndermez; ödünç verirseniz bu makine başkalarının işleri için çağrı yapar. Koşulları kendiniz okuyun, çünkü değişebilirler.",
+    "Key sharing": "Anahtar paylaşımı",
+    "Lending": "Ödünç verme",
+    "Lending may get your key or account suspended.": "Ödünç verirseniz anahtarınız veya hesabınız askıya alınabilir.",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "Yerel modeller her zaman ödünç verilebilir. Çoğu ücretsiz bulut planının koşulları ödünç vermeyi yasaklar (bkz. `desman global terms`).",
+    "Nothing lent. Run it again with --yes to lend {name}.": "Hiçbir şey ödünç verilmedi. {name} sağlayıcısını ödünç vermek için komutu --yes ile yeniden çalıştırın.",
+    "See `desman global terms` for provider terms.": "Sağlayıcı koşulları için `desman global terms` komutuna bakın.",
+    "Show terms for cloud providers, or for one PROVIDER.": "Tüm bulut sağlayıcılarının veya tek bir PROVIDER için koşulları göster.",
+    "Terms": "Koşullar",
+    "allowed": "izinli",
+    "forbidden": "yasak",
+    "not checked": "incelenmedi",
+    "unclear": "belirsiz",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} kendi makinenizde çalışır. Bulut sağlayıcısı koşulları geçerli değildir.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} bir bulut modeli sağlayıcısı değildir: sağlayıcı koşulları geçerli değildir.",
+    "{name}'s terms allow using your key for other people's work.": "{name} koşulları, anahtarınızı başkalarının işleri için kullanmanıza izin verir.",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "{name} koşulları, anahtarınızı başkalarının işleri için kullanmanıza açıkça izin vermez.",
+    "{name}'s terms forbid using your key for other people's work.": "{name} koşulları, anahtarınızı başkalarının işleri için kullanmanızı yasaklar.",
+    "{name}: lending {verdict}": "{name}: ödünç verme {verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} {url} adresindeki {clauses} bölümlerine bakın (okunma tarihi {checked}).",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "{path} konumundaki veritabanı daha yeni bir DESMAN sürümüyle oluşturuldu. DESMAN’ı güncelleyin veya DESMAN_DATA_DIR değişkenini başka bir dizine ayarlayın."

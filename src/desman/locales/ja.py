@@ -10,6 +10,29 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "確認日",
+    "Confirm lending a new cloud provider.": "クラウドプロバイダーを初めて貸し出すことを確認します。",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN は {name} の規約を読んでいません。貸し出す前に確認してください: {url}。",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN は誰にもキーを送信しません。貸し出しとは、このマシンが他の人のジョブのために API を呼び出すことです。規約は変わるため、ご自身で確認してください。",
+    "Key sharing": "キーの共有",
+    "Lending": "貸し出し",
+    "Lending may get your key or account suspended.": "貸し出すと、キーやアカウントが停止される場合があります。",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "ローカルモデルはいつでも貸し出せます。ほとんどのクラウド無料プランでは規約で貸し出しが禁止されています（`desman global terms` を参照）。",
+    "Nothing lent. Run it again with --yes to lend {name}.": "貸し出しは行われていません。{name} を貸し出すには、--yes を付けて実行し直してください。",
+    "See `desman global terms` for provider terms.": "プロバイダーの規約は `desman global terms` で確認できます。",
+    "Show terms for cloud providers, or for one PROVIDER.": "すべてのクラウドプロバイダー、または指定した PROVIDER の規約を表示します。",
+    "Terms": "規約",
+    "allowed": "許可",
+    "forbidden": "禁止",
+    "not checked": "未確認",
+    "unclear": "不明",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} はご自身のマシンで動作します。クラウドプロバイダーの規約は適用されません。",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} はクラウドモデルのプロバイダーではないため、プロバイダーの規約は適用されません。",
+    "{name}'s terms allow using your key for other people's work.": "{name} の規約では、他の人の作業にご自身のキーを使うことが許可されています。",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "{name} の規約では、他の人の作業にご自身のキーを使ってよいかが明確ではありません。",
+    "{name}'s terms forbid using your key for other people's work.": "{name} の規約では、他の人の作業にご自身のキーを使うことが禁止されています。",
+    "{name}: lending {verdict}": "{name}: 貸し出しは{verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} {url} の {clauses} を参照してください（{checked} に確認）。",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "{path} のデータベースは、より新しいバージョンの DESMAN で作成されました。DESMAN を更新するか、DESMAN_DATA_DIR に別のディレクトリを指定してください。"

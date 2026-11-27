@@ -309,6 +309,8 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
 #settings-form .role-row strong { font-size: 12px; font-weight: 400; }
 #settings-form .lending-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 #settings-form .lending-row strong { flex: 1; }
+#settings-form .lending-row .lending-terms { flex-basis: 100%; order: 1; font-size: 11px; color: #9db4ba; }
+#settings-form .lending-row .lending-terms a { color: inherit; }
 #settings-form .lending-row .setting-row { display: block; border: 0; padding: 0; }
 #settings-form .lending-row .setting-row > span { display: block; font-size: 10px; color: #9db4ba; }
 #settings-form .lending-row input { width: 100px; }
