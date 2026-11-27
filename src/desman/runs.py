@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import errno
 import functools
+import posixpath
 import re
 import secrets
 import shutil
@@ -778,7 +779,8 @@ def _review_trace_frame(trace: str) -> tuple[str, int] | None:
     if not frames:
         return None
     syntax_path, syntax_line, path, line = frames[-1]
-    path = (syntax_path or path).removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
+    # The ini's `pythonpath = ..` makes paths like /workspace/.desman-review-X/../calc.py.
+    path = posixpath.normpath(syntax_path or path).removeprefix(f"{MOUNT_POINT}/")
     return path, int(syntax_line or line)
 
 
