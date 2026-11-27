@@ -197,6 +197,8 @@ REVIEWER_TESTS = (
     ' On accept, include "tests": a Python pytest module (at most 20000 characters with '
     "top-level test_ functions). Import the produced code from the workspace root, the "
     "working directory. Write independent tests; do not copy or invoke the executor's tests. "
+    "For required runs of non-Python code, you may launch the program with subprocess "
+    "inside the same networkless sandbox and check its output and exit code. "
     "Cover the acceptance criteria and every concrete input and expected output example in "
     "the goal, subtask and inputs, with a test for each example. Test only behaviour stated "
     "in the goal, subtask, inputs or acceptance criteria, plus behaviour no reading of the "

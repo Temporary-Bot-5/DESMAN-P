@@ -12,6 +12,9 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "审核者的测试 (第 {attempt} 次) — 通过：{passed}，失败：{failed}，错误：{errors}",
     "Reviewer's tests (attempt {attempt}) did not run.": "审核者的测试 (第 {attempt} 次)未运行。",
+    "Reviewer's tests (attempt {attempt}) timed out.": "审核者的测试（第 {attempt} 次）超时。",
+    "Reviewer's tests (attempt {attempt}) stopped: {reason}": "审核者的测试（第 {attempt} 次）已停止：{reason}",
+    "Reviewer's tests (attempt {attempt}) produced no report.": "审核者的测试（第 {attempt} 次）未生成报告。",
     "Checked": "核查日期",
     "Confirm lending a new cloud provider.": "确认首次出借云服务商的服务。",
     "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN 尚未阅读 {name} 的条款。出借前请查阅：{url}。",

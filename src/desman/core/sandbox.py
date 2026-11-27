@@ -1338,13 +1338,16 @@ def _docker_mount(source: Path, target: str, *, readonly: bool = False) -> str:
 
 def _isolated_pytest(command: Sequence[str]) -> Sequence[str]:
     """Make the read-only pytest mount available even when Python ignores PYTHONPATH."""
-    if list(command[:4]) != ["python3", "-I", "-m", "pytest"]:
+    if list(command[:2]) != ["python3", "-I"]:
+        return command
+    module_flag = 3 if len(command) > 2 and command[2] == "-B" else 2
+    if list(command[module_flag : module_flag + 2]) != ["-m", "pytest"]:
         return command
     source = (
         f"import runpy, sys; sys.path.insert(0, {_PYTHON_PATH!r}); "
         "runpy.run_module('pytest', run_name='__main__', alter_sys=True)"
     )
-    return ["python3", "-I", "-B", "-c", source, *command[4:]]
+    return ["python3", "-I", "-B", "-c", source, *command[module_flag + 2 :]]
 
 
 def _pytest_mounts() -> Iterator[tuple[Path, str]]:

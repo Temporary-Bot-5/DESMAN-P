@@ -46,6 +46,7 @@ from desman.core.coordinator import (
     Failure,
     Labels,
     Outcome,
+    ReviewTestRunner,
     ReviewTests,
     TestRun,
     Work,
@@ -830,9 +831,8 @@ def _run_review_tests(
         limits = sandbox.limits
         message = (
             f"The workspace is too large for the reviewer's test run "
-            f"(at least {entries} entries and {size} bytes; sandbox quota: "
-            f"{limits.workspace_files} entries and {limits.workspace_bytes} bytes). "
-            "Remove files the reviewer's run does not need."
+            f"(at least {entries} entries, {size} bytes; sandbox quota: "
+            f"{limits.workspace_files} entries, {limits.workspace_bytes} bytes)."
         )
         return TestRun(
             ran=False,
@@ -910,6 +910,7 @@ def _run_review_tests(
                 [
                     "python3",
                     "-I",
+                    "-B",
                     "-m",
                     "pytest",
                     "-c",
@@ -1005,7 +1006,9 @@ def coordinator(
             models=lambda ref: hub.inspect(ref, http),
             knowledge=tree,
         ),
-        review_tests=functools.partial(_run_review_tests, sandbox),
+        review_tests=ReviewTestRunner(
+            functools.partial(_run_review_tests, sandbox), sandbox.unavailable
+        ),
         knowledge=tree,
         lease_seconds=lease_seconds,
         watch=watch,

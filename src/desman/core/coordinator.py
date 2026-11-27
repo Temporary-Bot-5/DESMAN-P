@@ -62,7 +62,7 @@ from desman.core.effects import (
     Effects,
     earlier_lookups,
     earlier_results,
-    has_written_files,
+    has_written_python_files,
     workspace_files,
 )
 from desman.core.models import (
@@ -227,13 +227,23 @@ class TestRun(BaseModel):
     skipped_names: list[str] = Field(default_factory=list, max_length=5)
 
 
-ReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], TestRun]
+RunReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], TestRun]
+
+
+@dataclass(frozen=True)
+class ReviewTestRunner:
+    run: RunReviewTests
+    unavailable: Callable[[], str | None]
+
+
+ReviewTests = RunReviewTests | ReviewTestRunner
+
 # Scope the test contract to the current call while keeping the two-argument Reviewer API.
 review_tests_enabled: ContextVar[bool] = ContextVar("review_tests_enabled", default=False)
 
 
-def needs_review_tests(subtask: Subtask, *, written_files: bool) -> bool:
-    return subtask.runs_code or (subtask.kind is Kind.CODE and written_files)
+def needs_review_tests(subtask: Subtask, *, written_python_files: bool) -> bool:
+    return subtask.runs_code or (subtask.kind is Kind.CODE and written_python_files)
 
 
 class Work(BaseModel):
@@ -951,36 +961,45 @@ class Coordinator:
         self.store.note(subtask.id, Actor.EXECUTOR, "decomposition_failed", {"reason": reason})
         return False
 
-    def _review_test_skip_reason(self, subtask: Subtask) -> str | None:
+    def _review_test_skip(
+        self, subtask: Subtask, cover_call: Callable[[float], None]
+    ) -> TestRun | None:
         if self.review_tests is None:
-            return "review test runner unavailable"
+            return TestRun(ran=False, reason_not_run="review test runner unavailable")
         if self.store.tools(subtask.task_id) is not Tools.GRANTED or "document" in subtask.inputs:
-            return "task does not grant tools"
+            return TestRun(ran=False, reason_not_run="task does not grant tools")
         tool = self.tools.get(RUN_TOOL) if self.tools is not None else None
         if tool is None:
-            return "run_command unavailable"
+            return TestRun(ran=False, reason_not_run="run_command unavailable")
         access = self._crew(subtask).access or executor_access()
-        return access.refusal(tool)
+        if reason := access.refusal(tool):
+            return TestRun(ran=False, reason_not_run=reason)
+        if isinstance(self.review_tests, ReviewTestRunner):
+            cover_call(120)
+            if reason := self.review_tests.unavailable():
+                return TestRun(ran=False, reason_not_run=reason[:1_000], sandbox_unavailable=True)
+        return None
 
     def _check_review_tests(
         self,
         subtask: Subtask,
         review: Review,
-        skip_reason: str | None,
+        skipped: TestRun | None,
         cover_call: Callable[[float], None],
     ) -> tuple[Review | Failure, dict[str, Any] | None]:
         attempt = subtask.attempts.quality + 1
-        if skip_reason is not None:
-            result = TestRun(ran=False, reason_not_run=skip_reason)
+        if skipped is not None:
+            result = skipped
         elif review.tests is None:
             return Failure(kind=FailureKind.TRANSIENT, reason="reviewer gave no tests"), None
         else:
             runner = self.review_tests
             assert runner is not None
+            run = runner.run if isinstance(runner, ReviewTestRunner) else runner
             workspace = Workspace(self.workspaces, subtask.task_id)
             try:
                 result = TestRun.model_validate(
-                    runner(subtask, workspace, review.tests, attempt, cover_call)
+                    run(subtask, workspace, review.tests, attempt, cover_call)
                 )
             except SandboxUnavailable as error:
                 result = TestRun(
@@ -992,14 +1011,14 @@ class Coordinator:
             "tail": result.tail[-2_000:],
             "attempt": attempt,
         }
-        if skip_reason is None:
+        if skipped is None:
             note["source"] = review.tests
         return self._review_test_verdict(subtask, review, result), note
 
     @staticmethod
     def _review_test_verdict(subtask: Subtask, review: Review, result: TestRun) -> Review | Failure:
         if result.copy_over_quota:
-            feedback = result.copy_over_quota
+            return Failure(kind=FailureKind.TRANSIENT, reason=result.copy_over_quota)
         elif result.disk_low:
             return Failure(
                 kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
@@ -1038,7 +1057,7 @@ class Coordinator:
         only while the reservation is still ours."""
         review: Review | Failure
         needs_tests = False
-        skip_reason = None
+        skipped = None
         artifact = self.store.latest_artifact(subtask.id)
 
         def cover_call(timeout: float) -> None:
@@ -1047,13 +1066,13 @@ class Coordinator:
         try:
             needs_tests = not is_error_report(artifact) and needs_review_tests(
                 subtask,
-                written_files=subtask.kind is Kind.CODE
+                written_python_files=subtask.kind is Kind.CODE
                 and not subtask.runs_code
-                and has_written_files(self.store, subtask, root=self.workspaces),
+                and has_written_python_files(self.store, subtask, root=self.workspaces),
             )
-            skip_reason = self._review_test_skip_reason(subtask) if needs_tests else None
+            skipped = self._review_test_skip(subtask, cover_call) if needs_tests else None
             reviewer = self._crew(subtask).reviewer
-            setting = review_tests_enabled.set(needs_tests and skip_reason is None)
+            setting = review_tests_enabled.set(needs_tests and skipped is None)
             try:
                 with (
                     calls.for_(self._for(calls.Role.REVIEWER, subtask)),
@@ -1084,11 +1103,13 @@ class Coordinator:
                 feedback=f"{_error_reason(artifact)} (accepted by the reviewer, overruled)",
             )
         try:
-            if isinstance(review, Review) and review.verdict is Verdict.ACCEPT and needs_tests:
+            if (
+                isinstance(review, Review)
+                and needs_tests
+                and (skipped is not None or review.verdict is Verdict.ACCEPT)
+            ):
                 try:
-                    review, note = self._check_review_tests(
-                        subtask, review, skip_reason, cover_call
-                    )
+                    review, note = self._check_review_tests(subtask, review, skipped, cover_call)
                 except StaleStateError:
                     raise
                 except Exception as error:

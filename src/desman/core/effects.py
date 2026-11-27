@@ -400,18 +400,21 @@ def _output_order(workspace: Workspace, item: tuple[str, float]) -> tuple[int, f
     return priority, -modified, path
 
 
-def has_written_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
-    """Check journaled writes and workspace output created by commands inside the sandbox."""
+def has_written_python_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
+    """Check journaled writes and workspace command outputs for Python files."""
     if any(
-        _written_paths(store.effects(subtask.id, execution))
+        Path(path).suffix.lower() == ".py"
         for execution in range(store.executions(subtask.id) - 1, -1, -1)
+        for path in _written_paths(store.effects(subtask.id, execution))
     ):
         return True
     workspace = Workspace(
         root if root is not None else workspace_root_for(store.conn), subtask.task_id
     )
     windows, _ = _command_windows(store, subtask)
-    return next(_workspace_outputs(workspace, windows), None) is not None
+    return any(
+        Path(path).suffix.lower() == ".py" for path, _ in _workspace_outputs(workspace, windows)
+    )
 
 
 def _written_files(

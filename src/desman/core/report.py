@@ -32,6 +32,8 @@ class ReviewTestSummary(BaseModel):
     failed: int = 0
     errors: int = 0
     timed_out: bool = False
+    report_missing: bool = False
+    stopped: str = ""
 
 
 class SubtaskReport(BaseModel):
@@ -111,6 +113,8 @@ def task_report(store: Store, task_id: str) -> TaskReport:
         for sub in subtasks:
             reason = _reason(store, sub, by_id)
             tests = last_review_tests(store, sub.id)
+            if tests is not None:
+                tests["stopped"] = (tests.get("stopped") or tests.get("workspace_full") or "")[:250]
             reports.append(
                 SubtaskReport(
                     id=sub.id,

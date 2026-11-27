@@ -328,25 +328,39 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
             notes.append(one_line(sub.reason, 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
         review_tests = sub.review_tests
-        if review_tests and review_tests.ran:
-            click.echo(
-                "      "
-                + t(
+        if review_tests:
+            if not review_tests.ran:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) did not run.",
+                    attempt=review_tests.attempt,
+                )
+                if review_tests.reason_not_run:
+                    test_line += " " + one_line(review_tests.reason_not_run, 1_000)
+            elif review_tests.timed_out:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) timed out.",
+                    attempt=review_tests.attempt,
+                )
+            elif review_tests.stopped:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) stopped: {reason}",
+                    attempt=review_tests.attempt,
+                    reason=one_line(review_tests.stopped, 250),
+                )
+            elif review_tests.report_missing:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) produced no report.",
+                    attempt=review_tests.attempt,
+                )
+            else:
+                test_line = t(
                     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}",
                     attempt=review_tests.attempt,
                     passed=review_tests.passed,
                     failed=review_tests.failed,
                     errors=review_tests.errors,
                 )
-            )
-        elif review_tests:
-            click.echo(
-                "      "
-                + t(
-                    "Reviewer's tests (attempt {attempt}) did not run.",
-                    attempt=review_tests.attempt,
-                )
-            )
+            click.echo("      " + test_line)
         if hint := search_setup_hint(sub):
             click.echo("      " + hint)
         if sub.knowledge:
