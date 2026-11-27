@@ -784,6 +784,10 @@ def test_network_cloud_setting_uses_catalog_and_updates_lendable_providers(
     assert "groq" in disabled["network"]["donated"]
     groq = next(p for p in disabled["providers"] if p["id"] == "groq")
     assert not groq["lendable"]
+    assert groq["terms_url"] == "https://console.groq.com/docs/legal/services-agreement"
+    assert groq["lending"] == "forbidden"
+    ollama = next(p for p in disabled["providers"] if p["id"] == "ollama")
+    assert ollama["terms_url"] is None and ollama["lending"] is None
     assert groq["lending_label"] == "GROQ (not lent: cloud lending off)"
     with ui.use(app.front):
         chat._action(

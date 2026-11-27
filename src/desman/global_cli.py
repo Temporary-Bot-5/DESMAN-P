@@ -26,7 +26,7 @@ import sqlite3
 import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta, tzinfo
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -48,7 +48,7 @@ from desman.core import stats as task_stats
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
 from desman.net import cluster, jobs, node, protocol, search_lend, sign, updates
-from desman.providers import Provider
+from desman.providers import Provider, Terms
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
 """A module's quota when the person names none."""
@@ -320,6 +320,63 @@ def cloud_warning() -> str:
         "the network's operator gives this node jobs like any other module. Turn it on only "
         "if that is allowed for you, for example when the network's operator is you (testing "
         "on your own machines). Keys never leave this machine: only their fingerprint is sent."
+    )
+
+
+def cloud_warnings() -> list[str]:
+    return [
+        cloud_warning(),
+        *(
+            t(
+                "{name}: lending {verdict}",
+                name=p.name,
+                verdict=providers.verdict_text(p.terms.lending),
+            )
+            for p in providers.FREE
+            if p.terms is not None
+        ),
+        t("See `desman global terms` for provider terms."),
+    ]
+
+
+def provider_terms(name: str | None) -> tuple[list[Provider], Provider | None]:
+    if name is None:
+        return list(providers.CLOUD), None
+    try:
+        provider = providers.find(name)
+    except providers.UnknownProvider as e:
+        raise click.ClickException(str(e)) from e
+    return ([], provider) if provider.local else ([provider], None)
+
+
+def terms_json(rows: list[Provider]) -> list[dict[str, Any]]:
+    return [{"id": p.id, **asdict(p.terms)} for p in rows if p.terms is not None]
+
+
+def print_terms(rows: list[Provider], local: Provider | None) -> None:
+    if local is not None:
+        ui.note(
+            t("{name} runs on your own machine. No cloud provider terms apply.", name=local.name)
+        )
+        return
+    table = ui.table(t("Provider"), t("Key sharing"), t("Lending"), t("Checked"), t("Terms"))
+    table.columns[-1].overflow = "fold"
+    for p in rows:
+        terms = p.terms
+        if terms is not None:
+            table.add_row(
+                p.name,
+                providers.verdict_text(terms.key_sharing),
+                providers.verdict_text(terms.lending),
+                terms.checked,
+                Text(terms.url, style=f"link {terms.url}"),
+            )
+    ui.out(table)
+    ui.note(
+        t(
+            "DESMAN never sends a key to anyone; lending means this machine makes calls for "
+            "others' jobs. Read the terms yourself: they change."
+        )
     )
 
 
@@ -772,6 +829,11 @@ class Lent:
         return self.old != self.new
 
 
+def terms_to_accept(config: Config, provider: Provider) -> Terms | None:
+    """Cloud terms need consent when a donation is first made."""
+    return None if provider.id in config.network.donated else provider.terms
+
+
 def donate(
     manager: ConfigManager,
     name: str,
@@ -779,10 +841,14 @@ def donate(
     tokens: int | None = None,
     *,
     conn: sqlite3.Connection | None = None,
+    accepted_terms: bool = False,
 ) -> Lent:
     """Lend a provider (or change the quota of one lent already)."""
     with _change(manager, conn) as (config, entries):
         provider = donatable(config, name)
+        if terms_to_accept(config, provider) is not None and not accepted_terms:
+            # The donation may have been withdrawn since the CLI or chat preview.
+            raise click.ClickException(providers.lending_note(provider))
         old = config.network.donated.get(provider.id)
         new = donation(old or DEFAULT_DONATION, calls, tokens, provider.id)
         config.network.donated[provider.id] = new
@@ -1075,7 +1141,8 @@ def cloud_command(state: str | None) -> None:
     )
     ui.out(cloud_text(on))
     if state == "on":
-        ui.warn(cloud_warning())
+        for warning in cloud_warnings():
+            ui.warn(warning)
 
 
 @global_group.command("search")
@@ -1087,14 +1154,43 @@ def search_command(state: str | None) -> None:
     ui.out(search_text(on, joined=manager.load().network.enabled))
 
 
+@global_group.command("terms")
+@click.argument("provider", required=False)
+@json_option
+def terms_command(provider: str | None, as_json: bool) -> None:
+    """Show terms for cloud providers, or for one PROVIDER."""
+    rows, local = provider_terms(provider)
+    if as_json:
+        click.echo(json.dumps(terms_json(rows)))
+    else:
+        print_terms(rows, local)
+
+
 @global_group.command("donate")
 @click.argument("provider")
 @calls_option
 @tokens_option
+@click.option("--yes", is_flag=True, help="Confirm lending a new cloud provider.")
 @json_option
-def donate_command(provider: str, calls: int | None, tokens: int | None, as_json: bool) -> None:
+def donate_command(
+    provider: str, calls: int | None, tokens: int | None, yes: bool, as_json: bool
+) -> None:
     """Lend PROVIDER to desman-global with a daily quota (its key stays on this machine)."""
-    lent = donate(load_config(), provider, calls, tokens)
+    manager = load_config()
+    config = manager.load()
+    found = donatable(config, provider)
+    terms = terms_to_accept(config, found)
+    if terms is not None:
+        ui.warn(providers.lending_note(found), stderr=as_json)
+        if not yes:
+            if as_json:
+                click.echo(
+                    json.dumps({"lent": False, "provider": found.id, "terms": asdict(terms)})
+                )
+            else:
+                ui.note(t("Nothing lent. Run it again with --yes to lend {name}.", name=found.name))
+            return
+    lent = donate(manager, provider, calls, tokens, accepted_terms=terms is not None and yes)
     if as_json:
         click.echo(_lent_json(lent))
     else:

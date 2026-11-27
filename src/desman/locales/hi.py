@@ -10,6 +10,28 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "जाँच की तारीख",
+    "Confirm lending a new cloud provider.": "क्लाउड प्रदाता को पहली बार उधार देने की पुष्टि करें।",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN ने {name} की शर्तें नहीं पढ़ी हैं। उधार देने से पहले उन्हें देखें: {url}।",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN किसी को भी कुंजी नहीं भेजता; उधार देने पर यह मशीन दूसरों के काम के लिए अनुरोध करती है। शर्तें स्वयं पढ़ें, क्योंकि वे बदलती रहती हैं।",
+    "Key sharing": "कुंजी साझा करना",
+    "Lending": "उधार देना",
+    "Lending may get your key or account suspended.": "उधार देने से आपकी कुंजी या खाता निलंबित हो सकता है।",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "स्थानीय मॉडल हमेशा उधार दिए जा सकते हैं। ज़्यादातर मुफ़्त क्लाउड योजनाओं की शर्तें उधार देने से रोकती हैं (`desman global terms` देखें)।",
+    "Nothing lent. Run it again with --yes to lend {name}.": "कुछ भी उधार नहीं दिया गया। {name} को उधार देने के लिए कमांड --yes के साथ फिर चलाएँ।",
+    "See `desman global terms` for provider terms.": "प्रदाताओं की शर्तों के लिए `desman global terms` देखें।",
+    "Show terms for cloud providers, or for one PROVIDER.": "सभी क्लाउड प्रदाताओं या किसी एक PROVIDER की शर्तें दिखाएँ।",
+    "Terms": "शर्तें",
+    "allowed": "अनुमति है",
+    "forbidden": "मनाही है",
+    "not checked": "जाँच नहीं हुई",
+    "unclear": "अस्पष्ट",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} आपकी अपनी मशीन पर चलता है। क्लाउड प्रदाता की कोई शर्त लागू नहीं होती।",
+    "{name}'s terms allow using your key for other people's work.": "{name} की शर्तें दूसरों के काम के लिए आपकी कुंजी के उपयोग की अनुमति देती हैं।",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "{name} की शर्तें दूसरों के काम के लिए आपकी कुंजी के उपयोग की स्पष्ट अनुमति नहीं देतीं।",
+    "{name}'s terms forbid using your key for other people's work.": "{name} की शर्तें दूसरों के काम के लिए आपकी कुंजी के उपयोग पर रोक लगाती हैं।",
+    "{name}: lending {verdict}": "{name}: उधार देना — {verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} {url} में {clauses} देखें (पढ़ने की तारीख {checked})।",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "{path} पर मौजूद डेटाबेस DESMAN के नए संस्करण से बनाया गया था। DESMAN को अपडेट करें या DESMAN_DATA_DIR में कोई दूसरी निर्देशिका सेट करें।"

@@ -10,6 +10,28 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "核查日期",
+    "Confirm lending a new cloud provider.": "确认首次出借云服务商的服务。",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN 尚未阅读 {name} 的条款。出借前请查阅：{url}。",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN 不会向任何人发送密钥。出借意味着这台机器会为其他人的任务发起调用。条款会变更，请自行阅读。",
+    "Key sharing": "共享密钥",
+    "Lending": "出借",
+    "Lending may get your key or account suspended.": "出借可能导致您的密钥或账户被停用。",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "本地模型始终可以出借。大多数免费云套餐的条款禁止出借（参见 `desman global terms`）。",
+    "Nothing lent. Run it again with --yes to lend {name}.": "尚未出借任何服务。请加上 --yes 重新运行命令以出借 {name}。",
+    "See `desman global terms` for provider terms.": "运行 `desman global terms` 查看服务商条款。",
+    "Show terms for cloud providers, or for one PROVIDER.": "显示所有云服务商或指定 PROVIDER 的条款。",
+    "Terms": "条款",
+    "allowed": "允许",
+    "forbidden": "禁止",
+    "not checked": "未核查",
+    "unclear": "不明确",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} 在您自己的机器上运行，无需遵守云服务商条款。",
+    "{name}'s terms allow using your key for other people's work.": "{name} 的条款允许使用您的密钥处理其他人的任务。",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "{name} 的条款未明确允许使用您的密钥处理其他人的任务。",
+    "{name}'s terms forbid using your key for other people's work.": "{name} 的条款禁止使用您的密钥处理其他人的任务。",
+    "{name}: lending {verdict}": "{name}：出借{verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} 请参阅 {url} 中的 {clauses}（阅读日期：{checked}）。",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "{path} 处的数据库由较新版本的 DESMAN 创建。请更新 DESMAN，或将 DESMAN_DATA_DIR 设置为其他目录。"

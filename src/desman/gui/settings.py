@@ -59,6 +59,8 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
                 "id": p.id,
                 "name": p.name,
                 "url": p.url,
+                "terms_url": p.terms.url if p.terms else None,
+                "lending": p.terms.lending if p.terms else None,
                 "ready": p.is_ready(config),
                 "keyed": p.key_env is not None,
                 "keys": [

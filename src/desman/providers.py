@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from desman.i18n import t
 
@@ -26,6 +26,18 @@ class Setting:
     env: str
     label: str
     default: str = ""
+
+
+Verdict = Literal["forbidden", "unclear", "allowed", "unchecked"]
+
+
+@dataclass(frozen=True)
+class Terms:
+    url: str
+    checked: str
+    key_sharing: Verdict
+    lending: Verdict
+    clauses: str
 
 
 @dataclass(frozen=True)
@@ -62,10 +74,11 @@ class Provider:
     context_env: str | None = None
     # Its key may be lent to desman-global (ADR 0004, decision 5): the node makes calls for
     # others with it. Set only by a person who read the free tier's terms on serving third
-    # parties, with the link and the date in a comment. Never for a paid provider.
+    # parties and recorded them below. Requires terms.lending == "allowed". Never for a paid provider.
     donatable: bool = False
     # Provider-managed settings excluded from the wizard and config display.
     internal_settings: tuple[str, ...] = ()
+    terms: Terms | None = None
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -131,6 +144,14 @@ FREE = (
         # Big free models write ~60–90 tokens/s: long replies take over a minute.
         # One call plus one repair stays under the 300-second lease; long replies took 64–92 s.
         timeout=120.0,
+        terms=Terms(
+            "https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf",
+            "2026-11-27",
+            "forbidden",
+            "forbidden",
+            "§1.2, §1.4 (trial: internal testing and evaluation only, not production), §4.2 (no "
+            "making available to others)",
+        ),
     ),
     Provider(
         "google",
@@ -140,6 +161,15 @@ FREE = (
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         default_model="gemini-3.5-flash-lite",
         limits_url="https://ai.google.dev/gemini-api/docs/rate-limits",
+        terms=Terms(
+            "https://developers.google.com/terms",
+            "2026-11-27",
+            "forbidden",
+            "forbidden",
+            "APIs Terms §4.a.1 (no sublicensing to a third party), §4.b.1 (credentials for your "
+            "own API client, kept confidential); Gemini Additional Terms "
+            "(aistudio.google.com/docs/terms): free tier prompts used for training",
+        ),
     ),
     Provider(
         "groq",
@@ -149,6 +179,15 @@ FREE = (
         base_url="https://api.groq.com/openai/v1",
         default_model="openai/gpt-oss-20b",
         limits_url="https://console.groq.com/docs/rate-limits",
+        terms=Terms(
+            "https://console.groq.com/docs/legal/services-agreement",
+            "2026-11-27",
+            "unclear",
+            "forbidden",
+            "§3.2 (no reselling or leasing access to the account), §6.3(c) (no transfer or "
+            "distribution without Groq's approval); AI Policy (no orchestrating usage between "
+            "organizations)",
+        ),
     ),
     Provider(
         "mistral",
@@ -158,6 +197,14 @@ FREE = (
         base_url="https://api.mistral.ai/v1",
         default_model="mistral-small-latest",
         limits_url="https://admin.mistral.ai/plateforme/limits",
+        terms=Terms(
+            "https://legal.mistral.ai/terms/commercial-terms-of-service",
+            "2026-11-27",
+            "forbidden",
+            "forbidden",
+            "§2.2(h) (no transferring API keys), §2.2(i) (no third-party access without written "
+            "authorization)",
+        ),
     ),
     Provider(
         "cloudflare",
@@ -168,6 +215,14 @@ FREE = (
         base_url="https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1",
         default_model="@cf/meta/llama-3.1-8b-instruct",
         limits_url="https://developers.cloudflare.com/workers-ai/platform/limits/",
+        terms=Terms(
+            "https://www.cloudflare.com/terms/",
+            "2026-11-27",
+            "unclear",
+            "forbidden",
+            "§2.2.1(a) (no loaning access to the Services to a third party), §2.3 (a shared API "
+            "token is at your sole risk)",
+        ),
     ),
     Provider(
         "cohere",
@@ -177,6 +232,14 @@ FREE = (
         base_url="https://api.cohere.ai/compatibility/v1",
         default_model="command-a-03-2025",
         limits_url="https://docs.cohere.com/docs/rate-limits",
+        terms=Terms(
+            "https://cohere.com/terms-of-use",
+            "2026-11-27",
+            "forbidden",
+            "forbidden",
+            "§2.2 (account not shared), §14 (no service-bureau or timesharing use); trial keys "
+            "are evaluation keys",
+        ),
     ),
     Provider(
         "aion",
@@ -186,6 +249,14 @@ FREE = (
         base_url="https://api.aionlabs.ai/v1",
         default_model="aion-labs/aion-3.0-mini",
         limits_url="https://aionlabs.ai/",
+        terms=Terms(
+            "https://aionlabs.ai/terms",
+            "2026-11-27",
+            "forbidden",
+            "unclear",
+            "§4 (no sharing or lending keys; serving your own users allowed only with credentials "
+            "you issue and bill)",
+        ),
     ),
     Provider(
         "openrouter",
@@ -195,6 +266,14 @@ FREE = (
         base_url="https://openrouter.ai/api/v1",
         default_model="nvidia/nemotron-3.5-lightning:free",
         limits_url="https://openrouter.ai/docs/api-reference/limits",
+        terms=Terms(
+            "https://openrouter.ai/terms",
+            "2026-11-27",
+            "unclear",
+            "unclear",
+            "§7.4 (no reselling API access), §7.14 (no transferring access), §3.2 (you answer for "
+            "all use of your keys)",
+        ),
     ),
     Provider(
         "vercel",
@@ -204,6 +283,14 @@ FREE = (
         base_url="https://ai-gateway.vercel.sh/v1",
         default_model="google/gemini-3.5-flash-lite",
         limits_url="https://vercel.com/docs/ai-gateway/pricing",
+        terms=Terms(
+            "https://vercel.com/terms",
+            "2026-11-27",
+            "unclear",
+            "forbidden",
+            "§4 (Hobby plan: personal, non-commercial use only), §12(i),(iv) (no making the "
+            "Services available to third parties, no service-bureau use)",
+        ),
     ),
 )
 
@@ -220,6 +307,13 @@ PAID = (
         default_model="gpt-6-luna",
         limits_url="https://platform.openai.com/settings/organization/limits",
         paid=True,
+        terms=Terms(
+            "https://openai.com/policies/services-agreement/",
+            "2026-11-27",
+            "forbidden",
+            "forbidden",
+            "§3.1 (no reselling or leasing account access), §3.3(g) (no transferring API keys)",
+        ),
     ),
     Provider(
         "anthropic",
@@ -239,6 +333,13 @@ PAID = (
         ),
         send_temperature=False,
         max_tokens=4096,
+        terms=Terms(
+            "https://www.anthropic.com/legal/commercial-terms",
+            "2026-11-27",
+            "unclear",
+            "forbidden",
+            "§D.4(a) (no reselling the Services without approval)",
+        ),
     ),
     Provider(
         "deepseek",
@@ -249,6 +350,13 @@ PAID = (
         default_model="deepseek-flash",
         limits_url="https://api-docs.deepseek.com/quick_start/rate_limit",
         paid=True,
+        terms=Terms(
+            "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html",
+            "2026-11-27",
+            "forbidden",
+            "unclear",
+            "§2.2 (do not share the API key)",
+        ),
     ),
     Provider(
         "xai",
@@ -259,10 +367,56 @@ PAID = (
         default_model="grok-4.3",
         limits_url="https://docs.x.ai/docs/models",
         paid=True,
+        terms=Terms(
+            "https://x.ai/legal/terms-of-service",
+            "2026-11-27",  # The page refused automated reading.
+            "unchecked",
+            "unchecked",
+            "",
+        ),
     ),
 )
 
 CLOUD = FREE + PAID
+
+
+def verdict_text(v: Verdict) -> str:
+    return {
+        "forbidden": t("forbidden"),
+        "unclear": t("unclear"),
+        "allowed": t("allowed"),
+        "unchecked": t("not checked"),
+    }[v]
+
+
+def lending_note(p: Provider) -> str:
+    terms = p.terms
+    if terms is None:
+        return ""
+    if terms.lending == "unchecked":
+        return t(
+            "DESMAN has not read {name}'s terms. Check them before lending: {url}.",
+            name=p.name,
+            url=terms.url,
+        )
+    if terms.lending == "forbidden":
+        verdict = t("{name}'s terms forbid using your key for other people's work.", name=p.name)
+    elif terms.lending == "unclear":
+        verdict = t(
+            "{name}'s terms do not clearly allow using your key for other people's work.",
+            name=p.name,
+        )
+    else:
+        verdict = t("{name}'s terms allow using your key for other people's work.", name=p.name)
+    if terms.lending in ("forbidden", "unclear"):
+        verdict += " " + t("Lending may get your key or account suspended.")
+    return t(
+        "{verdict} See {clauses} in {url} (read {checked}).",
+        verdict=verdict,
+        clauses=terms.clauses,
+        url=terms.url,
+        checked=terms.checked,
+    )
 
 
 def untested_note() -> str:

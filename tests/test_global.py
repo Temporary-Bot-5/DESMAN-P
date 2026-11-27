@@ -256,7 +256,7 @@ def test_cloud_consent_controls_lending_and_is_journaled() -> None:
     assert "desman global cloud on" in refused("global", "donate", "groq")
     assert "Most free tiers' terms" in ok("global", "cloud", "on").output
     assert json.loads(ok("global", "status", "--json").output)["lend_cloud"] is True
-    ok("global", "donate", "groq")
+    ok("global", "donate", "groq", "--yes")
     assert "paid provider" in refused("global", "donate", providers.PAID[0].id)
     ok("global", "cloud", "off")
     ok("global", "cloud", "off")  # No duplicate receipt for the same state.
@@ -370,6 +370,9 @@ def test_the_wizards_network_step_joins_and_leaves() -> None:
     assert result.exit_code == 0, result.output
     assert "is not a registry address" in result.output
     assert "Taking part in desman-global" in result.output
+    assert result.output.index("Most free cloud tiers forbid lending") < result.output.index(
+        "Take part in desman-global?"
+    )
     assert saved().network.enabled and node_key().exists()
     result = wizard("1", DONE, *KEEP_PERMISSIONS, "", "", "", "")  # Enter keeps it on
     assert result.exit_code == 0, result.output
@@ -422,7 +425,10 @@ def test_cloud_consent_from_chat_shows_warning_and_waits_for_yes(fake: FakeLLM) 
     fake.on(CHAT, asks("global cloud", state="on"), asks("global cloud", state="on"))
     result = chat("allow cloud lending", "n")
     assert "Most free tiers' terms" in result.output
-    assert "Apply this change?" in result.output
+    assert result.output.index("GROQ: lending forbidden") < result.output.index(
+        "Apply this change?"
+    )
+    assert "`/global terms`" in result.output
     assert not saved().network.lend_cloud and network_log() == []
 
     result = chat("allow cloud lending", "y")

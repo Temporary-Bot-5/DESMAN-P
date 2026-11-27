@@ -10,6 +10,28 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Checked": "Geprüft",
+    "Confirm lending a new cloud provider.": "Das erstmalige Verleihen eines Cloud-Anbieters bestätigen.",
+    "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN hat die Bedingungen von {name} nicht gelesen. Prüfen Sie sie vor dem Verleihen: {url}.",
+    "DESMAN never sends a key to anyone; lending means this machine makes calls for others' jobs. Read the terms yourself: they change.": "DESMAN gibt niemals einen Schlüssel weiter; beim Verleihen bearbeitet dieser Rechner Aufträge anderer. Lesen Sie die Bedingungen selbst, denn sie ändern sich.",
+    "Key sharing": "Schlüsselweitergabe",
+    "Lending": "Verleihen",
+    "Lending may get your key or account suspended.": "Beim Verleihen kann Ihr Schlüssel oder Konto gesperrt werden.",
+    "Local models can always be lent. Most free cloud tiers forbid lending under their terms (see `desman global terms`).": "Lokale Modelle können immer verliehen werden. Die Bedingungen der meisten kostenlosen Cloud-Tarife verbieten das Verleihen (siehe `desman global terms`).",
+    "Nothing lent. Run it again with --yes to lend {name}.": "Es wurde nichts verliehen. Führen Sie den Befehl mit --yes erneut aus, um {name} zu verleihen.",
+    "See `desman global terms` for provider terms.": "Die Anbieterbedingungen finden Sie unter `desman global terms`.",
+    "Show terms for cloud providers, or for one PROVIDER.": "Bedingungen aller Cloud-Anbieter oder eines einzelnen PROVIDER anzeigen.",
+    "Terms": "Bedingungen",
+    "allowed": "erlaubt",
+    "forbidden": "verboten",
+    "not checked": "nicht geprüft",
+    "unclear": "unklar",
+    "{name} runs on your own machine. No cloud provider terms apply.": "{name} läuft auf Ihrem eigenen Rechner. Es gelten keine Bedingungen eines Cloud-Anbieters.",
+    "{name}'s terms allow using your key for other people's work.": "Die Bedingungen von {name} erlauben die Nutzung Ihres Schlüssels für Aufträge anderer.",
+    "{name}'s terms do not clearly allow using your key for other people's work.": "Die Bedingungen von {name} erlauben die Nutzung Ihres Schlüssels für Aufträge anderer nicht ausdrücklich.",
+    "{name}'s terms forbid using your key for other people's work.": "Die Bedingungen von {name} verbieten die Nutzung Ihres Schlüssels für Aufträge anderer.",
+    "{name}: lending {verdict}": "{name}: Verleihen {verdict}",
+    "{verdict} See {clauses} in {url} (read {checked}).": "{verdict} Siehe {clauses} in {url} (gelesen am {checked}).",
     "The database at {path} was created by a newer DESMAN. "
     "Update DESMAN or set DESMAN_DATA_DIR to another directory.": (
         "Die Datenbank unter {path} wurde von einer neueren DESMAN-Version erstellt. Aktualisieren Sie DESMAN oder setzen Sie DESMAN_DATA_DIR auf ein anderes Verzeichnis."
