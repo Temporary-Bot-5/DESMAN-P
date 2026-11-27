@@ -19,6 +19,7 @@ MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) timed out.": "レビュー担当者のテスト（試行 {attempt}）がタイムアウトしました。",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "レビュー担当者のテスト（試行 {attempt}）を停止しました：{reason}",
     "needs package {name}, not installed in the sandbox": "必要なパッケージ {name} がサンドボックスにインストールされていません",
+    "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "レビュー担当のテスト（試行 {attempt}）を収集または準備できませんでした: {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "レビュー担当者のテスト（試行 {attempt}）— pytest は終了コード {exit_code} で終了しました",
     "Reviewer's tests (attempt {attempt}) produced no report.": "レビュー担当者のテスト（試行 {attempt}）でレポートが生成されませんでした。",
     "Checked": "確認日",

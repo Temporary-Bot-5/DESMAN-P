@@ -768,6 +768,20 @@ _REVIEW_COPY_PREFIX = "review-"
 _REVIEW_REPORT_LIMIT = 1024 * 1024
 
 
+def _review_trace_frame(trace: str) -> tuple[str, int] | None:
+    # Pytest renders collection frames, failure locations and syntax errors differently.
+    frames = re.findall(
+        r'(?m)^(?:(?:E +| +)File "([^"\n]+)", line ([0-9]{1,9})(?:, in .+)?'
+        r"|([^\n]+?):([0-9]{1,9})(?:: (?:in .+|[A-Za-z_][\w.]*))?)$",
+        trace,
+    )
+    if not frames:
+        return None
+    syntax_path, syntax_line, path, line = frames[-1]
+    path = (syntax_path or path).removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
+    return path, int(syntax_line or line)
+
+
 def _missing_review_import(
     issue: ET.Element,
     workspace: Workspace,
@@ -778,21 +792,19 @@ def _missing_review_import(
 ) -> tuple[str, bool] | None:
     trace = (issue.text or "").strip()
     pattern = r"(?:E +)?ModuleNotFoundError: No module named '([^'\n]+)'"
-    match = re.fullmatch(pattern, issue.get("message", "")) or re.fullmatch(
-        pattern, trace.rsplit("\n", 1)[-1]
+    match = re.fullmatch(pattern, issue.get("message", "")) or next(
+        (match for line in reversed(trace.splitlines()) if (match := re.fullmatch(pattern, line))),
+        None,
     )
     if match is None:
         return None
     name = match[1]
     if not name.isidentifier() or name in sys.stdlib_module_names or name in local_names:
         return None
-    # Collection and test failures render the innermost frame differently.
-    frames = re.findall(r"(?m)^([^\n]+?):([0-9]{1,9}): (?:in .+|ModuleNotFoundError)$", trace)
-    if not frames:
+    frame = _review_trace_frame(trace)
+    if frame is None:
         return None
-    path, line = frames[-1]
-    path = path.removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
-    lineno = int(line)
+    path, lineno = frame
     in_reviewer = path == reviewer_file
     if in_reviewer:
         tree = reviewer_tree
@@ -826,6 +838,7 @@ class _ReviewReport:
     failing: list[str]
     executor_packages: set[str]
     reviewer_import: str | None
+    reviewer_error: str | None
     verified: bool
 
 
@@ -912,10 +925,11 @@ def _read_review_report(
     all_issues_need_packages = True
     reviewer_imports: set[str] = set()
     all_issues_from_reviewer_imports = True
-    identities: set[tuple[str, str]] = set()
+    declared_names = review_test_names(reviewer_tree)
     collection_errors = 0
-    case_ids: set[tuple[str, str]] = set()
-    valid_case_ids = True
+    matching_name = False
+    all_cases_in_module = True
+    reviewer_errors: list[str] = []
     for case in suite.iterfind("testcase"):
         error = case.find("error")
         failure = case.find("failure")
@@ -934,22 +948,37 @@ def _read_review_report(
         counts[status] += 1
         name = case.get("name", "")
         group = case.get("classname", "")
-        if (
-            error is not None
-            and error.get("message") == "collection failure"
-            and not group
-            and name == "test_review"
-        ):
+        collection_error = error is not None and error.get("message") == "collection failure"
+        if collection_error and not group and name == "test_review":
             collection_errors += 1
         else:
-            base, bracket, parameter = name.partition("[")
-            case_id = (group, name)
-            if (bracket and not parameter.endswith("]")) or (
-                exit_code == 0 and case_id in case_ids
-            ):
-                valid_case_ids = False
-            case_ids.add(case_id)
-            identities.add((group, base))
+            case_file = case.get("file")
+            in_module = (
+                case_file.removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
+                in {reviewer_file, "test_review.py"}
+                if case_file
+                else group == "test_review" or group.startswith("test_review.")
+            )
+            all_cases_in_module &= in_module
+            matching_name |= name.partition("[")[0] in declared_names
+        setup_error = error is not None and error.get("message", "").startswith(
+            "failed on setup with "
+        )
+        reviewer_side = False
+        if error is not None and (collection_error or setup_error):
+            trace = error.text or ""
+            frame = _review_trace_frame(trace)
+            if frame is not None and frame[0] == reviewer_file:
+                reviewer_side = True
+                reason = next(
+                    (
+                        line.removeprefix("E").strip()
+                        for line in reversed(trace.splitlines())
+                        if line.startswith("E ") and line[1:].strip()
+                    ),
+                    error.get("message", ""),
+                )
+                reviewer_errors.append(reason[:500])
         if issue is None:
             continue
         if len(failing) < 20:
@@ -957,11 +986,11 @@ def _read_review_report(
         missing = _missing_review_import(
             issue, source, copied_python, local_names, reviewer_file, reviewer_tree
         )
-        if missing is not None and missing[1]:
+        if missing is not None and missing[1] and reviewer_side:
             reviewer_imports.add(missing[0])
         else:
             all_issues_from_reviewer_imports = False
-        if missing is not None and not missing[1]:
+        if missing is not None and not missing[1] and (collection_error or setup_error):
             missing_packages.add(missing[0])
         else:
             all_issues_need_packages = False
@@ -973,14 +1002,17 @@ def _read_review_report(
     names_match = (
         collection_errors == 1 and sum(counts.values()) == 1 and exit_code == 2
         if collection_errors
-        else identities == review_test_names(reviewer_tree)
+        else all_cases_in_module and matching_name
     )
     return _ReviewReport(
         counts,
         failing,
         missing_packages if all_issues_need_packages else set(),
         reviewer_import,
-        valid_case_ids and names_match and _summary_matches(stdout, counts),
+        reviewer_errors[0]
+        if reviewer_errors and len(reviewer_errors) == counts["errors"] and counts["failed"] == 0
+        else None,
+        names_match and _summary_matches(stdout, counts),
     )
 
 
@@ -1093,7 +1125,11 @@ def _run_review_tests(
             file = f"{review_dir}/test_review.py"
             ini = f"{review_dir}/pytest.ini"
             report = f"{review_dir}/{secrets.token_hex(16)}.xml"
-            config = f"[pytest]\npythonpath = ..\naddopts = --junitxml={report}\n"
+            config = (
+                "[pytest]\npythonpath = ..\npython_files = test_*.py *_test.py\n"
+                "python_classes = Test*\npython_functions = test*\n"
+                f"addopts = --junitxml={report}\n"
+            )
             copy.write(file, module)
             copy.write(ini, config)
             review_limits = replace(
@@ -1176,6 +1212,7 @@ def _run_review_tests(
         skipped=counts.get("skipped", 0),
         report_missing=parsed is None,
         report_unverified=parsed is not None and not parsed.verified,
+        reviewer_error=parsed.reviewer_error if parsed and parsed.verified else None,
         reviewer_missing_import=reviewer_import,
         reviewer_import_is_package=reviewer_import is not None
         and (

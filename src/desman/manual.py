@@ -40,7 +40,7 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "Planner: 1 subtask for simple work, up to 8 for tools/dependencies; template fallback. Simple code changes and tests share one subtask. Executors work; reviewers check. Dependencies form a DAG. Stopped work resumes from checkpoints with `/resume TASK`; done work is kept. `/worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `/run GOAL` and `/status TASK` show full text answers (data inside) and file folders; status --json includes the full result, files and folder. `/list` shows visible tasks (with --subtasks, --all: hidden too). `/status TASK`, `/audit TASK` and `/stats` retain access to history. `/task pin TASK` and `/task unpin TASK` control a task's pin and its modules' pin. `/task hide TASK` hides finished work only; `/task hide --finished` hides finished unpinned ones; nothing is erased. `/task pause TASK` pauses unfinished work; `/task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `/resume TASK` clears the operator pause and continues. `/task extend TASK GOAL` and `/task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. Retellings may propose these (window first). Subtasks get ≤3 knowledge nodes (see status). "
+        "Planner: 1 subtask for simple work, up to 8 for tools/dependencies; template fallback. Simple code changes and tests share one subtask. Executors work; reviewers check. Dependencies form a DAG. Stopped work resumes from checkpoints with `/resume TASK`; done work is kept. `/worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (temporary limit), needs_human, failed, blocked, cancelled. `/run GOAL` and `/status TASK` show full text answers (data inside) and file folders; status --json includes the full result, files and folder. `/list` shows visible tasks (with --subtasks, --all: hidden too). `/status TASK`, `/audit TASK` and `/stats` retain access to history. `/task pin TASK` and `/task unpin TASK` control a task's pin and its modules' pin. `/task hide TASK` hides finished work only; `/task hide --finished` hides finished unpinned ones; nothing is erased. `/task pause TASK` pauses unfinished work; `/task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `/resume TASK` clears the operator pause and continues. `/task extend TASK GOAL` and `/task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. Retellings may propose these (window first). Subtasks get ≤3 knowledge nodes (see status). "
         "Status shows the latest review test outcome and attempt. Audit keeps the source and output tail.",
     ),
     Topic(
@@ -67,19 +67,18 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Executor tools use workspaces/TASK next to the database. Chat lists files and folder, skips repeated text and treats it as untrusted. Chat and run/status show written "
+        "Executor tools use workspaces/TASK next to the database. Chat lists the files and folder and skips repeated, untrusted text. Chat and run/status show "
         "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). Same-chat follow-up tasks get copies in from-TASK/; originals stay. Retries and interrupted runs reuse saved tool results. "
         "Retries see work files and rewrite stale demonstration files.\n"
         "Running code needs run_command, shell_execution (`/permissions`) and a sandbox. "
-        "If the planner or `/run --runs-code` requires execution, the attempt’s last run must "
+        "If the planner or `/run --runs-code` requires execution, the last run must "
         "exit 0. If unavailable, the subtask waits for the person. "
         "Code subtasks default to 16 tool rounds (8–48 via `/tuning --code-rounds N`). "
         "edit_file replaces exact fragments; each run shows the executor its exit code and output tails. Prose goes in the result; files are extra. Review checks sources, dates, language "
-        "(names/translations allowed) and coverage. Live data may have fewer items given sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
+        "(names/translations allowed) and coverage. Live data may have fewer items with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
         "the combine step. For blocked pages, use snippets or another official source. "
-        "Review sees recent files and may test runs or Python outputs in an offline copy. It checks test names and counts against the report and pytest output. "
-        "Sandbox outages interrupt required reviews. Oversized copies skip tests, as can "
-        "missing third-party imports in submitted Python without required execution.\n"
+        "Review tests runs or Python outputs in an offline copy and checks test names and counts. "
+        "Required reviews pause for one minute on sandbox outages, and any review pauses on low disk space. Reviewer setup or collection errors retry the review. Oversized copies and missing packages on optional collection/setup can skip tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code and use your latest message’s language.",
     ),

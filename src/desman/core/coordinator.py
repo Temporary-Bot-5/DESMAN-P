@@ -37,12 +37,11 @@ import ast
 import functools
 import json
 import math
-import re
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
@@ -78,7 +77,7 @@ from desman.core.models import (
 )
 from desman.core.policy import Access, executor_access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
-from desman.core.sandbox import SandboxUnavailable
+from desman.core.sandbox import SANDBOX_RETRY_SECONDS, SandboxUnavailable
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
@@ -196,26 +195,20 @@ class Review(BaseModel):
             except (SyntaxError, ValueError, RecursionError) as error:
                 raise ValueError(f"tests must be valid Python: {error}") from error
             if not review_test_names(module):
-                raise ValueError(
-                    "tests must define a top-level test_ function or Test class method"
-                )
+                raise ValueError("tests must define a top-level test function or class method")
         return tests
 
 
-def review_test_names(module: ast.Module) -> set[tuple[str, str]]:
-    def names(body: list[ast.stmt]) -> set[str]:
-        return {
-            node.name
-            for node in body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name.startswith("test_")
-        }
-
-    found = {("test_review", name) for name in names(module.body)}
-    for node in module.body:
-        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
-            found.update((f"test_review.{node.name}", name) for name in names(node.body))
-    return found
+def review_test_names(module: ast.Module) -> set[str]:
+    scopes: list[ast.Module | ast.ClassDef] = [module]
+    scopes.extend(node for node in module.body if isinstance(node, ast.ClassDef))
+    return {
+        node.name
+        for scope in scopes
+        for node in scope.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test")
+    }
 
 
 class ReviewTestRun(BaseModel):
@@ -231,6 +224,7 @@ class ReviewTestRun(BaseModel):
     skipped: int = Field(default=0, ge=0)
     report_missing: bool = False
     report_unverified: bool = False
+    reviewer_error: str | None = None
     reviewer_missing_import: str | None = None
     reviewer_import_is_package: bool = False
     failing: list[Annotated[str, Field(max_length=250)]] = Field(
@@ -1035,23 +1029,13 @@ class Coordinator:
         }
         if skipped is None:
             note["source"] = review.tests
-        verdict = self._review_test_verdict(subtask, review, result)
-        if not isinstance(verdict, Failure) and result.reviewer_missing_import:
-            note.update(reviewer_missing_import=None, reviewer_import_is_package=False)
-        return verdict, note
+        return self._review_test_verdict(subtask, review, result), note
 
     def _review_test_verdict(
         self, subtask: Subtask, review: Review, result: ReviewTestRun
     ) -> Review | Failure:
-        if result.disk_low:
-            return Failure(
-                kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
-            )
-        elif result.sandbox_unavailable and subtask.runs_code:
-            return Failure(
-                kind=FailureKind.TRANSIENT,
-                reason=result.reason_not_run or "review sandbox unavailable",
-            )
+        if result.disk_low or (result.sandbox_unavailable and subtask.runs_code):
+            return self._review_sandbox_failure(result)
         elif result.stopped or result.workspace_full:
             feedback = f"reviewer's tests failed: {result.stopped or result.workspace_full}"
         elif not result.ran:
@@ -1062,14 +1046,11 @@ class Coordinator:
             feedback = "reviewer's tests produced no report"
         elif result.report_unverified:
             feedback = "reviewer's tests could not be verified"
-        elif (name := result.reviewer_missing_import) and not self._task_names_import(
-            subtask, name
-        ):
-            reason = (
-                f"reviewer's tests need package {name}"
-                if result.reviewer_import_is_package
-                else f"reviewer's tests import {name}, which the task does not name"
-            )
+        elif result.reviewer_error:
+            if result.reviewer_missing_import and result.reviewer_import_is_package:
+                reason = f"reviewer's tests need package {result.reviewer_missing_import}"
+            else:
+                reason = f"reviewer's tests could not collect or set up: {result.reviewer_error}"
             return Failure(kind=FailureKind.TRANSIENT, reason=reason)
         elif result.exit_code == 0 and result.failed == result.errors == 0:
             if result.passed > 0:
@@ -1087,16 +1068,16 @@ class Coordinator:
             feedback=feedback + (f"\n{result.tail}" if result.tail else ""),
         )
 
-    def _task_names_import(self, subtask: Subtask, name: str) -> bool:
-        goal, _ = self.store.subtask_goal(subtask)
-        return any(
-            re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text)
-            for text in (
-                goal,
-                subtask.description,
-                subtask.acceptance_criteria,
-                json.dumps(subtask.inputs, ensure_ascii=False),
-            )
+    def _review_sandbox_failure(self, result: ReviewTestRun) -> Failure:
+        reason = (
+            result.stopped or "disk space too low"
+            if result.disk_low
+            else result.reason_not_run or "review sandbox unavailable"
+        )
+        return Failure(
+            kind=FailureKind.TRANSIENT,
+            reason=reason,
+            paused_until=db.to_iso(self.store.clock() + timedelta(seconds=SANDBOX_RETRY_SECONDS)),
         )
 
     def _review(self, subtask: Subtask, token: str, events: list[str]) -> bool:
@@ -1123,10 +1104,7 @@ class Coordinator:
             )
             skipped = self._review_test_skip(subtask, cover_call) if needs_tests else None
             if skipped and skipped.sandbox_unavailable and subtask.runs_code:
-                review = Failure(
-                    kind=FailureKind.TRANSIENT,
-                    reason=skipped.reason_not_run or "review sandbox unavailable",
-                )
+                review = self._review_sandbox_failure(skipped)
             else:
                 reviewer = self._crew(subtask).reviewer
                 setting = review_tests_enabled.set(needs_tests and skipped is None)
@@ -1187,8 +1165,7 @@ class Coordinator:
                 details = {"verdict": review.verdict.value, "feedback": review.feedback}
             if isinstance(review, Failure):
                 # Counts against the subtask's budget, so a reviewer that keeps failing cannot
-                # loop forever. A transient one keeps the subtask in REVIEW: the submitted work is
-                # reviewed again, not run again.
+                # loop forever. A transient interruption retries the review of the same artifact.
                 moved = self.store.record_failure(
                     subtask.id,
                     S.REVIEW,

@@ -694,24 +694,27 @@ class Store:
 
         Counters are read and written in one transaction, so concurrent failures cannot lose a count.
         A transient failure during REVIEW is the reviewer's, not the work's: the subtask stays in
-        REVIEW with its artifact (only the counter grows), so the work is not run again.
+        REVIEW with its artifact, or pauses before resuming REVIEW when given a deadline.
         A reviewer's failure passes `review` as a verdict does (see `transition`).
         """
         with db.transaction(self.conn):
             current = self.get_subtask(subtask_id)
             decision = decide(kind, current.attempts, self.policy(current.task_id))
-            if src is S.REVIEW and kind is FailureKind.TRANSIENT and decision.status is S.READY:
-                return self._count_review_interruption(
-                    current,
-                    decision.attempts,
-                    f"{reason}: {decision.reason}" if reason else decision.reason,
-                    details,
-                    review,
-                )
+            status = decision.status
+            if src is S.REVIEW and kind is FailureKind.TRANSIENT and status is S.READY:
+                if paused_until is None:
+                    return self._count_review_interruption(
+                        current,
+                        decision.attempts,
+                        f"{reason}: {decision.reason}" if reason else decision.reason,
+                        details,
+                        review,
+                    )
+                status = S.PAUSED
             return self._apply(
                 subtask_id,
                 src,
-                decision.status,
+                status,
                 actor,
                 lease=lease,
                 attempts=decision.attempts,

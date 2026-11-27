@@ -19,6 +19,7 @@ MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) timed out.": "Las pruebas del revisor (intento {attempt}) agotaron el tiempo.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Pruebas del revisor (intento {attempt}) detenidas: {reason}",
     "needs package {name}, not installed in the sandbox": "Se necesita el paquete {name}, que no está instalado en el entorno aislado",
+    "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "No se pudieron recopilar o preparar las pruebas del revisor (intento {attempt}): {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Pruebas del revisor (intento {attempt}) — pytest terminó con el código {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "Las pruebas del revisor (intento {attempt}) no generaron un informe.",
     "Checked": "Revisión",

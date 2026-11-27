@@ -104,6 +104,19 @@ def submitted(
     return task_id
 
 
+def assert_sandbox_retry(coord: Coordinator, task_id: str, clock: FakeClock) -> None:
+    [sub] = coord.store.list_subtasks(task_id)
+    assert sub.status is SubtaskStatus.PAUSED
+    assert sub.paused_until == db.to_iso(clock() + timedelta(seconds=60))
+    assert sub.attempts.transient == 1
+    assert not coord.tick(task_id, [])
+    assert coord.store.get_subtask(sub.id).attempts.transient == 1
+    assert (
+        len([row for row in coord.store.audit_log(task_id) if row["action"] == "review_failed"])
+        == 1
+    )
+
+
 def unread(work: Work) -> Success:
     pytest.fail("the submitted artifact should be reviewed without re-execution")
 
@@ -263,15 +276,14 @@ def test_skips_and_missing_module(
         }
         assert reason[mode] in note["reason_not_run"]
         if mode == "sandbox":
-            assert sub.status is SubtaskStatus.REVIEW
-            assert sub.attempts.transient == 1
+            assert_sandbox_retry(coord, task_id, clock)
 
 
 @pytest.mark.parametrize(
     ("bad", "problem"),
     [
         ("def test_broken(", "valid Python"),
-        ("def helper(): pass", "top-level test_"),
+        ("def helper(): pass", "top-level test"),
         (MODULE + "#" * 20_000, "at most 20000"),
     ],
 )
@@ -368,7 +380,13 @@ def test_runner_writes_module_and_parses_pytest(
         if os.name != "nt":
             assert copy.is_executable("run.sh")
         assert copy.read_text(path) == MODULE
-        assert copy.read_text(ini).startswith("[pytest]\npythonpath = ..\naddopts = --junitxml=")
+        assert copy.read_text(ini).splitlines()[:-1] == [
+            "[pytest]",
+            "pythonpath = ..",
+            "python_files = test_*.py *_test.py",
+            "python_classes = Test*",
+            "python_functions = test*",
+        ]
         copy.write("answer.py", "changed")
         (cwd / "delete.txt").unlink()
         write_report(
@@ -598,6 +616,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         "timed_out": False,
         "report_missing": False,
         "report_unverified": False,
+        "reviewer_error": None,
         "reviewer_missing_import": None,
         "reviewer_import_is_package": False,
         "stopped": "",
@@ -1018,6 +1037,8 @@ def test_review_infrastructure_failure(
     if reason == "fits" or quota:
         assert sub.status is SubtaskStatus.DONE
         assert sub.attempts.transient == 0
+    elif reason in {"disk", "outage"}:
+        assert_sandbox_retry(coord, task_id, clock)
     else:
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
     note = last_review_tests(store, sub.id)
@@ -1177,6 +1198,10 @@ def test_review_requires_report_and_copies_web_page(
         ({"ran": True, "report_missing": True}, "produced no report."),
         ({"ran": True, "exit_code": 5}, "— pytest exited 5"),
         (
+            {"ran": True, "reviewer_error": "NameError: unknown_name"},
+            "could not collect or set up: NameError: unknown_name",
+        ),
+        (
             {"ran": False, "missing_packages": ["requests"]},
             "did not run. needs package requests, not installed in the sandbox",
         ),
@@ -1212,7 +1237,7 @@ def test_status_shows_review_test_outcome(
         "reviewer-frame-expected",
         pytest.param("real", marks=confined),
         pytest.param("reviewer-calc", marks=confined),
-        pytest.param("reviewer-hypothesis", marks=confined),
+        pytest.param("reviewer-desman_absent_review_package", marks=confined),
     ],
 )
 def test_missing_package_in_review(
@@ -1260,7 +1285,7 @@ def test_missing_package_in_review(
     sandbox = Sandbox()
     if mode == "local":
         workspace.write("src/requests/__init__.py", "")
-    if mode not in {"real", "reviewer-calc", "reviewer-hypothesis"}:
+    if mode not in {"real", "reviewer-calc", "reviewer-desman_absent_review_package"}:
         monkeypatch.setattr(sandbox, "unavailable", lambda: None)
 
         def run(command: list[str], cwd: Path, **_: object) -> Outcome:
@@ -1316,7 +1341,7 @@ def test_missing_package_in_review(
     note = last_review_tests(store, sub.id)
     assert note is not None and note["source"] == module
     rows = store.audit_log(task_id)
-    if not runs_code and mode in {"missing", "call", "real"}:
+    if not runs_code and mode in {"missing", "real"}:
         assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
         assert not note["ran"]
         assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
@@ -1326,14 +1351,14 @@ def test_missing_package_in_review(
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
         assert note["ran"] and note["errors"] + note["failed"] == (2 if mode == "mixed" else 1)
         assert not note["report_unverified"], note["tail"]
-        if mode in {"reviewer-hypothesis", "reviewer-frame-hypothesis", "reviewer-frame-solution"}:
+        if mode.startswith("reviewer-"):
             [failure] = [row for row in rows if row["action"] == "review_interrupted"]
             expected = (
-                "reviewer's tests import solution, which the task does not name"
-                if mode == "reviewer-frame-solution"
-                else "reviewer's tests need package hypothesis"
+                "reviewer's tests need package"
+                if mode.endswith("hypothesis")
+                else "reviewer's tests could not collect or set up"
             )
-            assert json.loads(failure["details_json"])["reason"].startswith(expected + ": ")
+            assert json.loads(failure["details_json"])["reason"].startswith(expected)
             assert store.get_subtask(sub.id).attempts.quality == 0
         else:
             assert any(row["action"] == "verdict" for row in rows)
@@ -1423,7 +1448,14 @@ def test_executable_and_empty_directory_in_real_review_sandbox(
     ("cases", "summary", "verified"),
     [
         ('<testcase classname="test_review.TestAnswer" name="test_answer[4]"/>', "1 passed", True),
-        ('<testcase classname="test_review.TestOther" name="test_answer[4]"/>', "1 passed", False),
+        ('<testcase file="test_review.py" name="test_answer[4]"/>', "1 passed", True),
+        ('<testcase classname="other_module.TestOther" name="test_answer[4]"/>', "1 passed", False),
+        (
+            '<testcase classname="test_review" name="test_answer"/>'
+            '<testcase classname="other_module" name="test_helper"/>',
+            "2 passed",
+            False,
+        ),
         ('<testcase classname="test_review.TestAnswer" name="test_other"/>', "1 passed", False),
         ('<testcase classname="test_review.TestAnswer" name="test_answer[4]"/>', "2 passed", False),
     ],
@@ -1500,3 +1532,164 @@ def rewrite_report():
     assert json.loads(verdict["details_json"])["feedback"].startswith(
         "reviewer's tests could not be verified"
     )
+
+
+@pytest.mark.parametrize("real", [False, pytest.param(True, marks=confined)])
+@pytest.mark.parametrize(
+    ("module", "cases"),
+    [
+        ("def testAddition(): assert 1 + 1 == 2", [("test_review", "testAddition")]),
+        (
+            "class Base:\n    def test_answer(self): assert True\nclass TestAnswer(Base): pass",
+            [("test_review.TestAnswer", "test_answer")],
+        ),
+        (
+            "from helper import test_x\n" + MODULE,
+            [("test_review", "test_x"), ("test_review", "test_answer")],
+        ),
+    ],
+)
+def test_review_accepts_pytest_discovery_variants(
+    store: Store,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    module: str,
+    cases: list[tuple[str, str]],
+    real: bool,
+) -> None:
+    task_id = submitted(store)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("helper.py", "def test_x(): assert True")
+    sandbox = Sandbox()
+    if not real:
+
+        def run(command: list[str], cwd: Path, **_: object) -> Outcome:
+            write_report(
+                command,
+                cwd,
+                "".join(f'<testcase classname="{group}" name="{name}"/>' for group, name in cases),
+            )
+            return Outcome(0, f"{len(cases)} passed in 0.01s", "")
+
+        monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+        monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    note = last_review_tests(store, sub.id)
+    assert note is not None and not note["report_unverified"], note
+    assert sub.status is SubtaskStatus.DONE, note
+
+
+@pytest.mark.parametrize("real", [False, pytest.param(True, marks=confined)])
+@pytest.mark.parametrize(
+    ("module", "phase", "reason"),
+    [
+        ("def test_answer(unknown_fixture): pass", "setup", "fixture 'unknown_fixture' not found"),
+        ("unknown_name\n" + MODULE, "collection", "NameError: unknown_name"),
+        ("None.bad\n" + MODULE, "collection", "AttributeError: missing attribute"),
+        ("def test_answer():\n    await something", "syntax", "SyntaxError: invalid syntax"),
+        ("def test_answer(): assert False", "call", "AssertionError"),
+        ("def test_answer(): unknown_name", "call", "NameError"),
+    ],
+)
+def test_reviewer_collection_and_setup_errors(
+    store: Store,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    module: str,
+    phase: str,
+    reason: str,
+    real: bool,
+) -> None:
+    task_id = submitted(store)
+    sandbox = Sandbox()
+    if not real:
+
+        def run(command: list[str], cwd: Path, **_: object) -> Outcome:
+            path = command[-1]
+            if phase == "setup":
+                cases = (
+                    '<testcase classname="test_review" name="test_answer">'
+                    f'<error message="failed on setup with fixture error">E   {reason}\n'
+                    f"/workspace/{path}:1</error></testcase>"
+                )
+            elif phase in {"collection", "syntax"}:
+                frame = (
+                    f'E     File "/workspace/{path}", line 2'
+                    if phase == "syntax"
+                    else f"{path}:1: in &lt;module&gt;"
+                )
+                cases = (
+                    '<testcase name="test_review"><error message="collection failure">'
+                    f"{frame}\nE   {reason}</error></testcase>"
+                )
+            else:
+                cases = (
+                    '<testcase classname="test_review" name="test_answer">'
+                    f'<failure message="{reason}">E   {reason}\n'
+                    f"{path}:1: {reason}</failure></testcase>"
+                )
+            write_report(command, cwd, cases)
+            if phase == "call":
+                return Outcome(1, "1 failed in 0.01s", "")
+            return Outcome(1 if phase == "setup" else 2, "1 error in 0.01s", "")
+
+        monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+        monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    note = _review_test_context(store, sub)["previous_review_tests"]
+    assert note is not None and not note["report_unverified"], note
+    if phase == "call":
+        assert sub.attempts.quality == 1 and sub.attempts.transient == 0
+        assert note["reviewer_error"] is None
+    else:
+        assert sub.attempts.transient == 1 and sub.attempts.quality == 0
+        assert reason.partition(":")[0] in note["reviewer_error"]
+
+
+def test_command_window_excludes_sibling_writes(
+    store: Store, tmp_path: Path, clock: FakeClock
+) -> None:
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Write a helper and run a command",
+            subtasks=[
+                SubtaskSpec(description="Write helper", acceptance_criteria="helper exists"),
+                SubtaskSpec(description="Run command", acceptance_criteria="runs", kind=Kind.CODE),
+            ],
+        )
+    )
+    sibling = store.claim("sibling", task_id=task_id)
+    sub = store.claim("executor", task_id=task_id)
+    assert sibling is not None and sibling.lease_token is not None
+    assert sub is not None and sub.lease_token is not None
+    workspace = Workspace(tmp_path, task_id)
+    store.start_effect(sub.id, sub.lease_token, 0, 0, "run_command", "command")
+    store.start_effect(sibling.id, sibling.lease_token, 0, 0, "write_file", "helper")
+    helper = workspace.root / workspace.write("helper.py", "answer = 4")
+    at = clock().timestamp()
+    os.utime(helper, (at, at))
+    store.finish_effect(
+        sibling.id, sibling.lease_token, 0, 0, {"ok": True, "output": {"path": "helper.py"}}
+    )
+    store.finish_effect(sub.id, sub.lease_token, 0, 0, {"ok": True})
+    store.submit(sub.id, sub.lease_token, {"summary": "ran"})
+    assert not has_written_python_files(store, sub, root=tmp_path)
+    assert "written_files" not in evidence(store, sub, workspace=workspace)

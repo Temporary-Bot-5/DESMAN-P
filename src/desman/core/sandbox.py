@@ -177,6 +177,9 @@ def _shm(limits: Limits) -> list[str]:
     return ["--size", str(limits.tmp_bytes), "--tmpfs", "/dev/shm"]
 
 
+SANDBOX_RETRY_SECONDS = 60
+
+
 class SandboxUnavailable(RuntimeError):
     """The sandbox cannot run here: no command runs at all."""
 
@@ -630,14 +633,14 @@ class Sandbox:
                 elif self.backend == "wasi":
                     self._problem = self._probe_wasi()
                     if self.docker or self._problem is not None:
-                        self._retry_at = self._monotonic() + 60.0
+                        self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
                 elif self.backend == "wsl":
-                    self._retry_at = self._monotonic() + 60.0
+                    self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
                 else:
                     self._problem = self._probe_docker()
             except _DockerDaemonUnavailable as exc:
                 self._problem = str(exc)
-                self._retry_at = self._monotonic() + 60.0
+                self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
             if self._problem is not None and self.backend == "docker":
                 if self.platform == "win32" and self._probe_wsl():
                     self._backend = "wsl"
@@ -646,7 +649,7 @@ class Sandbox:
                 if self._backend != "docker":
                     self._problem = None
                     self.image_present = None
-                    self._retry_at = self._monotonic() + 60.0
+                    self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
                 elif self._wsl_issue is not None:
                     self._problem += " " + self._wsl_issue
             self._checked = True
