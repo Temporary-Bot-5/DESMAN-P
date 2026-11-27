@@ -973,7 +973,7 @@ class Sandbox:
             self.prlimit,
             f"--nproc={self.limits.processes}",
             "--",
-            *command,
+            *_isolated_pytest(command),
         ]
         return argv
 
@@ -1205,7 +1205,7 @@ class Sandbox:
             "-B",
             "-c",
             _DOCKER_EXEC,
-            *command,
+            *_isolated_pytest(command),
         ]
 
     def docker_image_present(self) -> bool:
@@ -1333,6 +1333,17 @@ def _docker_mount(source: Path, target: str, *, readonly: bool = False) -> str:
     output = io.StringIO()
     csv.writer(output).writerow(fields)
     return output.getvalue().removesuffix("\r\n")
+
+
+def _isolated_pytest(command: Sequence[str]) -> Sequence[str]:
+    """Make the read-only pytest mount available even when Python ignores PYTHONPATH."""
+    if list(command[:4]) != ["python3", "-I", "-m", "pytest"]:
+        return command
+    source = (
+        f"import runpy, sys; sys.path.insert(0, {_PYTHON_PATH!r}); "
+        "runpy.run_module('pytest', run_name='__main__', alter_sys=True)"
+    )
+    return ["python3", "-I", "-B", "-c", source, *command[4:]]
 
 
 def _pytest_mounts() -> Iterator[tuple[Path, str]]:
@@ -2032,10 +2043,13 @@ def _wasi_argv(command: Sequence[str]) -> list[str] | None:
             break
     match list(command[index:]):
         case ["-m", "pytest", *args]:
+            isolated = "-I" in command[1:index]
+            bootstrap = "import sys; sys.path.append('/site'); " if isolated else "import sys; "
             source = (
-                f"{start}import sys, pytest; sys.exit(pytest.main({[*args, *_WASI_PYTEST_ARGS]!r}))"
+                f"{start}{bootstrap}import pytest; "
+                f"sys.exit(pytest.main({[*args, *_WASI_PYTEST_ARGS]!r}))"
             )
-            return ["python", "-c", source]
+            return ["python", *(["-I", "-B"] if isolated else []), "-c", source]
         case ["-m", "unittest", *args]:
             source = (
                 f"{start}import runpy; "

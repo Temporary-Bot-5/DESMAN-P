@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -13,9 +14,9 @@ from conftest import FakeClock
 from desman.actions import print_report
 from desman.agents import llm_executor, llm_reviewer
 from desman.core import db
-from desman.core.coordinator import Coordinator, Success, Work
+from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work, review_test_file
 from desman.core.coordinator import TestRun as ReviewTestResult
-from desman.core.effects import evidence, last_review_tests
+from desman.core.effects import evidence, has_written_files, last_review_tests
 from desman.core.models import Kind, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Permission, executor_access
 from desman.core.report import task_report
@@ -75,6 +76,20 @@ def unread(work: Work) -> Success:
             ".review/test_review_1.py",
         ),
         (ReviewTestResult(ran=True, exit_code=5), "pytest exited 5"),
+        (ReviewTestResult(ran=True, exit_code=0, failed=1, failing=["test_answer"]), "test_answer"),
+        (ReviewTestResult(ran=True, exit_code=0, passed=1, errors=1), "pytest exited 0"),
+        (
+            ReviewTestResult(ran=True, exit_code=0, passed=1, stopped="watch stopped"),
+            "watch stopped",
+        ),
+        (
+            ReviewTestResult(ran=True, exit_code=0, passed=1, workspace_full="quota exceeded"),
+            "quota exceeded",
+        ),
+        (
+            ReviewTestResult(ran=True, exit_code=0, tail="1 skipped"),
+            "verified nothing: 0 passed\n1 skipped",
+        ),
     ],
 )
 def test_review_result(
@@ -106,15 +121,15 @@ def test_review_result(
     rows = store.audit_log(task_id)
     [note] = [row for row in rows if row["action"] == "review_tests"]
     assert note["actor"] == "reviewer" and note["to_status"] is None
+    [sub] = store.list_subtasks(task_id)
     assert json.loads(note["details_json"]) == {
-        "file": ".review/test_review_1.py",
-        **result.model_dump(exclude={"tail"}),
+        "file": f".review/{sub.id}/test_review_1.py",
+        **result.model_dump(),
     }
     if reason is not None:
         [verdict] = [row for row in rows if row["action"] == "verdict"]
-        assert (
-            json.loads(verdict["details_json"])["feedback"] == f"reviewer's tests failed: {reason}"
-        )
+        message = reason if reason.startswith("verified nothing") else f"failed: {reason}"
+        assert json.loads(verdict["details_json"])["feedback"] == f"reviewer's tests {message}"
 
 
 @pytest.mark.parametrize("mode", ["non-code", "permission", "tools", "sandbox", "missing"])
@@ -202,29 +217,44 @@ def test_runner_writes_module_and_parses_pytest(
     workspace = Workspace(tmp_path, "task")
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
 
+    [sub] = store.list_subtasks(submitted(store))
+    path = f".review/{sub.id}/test_review_2.py"
+
     def run(command: list[str], cwd: Path, *, timeout: float) -> Outcome:
         assert command == [
             "python3",
+            "-I",
             "-m",
             "pytest",
-            "-q",
+            "-c",
+            ".review/pytest.ini",
+            "--rootdir",
+            ".review",
+            "--noconftest",
             "-p",
             "no:cacheprovider",
-            ".review/test_review_2.py",
+            "-o",
+            "addopts=",
+            "-q",
+            path,
         ]
         assert cwd == workspace.root and timeout == 60
-        assert workspace.read_text(".review/test_review_2.py") == MODULE
+        assert workspace.read_text(path) == MODULE
+        assert workspace.read_text(".review/pytest.ini") == "[pytest]\npythonpath = ..\n"
         return Outcome(
             1,
-            "FAILED .review/test_review_2.py::test_answer - assert 1\n1 failed, 2 passed, 1 error in 0.02s\n",
+            f"FAILED {path}::test_answer - assert 1\n1 failed, 2 passed, 1 error in 0.02s\n",
             "",
+            workspace_full="over quota",
+            stopped="watch stopped",
         )
 
     monkeypatch.setattr(sandbox, "run", run)
-    [sub] = store.list_subtasks(submitted(store))
     result = _run_review_tests(sandbox, sub, workspace, MODULE, 2)
     assert (result.exit_code, result.passed, result.failed, result.errors) == (1, 2, 1, 1)
-    assert result.failing == [".review/test_review_2.py::test_answer"]
+    assert result.failing == [f"{path}::test_answer"]
+    assert result.workspace_full == "over quota"
+    assert result.stopped == "watch stopped"
 
 
 def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: FakeClock) -> None:
@@ -252,8 +282,15 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
 
     def runner(sub: Subtask, workspace: Workspace, module: str, attempt: int) -> ReviewTestResult:
         seen.append(attempt)
+        workspace.write(review_test_file(sub.id, attempt), module)
         if attempt == 1:
-            return ReviewTestResult(ran=True, exit_code=1, failed=1, failing=["test_answer"])
+            return ReviewTestResult(
+                ran=True,
+                exit_code=1,
+                failed=1,
+                failing=["test_answer"],
+                tail="x" * 3_000 + "assertion details",
+            )
         return ReviewTestResult(ran=True, exit_code=0, passed=1)
 
     coord = Coordinator(
@@ -274,7 +311,16 @@ def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: 
     execute = [call.prompt for call in llm.calls if call.prompt.startswith("Execute subtask")]
     assert "reviewer's tests failed: test_answer" in execute[-1]
     review = [call.prompt for call in llm.calls if call.prompt.startswith("Review")]
-    assert "previous_review_tests" in review[-1] and "test_answer" in review[-1]
+    previous = json.loads(review[-1].partition("\n")[2])["previous_review_tests"]
+    assert previous["source"] == MODULE
+    assert len(previous["tail"]) == 2_000 and previous["tail"].endswith("assertion details")
+    assert "inputs" not in json.loads(review[-1].partition("\n")[2])
+    [first, _] = [
+        json.loads(row["details_json"])
+        for row in store.audit_log(task_id)
+        if row["action"] == "review_tests"
+    ]
+    assert "source" not in first and first["tail"] == previous["tail"]
 
 
 def test_normal_run_wires_review_to_command_sandbox(
@@ -288,7 +334,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         commands.append(command)
         if command[-1] == "main.py":
             return Outcome(0, "4", "")
-        assert command[-1] == ".review/test_review_1.py"
+        assert command[-1] == review_test_file(sub.id, 1)
         return Outcome(0, "1 passed in 0.01s", "")
 
     monkeypatch.setattr(sandbox, "run", run)
@@ -318,6 +364,7 @@ def test_normal_run_wires_review_to_command_sandbox(
             ],
         )
     )
+    [sub] = store.list_subtasks(task_id)
     coord = coordinator(
         store,
         Models(llm, None),
@@ -326,12 +373,12 @@ def test_normal_run_wires_review_to_command_sandbox(
         sandbox=sandbox,
     )
     assert coord.run(task_id).status is TaskStatus.DONE
-    assert [command[-1] for command in commands] == ["main.py", ".review/test_review_1.py"]
+    assert [command[-1] for command in commands] == ["main.py", review_test_file(sub.id, 1)]
     report = task_report(store, task_id)
     print_report(report, store)
     output = capsys.readouterr().out
     assert "Reviewer's tests: 1 passed, 0 failed, 0 errors" in output
-    assert ".review/test_review_1.py" not in output
+    assert review_test_file(sub.id, 1) not in output
 
 
 # This small fixture reproduces the four live probe failures while its smoke tests pass.
@@ -485,3 +532,90 @@ def test_code_with_unjournaled_files_is_reviewed(
     [request] = llm.calls
     assert "answer = 4" in request.prompt
     assert "top-level test_ functions" in request.messages[0].content
+
+
+@pytest.mark.parametrize("verdict", [Verdict.RETRY, Verdict.ESCALATE])
+def test_nonaccept_verdict_discards_invalid_tests(store: Store, verdict: Verdict) -> None:
+    [sub] = store.list_subtasks(submitted(store))
+    reply = json.dumps({"verdict": verdict, "feedback": "Make it square", "tests": {"bad": True}})
+    llm = FakeLLM().on("Review", reply)
+    assert llm_reviewer(llm)(sub, {"summary": "Ready"}) == Review(
+        verdict=verdict, feedback="Make it square"
+    )
+    assert len(llm.calls) == 1
+
+
+@confined
+@pytest.mark.parametrize("skipped", [False, True])
+def test_reviews_ignore_workspace_pytest_configuration(
+    store: Store, tmp_path: Path, skipped: bool
+) -> None:
+    task_id = submitted(store)
+    [sub] = store.list_subtasks(task_id)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("answer.py", "answer = 4")
+    workspace.write("pytest.py", "raise RuntimeError('workspace pytest imported')")
+    workspace.write("pytest.ini", "[pytest]\naddopts = --not-a-real-option\n")
+    workspace.write(
+        "conftest.py",
+        "import pytest\ndef pytest_collection_modifyitems(items):\n"
+        "    for item in items:\n        item.add_marker(pytest.mark.skip)\n",
+    )
+    module = "from answer import answer\ndef test_answer():\n    assert answer == 4\n"
+    if skipped:
+        module = "import pytest\n" + module.replace(
+            "    assert answer == 4", "    pytest.importorskip('missing_answer_module')"
+        )
+    result = _run_review_tests(Sandbox(), sub, workspace, module, 1)
+    assert result.ran and result.exit_code == 0, result.tail
+    assert result.passed == (0 if skipped else 1), result.tail
+    assert ("1 skipped" in result.tail) == skipped
+
+
+def test_code_fallback_ignores_earlier_subtask_and_copied_inputs(
+    store: Store, tmp_path: Path, clock: FakeClock
+) -> None:
+    task_id = store.create_task(
+        TaskSpec(
+            goal="Write a report, then describe the code in prose",
+            subtasks=[
+                SubtaskSpec(description="report", acceptance_criteria="file"),
+                SubtaskSpec(
+                    description="describe",
+                    acceptance_criteria="prose",
+                    kind=Kind.CODE,
+                    depends_on=[0],
+                ),
+            ],
+        )
+    )
+    workspace = Workspace(tmp_path, task_id)
+
+    def execute(work: Work) -> Success:
+        if work.subtask.description == "report":
+            path = workspace.root / workspace.write("report.md", "# Report")
+            at = clock().timestamp()
+            os.utime(path, (at, at))
+            clock.advance(1)
+        else:
+            workspace.write("from-abc/data.csv", "copied input")
+            assert not has_written_files(store, work.subtask, root=tmp_path)
+        return Success(content={"summary": "ready"})
+
+    def runner(sub: Subtask, ws: Workspace, module: str, attempt: int) -> ReviewTestResult:
+        pytest.fail("the prose-only subtask did not write output files")
+
+    llm = FakeLLM().on("Review", '{"verdict":"accept"}', '{"verdict":"accept"}')
+    coord = Coordinator(
+        store,
+        execute,
+        llm_reviewer(llm, evidence=partial(evidence, store, workspace=workspace)),
+        access=executor_access([Permission.SHELL]),
+        tools=builtin_registry(),
+        workspaces=tmp_path,
+        review_tests=runner,
+        sleep=clock.sleep,
+    )
+    assert coord.run(task_id).status is TaskStatus.DONE
+    assert "written_files" not in llm.calls[-1].prompt
+    assert "top-level test_ functions" not in llm.calls[-1].messages[0].content

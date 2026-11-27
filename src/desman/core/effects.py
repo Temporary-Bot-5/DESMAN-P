@@ -44,6 +44,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel
 
+from desman.core import db
 from desman.core.context import (
     CHARS_PER_TOKEN,
     Knowledge,
@@ -306,12 +307,27 @@ def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
     return dict(json.loads(row[0])) if row else None
 
 
-def _workspace_outputs(workspace: Workspace) -> Iterator[str]:
-    return (
-        path
-        for path in workspace.files()
-        if is_work_file(path) and not path.startswith(("input/", "web/", TOOL_RESULTS_DIR))
-    )
+def _workspace_outputs(workspace: Workspace, store: Store, subtask: Subtask) -> Iterator[str]:
+    row = store.conn.execute(
+        """SELECT ts FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
+           ORDER BY seq DESC LIMIT 1""",
+        (subtask.id,),
+    ).fetchone()
+    if row is None:
+        return
+    started = db.parse_iso(row[0]).timestamp()
+    for path in workspace.files():
+        folder, slash, _ = path.partition("/")
+        if slash and folder.startswith("from-"):
+            continue
+        if not is_work_file(path) or path.startswith(("input/", "web/", TOOL_RESULTS_DIR)):
+            continue
+        try:
+            modified = workspace.mtime(path)
+        except (OSError, PathEscapeError):
+            continue
+        if modified >= started:
+            yield path
 
 
 def has_written_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
@@ -324,7 +340,7 @@ def has_written_files(store: Store, subtask: Subtask, *, root: Path | None = Non
     workspace = Workspace(
         root if root is not None else workspace_root_for(store.conn), subtask.task_id
     )
-    return next(_workspace_outputs(workspace), None) is not None
+    return next(_workspace_outputs(workspace, store, subtask), None) is not None
 
 
 def _written_files(
@@ -334,7 +350,7 @@ def _written_files(
     from_workspace = not paths and (subtask.kind is Kind.CODE or subtask.runs_code)
     if from_workspace:
         workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
-        paths = list(islice(_workspace_outputs(workspace), 12))
+        paths = list(islice(_workspace_outputs(workspace, store, subtask), 12))
     files = []
     for path in paths:
         try:

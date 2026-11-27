@@ -56,7 +56,7 @@ from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
-from desman.core.workspace import Workspace
+from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.i18n import t
 from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
@@ -758,11 +758,28 @@ def _run_review_tests(
     try:
         if problem := sandbox.unavailable():
             return TestRun(ran=False, reason_not_run=problem[:1_000])
-        file = review_test_file(attempt)
+        file = review_test_file(subtask.id, attempt)
         workspace.write(file, module)
+        workspace.write(".review/pytest.ini", "[pytest]\npythonpath = ..\n")
         # python3 is the interpreter name supplied by every Sandbox backend.
         outcome = sandbox.run(
-            ["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", file],
+            [
+                "python3",
+                "-I",
+                "-m",
+                "pytest",
+                "-c",
+                ".review/pytest.ini",
+                "--rootdir",
+                ".review",
+                "--noconftest",
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "addopts=",
+                "-q",
+                file,
+            ],
             workspace.root,
             timeout=REVIEW_TEST_TIMEOUT,
         )
@@ -796,6 +813,8 @@ def _run_review_tests(
         failing=failing[:20],
         tail=tail[-4_000:],
         timed_out=outcome.timed_out,
+        workspace_full=outcome.workspace_full,
+        stopped=outcome.stopped,
     )
 
 
@@ -808,9 +827,18 @@ def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
     ):
         return {}
     goal, is_final = store.subtask_goal(subtask)
+    previous = last_review_tests(store, subtask.id)
+    if previous is not None and previous["ran"]:
+        try:
+            workspace = Workspace(workspace_root_for(store.conn), subtask.task_id)
+            previous["source"] = workspace.read(previous["file"], limit=32_000).decode(
+                errors="replace"
+            )[:8_000]
+        except (OSError, PathEscapeError):
+            pass
     return {
         **({} if is_final else {"task_goal": goal}),
-        "previous_review_tests": last_review_tests(store, subtask.id),
+        "previous_review_tests": previous,
     }
 
 

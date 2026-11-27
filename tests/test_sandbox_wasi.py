@@ -24,11 +24,13 @@ from desman.cli import cli
 from desman.commands import Context, Proposal, SandboxSetupArgs, find
 from desman.config import Permissions, open_config
 from desman.core import sandbox
+from desman.core.models import SubtaskSpec, TaskSpec
 from desman.core.policy import Permission, executor_access
 from desman.core.sandbox import Limits, Sandbox, SandboxUnavailable, install_wasi
 from desman.core.store import Store
 from desman.core.tools import Toolbox, ToolCall, builtin_registry
 from desman.core.workspace import Workspace
+from desman.runs import _run_review_tests
 
 
 def _box(path: Path, *, platform: str = "darwin", limits: Limits | None = None) -> Sandbox:
@@ -352,6 +354,27 @@ def test_real_pytest_and_tool(runtime: Path, tmp_path: Path) -> None:
         assert call.ok, call
         assert call.output["exit_code"] == code and f"1 {label}" in call.output["stdout"], call
     assert not (work.root / ".pytest_cache").exists()
+
+
+def test_real_isolated_review_pytest(runtime: Path, tmp_path: Path, store: Store) -> None:
+    task = store.create_task(
+        TaskSpec(
+            goal="Check answer",
+            subtasks=[SubtaskSpec(description="Check", acceptance_criteria="4")],
+        )
+    )
+    [subtask] = store.list_subtasks(task)
+    workspace = Workspace(tmp_path, task)
+    workspace.write("answer.py", "answer = 4")
+    workspace.write("pytest.py", "raise RuntimeError('workspace pytest imported')")
+    result = _run_review_tests(
+        _box(runtime),
+        subtask,
+        workspace,
+        "import pytest\nfrom answer import answer\ndef test_answer():\n    assert answer == 4\n",
+        1,
+    )
+    assert result.ran and result.exit_code == 0 and result.passed == 1, result.tail
 
 
 def test_real_cache_rebuilt_on_deserialize_failure(runtime: Path, tmp_path: Path) -> None:

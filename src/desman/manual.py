@@ -81,9 +81,9 @@ TOPICS: Final = (
         "(names/translations allowed) and coverage. Live data may have fewer items with sources "
         "and stated gaps. Split parts keep the request's language; honest partial findings feed "
         "the combine step. For blocked pages, use snippets or another official source. Review "
-        "sees files written in the latest attempt, within budget. For code the reviewer writes "
-        "independent tests; DESMAN runs them in the sandbox when permitted and sends failing work "
-        "back. The sandbox has python3 -m pytest but no network (no pip install).\n"
+        "sees files written in the latest attempt, within budget. For code, reviewers write "
+        "independent tests. When permitted, the sandbox runs them and requires a pass with no "
+        "failures. It has python3 -m pytest and no network (no pip install).\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code and use your latest message’s language.",
     ),

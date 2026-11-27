@@ -29,7 +29,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Final
 
-from desman.core import db, filelock
+from desman.core import db
 from desman.core.atomic import replace_file, retry_sharing
 
 WORKSPACES_DIR: Final = "workspaces"
@@ -115,18 +115,6 @@ class Workspace:
         if self.root.is_symlink() or not self.root.is_dir():
             raise PathEscapeError(f"workspace {self.root} is not a plain directory")
 
-    @contextmanager
-    def review_lock(self) -> Iterator[None]:
-        """Serialize reviewer test runs sharing this task's attempt filenames."""
-        # Keep the lock outside the sandbox's writable mount.
-        path = self.root.with_name(f".review-{self.task_id}.lock")
-        with path.open("ab") as lock:
-            filelock.lock(lock.fileno())
-            try:
-                yield
-            finally:
-                filelock.unlock(lock.fileno())
-
     # There is deliberately no method returning an absolute path to a file: a path checked now
     # can be swapped for a symlink before the caller opens it. Use read/write/exists/files.
 
@@ -156,19 +144,24 @@ class Workspace:
                 raise
         return "/".join(parts)
 
-    def _read_portably(self, path: str, parts: tuple[str, ...]) -> bytes:
+    def _read_portably(self, path: str, parts: tuple[str, ...], limit: int) -> bytes:
         self._check_no_links(parts)
         target = self.root.joinpath(*parts)
         if not target.is_file():
             raise FileNotFoundError(f"no file {path!r} in workspace")
         if target.stat().st_nlink > 1:
             raise PathEscapeError(f"{path!r} has other hard links")
-        return retry_sharing(target.read_bytes)
 
-    def read(self, path: str) -> bytes:
+        def read_file() -> bytes:
+            with target.open("rb") as file:
+                return file.read(limit)
+
+        return retry_sharing(read_file)
+
+    def read(self, path: str, *, limit: int = -1) -> bytes:
         parts = check_path(path)
         if not SECURE:
-            return self._read_portably(path, parts)
+            return self._read_portably(path, parts, limit)
         with self._parent(parts, create=False) as parent:
             # O_NONBLOCK: a FIFO planted under this name must not hang the open.
             flags = os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _BINARY | _NONBLOCK
@@ -181,10 +174,17 @@ class Workspace:
                 # code could have linked one from outside the workspace.
                 if info.st_nlink > 1:
                     raise PathEscapeError(f"{path!r} has other hard links")
-                return f.read()
+                return f.read(limit)
 
     def size(self, path: str) -> int:
         """Size of a regular, unlinked file without reading its contents."""
+        return self._file_stat(path).st_size
+
+    def mtime(self, path: str) -> float:
+        """Modification time of a regular, unlinked file."""
+        return self._file_stat(path).st_mtime
+
+    def _file_stat(self, path: str) -> os.stat_result:
         parts = check_path(path)
         if not SECURE:
             self._check_no_links(parts)
@@ -194,7 +194,7 @@ class Workspace:
                 info = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
             raise PathEscapeError(f"{path!r} is not a regular, unlinked file")
-        return info.st_size
+        return info
 
     def read_text(self, path: str) -> str:
         return self.read(path).decode()

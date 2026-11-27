@@ -12,12 +12,12 @@
 "policy.toml" = "7813a26348d64d2e4b1101cf5c8d78933baccfd066e4b7ef963b680523c49474"
 "core/policy.py" = "f05e222d40b3ec68582960f9095fd826a90f0edccd907d8fec8441957f6223da"
 # The reviewer (and the executor it judges).
-"agents.py" = "bd40415465ff5f410d4c0906e6fad6253b16eb5857e2e397a0837833165d983e"
+"agents.py" = "3552d7c5b0c07954a33510ecca306abecb61ff982c963b7fb40384a7ebd61bb2"
 # Security rules: the sandbox for generated code, the workspace guard for files.
-"core/sandbox.py" = "7b86e76ad3a705b0c51c105eb821fa5fd85d10d83e734ddbbe9ee8767dd001cc"
+"core/sandbox.py" = "7a5aa2ae8c109fd56ae74083585763649250fc1c2b695250f2abe72370a00a47"
 "core/seccomp.py" = "ad8bdca57118b7f2af27ad445525f8182d6ae7918c6e4ed79ec7aa9c0e3ef93a"
 "core/wasi_runner.py" = "59d420da9882693cf93ec2d0c4587983f6d20ac46ddb15ea6ebdf9e34a6d9934"
-"core/workspace.py" = "66dac2117f10a21dcf7a8d078b05c84a710ef10ce8ddccbbf2196ff95bab328a"
+"core/workspace.py" = "9214f55ecd197e25363bc6465ccdbcda19ca78ad369e8c88e76b71b37114eb56"
 "core/atomic.py" = "cbfaa6ef20fc9923426f115893ccda1f7eaf8dbe8290a987a5d8d09d438dc48a"
 # Approval rules: who may take which edge (the operator's decisions), and this check.
 "core/states.py" = "78f76f5b9da5ac1e6273a7d6752a64b8a6cd606b757033361f667e0cbffac03d"

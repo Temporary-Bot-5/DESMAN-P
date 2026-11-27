@@ -1072,7 +1072,8 @@ def llm_reviewer(
             subtask, written_files=bool(shown.get("written_files")) or bool(context)
         )
         if check_code:
-            prompt["inputs"] = subtask.inputs
+            if evidence is None:
+                prompt["inputs"] = subtask.inputs
             prompt.update(context)
             verdict_with_tests = _ask(llm, system + REVIEWER_TESTS, REVIEW, prompt, _CodeVerdict)
             return Review(
@@ -1101,6 +1102,13 @@ class _Verdict(BaseModel):
 
 class _CodeVerdict(_Verdict, Review):
     """Review verdict with an independently written pytest module."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_unused_tests(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("verdict") in (Verdict.RETRY, Verdict.ESCALATE):
+            return {key: value for key, value in data.items() if key != "tests"}
+        return data
 
 
 def _plain_result(text: str) -> _Result | None:

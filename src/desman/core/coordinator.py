@@ -214,13 +214,15 @@ class TestRun(BaseModel):
     )
     tail: str = Field(default="", max_length=4_000)
     timed_out: bool = False
+    workspace_full: str = ""
+    stopped: str = ""
 
 
 ReviewTests = Callable[[Subtask, Workspace, str, int], TestRun]
 
 
-def review_test_file(attempt: int) -> str:
-    return f".review/test_review_{attempt}.py"
+def review_test_file(subtask_id: str, attempt: int) -> str:
+    return f".review/{subtask_id}/test_review_{attempt}.py"
 
 
 def needs_review_tests(subtask: Subtask, *, written_files: bool) -> bool:
@@ -968,32 +970,36 @@ class Coordinator:
         elif review.tests is None:
             result = TestRun(ran=False, reason_not_run="reviewer gave no tests")
         else:
+            cover_call(REVIEW_TEST_TIMEOUT)
             workspace = Workspace(self.workspaces, subtask.task_id)
-            with workspace.review_lock():
-                # A worker's permissions can change while a sibling runs its tests.
-                if reason := access.refusal(tool):
-                    result = TestRun(ran=False, reason_not_run=reason)
-                else:
-                    cover_call(REVIEW_TEST_TIMEOUT)
-                    result = TestRun.model_validate(
-                        runner(subtask, workspace, review.tests, attempt)
-                    )
+            result = TestRun.model_validate(runner(subtask, workspace, review.tests, attempt))
 
         self.store.note(
             subtask.id,
             Actor.REVIEWER,
             "review_tests",
-            {"file": review_test_file(attempt), **result.model_dump(exclude={"tail"})},
+            {
+                "file": review_test_file(subtask.id, attempt),
+                **result.model_dump(exclude={"tail"}),
+                "tail": result.tail[-2_000:],
+            },
         )
-        if not result.ran or (result.exit_code == 0 and not result.timed_out):
+        if result.stopped or result.workspace_full:
+            feedback = f"reviewer's tests failed: {result.stopped or result.workspace_full}"
+        elif not result.ran:
             return review
-        reason = ", ".join(result.failing)
-        if not reason:
-            reason = "timed out" if result.timed_out else f"pytest exited {result.exit_code}"
+        elif result.timed_out:
+            feedback = "reviewer's tests failed: timed out"
+        elif result.exit_code == 0 and result.failed == result.errors == 0:
+            if result.passed > 0:
+                return review
+            feedback = "reviewer's tests verified nothing: 0 passed"
+        else:
+            reason = ", ".join(result.failing) or f"pytest exited {result.exit_code}"
+            feedback = f"reviewer's tests failed: {reason}"
         return Review(
             verdict=Verdict.RETRY,
-            feedback=f"reviewer's tests failed: {reason}"
-            + (f"\n{result.tail}" if result.tail else ""),
+            feedback=feedback + (f"\n{result.tail}" if result.tail else ""),
         )
 
     def _review(self, subtask: Subtask, token: str, events: list[str]) -> bool:
