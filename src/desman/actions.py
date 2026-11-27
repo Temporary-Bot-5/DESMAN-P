@@ -325,7 +325,7 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
         if sub.paused_until:
             notes.append(t("paused until {until}", until=sub.paused_until))
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
-            notes.append(one_line(sub.reason, 100))
+            notes.append(one_line(ui.display_task_reason(sub.reason), 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
         review_tests = sub.review_tests
         if review_tests:
@@ -576,7 +576,7 @@ def print_inbox(items: list[InboxItem], hint: bool = True) -> None:
             f"  [{one_line(item.goal, 40)}]"
         )
         if item.reason:
-            click.echo(f"{'':<12} {one_line(item.reason, 110)}")
+            click.echo(f"{'':<12} {one_line(ui.display_task_reason(item.reason), 110)}")
         if setup := search_setup_hint(item):
             click.echo(" " * 12 + ui.chat_hint(setup))
     if hint:
@@ -607,7 +607,7 @@ def choose_inbox(store: Store, session_id: str | None = None) -> dict[str, Any]:
                     ui.Choice(
                         label=f"{i.ref}  {i.status}  {i.description}  [{i.goal}]",
                         value=i,
-                        hint=i.reason or "",
+                        hint=ui.display_task_reason(i.reason or ""),
                     )
                     for i in items
                 ]
@@ -689,7 +689,7 @@ def print_waiting(items: list[InboxItem], hint: str) -> None:
             + Text(f"{item.status}  {one_line(item.description, 50)}  [{one_line(item.goal, 40)}]")
         )
         if item.reason:
-            ui.note(f"    {one_line(item.reason, 110)}")
+            ui.note(f"    {one_line(ui.display_task_reason(item.reason), 110)}")
         if setup := search_setup_hint(item):
             ui.note(setup)
     ui.note(hint)

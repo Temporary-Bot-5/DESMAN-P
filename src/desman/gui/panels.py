@@ -9,7 +9,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from desman import modules_cli, providers, tuning_cli
+from desman import modules_cli, providers, tuning_cli, ui
 from desman.config import Config, ConfigError, open_config
 from desman.core import calls, choices, db, holds
 from desman.core.report import inbox, short_description, task_report, task_summaries
@@ -213,7 +213,9 @@ def snapshot(path: Path, kind: str, front: WebFront) -> dict[str, Any]:
                             "status": sub.status.value,
                             "description": redact(sub.description),
                             "title": short_description(redact(sub.description)),
-                            "reason": redact(sub.reason or "") if item else None,
+                            "reason": redact(ui.display_task_reason(sub.reason or ""))
+                            if item
+                            else None,
                             "ref": item.ref if item else None,
                             "version": item.version if item else None,
                         }

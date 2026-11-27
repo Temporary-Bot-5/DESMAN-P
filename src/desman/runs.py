@@ -1194,6 +1194,7 @@ def _run_review_tests(
         workspace_full=outcome.workspace_full,
         stopped=outcome.stopped,
         disk_low=outcome.disk_low,
+        disk_free_minimum=outcome.disk_free_minimum,
         skipped_files=skipped,
         skipped_names=skipped_names,
     )
@@ -1203,6 +1204,8 @@ def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
     goal, is_final = store.subtask_goal(subtask)
     previous = last_review_tests(store, subtask.id)
     if previous is not None:
+        previous.pop("artifact_digest", None)
+        previous.pop("disk_free_minimum", None)
         source = previous.get("source")
         if isinstance(source, str) and len(source) > 8_000:
             marker = "\n[truncated]"

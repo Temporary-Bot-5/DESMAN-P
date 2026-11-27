@@ -1116,6 +1116,19 @@ def provider_wait(seconds: float, as_json: bool = False) -> None:
     warn(t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds)), stderr=as_json)
 
 
+def display_task_reason(reason: str) -> str:
+    prefix = "the sandbox has been unavailable for "
+    if reason.startswith(prefix):
+        minutes, separator, detail = reason.removeprefix(prefix).partition(" minutes: ")
+        if separator and minutes.isdecimal():
+            return t(
+                "the sandbox has been unavailable for {minutes} minutes: {reason}",
+                minutes=minutes,
+                reason=detail,
+            )
+    return reason
+
+
 def sandbox_wait(seconds: float, reason: str, as_json: bool = False) -> None:
     import math
 

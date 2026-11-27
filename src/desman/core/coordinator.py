@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import hashlib
 import json
 import math
 import time
@@ -63,6 +64,7 @@ from desman.core.effects import (
     earlier_lookups,
     earlier_results,
     has_written_python_files,
+    last_review_tests,
     workspace_files,
 )
 from desman.core.models import (
@@ -77,7 +79,7 @@ from desman.core.models import (
 )
 from desman.core.policy import Access, executor_access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
-from desman.core.sandbox import SANDBOX_RETRY_SECONDS, SandboxUnavailable
+from desman.core.sandbox import SANDBOX_RETRY_SECONDS, SandboxUnavailable, disk_still_low
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
@@ -88,7 +90,6 @@ from desman.core.store import (
 )
 from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult, builtin_registry
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
-from desman.i18n import t
 from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
 S = SubtaskStatus
@@ -245,6 +246,7 @@ class ReviewTestRun(BaseModel):
     workspace_full: str = ""
     stopped: str = ""
     disk_low: bool = False
+    disk_free_minimum: int | None = None
     sandbox_unavailable: bool = False
     copy_over_quota: str = ""
     skipped_files: int = Field(default=0, ge=0)
@@ -264,6 +266,10 @@ ReviewTests = RunReviewTests | ReviewTestRunner
 
 # Scope the test contract to the current call while keeping the two-argument Reviewer API.
 review_tests_enabled: ContextVar[bool] = ContextVar("review_tests_enabled", default=False)
+
+
+def _artifact_digest(artifact: dict[str, Any] | None) -> str:
+    return hashlib.sha256(json.dumps(artifact, sort_keys=True).encode()).hexdigest()
 
 
 def needs_review_tests(subtask: Subtask, *, written_python_files: bool) -> bool:
@@ -992,6 +998,21 @@ class Coordinator:
         self.store.note(subtask.id, Actor.EXECUTOR, "decomposition_failed", {"reason": reason})
         return False
 
+    def _review_disk_skip(
+        self, subtask: Subtask, artifact: dict[str, Any] | None
+    ) -> ReviewTestRun | None:
+        previous = last_review_tests(self.store, subtask.id)
+        if (
+            previous is not None
+            and previous.get("disk_low") is True
+            and previous.get("attempt") == subtask.attempts.quality + 1
+            and previous.get("artifact_digest") == _artifact_digest(artifact)
+            and isinstance(minimum := previous.get("disk_free_minimum"), int)
+            and disk_still_low(self.workspaces, minimum)
+        ):
+            return ReviewTestRun.model_validate(previous)
+        return None
+
     def _review_test_skip(
         self, subtask: Subtask, cover_call: Callable[[float], None]
     ) -> ReviewTestRun | None:
@@ -1054,9 +1075,9 @@ class Coordinator:
     def _review_test_verdict(
         self, subtask: Subtask, review: Review, result: ReviewTestRun
     ) -> Review | Failure:
-        if result.disk_low or (result.sandbox_unavailable and subtask.runs_code):
-            return self._review_sandbox_failure(subtask, result)
-        if not result.ran:
+        if subtask.runs_code and (not result.ran or result.disk_low):
+            return self._required_review_test_failure(subtask, result)
+        if not result.ran or result.disk_low:
             return review
 
         if result.timed_out or result.stopped or result.workspace_full:
@@ -1090,7 +1111,12 @@ class Coordinator:
             feedback=feedback + (f"\n{result.tail}" if result.tail else ""),
         )
 
-    def _review_sandbox_failure(self, subtask: Subtask, result: ReviewTestRun) -> Failure:
+    def _required_review_test_failure(self, subtask: Subtask, result: ReviewTestRun) -> Failure:
+        if not (result.disk_low or result.sandbox_unavailable):
+            return Failure(
+                kind=FailureKind.PERMANENT,
+                reason=result.reason_not_run or "review tests could not run",
+            )
         reason = (
             result.stopped or "disk space too low"
             if result.disk_low
@@ -1107,13 +1133,10 @@ class Coordinator:
             (subtask.id,),
         ).fetchone()
         if previous + 1 >= 10:
+            minutes = (previous + 1) * SANDBOX_RETRY_SECONDS // 60
             return Failure(
                 kind=FailureKind.PERMANENT,
-                reason=t(
-                    "the sandbox has been unavailable for {minutes} minutes: {reason}",
-                    minutes=(previous + 1) * SANDBOX_RETRY_SECONDS // 60,
-                    reason=reason,
-                ),
+                reason=f"the sandbox has been unavailable for {minutes} minutes: {reason}",
             )
         return Failure(
             kind=FailureKind.OUTAGE,
@@ -1144,16 +1167,13 @@ class Coordinator:
                     and has_written_python_files(self.store, subtask, root=self.workspaces),
                 )
             )
-            skipped = self._review_test_skip(subtask, cover_call) if needs_tests else None
+            if needs_tests:
+                if subtask.runs_code:
+                    skipped = self._review_disk_skip(subtask, artifact)
+                if skipped is None:
+                    skipped = self._review_test_skip(subtask, cover_call)
             if skipped is not None and subtask.runs_code:
-                review = (
-                    self._review_sandbox_failure(subtask, skipped)
-                    if skipped.sandbox_unavailable
-                    else Failure(
-                        kind=FailureKind.PERMANENT,
-                        reason=skipped.reason_not_run or "review tests could not run",
-                    )
-                )
+                review = self._required_review_test_failure(subtask, skipped)
             else:
                 reviewer = self._crew(subtask).reviewer
                 setting = review_tests_enabled.set(needs_tests and skipped is None)
@@ -1191,7 +1211,8 @@ class Coordinator:
         try:
             note = None
             if skipped is not None and subtask.runs_code:
-                note = {**skipped.model_dump(), "attempt": subtask.attempts.quality + 1}
+                if not skipped.disk_low:
+                    note = {**skipped.model_dump(), "attempt": subtask.attempts.quality + 1}
             elif (
                 isinstance(review, Review)
                 and needs_tests
@@ -1207,13 +1228,18 @@ class Coordinator:
                         reason=f"review tests raised {type(error).__name__}: {error}",
                     )
             if note is not None:
+                if note["disk_low"]:
+                    note["artifact_digest"] = _artifact_digest(artifact)
                 with db.transaction(self.store.conn):
                     self.store.extend_review(subtask.id, token, MODEL_CALL_MARGIN)
                     self.store.note(subtask.id, Actor.REVIEWER, "review_tests", note)
             if isinstance(review, Review):
                 details = {"verdict": review.verdict.value, "feedback": review.feedback}
-                if note is not None and not note["ran"]:
-                    details["tests"] = f"not run: {note['reason_not_run'] or 'unspecified'}"
+                if note is not None:
+                    if note["disk_low"]:
+                        details["tests"] = f"stopped: {note['stopped'] or 'disk space too low'}"
+                    elif not note["ran"]:
+                        details["tests"] = f"not run: {note['reason_not_run'] or 'unspecified'}"
             if isinstance(review, Failure):
                 # Transient interruptions spend budget while sandbox outages simply pause.
                 moved = self.store.record_failure(

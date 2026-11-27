@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeClock
+from desman import i18n, ui
 from desman.actions import print_report
 from desman.agents import llm_executor, llm_reviewer
 from desman.core import coordinator as coordinator_module
@@ -1027,7 +1028,7 @@ def test_changes():
 
 
 @pytest.mark.parametrize(
-    "reason", ["disk", "outage", "quota", "optional-quota", "write-error", "fits"]
+    "reason", ["disk", "optional-disk", "outage", "quota", "optional-quota", "write-error", "fits"]
 )
 def test_review_infrastructure_failure(
     store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
@@ -1035,7 +1036,7 @@ def test_review_infrastructure_failure(
     quota = reason in {"quota", "optional-quota"}
     task_id = submitted(
         store,
-        runs_code=reason != "optional-quota",
+        runs_code=reason not in {"optional-quota", "optional-disk"},
         kind=Kind.CODE,
         output_path="answer.py",
     )
@@ -1080,7 +1081,7 @@ def test_review_infrastructure_failure(
     )
     assert coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
-    if reason == "fits" or quota:
+    if reason in {"fits", "optional-quota", "optional-disk"}:
         assert sub.status is SubtaskStatus.DONE
         assert sub.attempts.transient == 0
     elif reason in {"disk", "outage"}:
@@ -1095,6 +1096,9 @@ def test_review_infrastructure_failure(
         failures = [row for row in store.audit_log(task_id) if row["action"] == "review_failed"]
         assert len(failures) == 6
         assert all(json.loads(row["details_json"])["failure"] == "outage" for row in failures)
+    elif reason == "quota":
+        assert sub.status is SubtaskStatus.NEEDS_HUMAN
+        assert sub.attempts.transient == 0
     else:
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
     note = last_review_tests(store, sub.id)
@@ -1105,14 +1109,71 @@ def test_review_infrastructure_failure(
         assert list(tmp_path.glob("review-*")) == []
         return
     assert note is not None
-    assert note["disk_low"] is (reason == "disk")
-    assert note["ran"] is (reason in {"disk", "fits"})
+    assert note["disk_low"] is (reason in {"disk", "optional-disk"})
+    assert note["ran"] is (reason in {"disk", "optional-disk", "fits"})
     if quota:
         assert "quota: " in note["copy_over_quota"]
         assert sub.attempts.quality == 0
         assert "at least 1 entries, 101 bytes" in note["reason_not_run"]
-        assert not any(row["action"] == "review_failed" for row in store.audit_log(task_id))
+        failures = [row for row in store.audit_log(task_id) if row["action"] == "review_failed"]
+        if reason == "quota":
+            [failure] = failures
+            details = json.loads(failure["details_json"])
+            assert details["failure"] == "permanent"
+            assert details["cause"] == note["reason_not_run"]
+        else:
+            assert not failures
     assert list(tmp_path.glob("review-*")) == []
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_low_disk_pauses_without_asking_reviewer_again(
+    store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recover: bool
+) -> None:
+    task_id = submitted(store)
+    free = 99
+    monkeypatch.setattr("desman.core.sandbox._free", lambda _: free)
+    llm = FakeLLM().on("Review", ACCEPT, ACCEPT)
+
+    def runner(*_: object) -> ReviewTestRun:
+        if free >= 100:
+            return ReviewTestRun(ran=True, exit_code=0, passed=1)
+        return ReviewTestRun(
+            ran=True, disk_low=True, disk_free_minimum=100, stopped="disk space too low"
+        )
+
+    coord = Coordinator(
+        store,
+        unread,
+        llm_reviewer(llm),
+        access=executor_access([Permission.SHELL]),
+        workspaces=tmp_path,
+        review_tests=runner,
+        sleep=clock.sleep,
+    )
+    assert coord.tick(task_id, [])
+    assert_sandbox_retry(coord, task_id, clock)
+    [sub] = store.list_subtasks(task_id)
+    original = last_review_tests(store, sub.id)
+    clock.sleep(60)
+    assert coord.tick(task_id, [])
+    assert len(llm.calls) == 1
+    assert store.get_subtask(sub.id).status is SubtaskStatus.PAUSED
+    assert last_review_tests(store, sub.id) == original
+    if recover:
+        free = 100
+        clock.sleep(60)
+        assert coord.tick(task_id, [])
+        assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
+        assert len(llm.calls) == 2
+    else:
+        for _ in range(8):
+            clock.sleep(60)
+            assert coord.tick(task_id, [])
+        settled = store.get_subtask(sub.id)
+        assert settled.status is SubtaskStatus.NEEDS_HUMAN
+        assert settled.attempts == sub.attempts
+        assert len(llm.calls) == 1
 
 
 def test_lost_reservation_keeps_final_verdict_without_test_note(
@@ -1413,11 +1474,20 @@ def test_missing_package_in_review(
     assert note is not None and note["source"] == module
     rows = store.audit_log(task_id)
     if mode in {"missing", "metadata"}:
-        assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
         assert not note["ran"]
         assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
-        [verdict] = [row for row in rows if row["action"] == "verdict"]
-        assert json.loads(verdict["details_json"])["tests"] == f"not run: {note['reason_not_run']}"
+        if runs_code:
+            assert store.get_subtask(sub.id).status is SubtaskStatus.NEEDS_HUMAN
+            [failure] = [row for row in rows if row["action"] == "review_failed"]
+            details = json.loads(failure["details_json"])
+            assert details["failure"] == "permanent"
+            assert details["cause"] == note["reason_not_run"]
+        else:
+            assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
+            [verdict] = [row for row in rows if row["action"] == "verdict"]
+            assert (
+                json.loads(verdict["details_json"])["tests"] == f"not run: {note['reason_not_run']}"
+            )
     else:
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
         assert note["ran"] and note["errors"] + note["failed"] == (2 if mode == "mixed" else 1)
@@ -1845,7 +1915,10 @@ def test_command_window_excludes_sibling_writes(
     assert "written_files" not in evidence(store, sub, workspace=workspace)
 
 
-def test_sandbox_outage_limit_and_wait_reason(store: Store, clock: FakeClock) -> None:
+def test_sandbox_outage_limit_and_wait_reason(
+    store: Store, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(i18n, "_current", i18n.CATALOGS["de"])
     task_id = submitted(store)
 
     def unreachable(*_: object) -> ReviewTestRun:
@@ -1884,6 +1957,11 @@ def test_sandbox_outage_limit_and_wait_reason(store: Store, clock: FakeClock) ->
     )
     [sub] = store.list_subtasks(task_id)
     assert sub.attempts.transient == sub.attempts.quality == 0
+    [reported] = task_report(store, task_id).subtasks
+    assert reported.reason is not None
+    assert ui.display_task_reason(reported.reason).startswith(
+        "Die Sandbox ist seit 10 Minuten nicht verfügbar: backend went away"
+    )
 
 
 def test_network_review_never_requests_or_runs_tests(store: Store) -> None:

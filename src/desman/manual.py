@@ -67,20 +67,20 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Tools use workspaces/TASK next to the DB. Chat lists files and their folder and skips repeated, untrusted text. Chat and run/status show "
-        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). Same-chat follow-ups get copies in from-TASK/. Originals stay. Retries and interrupted runs reuse saved tool results. "
-        "Retries see work files and rewrite stale demonstration files.\n"
-        "Running code needs run_command, shell_execution (`/permissions`) and a sandbox. "
-        "If the planner or `/run --runs-code` requires execution, the last run must "
-        "exit 0. If unavailable, the subtask waits for the person. "
-        "Code subtasks default to 16 tool rounds (8–48 via `/tuning --code-rounds N`). "
-        "edit_file replaces exact fragments. Runs show the executor exit codes and output tails. Prose goes in the result; files are extra. Review checks sources, dates, language "
-        "(names/translations allowed) and coverage. Live data may have fewer items, with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
-        "the combine step. For blocked pages, use snippets or another official source. "
-        "Review tests runs or Python outputs in offline copies and checks names and counts. Verified passes allow acceptance. Call failures retry execution. Ambiguity retries review. "
-        "Sandbox outages and low disk pause review for 60s. Ten outages or blocked required runs need human review. Network jobs skip tests. Large copies or missing packages can skip tests.\n"
+        "Tools use workspaces/TASK beside the DB. Chat lists files and folder, omitting repeated, untrusted text. Chat and run/status show "
+        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). Follow-ups in this chat copy to from-TASK/. Originals stay. Retries and interrupted runs reuse tool results. "
+        "Retries see work files and rewrite stale demos.\n"
+        "Code execution needs run_command, shell_execution (`/permissions`) and a sandbox. "
+        "For planner-required execution or `/run --runs-code`, the last run must "
+        "exit 0. Unavailable runs need a person. "
+        "Code defaults to 16 tool rounds per subtask (8–48 via `/tuning --code-rounds N`). "
+        "edit_file replaces exact fragments. Runs show executor exit codes and output tails. Results hold prose, with files as extras. Review checks sources, dates, language "
+        "(names/translations allowed) and coverage. Live data may have fewer items with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
+        "the combine step. Use snippets or another official source for blocked pages. "
+        "Review tests runs or Python outputs in offline copies, checking names and counts. Verified passes allow acceptance. Call failures retry execution. Ambiguity retries review. "
+        "Outages or low disk pause review for 60s only for required runs. Other code skips tests then. Status says why. Ten outages or blocked required tests need human review. Network jobs skip tests. Large copies or missing packages can block tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
-        "Retellings copy task code and use your latest message’s language.",
+        "Retellings copy task code in your latest message’s language.",
     ),
     Topic(
         "attachments",

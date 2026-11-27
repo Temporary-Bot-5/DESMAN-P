@@ -230,6 +230,7 @@ class Outcome:
     disk_low: bool = False
     """It was stopped for the disk's free space, which other programs' writes lower too: not
     necessarily the code's doing."""
+    disk_free_minimum: int | None = None
 
 
 @dataclass(frozen=True)
@@ -431,6 +432,7 @@ def _watch(workdir: Path, limits: Limits) -> Callable[[], Stop | None]:
                 f"the disk holding the workspace lost {_size(lost)} of free space during the "
                 f"run, more than {_size(disk)} (writes of other programs count too)",
                 disk_low=True,
+                disk_free_minimum=before - disk,
             )
         return None
 
@@ -443,6 +445,12 @@ class Stop:
 
     reason: str
     disk_low: bool = False
+    disk_free_minimum: int | None = None
+
+
+def disk_still_low(path: Path, minimum: int) -> bool:
+    free = _free(path)
+    return free is not None and free < minimum
 
 
 def _free(path: Path) -> int | None:
@@ -1447,6 +1455,7 @@ def _execute(
         stderr_cut=stderr.cut,
         stopped="" if stop is None else stop.reason,
         disk_low=stop is not None and stop.disk_low,
+        disk_free_minimum=None if stop is None else stop.disk_free_minimum,
     )
 
 
@@ -1656,6 +1665,7 @@ def _execute_wsl(
         stderr_cut=stderr.cut,
         stopped="" if stop_for is None else stop_for.reason,
         disk_low=stop_for is not None and stop_for.disk_low,
+        disk_free_minimum=None if stop_for is None else stop_for.disk_free_minimum,
     )
     if not timed_out and not killed:
         detail = diagnostic.text().strip()
