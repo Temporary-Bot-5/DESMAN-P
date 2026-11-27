@@ -38,7 +38,6 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from itertools import islice
 from pathlib import Path
 from typing import Any, Final
 
@@ -59,6 +58,7 @@ from desman.core.models import Kind, Subtask
 from desman.core.store import Store
 from desman.core.tools import (
     FILE_WRITE_TOOLS,
+    RUN_TOOL,
     TOOL_RESULTS_DIR,
     Replayed,
     Tool,
@@ -163,7 +163,11 @@ def evidence(
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
     items += [("earlier_call", row) for row in earlier_rows]
-    files = _written_files([*rows, *earlier_rows], workspace, store, subtask)
+    files, used_attempt_start = _written_files([*rows, *earlier_rows], workspace, store, subtask)
+    if used_attempt_start:
+        out["written_files_timing"] = (
+            "No usable run_command journal times. File evidence uses the attempt start time."
+        )
     if files:
         out["written_files"] = []
         items += [("file", file) for file in files]
@@ -307,15 +311,36 @@ def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
     return dict(json.loads(row[0])) if row else None
 
 
-def _workspace_outputs(workspace: Workspace, store: Store, subtask: Subtask) -> Iterator[str]:
+def _command_windows(store: Store, subtask: Subtask) -> tuple[list[tuple[float, float]], bool]:
+    execution = store.executions(subtask.id) - 1
+    commands = [row for row in store.effects(subtask.id, execution) if row["tool"] == RUN_TOOL]
+    windows = []
+    for row in commands:
+        if row["state"] != "done":
+            continue
+        try:
+            started = db.parse_iso(row["started_at"]).timestamp()
+            finished = db.parse_iso(row["finished_at"]).timestamp()
+        except (IndexError, TypeError, ValueError, OverflowError, OSError):
+            continue
+        if started <= finished:
+            # The journal stores millisecond precision, while filesystem mtimes can be finer.
+            windows.append((started, finished + 0.001))
+    if windows or not commands:
+        return windows, False
     row = store.conn.execute(
         """SELECT ts FROM audit_log WHERE subtask_id = ? AND action = 'attempt_started'
            ORDER BY seq DESC LIMIT 1""",
         (subtask.id,),
     ).fetchone()
-    if row is None:
+    return ([(db.parse_iso(row[0]).timestamp(), float("inf"))], True) if row else ([], False)
+
+
+def _workspace_outputs(
+    workspace: Workspace, windows: list[tuple[float, float]]
+) -> Iterator[tuple[str, float]]:
+    if not windows:
         return
-    started = db.parse_iso(row[0]).timestamp()
     for path in workspace.files():
         folder, slash, _ = path.partition("/")
         if slash and folder.startswith("from-"):
@@ -326,8 +351,29 @@ def _workspace_outputs(workspace: Workspace, store: Store, subtask: Subtask) -> 
             modified = workspace.mtime(path)
         except (OSError, PathEscapeError):
             continue
-        if modified >= started:
-            yield path
+        if any(started <= modified < finished for started, finished in windows):
+            yield path, modified
+
+
+def _output_order(workspace: Workspace, item: tuple[str, float]) -> tuple[int, float, str]:
+    path, modified = item
+    suffix = Path(path).suffix.lower()
+    if suffix == ".py":
+        return 0, -modified, path
+    priority = 2
+    if suffix not in {".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".parquet"}:
+        try:
+            sample = workspace.read(path, limit=1024)
+            # Ignore an incomplete last character when sampling a UTF-8 file.
+            sample.decode("utf-8", errors="strict")
+            if b"\x00" not in sample:
+                priority = 1
+        except UnicodeDecodeError as error:
+            if error.reason == "unexpected end of data" and b"\x00" not in sample:
+                priority = 1
+        except (OSError, PathEscapeError):
+            pass
+    return priority, -modified, path
 
 
 def has_written_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
@@ -340,17 +386,27 @@ def has_written_files(store: Store, subtask: Subtask, *, root: Path | None = Non
     workspace = Workspace(
         root if root is not None else workspace_root_for(store.conn), subtask.task_id
     )
-    return next(_workspace_outputs(workspace, store, subtask), None) is not None
+    windows, _ = _command_windows(store, subtask)
+    return next(_workspace_outputs(workspace, windows), None) is not None
 
 
 def _written_files(
     rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], bool]:
     paths = _written_paths(rows)
+    used_attempt_start = False
     from_workspace = not paths and (subtask.kind is Kind.CODE or subtask.runs_code)
     if from_workspace:
-        workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
-        paths = list(islice(_workspace_outputs(workspace, store, subtask), 12))
+        windows, used_attempt_start = _command_windows(store, subtask)
+        output_workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
+        paths = [
+            path
+            for path, _ in sorted(
+                _workspace_outputs(output_workspace, windows),
+                key=lambda item: _output_order(output_workspace, item),
+            )[:12]
+        ]
+        workspace = output_workspace
     files = []
     for path in paths:
         try:
@@ -364,7 +420,7 @@ def _written_files(
         except (OSError, UnicodeError, PathEscapeError):
             text = "File unreadable or not UTF-8: content unavailable."
         files.append({"path": path, "text": text})
-    return files
+    return files, used_attempt_start
 
 
 def timestamp(value: str | None) -> str | None:

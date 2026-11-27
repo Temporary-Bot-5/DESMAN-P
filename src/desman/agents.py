@@ -1103,6 +1103,12 @@ class _Verdict(BaseModel):
 class _CodeVerdict(_Verdict, Review):
     """Review verdict with an independently written pytest module."""
 
+    @model_validator(mode="after")
+    def _requires_tests_on_accept(self) -> Self:
+        if self.verdict is Verdict.ACCEPT and self.tests is None:
+            raise ValueError("reviewer gave no tests")
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def _discard_unused_tests(cls, data: Any) -> Any:

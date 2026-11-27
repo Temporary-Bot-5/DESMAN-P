@@ -76,6 +76,7 @@ from desman.core.models import (
 )
 from desman.core.policy import Access, executor_access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
+from desman.core.sandbox import SandboxUnavailable
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
@@ -216,6 +217,7 @@ class TestRun(BaseModel):
     timed_out: bool = False
     workspace_full: str = ""
     stopped: str = ""
+    disk_low: bool = False
 
 
 ReviewTests = Callable[[Subtask, Workspace, str, int], TestRun]
@@ -945,10 +947,10 @@ class Coordinator:
         return False
 
     def _check_review_tests(
-        self, subtask: Subtask, review: Review, cover_call: Callable[[float], None]
+        self, subtask: Subtask, review: Review, token: str, cover_call: Callable[[float], None]
     ) -> Review | Failure:
         runner = self.review_tests
-        if runner is None or not needs_review_tests(
+        if not needs_review_tests(
             subtask,
             written_files=subtask.kind is Kind.CODE
             and not subtask.runs_code
@@ -956,34 +958,52 @@ class Coordinator:
         ):
             return review
         attempt = subtask.attempts.quality + 1
-        if review.tests is None and subtask.runs_code:
+        if review.tests is None:
             return Failure(kind=FailureKind.TRANSIENT, reason="reviewer gave no tests")
+
+        if runner is None:
+            return review
 
         tool = self.tools.get(RUN_TOOL) if self.tools is not None else None
         access = self._crew(subtask).access or executor_access()
+        skip_reason: str | None
         if self.store.tools(subtask.task_id) is not Tools.GRANTED or "document" in subtask.inputs:
-            result = TestRun(ran=False, reason_not_run="task does not grant tools")
+            skip_reason = "task does not grant tools"
         elif tool is None:
-            result = TestRun(ran=False, reason_not_run="run_command unavailable")
-        elif reason := access.refusal(tool):
-            result = TestRun(ran=False, reason_not_run=reason)
-        elif review.tests is None:
-            result = TestRun(ran=False, reason_not_run="reviewer gave no tests")
+            skip_reason = "run_command unavailable"
+        else:
+            skip_reason = access.refusal(tool)
+        if skip_reason is not None:
+            result = TestRun(ran=False, reason_not_run=skip_reason)
         else:
             cover_call(REVIEW_TEST_TIMEOUT)
             workspace = Workspace(self.workspaces, subtask.task_id)
-            result = TestRun.model_validate(runner(subtask, workspace, review.tests, attempt))
+            try:
+                result = TestRun.model_validate(runner(subtask, workspace, review.tests, attempt))
+            except SandboxUnavailable as error:
+                result = TestRun(ran=False, reason_not_run=str(error)[:1_000])
 
-        self.store.note(
-            subtask.id,
-            Actor.REVIEWER,
-            "review_tests",
-            {
-                "file": review_test_file(subtask.id, attempt),
-                **result.model_dump(exclude={"tail"}),
-                "tail": result.tail[-2_000:],
-            },
-        )
+        with db.transaction(self.store.conn):
+            self.store.extend_review(subtask.id, token, MODEL_CALL_MARGIN)
+            self.store.note(
+                subtask.id,
+                Actor.REVIEWER,
+                "review_tests",
+                {
+                    "file": review_test_file(subtask.id, attempt),
+                    **result.model_dump(exclude={"tail"}),
+                    "tail": result.tail[-2_000:],
+                },
+            )
+        if result.disk_low:
+            return Failure(
+                kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
+            )
+        if not result.ran and skip_reason is None and subtask.runs_code:
+            return Failure(
+                kind=FailureKind.TRANSIENT,
+                reason=result.reason_not_run or "review sandbox unavailable",
+            )
         if result.stopped or result.workspace_full:
             feedback = f"reviewer's tests failed: {result.stopped or result.workspace_full}"
         elif not result.ran:
@@ -1025,6 +1045,11 @@ class Coordinator:
             review = Failure(
                 kind=FailureKind.TRANSIENT, reason=f"reviewer raised {type(e).__name__}: {e}"
             )
+        verdict = (
+            {"verdict": review.verdict.value, "feedback": review.feedback}
+            if isinstance(review, Review)
+            else {}
+        )
         if (
             isinstance(review, Review)
             and review.verdict is Verdict.ACCEPT
@@ -1036,11 +1061,10 @@ class Coordinator:
                 verdict=Verdict.RETRY,
                 feedback=f"{_error_reason(artifact)} (accepted by the reviewer, overruled)",
             )
-        verdict: dict[str, Any] = {}
         try:
             if isinstance(review, Review) and review.verdict is Verdict.ACCEPT:
                 try:
-                    review = self._check_review_tests(subtask, review, cover_call)
+                    review = self._check_review_tests(subtask, review, token, cover_call)
                 except StaleStateError:
                     raise
                 except Exception as error:
@@ -1049,7 +1073,7 @@ class Coordinator:
                         reason=f"review tests raised {type(error).__name__}: {error}",
                     )
             if isinstance(review, Review):
-                verdict = {"verdict": review.verdict.value, "feedback": review.feedback}
+                details = {"verdict": review.verdict.value, "feedback": review.feedback}
             if isinstance(review, Failure):
                 # Counts against the subtask's budget, so a reviewer that keeps failing cannot
                 # loop forever. A transient one keeps the subtask in REVIEW: the submitted work is
@@ -1071,7 +1095,7 @@ class Coordinator:
                     S.DONE,
                     Actor.REVIEWER,
                     reason=review.feedback or None,
-                    details=verdict,
+                    details=details,
                     action="verdict",
                     review=token,
                 )
@@ -1082,7 +1106,7 @@ class Coordinator:
                     Actor.REVIEWER,
                     FailureKind.QUALITY,
                     reason=review.feedback or "rejected by reviewer",
-                    details=verdict,
+                    details=details,
                     action="verdict",
                     review=token,
                 )
@@ -1093,7 +1117,7 @@ class Coordinator:
                     S.NEEDS_HUMAN,
                     Actor.REVIEWER,
                     reason=review.feedback or "escalated by reviewer",
-                    details=verdict,
+                    details=details,
                     action="verdict",
                     review=token,
                 )

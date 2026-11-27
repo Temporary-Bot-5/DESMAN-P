@@ -20,6 +20,7 @@ from desman.config import ConfigManager, default_config_path
 from desman.core import db
 from desman.core.audit import check_history
 from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
+from desman.core.coordinator import TestRun as ReviewTestRun
 from desman.core.models import SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Access, Policy, Role, RolePolicy
 from desman.core.retry import strategy_for
@@ -85,7 +86,10 @@ def runs_code() -> TaskSpec:
 
 
 def accept(subtask: object, artifact: object) -> Review:
-    return Review(verdict=Verdict.ACCEPT)
+    return Review(
+        verdict=Verdict.ACCEPT,
+        tests="def test_addition():\n    assert 2 + 3 == 5\n",
+    )
 
 
 def coordinator(
@@ -101,6 +105,7 @@ def coordinator(
         sleep=clock.sleep,
         strategies=strategy_for,
         decomposer=lambda work: None,
+        review_tests=lambda *_: ReviewTestRun(ran=True, exit_code=0, passed=1),
     )
 
 

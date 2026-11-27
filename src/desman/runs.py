@@ -14,6 +14,8 @@ import sqlite3
 from collections.abc import Callable, Collection, Mapping, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
@@ -54,9 +56,9 @@ from desman.core.sandbox import Sandbox, SandboxUnavailable
 from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
-from desman.core.tools import Registry, builtin_registry
+from desman.core.tools import TOOL_RESULTS_DIR, Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
-from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
+from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
 from desman.i18n import t
 from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
@@ -755,34 +757,58 @@ def _personalize() -> bool:
 def _run_review_tests(
     sandbox: Sandbox, subtask: Subtask, workspace: Workspace, module: str, attempt: int
 ) -> TestRun:
+    file = review_test_file(subtask.id, attempt)
+    workspace.write(file, module)
+    config = "[pytest]\npythonpath = ..\n"
     try:
         if problem := sandbox.unavailable():
-            return TestRun(ran=False, reason_not_run=problem[:1_000])
-        file = review_test_file(subtask.id, attempt)
-        workspace.write(file, module)
-        workspace.write(".review/pytest.ini", "[pytest]\npythonpath = ..\n")
-        # python3 is the interpreter name supplied by every Sandbox backend.
-        outcome = sandbox.run(
-            [
-                "python3",
-                "-I",
-                "-m",
-                "pytest",
-                "-c",
-                ".review/pytest.ini",
-                "--rootdir",
-                ".review",
-                "--noconftest",
-                "-p",
-                "no:cacheprovider",
-                "-o",
-                "addopts=",
-                "-q",
-                file,
-            ],
-            workspace.root,
-            timeout=REVIEW_TEST_TIMEOUT,
-        )
+            raise SandboxUnavailable(problem)
+        with TemporaryDirectory(prefix="review-", dir=workspace.root.parent) as directory:
+            location = Path(directory)
+            copy = Workspace(location.parent, location.name)
+            # Count the test module, pytest configuration and both of their parent directories.
+            directories = {PurePosixPath(".review"), PurePosixPath(file).parent}
+            entries = 4
+            remaining = sandbox.limits.workspace_bytes - len(module.encode()) - len(config)
+            if entries > sandbox.limits.workspace_files or remaining < 0:
+                raise SandboxUnavailable("review workspace copy would exceed the sandbox quota")
+            copy.write(file, module)
+            copy.write(".review/pytest.ini", config)
+            for path in workspace.files():
+                if not is_work_file(path) or path.startswith(("web/", TOOL_RESULTS_DIR)):
+                    continue
+                parents = set(PurePosixPath(path).parents) - {PurePosixPath(".")}
+                entries += 1 + len(parents - directories)
+                if entries > sandbox.limits.workspace_files or workspace.size(path) > remaining:
+                    raise SandboxUnavailable("review workspace copy would exceed the sandbox quota")
+                data = workspace.read(path, limit=remaining + 1)
+                remaining -= len(data)
+                if remaining < 0:
+                    raise SandboxUnavailable("review workspace copy would exceed the sandbox quota")
+                copy.write(path, data)
+                directories.update(parents)
+            # python3 is the interpreter name supplied by every Sandbox backend.
+            outcome = sandbox.run(
+                [
+                    "python3",
+                    "-I",
+                    "-m",
+                    "pytest",
+                    "-c",
+                    ".review/pytest.ini",
+                    "--rootdir",
+                    ".review",
+                    "--noconftest",
+                    "-p",
+                    "no:cacheprovider",
+                    "-o",
+                    "addopts=",
+                    "-q",
+                    file,
+                ],
+                copy.root,
+                timeout=REVIEW_TEST_TIMEOUT,
+            )
     except SandboxUnavailable as error:
         return TestRun(ran=False, reason_not_run=str(error)[:1_000])
     summary = outcome.stdout.splitlines()
@@ -815,6 +841,7 @@ def _run_review_tests(
         timed_out=outcome.timed_out,
         workspace_full=outcome.workspace_full,
         stopped=outcome.stopped,
+        disk_low=outcome.disk_low,
     )
 
 

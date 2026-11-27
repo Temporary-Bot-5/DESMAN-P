@@ -21,12 +21,14 @@ from desman.core.models import Kind, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Permission, executor_access
 from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
-from desman.core.sandbox import Outcome, Sandbox
+from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable
 from desman.core.states import SubtaskStatus, TaskStatus
 from desman.core.store import Store
 from desman.core.tools import builtin_registry
 from desman.core.workspace import Workspace
+from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM
+from desman.llm.structured import StructuredOutputError
 from desman.runs import Models, _review_test_context, _run_review_tests, coordinator
 from helpers import make_config
 from test_sandbox import confined
@@ -143,7 +145,7 @@ def test_skips_and_missing_module(
         runs_code=mode != "non-code",
         tools=Tools.NONE if mode == "tools" else Tools.GRANTED,
     )
-    replies = ('{"verdict":"accept"}',) * 2 if mode == "missing" else (ACCEPT,)
+    replies = ('{"verdict":"accept"}',) * 4 if mode == "missing" else (ACCEPT,)
     llm = FakeLLM().on("Review", *replies)
     coord = Coordinator(
         store,
@@ -154,7 +156,7 @@ def test_skips_and_missing_module(
         review_tests=partial(_run_review_tests, sandbox),
         sleep=clock.sleep,
     )
-    if mode == "missing":
+    if mode in ("missing", "sandbox"):
         assert coord.tick(task_id, [])
     else:
         assert coord.run(task_id).status is TaskStatus.DONE
@@ -173,11 +175,11 @@ def test_skips_and_missing_module(
             ]
             assert "reviewer gave no tests" in json.loads(interruption["details_json"])["reason"]
             assert coord.run(task_id).status is TaskStatus.NEEDS_HUMAN
-            assert len(llm.calls) == 2
+            assert len(llm.calls) == 4
             [failure] = [
                 row for row in store.audit_log(task_id) if row["action"] == "review_failed"
             ]
-            assert json.loads(failure["details_json"])["cause"] == "reviewer gave no tests"
+            assert "reviewer gave no tests" in json.loads(failure["details_json"])["cause"]
     else:
         assert note is not None and not note["ran"]
         reason = {
@@ -186,6 +188,9 @@ def test_skips_and_missing_module(
             "sandbox": "no sandbox here",
         }
         assert reason[mode] in note["reason_not_run"]
+        if mode == "sandbox":
+            assert sub.status is SubtaskStatus.REVIEW
+            assert sub.attempts.transient == 1
 
 
 @pytest.mark.parametrize(
@@ -220,6 +225,18 @@ def test_runner_writes_module_and_parses_pytest(
     [sub] = store.list_subtasks(submitted(store))
     path = f".review/{sub.id}/test_review_2.py"
 
+    workspace.write("answer.py", "answer = 4")
+    workspace.write("delete.txt", "keep me")
+    for excluded in (
+        ".review/old.py",
+        "__pycache__/x.pyc",
+        ".pytest_cache/cache",
+        "web/page",
+        ".tool-results/result",
+    ):
+        workspace.write(excluded, "skip")
+    locations: list[Path] = []
+
     def run(command: list[str], cwd: Path, *, timeout: float) -> Outcome:
         assert command == [
             "python3",
@@ -238,9 +255,14 @@ def test_runner_writes_module_and_parses_pytest(
             "-q",
             path,
         ]
-        assert cwd == workspace.root and timeout == 60
-        assert workspace.read_text(path) == MODULE
-        assert workspace.read_text(".review/pytest.ini") == "[pytest]\npythonpath = ..\n"
+        assert cwd.parent == workspace.root.parent and cwd != workspace.root and timeout == 60
+        locations.append(cwd)
+        copy = Workspace(cwd.parent, cwd.name)
+        assert copy.files() == sorted([path, ".review/pytest.ini", "answer.py", "delete.txt"])
+        assert copy.read_text(path) == MODULE
+        assert copy.read_text(".review/pytest.ini") == "[pytest]\npythonpath = ..\n"
+        copy.write("answer.py", "changed")
+        (cwd / "delete.txt").unlink()
         return Outcome(
             1,
             f"FAILED {path}::test_answer - assert 1\n1 failed, 2 passed, 1 error in 0.02s\n",
@@ -255,6 +277,10 @@ def test_runner_writes_module_and_parses_pytest(
     assert result.failing == [f"{path}::test_answer"]
     assert result.workspace_full == "over quota"
     assert result.stopped == "watch stopped"
+    assert workspace.read_text(path) == MODULE
+    assert workspace.read_text("answer.py") == "answer = 4"
+    assert workspace.read_text("delete.txt") == "keep me"
+    assert not locations[0].exists()
 
 
 def test_code_written_with_tools_gets_reviews_and_feedback(store: Store, clock: FakeClock) -> None:
@@ -494,8 +520,9 @@ def test_error_artifact_overrules_accept_before_tests(store: Store, clock: FakeC
     assert "gave up" in json.loads(verdict["details_json"])["feedback"]
 
 
-def test_code_with_unjournaled_files_is_reviewed(
-    store: Store, tmp_path: Path, clock: FakeClock
+@pytest.mark.parametrize("mode", ["pass", "missing", "outage"])
+def test_code_with_command_outputs_is_reviewed(
+    store: Store, tmp_path: Path, clock: FakeClock, mode: str
 ) -> None:
     task_id = store.create_task(
         TaskSpec(
@@ -508,29 +535,66 @@ def test_code_with_unjournaled_files_is_reviewed(
     workspace = Workspace(tmp_path, task_id)
 
     def execute(work: Work) -> Success:
-        workspace.write("script.py", "answer = 4")
+        assert work.subtask.lease_token is not None
+        lease = work.subtask.lease_token
+        store.start_effect(work.subtask.id, lease, 0, 0, "run_command", "key")
+        clock.advance(1)
+        for name, content in {
+            "script.py": "answer = 4",
+            "helper.sh": "echo 4",
+            "older.md": "# Notes",
+            **{f"a{index}.csv": "1,2" for index in range(12)},
+        }.items():
+            path = workspace.root / workspace.write(name, content)
+            at = clock().timestamp() - (0.5 if name == "older.md" else 0)
+            os.utime(path, (at, at))
+        clock.advance(1)
+        store.finish_effect(work.subtask.id, lease, 0, 0, {"ok": True})
+        clock.advance(1)
+        late = workspace.root / workspace.write("late.py", "different subtask")
+        at = clock().timestamp()
+        os.utime(late, (at, at))
         return Success(content={"summary": "ready"})
 
     llm = FakeLLM().on("Review", ACCEPT)
 
     def runner(sub: Subtask, ws: Workspace, module: str, attempt: int) -> ReviewTestResult:
         assert ws.read_text("script.py") == "answer = 4"
+        assert mode != "missing"
+        if mode == "outage":
+            raise SandboxUnavailable("backend went away")
         return ReviewTestResult(ran=True, exit_code=0, passed=1)
 
+    reviewer = llm_reviewer(llm, evidence=partial(evidence, store, workspace=workspace))
     coord = Coordinator(
         store,
         execute,
-        llm_reviewer(llm, evidence=partial(evidence, store, workspace=workspace)),
+        (lambda *_: Review(verdict=Verdict.ACCEPT)) if mode == "missing" else reviewer,
         access=executor_access([Permission.SHELL]),
         workspaces=tmp_path,
         review_tests=runner,
         sleep=clock.sleep,
     )
+    if mode == "missing":
+        assert coord.tick(task_id, [])  # Execute and submit.
+        assert coord.tick(task_id, [])  # Review the submitted work.
+        [sub] = store.list_subtasks(task_id)
+        assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
+        [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_interrupted"]
+        assert json.loads(entry["details_json"])["reason"].startswith("reviewer gave no tests:")
+        return
     assert coord.run(task_id).status is TaskStatus.DONE
     [sub] = store.list_subtasks(task_id)
-    assert last_review_tests(store, sub.id) is not None
+    note = last_review_tests(store, sub.id)
+    assert note is not None and note["ran"] is (mode == "pass")
+    if mode == "outage":
+        assert note["reason_not_run"] == "backend went away"
     [request] = llm.calls
     assert "answer = 4" in request.prompt
+    assert "late.py" not in request.prompt
+    shown = json.loads(request.prompt.partition("\n")[2])["evidence"]["written_files"]
+    assert [file["path"] for file in shown[:3]] == ["script.py", "helper.sh", "older.md"]
+    assert len(shown) == 12
     assert "top-level test_ functions" in request.messages[0].content
 
 
@@ -599,6 +663,9 @@ def test_code_fallback_ignores_earlier_subtask_and_copied_inputs(
             clock.advance(1)
         else:
             workspace.write("from-abc/data.csv", "copied input")
+            unrelated = workspace.root / workspace.write("unrelated.py", "not from a command")
+            at = clock().timestamp()
+            os.utime(unrelated, (at, at))
             assert not has_written_files(store, work.subtask, root=tmp_path)
         return Success(content={"summary": "ready"})
 
@@ -619,3 +686,111 @@ def test_code_fallback_ignores_earlier_subtask_and_copied_inputs(
     assert coord.run(task_id).status is TaskStatus.DONE
     assert "written_files" not in llm.calls[-1].prompt
     assert "top-level test_ functions" not in llm.calls[-1].messages[0].content
+
+
+@pytest.mark.parametrize("runs_code", [False, True])
+def test_missing_tests_are_repaired_without_caching(store: Store, runs_code: bool) -> None:
+    [sub] = store.list_subtasks(submitted(store, runs_code=runs_code))
+    if not runs_code:
+        sub = sub.model_copy(update={"kind": Kind.CODE})
+    missing = '{"verdict":"accept"}'
+    llm = FakeLLM().on("Review", missing, missing, missing, ACCEPT)
+    cached = Cached(llm, store.conn, "reviewer")
+    reviewer = llm_reviewer(cached, evidence=lambda *_: {"written_files": [{"path": "main.py"}]})
+
+    with pytest.raises(StructuredOutputError, match="reviewer gave no tests"):
+        reviewer(sub, {"summary": "Ready"})
+    assert len(llm.calls) == 2
+    assert store.conn.execute("SELECT COUNT(*) FROM response_cache").fetchone()[0] == 0
+    repaired = reviewer(sub, {"summary": "Ready"})
+    assert isinstance(repaired, Review) and repaired.tests == MODULE
+    assert len(llm.calls) == 4 and cached.hits == 0
+    assert [row[0] for row in store.conn.execute("SELECT text FROM response_cache")] == [ACCEPT]
+
+
+@confined
+def test_review_mutations_stay_in_sandbox_copy(store: Store, tmp_path: Path) -> None:
+    task_id = submitted(store)
+    [sub] = store.list_subtasks(task_id)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("answer.py", "answer = 4")
+    workspace.write("delete.txt", "keep me")
+    module = """
+from pathlib import Path
+
+def test_changes():
+    answer = Path("answer.py")
+    assert answer.read_text() == "answer = 4"
+    answer.write_text("changed")
+    Path("delete.txt").unlink()
+"""
+    result = _run_review_tests(Sandbox(), sub, workspace, module, 1)
+    assert result.passed == 1, result.tail
+    assert workspace.read_text("answer.py") == "answer = 4"
+    assert workspace.read_text("delete.txt") == "keep me"
+    assert list(tmp_path.glob("review-*")) == []
+
+
+@pytest.mark.parametrize("reason", ["disk", "outage", "quota"])
+def test_review_infrastructure_failure(
+    store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    task_id = submitted(store)
+    sandbox = Sandbox(limits=Limits(workspace_bytes=100) if reason == "quota" else Limits())
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write("answer.py", "x" * 100)
+
+    def run(command: list[str], cwd: Path, *, timeout: float) -> Outcome:
+        assert reason != "quota"
+        if reason == "outage":
+            raise SandboxUnavailable("backend went away")
+        return Outcome(None, "", "", stopped="disk space too low", disk_low=True)
+
+    monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        llm_reviewer(FakeLLM().on("Review", ACCEPT)),
+        access=executor_access([Permission.SHELL]),
+        workspaces=tmp_path,
+        review_tests=partial(_run_review_tests, sandbox),
+        sleep=clock.sleep,
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
+    note = last_review_tests(store, sub.id)
+    assert note is not None
+    assert note["disk_low"] is (reason == "disk")
+    assert note["ran"] is (reason == "disk")
+    if reason == "quota":
+        assert "quota" in note["reason_not_run"]
+    assert list(tmp_path.glob("review-*")) == []
+
+
+def test_lost_reservation_keeps_model_verdict_without_test_note(
+    store: Store, clock: FakeClock
+) -> None:
+    task_id = submitted(store)
+
+    def runner(sub: Subtask, ws: Workspace, module: str, attempt: int) -> ReviewTestResult:
+        clock.advance(120)
+        assert store.reserve_review(sub.id, "other reviewer", seconds=60)
+        return ReviewTestResult(ran=True, exit_code=0, passed=1)
+
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, feedback="looks good", tests=MODULE),
+        access=executor_access([Permission.SHELL]),
+        review_tests=runner,
+        review_seconds=1,
+        sleep=clock.sleep,
+    )
+    coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    assert last_review_tests(store, sub.id) is None
+    [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_discarded"]
+    details = json.loads(entry["details_json"])
+    assert (details["verdict"], details["feedback"]) == ("accept", "looks good")

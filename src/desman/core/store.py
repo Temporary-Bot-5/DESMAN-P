@@ -1365,7 +1365,7 @@ class Store:
 
     def extend_review(self, subtask_id: str, token: str, seconds: int) -> None:
         """Ensure this reservation covers a call, without shortening it or changing its token."""
-        with db.transaction(self.conn):
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
             until = db.to_iso(self.clock() + timedelta(seconds=seconds))
             updated = self.conn.execute(
                 """UPDATE subtasks SET review_until = max(review_until, ?)
