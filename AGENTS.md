@@ -333,9 +333,10 @@ A commit that changes a file listed in `src/desman/protected.toml` updates its h
 For L.5 (ADR 0019), `runs.py` creates and removes its own disposable scratch directory under the
 workspaces root, separate from the agent's workspace. It writes the copied files and the
 reviewer's tests through `Workspace`, runs the tests through the same Sandbox, and records
-their source and outcome in `review_tests` notes. A verified pass allows acceptance. A test call
-failure or stopped run retries execution. Ambiguous outcomes retry review within its transient
-budget. Known non-local packages missing from executor imports can skip tests. Required sandbox
+their source and outcome in `review_tests` notes committed with the verdict or failure. A
+verified pass allows acceptance. Test call failures retry execution. Stopped runs, full
+workspaces and ambiguous outcomes retry review within its transient budget. Missing executor
+imports can skip tests when their top-level names are on the curated PyPI list. Required sandbox
 outages and low disk space pause review without spending attempts. Program output in review
 context is untrusted. Deliberate tampering by code that shares the review sandbox is still
 possible. Never edit a migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a

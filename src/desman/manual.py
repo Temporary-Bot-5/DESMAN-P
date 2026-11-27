@@ -77,7 +77,7 @@ TOPICS: Final = (
         "edit_file replaces exact fragments. Runs show exit codes and output tails. Results hold prose plus files. Review checks sources, dates, language "
         "(names/translations allowed) and coverage. Cite sources and gaps for partial live data. Split parts keep the request's language and feed honest partial findings into the combine step. Use snippets or other official sources for blocked pages. "
         "Review tests run offline on workspace copies. Acceptance needs a verified pass. Test failures and executor hangs retry execution. Stops, quota overruns and ambiguity retry review. "
-        "Low disk pauses reviews for 60s. Sandbox outages pause required runs. Status says why. After ten pauses or if required tests are blocked, the person decides. Network jobs skip tests. Large copies or missing packages can block tests.\n"
+        "Low disk or required sandbox outages pause review for 60s. Status says why. Ten consecutive outage pauses or blocked required tests need a person. Network jobs skip tests. Copies allow existing usage plus reviewer files. Missing curated PyPI imports can block tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code in your latest message’s language.",
     ),

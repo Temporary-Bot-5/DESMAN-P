@@ -18,6 +18,7 @@ MESSAGES: dict[str, Forms] = {
     "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "समीक्षक से कुल {seconds} सेकंड की सीमा में कम या तेज़ परीक्षण लिखने को कहा गया।",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "समीक्षक के परीक्षण (प्रयास {attempt}) रुके: {reason}",
     "needs package {name}, not installed in the sandbox": "पैकेज {name} चाहिए, जो सैंडबॉक्स में स्थापित नहीं है",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "समीक्षक के परीक्षण (प्रयास {attempt}): तैयार किया गया कोड आयात नहीं हो सका: {reason}",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "समीक्षक के परीक्षण (प्रयास {attempt}) खोजे या तैयार नहीं किए जा सके: {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "समीक्षक के परीक्षण (प्रयास {attempt}) — pytest निकास कोड {exit_code} के साथ बंद हुआ",
     "Reviewer's tests (attempt {attempt}) produced no report.": "समीक्षक के परीक्षणों (प्रयास {attempt}) की कोई रिपोर्ट नहीं बनी।",

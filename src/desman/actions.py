@@ -373,6 +373,12 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
                     "Reviewer's tests (attempt {attempt}) could not be verified.",
                     attempt=review_tests.attempt,
                 )
+            elif review_tests.executor_setup_error:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}",
+                    attempt=review_tests.attempt,
+                    reason=one_line(review_tests.executor_setup_error, 250),
+                )
             elif review_tests.collection_setup_error:
                 test_line = t(
                     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}",

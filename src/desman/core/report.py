@@ -36,6 +36,7 @@ class ReviewTestSummary(BaseModel):
     report_missing: bool = False
     report_unverified: bool = False
     collection_setup_error: str | None = None
+    executor_setup_error: str | None = None
     hang: str | None = None
     stopped: str = ""
 

@@ -24,29 +24,31 @@ permissions. The reviewer has no tools.
    uses, with the same limits, only while the task grants tools and the person's
    `shell_execution` is on. It runs in a copy of the workspace made by `runs.py` under the
    workspaces root (files written through `Workspace`), so the tests cannot change what the
-   person gets; the copy is removed after the run and stale copies are swept. pytest is started
-   isolated (`-I -B`, its own ini, no `conftest.py`, no `addopts`), and results come from a
+   person gets; the copy is removed after the run and stale copies are swept. Each copy limit is the
+   greater of the sandbox quota and the initial workspace usage, plus room for reviewer
+   files. pytest is started isolated (`-I -B`, its own ini, no `conftest.py`, no `addopts`), and results come from a
    JUnit report cross-checked with pytest's summary.
 3. **Not a tool call.** The run is code's own check, recorded as a `review_tests` note
    (counts, the reviewer's module, a bounded output tail, the attempt), not in the call journal:
-   nothing is repeated on a rerun, and an interrupted review simply runs it again. This is the one
-   exception to "generated code runs only through the `run_command` tool"; AGENTS.md says so.
+   the note and the verdict or failure commit together. An interrupted review runs it again. This
+   is the one exception to "generated code runs only through the `run_command` tool"; AGENTS.md says so.
 4. **One decision table.**
    - A. A verified pass → accept.
    - B. A test failure or an import error in the executor's own file → back to the executor.
      A timed-out test also goes back to the executor when the innermost workspace frame in its
-     faulthandler stack is in a copied executor file. The ini requests a stack dump after 20 s.
+     last faulthandler dump is in a copied executor file. The ini requests a stack dump after 20 s.
    - C. Ambiguous results (reviewer collection or setup errors, zero tests, missing reports,
      other timeouts, stopped runs and full workspaces) → back to the reviewer, who fixes its
      test or names the executor's defect. The note keeps the reason.
    - D. Tests that cannot run (permissions, sandbox unavailable, missing package, copy over
      quota) → the model's verdict stands with the reason recorded. Required runs (`runs_code`)
      go to the person. A missing import counts as a package only when its top-level name is
-     known from host distribution metadata or the common PyPI import list.
+     on the curated common PyPI import list.
    - Low disk space pauses every qualifying review, including when copying fails. Reviews
      skip the model call while free space remains below the recorded threshold. An unavailable
-     sandbox also pauses required reviews. After ten pauses, a continuing outage goes to
-     the person.
+     sandbox also pauses required reviews. After ten consecutive outage pauses, a continuing
+     outage goes to the person. A non-outage test note or any verdict resets the count for
+     that execution attempt.
 
 ## Consequences
 

@@ -1146,7 +1146,13 @@ class Coordinator:
                  AND json_extract(pause.details_json, '$.failure') = 'outage'
                  AND pause.seq > COALESCE(
                      (SELECT MAX(seq) FROM audit_log
-                      WHERE subtask_id = pause.subtask_id AND action = 'attempt_started'), 0)""",
+                      WHERE subtask_id = pause.subtask_id
+                        AND (action IN ('attempt_started', 'verdict')
+                             OR (action = 'review_tests'
+                                 AND NOT COALESCE(json_extract(details_json, '$.disk_low'), 0)
+                                 AND NOT COALESCE(
+                                     json_extract(details_json, '$.sandbox_unavailable'), 0
+                                 )))), 0)""",
             (subtask.id,),
         ).fetchone()
         if previous >= 10:
@@ -1249,12 +1255,8 @@ class Coordinator:
                         "could_not_run": reason,
                     }
                     review = Failure(kind=FailureKind.TRANSIENT, reason=reason)
-            if note is not None:
-                if note.get("disk_low"):
-                    note["artifact_digest"] = _artifact_digest(artifact)
-                with db.transaction(self.store.conn):
-                    self.store.extend_review(subtask.id, token, MODEL_CALL_MARGIN)
-                    self.store.note(subtask.id, Actor.REVIEWER, "review_tests", note)
+            if note is not None and note.get("disk_low"):
+                note["artifact_digest"] = _artifact_digest(artifact)
             if isinstance(review, Review):
                 details = {"verdict": review.verdict.value, "feedback": review.feedback}
                 if note is not None:
@@ -1273,6 +1275,7 @@ class Coordinator:
                     paused_until=review.paused_until,
                     action="review_failed",
                     review=token,
+                    review_tests=note,
                 )
             elif review.verdict is Verdict.ACCEPT:
                 moved = self.store.transition(
@@ -1284,6 +1287,7 @@ class Coordinator:
                     details=details,
                     action="verdict",
                     review=token,
+                    review_tests=note,
                 )
             elif review.verdict is Verdict.RETRY:
                 moved = self.store.record_failure(
@@ -1295,6 +1299,7 @@ class Coordinator:
                     details=details,
                     action="verdict",
                     review=token,
+                    review_tests=note,
                 )
             elif review.verdict is Verdict.ESCALATE:
                 moved = self.store.transition(
@@ -1306,6 +1311,7 @@ class Coordinator:
                     details=details,
                     action="verdict",
                     review=token,
+                    review_tests=note,
                 )
         except StaleStateError as e:
             # Decided by someone else, or our reservation ran out and was taken over: the

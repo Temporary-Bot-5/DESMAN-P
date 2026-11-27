@@ -18,6 +18,7 @@ MESSAGES: dict[str, Forms] = {
     "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "İnceleyiciden toplam {seconds} saniyelik sınır içinde daha az veya daha hızlı test yazması istendi.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "İnceleyenin testleri (deneme {attempt}) durduruldu: {reason}",
     "needs package {name}, not installed in the sandbox": "Gerekli {name} paketi korumalı alanda kurulu değil",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "İnceleyenin testleri (deneme {attempt}): üretilen kod içe aktarılamadı: {reason}",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "İnceleyicinin testleri (deneme {attempt}) toplanamadı veya hazırlanamadı: {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "İnceleyenin testleri (deneme {attempt}) — pytest {exit_code} koduyla sonlandı",
     "Reviewer's tests (attempt {attempt}) produced no report.": "İnceleyenin testleri (deneme {attempt}) rapor oluşturmadı.",

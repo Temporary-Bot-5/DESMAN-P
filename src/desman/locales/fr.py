@@ -18,6 +18,7 @@ MESSAGES: dict[str, Forms] = {
     "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "Il a été demandé au réviseur d’écrire moins de tests ou des tests plus rapides, dans la limite totale de {seconds} s.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Tests de vérification arrêtés (tentative {attempt}) : {reason}",
     "needs package {name}, not installed in the sandbox": "Le paquet {name} est requis et n’est pas installé dans le bac à sable",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "Tests du réviseur (tentative {attempt}) : impossible d’importer le code produit : {reason}",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "Impossible de collecter ou de préparer les tests du réviseur (tentative {attempt}) : {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Tests de vérification (tentative {attempt}) — pytest a quitté avec le code {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "Les tests de vérification (tentative {attempt}) n’ont produit aucun rapport.",

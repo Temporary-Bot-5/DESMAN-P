@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import errno
+import importlib.metadata
 import json
 import os
 import re
 import shutil
-import subprocess
-import sys
 from collections.abc import Callable
 from datetime import timedelta
 from functools import partial
@@ -757,6 +756,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         "report_missing": False,
         "report_unverified": False,
         "collection_setup_error": None,
+        "executor_setup_error": None,
         "hang": None,
         "stopped": "",
     }
@@ -1129,6 +1129,7 @@ def test_changes():
         "optional-quota",
         "write-error",
         "fits",
+        "already-over-quota",
         "copy-enospc",
         "optional-copy-edquot",
     ],
@@ -1146,7 +1147,22 @@ def test_review_infrastructure_failure(
     sandbox = Sandbox(limits=Limits(workspace_bytes=100, workspace_files=1))
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     workspace = Workspace(tmp_path, task_id)
-    workspace.write("answer.py", "x" * (101 if quota else 100))
+    above_quota = reason == "already-over-quota"
+    workspace.write("answer.py", "x" * (101 if above_quota else 100))
+    if above_quota:
+        workspace.write("other.py", "y")
+    if quota:
+        size = Workspace.size
+        measured = False
+
+        def grow_on_copy(self: Workspace, path: str) -> int:
+            nonlocal measured
+            if measured and self.root == workspace.root:
+                self.write(path, "x" * 101)
+            measured = True
+            return size(self, path)
+
+        monkeypatch.setattr(Workspace, "size", grow_on_copy)
     if reason in {"copy-enospc", "optional-copy-edquot"}:
         disk_usage = shutil.disk_usage(tmp_path)
         monkeypatch.setattr(shutil, "disk_usage", lambda _: disk_usage)
@@ -1166,14 +1182,15 @@ def test_review_infrastructure_failure(
 
     def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
         assert not quota and reason not in {"write-error", "copy-enospc", "optional-copy-edquot"}
-        assert limits.workspace_files == 5
+        assert limits.workspace_files == (6 if above_quota else 5)
         assert limits.workspace_bytes == (
-            100
+            (102 if above_quota else 100)
             + len(MODULE.encode())
             + (cwd / command[command.index("-c") + 1]).stat().st_size
             + 1024 * 1024
         )
-        if reason == "fits":
+        if reason in {"fits", "already-over-quota"}:
+            assert (cwd / "answer.py").stat().st_size == (101 if above_quota else 100)
             write_report(command, cwd)
             return Outcome(0, "===== 1 passed in 0.01s =====\natexit: closing", "")
         if reason == "outage":
@@ -1193,7 +1210,7 @@ def test_review_infrastructure_failure(
     )
     assert coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
-    if reason in {"fits", "optional-quota"}:
+    if reason in {"fits", "already-over-quota", "optional-quota"}:
         assert sub.status is SubtaskStatus.DONE
         assert sub.attempts.transient == 0
     elif reason in {"disk", "outage", "copy-enospc", "optional-disk", "optional-copy-edquot"}:
@@ -1226,7 +1243,7 @@ def test_review_infrastructure_failure(
     assert note["disk_low"] is (
         reason in {"disk", "optional-disk", "copy-enospc", "optional-copy-edquot"}
     )
-    assert note["ran"] is (reason in {"disk", "optional-disk", "fits"})
+    assert note["ran"] is (reason in {"disk", "optional-disk", "fits", "already-over-quota"})
     if reason in {"copy-enospc", "optional-copy-edquot"}:
         assert note["disk_free_minimum"] > 0
         assert len(llm.calls) == 1
@@ -1319,6 +1336,10 @@ def test_lost_reservation_keeps_final_verdict_without_test_note(
     coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
     assert last_review_tests(store, sub.id) is None
+    assert _review_test_context(store, sub)["previous_review_tests"] is None
+    [reported] = task_report(store, task_id).subtasks
+    assert reported.review_tests is None
+    assert not any(row["action"] == "review_tests" for row in store.audit_log(task_id))
     [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_discarded"]
     details = json.loads(entry["details_json"])
     assert (details["verdict"], details["feedback"]) == (
@@ -1439,6 +1460,14 @@ def test_review_requires_report_and_copies_web_page(
         ({"ran": True, "report_missing": True}, "produced no report."),
         ({"ran": True, "exit_code": 5}, "— pytest exited 5"),
         (
+            {
+                "ran": True,
+                "executor_setup_error": "ModuleNotFoundError: utils",
+                "collection_setup_error": "collection failure",
+            },
+            ": the produced code failed to import: ModuleNotFoundError: utils",
+        ),
+        (
             {"ran": True, "collection_setup_error": "NameError: unknown_name"},
             "could not collect or set up: NameError: unknown_name",
         ),
@@ -1458,7 +1487,8 @@ def test_status_shows_review_test_outcome(
     [sub] = store.list_subtasks(task_id)
     store.note(sub.id, Actor.REVIEWER, "review_tests", {"attempt": 1, **note})
     print_report(task_report(store, task_id), store)
-    assert f"Reviewer's tests (attempt 1) {expected}" in capsys.readouterr().out
+    separator = "" if expected.startswith(":") else " "
+    assert f"Reviewer's tests (attempt 1){separator}{expected}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("runs_code", [False, True])
@@ -1473,6 +1503,7 @@ def test_status_shows_review_test_outcome(
         "stdlib",
         "wrong-line",
         "helpers",
+        "utils",
         "flask",
         "jsn",
         "reviewer-frame-calc",
@@ -1521,10 +1552,15 @@ def test_missing_package_in_review(
         "stdlib": "sqlite3",
         "reviewer-frame-hypothesis": "hypothesis",
         "helpers": "helpers",
+        "utils": "utils",
         "missing": "numpy",
         "flask": "flask",
         "jsn": "jsn",
     }.get(mode, "requests")
+    if mode == "utils":
+        monkeypatch.setattr(
+            importlib.metadata, "packages_distributions", lambda: {"utils": ["utils"]}
+        )
     source = "from helpers import x\n" if mode == "helpers" else f"import {package}\n"
     if mode.startswith("executor-syntax"):
         source = "from calc import answer\n"
@@ -1634,12 +1670,13 @@ def test_missing_package_in_review(
             "nested",
             "stdlib",
             "helpers",
+            "utils",
             "jsn",
         } or mode.startswith("executor-syntax"):
             [verdict] = [row for row in rows if row["action"] == "verdict"]
             details = json.loads(verdict["details_json"])
             assert details["verdict"] == "retry"
-            if mode in {"helpers", "jsn"}:
+            if mode in {"helpers", "jsn", "utils"}:
                 assert (
                     f"your code imports {package}, which is not in the workspace "
                     "and is not an installable package known here"
@@ -2078,6 +2115,39 @@ def test_command_window_and_sibling_writes(
     assert ("written_files" in evidence(store, sub, workspace=workspace)) is inside_window
 
 
+@pytest.mark.parametrize("reset", ["review_tests", "verdict"])
+def test_sandbox_outage_limit_resets_after_review_progress(
+    store: Store, clock: FakeClock, reset: str
+) -> None:
+    task_id = submitted(store)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: pytest.fail("outage should skip the reviewer"),
+        access=executor_access([Permission.SHELL]),
+        review_tests=ReviewTestRunner(
+            lambda *_: pytest.fail("outage should skip the runner"), lambda: "backend went away"
+        ),
+        sleep=clock.sleep,
+    )
+    for _ in range(10):
+        assert coord.tick(task_id, [])
+        clock.advance(60)
+    [sub] = store.list_subtasks(task_id)
+    details = (
+        {"ran": True, "report_missing": True} if reset == "review_tests" else {"verdict": "retry"}
+    )
+    store.note(sub.id, Actor.REVIEWER, reset, details)
+    assert coord.tick(task_id, [])
+    assert store.get_subtask(sub.id).status is SubtaskStatus.PAUSED
+    failures = [
+        json.loads(row["details_json"])["failure"]
+        for row in store.audit_log(task_id)
+        if row["action"] == "review_failed"
+    ]
+    assert failures == ["outage"] * 11
+
+
 def test_sandbox_outage_limit_and_wait_reason(
     store: Store, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2152,7 +2222,7 @@ def test_network_review_never_requests_or_runs_tests(store: Store) -> None:
 
 
 @pytest.mark.parametrize("call_fails", [False, True])
-def test_real_pytest_teardown_error(
+def test_recorded_pytest_teardown_error(
     store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, call_fails: bool
 ) -> None:
     module = (
@@ -2167,15 +2237,24 @@ def test_real_pytest_teardown_error(
     sandbox = Sandbox()
 
     def run(command: list[str], cwd: Path, **_: object) -> Outcome:
-        result = subprocess.run(
-            [sys.executable, *command[1:]],
-            cwd=cwd,
-            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
-            capture_output=True,
-            text=True,
-            timeout=30,
+        # Captured pytest JUnit cases with the temporary directory removed.
+        cases = (
+            '<testcase classname="test_review" name="test_answer" time="0.001">'
+            '<error message="failed on teardown with &quot;RuntimeError: teardown broke&quot;">'
+            "@pytest.fixture\n    def broken():\n        yield\n"
+            "&gt;       raise RuntimeError('teardown broke')\nE       RuntimeError: teardown broke"
+            "\n\ntest_review.py:6: RuntimeError</error></testcase>"
         )
-        return Outcome(result.returncode, result.stdout, result.stderr)
+        if call_fails:
+            cases = (
+                '<testcase classname="test_review" name="test_answer" time="0.001">'
+                '<failure message="assert not True">broken = None\n\n'
+                "    def test_answer(broken):\n&gt;       assert not True\nE       assert not True"
+                "\n\ntest_review.py:9: AssertionError</failure></testcase>"
+            ) + cases
+        write_report(command, cwd, cases)
+        summary = "1 failed, 1 error" if call_fails else "1 passed, 1 error"
+        return Outcome(1, f"{summary} in 0.01s", "")
 
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     monkeypatch.setattr(sandbox, "run", run)
@@ -2204,7 +2283,7 @@ def test_real_pytest_teardown_error(
 
 
 @pytest.mark.parametrize("executor_hangs", [True, False])
-def test_real_pytest_hang(
+def test_recorded_pytest_hang(
     store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executor_hangs: bool
 ) -> None:
     task_id = submitted(store)
@@ -2221,24 +2300,22 @@ def test_real_pytest_hang(
         ini = cwd / command[command.index("-c") + 1]
         config = ini.read_text()
         assert "faulthandler_timeout = 20" in config
-        ini.write_text(config.replace("faulthandler_timeout = 20", "faulthandler_timeout = 0.1"))
-        with pytest.raises(subprocess.TimeoutExpired) as timed_out:
-            subprocess.run(
-                [sys.executable, *command[1:]],
-                cwd=cwd,
-                env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
-                capture_output=True,
-                timeout=2,
-            )
-        error = timed_out.value
-        stderr = (error.stderr or b"").decode()
-        assert "Timeout (" in stderr[-limits.stderr_chars :]
-        return Outcome(
-            None,
-            (error.stdout or b"").decode(),
-            stderr[-limits.stderr_chars :],
-            timed_out=True,
+        # Captured faulthandler excerpts with paths and thread IDs normalized.
+        reviewer = f"/workspace/{command[-1]}"
+        header = "Timeout (0:00:00.080000)!\nThread 0x00007f0000000000 (most recent call first):\n"
+        pytest_frame = (
+            '  File "/usr/lib/python3/dist-packages/_pytest/python.py", '
+            "line 167 in pytest_pyfunc_call\n"
         )
+        executor_dump = (
+            header
+            + '  File "/workspace/calc.py", line 3 in calculate\n'
+            + f'  File "{reviewer}", line 5 in test_answer\n'
+            + pytest_frame
+        )
+        reviewer_dump = header + f'  File "{reviewer}", line 4 in test_answer\n' + pytest_frame
+        dumps = (reviewer_dump, executor_dump) if executor_hangs else (executor_dump, reviewer_dump)
+        return Outcome(None, "", "\n".join(dumps)[-limits.stderr_chars :], timed_out=True)
 
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     monkeypatch.setattr(sandbox, "run", run)

@@ -23,6 +23,7 @@ MESSAGES: dict[str, Forms] = {
     "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "Poproszono recenzenta o napisanie mniejszej liczby testów lub szybszych testów w łącznym limicie {seconds} s.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Testy recenzenta (próba {attempt}) przerwane: {reason}",
     "needs package {name}, not installed in the sandbox": "Wymagany pakiet {name} nie jest zainstalowany w piaskownicy",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "Testy recenzenta (próba {attempt}): nie udało się zaimportować wygenerowanego kodu: {reason}",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "Nie udało się zebrać lub przygotować testów recenzenta (próba {attempt}): {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Testy recenzenta (próba {attempt}) — pytest zakończył się z kodem {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "Testy recenzenta (próba {attempt}) nie wygenerowały raportu.",

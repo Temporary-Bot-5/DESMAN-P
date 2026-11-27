@@ -23,6 +23,7 @@ MESSAGES: dict[str, Forms] = {
     "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "Проверяющему предложено написать меньше тестов или ускорить их, чтобы уложиться в общий лимит {seconds} с.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Тесты проверяющего (попытка {attempt}) остановлены: {reason}",
     "needs package {name}, not installed in the sandbox": "Требуется пакет {name}, который не установлен в песочнице",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "Тесты проверяющего (попытка {attempt}): не удалось импортировать созданный код: {reason}",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "Не удалось собрать или подготовить тесты проверяющего (попытка {attempt}): {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Тесты проверяющего (попытка {attempt}) — pytest завершился с кодом {exit_code}",
     "Reviewer's tests (attempt {attempt}) produced no report.": "Тесты проверяющего (попытка {attempt}) не сформировали отчёт.",

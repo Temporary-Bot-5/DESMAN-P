@@ -631,6 +631,7 @@ class Store:
         action: str = "transition",
         expected_version: int | None = None,
         review: str | None = None,
+        review_tests: dict[str, Any] | None = None,
     ) -> Subtask:
         """Move a subtask from `src` to `dst` if it is still in `src`.
 
@@ -642,6 +643,7 @@ class Store:
         - Leaving REVIEW as the reviewer requires `review`, the token from `reserve_review()`,
           to be the current reservation (None: only while nobody holds one), so a reviewer
           whose reservation was taken over cannot decide.
+        - `review_tests` records the test result atomically with the reviewer’s decision.
         - `attempts` replaces the failure counters in the same update; a human sending the
           subtask back to READY resets them (a fresh budget is the point of a restart).
         - The scheduler can only take RUNNING away from an executor whose lease has expired.
@@ -650,6 +652,8 @@ class Store:
         - Lease and pause fields follow the status. Claiming (-> RUNNING) goes through `claim()`.
         """
         with db.transaction(self.conn):
+            if review_tests is not None:
+                self.note(subtask_id, actor, "review_tests", review_tests)
             return self._apply(
                 subtask_id,
                 src,
@@ -688,6 +692,7 @@ class Store:
         action: str = "failure",
         details: dict[str, Any] | None = None,
         review: str | None = None,
+        review_tests: dict[str, Any] | None = None,
     ) -> Subtask:
         """Apply the task's retry policy to a failed attempt: retry, pause or escalate to the
         operator.
@@ -695,9 +700,11 @@ class Store:
         Counters are read and written in one transaction, so concurrent failures cannot lose a count.
         A transient failure during REVIEW is the reviewer's, not the work's: the subtask stays in
         REVIEW with its artifact, or pauses before resuming REVIEW when given a deadline.
-        A reviewer's failure passes `review` as a verdict does (see `transition`).
+        A reviewer's failure passes `review` and optionally `review_tests` as a verdict does (see `transition`).
         """
         with db.transaction(self.conn):
+            if review_tests is not None:
+                self.note(subtask_id, actor, "review_tests", review_tests)
             current = self.get_subtask(subtask_id)
             decision = decide(kind, current.attempts, self.policy(current.task_id))
             status = decision.status

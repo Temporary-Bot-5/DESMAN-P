@@ -18,6 +18,7 @@ MESSAGES: dict[str, Forms] = {
     "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "검토자에게 총 {seconds}초 이내에 끝나도록 테스트 수를 줄이거나 더 빠른 테스트를 작성해 달라고 요청했습니다.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "검토자 테스트(시도 {attempt}) 중단: {reason}",
     "needs package {name}, not installed in the sandbox": "필요한 패키지 {name}이(가) 샌드박스에 설치되어 있지 않습니다",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "검토자 테스트(시도 {attempt}): 생성된 코드를 가져오지 못했습니다: {reason}",
     "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "검토자의 테스트(시도 {attempt})를 수집하거나 준비하지 못했습니다: {reason}",
     "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "검토자 테스트(시도 {attempt}) — pytest가 종료 코드 {exit_code}(으)로 종료되었습니다",
     "Reviewer's tests (attempt {attempt}) produced no report.": "검토자 테스트(시도 {attempt})에서 보고서가 생성되지 않았습니다.",

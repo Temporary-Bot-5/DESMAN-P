@@ -12,7 +12,6 @@ from __future__ import annotations
 import ast
 import errno
 import functools
-import importlib.metadata
 import posixpath
 import re
 import secrets
@@ -849,37 +848,34 @@ _COMMON_PYPI_IMPORTS = frozenset(
 )
 
 
-@functools.lru_cache(maxsize=1)
-def _installed_import_names() -> set[str]:
-    return set(importlib.metadata.packages_distributions())
-
-
 def _review_hang(output: str, root: Path, copied_files: set[str], reviewer_file: str) -> str | None:
     # Faulthandler prints each thread's innermost frame first.
-    for dump in re.split(r"(?m)^Timeout \(0:\d{2}:\d{2}(?:\.\d+)?\)!\s*$", output)[1:]:
-        stacks = re.findall(
-            r"(?m)^(?:Current thread|Thread) [^\n]+ \(most recent call first\):\n"
-            r"((?:  File [^\n]+\n?)+)",
-            dump,
-        )
-        for stack in stacks:
-            frames = []
-            for path, line, function in re.findall(
-                r'(?m)^  File "([^"\n]+)", line ([0-9]{1,9}) in ([^\n]+)$', stack
-            ):
-                normalized = posixpath.normpath(path.replace("\\", "/"))
-                relative = normalized.removeprefix(f"{MOUNT_POINT}/")
-                relative = relative.removeprefix(f"{root.as_posix()}/")
-                if relative != normalized or relative in copied_files or relative == reviewer_file:
-                    frames.append((relative, line, function))
-            if not frames or frames[0][0] not in copied_files:
-                continue
-            reviewer_frames = [name for file, _, name in frames if file == reviewer_file]
-            if not reviewer_frames:
-                continue
-            path, line, _ = frames[0]
-            test = next((name for name in reviewer_frames if name.startswith("test")), None)
-            return f"test {test} hung in {path}:{line}" if test else f"test hung in {path}:{line}"
+    dumps = re.split(r"(?m)^Timeout \(\d+:\d{2}:\d{2}(?:\.\d+)?\)!\s*$", output)
+    if len(dumps) == 1:
+        return None
+    stacks = re.findall(
+        r"(?m)^(?:Current thread|Thread) [^\n]+ \(most recent call first\):\n"
+        r"((?:  File [^\n]+\n?)+)",
+        dumps[-1],
+    )
+    for stack in stacks:
+        frames = []
+        for path, line, function in re.findall(
+            r'(?m)^  File "([^"\n]+)", line ([0-9]{1,9}) in ([^\n]+)$', stack
+        ):
+            normalized = posixpath.normpath(path.replace("\\", "/"))
+            relative = normalized.removeprefix(f"{MOUNT_POINT}/")
+            relative = relative.removeprefix(f"{root.as_posix()}/")
+            if relative != normalized or relative in copied_files or relative == reviewer_file:
+                frames.append((relative, line, function))
+        if not frames or frames[0][0] not in copied_files:
+            continue
+        reviewer_frames = [name for file, _, name in frames if file == reviewer_file]
+        if not reviewer_frames:
+            continue
+        path, line, _ = frames[0]
+        test = next((name for name in reviewer_frames if name.startswith("test")), None)
+        return f"test {test} hung in {path}:{line}" if test else f"test hung in {path}:{line}"
     return None
 
 
@@ -894,7 +890,7 @@ def _missing_review_import(error_text: str, local_names: set[str]) -> tuple[str 
         and root not in sys.stdlib_module_names
         and root not in local_names
     ):
-        if root in _COMMON_PYPI_IMPORTS or root in _installed_import_names():
+        if root in _COMMON_PYPI_IMPORTS:
             return name, error_text
         return None, (
             f"your code imports {name}, which is not in the workspace "
@@ -1114,7 +1110,6 @@ def _run_review_tests(
             skipped_names.append(path)
 
     def over_quota(entries: int, size: int) -> ReviewTestRun:
-        limits = sandbox.limits
         message = (
             f"The workspace is too large for the reviewer's test run "
             f"(at least {entries} entries, {size} bytes; sandbox quota: "
@@ -1145,16 +1140,20 @@ def _run_review_tests(
                 skip(path)
                 continue
             paths.append(path)
-        limits = sandbox.limits
-
-        def copy_seconds(remaining: int) -> float:
-            return 30 + min(estimated, limits.workspace_bytes) / 10_000_000 + 0.05 * remaining
-
-        paths.sort()
         directories = [path for path in directories if is_work_file(path + "/entry")]
         entries = len(directories)
-        if entries > limits.workspace_files:
-            return over_quota(entries, 0)
+        base_limits = sandbox.limits
+        # A copy of the initial files fits even if they already exceed the configured quota.
+        limits = replace(
+            base_limits,
+            workspace_files=max(base_limits.workspace_files, entries + len(paths)),
+            workspace_bytes=max(base_limits.workspace_bytes, estimated),
+        )
+
+        def copy_seconds(remaining: int) -> float:
+            return 30 + estimated / 10_000_000 + 0.05 * remaining
+
+        paths.sort()
         cover(copy_seconds(len(paths) + entries))
         with TemporaryDirectory(
             prefix=_REVIEW_COPY_PREFIX, dir=root, ignore_cleanup_errors=True
