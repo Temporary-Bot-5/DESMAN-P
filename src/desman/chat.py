@@ -1738,7 +1738,7 @@ class Chat:
         ):
             self._event(
                 t(
-                    "Waiting for the sandbox until {until}. {reason} (desman resume {ref})",
+                    "Waiting for the sandbox until {until}. {reason} (/resume {ref})",
                     until=_when(paused_until),
                     reason=reason,
                     ref=ref,

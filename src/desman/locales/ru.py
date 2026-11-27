@@ -1002,6 +1002,7 @@ MESSAGES: dict[str, Forms] = {
     "the sandbox has been unavailable for {minutes} minutes: {reason}": "Песочница недоступна уже {minutes} мин: {reason}",
     "Waiting {seconds} s for the sandbox. {reason}": "Ожидание песочницы: {seconds} с. {reason}",
     "Waiting for the sandbox until {until}. {reason} (desman resume {ref})": "Ожидание песочницы до {until}. {reason} (desman resume {ref})",
+    "Waiting for the sandbox until {until}. {reason} (/resume {ref})": "Ожидание песочницы до {until}. {reason} (/resume {ref})",
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": (
         "Пауза из-за лимита провайдера до {until}. Продолжить: desman resume {ref}"
     ),
@@ -1351,7 +1352,7 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Спрашивать модель, даже если на такой же запрос уже есть принятый ответ (по умолчанию он используется повторно 7 дней, это экономит квоту при resume).",
     "yes": "да",
     "no": "нет",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Создать задачу для цели GOAL (или из --spec) и выполнить её.\n\nМодель разбивает GOAL на подзадачи; если не получилось, единственной подзадачей становится сама цель (см. --plan). Коды выхода: 0 — готово, 3 — ждёт оператора, 4 — пауза (лимит провайдера), 5 — failed или cancelled, 6 — ещё выполняется в другом месте.",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit or sandbox outage),\n5 failed or cancelled, 6 still in progress elsewhere.": "Создать задачу для цели GOAL (или из --spec) и выполнить её.\n\nМодель разбивает GOAL на подзадачи; если не получилось, единственной подзадачей становится сама цель (см. --plan). Коды выхода: 0 — готово, 3 — ждёт оператора, 4 — пауза (лимит провайдера или недоступность песочницы), 5 — failed или cancelled, 6 — ещё выполняется в другом месте.",
     "--plan is for GOAL: a --spec is already a plan": "--plan относится к GOAL: --spec уже и есть план",
     "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Как GOAL превращается в подзадачи: llm просит модель составить план (по умолчанию; если не вышло, берётся шаблон), template делает саму цель единственной подзадачей (по умолчанию с --fake-llm).",
     "Planning…": "Составляю план…",

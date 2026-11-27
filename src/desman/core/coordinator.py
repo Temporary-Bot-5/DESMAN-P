@@ -238,6 +238,7 @@ class ReviewTestRun(BaseModel):
     report_missing: bool = False
     report_unverified: bool = False
     collection_setup_error: str | None = None
+    executor_setup_error: str | None = None
     failing: list[Annotated[str, Field(max_length=250)]] = Field(
         default_factory=list, max_length=20
     )
@@ -1082,8 +1083,14 @@ class Coordinator:
 
         if result.timed_out or result.stopped or result.workspace_full:
             reason = result.stopped or result.workspace_full or "timed out"
-        elif not (result.report_missing or result.report_unverified) and result.failed:
-            reason = ", ".join(result.failing) or f"pytest exited {result.exit_code}"
+        elif not (result.report_missing or result.report_unverified) and (
+            result.failed or result.executor_setup_error
+        ):
+            reason = (
+                result.executor_setup_error
+                or ", ".join(result.failing)
+                or f"pytest exited {result.exit_code}"
+            )
         else:
             if result.report_missing:
                 reason = "pytest produced no report"

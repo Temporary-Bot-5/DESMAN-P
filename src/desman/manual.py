@@ -67,18 +67,17 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "Tools use workspaces/TASK beside the DB. Chat lists files and folder, omitting repeated, untrusted text. Chat and run/status show "
-        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). Follow-ups in this chat copy to from-TASK/. Originals stay. Retries and interrupted runs reuse tool results. "
+        "Tools use workspaces/TASK beside the DB. Chat lists files and folder, skips repeated text and treats it as untrusted. Chat and run/status show "
+        "UTF-8 text (≤2 files, each ≤40 lines/4000 chars). Chat follow-ups copy to from-TASK/. Originals stay. Retries and resumes reuse tool results. "
         "Retries see work files and rewrite stale demos.\n"
         "Code execution needs run_command, shell_execution (`/permissions`) and a sandbox. "
-        "For planner-required execution or `/run --runs-code`, the last run must "
+        "When the planner or `/run --runs-code` requires execution, the last run must "
         "exit 0. Unavailable runs need a person. "
         "Code defaults to 16 tool rounds per subtask (8–48 via `/tuning --code-rounds N`). "
-        "edit_file replaces exact fragments. Runs show executor exit codes and output tails. Results hold prose, with files as extras. Review checks sources, dates, language "
-        "(names/translations allowed) and coverage. Live data may have fewer items with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
-        "the combine step. Use snippets or another official source for blocked pages. "
-        "Review tests runs or Python outputs in offline copies, checking names and counts. Verified passes allow acceptance. Call failures retry execution. Ambiguity retries review. "
-        "Outages or low disk pause review for 60s only for required runs. Other code skips tests then. Status says why. Ten outages or blocked required tests need human review. Network jobs skip tests. Large copies or missing packages can block tests.\n"
+        "edit_file replaces exact fragments. Runs show exit codes and output tails. Results hold prose plus files. Review checks sources, dates, language "
+        "(names/translations allowed) and coverage. Cite sources and gaps for partial live data. Split parts keep the request's language and feed honest partial findings into the combine step. Use snippets or other official sources for blocked pages. "
+        "Review sees files written in the latest attempt, within budget. It tests runs or Python outputs in offline copies and checks names/counts. Verified passes allow acceptance. Test failures retry execution. Ambiguity retries review. "
+        "Outages or low disk pause required runs for 60s. Other code skips tests. Status says why. Ten outages or blocked required tests need human review. Network jobs skip tests. Large copies and missing packages can block tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code in your latest message’s language.",
     ),
@@ -169,29 +168,28 @@ TOPICS: Final = (
         "what agents may do, their tools, the sandbox and the web",
         "Tools require both role policy and user permission. "
         "network_access, shell_execution, fs_outside_access and admin_rights default to off. "
-        "Use `/permissions` or the wizard. Chat changes require confirmation.\n"
-        "The executor can read, write, edit and list task files without following links. "
-        "run_command needs shell_execution and an available "
-        "sandbox: no network, cleared environment, system-call filter, time and memory limits, "
-        "a workspace quota. Linux uses "
+        "Set them via `/permissions` or the wizard. Chat confirms changes.\n"
+        "Executors read, write, edit and list task files without following links. "
+        "run_command needs shell_execution and a "
+        "sandbox with a cleared environment, a system-call filter and time, memory and workspace limits. python3 -m pytest works in the sandbox. No network, so nothing can be pip-installed. Linux uses "
         "bubblewrap. Windows and macOS prefer Docker Desktop in Linux-container mode. "
         "Windows tries WSL2 next, then WebAssembly. WASI supports Python, pytest and unittest "
         "without packages requiring C extensions. "
-        "`/sandbox setup --yes` installs the chosen backend. "
+        "`/sandbox setup --yes` installs the backend. "
         "`/sandbox setup --wsl --yes` (Windows) or `/sandbox setup --wasi --yes` installs "
-        "that sandbox. "
+        "it. "
         "`/sandbox remove --wsl --yes` deletes its sandbox distribution. "
         "web_search and web_fetch (network_access) read public pages and mark results untrusted. "
-        "After a task reads the web, web_fetch opens only URLs seen in it, never ones carrying "
+        "After web use, web_fetch opens only URLs seen by the task, excluding URLs carrying "
         "workspace text. "
         "Search covers Wikipedia, Stack Overflow, arXiv and GitHub. Whole-web search needs local "
         "SearXNG (`/search setup`), a Tavily key in `/config`, or borrowing via "
         "`/global search STATE`. Missing search setup pauses the subtask without spending a "
         "retry. "
-        "suggest_model records a suggestion for the person. read_node reads the knowledge tree "
-        "and is always allowed. Every tool call and refusal is recorded with its reason. "
-        "The planner, reviewer and interlocutor have no tools. admin_rights is for "
-        "test machines and warns on every run.",
+        "suggest_model records suggestions for the person. read_node reads the knowledge tree "
+        "and is always allowed. Tool calls and refusals are logged with reasons. "
+        "Planner, reviewer and interlocutor have no tools. admin_rights is for "
+        "test machines and warns each run.",
     ),
     Topic(
         "search",

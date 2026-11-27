@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -1028,7 +1029,18 @@ def test_changes():
 
 
 @pytest.mark.parametrize(
-    "reason", ["disk", "optional-disk", "outage", "quota", "optional-quota", "write-error", "fits"]
+    "reason",
+    [
+        "disk",
+        "optional-disk",
+        "outage",
+        "quota",
+        "optional-quota",
+        "write-error",
+        "fits",
+        "copy-enospc",
+        "optional-copy-edquot",
+    ],
 )
 def test_review_infrastructure_failure(
     store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
@@ -1036,7 +1048,7 @@ def test_review_infrastructure_failure(
     quota = reason in {"quota", "optional-quota"}
     task_id = submitted(
         store,
-        runs_code=reason not in {"optional-quota", "optional-disk"},
+        runs_code=reason not in {"optional-quota", "optional-disk", "optional-copy-edquot"},
         kind=Kind.CODE,
         output_path="answer.py",
     )
@@ -1044,17 +1056,22 @@ def test_review_infrastructure_failure(
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     workspace = Workspace(tmp_path, task_id)
     workspace.write("answer.py", "x" * (101 if quota else 100))
-    if reason == "write-error":
+    if reason in {"write-error", "copy-enospc", "optional-copy-edquot"}:
 
         def disk_full(
             self: Workspace, path: str, data: bytes | str, *, executable: bool = False
         ) -> str:
-            raise OSError("disk full")
+            if reason == "write-error":
+                raise OSError("disk full")
+            code = errno.ENOSPC
+            if reason == "optional-copy-edquot":
+                code = getattr(errno, "EDQUOT", code)
+            raise OSError(code, os.strerror(code))
 
         monkeypatch.setattr(Workspace, "write", disk_full)
 
     def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
-        assert not quota and reason != "write-error"
+        assert not quota and reason not in {"write-error", "copy-enospc", "optional-copy-edquot"}
         assert limits.workspace_files == 5
         assert limits.workspace_bytes == (
             100
@@ -1081,10 +1098,10 @@ def test_review_infrastructure_failure(
     )
     assert coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
-    if reason in {"fits", "optional-quota", "optional-disk"}:
+    if reason in {"fits", "optional-quota", "optional-disk", "optional-copy-edquot"}:
         assert sub.status is SubtaskStatus.DONE
         assert sub.attempts.transient == 0
-    elif reason in {"disk", "outage"}:
+    elif reason in {"disk", "outage", "copy-enospc"}:
         assert_sandbox_retry(coord, task_id, clock)
         for _ in range(5):
             clock.sleep(60)
@@ -1109,7 +1126,9 @@ def test_review_infrastructure_failure(
         assert list(tmp_path.glob("review-*")) == []
         return
     assert note is not None
-    assert note["disk_low"] is (reason in {"disk", "optional-disk"})
+    assert note["disk_low"] is (
+        reason in {"disk", "optional-disk", "copy-enospc", "optional-copy-edquot"}
+    )
     assert note["ran"] is (reason in {"disk", "optional-disk", "fits"})
     if quota:
         assert "quota: " in note["copy_over_quota"]
@@ -1351,13 +1370,15 @@ def test_status_shows_review_test_outcome(
         "stdlib",
         "wrong-line",
         "helpers",
-        "metadata",
+        "flask",
         "jsn",
         "reviewer-frame-calc",
         "reviewer-frame-hypothesis",
         "reviewer-frame-solution",
         "reviewer-frame-expected",
         pytest.param("real", marks=confined),
+        "executor-syntax",
+        pytest.param("executor-syntax-real", marks=confined),
         pytest.param("reviewer-calc", marks=confined),
         pytest.param("reviewer-desman_absent_review_package", marks=confined),
     ],
@@ -1389,6 +1410,8 @@ def test_missing_package_in_review(
     sub = store.claim("executor", task_id=task_id)
     assert sub is not None and sub.lease_token is not None
     workspace = Workspace(tmp_path, task_id)
+    module_name = "app" if mode == "flask" else "fetch"
+    output_path = f"{module_name}.py"
     # The real run needs a package the host's /usr surely lacks (requests may be there).
     package = {
         "real": "desman_absent_package",
@@ -1396,39 +1419,54 @@ def test_missing_package_in_review(
         "reviewer-frame-hypothesis": "hypothesis",
         "helpers": "helpers",
         "missing": "numpy",
-        "metadata": "installed_package",
+        "flask": "flask",
         "jsn": "jsn",
     }.get(mode, "requests")
-    if mode == "metadata":
-        monkeypatch.setattr(
-            "desman.runs.packages_distributions",
-            lambda: {"installed_package": ["installed-distribution"]},
-        )
     source = "from helpers import x\n" if mode == "helpers" else f"import {package}\n"
-    workspace.write("fetch.py", source)
+    if mode.startswith("executor-syntax"):
+        source = "from calc import answer\n"
+        workspace.write("calc.py", "answer = (]\n")
+    workspace.write(output_path, source)
+    if mode == "helpers":
+        workspace.write("helpers.py", "y = 1\n")
     if mode in {"reviewer-calc", "reviewer-frame-calc"}:
         workspace.write("src/calc.py", "answer = 4\n")
     if not runs_code:
         store.start_effect(sub.id, sub.lease_token, 0, 0, "write_file", "key")
         store.finish_effect(
-            sub.id, sub.lease_token, 0, 0, {"ok": True, "output": {"path": "fetch.py"}}
+            sub.id, sub.lease_token, 0, 0, {"ok": True, "output": {"path": output_path}}
         )
     store.submit(sub.id, sub.lease_token, {"summary": "ready"})
     sandbox = Sandbox()
-    if mode == "local":
+    if mode in {"local", "nested"}:
         workspace.write("src/requests/__init__.py", "")
-    if mode not in {"real", "reviewer-calc", "reviewer-desman_absent_review_package"}:
+    if mode not in {
+        "real",
+        "executor-syntax-real",
+        "reviewer-calc",
+        "reviewer-desman_absent_review_package",
+    }:
         monkeypatch.setattr(sandbox, "unavailable", lambda: None)
 
         def run(command: list[str], cwd: Path, **_: object) -> Outcome:
-            assert (cwd / "fetch.py").read_text() == source
+            assert (cwd / output_path).read_text() == source
             name = "requests.api" if mode == "nested" else package
             line = 2 if mode == "wrong-line" else 1
             cases = (
                 '<testcase name="test_review"><error message="collection failure">'
-                f"fetch.py:{line}: in &lt;module&gt;\n    import {package}\n"
+                f"{output_path}:{line}: in &lt;module&gt;\n    import {package}\n"
                 f"E   ModuleNotFoundError: No module named '{name}'</error></testcase>"
             )
+            if mode == "executor-syntax":
+                cases = (
+                    '<testcase name="test_review"><error message="collection failure">'
+                    'fetch.py:1: in &lt;module&gt;\nE     File "calc.py", line 1\n'
+                    "E   SyntaxError: invalid syntax</error></testcase>"
+                )
+            if mode == "helpers":
+                cases = cases.replace(
+                    "ModuleNotFoundError: No module named", "ImportError: cannot import name"
+                )
             if mode.startswith("reviewer-frame-"):
                 missing = mode.removeprefix("reviewer-frame-")
                 cases = (
@@ -1454,7 +1492,7 @@ def test_missing_package_in_review(
             return Outcome(exit_code, summary, "")
 
         monkeypatch.setattr(sandbox, "run", run)
-    module = f"import fetch\n\ndef test_fetch():\n    assert fetch.{package}\n"
+    module = f"import {module_name}\n\ndef test_fetch():\n    assert {module_name}.{package}\n"
     if mode == "mixed":
         module += "\ndef test_other():\n    assert False\n"
     if mode.startswith("reviewer-"):
@@ -1473,7 +1511,7 @@ def test_missing_package_in_review(
     note = last_review_tests(store, sub.id)
     assert note is not None and note["source"] == module
     rows = store.audit_log(task_id)
-    if mode in {"missing", "metadata"}:
+    if mode in {"missing", "flask", "jsn", "real"}:
         assert not note["ran"]
         assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
         if runs_code:
@@ -1492,8 +1530,14 @@ def test_missing_package_in_review(
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
         assert note["ran"] and note["errors"] + note["failed"] == (2 if mode == "mixed" else 1)
         assert not note["report_unverified"], note["tail"]
-        if mode in {"call", "mixed"}:
-            assert any(row["action"] == "verdict" for row in rows)
+        if mode in {"call", "mixed", "local", "nested", "stdlib", "helpers"} or mode.startswith(
+            "executor-syntax"
+        ):
+            [verdict] = [row for row in rows if row["action"] == "verdict"]
+            details = json.loads(verdict["details_json"])
+            assert details["verdict"] == "retry"
+            if mode.startswith("executor-syntax"):
+                assert "SyntaxError" in details["feedback"]
             assert store.get_subtask(sub.id).attempts.quality == 1
         else:
             [failure] = [row for row in rows if row["action"] == "review_interrupted"]
@@ -1841,7 +1885,7 @@ def test_missing_calculator_function_goes_back_to_reviewer_then_executor(
                 command,
                 cwd,
                 '<testcase name="test_review"><error message="collection failure">'
-                f"E   {error}</error></testcase>",
+                f"{command[-1]}:1: in &lt;module&gt;\nE   {error}</error></testcase>",
             )
             return Outcome(2, f"{error}\n1 error in 0.01s", "")
 
@@ -1884,8 +1928,9 @@ def test_missing_calculator_function_goes_back_to_reviewer_then_executor(
     assert executions == [defect]
 
 
-def test_command_window_excludes_sibling_writes(
-    store: Store, tmp_path: Path, clock: FakeClock
+@pytest.mark.parametrize("inside_window", [False, True])
+def test_command_window_and_sibling_writes(
+    store: Store, tmp_path: Path, clock: FakeClock, inside_window: bool
 ) -> None:
     task_id = store.create_task(
         TaskSpec(
@@ -1904,15 +1949,15 @@ def test_command_window_excludes_sibling_writes(
     store.start_effect(sub.id, sub.lease_token, 0, 0, "run_command", "command")
     store.start_effect(sibling.id, sibling.lease_token, 0, 0, "write_file", "helper")
     helper = workspace.root / workspace.write("helper.py", "answer = 4")
-    at = clock().timestamp()
+    at = clock().timestamp() - (0 if inside_window else 10)
     os.utime(helper, (at, at))
     store.finish_effect(
         sibling.id, sibling.lease_token, 0, 0, {"ok": True, "output": {"path": "helper.py"}}
     )
     store.finish_effect(sub.id, sub.lease_token, 0, 0, {"ok": True})
     store.submit(sub.id, sub.lease_token, {"summary": "ran"})
-    assert not has_written_python_files(store, sub, root=tmp_path)
-    assert "written_files" not in evidence(store, sub, workspace=workspace)
+    assert has_written_python_files(store, sub, root=tmp_path) is inside_window
+    assert ("written_files" in evidence(store, sub, workspace=workspace)) is inside_window
 
 
 def test_sandbox_outage_limit_and_wait_reason(

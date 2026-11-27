@@ -462,7 +462,7 @@ def run(
     """Create a task for GOAL (or from --spec) and work on it.
 
     The model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask
-    (see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),
+    (see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit or sandbox outage),
     5 failed or cancelled, 6 still in progress elsewhere.
     """
     if (goal is None) == (spec_path is None):

@@ -29,7 +29,7 @@ An execution ends when the executor hands in something to judge (`Store.executio
 attempt after a rejection starts a new journal, since the model is then meant to act again.
 Results are kept in the database because a replay must return them (including what a read
 returned). Call identity uses the arguments’ hash. Bounded summaries keep only the sizes of private fields.
-Attribution of files to sibling run_command calls by time is best effort.
+Attribution of workspace files to run_command calls by time is best effort.
 """
 
 from __future__ import annotations
@@ -371,8 +371,6 @@ def _command_windows(store: Store, subtask: Subtask) -> tuple[list[tuple[float, 
 
 
 def _workspace_outputs(
-    store: Store,
-    subtask: Subtask,
     workspace: Workspace,
     windows: list[tuple[float, float]],
     *,
@@ -380,21 +378,7 @@ def _workspace_outputs(
 ) -> Iterator[tuple[str, float]]:
     if not windows:
         return
-    write_tools = ", ".join("?" for _ in FILE_WRITE_TOOLS)
-    sibling_writes = set(
-        _written_paths(
-            store.conn.execute(
-                f"""SELECT e.tool, e.state, e.result_json FROM effects e
-                    JOIN subtasks s ON s.id = e.subtask_id
-                    WHERE s.task_id = ? AND s.id != ? AND e.state = 'done'
-                      AND e.tool IN ({write_tools})""",
-                (subtask.task_id, subtask.id, *FILE_WRITE_TOOLS),
-            ).fetchall()
-        )
-    )
     for path in workspace.iter_files():
-        if path in sibling_writes:
-            continue
         if python_only and Path(path).suffix.lower() != ".py":
             continue
         folder, slash, _ = path.partition("/")
@@ -431,10 +415,7 @@ def has_written_python_files(store: Store, subtask: Subtask, *, root: Path | Non
         root if root is not None else workspace_root_for(store.conn), subtask.task_id
     )
     windows, _ = _command_windows(store, subtask)
-    return (
-        next(_workspace_outputs(store, subtask, workspace, windows, python_only=True), None)
-        is not None
-    )
+    return next(_workspace_outputs(workspace, windows, python_only=True), None) is not None
 
 
 def _written_files(
@@ -449,7 +430,7 @@ def _written_files(
         paths = [
             path
             for path, _ in sorted(
-                _workspace_outputs(store, subtask, output_workspace, windows),
+                _workspace_outputs(output_workspace, windows),
                 key=_output_order,
             )[:12]
         ]

@@ -10,6 +10,7 @@ Deliberate tampering by code that shares the review sandbox is still possible.
 from __future__ import annotations
 
 import ast
+import errno
 import functools
 import re
 import secrets
@@ -23,7 +24,6 @@ from collections.abc import Callable, Collection, Mapping, Set
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from importlib.metadata import packages_distributions
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -782,35 +782,17 @@ def _review_trace_frame(trace: str) -> tuple[str, int] | None:
     return path, int(syntax_line or line)
 
 
-def _missing_review_import(
-    issue: ET.Element,
-    workspace: Workspace,
-    copied_python: set[str],
-    local_names: set[str],
-) -> str | None:
-    trace = (issue.text or "").strip()
-    pattern = r"(?:E +)?ModuleNotFoundError: No module named '([^'\n]+)'"
-    match = re.fullmatch(pattern, issue.get("message", "")) or next(
-        (match for line in reversed(trace.splitlines()) if (match := re.fullmatch(pattern, line))),
-        None,
-    )
+def _missing_review_import(error_text: str, local_names: set[str]) -> str | None:
+    match = re.fullmatch(r"ModuleNotFoundError: No module named '([^'\n]+)'", error_text)
     if match is None:
         return None
     name = match[1]
-    if not name.isidentifier() or name in sys.stdlib_module_names or name in local_names:
-        return None
-    frame = _review_trace_frame(trace)
-    if frame is None:
-        return None
-    path, lineno = frame
-    if path not in copied_python:
-        return None
-    try:
-        if not 1 <= lineno <= len(workspace.read(path).splitlines()):
-            return None
-    except (OSError, PathEscapeError):
-        return None
-    if name in _COMMON_REVIEW_PACKAGES or name in packages_distributions():
+    root = name.partition(".")[0]
+    if (
+        all(part.isidentifier() for part in name.split("."))
+        and root not in sys.stdlib_module_names
+        and root not in local_names
+    ):
         return name
     return None
 
@@ -821,6 +803,7 @@ class _ReviewReport:
     failing: list[str]
     executor_packages: set[str]
     collection_setup_error: str | None
+    executor_setup_error: str | None
     verified: bool
 
 
@@ -857,27 +840,10 @@ def _summary_matches(stdout: str, counts: dict[str, int]) -> bool:
     return summaries == [counts]
 
 
-# Imports alone do not identify distributions. Include common dependencies that may live
-# only in the sandbox, alongside packages known to this Python installation.
-_COMMON_REVIEW_PACKAGES = frozenset(
-    {
-        "hypothesis",
-        "numpy",
-        "pandas",
-        "requests",
-        "scipy",
-        "sklearn",
-        "yaml",
-        "PIL",
-        "bs4",
-    }
-)
-
-
 def _read_review_report(
     workspace: Workspace,
     report: str,
-    copied_python: set[str],
+    copied_files: set[str],
     local_names: set[str],
     reviewer_file: str,
     reviewer_tree: ast.Module,
@@ -909,6 +875,7 @@ def _read_review_report(
     matching_name = False
     all_cases_in_module = True
     collection_setup_error = None
+    executor_setup_error = None
     previous_failure: tuple[str, str] | None = None
     for case in suite.iterfind("testcase"):
         name = case.get("name", "")
@@ -955,8 +922,9 @@ def _read_review_report(
         setup_error = error is not None and error.get("message", "").startswith(
             "failed on setup with "
         )
-        if error is not None and collection_setup_error is None:
-            collection_setup_error = next(
+        error_text = None
+        if error is not None:
+            error_text = next(
                 (
                     line.removeprefix("E").strip()
                     for line in reversed((error.text or "").splitlines())
@@ -964,17 +932,25 @@ def _read_review_report(
                 ),
                 error.get("message", "pytest error outside the test call"),
             )[:500]
+            if collection_setup_error is None:
+                collection_setup_error = error_text
         if failure is not None and len(failing) < 20:
             failing.append((f"{group}::{name}" if group else name)[:250])
         if teardown_error:
             all_issues_need_packages = False
         if issue is None:
             continue
-        missing = (
-            _missing_review_import(issue, workspace, copied_python, local_names)
-            if collection_error or setup_error
-            else None
-        )
+        missing = None
+        if error is not None and error_text is not None and (collection_error or setup_error):
+            frame = _review_trace_frame(error.text or "")
+            if frame is not None:
+                path, lineno = frame
+                if path in copied_files:
+                    with suppress(OSError, PathEscapeError):
+                        if 1 <= lineno <= len(workspace.read(path).splitlines()):
+                            missing = _missing_review_import(error_text, local_names)
+                            if missing is None and executor_setup_error is None:
+                                executor_setup_error = error_text
         if missing is None:
             all_issues_need_packages = False
         else:
@@ -989,6 +965,7 @@ def _read_review_report(
         failing,
         missing_packages if all_issues_need_packages else set(),
         collection_setup_error,
+        executor_setup_error,
         names_match and _summary_matches(stdout, counts),
     )
 
@@ -1073,7 +1050,7 @@ def _run_review_tests(
                 if index and index % 500 == 0:
                     cover(copy_seconds(len(paths) + entries - index))
                 copy.mkdir(path)
-            copied_python: set[str] = set()
+            copied_files: set[str] = set()
             local_names = {PurePosixPath(path).name for path in directories}
             size = 0
             for index, path in enumerate(paths):
@@ -1094,8 +1071,8 @@ def _run_review_tests(
                     return over_quota(next_entries, next_size)
                 copy.write(path, data, executable=executable)
                 entries, size = next_entries, next_size
+                copied_files.add(path)
                 if path.endswith(".py"):
-                    copied_python.add(path)
                     local_names.add(PurePosixPath(path).stem)
             review_dir = f".desman-review-{secrets.token_hex(16)}"
             copy.mkdir(review_dir)
@@ -1143,7 +1120,7 @@ def _run_review_tests(
             parsed = _read_review_report(
                 copy,
                 report,
-                copied_python,
+                copied_files,
                 local_names,
                 file,
                 reviewer_tree,
@@ -1155,6 +1132,18 @@ def _run_review_tests(
             ran=False,
             reason_not_run=str(error)[:1_000],
             sandbox_unavailable=True,
+            skipped_files=skipped,
+            skipped_names=skipped_names,
+        )
+    except OSError as error:
+        if error.errno not in {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}:
+            raise
+        reason = f"disk space too low: {error.strerror or error}"
+        return ReviewTestRun(
+            ran=False,
+            reason_not_run=reason,
+            stopped=reason,
+            disk_low=True,
             skipped_files=skipped,
             skipped_names=skipped_names,
         )
@@ -1188,6 +1177,7 @@ def _run_review_tests(
         report_missing=parsed is None,
         report_unverified=parsed is not None and not parsed.verified,
         collection_setup_error=parsed.collection_setup_error if parsed else None,
+        executor_setup_error=parsed.executor_setup_error if parsed else None,
         failing=parsed.failing if parsed else [],
         tail=tail[-4_000:],
         timed_out=outcome.timed_out,
