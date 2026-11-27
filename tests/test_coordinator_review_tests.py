@@ -20,13 +20,13 @@ from desman.core.coordinator import (
     Coordinator,
     Failure,
     Review,
+    ReviewTestRun,
     ReviewTestRunner,
     Success,
     Verdict,
     Work,
     review_tests_enabled,
 )
-from desman.core.coordinator import TestRun as ReviewTestResult
 from desman.core.effects import evidence, has_written_python_files, last_review_tests
 from desman.core.models import Kind, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Permission, executor_access
@@ -48,14 +48,22 @@ MODULE = "def test_answer():\n    assert True\n"
 ACCEPT = json.dumps({"verdict": "accept", "tests": MODULE})
 
 
+def report_path(command: list[str], cwd: Path) -> Path:
+    ini = cwd / command[command.index("-c") + 1]
+    report = ini.read_text().split("addopts = --junitxml=", 1)[1].strip()
+    assert report not in command
+    path = cwd / report
+    assert path.parent == ini.parent and path.suffix == ".xml"
+    return path
+
+
 def write_report(
-    command: list[str], cwd: Path, cases: str = '<testcase name="test_answer"/>'
+    command: list[str],
+    cwd: Path,
+    cases: str = '<testcase classname="test_review" name="test_answer"/>',
 ) -> None:
-    path = command[command.index("--junitxml") + 1]
-    review_dir = Path(command[-1]).parent
-    assert review_dir.name.startswith(".desman-review-")
-    assert Path(path).parent == review_dir and Path(path).suffix == ".xml"
-    (cwd / path).write_text(
+    assert Path(command[-1]).parent.name.startswith(".desman-review-")
+    report_path(command, cwd).write_text(
         f"<testsuites><testsuite>{cases}</testsuite></testsuites>", encoding="utf-8"
     )
 
@@ -103,37 +111,37 @@ def unread(work: Work) -> Success:
 @pytest.mark.parametrize(
     ("result", "reason"),
     [
-        (ReviewTestResult(ran=True, exit_code=0, passed=3), None),
+        (ReviewTestRun(ran=True, exit_code=0, passed=3), None),
         (
-            ReviewTestResult(
+            ReviewTestRun(
                 ran=True, exit_code=1, failed=1, failing=["test_answer"], tail="assert 2 == 4"
             ),
             "test_answer\nassert 2 == 4",
         ),
-        (ReviewTestResult(ran=True, timed_out=True), "timed out"),
+        (ReviewTestRun(ran=True, timed_out=True), "timed out"),
         (
-            ReviewTestResult(ran=True, exit_code=2, errors=1, failing=[".review/test_review_1.py"]),
+            ReviewTestRun(ran=True, exit_code=2, errors=1, failing=[".review/test_review_1.py"]),
             ".review/test_review_1.py",
         ),
-        (ReviewTestResult(ran=True, exit_code=5), "pytest exited 5"),
-        (ReviewTestResult(ran=True, exit_code=0, failed=1, failing=["test_answer"]), "test_answer"),
-        (ReviewTestResult(ran=True, exit_code=0, passed=1, errors=1), "pytest exited 0"),
+        (ReviewTestRun(ran=True, exit_code=5), "pytest exited 5"),
+        (ReviewTestRun(ran=True, exit_code=0, failed=1, failing=["test_answer"]), "test_answer"),
+        (ReviewTestRun(ran=True, exit_code=0, passed=1, errors=1), "pytest exited 0"),
         (
-            ReviewTestResult(ran=True, exit_code=0, passed=1, stopped="watch stopped"),
+            ReviewTestRun(ran=True, exit_code=0, passed=1, stopped="watch stopped"),
             "watch stopped",
         ),
         (
-            ReviewTestResult(ran=True, exit_code=0, passed=1, workspace_full="quota exceeded"),
+            ReviewTestRun(ran=True, exit_code=0, passed=1, workspace_full="quota exceeded"),
             "quota exceeded",
         ),
         (
-            ReviewTestResult(ran=True, exit_code=0, tail="1 skipped"),
+            ReviewTestRun(ran=True, exit_code=0, tail="1 skipped"),
             "verified nothing: 0 passed\n1 skipped",
         ),
     ],
 )
 def test_review_result(
-    store: Store, clock: FakeClock, result: ReviewTestResult, reason: str | None
+    store: Store, clock: FakeClock, result: ReviewTestRun, reason: str | None
 ) -> None:
     task_id = submitted(store)
 
@@ -143,7 +151,7 @@ def test_review_result(
         module: str,
         attempt: int,
         cover: Callable[[float], None],
-    ) -> ReviewTestResult:
+    ) -> ReviewTestRun:
         assert module == MODULE and attempt == 1
         cover(60)
         current = store.get_subtask(sub.id)
@@ -279,7 +287,7 @@ def test_invalid_module_gets_one_repair(
         llm_reviewer(llm),
         sleep=clock.sleep,
         access=executor_access([Permission.SHELL]),
-        review_tests=lambda *_: ReviewTestResult(ran=True, exit_code=0, passed=1),
+        review_tests=lambda *_: ReviewTestRun(ran=True, exit_code=0, passed=1),
     )
     assert coord.run(task_id).status is TaskStatus.DONE
     assert len(llm.calls) == 3
@@ -333,7 +341,6 @@ def test_runner_writes_module_and_parses_pytest(
         path = command[-1]
         review_dir = Path(path).parent.as_posix()
         ini = f"{review_dir}/pytest.ini"
-        report = command[-2]
         assert command == [
             "python3",
             "-I",
@@ -347,11 +354,7 @@ def test_runner_writes_module_and_parses_pytest(
             "--noconftest",
             "-p",
             "no:cacheprovider",
-            "-o",
-            "addopts=",
             "-q",
-            "--junitxml",
-            report,
             path,
         ]
         assert cwd.parent == workspace.root.parent and cwd != workspace.root and timeout == 60
@@ -365,7 +368,7 @@ def test_runner_writes_module_and_parses_pytest(
         if os.name != "nt":
             assert copy.is_executable("run.sh")
         assert copy.read_text(path) == MODULE
-        assert copy.read_text(ini) == "[pytest]\npythonpath = ..\n"
+        assert copy.read_text(ini).startswith("[pytest]\npythonpath = ..\naddopts = --junitxml=")
         copy.write("answer.py", "changed")
         (cwd / "delete.txt").unlink()
         write_report(
@@ -407,7 +410,7 @@ def test_copy_refreshes_review_reservation(
 
     def run(command: list[str], cwd: Path, **kwargs: object) -> Outcome:
         write_report(command, cwd)
-        return Outcome(0, "", "")
+        return Outcome(0, "1 passed in 0.01s", "")
 
     monkeypatch.setattr(sandbox, "run", run)
     workspace = Workspace(tmp_path, "task")
@@ -451,10 +454,10 @@ def test_code_written_with_tools_gets_reviews_and_feedback(
         module: str,
         attempt: int,
         cover: Callable[[float], None],
-    ) -> ReviewTestResult:
+    ) -> ReviewTestRun:
         seen.append(attempt)
         if attempt == 1:
-            return ReviewTestResult(
+            return ReviewTestRun(
                 ran=True,
                 exit_code=1,
                 failed=1,
@@ -463,7 +466,7 @@ def test_code_written_with_tools_gets_reviews_and_feedback(
                 skipped_names=["a.py", "b.py", "c.py", "d.py", "e.py"],
                 tail="x" * 3_000 + "assertion details",
             )
-        return ReviewTestResult(ran=True, exit_code=0, passed=1)
+        return ReviewTestRun(ran=True, exit_code=0, passed=1)
 
     executor = llm_executor(llm, format_final=False)
 
@@ -594,6 +597,9 @@ def test_normal_run_wires_review_to_command_sandbox(
         "errors": 0,
         "timed_out": False,
         "report_missing": False,
+        "report_unverified": False,
+        "reviewer_missing_import": None,
+        "reviewer_import_is_package": False,
         "stopped": "",
     }
     attempts = subreport.attempts.model_copy(update={"quality": 1})
@@ -714,7 +720,7 @@ def test_error_artifact_overrules_accept_before_tests(store: Store, clock: FakeC
         module: str,
         attempt: int,
         cover: Callable[[float], None],
-    ) -> ReviewTestResult:
+    ) -> ReviewTestRun:
         pytest.fail("an error artifact must never be tested for acceptance")
 
     coord = Coordinator(
@@ -771,12 +777,12 @@ def test_code_with_command_outputs_is_reviewed(
 
     def runner(
         sub: Subtask, ws: Workspace, module: str, attempt: int, cover: Callable[[float], None]
-    ) -> ReviewTestResult:
+    ) -> ReviewTestRun:
         assert ws.read_text("script.py") == "answer = 4"
         assert mode != "missing"
         if mode == "outage":
             raise SandboxUnavailable("backend went away")
-        return ReviewTestResult(ran=True, exit_code=0, passed=1)
+        return ReviewTestRun(ran=True, exit_code=0, passed=1)
 
     reviewer = llm_reviewer(llm, evidence=partial(evidence, store, workspace=workspace))
     coord = Coordinator(
@@ -884,7 +890,7 @@ def test_code_fallback_ignores_earlier_subtask_and_copied_inputs(
 
     def runner(
         sub: Subtask, ws: Workspace, module: str, attempt: int, cover: Callable[[float], None]
-    ) -> ReviewTestResult:
+    ) -> ReviewTestRun:
         pytest.fail("the prose-only subtask did not write output files")
 
     llm = FakeLLM().on("Review", '{"verdict":"accept"}', '{"verdict":"accept"}')
@@ -985,7 +991,10 @@ def test_review_infrastructure_failure(
         assert not quota and reason != "write-error"
         assert limits.workspace_files == 5
         assert limits.workspace_bytes == (
-            100 + len(MODULE.encode()) + len("[pytest]\npythonpath = ..\n") + 1024 * 1024
+            100
+            + len(MODULE.encode())
+            + (cwd / command[command.index("-c") + 1]).stat().st_size
+            + 1024 * 1024
         )
         if reason == "fits":
             write_report(command, cwd)
@@ -1036,10 +1045,10 @@ def test_lost_reservation_keeps_final_verdict_without_test_note(
 
     def runner(
         sub: Subtask, ws: Workspace, module: str, attempt: int, cover: Callable[[float], None]
-    ) -> ReviewTestResult:
+    ) -> ReviewTestRun:
         clock.advance(120)
         assert store.reserve_review(sub.id, "other reviewer", seconds=60)
-        return ReviewTestResult(ran=True, exit_code=1, failed=1, failing=["test_answer"])
+        return ReviewTestRun(ran=True, exit_code=1, failed=1, failing=["test_answer"])
 
     coord = Coordinator(
         store,
@@ -1105,7 +1114,7 @@ def test_invalid_report_cannot_verify_fake_summary(
 
     def run(command: list[str], cwd: Path, **kwargs: object) -> Outcome:
         if report is not None:
-            (cwd / command[-2]).write_text(report, encoding="utf-8")
+            report_path(command, cwd).write_text(report, encoding="utf-8")
         return Outcome(0, "1 passed in 0.01s", "")
 
     monkeypatch.setattr(sandbox, "run", run)
@@ -1199,6 +1208,8 @@ def test_status_shows_review_test_outcome(
         "wrong-line",
         "reviewer-frame-calc",
         "reviewer-frame-hypothesis",
+        "reviewer-frame-solution",
+        "reviewer-frame-expected",
         pytest.param("real", marks=confined),
         pytest.param("reviewer-calc", marks=confined),
         pytest.param("reviewer-hypothesis", marks=confined),
@@ -1214,7 +1225,9 @@ def test_missing_package_in_review(
 ) -> None:
     task_id = store.create_task(
         TaskSpec(
-            goal="Produce a fetch module",
+            goal="Produce expected.py"
+            if mode == "reviewer-frame-expected"
+            else "Produce a fetch module",
             retry=RetryPolicy(max_attempts=1),
             subtasks=[
                 SubtaskSpec(
@@ -1266,20 +1279,27 @@ def test_missing_package_in_review(
                     f"{command[-1]}:1: in &lt;module&gt;\n    import {missing}\n"
                     f"E   ModuleNotFoundError: No module named '{missing}'</error></testcase>"
                 )
-            if mode == "call":
+            summary = "1 error in 0.01s"
+            exit_code = 2
+            if mode in {"call", "mixed"}:
+                exit_code = 1
+                summary = "1 failed in 0.01s"
                 cases = (
-                    '<testcase name="test_fetch"><failure '
+                    '<testcase classname="test_review" name="test_fetch"><failure '
                     'message="ModuleNotFoundError: No module named &apos;requests&apos;">'
                     "E   ModuleNotFoundError: No module named 'requests'\n\n"
                     "fetch.py:1: ModuleNotFoundError</failure></testcase>"
                 )
             if mode == "mixed":
-                cases += '<testcase name="test_other"><failure>AssertionError</failure></testcase>'
+                cases += '<testcase classname="test_review" name="test_other"><failure>AssertionError</failure></testcase>'
+                summary = "2 failed in 0.01s"
             write_report(command, cwd, cases)
-            return Outcome(2, "", "")
+            return Outcome(exit_code, summary, "")
 
         monkeypatch.setattr(sandbox, "run", run)
     module = f"import fetch\n\ndef test_fetch():\n    assert fetch.{package}\n"
+    if mode == "mixed":
+        module += "\ndef test_other():\n    assert False\n"
     if mode.startswith("reviewer-"):
         module = f"import {mode.removeprefix('reviewer-').removeprefix('frame-')}\n" + MODULE
     llm = FakeLLM().on("Review", json.dumps({"verdict": "accept", "tests": module}))
@@ -1295,13 +1315,28 @@ def test_missing_package_in_review(
     assert coord.tick(task_id, [])
     note = last_review_tests(store, sub.id)
     assert note is not None and note["source"] == module
+    rows = store.audit_log(task_id)
     if not runs_code and mode in {"missing", "call", "real"}:
         assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
         assert not note["ran"]
         assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
+        [verdict] = [row for row in rows if row["action"] == "verdict"]
+        assert json.loads(verdict["details_json"])["tests"] == f"not run: {note['reason_not_run']}"
     else:
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
         assert note["ran"] and note["errors"] + note["failed"] == (2 if mode == "mixed" else 1)
+        assert not note["report_unverified"], note["tail"]
+        if mode in {"reviewer-hypothesis", "reviewer-frame-hypothesis", "reviewer-frame-solution"}:
+            [failure] = [row for row in rows if row["action"] == "review_interrupted"]
+            expected = (
+                "reviewer's tests import solution, which the task does not name"
+                if mode == "reviewer-frame-solution"
+                else "reviewer's tests need package hypothesis"
+            )
+            assert json.loads(failure["details_json"])["reason"].startswith(expected + ": ")
+            assert store.get_subtask(sub.id).attempts.quality == 0
+        else:
+            assert any(row["action"] == "verdict" for row in rows)
     assert len(llm.calls) == 1
 
 
@@ -1382,3 +1417,86 @@ def test_executable_and_empty_directory_in_real_review_sandbox(
     )
     result = _run_review_tests(Sandbox(), subtask, workspace, module, 1)
     assert result.ran and result.exit_code == 0 and result.passed == 1, result.tail
+
+
+@pytest.mark.parametrize(
+    ("cases", "summary", "verified"),
+    [
+        ('<testcase classname="test_review.TestAnswer" name="test_answer[4]"/>', "1 passed", True),
+        ('<testcase classname="test_review.TestOther" name="test_answer[4]"/>', "1 passed", False),
+        ('<testcase classname="test_review.TestAnswer" name="test_other"/>', "1 passed", False),
+        ('<testcase classname="test_review.TestAnswer" name="test_answer[4]"/>', "2 passed", False),
+    ],
+)
+def test_review_report_verifies_test_names_and_summary(
+    store: Store,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cases: str,
+    summary: str,
+    verified: bool,
+) -> None:
+    task_id = submitted(store)
+    sandbox = Sandbox()
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+
+    def run(command: list[str], cwd: Path, **kwargs: object) -> Outcome:
+        write_report(command, cwd, cases)
+        return Outcome(0, f"{summary} in 0.01s", "")
+
+    monkeypatch.setattr(sandbox, "run", run)
+    module = (
+        "import pytest\nclass TestAnswer:\n"
+        "    @pytest.mark.parametrize('value', [4])\n"
+        "    def test_answer(self, value): assert value == 4\n"
+    )
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.run(task_id).status is (TaskStatus.DONE if verified else TaskStatus.NEEDS_HUMAN)
+    if not verified:
+        [verdict] = [row for row in store.audit_log(task_id) if row["action"] == "verdict"]
+        assert json.loads(verdict["details_json"])["feedback"].startswith(
+            "reviewer's tests could not be verified"
+        )
+
+
+@confined
+def test_report_rewritten_at_exit_is_unverified(store: Store, tmp_path: Path) -> None:
+    task_id = submitted(store)
+    workspace = Workspace(tmp_path, task_id)
+    workspace.write(
+        "answer.py",
+        """
+import atexit
+from pathlib import Path
+
+@atexit.register
+def rewrite_report():
+    for report in Path.cwd().glob('.desman-review-*/*.xml'):
+        source = report.read_text()
+        changed = source.replace('name="test_answer"', 'name="unexpected"')
+        report.write_text(changed)
+""",
+    )
+    sandbox = Sandbox()
+    module = "import answer\n" + MODULE
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        tools=builtin_registry(sandbox),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.run(task_id).status is TaskStatus.NEEDS_HUMAN
+    [verdict] = [row for row in store.audit_log(task_id) if row["action"] == "verdict"]
+    assert json.loads(verdict["details_json"])["feedback"].startswith(
+        "reviewer's tests could not be verified"
+    )

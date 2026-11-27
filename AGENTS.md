@@ -333,7 +333,8 @@ A commit that changes a file listed in `src/desman/protected.toml` updates its h
 For L.5, `runs.py` creates and removes its own disposable scratch directory under the
 workspaces root, separate from the agent's workspace. It writes the copied files and the
 reviewer's tests through `Workspace`, runs the tests through the same Sandbox, and records
-their source and outcome in `review_tests` notes. Never edit a
+their source and outcome in `review_tests` notes. Deliberate tampering by code that shares the
+review sandbox is still possible. Never edit a
 migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
 backfill if needed) and test upgrading a database built with the previous migrations. Keep the `subtasks.status` CHECK in
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,

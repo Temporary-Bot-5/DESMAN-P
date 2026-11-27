@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Reviewer's tests (attempt {attempt}) could not be verified.": "İnceleyicinin testleri (deneme {attempt}) doğrulanamadı.",
+    "Reviewer's tests need package {name}.": "İnceleyicinin testleri {name} paketini gerektiriyor.",
+    "Reviewer's tests import {name}, which the task does not name.": "İnceleyicinin testleri görevde adı geçmeyen {name} modülünü içe aktarıyor.",
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "İnceleyenin testleri (deneme {attempt}) — başarılı: {passed}, başarısız: {failed}, hata: {errors}",
     "document parts work without tools": "belge bölümleri araç kullanılmadan işlenir",
     "Reviewer's tests (attempt {attempt}) did not run.": "İnceleyenin testleri (deneme {attempt}) çalıştırılmadı.",

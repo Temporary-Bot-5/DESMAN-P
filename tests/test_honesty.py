@@ -19,8 +19,7 @@ from desman.cli import cli
 from desman.config import ConfigManager, default_config_path
 from desman.core import db
 from desman.core.audit import check_history
-from desman.core.coordinator import Coordinator, Review, Success, Verdict, Work
-from desman.core.coordinator import TestRun as ReviewTestRun
+from desman.core.coordinator import Coordinator, Review, ReviewTestRun, Success, Verdict, Work
 from desman.core.models import SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Access, Policy, Role, RolePolicy
 from desman.core.retry import strategy_for

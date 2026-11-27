@@ -34,6 +34,9 @@ class ReviewTestSummary(BaseModel):
     errors: int = 0
     timed_out: bool = False
     report_missing: bool = False
+    report_unverified: bool = False
+    reviewer_missing_import: str | None = None
+    reviewer_import_is_package: bool = False
     stopped: str = ""
 
 

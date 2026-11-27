@@ -77,7 +77,7 @@ TOPICS: Final = (
         "edit_file replaces exact fragments; each run shows the executor its exit code and output tails. Prose goes in the result; files are extra. Review checks sources, dates, language "
         "(names/translations allowed) and coverage. Live data may have fewer items given sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
         "the combine step. For blocked pages, use snippets or another official source. "
-        "Review sees recent files and, if allowed, tests required runs or Python outputs in an offline copy. "
+        "Review sees recent files and may test runs or Python outputs in an offline copy. It checks test names and counts against the report and pytest output. "
         "Sandbox outages interrupt required reviews. Oversized copies skip tests, as can "
         "missing third-party imports in submitted Python without required execution.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "

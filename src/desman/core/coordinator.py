@@ -37,6 +37,7 @@ import ast
 import functools
 import json
 import math
+import re
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -194,15 +195,30 @@ class Review(BaseModel):
                 module = ast.parse(tests)
             except (SyntaxError, ValueError, RecursionError) as error:
                 raise ValueError(f"tests must be valid Python: {error}") from error
-            if not any(
-                isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
-                for node in module.body
-            ):
-                raise ValueError("tests must define a top-level test_ function")
+            if not review_test_names(module):
+                raise ValueError(
+                    "tests must define a top-level test_ function or Test class method"
+                )
         return tests
 
 
-class TestRun(BaseModel):
+def review_test_names(module: ast.Module) -> set[tuple[str, str]]:
+    def names(body: list[ast.stmt]) -> set[str]:
+        return {
+            node.name
+            for node in body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("test_")
+        }
+
+    found = {("test_review", name) for name in names(module.body)}
+    for node in module.body:
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            found.update((f"test_review.{node.name}", name) for name in names(node.body))
+    return found
+
+
+class ReviewTestRun(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     ran: bool
@@ -214,6 +230,9 @@ class TestRun(BaseModel):
     errors: int = Field(default=0, ge=0)
     skipped: int = Field(default=0, ge=0)
     report_missing: bool = False
+    report_unverified: bool = False
+    reviewer_missing_import: str | None = None
+    reviewer_import_is_package: bool = False
     failing: list[Annotated[str, Field(max_length=250)]] = Field(
         default_factory=list, max_length=20
     )
@@ -228,7 +247,7 @@ class TestRun(BaseModel):
     skipped_names: list[str] = Field(default_factory=list, max_length=5)
 
 
-RunReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], TestRun]
+RunReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], ReviewTestRun]
 
 
 @dataclass(frozen=True)
@@ -964,28 +983,30 @@ class Coordinator:
 
     def _review_test_skip(
         self, subtask: Subtask, cover_call: Callable[[float], None]
-    ) -> TestRun | None:
+    ) -> ReviewTestRun | None:
         if "document" in subtask.inputs:
-            return TestRun(ran=False, reason_not_run="document parts work without tools")
+            return ReviewTestRun(ran=False, reason_not_run="document parts work without tools")
         if self.store.tools(subtask.task_id) is not Tools.GRANTED:
-            return TestRun(ran=False, reason_not_run="task does not grant tools")
+            return ReviewTestRun(ran=False, reason_not_run="task does not grant tools")
         tool = self.tools.get(RUN_TOOL) if self.tools is not None else None
         if tool is None:
-            return TestRun(ran=False, reason_not_run="run_command unavailable")
+            return ReviewTestRun(ran=False, reason_not_run="run_command unavailable")
         access = self._crew(subtask).access or executor_access()
         if reason := access.refusal(tool):
-            return TestRun(ran=False, reason_not_run=reason)
+            return ReviewTestRun(ran=False, reason_not_run=reason)
         if isinstance(self.review_tests, ReviewTestRunner):
             cover_call(120)
             if reason := self.review_tests.unavailable():
-                return TestRun(ran=False, reason_not_run=reason[:1_000], sandbox_unavailable=True)
+                return ReviewTestRun(
+                    ran=False, reason_not_run=reason[:1_000], sandbox_unavailable=True
+                )
         return None
 
     def _check_review_tests(
         self,
         subtask: Subtask,
         review: Review,
-        skipped: TestRun | None,
+        skipped: ReviewTestRun | None,
         cover_call: Callable[[float], None],
     ) -> tuple[Review | Failure, dict[str, Any] | None]:
         attempt = subtask.attempts.quality + 1
@@ -999,11 +1020,11 @@ class Coordinator:
             run = runner.run if isinstance(runner, ReviewTestRunner) else runner
             workspace = Workspace(self.workspaces, subtask.task_id)
             try:
-                result = TestRun.model_validate(
+                result = ReviewTestRun.model_validate(
                     run(subtask, workspace, review.tests, attempt, cover_call)
                 )
             except SandboxUnavailable as error:
-                result = TestRun(
+                result = ReviewTestRun(
                     ran=False, reason_not_run=str(error)[:1_000], sandbox_unavailable=True
                 )
 
@@ -1014,10 +1035,14 @@ class Coordinator:
         }
         if skipped is None:
             note["source"] = review.tests
-        return self._review_test_verdict(subtask, review, result), note
+        verdict = self._review_test_verdict(subtask, review, result)
+        if not isinstance(verdict, Failure) and result.reviewer_missing_import:
+            note.update(reviewer_missing_import=None, reviewer_import_is_package=False)
+        return verdict, note
 
-    @staticmethod
-    def _review_test_verdict(subtask: Subtask, review: Review, result: TestRun) -> Review | Failure:
+    def _review_test_verdict(
+        self, subtask: Subtask, review: Review, result: ReviewTestRun
+    ) -> Review | Failure:
         if result.disk_low:
             return Failure(
                 kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
@@ -1035,6 +1060,17 @@ class Coordinator:
             feedback = "reviewer's tests failed: timed out"
         elif result.report_missing:
             feedback = "reviewer's tests produced no report"
+        elif result.report_unverified:
+            feedback = "reviewer's tests could not be verified"
+        elif (name := result.reviewer_missing_import) and not self._task_names_import(
+            subtask, name
+        ):
+            reason = (
+                f"reviewer's tests need package {name}"
+                if result.reviewer_import_is_package
+                else f"reviewer's tests import {name}, which the task does not name"
+            )
+            return Failure(kind=FailureKind.TRANSIENT, reason=reason)
         elif result.exit_code == 0 and result.failed == result.errors == 0:
             if result.passed > 0:
                 return review
@@ -1049,6 +1085,18 @@ class Coordinator:
         return Review(
             verdict=Verdict.RETRY,
             feedback=feedback + (f"\n{result.tail}" if result.tail else ""),
+        )
+
+    def _task_names_import(self, subtask: Subtask, name: str) -> bool:
+        goal, _ = self.store.subtask_goal(subtask)
+        return any(
+            re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text)
+            for text in (
+                goal,
+                subtask.description,
+                subtask.acceptance_criteria,
+                json.dumps(subtask.inputs, ensure_ascii=False),
+            )
         )
 
     def _review(self, subtask: Subtask, token: str, events: list[str]) -> bool:
@@ -1152,6 +1200,8 @@ class Coordinator:
                     review=token,
                 )
             elif review.verdict is Verdict.ACCEPT:
+                if note is not None and not note["ran"]:
+                    details["tests"] = f"not run: {note['reason_not_run'] or 'unspecified'}"
                 moved = self.store.transition(
                     subtask.id,
                     S.REVIEW,

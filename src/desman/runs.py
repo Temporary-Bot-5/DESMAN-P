@@ -4,6 +4,7 @@ The operator (ADR 0003) is the coordinator with its planner, executor and review
 put together from the config: the models (a lineup per role, `llm.router`; the executor's per
 kind of subtask, each with its other lineup for retries with another model), the executor's
 access (the tool policy within the human's permissions) and its tools.
+Deliberate tampering by code that shares the review sandbox is still possible.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from collections.abc import Callable, Collection, Mapping, Set
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from importlib.metadata import packages_distributions
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -49,10 +51,11 @@ from desman.core.coordinator import (
     Failure,
     Labels,
     Outcome,
+    ReviewTestRun,
     ReviewTestRunner,
     ReviewTests,
-    TestRun,
     Work,
+    review_test_names,
 )
 from desman.core.effects import evidence, last_review_tests, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
@@ -765,12 +768,14 @@ _REVIEW_COPY_PREFIX = "review-"
 _REVIEW_REPORT_LIMIT = 1024 * 1024
 
 
-def _missing_review_package(
+def _missing_review_import(
     issue: ET.Element,
     workspace: Workspace,
     copied_python: set[str],
     local_names: set[str],
-) -> str | None:
+    reviewer_file: str,
+    reviewer_tree: ast.Module,
+) -> tuple[str, bool] | None:
     trace = (issue.text or "").strip()
     pattern = r"(?:E +)?ModuleNotFoundError: No module named '([^'\n]+)'"
     match = re.fullmatch(pattern, issue.get("message", "")) or re.fullmatch(
@@ -788,12 +793,16 @@ def _missing_review_package(
     path, line = frames[-1]
     path = path.removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
     lineno = int(line)
-    if path not in copied_python or not workspace.exists(path):
-        return None
-    try:
-        tree = ast.parse(workspace.read(path))
-    except (OSError, PathEscapeError, SyntaxError, ValueError, RecursionError):
-        return None
+    in_reviewer = path == reviewer_file
+    if in_reviewer:
+        tree = reviewer_tree
+    else:
+        if path not in copied_python or not workspace.exists(path):
+            return None
+        try:
+            tree = ast.parse(workspace.read(path))
+        except (OSError, PathEscapeError, SyntaxError, ValueError, RecursionError):
+            return None
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)) and node.lineno <= lineno <= (
             node.end_lineno or node.lineno
@@ -801,14 +810,73 @@ def _missing_review_package(
             if isinstance(node, ast.Import) and any(
                 alias.name.partition(".")[0] == name for alias in node.names
             ):
-                return name
+                return name, in_reviewer
             if (
                 isinstance(node, ast.ImportFrom)
                 and node.level == 0
                 and (node.module or "").partition(".")[0] == name
             ):
-                return name
+                return name, in_reviewer
     return None
+
+
+@dataclass
+class _ReviewReport:
+    counts: dict[str, int]
+    failing: list[str]
+    executor_packages: set[str]
+    reviewer_import: str | None
+    verified: bool
+
+
+def _summary_matches(stdout: str, counts: dict[str, int]) -> bool:
+    categories = {
+        "passed": "passed",
+        "failed": "failed",
+        "error": "errors",
+        "errors": "errors",
+        "skipped": "skipped",
+        "xfailed": "skipped",
+        "xpassed": "passed",
+    }
+    summaries = []
+    for line in stdout.splitlines():
+        match = re.fullmatch(
+            r"(.*?) in [0-9]+(?:\.[0-9]+)?s(?: \(\d+:\d+:\d+\))?", line.strip(" =")
+        )
+        if not match:
+            continue
+        summary = dict.fromkeys(counts, 0)
+        fields = match[1].split(", ")
+        if fields != ["no tests ran"]:
+            for field in fields:
+                item = re.fullmatch(r"([0-9]{1,9}) ([a-z]+)", field)
+                if not item or item[2] not in {*categories, "warning", "warnings", "deselected"}:
+                    break
+                if item[2] in categories:
+                    summary[categories[item[2]]] += int(item[1])
+            else:
+                summaries.append(summary)
+            continue
+        summaries.append(summary)
+    return summaries == [counts]
+
+
+# Imports alone do not identify distributions. Include common dependencies that may live
+# only in the sandbox, alongside packages known to this Python installation.
+_COMMON_REVIEW_PACKAGES = frozenset(
+    {
+        "hypothesis",
+        "numpy",
+        "pandas",
+        "requests",
+        "scipy",
+        "sklearn",
+        "yaml",
+        "PIL",
+        "bs4",
+    }
+)
 
 
 def _read_review_report(
@@ -817,7 +885,11 @@ def _read_review_report(
     source: Workspace,
     copied_python: set[str],
     local_names: set[str],
-) -> tuple[dict[str, int], list[str], set[str]] | None:
+    reviewer_file: str,
+    reviewer_tree: ast.Module,
+    stdout: str,
+    exit_code: int | None,
+) -> _ReviewReport | None:
     try:
         data = workspace.read(report, limit=_REVIEW_REPORT_LIMIT + 1)
         if len(data) > _REVIEW_REPORT_LIMIT:
@@ -830,13 +902,20 @@ def _read_review_report(
         return None
     if root.tag != "testsuites":
         return None
-    suite = root.find("testsuite")
-    if suite is None:
+    suites = root.findall("testsuite")
+    if len(suites) != 1:
         return None
+    [suite] = suites
     counts = dict.fromkeys(("passed", "failed", "errors", "skipped"), 0)
     failing: list[str] = []
     missing_packages: set[str] = set()
     all_issues_need_packages = True
+    reviewer_imports: set[str] = set()
+    all_issues_from_reviewer_imports = True
+    identities: set[tuple[str, str]] = set()
+    collection_errors = 0
+    case_ids: set[tuple[str, str]] = set()
+    valid_case_ids = True
     for case in suite.iterfind("testcase"):
         error = case.find("error")
         failure = case.find("failure")
@@ -853,18 +932,56 @@ def _read_review_report(
             status = "passed"
             issue = None
         counts[status] += 1
+        name = case.get("name", "")
+        group = case.get("classname", "")
+        if (
+            error is not None
+            and error.get("message") == "collection failure"
+            and not group
+            and name == "test_review"
+        ):
+            collection_errors += 1
+        else:
+            base, bracket, parameter = name.partition("[")
+            case_id = (group, name)
+            if (bracket and not parameter.endswith("]")) or (
+                exit_code == 0 and case_id in case_ids
+            ):
+                valid_case_ids = False
+            case_ids.add(case_id)
+            identities.add((group, base))
         if issue is None:
             continue
         if len(failing) < 20:
-            name = case.get("name", "")
-            group = case.get("classname", "")
             failing.append((f"{group}::{name}" if group else name)[:250])
-        if package := _missing_review_package(issue, source, copied_python, local_names):
-            missing_packages.add(package)
-            continue
-        # An unrelated failure still needs to be judged.
-        all_issues_need_packages = False
-    return counts, failing, missing_packages if all_issues_need_packages else set()
+        missing = _missing_review_import(
+            issue, source, copied_python, local_names, reviewer_file, reviewer_tree
+        )
+        if missing is not None and missing[1]:
+            reviewer_imports.add(missing[0])
+        else:
+            all_issues_from_reviewer_imports = False
+        if missing is not None and not missing[1]:
+            missing_packages.add(missing[0])
+        else:
+            all_issues_need_packages = False
+    reviewer_import = (
+        next(iter(reviewer_imports))
+        if all_issues_from_reviewer_imports and len(reviewer_imports) == 1
+        else None
+    )
+    names_match = (
+        collection_errors == 1 and sum(counts.values()) == 1 and exit_code == 2
+        if collection_errors
+        else identities == review_test_names(reviewer_tree)
+    )
+    return _ReviewReport(
+        counts,
+        failing,
+        missing_packages if all_issues_need_packages else set(),
+        reviewer_import,
+        valid_case_ids and names_match and _summary_matches(stdout, counts),
+    )
 
 
 def _sweep_review_copies(root: Path) -> None:
@@ -883,9 +1000,9 @@ def _run_review_tests(
     module: str,
     _attempt: int,
     cover: Callable[[float], None] = lambda _: None,
-) -> TestRun:
+) -> ReviewTestRun:
     cover(30)
-    config = "[pytest]\npythonpath = ..\n"
+    reviewer_tree = ast.parse(module)
     skipped = 0
     skipped_names: list[str] = []
 
@@ -895,14 +1012,14 @@ def _run_review_tests(
         if len(skipped_names) < 5:
             skipped_names.append(path)
 
-    def over_quota(entries: int, size: int) -> TestRun:
+    def over_quota(entries: int, size: int) -> ReviewTestRun:
         limits = sandbox.limits
         message = (
             f"The workspace is too large for the reviewer's test run "
             f"(at least {entries} entries, {size} bytes; sandbox quota: "
             f"{limits.workspace_files} entries, {limits.workspace_bytes} bytes)."
         )
-        return TestRun(
+        return ReviewTestRun(
             ran=False,
             reason_not_run=message,
             copy_over_quota=message,
@@ -976,6 +1093,7 @@ def _run_review_tests(
             file = f"{review_dir}/test_review.py"
             ini = f"{review_dir}/pytest.ini"
             report = f"{review_dir}/{secrets.token_hex(16)}.xml"
+            config = f"[pytest]\npythonpath = ..\naddopts = --junitxml={report}\n"
             copy.write(file, module)
             copy.write(ini, config)
             review_limits = replace(
@@ -1002,11 +1120,7 @@ def _run_review_tests(
                     "--noconftest",
                     "-p",
                     "no:cacheprovider",
-                    "-o",
-                    "addopts=",
                     "-q",
-                    "--junitxml",
-                    report,
                     file,
                 ],
                 copy.root,
@@ -1019,21 +1133,27 @@ def _run_review_tests(
                 workspace,
                 copied_python if not subtask.runs_code else set(),
                 local_names,
+                file,
+                reviewer_tree,
+                outcome.stdout,
+                outcome.exit_code,
             )
     except SandboxUnavailable as error:
-        return TestRun(
+        return ReviewTestRun(
             ran=False,
             reason_not_run=str(error)[:1_000],
             sandbox_unavailable=True,
             skipped_files=skipped,
             skipped_names=skipped_names,
         )
-    counts, failing, missing_packages = parsed if parsed is not None else ({}, [], set())
+    counts = parsed.counts if parsed else {}
+    missing_packages = parsed.executor_packages if parsed and parsed.verified else set()
+    reviewer_import = parsed.reviewer_import if parsed and parsed.verified else None
     if missing_packages and not (
         outcome.timed_out or outcome.stopped or outcome.workspace_full or outcome.disk_low
     ):
         packages = sorted(missing_packages)[:20]
-        return TestRun(
+        return ReviewTestRun(
             ran=False,
             missing_packages=packages,
             reason_not_run="; ".join(
@@ -1047,7 +1167,7 @@ def _run_review_tests(
         for part in (outcome.stdout, outcome.stderr, outcome.stopped, outcome.workspace_full)
         if part
     )
-    return TestRun(
+    return ReviewTestRun(
         ran=True,
         exit_code=outcome.exit_code,
         passed=counts.get("passed", 0),
@@ -1055,7 +1175,14 @@ def _run_review_tests(
         errors=counts.get("errors", 0),
         skipped=counts.get("skipped", 0),
         report_missing=parsed is None,
-        failing=failing,
+        report_unverified=parsed is not None and not parsed.verified,
+        reviewer_missing_import=reviewer_import,
+        reviewer_import_is_package=reviewer_import is not None
+        and (
+            reviewer_import in _COMMON_REVIEW_PACKAGES
+            or reviewer_import in packages_distributions()
+        ),
+        failing=parsed.failing if parsed else [],
         tail=tail[-4_000:],
         timed_out=outcome.timed_out,
         workspace_full=outcome.workspace_full,

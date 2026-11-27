@@ -10,6 +10,9 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Reviewer's tests (attempt {attempt}) could not be verified.": "レビュー担当のテスト（試行 {attempt}）を検証できませんでした。",
+    "Reviewer's tests need package {name}.": "レビュー担当のテストにはパッケージ {name} が必要です。",
+    "Reviewer's tests import {name}, which the task does not name.": "レビュー担当のテストは、タスクで指定されていない {name} をインポートしています。",
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "レビュー担当のテスト (試行 {attempt}) — 成功: {passed}、失敗: {failed}、エラー: {errors}",
     "document parts work without tools": "文書の各部分はツールを使わずに処理します",
     "Reviewer's tests (attempt {attempt}) did not run.": "レビュー担当のテスト (試行 {attempt})は実行されませんでした。",
