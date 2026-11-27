@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from desman import config_cli, tuning_cli, ui, uninstall_cli, wizard
+from desman import config_cli, global_cli, tuning_cli, ui, uninstall_cli, wizard
 from desman.chat import Chat
 from desman.config import open_config
 from desman.core import db
@@ -767,6 +767,9 @@ def test_network_cloud_setting_uses_catalog_and_updates_lendable_providers(
     assert data["lend_cloud"] is False
     assert data["cloud_label"] == "Lend my free cloud keys to desman-global"
     assert "Most free tiers' terms" in data["cloud_warning"]
+    assert data["cloud_warnings"] == global_cli.cloud_warnings()
+    assert data["terms_word"] == "Terms"
+    assert data["lending_word"] == "Lending"
     assert not lendable("groq")
     with ui.use(app.front):
         chat._action(action({"section": "network", "operation": "cloud", "state": "on"}))
@@ -774,9 +777,35 @@ def test_network_cloud_setting_uses_catalog_and_updates_lendable_providers(
     assert (
         open_config().load().network.lend_cloud and lendable("groq") and not lendable("anthropic")
     )
-    with ui.use(app.front):
-        chat._action(action({"section": "network", "operation": "donate", "provider": "groq"}))
-    assert snapshot(app)["result"]["ok"]
+    donate = action({"section": "network", "operation": "donate", "provider": "groq"})
+
+    def confirm_donation(approved: bool) -> None:
+        prompts = []
+
+        def respond() -> None:
+            with app.front.condition:
+                if not app.front.condition.wait_for(
+                    lambda: app.front.prompt is not None, timeout=2
+                ):
+                    return
+                prompt = app.front.prompt
+                assert prompt is not None
+                prompts.append(prompt)
+                assert app.front.answer({"id": prompt["id"], "value": approved})
+
+        thread = threading.Thread(target=respond)
+        thread.start()
+        with ui.use(app.front):
+            chat._action(donate)
+        thread.join(2)
+        assert len(prompts) == 1
+        assert prompts[0]["kind"] == "confirm"
+        assert "GROQ's terms forbid" in prompts[0]["question"]
+        assert snapshot(app)["result"]["ok"] is approved
+        assert ("groq" in open_config().load().network.donated) is approved
+
+    confirm_donation(False)
+    confirm_donation(True)
     with ui.use(app.front):
         chat._action(action({"section": "network", "operation": "cloud", "state": "off"}))
     disabled = snapshot(app)
@@ -785,9 +814,12 @@ def test_network_cloud_setting_uses_catalog_and_updates_lendable_providers(
     groq = next(p for p in disabled["providers"] if p["id"] == "groq")
     assert not groq["lendable"]
     assert groq["terms_url"] == "https://console.groq.com/docs/legal/services-agreement"
-    assert groq["lending"] == "forbidden"
+    assert groq["lending"] == groq["lending_text"] == "forbidden"
     ollama = next(p for p in disabled["providers"] if p["id"] == "ollama")
     assert ollama["terms_url"] is None and ollama["lending"] is None
+    assert ollama["lending_text"] is None
+    xai = next(p for p in disabled["providers"] if p["id"] == "xai")
+    assert xai["lending"] == "unchecked" and xai["lending_text"] == "not checked"
     assert groq["lending_label"] == "GROQ (not lent: cloud lending off)"
     with ui.use(app.front):
         chat._action(

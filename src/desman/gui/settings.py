@@ -61,6 +61,7 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
                 "url": p.url,
                 "terms_url": p.terms.url if p.terms else None,
                 "lending": p.terms.lending if p.terms else None,
+                "lending_text": providers.verdict_text(p.terms.lending) if p.terms else None,
                 "ready": p.is_ready(config),
                 "keyed": p.key_env is not None,
                 "keys": [
@@ -165,6 +166,9 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
             "lead_label": t("Lead clusters"),
             "cloud_label": t("Lend my free cloud keys to desman-global"),
             "cloud_warning": global_cli.cloud_warning(),
+            "cloud_warnings": global_cli.cloud_warnings(),
+            "terms_word": t("Terms"),
+            "lending_word": t("Lending"),
             "cluster_text": global_cli.cluster_text(network.cluster),
             "default_quota": global_cli.DEFAULT_DONATION.model_dump(),
         },

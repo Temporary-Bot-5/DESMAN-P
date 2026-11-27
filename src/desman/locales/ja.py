@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "not checked": "未確認",
     "unclear": "不明",
     "{name} runs on your own machine. No cloud provider terms apply.": "{name} はご自身のマシンで動作します。クラウドプロバイダーの規約は適用されません。",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} はクラウドモデルのプロバイダーではないため、プロバイダーの規約は適用されません。",
     "{name}'s terms allow using your key for other people's work.": "{name} の規約では、他の人の作業にご自身のキーを使うことが許可されています。",
     "{name}'s terms do not clearly allow using your key for other people's work.": "{name} の規約では、他の人の作業にご自身のキーを使ってよいかが明確ではありません。",
     "{name}'s terms forbid using your key for other people's work.": "{name} の規約では、他の人の作業にご自身のキーを使うことが禁止されています。",

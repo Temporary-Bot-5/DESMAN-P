@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "not checked": "未核查",
     "unclear": "不明确",
     "{name} runs on your own machine. No cloud provider terms apply.": "{name} 在您自己的机器上运行，无需遵守云服务商条款。",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} 不是云端模型提供商，不适用提供商条款。",
     "{name}'s terms allow using your key for other people's work.": "{name} 的条款允许使用您的密钥处理其他人的任务。",
     "{name}'s terms do not clearly allow using your key for other people's work.": "{name} 的条款未明确允许使用您的密钥处理其他人的任务。",
     "{name}'s terms forbid using your key for other people's work.": "{name} 的条款禁止使用您的密钥处理其他人的任务。",

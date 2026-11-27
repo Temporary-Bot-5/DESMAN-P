@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "not checked": "जाँच नहीं हुई",
     "unclear": "अस्पष्ट",
     "{name} runs on your own machine. No cloud provider terms apply.": "{name} आपकी अपनी मशीन पर चलता है। क्लाउड प्रदाता की कोई शर्त लागू नहीं होती।",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} क्लाउड मॉडल प्रदाता नहीं है: प्रदाता की कोई शर्त लागू नहीं होती।",
     "{name}'s terms allow using your key for other people's work.": "{name} की शर्तें दूसरों के काम के लिए आपकी कुंजी के उपयोग की अनुमति देती हैं।",
     "{name}'s terms do not clearly allow using your key for other people's work.": "{name} की शर्तें दूसरों के काम के लिए आपकी कुंजी के उपयोग की स्पष्ट अनुमति नहीं देतीं।",
     "{name}'s terms forbid using your key for other people's work.": "{name} की शर्तें दूसरों के काम के लिए आपकी कुंजी के उपयोग पर रोक लगाती हैं।",

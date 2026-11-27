@@ -2316,12 +2316,17 @@ class Chat:
                     if isinstance(made, commands.Proposal):
                         # Operator decisions and the settings commands below need a
                         # confirmation in addition to the person's form submission.
-                        confirm = entry.name.startswith("operator ") or entry.name in (
-                            "models add",
-                            "models remove",
-                            "global join",
-                            "config reset",
-                            "uninstall",
+                        confirm = (
+                            made.confirm
+                            or entry.name.startswith("operator ")
+                            or entry.name
+                            in (
+                                "models add",
+                                "models remove",
+                                "global join",
+                                "config reset",
+                                "uninstall",
+                            )
                         )
                         made = (
                             made.apply()

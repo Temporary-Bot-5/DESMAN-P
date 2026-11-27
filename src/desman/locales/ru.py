@@ -32,6 +32,7 @@ MESSAGES: dict[str, Forms] = {
     "not checked": "не проверено",
     "unclear": "неясно",
     "{name} runs on your own machine. No cloud provider terms apply.": "{name} работает на вашей машине. Условия облачных провайдеров не применяются.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} не является поставщиком облачных моделей: условия поставщика не применяются.",
     "{name}'s terms allow using your key for other people's work.": "Условия {name} разрешают использовать ваш ключ для чужих заданий.",
     "{name}'s terms do not clearly allow using your key for other people's work.": "Из условий {name} неясно, можно ли использовать ваш ключ для чужих заданий.",
     "{name}'s terms forbid using your key for other people's work.": "Условия {name} запрещают использовать ваш ключ для чужих заданий.",

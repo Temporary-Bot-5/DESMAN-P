@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "not checked": "미확인",
     "unclear": "불명확",
     "{name} runs on your own machine. No cloud provider terms apply.": "{name}은(는) 본인의 컴퓨터에서 실행됩니다. 클라우드 제공업체 약관이 적용되지 않습니다.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name}은(는) 클라우드 모델 제공업체가 아니므로 제공업체 약관이 적용되지 않습니다.",
     "{name}'s terms allow using your key for other people's work.": "{name}의 약관은 다른 사람의 작업에 본인의 키를 사용하는 것을 허용합니다.",
     "{name}'s terms do not clearly allow using your key for other people's work.": "{name}의 약관에는 다른 사람의 작업에 본인의 키를 사용해도 되는지 명확히 나와 있지 않습니다.",
     "{name}'s terms forbid using your key for other people's work.": "{name}의 약관은 다른 사람의 작업에 본인의 키를 사용하는 것을 금지합니다.",

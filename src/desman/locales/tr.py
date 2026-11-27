@@ -27,6 +27,7 @@ MESSAGES: dict[str, Forms] = {
     "not checked": "incelenmedi",
     "unclear": "belirsiz",
     "{name} runs on your own machine. No cloud provider terms apply.": "{name} kendi makinenizde çalışır. Bulut sağlayıcısı koşulları geçerli değildir.",
+    "{name} is not a cloud model provider: no provider terms apply.": "{name} bir bulut modeli sağlayıcısı değildir: sağlayıcı koşulları geçerli değildir.",
     "{name}'s terms allow using your key for other people's work.": "{name} koşulları, anahtarınızı başkalarının işleri için kullanmanıza izin verir.",
     "{name}'s terms do not clearly allow using your key for other people's work.": "{name} koşulları, anahtarınızı başkalarının işleri için kullanmanıza açıkça izin vermez.",
     "{name}'s terms forbid using your key for other people's work.": "{name} koşulları, anahtarınızı başkalarının işleri için kullanmanızı yasaklar.",

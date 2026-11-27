@@ -343,20 +343,28 @@ def provider_terms(name: str | None) -> tuple[list[Provider], Provider | None]:
     if name is None:
         return list(providers.CLOUD), None
     try:
-        provider = providers.find(name)
+        provider = providers.find_keyed(name)
     except providers.UnknownProvider as e:
         raise click.ClickException(str(e)) from e
-    return ([], provider) if provider.local else ([provider], None)
+    return ([], provider) if provider.terms is None else ([provider], None)
 
 
 def terms_json(rows: list[Provider]) -> list[dict[str, Any]]:
     return [{"id": p.id, **asdict(p.terms)} for p in rows if p.terms is not None]
 
 
-def print_terms(rows: list[Provider], local: Provider | None) -> None:
-    if local is not None:
+def print_terms(rows: list[Provider], without_terms: Provider | None) -> None:
+    if without_terms is not None:
         ui.note(
-            t("{name} runs on your own machine. No cloud provider terms apply.", name=local.name)
+            t(
+                "{name} runs on your own machine. No cloud provider terms apply.",
+                name=without_terms.name,
+            )
+            if without_terms.local
+            else t(
+                "{name} is not a cloud model provider: no provider terms apply.",
+                name=without_terms.name,
+            )
         )
         return
     table = ui.table(t("Provider"), t("Key sharing"), t("Lending"), t("Checked"), t("Terms"))
@@ -368,7 +376,7 @@ def print_terms(rows: list[Provider], local: Provider | None) -> None:
                 p.name,
                 providers.verdict_text(terms.key_sharing),
                 providers.verdict_text(terms.lending),
-                terms.checked,
+                terms.checked or providers.verdict_text("unchecked"),
                 Text(terms.url, style=f"link {terms.url}"),
             )
     ui.out(table)
@@ -1159,11 +1167,11 @@ def search_command(state: str | None) -> None:
 @json_option
 def terms_command(provider: str | None, as_json: bool) -> None:
     """Show terms for cloud providers, or for one PROVIDER."""
-    rows, local = provider_terms(provider)
+    rows, without_terms = provider_terms(provider)
     if as_json:
         click.echo(json.dumps(terms_json(rows)))
     else:
-        print_terms(rows, local)
+        print_terms(rows, without_terms)
 
 
 @global_group.command("donate")
@@ -1172,13 +1180,21 @@ def terms_command(provider: str | None, as_json: bool) -> None:
 @tokens_option
 @click.option("--yes", is_flag=True, help="Confirm lending a new cloud provider.")
 @json_option
+@click.pass_context
 def donate_command(
-    provider: str, calls: int | None, tokens: int | None, yes: bool, as_json: bool
+    ctx: click.Context,
+    provider: str,
+    calls: int | None,
+    tokens: int | None,
+    yes: bool,
+    as_json: bool,
 ) -> None:
     """Lend PROVIDER to desman-global with a daily quota (its key stays on this machine)."""
     manager = load_config()
     config = manager.load()
     found = donatable(config, provider)
+    old = config.network.donated.get(found.id)
+    donation(old or DEFAULT_DONATION, calls, tokens, found.id)
     terms = terms_to_accept(config, found)
     if terms is not None:
         ui.warn(providers.lending_note(found), stderr=as_json)
@@ -1189,7 +1205,7 @@ def donate_command(
                 )
             else:
                 ui.note(t("Nothing lent. Run it again with --yes to lend {name}.", name=found.name))
-            return
+            ctx.exit(1)
     lent = donate(manager, provider, calls, tokens, accepted_terms=terms is not None and yes)
     if as_json:
         click.echo(_lent_json(lent))

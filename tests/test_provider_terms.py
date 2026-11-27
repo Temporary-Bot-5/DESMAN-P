@@ -5,12 +5,14 @@ from dataclasses import asdict
 from datetime import date
 from urllib.parse import urlsplit
 
+import pytest
+
 from desman import providers
 from desman.config import Network
 from desman.interlocutor import CHAT
 from desman.llm.fake import FakeLLM
 from test_commands import asks, chat
-from test_global import OLLAMA, REGISTRY, configured, network_log, ok, refused, saved
+from test_global import OLLAMA, REGISTRY, configured, desman, network_log, ok, refused, saved
 from test_global import fake as fake
 
 GROQ = providers.find("groq")
@@ -22,7 +24,11 @@ def test_catalog_terms() -> None:
         assert terms is not None
         url = urlsplit(terms.url)
         assert url.scheme == "https" and url.hostname
-        assert date.fromisoformat(terms.checked).isoformat() == terms.checked
+        if (terms.key_sharing, terms.lending) == ("unchecked", "unchecked"):
+            assert terms.checked is None
+        else:
+            assert terms.checked is not None
+            assert date.fromisoformat(terms.checked).isoformat() == terms.checked
         assert not provider.donatable or terms.lending == "allowed"
     assert all(p.terms is None for p in providers.LOCAL + providers.SERVICES)
     assert not any(p.donatable for p in providers.PROVIDERS + providers.SERVICES)
@@ -38,6 +44,10 @@ def test_terms_table_and_json() -> None:
         set(row) == {"id", "url", "checked", "key_sharing", "lending", "clauses"} for row in rows
     )
 
+    xai = ok("global", "terms", "xai").stdout
+    assert xai.count("not checked") == 3
+    assert next(row for row in rows if row["id"] == "xai")["checked"] is None
+
     one = ok("global", "terms", "GROQ_API_KEY").output
     assert "GROQ" in one and "NVIDIA" not in one and "2026-11-27" in one
     assert "unclear" in one and "forbidden" in one
@@ -47,6 +57,14 @@ def test_terms_table_and_json() -> None:
     assert "unknown provider" in refused("global", "terms", "nobody")
     assert "runs on your own machine" in ok("global", "terms", "ollama").output
     assert json.loads(ok("global", "terms", "ollama", "--json").stdout) == []
+
+
+@pytest.mark.parametrize("service", ["searxng", "tavily", "huggingface"])
+def test_service_has_no_cloud_model_terms(service: str) -> None:
+    name = providers.find_keyed(service).name
+    output = " ".join(ok("global", "terms", service).stdout.split())
+    assert f"{name} is not a cloud model provider: no provider terms apply." in output
+    assert json.loads(ok("global", "terms", service, "--json").stdout) == []
 
 
 def setup_lending() -> None:
@@ -60,11 +78,13 @@ def setup_lending() -> None:
 def test_donation_warns_and_requires_yes_only_for_new_cloud_provider() -> None:
     setup_lending()
     before = saved()
-    preview = ok("global", "donate", "groq")
+    preview = desman("global", "donate", "groq")
+    assert preview.exit_code == 1
     assert "GROQ's terms forbid" in preview.stdout
     assert "Nothing lent. Run it again with --yes to lend GROQ." in preview.stdout
 
-    preview_json = ok("global", "donate", "groq", "--json")
+    preview_json = desman("global", "donate", "groq", "--json")
+    assert preview_json.exit_code == 1
     terms = GROQ.terms
     assert terms is not None
     assert json.loads(preview_json.stdout) == {
@@ -87,6 +107,16 @@ def test_donation_warns_and_requires_yes_only_for_new_cloud_provider() -> None:
     assert saved().network.donated["groq"].calls_per_day == 20
     assert "terms forbid" not in ok("global", "donate", "ollama").output
     assert "ollama" in saved().network.donated
+
+
+def test_invalid_quota_fails_before_terms_preview() -> None:
+    setup_lending()
+    result = desman("global", "donate", "groq", "--calls", "0", "--json")
+    assert result.exit_code == 1
+    assert "A quota is" in result.stderr
+    assert "GROQ's terms forbid" not in result.output
+    assert result.stdout == ""
+    assert saved().network.donated == {} and network_log() == []
 
 
 def test_chat_donation_warns_before_confirmation(fake: FakeLLM) -> None:

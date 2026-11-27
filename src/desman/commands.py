@@ -117,6 +117,8 @@ class Proposal:
     """Asked instead of "Apply this change?" (opening the wizard changes nothing yet)."""
     on_decline: Callable[[], Outcome] | None = None
     """Optional outcome when the proposal asks to share a read result."""
+    confirm: bool = False
+    """Ask even after the person submits a settings form."""
 
 
 @dataclass
@@ -1478,9 +1480,10 @@ def _global_search(ctx: Context, args: BorrowSearchArgs) -> Outcome | Proposal:
 
 
 def _global_terms(ctx: Context, args: TermsArgs) -> Outcome:
-    rows, local = global_cli.provider_terms(args.provider)
-    global_cli.print_terms(rows, local)
-    return Outcome({"terms": global_cli.terms_json(rows), "local": local.id if local else None})
+    rows, without_terms = global_cli.provider_terms(args.provider)
+    global_cli.print_terms(rows, without_terms)
+    local = without_terms.id if without_terms is not None and without_terms.local else None
+    return Outcome({"terms": global_cli.terms_json(rows), "local": local})
 
 
 def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
@@ -1526,7 +1529,7 @@ def _global_donate(ctx: Context, args: DonateArgs) -> Outcome | Proposal:
     )
     if needs_terms:
         warnings.append(providers.lending_note(provider))
-    return Proposal(lines, apply, warnings)
+    return Proposal(lines, apply, warnings, confirm=needs_terms)
 
 
 def _global_undonate(ctx: Context, args: UndonateArgs) -> Proposal:

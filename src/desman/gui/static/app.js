@@ -1459,9 +1459,15 @@ function drawSettings() {
     settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registry.value || null})}), d.network.enabled ? words.leave : words.join);
     const cloud = settingInput(root, d.network.cloud_label, d.network.lend_cloud, "checkbox");
     settingAuto(root, () => ({section: "network", operation: "cloud", state: cloud.checked ? "on" : "off"}), [cloud]);
-    text("p", d.network.cloud_warning, root);
+    for (const line of d.network.cloud_warnings || [d.network.cloud_warning]) text("p", line, root);
     for (const p of d.providers.filter(p => p.lendable || Object.hasOwn(d.network.donated, p.id))) {
       const card = text("section", "", root); card.className = "lending-row"; text("strong", p.lending_label, card);
+      if (p.terms_url) {
+        const terms = text("small", "", card); terms.className = "lending-terms";
+        if (p.lending_text) terms.append(`${d.network.lending_word}: ${p.lending_text} · `);
+        const link = text("a", d.network.terms_word, terms);
+        link.href = p.terms_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      }
       const quota = d.network.donated[p.id];
       const calls = settingInput(card, words.calls_daily, quota?.calls_per_day ?? d.network.default_quota.calls_per_day, "number"); calls.min = 1; calls.max = 100000;
       const tokens = p.id === "searxng" ? null : settingInput(card, words.tokens_daily, quota?.tokens_per_day ?? d.network.default_quota.tokens_per_day, "number");

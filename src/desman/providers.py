@@ -34,7 +34,7 @@ Verdict = Literal["forbidden", "unclear", "allowed", "unchecked"]
 @dataclass(frozen=True)
 class Terms:
     url: str
-    checked: str
+    checked: str | None
     key_sharing: Verdict
     lending: Verdict
     clauses: str
@@ -369,7 +369,7 @@ PAID = (
         paid=True,
         terms=Terms(
             "https://x.ai/legal/terms-of-service",
-            "2026-11-27",  # The page refused automated reading.
+            None,  # The page refused automated reading.
             "unchecked",
             "unchecked",
             "",
