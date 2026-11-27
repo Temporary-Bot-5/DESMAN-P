@@ -1250,6 +1250,21 @@ class Store:
                 )
         return recovered
 
+    def sandbox_pause_reason(self, task_id: str, until: str) -> str | None:
+        """The reason for a sandbox outage at the given pending retry time, if any."""
+        row = self.conn.execute(
+            """SELECT json_extract(a.details_json, '$.cause')
+               FROM subtasks AS s JOIN audit_log AS a ON a.seq = (
+                   SELECT MAX(seq) FROM audit_log
+                   WHERE subtask_id = s.id AND to_status = 'paused'
+               )
+               WHERE s.task_id = ? AND s.status = 'paused' AND s.paused_until = ?
+                 AND json_extract(a.details_json, '$.failure') = 'outage'
+               ORDER BY a.seq LIMIT 1""",
+            (task_id, until),
+        ).fetchone()
+        return str(row[0]) if row and row[0] is not None else None
+
     def resume_due(self, *, task_id: str | None = None) -> list[Subtask]:
         """Resume PAUSED subtasks whose pause is over, back to where each one stopped."""
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())

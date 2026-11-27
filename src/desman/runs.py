@@ -909,10 +909,18 @@ def _read_review_report(
     matching_name = False
     all_cases_in_module = True
     collection_setup_error = None
+    previous_failure: tuple[str, str] | None = None
     for case in suite.iterfind("testcase"):
+        name = case.get("name", "")
+        group = case.get("classname", "")
         error = case.find("error")
         failure = case.find("failure")
-        if error is not None:
+        teardown_error = error is not None and error.get("message", "").startswith(
+            "failed on teardown"
+        )
+        if teardown_error:
+            counts["errors"] += 1
+        if error is not None and not teardown_error:
             status = "errors"
             issue = error
         elif failure is not None:
@@ -924,9 +932,13 @@ def _read_review_report(
         else:
             status = "passed"
             issue = None
-        counts[status] += 1
-        name = case.get("name", "")
-        group = case.get("classname", "")
+        # Pytest emits a second testcase for teardown when the call already failed.
+        separate_teardown = (
+            teardown_error and status == "passed" and previous_failure == (group, name)
+        )
+        if not separate_teardown:
+            counts[status] += 1
+        previous_failure = (group, name) if status == "failed" else None
         collection_error = error is not None and error.get("message") == "collection failure"
         if collection_error and not group and name == "test_review":
             collection_errors += 1
@@ -954,6 +966,8 @@ def _read_review_report(
             )[:500]
         if failure is not None and len(failing) < 20:
             failing.append((f"{group}::{name}" if group else name)[:250])
+        if teardown_error:
+            all_issues_need_packages = False
         if issue is None:
             continue
         missing = (

@@ -88,6 +88,7 @@ from desman.core.store import (
 )
 from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult, builtin_registry
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
+from desman.i18n import t
 from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
 S = SubtaskStatus
@@ -323,6 +324,7 @@ class RunResult(BaseModel):
     ticks: int
     paused_until: str | None = None
     """Set when the run returned because only paused work was left."""
+    sandbox_pause_reason: str | None = None
     events: list[str] = Field(default_factory=list)
 
 
@@ -436,6 +438,7 @@ class Coordinator:
         max_ticks: int = 10_000,
         short_pause_seconds: float = 0,
         on_pause: Callable[[float], None] | None = None,
+        on_sandbox_pause: Callable[[float, str], None] | None = None,
     ) -> RunResult:
         """Work on `task_id` until it is no longer ACTIVE.
 
@@ -468,11 +471,16 @@ class Coordinator:
             if pause_until is None:
                 raise RuntimeError(f"task {task_id} is active but nothing can move")  # a bug
             seconds = self._seconds_until(pause_until)
+            reason = self.store.sandbox_pause_reason(task_id, pause_until)
             if not wait_for_pauses and seconds > short_pause_seconds:
                 result.paused_until = pause_until
+                result.sandbox_pause_reason = reason
                 return result
-            if not wait_for_pauses and on_pause is not None:
-                on_pause(seconds)
+            if not wait_for_pauses:
+                if reason is not None and on_sandbox_pause is not None:
+                    on_sandbox_pause(seconds, reason)
+                elif reason is None and on_pause is not None:
+                    on_pause(seconds)
             self.sleep(seconds)
         return result
 
@@ -1047,7 +1055,7 @@ class Coordinator:
         self, subtask: Subtask, review: Review, result: ReviewTestRun
     ) -> Review | Failure:
         if result.disk_low or (result.sandbox_unavailable and subtask.runs_code):
-            return self._review_sandbox_failure(result)
+            return self._review_sandbox_failure(subtask, result)
         if not result.ran:
             return review
 
@@ -1082,12 +1090,31 @@ class Coordinator:
             feedback=feedback + (f"\n{result.tail}" if result.tail else ""),
         )
 
-    def _review_sandbox_failure(self, result: ReviewTestRun) -> Failure:
+    def _review_sandbox_failure(self, subtask: Subtask, result: ReviewTestRun) -> Failure:
         reason = (
             result.stopped or "disk space too low"
             if result.disk_low
             else result.reason_not_run or "review sandbox unavailable"
         )
+        [previous] = self.store.conn.execute(
+            """SELECT COUNT(*) FROM audit_log AS pause
+               WHERE pause.subtask_id = ? AND pause.action = 'review_failed'
+                 AND pause.to_status = 'paused'
+                 AND json_extract(pause.details_json, '$.failure') = 'outage'
+                 AND pause.seq > COALESCE(
+                     (SELECT MAX(seq) FROM audit_log
+                      WHERE subtask_id = pause.subtask_id AND action = 'attempt_started'), 0)""",
+            (subtask.id,),
+        ).fetchone()
+        if previous + 1 >= 10:
+            return Failure(
+                kind=FailureKind.PERMANENT,
+                reason=t(
+                    "the sandbox has been unavailable for {minutes} minutes: {reason}",
+                    minutes=(previous + 1) * SANDBOX_RETRY_SECONDS // 60,
+                    reason=reason,
+                ),
+            )
         return Failure(
             kind=FailureKind.OUTAGE,
             reason=reason,
@@ -1108,6 +1135,7 @@ class Coordinator:
         try:
             needs_tests = (
                 self.review_tests is not None
+                and self.store.origin(subtask.task_id) is not Origin.NETWORK
                 and not is_error_report(artifact)
                 and needs_review_tests(
                     subtask,
@@ -1117,8 +1145,15 @@ class Coordinator:
                 )
             )
             skipped = self._review_test_skip(subtask, cover_call) if needs_tests else None
-            if skipped and skipped.sandbox_unavailable and subtask.runs_code:
-                review = self._review_sandbox_failure(skipped)
+            if skipped is not None and subtask.runs_code:
+                review = (
+                    self._review_sandbox_failure(subtask, skipped)
+                    if skipped.sandbox_unavailable
+                    else Failure(
+                        kind=FailureKind.PERMANENT,
+                        reason=skipped.reason_not_run or "review tests could not run",
+                    )
+                )
             else:
                 reviewer = self._crew(subtask).reviewer
                 setting = review_tests_enabled.set(needs_tests and skipped is None)
@@ -1155,7 +1190,7 @@ class Coordinator:
             )
         try:
             note = None
-            if skipped and skipped.sandbox_unavailable and subtask.runs_code:
+            if skipped is not None and subtask.runs_code:
                 note = {**skipped.model_dump(), "attempt": subtask.attempts.quality + 1}
             elif (
                 isinstance(review, Review)

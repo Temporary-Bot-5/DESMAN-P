@@ -78,7 +78,7 @@ TOPICS: Final = (
         "(names/translations allowed) and coverage. Live data may have fewer items, with sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
         "the combine step. For blocked pages, use snippets or another official source. "
         "Review tests runs or Python outputs in offline copies and checks names and counts. Verified passes allow acceptance. Call failures retry execution. Ambiguity retries review. "
-        "Required sandbox outages and low disk pause review for 60s without spending attempts. Oversized copies and known third-party packages missing during collection/setup can skip tests.\n"
+        "Sandbox outages and low disk pause review for 60s. Ten outages or blocked required runs need human review. Network jobs skip tests. Large copies or missing packages can skip tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code and use your latest message’s language.",
     ),

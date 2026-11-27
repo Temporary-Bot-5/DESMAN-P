@@ -1116,6 +1116,19 @@ def provider_wait(seconds: float, as_json: bool = False) -> None:
     warn(t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds)), stderr=as_json)
 
 
+def sandbox_wait(seconds: float, reason: str, as_json: bool = False) -> None:
+    import math
+
+    warn(
+        t(
+            "Waiting {seconds} s for the sandbox. {reason}",
+            seconds=math.ceil(seconds),
+            reason=reason,
+        ),
+        stderr=as_json,
+    )
+
+
 def when(moment: str) -> str:
     """A stored timestamp in local time, to the minute."""
     return datetime.fromisoformat(moment).astimezone().strftime("%Y-%m-%d %H:%M")

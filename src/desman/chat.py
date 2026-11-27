@@ -1598,6 +1598,7 @@ class Chat:
                     task_id,
                     short_pause_seconds=provider_wait.PROVIDER_WAIT,
                     on_pause=ui.provider_wait,
+                    on_sandbox_pause=ui.sandbox_wait,
                 )
         except click.ClickException as e:  # protected files changed while it ran (5.3)
             ui.error(e.message)
@@ -1728,6 +1729,19 @@ class Chat:
                     "Task {ref}: steps {steps} wait for you; the rest goes on.",
                     ref=ref,
                     steps=", ".join(i.ref for i in asking),
+                ),
+                task_id,
+            )
+        elif (
+            paused_until is not None
+            and (reason := self.store.sandbox_pause_reason(task_id, paused_until)) is not None
+        ):
+            self._event(
+                t(
+                    "Waiting for the sandbox until {until}. {reason} (desman resume {ref})",
+                    until=_when(paused_until),
+                    reason=reason,
+                    ref=ref,
                 ),
                 task_id,
             )

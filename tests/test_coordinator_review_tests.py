@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from collections.abc import Callable
 from datetime import timedelta
 from functools import partial
@@ -18,6 +20,7 @@ from desman.core import coordinator as coordinator_module
 from desman.core import db
 from desman.core.coordinator import (
     Coordinator,
+    Crew,
     Failure,
     Review,
     ReviewTestRun,
@@ -28,14 +31,14 @@ from desman.core.coordinator import (
     review_tests_enabled,
 )
 from desman.core.effects import evidence, has_written_python_files, last_review_tests
-from desman.core.models import Kind, Subtask, SubtaskSpec, TaskSpec, Tools
+from desman.core.models import Kind, Origin, Subtask, SubtaskSpec, TaskSpec, Tools
 from desman.core.policy import Permission, executor_access
 from desman.core.report import task_report
 from desman.core.retry import RetryPolicy
 from desman.core.sandbox import Limits, Outcome, Sandbox, SandboxUnavailable
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import Store
-from desman.core.tools import builtin_registry
+from desman.core.tools import Registry, builtin_registry
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.cache import Cached
 from desman.llm.fake import FakeLLM
@@ -76,6 +79,7 @@ def submitted(
     kind: Kind = Kind.TEXT,
     document: bool = False,
     output_path: str | None = None,
+    origin: Origin = Origin.LOCAL,
 ) -> str:
     task_id = store.create_task(
         TaskSpec(
@@ -91,7 +95,8 @@ def submitted(
                     inputs={"document": {}} if document else {},
                 )
             ],
-        )
+        ),
+        origin=origin,
     )
     sub = store.claim("executor", task_id=task_id)
     assert sub is not None and sub.lease_token is not None
@@ -216,7 +221,17 @@ def test_review_result(
 
 
 @pytest.mark.parametrize(
-    "mode", ["non-code", "permission", "tools", "sandbox", "missing", "no-runner", "document"]
+    "mode",
+    [
+        "non-code",
+        "permission",
+        "tools",
+        "sandbox",
+        "missing",
+        "no-runner",
+        "document",
+        "missing-tool",
+    ],
 )
 def test_skips_and_missing_module(
     store: Store, clock: FakeClock, monkeypatch: pytest.MonkeyPatch, mode: str
@@ -244,7 +259,7 @@ def test_skips_and_missing_module(
         store,
         unread,
         llm_reviewer(llm),
-        tools=builtin_registry(sandbox),
+        tools=Registry() if mode == "missing-tool" else builtin_registry(sandbox),
         access=executor_access([] if mode == "permission" else [Permission.SHELL]),
         review_tests=None
         if mode == "no-runner"
@@ -254,10 +269,11 @@ def test_skips_and_missing_module(
     if mode in ("missing", "sandbox"):
         assert coord.tick(task_id, [])
     else:
-        assert coord.run(task_id).status is TaskStatus.DONE
+        expected = TaskStatus.DONE if mode in {"non-code", "no-runner"} else TaskStatus.NEEDS_HUMAN
+        assert coord.run(task_id).status is expected
     [sub] = store.list_subtasks(task_id)
     note = last_review_tests(store, sub.id)
-    if mode == "sandbox":
+    if mode in {"sandbox", "permission", "tools", "document", "missing-tool"}:
         assert not llm.calls
     else:
         assert ("synchronous top-level test* functions" in llm.calls[0].messages[0].content) == (
@@ -285,6 +301,7 @@ def test_skips_and_missing_module(
         assert note is not None and not note["ran"]
         reason = {
             "permission": "shell_execution",
+            "missing-tool": "run_command unavailable",
             "tools": "does not grant",
             "sandbox": "no sandbox here",
             "document": "document parts work without tools",
@@ -292,6 +309,11 @@ def test_skips_and_missing_module(
         assert reason[mode] in note["reason_not_run"]
         if mode == "sandbox":
             assert_sandbox_retry(coord, task_id, clock)
+        else:
+            [failure] = [
+                row for row in store.audit_log(task_id) if row["action"] == "review_failed"
+            ]
+            assert reason[mode] in json.loads(failure["details_json"])["cause"]
 
 
 @pytest.mark.parametrize(
@@ -1821,3 +1843,120 @@ def test_command_window_excludes_sibling_writes(
     store.submit(sub.id, sub.lease_token, {"summary": "ran"})
     assert not has_written_python_files(store, sub, root=tmp_path)
     assert "written_files" not in evidence(store, sub, workspace=workspace)
+
+
+def test_sandbox_outage_limit_and_wait_reason(store: Store, clock: FakeClock) -> None:
+    task_id = submitted(store)
+
+    def unreachable(*_: object) -> ReviewTestRun:
+        pytest.fail("review did not reach the test runner")
+
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: pytest.fail("outage should skip the reviewer"),
+        access=executor_access([Permission.SHELL]),
+        review_tests=ReviewTestRunner(unreachable, lambda: "backend went away"),
+        sleep=clock.sleep,
+    )
+    result = coord.run(task_id)
+    assert result.status is TaskStatus.ACTIVE
+    assert result.sandbox_pause_reason == "backend went away"
+
+    waits = []
+    result = coord.run(
+        task_id,
+        short_pause_seconds=60,
+        on_pause=lambda _: pytest.fail("sandbox outage reported as a provider pause"),
+        on_sandbox_pause=lambda seconds, reason: waits.append((seconds, reason)),
+    )
+    assert result.status is TaskStatus.NEEDS_HUMAN
+    assert waits == [(60, "backend went away")] * 9
+    failures = [
+        json.loads(row["details_json"])
+        for row in store.audit_log(task_id)
+        if row["action"] == "review_failed"
+    ]
+    assert [f["failure"] for f in failures] == ["outage"] * 9 + ["permanent"]
+    assert (
+        failures[-1]["cause"]
+        == "the sandbox has been unavailable for 10 minutes: backend went away"
+    )
+    [sub] = store.list_subtasks(task_id)
+    assert sub.attempts.transient == sub.attempts.quality == 0
+
+
+def test_network_review_never_requests_or_runs_tests(store: Store) -> None:
+    task_id = submitted(store, origin=Origin.NETWORK)
+
+    def reviewer(*_: object) -> Review:
+        assert not review_tests_enabled.get()
+        return Review(verdict=Verdict.ACCEPT)
+
+    def unreachable(*_: object) -> ReviewTestRun:
+        pytest.fail("network reviews must skip tests")
+
+    access = executor_access([Permission.SHELL])
+    coord = Coordinator(
+        store,
+        unread,
+        reviewer,
+        access=access,
+        network=Crew(unread, reviewer, access),
+        review_tests=unreachable,
+    )
+    assert coord.run(task_id).status is TaskStatus.DONE
+    [sub] = store.list_subtasks(task_id)
+    assert last_review_tests(store, sub.id) is None
+
+
+@pytest.mark.parametrize("call_fails", [False, True])
+def test_real_pytest_teardown_error(
+    store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, call_fails: bool
+) -> None:
+    module = (
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def broken():\n"
+        "    yield\n"
+        "    raise RuntimeError('teardown broke')\n"
+        f"def test_answer(broken): assert {not call_fails}\n"
+    )
+    task_id = submitted(store)
+    sandbox = Sandbox()
+
+    def run(command: list[str], cwd: Path, **_: object) -> Outcome:
+        result = subprocess.run(
+            [sys.executable, *command[1:]],
+            cwd=cwd,
+            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return Outcome(result.returncode, result.stdout, result.stderr)
+
+    monkeypatch.setattr(sandbox, "unavailable", lambda: None)
+    monkeypatch.setattr(sandbox, "run", run)
+    coord = Coordinator(
+        store,
+        unread,
+        lambda *_: Review(verdict=Verdict.ACCEPT, tests=module),
+        workspaces=tmp_path,
+        access=executor_access([Permission.SHELL]),
+        review_tests=partial(_run_review_tests, sandbox),
+    )
+    assert coord.tick(task_id, [])
+    [sub] = store.list_subtasks(task_id)
+    note = last_review_tests(store, sub.id)
+    assert note is not None and not note["report_unverified"], note
+    assert (note["passed"], note["failed"], note["errors"]) == (
+        int(not call_fails),
+        int(call_fails),
+        1,
+    )
+    if call_fails:
+        assert sub.attempts.quality == 1
+    else:
+        assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
+        assert "RuntimeError: teardown broke" in note["could_not_run"]

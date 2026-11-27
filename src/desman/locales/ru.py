@@ -999,6 +999,9 @@ MESSAGES: dict[str, Forms] = {
         "Используется {provider} · {model} ({n} ключей)",
     ),
     "fake LLM script ran out: {error}": "сценарий фальшивой LLM закончился: {error}",
+    "the sandbox has been unavailable for {minutes} minutes: {reason}": "Песочница недоступна уже {minutes} мин: {reason}",
+    "Waiting {seconds} s for the sandbox. {reason}": "Ожидание песочницы: {seconds} с. {reason}",
+    "Waiting for the sandbox until {until}. {reason} (desman resume {ref})": "Ожидание песочницы до {until}. {reason} (desman resume {ref})",
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": (
         "Пауза из-за лимита провайдера до {until}. Продолжить: desman resume {ref}"
     ),

@@ -29,6 +29,7 @@ An execution ends when the executor hands in something to judge (`Store.executio
 attempt after a rejection starts a new journal, since the model is then meant to act again.
 Results are kept in the database because a replay must return them (including what a read
 returned). Call identity uses the arguments’ hash. Bounded summaries keep only the sizes of private fields.
+Attribution of files to sibling run_command calls by time is best effort.
 """
 
 from __future__ import annotations
