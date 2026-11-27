@@ -8,12 +8,14 @@ access (the tool policy within the human's permissions) and its tools.
 
 from __future__ import annotations
 
+import ast
 import functools
 import re
 import secrets
 import shutil
 import sqlite3
 import stat
+import sys
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Collection, Mapping, Set
@@ -21,7 +23,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from tempfile import TemporaryDirectory, mkdtemp
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
@@ -57,13 +59,13 @@ from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
-from desman.core.sandbox import Sandbox, SandboxUnavailable
+from desman.core.sandbox import MOUNT_POINT, Sandbox, SandboxUnavailable
 from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
-from desman.core.workspace import PathEscapeError, Workspace, is_work_file
+from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
 from desman.i18n import t
 from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
@@ -763,8 +765,58 @@ _REVIEW_COPY_PREFIX = "review-"
 _REVIEW_REPORT_LIMIT = 1024 * 1024
 
 
+def _missing_review_package(
+    issue: ET.Element,
+    workspace: Workspace,
+    copied_python: set[str],
+    local_names: set[str],
+) -> str | None:
+    trace = (issue.text or "").strip()
+    pattern = r"(?:E +)?ModuleNotFoundError: No module named '([^'\n]+)'"
+    match = re.fullmatch(pattern, issue.get("message", "")) or re.fullmatch(
+        pattern, trace.rsplit("\n", 1)[-1]
+    )
+    if match is None:
+        return None
+    name = match[1]
+    if not name.isidentifier() or name in sys.stdlib_module_names or name in local_names:
+        return None
+    # Collection and test failures render the innermost frame differently.
+    frames = re.findall(r"(?m)^([^\n]+?):([0-9]{1,9}): (?:in .+|ModuleNotFoundError)$", trace)
+    if not frames:
+        return None
+    path, line = frames[-1]
+    path = path.removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
+    lineno = int(line)
+    if path not in copied_python or not workspace.exists(path):
+        return None
+    try:
+        tree = ast.parse(workspace.read(path))
+    except (OSError, PathEscapeError, SyntaxError, ValueError, RecursionError):
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and node.lineno <= lineno <= (
+            node.end_lineno or node.lineno
+        ):
+            if isinstance(node, ast.Import) and any(
+                alias.name.partition(".")[0] == name for alias in node.names
+            ):
+                return name
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and (node.module or "").partition(".")[0] == name
+            ):
+                return name
+    return None
+
+
 def _read_review_report(
-    workspace: Workspace, report: str
+    workspace: Workspace,
+    report: str,
+    source: Workspace,
+    copied_python: set[str],
+    local_names: set[str],
 ) -> tuple[dict[str, int], list[str], set[str]] | None:
     try:
         data = workspace.read(report, limit=_REVIEW_REPORT_LIMIT + 1)
@@ -807,20 +859,9 @@ def _read_review_report(
             name = case.get("name", "")
             group = case.get("classname", "")
             failing.append((f"{group}::{name}" if group else name)[:250])
-        pattern = r"(?:E +)?ModuleNotFoundError: No module named '([a-zA-Z_][a-zA-Z_0-9]*)'"
-        # Test failures carry the exception in the message. Collection errors put it
-        # at the end of the traceback and use a generic message.
-        match = re.fullmatch(pattern, issue.get("message", "")) or re.fullmatch(
-            pattern, (issue.text or "").strip().rsplit("\n", 1)[-1]
-        )
-        if match:
-            name = match[1]
-            if (
-                not (workspace.root / f"{name}.py").exists()
-                and not (workspace.root / name).is_dir()
-            ):
-                missing_packages.add(name)
-                continue
+        if package := _missing_review_package(issue, source, copied_python, local_names):
+            missing_packages.add(package)
+            continue
         # An unrelated failure still needs to be judged.
         all_issues_need_packages = False
     return counts, failing, missing_packages if all_issues_need_packages else set()
@@ -837,7 +878,7 @@ def _sweep_review_copies(root: Path) -> None:
 
 def _run_review_tests(
     sandbox: Sandbox,
-    _subtask: Subtask,
+    subtask: Subtask,
     workspace: Workspace,
     module: str,
     _attempt: int,
@@ -876,7 +917,8 @@ def _run_review_tests(
         _sweep_review_copies(root)
         paths = []
         estimated = 0
-        for path in workspace.files(on_skip=skip):
+        directories: list[str] = []
+        for path in workspace.iter_files(on_skip=skip, on_directory=directories.append):
             if not is_work_file(path):
                 continue
             try:
@@ -890,23 +932,33 @@ def _run_review_tests(
         def copy_seconds(remaining: int) -> float:
             return 30 + min(estimated, limits.workspace_bytes) / 10_000_000 + 0.05 * remaining
 
-        cover(copy_seconds(len(paths)))
+        paths.sort()
+        directories = [path for path in directories if is_work_file(path + "/entry")]
+        entries = len(directories)
+        if entries > limits.workspace_files:
+            return over_quota(entries, 0)
+        cover(copy_seconds(len(paths) + entries))
         with TemporaryDirectory(
             prefix=_REVIEW_COPY_PREFIX, dir=root, ignore_cleanup_errors=True
         ) as directory:
             location = Path(directory)
             copy = Workspace(location.parent, location.name)
-            directories: set[PurePosixPath] = set()
-            entries = size = 0
+            for index, path in enumerate(directories):
+                if index and index % 500 == 0:
+                    cover(copy_seconds(len(paths) + entries - index))
+                copy.mkdir(path)
+            copied_python: set[str] = set()
+            local_names = {PurePosixPath(path).name for path in directories}
+            size = 0
             for index, path in enumerate(paths):
                 if index and index % 500 == 0:
                     cover(copy_seconds(len(paths) - index))
-                parents = set(PurePosixPath(path).parents) - {PurePosixPath(".")}
-                next_entries = entries + 1 + len(parents - directories)
+                next_entries = entries + 1
                 try:
                     next_size = size + workspace.size(path)
                     if next_entries > limits.workspace_files or next_size > limits.workspace_bytes:
                         return over_quota(next_entries, next_size)
+                    executable = workspace.is_executable(path)
                     data = workspace.read(path, limit=limits.workspace_bytes - size + 1)
                 except (FileNotFoundError, PermissionError, PathEscapeError):
                     skip(path)
@@ -914,10 +966,13 @@ def _run_review_tests(
                 next_size = size + len(data)
                 if next_size > limits.workspace_bytes:
                     return over_quota(next_entries, next_size)
-                copy.write(path, data)
+                copy.write(path, data, executable=executable)
                 entries, size = next_entries, next_size
-                directories.update(parents)
-            review_dir = Path(mkdtemp(prefix=".desman-review-", dir=copy.root)).name
+                if path.endswith(".py"):
+                    copied_python.add(path)
+                    local_names.add(PurePosixPath(path).stem)
+            review_dir = f".desman-review-{secrets.token_hex(16)}"
+            copy.mkdir(review_dir)
             file = f"{review_dir}/test_review.py"
             ini = f"{review_dir}/pytest.ini"
             report = f"{review_dir}/{secrets.token_hex(16)}.xml"
@@ -958,7 +1013,13 @@ def _run_review_tests(
                 timeout=REVIEW_TEST_TIMEOUT,
                 limits=review_limits,
             )
-            parsed = _read_review_report(copy, report)
+            parsed = _read_review_report(
+                copy,
+                report,
+                workspace,
+                copied_python if not subtask.runs_code else set(),
+                local_names,
+            )
     except SandboxUnavailable as error:
         return TestRun(
             ran=False,
@@ -1007,9 +1068,18 @@ def _run_review_tests(
 
 def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
     goal, is_final = store.subtask_goal(subtask)
+    previous = last_review_tests(store, subtask.id)
+    if previous is not None:
+        source = previous.get("source")
+        if isinstance(source, str) and len(source) > 8_000:
+            marker = "\n[truncated]"
+            previous["source"] = source[: 8_000 - len(marker)] + marker
+        tail = previous.get("tail")
+        if isinstance(tail, str):
+            previous["tail"] = tail[-1_000:]
     return {
         **({} if is_final else {"task_goal": goal}),
-        "previous_review_tests": last_review_tests(store, subtask.id),
+        "previous_review_tests": previous,
     }
 
 
@@ -1033,6 +1103,7 @@ def coordinator(
     # only while personalisation is on (turned off mid-run: no longer given).
     tree = knowledge.reader(lambda: task_tree(store.conn, _personalize()))
     sandbox = sandbox if sandbox is not None else Sandbox()
+    _sweep_review_copies(workspace_root_for(store.conn))
     return _coordinator(
         store,
         models,

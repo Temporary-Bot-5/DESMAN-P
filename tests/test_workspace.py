@@ -137,9 +137,11 @@ def test_write_read_roundtrip(ws: Workspace) -> None:
 
 def test_written_files_are_private_and_no_temp_files_remain(ws: Workspace) -> None:
     ws.write("a.txt", "x")
+    ws.write("run.sh", "#!/bin/sh\n", executable=True)
     if os.name == "posix":
-        assert (ws.root / "a.txt").stat().st_mode & 0o077 == 0
-    assert os.listdir(ws.root) == ["a.txt"]
+        assert (ws.root / "a.txt").stat().st_mode & 0o777 == 0o600
+        assert (ws.root / "run.sh").stat().st_mode & 0o777 == 0o700
+    assert sorted(os.listdir(ws.root)) == ["a.txt", "run.sh"]
 
 
 @pytest.mark.parametrize("path", MALICIOUS)
@@ -184,6 +186,8 @@ def test_symlinked_directory_pointing_outside_is_not_followed(ws: Workspace, out
         ws.write("link/new", "pwned")
     with pytest.raises(PathEscapeError, match="symlink"):
         ws.write("link/secret", "pwned")
+    with pytest.raises(PathEscapeError, match="symlink"):
+        ws.mkdir("link/new-dir")
     with pytest.raises(PathEscapeError, match="symlink"):
         ws.read("link/secret")
     assert not ws.exists("link/secret")

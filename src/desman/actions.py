@@ -340,6 +340,8 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
                         for name in review_tests.missing_packages
                     )
                     test_line += " " + one_line(reasons, 1_000)
+                elif review_tests.reason_not_run == "document parts work without tools":
+                    test_line += " " + t("document parts work without tools")
                 elif review_tests.reason_not_run:
                     test_line += " " + one_line(review_tests.reason_not_run, 1_000)
             elif review_tests.timed_out:

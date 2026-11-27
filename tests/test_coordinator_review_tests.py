@@ -14,6 +14,7 @@ import pytest
 from conftest import FakeClock
 from desman.actions import print_report
 from desman.agents import llm_executor, llm_reviewer
+from desman.core import coordinator as coordinator_module
 from desman.core import db
 from desman.core.coordinator import (
     Coordinator,
@@ -59,7 +60,15 @@ def write_report(
     )
 
 
-def submitted(store: Store, *, runs_code: bool = True, tools: Tools = Tools.GRANTED) -> str:
+def submitted(
+    store: Store,
+    *,
+    runs_code: bool = True,
+    tools: Tools = Tools.GRANTED,
+    kind: Kind = Kind.TEXT,
+    document: bool = False,
+    output_path: str | None = None,
+) -> str:
     task_id = store.create_task(
         TaskSpec(
             goal="For input 2, the answer is 4.",
@@ -70,12 +79,19 @@ def submitted(store: Store, *, runs_code: bool = True, tools: Tools = Tools.GRAN
                     description="Implement square",
                     acceptance_criteria="Square returns an integer",
                     runs_code=runs_code,
+                    kind=kind,
+                    inputs={"document": {}} if document else {},
                 )
             ],
         )
     )
     sub = store.claim("executor", task_id=task_id)
     assert sub is not None and sub.lease_token is not None
+    if output_path is not None:
+        store.start_effect(sub.id, sub.lease_token, 0, 0, "write_file", "key")
+        store.finish_effect(
+            sub.id, sub.lease_token, 0, 0, {"ok": True, "output": {"path": output_path}}
+        )
     store.submit(sub.id, sub.lease_token, {"summary": "Ready to review"})
     return task_id
 
@@ -164,7 +180,7 @@ def test_review_result(
 
 
 @pytest.mark.parametrize(
-    "mode", ["non-code", "permission", "tools", "sandbox", "missing", "no-runner"]
+    "mode", ["non-code", "permission", "tools", "sandbox", "missing", "no-runner", "document"]
 )
 def test_skips_and_missing_module(
     store: Store, clock: FakeClock, monkeypatch: pytest.MonkeyPatch, mode: str
@@ -175,9 +191,17 @@ def test_skips_and_missing_module(
     )
     task_id = submitted(
         store,
-        runs_code=mode != "non-code",
-        tools=Tools.NONE if mode == "tools" else Tools.GRANTED,
+        runs_code=mode not in {"non-code", "no-runner"},
+        tools=Tools.NONE if mode in {"tools", "document"} else Tools.GRANTED,
+        kind=Kind.CODE if mode == "no-runner" else Kind.TEXT,
+        document=mode == "document",
     )
+    if mode == "no-runner":
+
+        def unexpected_scan(*args: object, **kwargs: object) -> bool:
+            pytest.fail("review test discovery must not scan the workspace without a runner")
+
+        monkeypatch.setattr(coordinator_module, "has_written_python_files", unexpected_scan)
     replies = ('{"verdict":"accept"}',) * 4
     llm = FakeLLM().on("Review", *replies)
     coord = Coordinator(
@@ -203,7 +227,7 @@ def test_skips_and_missing_module(
         assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (
             mode == "missing"
         )
-    if mode in ("non-code", "missing"):
+    if mode in ("non-code", "missing", "no-runner"):
         assert note is None
         assert ("top-level test_ functions" in llm.calls[0].messages[0].content) == (
             mode == "missing"
@@ -227,7 +251,7 @@ def test_skips_and_missing_module(
             "permission": "shell_execution",
             "tools": "does not grant",
             "sandbox": "no sandbox here",
-            "no-runner": "runner unavailable",
+            "document": "document parts work without tools",
         }
         assert reason[mode] in note["reason_not_run"]
         if mode == "sandbox":
@@ -275,6 +299,8 @@ def test_runner_writes_module_and_parses_pytest(
 
     workspace.write("answer.py", "answer = 4")
     workspace.write("delete.txt", "keep me")
+    workspace.mkdir("empty/nested")
+    workspace.write("run.sh", "#!/bin/sh\n", executable=True)
     included = [".review/old.py", "web/page.html", ".tool-results/result"]
     for path in included:
         workspace.write(path, "keep")
@@ -333,7 +359,11 @@ def test_runner_writes_module_and_parses_pytest(
         assert not stale.exists() and fresh.exists()
         locations.append(cwd)
         copy = Workspace(cwd.parent, cwd.name)
-        assert copy.files() == sorted([path, ini, "answer.py", "delete.txt", *included])
+        assert copy.files() == sorted([path, ini, "answer.py", "delete.txt", "run.sh", *included])
+        assert (cwd / "empty/nested").is_dir()
+        assert not (cwd / "__pycache__").exists()
+        if os.name != "nt":
+            assert copy.is_executable("run.sh")
         assert copy.read_text(path) == MODULE
         assert copy.read_text(ini) == "[pytest]\npythonpath = ..\n"
         copy.write("answer.py", "changed")
@@ -471,14 +501,14 @@ def test_code_written_with_tools_gets_reviews_and_feedback(
     review = [call.prompt for call in llm.calls if call.prompt.startswith("Review")]
     previous = json.loads(review[-1].partition("\n")[2])["previous_review_tests"]
     assert previous["source"] == MODULE
-    assert len(previous["tail"]) == 2_000 and previous["tail"].endswith("assertion details")
+    assert len(previous["tail"]) == 1_000 and previous["tail"].endswith("assertion details")
     assert "inputs" not in json.loads(review[-1].partition("\n")[2])
     [first, _] = [
         json.loads(row["details_json"])
         for row in store.audit_log(task_id)
         if row["action"] == "review_tests"
     ]
-    assert first["source"] == MODULE and first["tail"] == previous["tail"]
+    assert first["source"] == MODULE and first["tail"][-1_000:] == previous["tail"]
 
 
 def test_normal_run_wires_review_to_command_sandbox(
@@ -529,6 +559,12 @@ def test_normal_run_wires_review_to_command_sandbox(
             ],
         )
     )
+    workspaces = workspace_root_for(store.conn)
+    stale = workspaces / "review-stale"
+    stale.mkdir(parents=True)
+    os.utime(stale, (1, 1))
+    fresh = workspaces / "review-fresh"
+    fresh.mkdir()
     coord = coordinator(
         store,
         Models(llm, None),
@@ -536,6 +572,7 @@ def test_normal_run_wires_review_to_command_sandbox(
         make_config(),
         sandbox=sandbox,
     )
+    assert not stale.exists() and fresh.is_dir()
     assert coord.run(task_id).status is TaskStatus.DONE
     assert len(commands) == 2 and commands[0][-1] == "main.py"
     assert Path(commands[1][-1]).name == "test_review.py"
@@ -918,24 +955,34 @@ def test_changes():
     assert list(tmp_path.glob("review-*")) == []
 
 
-@pytest.mark.parametrize("reason", ["disk", "outage", "quota", "write-error", "fits"])
+@pytest.mark.parametrize(
+    "reason", ["disk", "outage", "quota", "optional-quota", "write-error", "fits"]
+)
 def test_review_infrastructure_failure(
     store: Store, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
-    task_id = submitted(store)
+    quota = reason in {"quota", "optional-quota"}
+    task_id = submitted(
+        store,
+        runs_code=reason != "optional-quota",
+        kind=Kind.CODE,
+        output_path="answer.py",
+    )
     sandbox = Sandbox(limits=Limits(workspace_bytes=100, workspace_files=1))
     monkeypatch.setattr(sandbox, "unavailable", lambda: None)
     workspace = Workspace(tmp_path, task_id)
-    workspace.write("answer.py", "x" * (101 if reason == "quota" else 100))
+    workspace.write("answer.py", "x" * (101 if quota else 100))
     if reason == "write-error":
 
-        def disk_full(self: Workspace, path: str, data: bytes | str) -> str:
+        def disk_full(
+            self: Workspace, path: str, data: bytes | str, *, executable: bool = False
+        ) -> str:
             raise OSError("disk full")
 
         monkeypatch.setattr(Workspace, "write", disk_full)
 
     def run(command: list[str], cwd: Path, *, timeout: float, limits: Limits) -> Outcome:
-        assert reason not in {"quota", "write-error"}
+        assert not quota and reason != "write-error"
         assert limits.workspace_files == 5
         assert limits.workspace_bytes == (
             100 + len(MODULE.encode()) + len("[pytest]\npythonpath = ..\n") + 1024 * 1024
@@ -959,10 +1006,8 @@ def test_review_infrastructure_failure(
     )
     assert coord.tick(task_id, [])
     [sub] = store.list_subtasks(task_id)
-    if reason == "fits":
+    if reason == "fits" or quota:
         assert sub.status is SubtaskStatus.DONE
-    elif reason == "quota":
-        assert sub.status is SubtaskStatus.NEEDS_HUMAN
         assert sub.attempts.transient == 0
     else:
         assert sub.status is SubtaskStatus.REVIEW and sub.attempts.transient == 1
@@ -976,13 +1021,11 @@ def test_review_infrastructure_failure(
     assert note is not None
     assert note["disk_low"] is (reason == "disk")
     assert note["ran"] is (reason in {"disk", "fits"})
-    if reason == "quota":
+    if quota:
         assert "quota: " in note["copy_over_quota"]
         assert sub.attempts.quality == 0
-        [entry] = [row for row in store.audit_log(task_id) if row["action"] == "review_failed"]
-        details = json.loads(entry["details_json"])
-        assert details["failure"] == "permanent"
-        assert "at least 1 entries, 101 bytes" in details["reason"]
+        assert "at least 1 entries, 101 bytes" in note["reason_not_run"]
+        assert not any(row["action"] == "review_failed" for row in store.audit_log(task_id))
     assert list(tmp_path.glob("review-*")) == []
 
 
@@ -1145,9 +1188,23 @@ def test_status_shows_review_test_outcome(
 
 @pytest.mark.parametrize("runs_code", [False, True])
 @pytest.mark.parametrize(
-    "mode", ["missing", "call", "local", "mixed", "nested", pytest.param("real", marks=confined)]
+    "mode",
+    [
+        "missing",
+        "call",
+        "local",
+        "mixed",
+        "nested",
+        "stdlib",
+        "wrong-line",
+        "reviewer-frame-calc",
+        "reviewer-frame-hypothesis",
+        pytest.param("real", marks=confined),
+        pytest.param("reviewer-calc", marks=confined),
+        pytest.param("reviewer-hypothesis", marks=confined),
+    ],
 )
-def test_missing_requests_in_review(
+def test_missing_package_in_review(
     store: Store,
     tmp_path: Path,
     clock: FakeClock,
@@ -1173,8 +1230,14 @@ def test_missing_requests_in_review(
     assert sub is not None and sub.lease_token is not None
     workspace = Workspace(tmp_path, task_id)
     # The real run needs a package the host's /usr surely lacks (requests may be there).
-    package = "desman_absent_package" if mode == "real" else "requests"
+    package = {
+        "real": "desman_absent_package",
+        "stdlib": "sqlite3",
+        "reviewer-frame-hypothesis": "hypothesis",
+    }.get(mode, "requests")
     workspace.write("fetch.py", f"import {package}\n")
+    if mode in {"reviewer-calc", "reviewer-frame-calc"}:
+        workspace.write("src/calc.py", "answer = 4\n")
     if not runs_code:
         store.start_effect(sub.id, sub.lease_token, 0, 0, "write_file", "key")
         store.finish_effect(
@@ -1183,18 +1246,26 @@ def test_missing_requests_in_review(
     store.submit(sub.id, sub.lease_token, {"summary": "ready"})
     sandbox = Sandbox()
     if mode == "local":
-        workspace.write("requests/__init__.py", "")
-    if mode != "real":
+        workspace.write("src/requests/__init__.py", "")
+    if mode not in {"real", "reviewer-calc", "reviewer-hypothesis"}:
         monkeypatch.setattr(sandbox, "unavailable", lambda: None)
 
         def run(command: list[str], cwd: Path, **_: object) -> Outcome:
-            assert (cwd / "fetch.py").read_text() == "import requests\n"
-            name = "requests.api" if mode == "nested" else "requests"
+            assert (cwd / "fetch.py").read_text() == f"import {package}\n"
+            name = "requests.api" if mode == "nested" else package
+            line = 2 if mode == "wrong-line" else 1
             cases = (
                 '<testcase name="test_review"><error message="collection failure">'
-                "fetch.py:1: in &lt;module&gt;\n    import requests\n"
+                f"fetch.py:{line}: in &lt;module&gt;\n    import {package}\n"
                 f"E   ModuleNotFoundError: No module named '{name}'</error></testcase>"
             )
+            if mode.startswith("reviewer-frame-"):
+                missing = mode.removeprefix("reviewer-frame-")
+                cases = (
+                    '<testcase name="test_review"><error message="collection failure">'
+                    f"{command[-1]}:1: in &lt;module&gt;\n    import {missing}\n"
+                    f"E   ModuleNotFoundError: No module named '{missing}'</error></testcase>"
+                )
             if mode == "call":
                 cases = (
                     '<testcase name="test_fetch"><failure '
@@ -1209,6 +1280,8 @@ def test_missing_requests_in_review(
 
         monkeypatch.setattr(sandbox, "run", run)
     module = f"import fetch\n\ndef test_fetch():\n    assert fetch.{package}\n"
+    if mode.startswith("reviewer-"):
+        module = f"import {mode.removeprefix('reviewer-').removeprefix('frame-')}\n" + MODULE
     llm = FakeLLM().on("Review", json.dumps({"verdict": "accept", "tests": module}))
     coord = Coordinator(
         store,
@@ -1222,13 +1295,13 @@ def test_missing_requests_in_review(
     assert coord.tick(task_id, [])
     note = last_review_tests(store, sub.id)
     assert note is not None and note["source"] == module
-    if mode in {"missing", "call", "real"}:
+    if not runs_code and mode in {"missing", "call", "real"}:
         assert store.get_subtask(sub.id).status is SubtaskStatus.DONE
         assert not note["ran"]
         assert note["reason_not_run"] == f"needs package {package}, not installed in the sandbox"
     else:
         assert store.get_subtask(sub.id).status is not SubtaskStatus.DONE
-        assert note["ran"] and note["errors"] == 1
+        assert note["ran"] and note["errors"] + note["failed"] == (2 if mode == "mixed" else 1)
     assert len(llm.calls) == 1
 
 
@@ -1274,3 +1347,38 @@ def test_command_evidence_uses_earlier_execution_and_reads_only_top_candidates(
     shown = evidence(store, again, workspace=workspace)["written_files"]
     assert reads == ["script.py", *(f"extra-{i:02}.txt" for i in range(11))]
     assert [file["path"] for file in shown] == reads
+
+
+def test_review_prompt_keeps_source_head_and_output_tail(store: Store) -> None:
+    [subtask] = store.list_subtasks(submitted(store))
+    source = MODULE + "x" * 10_000 + "source end"
+    tail = "output start" + "y" * 1_500 + "output end"
+    store.note(subtask.id, Actor.REVIEWER, "review_tests", {"source": source, "tail": tail})
+    previous = _review_test_context(store, subtask)["previous_review_tests"]
+    assert len(previous["source"]) == 8_000
+    assert previous["source"].startswith(MODULE)
+    assert previous["source"].endswith("[truncated]")
+    assert previous["tail"] == tail[-1_000:]
+    original = last_review_tests(store, subtask.id)
+    assert original is not None and original["source"] == source and original["tail"] == tail
+
+
+@confined
+def test_executable_and_empty_directory_in_real_review_sandbox(
+    store: Store, tmp_path: Path
+) -> None:
+    task_id = submitted(store)
+    [subtask] = store.list_subtasks(task_id)
+    workspace = Workspace(tmp_path, task_id)
+    script = workspace.root / workspace.write("run.sh", "#!/bin/sh\nprintf 'ready'\n")
+    script.chmod(0o700)
+    workspace.mkdir("empty/nested")
+    module = (
+        "from pathlib import Path\n"
+        "import subprocess\n"
+        "def test_program():\n"
+        "    assert subprocess.check_output(['./run.sh']) == b'ready'\n"
+        "    assert Path('empty/nested').is_dir()\n"
+    )
+    result = _run_review_tests(Sandbox(), subtask, workspace, module, 1)
+    assert result.ran and result.exit_code == 0 and result.passed == 1, result.tail

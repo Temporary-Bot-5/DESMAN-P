@@ -11,6 +11,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "검토자 테스트 (시도 {attempt}) — 통과: {passed}, 실패: {failed}, 오류: {errors}",
+    "document parts work without tools": "문서의 각 부분은 도구 없이 처리합니다",
     "Reviewer's tests (attempt {attempt}) did not run.": "검토자 테스트 (시도 {attempt})가 실행되지 않았습니다.",
     "Reviewer's tests (attempt {attempt}) timed out.": "검토자 테스트(시도 {attempt})의 제한 시간이 초과되었습니다.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "검토자 테스트(시도 {attempt}) 중단: {reason}",

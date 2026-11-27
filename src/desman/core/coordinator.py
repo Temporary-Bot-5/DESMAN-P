@@ -965,9 +965,9 @@ class Coordinator:
     def _review_test_skip(
         self, subtask: Subtask, cover_call: Callable[[float], None]
     ) -> TestRun | None:
-        if self.review_tests is None:
-            return TestRun(ran=False, reason_not_run="review test runner unavailable")
-        if self.store.tools(subtask.task_id) is not Tools.GRANTED or "document" in subtask.inputs:
+        if "document" in subtask.inputs:
+            return TestRun(ran=False, reason_not_run="document parts work without tools")
+        if self.store.tools(subtask.task_id) is not Tools.GRANTED:
             return TestRun(ran=False, reason_not_run="task does not grant tools")
         tool = self.tools.get(RUN_TOOL) if self.tools is not None else None
         if tool is None:
@@ -1018,9 +1018,7 @@ class Coordinator:
 
     @staticmethod
     def _review_test_verdict(subtask: Subtask, review: Review, result: TestRun) -> Review | Failure:
-        if result.copy_over_quota:
-            return Failure(kind=FailureKind.PERMANENT, reason=result.copy_over_quota)
-        elif result.disk_low:
+        if result.disk_low:
             return Failure(
                 kind=FailureKind.TRANSIENT, reason=result.stopped or "disk space too low"
             )
@@ -1065,11 +1063,15 @@ class Coordinator:
             self.store.extend_review(subtask.id, token, math.ceil(timeout) + MODEL_CALL_MARGIN)
 
         try:
-            needs_tests = not is_error_report(artifact) and needs_review_tests(
-                subtask,
-                written_python_files=subtask.kind is Kind.CODE
-                and not subtask.runs_code
-                and has_written_python_files(self.store, subtask, root=self.workspaces),
+            needs_tests = (
+                self.review_tests is not None
+                and not is_error_report(artifact)
+                and needs_review_tests(
+                    subtask,
+                    written_python_files=subtask.kind is Kind.CODE
+                    and not subtask.runs_code
+                    and has_written_python_files(self.store, subtask, root=self.workspaces),
+                )
             )
             skipped = self._review_test_skip(subtask, cover_call) if needs_tests else None
             if skipped and skipped.sandbox_unavailable and subtask.runs_code:

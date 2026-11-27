@@ -11,6 +11,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "レビュー担当のテスト (試行 {attempt}) — 成功: {passed}、失敗: {failed}、エラー: {errors}",
+    "document parts work without tools": "文書の各部分はツールを使わずに処理します",
     "Reviewer's tests (attempt {attempt}) did not run.": "レビュー担当のテスト (試行 {attempt})は実行されませんでした。",
     "Reviewer's tests (attempt {attempt}) timed out.": "レビュー担当者のテスト（試行 {attempt}）がタイムアウトしました。",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "レビュー担当者のテスト（試行 {attempt}）を停止しました：{reason}",

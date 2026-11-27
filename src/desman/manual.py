@@ -76,10 +76,10 @@ TOPICS: Final = (
         "Code subtasks default to 16 tool rounds (8–48 via `/tuning --code-rounds N`). "
         "edit_file replaces exact fragments; each run shows the executor its exit code and output tails. Prose goes in the result; files are extra. Review checks sources, dates, language "
         "(names/translations allowed) and coverage. Live data may have fewer items given sources and stated gaps. Split parts keep the request's language; honest partial findings feed "
-        "the combine step. For blocked pages, use snippets or another official source. Review "
-        "sees recent output files within budget. If allowed, independent tests for required runs or Python outputs "
-        "are written and must pass only in a sandboxed workspace copy. Sandbox outages interrupt review of required runs. "
-        "Review sandbox: stdlib and pytest only, offline. Missing packages skip tests.\n"
+        "the combine step. For blocked pages, use snippets or another official source. "
+        "Review sees recent files and, if allowed, tests required runs or Python outputs in an offline copy. "
+        "Sandbox outages interrupt required reviews. Oversized copies skip tests, as can "
+        "missing third-party imports in submitted Python without required execution.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
         "Retellings copy task code and use your latest message’s language.",
     ),

@@ -116,19 +116,20 @@ class Workspace:
     # There is deliberately no method returning an absolute path to a file: a path checked now
     # can be swapped for a symlink before the caller opens it. Use read/write/exists/files.
 
-    def write(self, path: str, data: bytes | str) -> str:
+    def write(self, path: str, data: bytes | str, *, executable: bool = False) -> str:
         """Create or replace a file, making parent directories as needed.
 
         Returns the normalized relative path (as `files()` would list it)."""
         payload = data.encode() if isinstance(data, str) else data
         parts = check_path(path)
+        mode = 0o700 if executable else 0o600
         if not SECURE:
-            self._write_fallback(parts, payload)
+            self._write_fallback(parts, payload, mode)
             return "/".join(parts)
         with self._parent(parts, create=True) as parent:
             tmp = f"{_TMP_PREFIX}{secrets.token_hex(8)}"
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC | _BINARY
-            fd = os.open(tmp, flags, 0o600, dir_fd=parent)
+            fd = os.open(tmp, flags, mode, dir_fd=parent)
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(payload)
@@ -141,6 +142,20 @@ class Workspace:
                     os.unlink(tmp, dir_fd=parent)
                 raise
         return "/".join(parts)
+
+    def mkdir(self, path: str) -> None:
+        """Create a directory and its parents without crossing symlinks."""
+        parts = check_path(path)
+        if not SECURE:
+            self._check_no_links(parts)
+            self.root.joinpath(*parts).mkdir(mode=0o700, parents=True)
+            return
+        with self._parent(parts, create=True) as parent:
+            os.mkdir(parts[-1], 0o700, dir_fd=parent)
+
+    def is_executable(self, path: str) -> bool:
+        """Whether the owner can execute this regular, unlinked file."""
+        return bool(self._file_stat(path).st_mode & stat.S_IXUSR)
 
     def _read_portably(self, path: str, parts: tuple[str, ...], limit: int) -> bytes:
         self._check_no_links(parts)
@@ -255,12 +270,29 @@ class Workspace:
         hard links are left out, so everything listed can be read back."""
         return sorted(self.iter_files(on_skip=on_skip))
 
-    def iter_files(self, *, on_skip: Callable[[str], None] | None = None) -> Iterator[str]:
+    def iter_files(
+        self,
+        *,
+        on_skip: Callable[[str], None] | None = None,
+        on_directory: Callable[[str], None] | None = None,
+    ) -> Iterator[str]:
         """Yield guarded regular files in traversal order."""
         if self.root.is_symlink():  # os.walk would follow the top directory
             return
-        for dirpath, _dirnames, filenames in os.walk(self.root, followlinks=False):
+        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=False):
             base = Path(dirpath)  # followlinks=False: linked directories are not entered
+            if on_directory is not None and base != self.root:
+                relative = base.relative_to(self.root).as_posix()
+                try:
+                    check_path(relative)
+                    if not stat.S_ISDIR(base.lstat().st_mode):
+                        raise PathEscapeError(f"{relative!r} is not a directory")
+                except (FileNotFoundError, PermissionError, PathEscapeError):
+                    if on_skip is not None:
+                        on_skip(relative)
+                    dirnames.clear()
+                    continue
+                on_directory(relative)
             for name in filenames:
                 full = base / name
                 if name.startswith(_TMP_PREFIX):
@@ -313,14 +345,14 @@ class Workspace:
             if i < len(parts) - 1 and not stat.S_ISDIR(mode):
                 raise NotADirectoryError(f"{'/'.join(parts[: i + 1])!r} is not a directory")
 
-    def _write_fallback(self, parts: tuple[str, ...], payload: bytes) -> None:
+    def _write_fallback(self, parts: tuple[str, ...], payload: bytes, mode: int) -> None:
         self._check_no_links(parts)
         target = self.root.joinpath(*parts)
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._check_no_links(parts)  # again, now that the parents exist
         tmp = target.parent / f"{_TMP_PREFIX}{secrets.token_hex(8)}"
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, mode)
             with os.fdopen(fd, "wb") as f:
                 f.write(payload)
                 f.flush()

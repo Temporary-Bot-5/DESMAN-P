@@ -11,6 +11,7 @@ def plural(n: int) -> int:
 
 MESSAGES: dict[str, Forms] = {
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "İnceleyenin testleri (deneme {attempt}) — başarılı: {passed}, başarısız: {failed}, hata: {errors}",
+    "document parts work without tools": "belge bölümleri araç kullanılmadan işlenir",
     "Reviewer's tests (attempt {attempt}) did not run.": "İnceleyenin testleri (deneme {attempt}) çalıştırılmadı.",
     "Reviewer's tests (attempt {attempt}) timed out.": "İnceleyenin testleri (deneme {attempt}) zaman aşımına uğradı.",
     "Reviewer's tests (attempt {attempt}) stopped: {reason}": "İnceleyenin testleri (deneme {attempt}) durduruldu: {reason}",
