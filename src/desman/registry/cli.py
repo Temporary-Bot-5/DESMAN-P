@@ -19,6 +19,8 @@ import os
 import re
 import shlex
 import sqlite3
+from contextlib import closing
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -29,9 +31,10 @@ from rich.text import Text
 
 from desman import i18n, ui
 from desman.core.models import Kind
-from desman.i18n import t
+from desman.i18n import t, tn
 from desman.net import protocol, sign
 from desman.registry import admin, checks, clusters, moderation, releases, server, store, work
+from desman.registry import operators as activity
 from desman.stdio import configure_output
 
 LANGUAGE_ENV: Final = "DESMAN_REGISTRY_LANGUAGE"
@@ -187,9 +190,12 @@ def assign(
 @cli.command()
 @click.argument("fingerprint")
 @click.option("--reason", default="", help="Why, kept in the record (at most 500 characters).")
+@click.option("--keep-work", is_flag=True, help="Keep the operator’s open work.")
 @_root_option
 @click.pass_context
-def revoke(ctx: click.Context, fingerprint: str, reason: str, root_key: Path | None) -> None:
+def revoke(
+    ctx: click.Context, fingerprint: str, reason: str, root_key: Path | None, keep_work: bool
+) -> None:
     """Revoke a key (a node's or an operator's), signed by the root."""
     if not _FINGERPRINT.match(fingerprint):
         raise click.BadParameter(
@@ -203,7 +209,9 @@ def revoke(ctx: click.Context, fingerprint: str, reason: str, root_key: Path | N
     try:
         conn, root = _open(ctx, root_key)
         try:
-            admin.revoke(conn, root, fingerprint, reason, now=_now())
+            done = admin.revoke_with_counts(
+                conn, root, fingerprint, reason, now=_now(), keep_work=keep_work
+            )
         finally:
             conn.close()
     except admin.AdminError as e:
@@ -212,9 +220,162 @@ def revoke(ctx: click.Context, fingerprint: str, reason: str, root_key: Path | N
         t("Revoked {fingerprint}: nodes refuse it from their next poll.", fingerprint=fingerprint)
     )
 
+    if done.jobs:
+        ui.note(tn(done.jobs, "Dropped {n} job.", "Dropped {n} jobs."))
+    if done.cluster_tasks:
+        ui.note(tn(done.cluster_tasks, "Dropped {n} cluster task.", "Dropped {n} cluster tasks."))
+
 
 def _json_option(command: Any) -> Any:
     return click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")(command)
+
+
+def _operator_table(rows: tuple[activity.Summary, ...], *, full: bool = False) -> None:
+    table = (
+        ui.table(t("Details"), "")
+        if full
+        else ui.table(t("Fingerprint"), t("Status"), t("Details"), t("Last request"))
+    )
+    for column in table.columns:
+        column.overflow = "fold"
+    if not full:
+        table.columns[0].min_width = 16
+    states = {
+        "active": t("active"),
+        "expired": t("expired"),
+        "revoked": t("revoked"),
+        "not_yet": t("not yet in term"),
+        "invalid": t("invalid assignment"),
+    }
+    for row in rows:
+        marks = []
+        if row.registry_key:
+            marks.append(t("Registry key"))
+        if row.appointer:
+            marks.append(t("Appointer"))
+        last = row.last_request
+        request = "" if last is None else f"{last.ts}\n{last.action}"
+        fields = (
+            (t("Scopes"), ", ".join(row.scopes)),
+            (t("Jobs"), str(row.jobs)),
+            (t("Cluster tasks"), str(row.cluster_tasks)),
+            (t("Writes"), str(row.writes)),
+            (t("Refusals"), str(row.refusals)),
+            (t("Complaint reads"), str(row.complaint_reads)),
+        )
+        if full:
+            for label, value in (
+                (t("Fingerprint"), row.fingerprint),
+                (t("Status"), states[row.state]),
+                (t("Role"), ", ".join(marks)),
+                (t("Issued"), row.issued_at),
+                (t("Expires"), row.expires_at),
+                (t("Last request"), request),
+                *fields,
+            ):
+                table.add_row(label, Text(value))
+        else:
+            fingerprint = "\n".join((row.fingerprint[:16], *marks))
+            term = f"{states[row.state]}\n{t('Issued')} {row.issued_at}\n{t('Expires')} {row.expires_at}"
+            details = "\n".join(f"{label}: {value}" for label, value in fields)
+            table.add_row(Text(fingerprint), Text(term), Text(details), Text(request))
+    ui.out(table)
+
+
+def _own_operator(ctx: click.Context) -> str | None:
+    path = _dir(ctx) / store.OPERATOR_KEY
+    return admin.load_operator_key(path).fingerprint if path.exists() else None
+
+
+@cli.group(invoke_without_command=True)
+@_json_option
+@click.pass_context
+def operators(ctx: click.Context, as_json: bool) -> None:
+    """List operator keys and their activity."""
+    if ctx.invoked_subcommand is not None:
+        return
+    try:
+        with closing(_open_db(ctx)) as conn:
+            rows = activity.summaries(conn, _root(), _now(), _own_operator(ctx))
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    if as_json:
+        click.echo(json.dumps([asdict(row) for row in rows], ensure_ascii=False))
+    elif rows:
+        _operator_table(rows)
+    else:
+        ui.note(t("No operator keys have been assigned."))
+
+
+def _operator_usage(rows: tuple[activity.Usage, ...], *, cluster: bool = False) -> None:
+    table = ui.table(
+        t("Status"),
+        t("Cluster tasks") if cluster else t("Jobs"),
+        t("Leases"),
+        t("Results"),
+        t("Verdicts"),
+        t("Cluster results"),
+        t("Nodes"),
+    )
+    for column in table.columns:
+        column.overflow = "fold"
+    for row in rows:
+        nodes = "\n".join(
+            f"{node.fingerprint[:16]} ({node.owner or '—'}): {node.leases}" for node in row.nodes
+        )
+        status = _cluster_status_name(row.status) if cluster else _job_status_name(row.status)
+        table.add_row(
+            status,
+            str(row.count),
+            str(row.leases),
+            str(row.results),
+            str(row.verdicts),
+            str(row.cluster_results),
+            Text(nodes),
+        )
+    ui.out(table)
+
+
+@operators.command("show")
+@click.argument("fingerprint")
+@click.option(
+    "--limit", type=click.IntRange(min=0), default=50, help="How many journal entries to show."
+)
+@_json_option
+@click.pass_context
+def operators_show(ctx: click.Context, fingerprint: str, limit: int, as_json: bool) -> None:
+    """Show an operator’s assignments, work and journal."""
+    try:
+        with closing(_open_db(ctx)) as conn:
+            report = activity.detail(conn, _root(), _now(), _own_operator(ctx), fingerprint, limit)
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    if as_json:
+        click.echo(json.dumps(asdict(report), ensure_ascii=False))
+        return
+    _operator_table((report.summary,), full=True)
+    table = ui.table(t("Record"), t("Action"), t("Issued"), t("Expires"), t("Scopes"), t("Reason"))
+    for column in table.columns:
+        column.overflow = "fold"
+    for row in report.records:
+        table.add_row(
+            row.id,
+            t("assignment") if row.kind == "assignment" else t("revocation"),
+            row.issued_at,
+            row.expires_at,
+            ", ".join(row.scopes),
+            Text(row.reason or ""),
+        )
+    ui.out(table)
+    _operator_usage(report.jobs)
+    _operator_usage(report.cluster_tasks, cluster=True)
+    ui.note(t("The registry does not receive model call or token counts for this work."))
+    table = ui.table(t("Time"), t("Action"), t("Details"))
+    for column in table.columns:
+        column.overflow = "fold"
+    for entry in report.journal:
+        table.add_row(entry.ts, entry.action, Text(json.dumps(entry.details, ensure_ascii=False)))
+    ui.out(table)
 
 
 def _status(found: store.Node) -> str:
@@ -291,6 +452,10 @@ def log_command(ctx: click.Context, limit: int, as_json: bool) -> None:
 
 
 def _job_status(found: work.JobRow) -> str:
+    return _job_status_name(found.status)
+
+
+def _job_status_name(status: str) -> str:
     names = {
         "execute": t("to do"),
         "recheck": t("to recheck"),
@@ -299,7 +464,7 @@ def _job_status(found: work.JobRow) -> str:
         "dropped": t("dropped"),
         "expired": t("expired"),
     }
-    return names.get(found.status, found.status)
+    return names.get(status, status)
 
 
 def _job_reason(found: work.JobRow) -> str:
@@ -307,11 +472,12 @@ def _job_reason(found: work.JobRow) -> str:
         "disputed": t("the recheck rejected the result"),
         "failed": t("nodes could not do it"),
         "leases_lost": t("nodes took it and fell silent"),
+        "operator_revoked": t("its operator's key was revoked"),
     }
     return "" if found.reason is None else names.get(found.reason, found.reason)
 
 
-def _open_db(ctx: click.Context) -> Any:
+def _open_db(ctx: click.Context) -> sqlite3.Connection:
     return store.open_registry(_dir(ctx) / store.DB_NAME)
 
 
@@ -1323,6 +1489,10 @@ _CLUSTER_STATUS: Final = ("waiting", "running", "operator", "accepted", "dropped
 
 
 def _cluster_status(found: clusters.ClusterTaskRow) -> str:
+    return _cluster_status_name(found.status)
+
+
+def _cluster_status_name(status: str) -> str:
     return {
         "waiting": t("waits for a cluster"),
         "running": t("a cluster works on it"),
@@ -1330,7 +1500,7 @@ def _cluster_status(found: clusters.ClusterTaskRow) -> str:
         "accepted": t("accepted"),
         "dropped": t("dropped"),
         "expired": t("expired"),
-    }[found.status]
+    }[status]
 
 
 def _cluster_reason(reason: str) -> str:
@@ -1338,6 +1508,7 @@ def _cluster_reason(reason: str) -> str:
         "result": t("its result came"),
         "job_given_up": t("a job gave up"),
         "operators_lost": t("its operators were lost"),
+        "operator_revoked": t("its operator's key was revoked"),
     }.get(reason, reason)
 
 
@@ -1696,8 +1867,6 @@ def daily(ctx: click.Context, days: int, keep: int, root_key: Path | None) -> No
 @click.pass_context
 def health(ctx: click.Context, as_json: bool, url: str) -> None:
     """Check registry health without changing the database."""
-    from dataclasses import asdict
-
     found = admin.health(_dir(ctx), now=_now(), url=url, root_pub=sign.ROOT_PUB)
     ok = all(c.level != "fail" for c in found)
     if as_json:

@@ -12,6 +12,10 @@ or repeat `--scope` for both). DESMAN keeps the private key in its data director
 signs requests and records locally. Use `--registry URL` during import or creation to
 specify the registry.
 
+The registry’s root owner can inspect each operator’s activity, including the work
+their key signed and the nodes that took it. Revoking the key stops the operator’s
+open jobs and cluster tasks by default.
+
 ## Commands
 
 Each line starts with `desman operator`. Read commands that take `--json` emit the

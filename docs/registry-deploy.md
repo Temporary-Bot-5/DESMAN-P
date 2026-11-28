@@ -188,8 +188,24 @@ Once the address is final it becomes `net.DEFAULT_REGISTRY` in a release.
 ```bash
 desman-registry nodes            # who takes part, what they lend, when seen last
 desman-registry log --limit 100  # registrations, departures, assignments, revocations, refusals
+desman-registry operators
+desman-registry operators show FINGERPRINT --limit 50
 desman-registry revoke FINGERPRINT --reason "why"   # a node or an operator, signed by the root
 ```
+
+To appoint an operator, ask them to run `desman operator key create --registry URL` and
+send the displayed public key. Check its fingerprint with them over a separate channel.
+Run `desman-registry assign PUBLIC_KEY --scope tasks` on the server with the desired scopes,
+then have the operator verify the assignment with `desman operator status`.
+
+`operators` lists historical operator keys and their activity. `operators show` accepts
+a full fingerprint or a unique prefix of at least eight hex digits and shows authority
+records, work by status and node, and the recent journal. Cluster lease counts come from
+the cluster’s jobs. Both commands support `--json`.
+
+By default, revoking an operator drops the open jobs and cluster tasks it signed, drops
+the open jobs of those clusters, and withdraws their held leases. All changes commit
+with the revocation. Use `--keep-work` to retain the work for another operator to settle.
 
 Every refused request is journaled with the reason and the key it claimed. A burst of
 `forged` or `replay` entries from one key usually means a broken clock or a copied `node.key`.
