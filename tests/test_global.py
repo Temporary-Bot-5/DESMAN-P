@@ -28,7 +28,7 @@ from desman.config import (
     default_config_path,
     upgrade,
 )
-from desman.core import db, netlog
+from desman.core import db, netlog, web
 from desman.interlocutor import CHAT
 from desman.llm.fake import FakeLLM
 from desman.net import jobs, sign
@@ -39,6 +39,16 @@ from test_wizard import DONE, KEEP_PERMISSIONS, wizard
 REGISTRY = "https://registry.example.org"
 OLLAMA = {"OLLAMA_MODEL": "llama3.2"}
 LENT = Donation(calls_per_day=100, tokens_per_day=100_000)
+
+
+@pytest.fixture(autouse=True)
+def catalog_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "resolve", lambda host, port: ["93.184.215.14"])
+    monkeypatch.setattr(
+        web,
+        "fetch_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(503))),
+    )
 
 
 @pytest.fixture

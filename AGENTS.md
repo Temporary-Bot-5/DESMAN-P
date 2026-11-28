@@ -284,6 +284,7 @@ src/desman/
                    #   gated), check_access, free RAM/video memory, Ollama's pull; HF_TOKEN
                    #   goes to huggingface.co only. Downloads nothing unless the person said yes
 └── net/           # desman-global, the node's side (ADR 0004); never runs while it is off
+    │              #   (except catalog.py: registry discovery the person asked for)
     ├── __init__.py # registry(config): the registry's address, None while it is off — the
     │              #   one way to it; DEFAULT_REGISTRY (None until the owner's registry runs)
     ├── sign.py    # Ed25519: node.key (0600, shown by fingerprint only), canonical JSON, Signed
@@ -368,7 +369,10 @@ preemption, self-improvement or network features before their phase).
   through git, never by an agent). `network` (desman-global) likewise: set by the human only,
   off by default; anything that talks to the registry gets its address from `net.registry()`; the one
   exception is operator mode (ADR 0016), which uses `net.operator_registry()` and only while
-  the person has installed an operator key.
+  the person has installed an operator key. Registry discovery (`net/catalog.py`, T.6zd) is
+  the other one: it fetches the root-signed catalog and probes the listed registries'
+  `/healthz` only when the person asks (`global registries`, joining in the wizard, CLI or
+  Settings), and sends nothing else to them.
 - A new CLI command also gets an entry in `commands.CATALOG` (a test requires it); the chat
   calls the same body function as the CLI, never the CLI itself.
 - A change that alters what DESMAN does for the person also updates the topic of
