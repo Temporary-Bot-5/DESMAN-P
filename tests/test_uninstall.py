@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 import desman
+from conftest import FakeClock
 from desman import commands, runs, sandbox_cli, searxng, searxng_native, ui, uninstall_cli
 from desman.chat import Chat
 from desman.cli import cli
@@ -334,12 +335,16 @@ def test_cleanup_removes_managed_search(
     if config_volume:
         mounts.append({"Type": "volume", "Destination": "/etc/searxng"})
     monkeypatch.setattr(searxng, "inspect", lambda: {"Mounts": mounts})
-    monkeypatch.setattr(searxng, "docker", docker.append)
+    monkeypatch.setattr(searxng, "docker", lambda args, timeout=60: docker.append(args))
     monkeypatch.setattr(searxng_native, "stop", stopped.append)
     uninstall_cli._services(app, purge, removing=False)
-    assert not docker and not stopped
+    assert docker == [["info"]] and not stopped
     uninstall_cli._services(app, purge, removing=True)
-    assert docker == [["rm", "-f", *([] if config_volume else ["-v"]), "desman-searxng"]]
+    assert docker == [
+        ["info"],
+        ["info"],
+        ["rm", "-f", *([] if config_volume else ["-v"]), "desman-searxng"],
+    ]
     assert stopped == ([native] if purge else [])
     assert native.is_dir()  # the installer purges this directory
 
@@ -418,7 +423,10 @@ def test_stopped_docker_allows_uninstall(
     settings = app / "searxng-docker" / "settings.yml"
     settings.parent.mkdir()
     settings.touch()
-    error = "failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine"
+    error = (
+        "error during connect: open //./pipe/dockerDesktopLinuxEngine: "
+        "Не удается найти указанный файл."
+    )
     commands_run: list[list[str]] = []
     running = False
 
@@ -445,13 +453,15 @@ def test_stopped_docker_allows_uninstall(
     uninstall_cli.start(app, False, spawn=lambda argv, **_: spawned.append(argv))
     assert len(spawned) == 1
     assert not capsys.readouterr().out
+    assert commands_run == [["info"], ["info"]]
     running = recovers
+    commands_run.clear()
     uninstall_cli._finish_cleanup(False)
     if recovers:
-        assert commands_run[-1] == ["rm", "-f", "-v", searxng.CONTAINER]
+        assert [args[0] for args in commands_run] == ["info", "ps", "inspect", "rm"]
         assert not capsys.readouterr().out
     else:
-        assert commands_run[-1] == ["info"]
+        assert commands_run == [["info"]]
         [note] = capsys.readouterr().out.splitlines()
         assert "Docker is not running" in note
 
@@ -460,7 +470,6 @@ def test_stopped_docker_allows_uninstall(
     "error",
     [
         "Error response from daemon: NO SUCH CONTAINER: desman-searxng",
-        "Error response from daemon: Removal of container desman-searxng is already in progress",
         "Error response from daemon: permission denied",
     ],
 )
@@ -479,11 +488,49 @@ def test_container_removal_race(app: Path, error: str, monkeypatch: pytest.Monke
     if "permission denied" in error:
         with pytest.raises(click.ClickException, match="permission denied"):
             uninstall_cli._finish_cleanup(False)
-        assert calls[1:] == [["info"]]
+        assert calls[2:] == [["info"]]
     else:
         uninstall_cli._finish_cleanup(False)
-        assert len(calls) == 1
-    assert calls[0] == ["rm", "-f", "-v", searxng.CONTAINER]
+        assert len(calls) == 2
+    assert calls[:2] == [["info"], ["rm", "-f", "-v", searxng.CONTAINER]]
+
+
+@pytest.mark.parametrize("disappears", [True, False])
+def test_container_removal_in_progress_checks_result(
+    disappears: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    clock: FakeClock,
+) -> None:
+    calls: list[str] = []
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        calls.append(args[0])
+        if args[0] == "rm":
+            raise click.ClickException("Removal of container desman-searxng is already in progress")
+        assert timeout == 2
+        if args[0] == "ps":
+            return "" if disappears and calls.count("ps") == 2 else searxng.CONTAINER
+        return '[{"Mounts": []}]'
+
+    monkeypatch.setattr(searxng, "docker", docker)
+    uninstall_cli._remove_docker_search({"Mounts": []}, sleep=clock.sleep)
+    assert calls == ["rm", "ps", "inspect", "ps"] + ([] if disappears else ["inspect"])
+    assert clock.slept == 1
+    output = capsys.readouterr().out
+    if disappears:
+        assert not output
+    else:
+        assert "docker rm -f desman-searxng" in output
+
+
+@pytest.mark.parametrize("target", ["//./pipe/dockerDesktopLinuxEngine", "npipe:docker_engine"])
+def test_daemon_unreachable_named_pipe(target: str) -> None:
+    error = f"error during connect: {target}: "
+    assert uninstall_cli._daemon_unreachable(
+        click.ClickException(error + "Не удается найти указанный файл.")
+    )
+    assert not uninstall_cli._daemon_unreachable(click.ClickException(error + "Access is denied."))
 
 
 @pytest.mark.parametrize("problem", ["docker", "native", "wsl"])

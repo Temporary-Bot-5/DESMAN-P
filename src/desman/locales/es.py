@@ -12,6 +12,7 @@ def plural(n: int) -> int:
 MESSAGES: dict[str, Forms] = {
     "You": "Tú",
     "Docker is not running, so the SearXNG container will stay. Start Docker before uninstalling to remove it, or run `docker rm -f desman-searxng` later.": "Docker no está en marcha, así que el contenedor de SearXNG se conservará. Inicia Docker antes de desinstalar o elimina el contenedor más tarde con `docker rm -f desman-searxng`.",
+    "The SearXNG container may still be present. To remove it later, run `docker rm -f desman-searxng`.": "Es posible que el contenedor de SearXNG siga presente. Para eliminarlo más tarde, ejecuta `docker rm -f desman-searxng`.",
     "Reviewer's tests (attempt {attempt}) could not be verified.": "No se pudieron verificar las pruebas del revisor (intento {attempt}).",
     "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "Pruebas del revisor (intento {attempt}) — superadas: {passed}, fallidas: {failed}, errores: {errors}",
     "document parts work without tools": "las partes del documento se procesan sin herramientas",

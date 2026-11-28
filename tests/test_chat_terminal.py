@@ -11,6 +11,7 @@ from pathlib import Path
 import click
 import pytest
 from rich.table import Table
+from rich.text import Text
 
 from conftest import FakeClock
 from desman import runs, task_files, ui
@@ -29,6 +30,20 @@ def sessions(clock: FakeClock) -> Iterator[Sessions]:
     open_config().save(Config(language="en", configured=True))
     yield Sessions(conn, clock=clock)
     conn.close()
+
+
+def test_reply_before_session_formats_commands_and_math(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = Chat(sessions)
+    assert chat.session_id is None
+    output: list[Text] = []
+    monkeypatch.setattr(ui, "is_terminal_front", lambda: True)
+    monkeypatch.setattr(ui, "out", output.append)
+    chat._say(r"Run `desman list` to see $2^2$ results.")
+    [reply] = output
+    assert "DESMAN" in reply.plain
+    assert "Run `/list` to see 2² results." in reply.plain
 
 
 def test_terminal_upgrade_and_constraints(tmp_path: Path) -> None:

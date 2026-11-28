@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -134,29 +135,36 @@ def _docker_settings_exist(app: Path) -> bool:
     )
 
 
-def _daemon_unreachable() -> bool:
+def _daemon_unreachable(exc: click.ClickException) -> bool:
+    error = exc.message.casefold()
+    if "permission denied" in error or "access is denied" in error:
+        return False
+    if "error during connect" in error and any(
+        detail in error
+        for detail in ("//./pipe/", "npipe:", "the system cannot find the file specified")
+    ):
+        return True
+    return isinstance(exc.__cause__, subprocess.TimeoutExpired) or any(
+        phrase in error
+        for phrase in (
+            "cannot connect to the docker daemon",
+            "failed to connect to the docker api",
+            "is the docker daemon running",
+            "connection refused",
+        )
+    )
+
+
+def _docker_stopped() -> bool:
     try:
         searxng.docker(["info"], timeout=5)
     except click.ClickException as exc:
-        error = exc.message.casefold()
-        if "permission denied" in error or "access is denied" in error:
-            return False
-        if "error during connect" in error and "the system cannot find the file specified" in error:
-            return True
-        return isinstance(exc.__cause__, subprocess.TimeoutExpired) or any(
-            phrase in error
-            for phrase in (
-                "cannot connect to the docker daemon",
-                "failed to connect to the docker api",
-                "is the docker daemon running",
-                "connection refused",
-            )
-        )
+        return _daemon_unreachable(exc)
     return False
 
 
 def docker_search_unavailable(app: Path) -> bool:
-    return find_docker() is not None and _docker_settings_exist(app) and _daemon_unreachable()
+    return find_docker() is not None and _docker_settings_exist(app) and _docker_stopped()
 
 
 def _docker_skip_note() -> str:
@@ -201,18 +209,26 @@ def _powershell_quote(path: Path) -> str:
 def _docker_search(app: Path, *, removing: bool) -> dict[str, Any] | None:
     if find_docker() is None:
         return None
+    managed = _docker_settings_exist(app)
     try:
-        return searxng.inspect()
-    except click.ClickException:
-        if _docker_settings_exist(app):
-            if not _daemon_unreachable():
+        searxng.docker(["info"], timeout=5)
+    except click.ClickException as exc:
+        if managed and not _daemon_unreachable(exc):
+            raise
+    else:
+        try:
+            return searxng.inspect()
+        except click.ClickException:
+            if managed and not _docker_stopped():
                 raise
-            if removing:
-                ui.out(Text(_docker_skip_note()))
-        return None
+    if managed and removing:
+        ui.out(Text(_docker_skip_note()))
+    return None
 
 
-def _remove_docker_search(container: dict[str, Any]) -> None:
+def _remove_docker_search(
+    container: dict[str, Any], *, sleep: Callable[[float], None] = time.sleep
+) -> None:
     # The image can have a configuration volume as well as a cache volume.
     volumes = [m for m in container.get("Mounts", []) if m.get("Type") == "volume"]
     cache_only = all(m.get("Destination") == "/var/cache/searxng" for m in volumes)
@@ -221,11 +237,29 @@ def _remove_docker_search(container: dict[str, Any]) -> None:
         searxng.docker(["rm", "-f", *flags, searxng.CONTAINER])
     except click.ClickException as exc:
         error = exc.message.casefold()
-        if "no such container" in error or (
-            "removal of container" in error and "is already in progress" in error
-        ):
+        if "no such container" in error:
             return
-        if not _daemon_unreachable():
+        if "removal of container" in error and "is already in progress" in error:
+            for _ in range(2):
+                sleep(0.5)
+                try:
+                    if searxng.inspect(timeout=2) is None:
+                        return
+                except click.ClickException as check:
+                    if "no such container" in check.message.casefold():
+                        return
+                    if not _daemon_unreachable(check):
+                        raise
+            ui.out(
+                Text(
+                    t(
+                        "The SearXNG container may still be present. "
+                        "To remove it later, run `docker rm -f desman-searxng`."
+                    )
+                )
+            )
+            return
+        if not _docker_stopped():
             raise
         ui.out(Text(_docker_skip_note()))
 

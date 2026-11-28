@@ -758,7 +758,7 @@ class Chat:
 
     def _say(self, text: str, task_id: str | None = None, *, settle: bool = True) -> None:
         if self.session_id is None:
-            ui.out(ui.chat_reply(text) if ui.is_terminal_front() else Text(text))
+            ui.out(_render_reply(text, terminal=ui.is_terminal_front()))
             return
         message = self.sessions.add(
             self.session_id,
@@ -3048,8 +3048,12 @@ def _render(message: Message, *, terminal: bool | None = None) -> Text:
         return Text(ui.chat_user_marker() if terminal else "› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
         return Text(message.text, style="muted")
+    return _render_reply(message.text, terminal=terminal)
+
+
+def _render_reply(text: str, *, terminal: bool) -> Text:
     with ui.chat_output():
-        text = ui.chat_hint(actions.plain_math(message.text))
+        text = ui.chat_hint(actions.plain_math(text))
     return ui.chat_reply(text) if terminal else Text(text)
 
 
