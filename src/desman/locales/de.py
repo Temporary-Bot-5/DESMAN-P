@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Bestätigung überspringen.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access ist aktiv, aber keine Suchmaschine für das ganze Web eingerichtet: web_search umfasst nur Wikipedia, Stack Overflow, arXiv und GitHub. `desman search setup` oder `desman config` verwenden.",
-    "Remembered model access refusals cleared for the checked keys.": "Gespeicherte Modellzugriffsverweigerungen für die geprüften Schlüssel gelöscht.",
+    "Remembered model access refusals cleared for the accepted keys.": "Gespeicherte Modellzugriffsverweigerungen für die akzeptierten Schlüssel gelöscht.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} für Schlüssel #{number} ({fingerprint}) bis {until} nicht verfügbar: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "Port {port} ist belegt (ist ein anderes `desman gui` geöffnet?). Verwenden Sie einen anderen --port oder lassen Sie ihn weg, um einen freien zu wählen.",
     "{path}:": "{path}:",
@@ -2012,7 +2012,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Ungültige Anführungszeichen im Befehl."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Ungültige Anführungszeichen im Befehl.",
+        "Only command options can follow quoted text.": "Nach Text in Anführungszeichen dürfen nur Befehlsoptionen folgen.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2313,7 +2318,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "Der Schlüssel konnte derzeit nicht geprüft werden.",
         "rate limited right now": "Das Ratenlimit ist derzeit erreicht.",
-        "The key could not be checked because the default model is unavailable.": "Der Schlüssel konnte nicht geprüft werden, weil das Standardmodell nicht verfügbar ist.",
+        "The key could not be checked: no available model.": "Der Schlüssel konnte nicht geprüft werden: kein Modell verfügbar.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Setzen Sie Text mit Leerzeichen in doppelte Anführungszeichen, z. B. "wie hier".',
         "DESMAN is thinking… {seconds} s": "DESMAN denkt nach… {seconds} s",
     }

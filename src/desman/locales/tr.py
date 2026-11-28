@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Onayı atlayın.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access açık, ancak tüm web için arama motoru ayarlanmamış: web_search yalnızca Wikipedia, Stack Overflow, arXiv ve GitHub kapsamındadır. `desman search setup` veya `desman config` kullanın.",
-    "Remembered model access refusals cleared for the checked keys.": "Denetlenen anahtarlar için kaydedilen model erişim retleri temizlendi.",
+    "Remembered model access refusals cleared for the accepted keys.": "Kabul edilen anahtarlar için kaydedilen model erişim retleri temizlendi.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model}, #{number} ({fingerprint}) anahtarı için {until} tarihine kadar kullanılamıyor: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "{port} bağlantı noktası meşgul (başka bir `desman gui` açık mı?). Başka bir --port kullanın veya boş bir bağlantı noktası seçmek için belirtmeyin.",
     "{path}:": "{path}:",
@@ -1930,7 +1930,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Komuttaki tırnak işaretleri geçersiz."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Komuttaki tırnak işaretleri geçersiz.",
+        "Only command options can follow quoted text.": "Tırnak içindeki metinden sonra yalnızca komut seçenekleri gelebilir.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2215,7 +2220,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "Anahtar şu anda doğrulanamadı.",
         "rate limited right now": "Şu anda istek hızı sınırına ulaşıldı.",
-        "The key could not be checked because the default model is unavailable.": "Varsayılan model kullanılamadığından anahtar doğrulanamadı.",
+        "The key could not be checked: no available model.": "Anahtar doğrulanamadı: kullanılabilir model yok.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Boşluk içeren metni çift tırnak içine alın, örneğin "bunun gibi".',
         "DESMAN is thinking… {seconds} s": "DESMAN düşünüyor… {seconds} sn",
     }

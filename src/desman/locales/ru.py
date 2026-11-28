@@ -414,7 +414,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Пропустить подтверждение.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access включён, но поиск по всему интернету не настроен: web_search охватывает только Wikipedia, Stack Overflow, arXiv и GitHub. Выполните `desman search setup` или используйте `desman config`.",
-    "Remembered model access refusals cleared for the checked keys.": "Сохранённые отказы в доступе к моделям удалены для проверенных ключей.",
+    "Remembered model access refusals cleared for the accepted keys.": "Сохранённые отказы в доступе к моделям удалены для принятых ключей.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} недоступна ключу №{number} ({fingerprint}) до {until}: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "Порт {port} занят (уже открыт другой `desman gui`?). Укажите другой --port или не указывайте его, чтобы выбрать свободный.",
     "{path}:": "{path}:",
@@ -2304,7 +2304,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Неверные кавычки в команде."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Неверные кавычки в команде.",
+        "Only command options can follow quoted text.": "После текста в кавычках допустимы только параметры команды.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2591,7 +2596,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "Сейчас не удалось проверить ключ.",
         "rate limited right now": "Сейчас достигнут лимит частоты запросов.",
-        "The key could not be checked because the default model is unavailable.": "Не удалось проверить ключ, потому что модель по умолчанию недоступна.",
+        "The key could not be checked: no available model.": "Не удалось проверить ключ: нет доступной модели.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Текст с пробелами заключите в двойные кавычки, например "вот так".',
         "DESMAN is thinking… {seconds} s": "DESMAN думает… {seconds} с",
     }

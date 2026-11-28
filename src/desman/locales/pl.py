@@ -414,7 +414,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Pomiń potwierdzenie.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access jest włączony, ale brak wyszukiwarki całej sieci: web_search obejmuje tylko Wikipedia, Stack Overflow, arXiv i GitHub. Użyj `desman search setup` lub `desman config`.",
-    "Remembered model access refusals cleared for the checked keys.": "Usunięto zapamiętane odmowy dostępu do modeli dla sprawdzonych kluczy.",
+    "Remembered model access refusals cleared for the accepted keys.": "Usunięto zapamiętane odmowy dostępu do modeli dla zaakceptowanych kluczy.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} niedostępny dla klucza #{number} ({fingerprint}) do {until}: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "Port {port} jest zajęty (czy inne `desman gui` jest otwarte?). Użyj innego --port lub pomiń tę opcję, aby wybrać wolny port.",
     "{path}:": "{path}:",
@@ -2061,7 +2061,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Nieprawidłowe cudzysłowy w poleceniu."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Nieprawidłowe cudzysłowy w poleceniu.",
+        "Only command options can follow quoted text.": "Po tekście w cudzysłowie mogą występować tylko opcje polecenia.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2354,7 +2359,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "Nie można teraz sprawdzić klucza.",
         "rate limited right now": "Osiągnięto aktualny limit częstotliwości żądań.",
-        "The key could not be checked because the default model is unavailable.": "Nie udało się sprawdzić klucza, ponieważ model domyślny jest niedostępny.",
+        "The key could not be checked: no available model.": "Nie udało się sprawdzić klucza: brak dostępnego modelu.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Tekst ze spacjami ujmij w podwójny cudzysłów, np. "tak jak tu".',
         "DESMAN is thinking… {seconds} s": "DESMAN myśli… {seconds} s",
     }

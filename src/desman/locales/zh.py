@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG：{url}",
     "Skip confirmation.": "跳过确认。",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access 已启用，但尚未设置全网搜索引擎：web_search 仅涵盖 Wikipedia、Stack Overflow、arXiv 和 GitHub。请运行 `desman search setup` 或使用 `desman config`。",
-    "Remembered model access refusals cleared for the checked keys.": "已清除所检查密钥的模型访问拒绝记录。",
+    "Remembered model access refusals cleared for the accepted keys.": "已清除已接受密钥的模型访问拒绝记录。",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} 对密钥 #{number} ({fingerprint}) 不可用，直到 {until}：{words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "端口 {port} 已被占用（是否已打开另一个 `desman gui`？）。请使用其他 --port，或省略此选项以选择空闲端口。",
     "{path}:": "{path}:",
@@ -1916,7 +1916,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "命令中的引号无效。"})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "命令中的引号无效。",
+        "Only command options can follow quoted text.": "带引号的文本后只能跟命令选项。",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2142,7 +2147,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "目前无法检查密钥。",
         "rate limited right now": "当前已达到请求速率限制。",
-        "The key could not be checked because the default model is unavailable.": "默认模型不可用，无法验证密钥。",
+        "The key could not be checked: no available model.": "无法验证密钥：没有可用的模型。",
         'Put text with spaces in double quotes, e.g. "like this".': '请将含空格的文本放在双引号内，例如 "像 这样"。',
         "DESMAN is thinking… {seconds} s": "DESMAN 正在思考… {seconds} 秒",
     }

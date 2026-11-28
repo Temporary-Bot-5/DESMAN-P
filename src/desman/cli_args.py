@@ -13,7 +13,7 @@ class FreeText(click.Argument):
     def _join(
         _ctx: click.Context, _param: click.Parameter, words: tuple[str, ...] | None
     ) -> str | None:
-        return " ".join(words) if words else None
+        return " ".join(words).rstrip() if words else None
 
 
 def extra_args_hint() -> str:

@@ -611,7 +611,7 @@ async function poll() {
         $("live").textContent = data.turn.reason || words.waiting_module.replace("{n}", data.turn.ahead);
       } else rich($("live"), live);
       showThinking(data.pending || data.ended ? null :
-        (data.turn?.thinking_since ?? data.thinking_since));
+        (data.turn ? data.turn.thinking_since : data.thinking_since));
       canAttach = !!data.can_attach;
       showPrompt(data.pending || null, true);
       showPrompt(data.prompt);

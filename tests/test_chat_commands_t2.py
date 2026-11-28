@@ -950,12 +950,11 @@ def test_model_gui_handoff_needs_confirmation(monkeypatch: pytest.MonkeyPatch, a
     ("line", "text", "task"),
     [
         (r"Тест тест tesT./|\~!@#$%", r"Тест тест tesT./|\~!@#$%", None),
-        ("--task X don't  remove --help  ", "don't  remove --help  ", "X"),
+        ("--task X don't  remove --help  ", "don't  remove --help", "X"),
         ('--task=X "two words"', "two words", "X"),
-        ('"Chat freezes" --task 1a2b3c4d', "Chat freezes", "1a2b3c4d"),
-        ("Chat --task=1a2b3c4d freezes", "Chat freezes", "1a2b3c4d"),
+        ('"Chat freezes" --task 1a2b', "Chat freezes", "1a2b"),
+        ("Chat --task=1a2b3c4d freezes", "Chat --task=1a2b3c4d freezes", None),
         ("I can't  open --foo -x -- the page", "I can't  open --foo -x -- the page", None),
-        ('"a --task X" and "b" --task Y', '"a --task X" and "b"', "Y"),
         ('says "hello', 'says "hello', None),
         ('"--help"', "--help", None),
     ],
@@ -977,9 +976,21 @@ def test_run_options_after_goal(
     assert parsed is not None
     assert parsed[1] == commands.RunArgs(goal="Read", file=["x"])
 
-    parsed = commands.parse_line("run do it --master", None, windows=windows)
+    for goal in ("do it --master", "explain what --json does", "don't use --model x please"):
+        parsed = commands.parse_line(f"run {goal}  \t\n", None, windows=windows)
+        assert parsed is not None
+        assert parsed[1] == commands.RunArgs(goal=goal)
+
+    parsed = commands.parse_line('run --master "  Keep indentation  \n"  ', None, windows=windows)
     assert parsed is not None
-    assert parsed[1] == commands.RunArgs(goal="do it", master=True)
+    assert parsed[1] == commands.RunArgs(goal="  Keep indentation", master=True)
+
+
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("tail", ['and "b" --task Y', "--unknown X", "--task Y extra", "--"])
+def test_only_options_can_follow_quoted_text(windows: bool, tail: str) -> None:
+    with pytest.raises(commands.BadArgs, match="Only command options"):
+        commands.parse_line(f'global report "a --task X" {tail}', None, windows=windows)
 
 
 def test_extra_argument_hint_in_chat_and_cli() -> None:

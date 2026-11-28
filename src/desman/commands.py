@@ -3666,57 +3666,12 @@ _POSIX_WORD = re.compile(r"""(?:[^\s'"\\]|\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*
 _WINDOWS_WORD = re.compile(r'(?:[^\s"]|"[^"]*")+(?=\s|$)')
 
 
-def _text_options(
-    line: str,
-    pattern: re.Pattern[str],
-    split: Callable[[str], list[str]],
-    options: dict[str, click.Option],
-    words: list[str],
-) -> str | None:
-    """Move exact option names and their values out of the prose before Click parses it."""
-    pieces: list[str] = []
-    end = 0
-    pos = 0
-    nonspace = re.compile(r"\S+")
-    while token := nonspace.search(line, pos):
-        start = token.start()
-        name, equals, _ = token[0].partition("=")
-        if name not in options:
-            # Only a quote at the start of a prose word can protect spaces inside it.
-            quoted = pattern.match(line, start) if line[start] in "\"'" else None
-            pos = quoted.end() if quoted else token.end()
-            continue
-        match = pattern.match(line, start)
-        if match is None:
-            raise ValueError("Unclosed quote or escape")
-        words.extend(split(match[0]))
-        pos = match.end()
-        option = options[name]
-        if not (option.is_flag or option.count):
-            for _ in range(option.nargs - bool(equals)):
-                value = nonspace.search(line, pos)
-                if value is None:
-                    return None  # Let Click report the incomplete option.
-                match = pattern.match(line, value.start())
-                if match is None:
-                    raise ValueError("Unclosed quote or escape")
-                words.extend(split(match[0]))
-                pos = match.end()
-        # Drop the gap before the extracted option, preserving the remaining prose spacing.
-        gap = start
-        while gap > end and line[gap - 1].isspace():
-            gap -= 1
-        pieces.append(line[end:gap])
-        end = pos
-    pieces.append(line[end:])
-    return "".join(pieces)
-
-
 def _line_words(line: str, root: click.Group, windows: bool) -> tuple[list[str], str | None]:
     import shlex
 
     pattern = _WINDOWS_WORD if windows else _POSIX_WORD
     split = _windows_words if windows else shlex.split
+    quoted = re.compile(r'"[^"]*"' if windows else r"""(?:"(?:[^"\\]|\\[\s\S])*"|'[^']*')""")
     command: click.Command = root
     words: list[str] = []
     fixed = 0
@@ -3724,6 +3679,7 @@ def _line_words(line: str, root: click.Group, windows: bool) -> tuple[list[str],
     option_values = 0
     options = True
     named_options: dict[str, click.Option] = {}
+    free_text: str | None = None
     while line:
         line = line.lstrip()
         if not line:
@@ -3735,23 +3691,19 @@ def _line_words(line: str, root: click.Group, windows: bool) -> tuple[list[str],
         starts_option = options and (
             token in {"--", "--help"} or token.partition("=")[0] in named_options
         )
-        if trailing and not fixed and not option_values and not starts_option:
-            if options:
-                prose = _text_options(line, pattern, split, named_options, words)
-                if prose is None:
-                    return words, None
-                line = prose
-            # Remove a single enclosing pair, without treating interior apostrophes or
-            # incomplete quotes as syntax in an otherwise unquoted description.
-            quotes = ('"',) if windows else ('"', "'")
-            trimmed = line.rstrip()
-            quoted = r'"[^"]*"' if windows else r"""(?:"(?:[^"\\]|\\[\s\S])*"|'[^']*')"""
-            if trimmed.startswith(quotes) and re.fullmatch(quoted, trimmed):
-                line = split(trimmed)[0]
-            # Tell Click where options stop so leading dashes in the prose are literal.
-            if options:
-                words.append("--")
-            return words, line
+        if trailing and not fixed and not option_values:
+            if free_text is not None:
+                if not starts_option or token == "--":
+                    raise BadArgs(t("Only command options can follow quoted text."))
+            elif not starts_option:
+                # An unquoted goal or description owns the entire remaining line.
+                match = quoted.match(line)
+                if match is None or (match.end() < len(line) and not line[match.end()].isspace()):
+                    free_text = line
+                    break
+                free_text = split(match[0])[0]
+                line = line[match.end() :]
+                continue
         match = pattern.match(line)
         if match is None:
             raise ValueError("Unclosed quote or escape")
@@ -3786,7 +3738,11 @@ def _line_words(line: str, root: click.Group, windows: bool) -> tuple[list[str],
         elif fixed:
             fixed -= 1
         words.append(word)
-    return words, None
+    if option_values:
+        return words, None  # Let Click report an incomplete option.
+    if free_text is not None and options:
+        words.append("--")  # Keep leading dashes in the text literal for Click.
+    return words, free_text
 
 
 def parse_line(

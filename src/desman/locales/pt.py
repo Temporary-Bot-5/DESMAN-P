@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Ignorar confirmação.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access está ativado, mas não há busca em toda a web: web_search cobre apenas Wikipedia, Stack Overflow, arXiv e GitHub. Use `desman search setup` ou `desman config`.",
-    "Remembered model access refusals cleared for the checked keys.": "Recusas de acesso a modelos memorizadas foram removidas para as chaves verificadas.",
+    "Remembered model access refusals cleared for the accepted keys.": "Recusas de acesso a modelos memorizadas foram removidas para as chaves aceitas.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} indisponível para a chave #{number} ({fingerprint}) até {until}: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "A porta {port} está ocupada (outro `desman gui` está aberto?). Use outra --port ou omita a opção para escolher uma porta livre.",
     "{path}:": "{path}:",
@@ -2012,7 +2012,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Aspas inválidas no comando."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Aspas inválidas no comando.",
+        "Only command options can follow quoted text.": "Apenas opções do comando podem aparecer após o texto entre aspas.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2311,7 +2316,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "Não foi possível verificar a chave agora.",
         "rate limited right now": "Limite de frequência de requisições atingido no momento.",
-        "The key could not be checked because the default model is unavailable.": "Não foi possível verificar a chave porque o modelo padrão está indisponível.",
+        "The key could not be checked: no available model.": "Não foi possível verificar a chave: nenhum modelo disponível.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Coloque textos com espaços entre aspas duplas, por exemplo "deste jeito".',
         "DESMAN is thinking… {seconds} s": "DESMAN está pensando… {seconds} s",
     }

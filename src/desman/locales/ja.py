@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "確認を省略します。",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access は有効ですが、ウェブ全体の検索エンジンが未設定です。web_search は Wikipedia、Stack Overflow、arXiv、GitHub のみを検索します。`desman search setup` または `desman config` を使用してください。",
-    "Remembered model access refusals cleared for the checked keys.": "確認したキーのモデルアクセス拒否の記録を消去しました。",
+    "Remembered model access refusals cleared for the accepted keys.": "受理されたキーのモデルアクセス拒否の記録を消去しました。",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} はキー #{number} ({fingerprint}) では {until} まで利用不可: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "ポート {port} は使用中です（別の `desman gui` が開いていますか？）。別の --port を指定するか、省略して空きポートを選んでください。",
     "{path}:": "{path}:",
@@ -1932,7 +1932,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "コマンドの引用符が正しくありません。"})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "コマンドの引用符が正しくありません。",
+        "Only command options can follow quoted text.": "引用符で囲んだテキストの後にはコマンドのオプションのみ指定できます。",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2171,7 +2176,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "現在キーを確認できませんでした。",
         "rate limited right now": "現在、リクエストのレート制限に達しています。",
-        "The key could not be checked because the default model is unavailable.": "既定のモデルが利用できないため、キーを確認できませんでした。",
+        "The key could not be checked: no available model.": "利用できるモデルがないため、キーを確認できませんでした。",
         'Put text with spaces in double quotes, e.g. "like this".': '空白を含むテキストは二重引用符で囲んでください。例 "この ように"。',
         "DESMAN is thinking… {seconds} s": "DESMAN が考えています… {seconds} 秒",
     }

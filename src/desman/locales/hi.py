@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "पुष्टि छोड़ें।",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access चालू है, लेकिन पूरे वेब का खोज इंजन सेट नहीं है: web_search केवल Wikipedia, Stack Overflow, arXiv और GitHub खोजता है। `desman search setup` या `desman config` का उपयोग करें।",
-    "Remembered model access refusals cleared for the checked keys.": "जाँची गई कुंजियों के लिए सहेजे गए मॉडल पहुँच अस्वीकरण मिटा दिए गए।",
+    "Remembered model access refusals cleared for the accepted keys.": "स्वीकार की गई कुंजियों के लिए सहेजे गए मॉडल पहुँच अस्वीकरण मिटा दिए गए।",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} कुंजी #{number} ({fingerprint}) के लिए {until} तक अनुपलब्ध: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "पोर्ट {port} व्यस्त है (क्या कोई दूसरा `desman gui` खुला है?)। दूसरा --port चुनें या खाली पोर्ट चुनने के लिए इसे छोड़ दें।",
     "{path}:": "{path}:",
@@ -2009,7 +2009,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "कमांड में उद्धरण चिह्न सही नहीं हैं।"})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "कमांड में उद्धरण चिह्न सही नहीं हैं।",
+        "Only command options can follow quoted text.": "उद्धरण चिह्नों में दिए गए पाठ के बाद केवल कमांड के विकल्प आ सकते हैं।",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2304,7 +2309,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "कुंजी की जाँच अभी नहीं हो सकी।",
         "rate limited right now": "अनुरोधों की दर सीमा अभी पूरी हो गई है।",
-        "The key could not be checked because the default model is unavailable.": "डिफ़ॉल्ट मॉडल उपलब्ध नहीं है, इसलिए कुंजी की जाँच नहीं हो सकी।",
+        "The key could not be checked: no available model.": "कुंजी की जाँच नहीं हो सकी: कोई मॉडल उपलब्ध नहीं है।",
         'Put text with spaces in double quotes, e.g. "like this".': 'रिक्त स्थान वाले पाठ को दोहरे उद्धरण चिह्नों में रखें, जैसे "इस तरह"।',
         "DESMAN is thinking… {seconds} s": "DESMAN सोच रहा है… {seconds} से",
     }

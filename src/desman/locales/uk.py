@@ -414,7 +414,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Пропустити підтвердження.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access увімкнено, але пошук у всьому інтернеті не налаштований: web_search охоплює лише Wikipedia, Stack Overflow, arXiv і GitHub. Виконайте `desman search setup` або `desman config`.",
-    "Remembered model access refusals cleared for the checked keys.": "Збережені відмови в доступі до моделей видалено для перевірених ключів.",
+    "Remembered model access refusals cleared for the accepted keys.": "Збережені відмови в доступі до моделей видалено для прийнятих ключів.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} недоступна ключу №{number} ({fingerprint}) до {until}: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "Порт {port} зайнятий (уже відкрито інший `desman gui`?). Вкажіть інший --port або пропустіть його, щоб вибрати вільний.",
     "{path}:": "{path}:",
@@ -2061,7 +2061,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Неправильні лапки в команді."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Неправильні лапки в команді.",
+        "Only command options can follow quoted text.": "Після тексту в лапках дозволені лише параметри команди.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2350,7 +2355,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "Зараз не вдалося перевірити ключ.",
         "rate limited right now": "Зараз досягнуто ліміту частоти запитів.",
-        "The key could not be checked because the default model is unavailable.": "Не вдалося перевірити ключ, бо типова модель недоступна.",
+        "The key could not be checked: no available model.": "Не вдалося перевірити ключ: немає доступної моделі.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Текст із пробілами беріть у подвійні лапки, наприклад "ось так".',
         "DESMAN is thinking… {seconds} s": "DESMAN думає… {seconds} с",
     }

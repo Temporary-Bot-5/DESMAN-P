@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "확인을 건너뜁니다.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access가 켜져 있지만 전체 웹 검색 엔진이 설정되지 않았습니다. web_search는 Wikipedia, Stack Overflow, arXiv, GitHub만 검색합니다. `desman search setup` 또는 `desman config`를 사용하세요.",
-    "Remembered model access refusals cleared for the checked keys.": "확인한 키의 저장된 모델 접근 거부 기록을 삭제했습니다.",
+    "Remembered model access refusals cleared for the accepted keys.": "수락된 키의 저장된 모델 접근 거부 기록을 삭제했습니다.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model}: 키 #{number} ({fingerprint})에서 {until}까지 사용 불가: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "포트 {port}이 사용 중입니다(다른 `desman gui`가 열려 있나요?). 다른 --port를 사용하거나 생략하여 빈 포트를 선택하세요.",
     "{path}:": "{path}:",
@@ -1926,7 +1926,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "명령의 따옴표가 올바르지 않습니다."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "명령의 따옴표가 올바르지 않습니다.",
+        "Only command options can follow quoted text.": "따옴표로 묶은 텍스트 뒤에는 명령 옵션만 올 수 있습니다.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2183,7 +2188,7 @@ MESSAGES.update(
     {
         "The key could not be checked now.": "지금은 키를 확인할 수 없습니다.",
         "rate limited right now": "현재 요청 속도 제한에 도달했습니다.",
-        "The key could not be checked because the default model is unavailable.": "기본 모델을 사용할 수 없어 키를 확인하지 못했습니다.",
+        "The key could not be checked: no available model.": "사용 가능한 모델이 없어 키를 확인하지 못했습니다.",
         'Put text with spaces in double quotes, e.g. "like this".': '공백이 있는 텍스트는 큰따옴표로 감싸세요. 예 "이렇게 입력".',
         "DESMAN is thinking… {seconds} s": "DESMAN이 생각 중… {seconds}초",
     }

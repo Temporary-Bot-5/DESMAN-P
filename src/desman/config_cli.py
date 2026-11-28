@@ -755,8 +755,8 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
             default,
         )
     ui.out(table)
-    if results and all(r.ok for r in results):
-        ui.note(t("Remembered model access refusals cleared for the checked keys."))
+    if any(r.ok for r in results):
+        ui.note(t("Remembered model access refusals cleared for the accepted keys."))
     ui.out("")
     warned: set[str] = set()
     for r in results:
@@ -767,8 +767,8 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
             _local_hint(p, r)
         elif not r.ok or r.detail == check.RATE_LIMITED:
             detail = r.detail
-            if detail == check.DEFAULT_MODEL_UNAVAILABLE:
-                detail = t("The key could not be checked because the default model is unavailable.")
+            if detail == check.NO_AVAILABLE_MODEL:
+                detail = t("The key could not be checked: no available model.")
             elif detail == check.CHECK_UNAVAILABLE:
                 detail = t("The key could not be checked now.")
             elif detail == check.RATE_LIMITED:
