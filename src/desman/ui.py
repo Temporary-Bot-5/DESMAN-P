@@ -320,14 +320,23 @@ _prompt: Any = None
 """The chat's prompt, made once so that ↑ reaches the lines typed earlier in this run."""
 
 
+def chat_user_marker() -> str:
+    return t("You") + " › "
+
+
+def chat_reply(text: str) -> Text:
+    return Text("\n") + Text("DESMAN ›", style="key") + Text("\n" + text + "\n")
+
+
 def _chat_prompt() -> Any:
     global _prompt
+    from prompt_toolkit.layout.containers import FloatContainer
+    from prompt_toolkit.layout.menus import CompletionsMenu
+
     if _prompt is None:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import InMemoryHistory
         from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.layout.containers import FloatContainer
-        from prompt_toolkit.layout.menus import CompletionsMenu
         from prompt_toolkit.styles import Style
 
         class RedactedHistory(InMemoryHistory):
@@ -376,9 +385,8 @@ def _chat_prompt() -> Any:
             # Keep the inserted completion when dismissing the list.
             event.current_buffer.complete_state = None
 
-        marker = "› "
         _prompt = PromptSession(
-            [("class:mark", marker)],
+            lambda: [("class:mark", chat_user_marker())],
             history=RedactedHistory(),
             key_bindings=bindings,
             complete_while_typing=True,
@@ -394,13 +402,14 @@ def _chat_prompt() -> Any:
                 }
             ),
         )
-        for container in _prompt.layout.walk():
-            if isinstance(container, FloatContainer):
-                for floating in container.floats:
-                    if isinstance(floating.content, CompletionsMenu):
-                        # The menu pads each entry with one leading cell.
-                        floating.xcursor = False
-                        floating.left = cell_len(marker) - 1
+
+    for container in _prompt.layout.walk():
+        if isinstance(container, FloatContainer):
+            for floating in container.floats:
+                if isinstance(floating.content, CompletionsMenu):
+                    # The menu pads each entry with one leading cell.
+                    floating.xcursor = False
+                    floating.left = cell_len(chat_user_marker()) - 1
     return _prompt
 
 

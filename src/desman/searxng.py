@@ -75,12 +75,14 @@ def available(*, timeout: float = 5) -> None:
         ) from e
 
 
-def inspect() -> dict[str, Any] | None:
-    names = docker(["ps", "-a", "--filter", f"name=^/{CONTAINER}$", "--format", "{{.Names}}"])
+def inspect(*, timeout: float = 60) -> dict[str, Any] | None:
+    names = docker(
+        ["ps", "-a", "--filter", f"name=^/{CONTAINER}$", "--format", "{{.Names}}"], timeout=timeout
+    )
     if CONTAINER not in names.splitlines():
         return None
     try:
-        data: dict[str, Any] = json.loads(docker(["inspect", CONTAINER]))[0]
+        data: dict[str, Any] = json.loads(docker(["inspect", CONTAINER], timeout=timeout))[0]
         return data
     except (ValueError, IndexError, TypeError) as e:
         raise click.ClickException(t("Docker failed: {error}", error=str(e))) from e

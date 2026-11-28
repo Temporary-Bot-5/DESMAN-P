@@ -148,7 +148,7 @@ def test_a_request_in_ordinary_words_becomes_a_task_seen_working_and_retold_ther
     assert "[0] running  Search the web for flights" in shown
     assert "groq llama (#1 gsk_…" in shown and "executor · [0] · working" in shown
     assert "is done" in shown
-    assert "The cheapest is TP 1351 on 12 November at 09:40, for 61 EUR." in shown
+    assert "\n\nDESMAN ›\nThe cheapest is TP 1351 on 12 November at 09:40, for 61 EUR." in shown
 
     # The work used both: Tavily was asked with the new key, and what it found reached the
     # executor (marked untrusted), whose result the retelling saw.

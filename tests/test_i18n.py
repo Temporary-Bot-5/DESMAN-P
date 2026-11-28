@@ -19,10 +19,23 @@ from click.testing import CliRunner, Result
 from desman import i18n, providers
 from desman.cli import cli
 from desman.config import Config, open_config
-from desman.locales import CLICK_DEVELOPER_ONLY, ru
+from desman.locales import CLICK_DEVELOPER_ONLY, ja, ru
 from desman.registry.cli import cli as registry_cli
 
 SOURCE = Path(__file__).parent.parent / "src" / "desman"
+
+
+def test_japanese_uninstall_warnings_use_consistent_container_spelling() -> None:
+    for message in (
+        "Docker is not running or not answering, so the SearXNG container will stay. "
+        "Start Docker before uninstalling to remove it, or run `docker rm -f desman-searxng` later.",
+        "The SearXNG container may still be present. "
+        "To remove it later, run `docker rm -f desman-searxng`.",
+    ):
+        translation = ja.MESSAGES[message]
+        assert isinstance(translation, str)
+        assert "SearXNG コンテナ" in translation
+        assert "コンテナー" not in translation
 
 
 @functools.cache

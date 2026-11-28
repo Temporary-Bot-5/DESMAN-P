@@ -26,6 +26,12 @@ from helpers import make_config
 # ── The texts ────────────────────────────────────────────────────────────────
 
 
+def test_uninstall_manual_describes_the_preview_and_later_container_removal() -> None:
+    topic = next(topic for topic in manual.TOPICS if topic.name == "data")
+    assert "the preview or confirmation says the container will stay" in topic.text
+    assert "Remove it later with docker rm -f desman-searxng" in topic.text
+
+
 @pytest.mark.parametrize("topic", manual.TOPICS, ids=lambda topic: topic.name)
 def test_every_command_a_topic_names_exists(topic: manual.Topic) -> None:
     """Check that every command in backticks has valid syntax for the chat or its launcher."""

@@ -11,7 +11,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.layout.screen import Screen
 from prompt_toolkit.output import DummyOutput
 
-from desman import ui
+from desman import i18n, ui
 
 
 @pytest.mark.parametrize(
@@ -35,11 +35,16 @@ def test_checkbox_summary_preserves_brackets(
     assert capsys.readouterr().out.strip() == summary
 
 
-@pytest.mark.parametrize("typed", ["/c", "/co"])
-def test_completion_menu_aligns_with_input(typed: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("language", "marker"), [("en", "You › "), ("ru", "Вы › ")])
+def test_completion_menu_aligns_with_input(
+    language: str, marker: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    typed = "/co"
     monkeypatch.setattr(ui, "_prompt", None)
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         prompt = ui._chat_prompt()
+        i18n.set_language(language)
+        assert ui._chat_prompt() is prompt
         app = prompt.app
         buffer = prompt.default_buffer
         document = Document(typed)
@@ -62,5 +67,6 @@ def test_completion_menu_aligns_with_input(typed: str, monkeypatch: pytest.Monke
         menu_start = min(
             x for x, cell in first_suggestion.items() if "completion-menu" in cell.style
         )
+        assert "".join(input_row[x].char for x in range(input_start)) == marker
         assert menu_start == input_start - 1
         assert first_suggestion[input_start].char == "/"

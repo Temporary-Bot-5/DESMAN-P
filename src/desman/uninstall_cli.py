@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -22,9 +24,15 @@ from desman import sandbox_cli, searxng, searxng_native, ui
 from desman.config import CONFIG_DIR_ENV, default_config_path, home_config_dir
 from desman.core import db
 from desman.core.sandbox import Sandbox, SandboxUnavailable, find_docker
-from desman.i18n import t
+from desman.i18n import language, set_language, t
+from desman.stdio import configure_output
 
 FAILURE_MARKER = "uninstall-failed.txt"
+_PREVIEW_DOCKER_TIMEOUT = 5
+_CLEANUP_DOCKER_TIMEOUT = 30
+_DOCKER_PROBE_TTL = 30
+_preview_probe: tuple[str, float, click.ClickException | None] | None = None
+_monotonic = time.monotonic
 
 
 def warn_last_failure() -> None:
@@ -125,12 +133,92 @@ def _check_paths(app: Path, purge: bool) -> None:
             )
 
 
-def plan(app: Path, purge: bool) -> list[str]:
+def _docker_settings_exist(app: Path) -> bool:
+    roots = {app, default_config_path().parent, home_config_dir()}
+    return any(
+        (root / name / "settings.yml").is_file()
+        for root in roots
+        for name in ("searxng", "searxng-docker")
+    )
+
+
+def _daemon_unreachable(exc: click.ClickException) -> bool:
+    if isinstance(exc.__cause__, subprocess.TimeoutExpired):
+        return True
+    error = exc.message.casefold()
+    if "internal server error for api route" in error or "all pipe instances are busy" in error:
+        return True
+    pipe_error = "error during connect" in error and any(
+        detail in error
+        for detail in ("//./pipe/", "npipe:", "the system cannot find the file specified")
+    )
+    if pipe_error and sys.platform == "win32":
+        pipe = re.search(r"//\./pipe/([^/\s:\"']+)", error)
+        if pipe is not None:
+            with suppress(OSError):
+                return all(name.casefold() != pipe[1] for name in os.listdir("\\\\.\\pipe\\"))
+    if "permission denied" in error or "access is denied" in error:
+        return False
+    return pipe_error or any(
+        phrase in error
+        for phrase in (
+            "cannot connect to the docker daemon",
+            "failed to connect to the docker api",
+            "is the docker daemon running",
+            "connection refused",
+        )
+    )
+
+
+def _probe_docker(timeout: int) -> click.ClickException | None:
+    try:
+        searxng.docker(["info"], timeout=timeout)
+    except click.ClickException as exc:
+        return exc
+    return None
+
+
+def _preview_docker(executable: str) -> click.ClickException | None:
+    global _preview_probe
+    if _preview_probe is not None:
+        cached_executable, expires, error = _preview_probe
+        if executable == cached_executable and _monotonic() < expires:
+            return error
+    error = _probe_docker(_PREVIEW_DOCKER_TIMEOUT)
+    _preview_probe = (executable, _monotonic() + _DOCKER_PROBE_TTL, error)
+    return error
+
+
+def _docker_unreachable_now() -> bool:
+    error = _probe_docker(_CLEANUP_DOCKER_TIMEOUT)
+    return error is not None and _daemon_unreachable(error)
+
+
+def docker_search_unavailable(app: Path) -> bool:
+    executable = find_docker()
+    if executable is None or not _docker_settings_exist(app):
+        return False
+    error = _preview_docker(executable)
+    return error is not None and _daemon_unreachable(error)
+
+
+def _docker_skip_note() -> str:
+    return t(
+        "Docker is not running or not answering, so the SearXNG container will stay. Start "
+        "Docker before uninstalling to remove it, or run `docker rm -f desman-searxng` later."
+    )
+
+
+def plan(app: Path, purge: bool, *, docker_unavailable: bool | None = None) -> list[str]:
+    if docker_unavailable is None:
+        docker_unavailable = docker_search_unavailable(app)
     lines = [
         t("Remove the DESMAN app folder: {path}", path=app),
         t("Remove the desman launcher and DESMAN shortcuts."),
         t("Remove managed SearXNG if present (desman search setup brings it back)."),
     ]
+    if docker_unavailable:
+        lines.append(_docker_skip_note())
     if purge:
         lines.extend(
             [
@@ -153,25 +241,71 @@ def _powershell_quote(path: Path) -> str:
     return "'" + value + "'"
 
 
-def _docker_search(app: Path) -> dict[str, Any] | None:
-    if find_docker() is None:
+def _docker_search(app: Path, *, removing: bool) -> dict[str, Any] | None:
+    executable = find_docker()
+    if executable is None:
         return None
+    managed = _docker_settings_exist(app)
+    error = _probe_docker(_CLEANUP_DOCKER_TIMEOUT) if removing else _preview_docker(executable)
+    if error is not None:
+        if managed and not _daemon_unreachable(error):
+            raise error
+    else:
+        try:
+            return searxng.inspect()
+        except click.ClickException as exc:
+            if (
+                managed
+                and not _daemon_unreachable(exc)
+                and not (removing and _docker_unreachable_now())
+            ):
+                raise
+    if managed and removing:
+        ui.out(Text(_docker_skip_note()))
+    return None
+
+
+def _remove_docker_search(
+    container: dict[str, Any], *, sleep: Callable[[float], None] = time.sleep
+) -> None:
+    # The image can have a configuration volume as well as a cache volume.
+    volumes = [m for m in container.get("Mounts", []) if m.get("Type") == "volume"]
+    cache_only = all(m.get("Destination") == "/var/cache/searxng" for m in volumes)
+    flags = ["-v"] if cache_only else []
     try:
-        return searxng.inspect()
-    except click.ClickException:
-        roots = {app, default_config_path().parent, home_config_dir()}
-        if any(
-            (root / name / "settings.yml").is_file()
-            for root in roots
-            for name in ("searxng", "searxng-docker")
-        ):
+        searxng.docker(["rm", "-f", *flags, searxng.CONTAINER])
+    except click.ClickException as exc:
+        error = exc.message.casefold()
+        if "no such container" in error:
+            return
+        if "removal of container" in error and "is already in progress" in error:
+            for _ in range(2):
+                sleep(0.5)
+                try:
+                    if searxng.inspect(timeout=2) is None:
+                        return
+                except click.ClickException as check:
+                    if "no such container" in check.message.casefold():
+                        return
+                    if not _daemon_unreachable(check):
+                        raise
+            ui.out(
+                Text(
+                    t(
+                        "The SearXNG container may still be present. "
+                        "To remove it later, run `docker rm -f desman-searxng`."
+                    )
+                )
+            )
+            return
+        if not _docker_unreachable_now():
             raise
-        return None
+        ui.out(Text(_docker_skip_note()))
 
 
 def _services(app: Path, purge: bool, *, removing: bool) -> None:
     box = _wsl_sandbox(removing=True) if purge and sys.platform == "win32" else None
-    container = _docker_search(app)
+    container = _docker_search(app, removing=removing)
     if purge:
         # The installer deletes the native files. Stop the service to release its handles.
         folder = searxng_native.directory()
@@ -183,14 +317,12 @@ def _services(app: Path, purge: bool, *, removing: bool) -> None:
         if box is not None:
             sandbox_cli.remove_wsl_sandbox(box)
         if container is not None:
-            # The image can have a configuration volume as well as a cache volume.
-            volumes = [m for m in container.get("Mounts", []) if m.get("Type") == "volume"]
-            cache_only = all(m.get("Destination") == "/var/cache/searxng" for m in volumes)
-            flags = ["-v"] if cache_only else []
-            searxng.docker(["rm", "-f", *flags, searxng.CONTAINER])
+            _remove_docker_search(container)
 
 
 def _finish_cleanup(purge: bool) -> None:
+    configure_output()
+    set_language(os.environ.get("DESMAN_UNINSTALL_LANGUAGE", language()))
     app = require_app()
     check_paths(app, purge)
     _services(app, purge, removing=True)
@@ -216,6 +348,7 @@ def _windows_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]
         "-Value $env:DESMAN_UNINSTALL_TIMEOUT; Report-Failure; exit 1 }; "
         "Start-Sleep -Seconds 1 }; "
         "Start-Sleep -Seconds 2; "
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
         f"& $env:DESMAN_UNINSTALL_PYTHON -c '{_cleanup_command(purge)}' "
         f"*> {_powershell_quote(log)}; "
         "if ($LASTEXITCODE -eq 0) { "
@@ -302,6 +435,7 @@ def start(
             DESMAN_UNINSTALL_PYTHON=sys.executable,
             DESMAN_UNINSTALL_DATA=str(db.default_db_path().parent.absolute()),
             DESMAN_UNINSTALL_LOG=str(log),
+            DESMAN_UNINSTALL_LANGUAGE=language(),
             DESMAN_UNINSTALL_TIMEOUT=t(
                 "Uninstall cancelled after waiting 10 minutes for DESMAN processes to close."
             ),

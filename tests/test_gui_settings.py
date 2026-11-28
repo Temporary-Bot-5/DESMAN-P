@@ -8,10 +8,11 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 from pydantic import ValidationError
 
-from desman import config_cli, global_cli, tuning_cli, ui, uninstall_cli, wizard
+from desman import config_cli, global_cli, searxng, tuning_cli, ui, uninstall_cli, wizard
 from desman.chat import Chat
 from desman.config import open_config
 from desman.core import db
@@ -679,6 +680,21 @@ def test_settings_reads_network_status_once(
     assert count == 1
 
 
+def test_uninstall_previews_do_not_probe_docker(
+    settings_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = settings_app
+    settings = tmp_path / "searxng-docker" / "settings.yml"
+    settings.parent.mkdir()
+    settings.touch()
+    monkeypatch.setattr(uninstall_cli, "installed_app", lambda: tmp_path)
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "docker", lambda *_, **__: pytest.fail("Docker called"))
+    preview = snapshot(app)["uninstall"]
+    assert preview["available"]
+    assert preview["lines"] and preview["purge_lines"]
+
+
 @pytest.mark.parametrize(("approved", "conflict"), [(False, False), (True, False), (True, True)])
 def test_uninstall_settings_confirms_and_only_exits_on_success(
     settings_app: Any,
@@ -695,6 +711,19 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
     home_config = tmp_path / "home-config"
     home_config.mkdir()
     monkeypatch.setattr(uninstall_cli, "home_config_dir", lambda: home_config)
+    settings = installed / "searxng" / "settings.yml"
+    settings.parent.mkdir()
+    settings.touch()
+    probes: list[list[str]] = []
+    monkeypatch.setattr(uninstall_cli, "_preview_probe", None)
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        probes.append(args)
+        assert timeout == 5
+        raise click.ClickException("Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "docker", docker)
     real_start = uninstall_cli.start
     calls: list[tuple[Path, bool]] = []
 
@@ -708,8 +737,8 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
     chat = Chat(Sessions(store.conn))
     assert snapshot(app)["uninstall"] == {
         "available": True,
-        "lines": uninstall_cli.plan(installed, False),
-        "purge_lines": uninstall_cli.plan(installed, True),
+        "lines": uninstall_cli.plan(installed, False, docker_unavailable=False),
+        "purge_lines": uninstall_cli.plan(installed, True, docker_unavailable=False),
     }
 
     def respond() -> None:
@@ -718,6 +747,7 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
             prompt = app.front.prompt
             assert prompt is not None and prompt["kind"] == "confirm"
             assert str(installed) in prompt["question"]
+            assert "Docker is not running" in prompt["question"]
             assert ("Delete the data folder" in prompt["question"]) is not conflict
             assert not calls
             if conflict:
@@ -737,6 +767,7 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
     with ui.use(app.front):
         chat.run()
     thread.join(2)
+    assert probes == [["info"]]
     assert calls == ([(installed, not conflict)] if approved else [])
     assert chat.exit_requested is removed
     if removed:

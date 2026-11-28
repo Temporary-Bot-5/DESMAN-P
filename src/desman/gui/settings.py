@@ -106,8 +106,12 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
     return {
         "uninstall": {
             "available": app is not None,
-            "lines": uninstall_cli.plan(app, False) if app is not None else [],
-            "purge_lines": uninstall_cli.plan(app, True) if app is not None else [],
+            "lines": uninstall_cli.plan(app, False, docker_unavailable=False)
+            if app is not None
+            else [],
+            "purge_lines": uninstall_cli.plan(app, True, docker_unavailable=False)
+            if app is not None
+            else [],
         },
         "general": {
             "language": config.language,
