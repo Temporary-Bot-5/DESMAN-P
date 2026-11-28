@@ -8,6 +8,7 @@ Failures are classified, because retrying only helps for some of them:
              says nothing about the subtask itself, so it has its own, larger budget.
 - LIMIT      a provider's rate limit or quota is exhausted. Retrying now only burns resources:
              pause until the quota resets. No attempt is spent.
+- OUTAGE     the sandbox is temporarily unavailable. Pause without spending an attempt.
 - PERMANENT  retrying cannot help (bad credentials, policy denial, invalid configuration).
              Hand over to the operator at once.
 
@@ -29,6 +30,7 @@ class FailureKind(StrEnum):
     QUALITY = "quality"
     TRANSIENT = "transient"
     LIMIT = "limit"
+    OUTAGE = "outage"
     PERMANENT = "permanent"
 
 
@@ -126,6 +128,13 @@ def decide(
             status=SubtaskStatus.PAUSED,
             attempts=attempts,
             reason="provider limits reached; paused until quota resets",
+        )
+
+    if kind is FailureKind.OUTAGE:
+        return RetryDecision(
+            status=SubtaskStatus.PAUSED,
+            attempts=attempts,
+            reason="sandbox outage; paused before retry",
         )
 
     if kind is FailureKind.PERMANENT:

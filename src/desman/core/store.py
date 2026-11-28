@@ -631,6 +631,7 @@ class Store:
         action: str = "transition",
         expected_version: int | None = None,
         review: str | None = None,
+        review_tests: dict[str, Any] | None = None,
     ) -> Subtask:
         """Move a subtask from `src` to `dst` if it is still in `src`.
 
@@ -642,6 +643,7 @@ class Store:
         - Leaving REVIEW as the reviewer requires `review`, the token from `reserve_review()`,
           to be the current reservation (None: only while nobody holds one), so a reviewer
           whose reservation was taken over cannot decide.
+        - `review_tests` records the test result atomically with the reviewer’s decision.
         - `attempts` replaces the failure counters in the same update; a human sending the
           subtask back to READY resets them (a fresh budget is the point of a restart).
         - The scheduler can only take RUNNING away from an executor whose lease has expired.
@@ -650,6 +652,8 @@ class Store:
         - Lease and pause fields follow the status. Claiming (-> RUNNING) goes through `claim()`.
         """
         with db.transaction(self.conn):
+            if review_tests is not None:
+                self.note(subtask_id, actor, "review_tests", review_tests)
             return self._apply(
                 subtask_id,
                 src,
@@ -688,30 +692,36 @@ class Store:
         action: str = "failure",
         details: dict[str, Any] | None = None,
         review: str | None = None,
+        review_tests: dict[str, Any] | None = None,
     ) -> Subtask:
         """Apply the task's retry policy to a failed attempt: retry, pause or escalate to the
         operator.
 
         Counters are read and written in one transaction, so concurrent failures cannot lose a count.
         A transient failure during REVIEW is the reviewer's, not the work's: the subtask stays in
-        REVIEW with its artifact (only the counter grows), so the work is not run again.
-        A reviewer's failure passes `review` as a verdict does (see `transition`).
+        REVIEW with its artifact, or pauses before resuming REVIEW when given a deadline.
+        A reviewer's failure passes `review` and optionally `review_tests` as a verdict does (see `transition`).
         """
         with db.transaction(self.conn):
+            if review_tests is not None:
+                self.note(subtask_id, actor, "review_tests", review_tests)
             current = self.get_subtask(subtask_id)
             decision = decide(kind, current.attempts, self.policy(current.task_id))
-            if src is S.REVIEW and kind is FailureKind.TRANSIENT and decision.status is S.READY:
-                return self._count_review_interruption(
-                    current,
-                    decision.attempts,
-                    f"{reason}: {decision.reason}" if reason else decision.reason,
-                    details,
-                    review,
-                )
+            status = decision.status
+            if src is S.REVIEW and kind is FailureKind.TRANSIENT and status is S.READY:
+                if paused_until is None:
+                    return self._count_review_interruption(
+                        current,
+                        decision.attempts,
+                        f"{reason}: {decision.reason}" if reason else decision.reason,
+                        details,
+                        review,
+                    )
+                status = S.PAUSED
             return self._apply(
                 subtask_id,
                 src,
-                decision.status,
+                status,
                 actor,
                 lease=lease,
                 attempts=decision.attempts,
@@ -1247,6 +1257,21 @@ class Store:
                 )
         return recovered
 
+    def sandbox_pause_reason(self, task_id: str, until: str) -> str | None:
+        """The reason for a sandbox outage at the given pending retry time, if any."""
+        row = self.conn.execute(
+            """SELECT json_extract(a.details_json, '$.cause')
+               FROM subtasks AS s JOIN audit_log AS a ON a.seq = (
+                   SELECT MAX(seq) FROM audit_log
+                   WHERE subtask_id = s.id AND to_status = 'paused'
+               )
+               WHERE s.task_id = ? AND s.status = 'paused' AND s.paused_until = ?
+                 AND json_extract(a.details_json, '$.failure') = 'outage'
+               ORDER BY a.seq LIMIT 1""",
+            (task_id, until),
+        ).fetchone()
+        return str(row[0]) if row and row[0] is not None else None
+
     def resume_due(self, *, task_id: str | None = None) -> list[Subtask]:
         """Resume PAUSED subtasks whose pause is over, back to where each one stopped."""
         scope, params = ("AND task_id = ?", (task_id,)) if task_id else ("", ())
@@ -1365,7 +1390,7 @@ class Store:
 
     def extend_review(self, subtask_id: str, token: str, seconds: int) -> None:
         """Ensure this reservation covers a call, without shortening it or changing its token."""
-        with db.transaction(self.conn):
+        with nullcontext(self.conn) if self.conn.in_transaction else db.transaction(self.conn):
             until = db.to_iso(self.clock() + timedelta(seconds=seconds))
             updated = self.conn.execute(
                 """UPDATE subtasks SET review_until = max(review_until, ?)

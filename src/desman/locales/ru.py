@@ -15,6 +15,18 @@ def plural(n: int) -> int:
 
 
 MESSAGES: dict[str, Forms] = {
+    "Reviewer's tests (attempt {attempt}) could not be verified.": "Не удалось проверить тесты рецензента (попытка {attempt}).",
+    "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}": "Тесты проверяющего (попытка {attempt}) — пройдено: {passed}, провалено: {failed}, ошибки: {errors}",
+    "document parts work without tools": "части документа обрабатываются без инструментов",
+    "Reviewer's tests (attempt {attempt}) did not run.": "Тесты проверяющего (попытка {attempt}) не запускались.",
+    "Reviewer's tests (attempt {attempt}) timed out.": "Тесты проверяющего (попытка {attempt}) превысили лимит времени.",
+    "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.": "Проверяющему предложено написать меньше тестов или ускорить их, чтобы уложиться в общий лимит {seconds} с.",
+    "Reviewer's tests (attempt {attempt}) stopped: {reason}": "Тесты проверяющего (попытка {attempt}) остановлены: {reason}",
+    "needs package {name}, not installed in the sandbox": "Требуется пакет {name}, который не установлен в песочнице",
+    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}": "Тесты проверяющего (попытка {attempt}): не удалось импортировать созданный код: {reason}",
+    "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}": "Не удалось собрать или подготовить тесты проверяющего (попытка {attempt}): {reason}",
+    "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}": "Тесты проверяющего (попытка {attempt}) — pytest завершился с кодом {exit_code}",
+    "Reviewer's tests (attempt {attempt}) produced no report.": "Тесты проверяющего (попытка {attempt}) не сформировали отчёт.",
     "Checked": "Дата проверки",
     "Confirm lending a new cloud provider.": "Подтвердить первое одалживание облачного провайдера.",
     "DESMAN has not read {name}'s terms. Check them before lending: {url}.": "DESMAN не читал условия {name}. Проверьте их перед одалживанием: {url}.",
@@ -989,6 +1001,10 @@ MESSAGES: dict[str, Forms] = {
         "Используется {provider} · {model} ({n} ключей)",
     ),
     "fake LLM script ran out: {error}": "сценарий фальшивой LLM закончился: {error}",
+    "the sandbox has been unavailable for {minutes} minutes: {reason}": "Песочница недоступна уже {minutes} мин: {reason}",
+    "Waiting {seconds} s for the sandbox. {reason}": "Ожидание песочницы: {seconds} с. {reason}",
+    "Waiting for the sandbox until {until}. {reason} (desman resume {ref})": "Ожидание песочницы до {until}. {reason} (desman resume {ref})",
+    "Waiting for the sandbox until {until}. {reason} (/resume {ref})": "Ожидание песочницы до {until}. {reason} (/resume {ref})",
     "Paused by a provider limit until {until}. Continue with: desman resume {ref}": (
         "Пауза из-за лимита провайдера до {until}. Продолжить: desman resume {ref}"
     ),
@@ -1338,7 +1354,7 @@ MESSAGES: dict[str, Forms] = {
     "Ask the model even when the same request already has an accepted reply (by default such a reply is reused for 7 days, which saves quota on a resume).": "Спрашивать модель, даже если на такой же запрос уже есть принятый ответ (по умолчанию он используется повторно 7 дней, это экономит квоту при resume).",
     "yes": "да",
     "no": "нет",
-    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),\n5 failed or cancelled, 6 still in progress elsewhere.": "Создать задачу для цели GOAL (или из --spec) и выполнить её.\n\nМодель разбивает GOAL на подзадачи; если не получилось, единственной подзадачей становится сама цель (см. --plan). Коды выхода: 0 — готово, 3 — ждёт оператора, 4 — пауза (лимит провайдера), 5 — failed или cancelled, 6 — ещё выполняется в другом месте.",
+    "Create a task for GOAL (or from --spec) and work on it.\n\nThe model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask\n(see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit or sandbox outage),\n5 failed or cancelled, 6 still in progress elsewhere.": "Создать задачу для цели GOAL (или из --spec) и выполнить её.\n\nМодель разбивает GOAL на подзадачи; если не получилось, единственной подзадачей становится сама цель (см. --plan). Коды выхода: 0 — готово, 3 — ждёт оператора, 4 — пауза (лимит провайдера или недоступность песочницы), 5 — failed или cancelled, 6 — ещё выполняется в другом месте.",
     "--plan is for GOAL: a --spec is already a plan": "--plan относится к GOAL: --spec уже и есть план",
     "How GOAL becomes subtasks: llm asks the model for a plan (the default; if it fails, the template is used), template makes the goal itself the only subtask (the default with --fake-llm).": "Как GOAL превращается в подзадачи: llm просит модель составить план (по умолчанию; если не вышло, берётся шаблон), template делает саму цель единственной подзадачей (по умолчанию с --fake-llm).",
     "Planning…": "Составляю план…",

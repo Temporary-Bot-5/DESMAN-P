@@ -24,7 +24,7 @@ import re
 import secrets
 import sqlite3
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Final
@@ -116,19 +116,20 @@ class Workspace:
     # There is deliberately no method returning an absolute path to a file: a path checked now
     # can be swapped for a symlink before the caller opens it. Use read/write/exists/files.
 
-    def write(self, path: str, data: bytes | str) -> str:
+    def write(self, path: str, data: bytes | str, *, executable: bool = False) -> str:
         """Create or replace a file, making parent directories as needed.
 
         Returns the normalized relative path (as `files()` would list it)."""
         payload = data.encode() if isinstance(data, str) else data
         parts = check_path(path)
+        mode = 0o700 if executable else 0o600
         if not SECURE:
-            self._write_fallback(parts, payload)
+            self._write_fallback(parts, payload, mode)
             return "/".join(parts)
         with self._parent(parts, create=True) as parent:
             tmp = f"{_TMP_PREFIX}{secrets.token_hex(8)}"
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC | _BINARY
-            fd = os.open(tmp, flags, 0o600, dir_fd=parent)
+            fd = os.open(tmp, flags, mode, dir_fd=parent)
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(payload)
@@ -142,19 +143,41 @@ class Workspace:
                 raise
         return "/".join(parts)
 
-    def _read_portably(self, path: str, parts: tuple[str, ...]) -> bytes:
+    def mkdir(self, path: str) -> None:
+        """Create a directory and its parents without crossing symlinks."""
+        parts = check_path(path)
+        if not SECURE:
+            self._check_no_links(parts)
+            self.root.joinpath(*parts).mkdir(mode=0o700, parents=True)
+            return
+        with self._parent(parts, create=True) as parent:
+            os.mkdir(parts[-1], 0o700, dir_fd=parent)
+
+    def is_executable(self, path: str) -> bool:
+        """Whether the owner can execute this regular, unlinked file."""
+        return bool(self._file_stat(path).st_mode & stat.S_IXUSR)
+
+    def _read_portably(self, path: str, parts: tuple[str, ...], limit: int) -> bytes:
         self._check_no_links(parts)
         target = self.root.joinpath(*parts)
         if not target.is_file():
             raise FileNotFoundError(f"no file {path!r} in workspace")
         if target.stat().st_nlink > 1:
             raise PathEscapeError(f"{path!r} has other hard links")
-        return retry_sharing(target.read_bytes)
 
-    def read(self, path: str) -> bytes:
+        if limit < 0:
+            return retry_sharing(target.read_bytes)
+
+        def read_file() -> bytes:
+            with target.open("rb") as file:
+                return file.read(limit)
+
+        return retry_sharing(read_file)
+
+    def read(self, path: str, *, limit: int = -1) -> bytes:
         parts = check_path(path)
         if not SECURE:
-            return self._read_portably(path, parts)
+            return self._read_portably(path, parts, limit)
         with self._parent(parts, create=False) as parent:
             # O_NONBLOCK: a FIFO planted under this name must not hang the open.
             flags = os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _BINARY | _NONBLOCK
@@ -167,10 +190,17 @@ class Workspace:
                 # code could have linked one from outside the workspace.
                 if info.st_nlink > 1:
                     raise PathEscapeError(f"{path!r} has other hard links")
-                return f.read()
+                return f.read(limit)
 
     def size(self, path: str) -> int:
         """Size of a regular, unlinked file without reading its contents."""
+        return self._file_stat(path).st_size
+
+    def mtime(self, path: str) -> float:
+        """Modification time of a regular, unlinked file."""
+        return self._file_stat(path).st_mtime
+
+    def _file_stat(self, path: str) -> os.stat_result:
         parts = check_path(path)
         if not SECURE:
             self._check_no_links(parts)
@@ -180,7 +210,7 @@ class Workspace:
                 info = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
             raise PathEscapeError(f"{path!r} is not a regular, unlinked file")
-        return info.st_size
+        return info
 
     def read_text(self, path: str) -> str:
         return self.read(path).decode()
@@ -233,29 +263,61 @@ class Workspace:
                 found.append((prefix + name, data))
         return found, not unread
 
-    def files(self) -> list[str]:
+    def files(self, *, on_skip: Callable[[str], None] | None = None) -> list[str]:
         """Regular files in the workspace, as sorted `/`-separated relative paths.
 
         Names the guard would refuse (generated code can create any name) and files with other
         hard links are left out, so everything listed can be read back."""
+        return sorted(self.iter_files(on_skip=on_skip))
+
+    def iter_files(
+        self,
+        *,
+        on_skip: Callable[[str], None] | None = None,
+        on_directory: Callable[[str], None] | None = None,
+    ) -> Iterator[str]:
+        """Yield guarded regular files in traversal order."""
         if self.root.is_symlink():  # os.walk would follow the top directory
-            return []
-        found = []
-        for dirpath, _dirnames, filenames in os.walk(self.root, followlinks=False):
+            return
+        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=False):
             base = Path(dirpath)  # followlinks=False: linked directories are not entered
+            if on_directory is not None and base != self.root:
+                relative = base.relative_to(self.root).as_posix()
+                try:
+                    check_path(relative)
+                    if not stat.S_ISDIR(base.lstat().st_mode):
+                        raise PathEscapeError(f"{relative!r} is not a directory")
+                except (FileNotFoundError, PermissionError, PathEscapeError):
+                    if on_skip is not None:
+                        on_skip(relative)
+                    dirnames.clear()
+                    continue
+                on_directory(relative)
+            if on_skip is not None:
+                # followlinks=False never enters a linked directory: say it was left out.
+                for name in list(dirnames):
+                    if (base / name).is_symlink():
+                        dirnames.remove(name)
+                        on_skip((base / name).relative_to(self.root).as_posix())
             for name in filenames:
                 full = base / name
-                if name.startswith(_TMP_PREFIX) or full.is_symlink() or not full.is_file():
-                    continue
-                if full.lstat().st_nlink > 1:  # never read back (see `read`)
+                if name.startswith(_TMP_PREFIX):
                     continue
                 relative = full.relative_to(self.root).as_posix()
                 try:
                     check_path(relative)
-                except PathEscapeError:
+                    info = full.lstat()
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
+                        raise PathEscapeError(f"{relative!r} is not a regular, unlinked file")
+                except (OSError, PathEscapeError) as error:
+                    if on_skip is not None:
+                        if isinstance(error, OSError) and not isinstance(
+                            error, (FileNotFoundError, PermissionError)
+                        ):
+                            raise
+                        on_skip(relative)
                     continue
-                found.append(relative)
-        return sorted(found)
+                yield relative
 
     @contextmanager
     def _parent(self, parts: tuple[str, ...], *, create: bool) -> Iterator[int]:
@@ -289,14 +351,14 @@ class Workspace:
             if i < len(parts) - 1 and not stat.S_ISDIR(mode):
                 raise NotADirectoryError(f"{'/'.join(parts[: i + 1])!r} is not a directory")
 
-    def _write_fallback(self, parts: tuple[str, ...], payload: bytes) -> None:
+    def _write_fallback(self, parts: tuple[str, ...], payload: bytes, mode: int) -> None:
         self._check_no_links(parts)
         target = self.root.joinpath(*parts)
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._check_no_links(parts)  # again, now that the parents exist
         tmp = target.parent / f"{_TMP_PREFIX}{secrets.token_hex(8)}"
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, mode)
             with os.fdopen(fd, "wb") as f:
                 f.write(payload)
                 f.flush()

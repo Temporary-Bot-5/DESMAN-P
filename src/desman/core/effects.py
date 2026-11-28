@@ -29,6 +29,7 @@ An execution ends when the executor hands in something to judge (`Store.executio
 attempt after a rejection starts a new journal, since the model is then meant to act again.
 Results are kept in the database because a replay must return them (including what a read
 returned). Call identity uses the arguments’ hash. Bounded summaries keep only the sizes of private fields.
+Attribution of workspace files to run_command calls by time is best effort.
 """
 
 from __future__ import annotations
@@ -38,10 +39,12 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Final
 
 from pydantic import BaseModel
 
+from desman.core import db
 from desman.core.context import (
     CHARS_PER_TOKEN,
     Knowledge,
@@ -52,10 +55,11 @@ from desman.core.context import (
     is_document_combine,
     truncate,
 )
-from desman.core.models import Subtask
+from desman.core.models import Kind, Subtask
 from desman.core.store import Store
 from desman.core.tools import (
     FILE_WRITE_TOOLS,
+    RUN_TOOL,
     TOOL_RESULTS_DIR,
     Replayed,
     Tool,
@@ -160,7 +164,11 @@ def evidence(
     items += [("dependency", d) for d in dependencies]
     items += [("call", row) for row in rows]
     items += [("earlier_call", row) for row in earlier_rows]
-    files = _written_files([*rows, *earlier_rows], workspace, store, subtask)
+    files, used_attempt_start = _written_files([*rows, *earlier_rows], workspace, store, subtask)
+    if used_attempt_start and files:
+        out["written_files_timing"] = (
+            "No usable run_command journal times. File evidence uses the attempt start and submit times."
+        )
     if files:
         out["written_files"] = []
         items += [("file", file) for file in files]
@@ -282,31 +290,151 @@ def _documents_read_in_parts(store: Store, subtask: Subtask) -> list[str]:
     return texts
 
 
-def _written_files(
-    rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
-) -> list[dict[str, str]]:
-    paths: list[str] = []
+def _written_paths(rows: list[Any]) -> Iterator[str]:
+    seen: set[str] = set()
     for row in rows:
         if row["tool"] not in FILE_WRITE_TOOLS or row["state"] != "done":
             continue
         result = ToolResult.model_validate_json(row["result_json"])
         if result.ok and isinstance(result.output, dict):
             path = result.output.get("path")
-            if isinstance(path, str) and path not in paths:
-                paths.append(path)
-    if not paths:
-        return []
+            if isinstance(path, str) and path not in seen:
+                seen.add(path)
+                yield path
+
+
+def last_review_tests(store: Store, subtask_id: str) -> dict[str, Any] | None:
+    row = store.conn.execute(
+        """SELECT details_json FROM audit_log WHERE subtask_id = ? AND action = 'review_tests'
+           ORDER BY seq DESC LIMIT 1""",
+        (subtask_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    note: dict[str, Any] = json.loads(row["details_json"])
+    return note
+
+
+def _command_windows(store: Store, subtask: Subtask) -> tuple[list[tuple[float, float]], bool]:
+    executions = store.executions(subtask.id)
+    windows: list[tuple[float, float]] = []
+    used_attempt_start = False
+    for execution in range(executions - 1, -1, -1):
+        commands = [row for row in store.effects(subtask.id, execution) if row["tool"] == RUN_TOOL]
+        before = len(windows)
+        for row in commands:
+            if row["state"] != "done":
+                continue
+            try:
+                started = db.parse_iso(row["started_at"]).timestamp()
+                finished = db.parse_iso(row["finished_at"]).timestamp()
+            except (IndexError, TypeError, ValueError, OverflowError, OSError):
+                continue
+            if started <= finished:
+                windows.append((started - 2, finished + 2))
+        if len(windows) != before or not commands:
+            continue
+        row = store.conn.execute(
+            """SELECT start.ts, submitted.ts FROM audit_log AS start
+               JOIN audit_log AS submitted ON submitted.subtask_id = start.subtask_id
+                   AND submitted.action = 'submit' AND submitted.seq > start.seq
+               WHERE start.subtask_id = ? AND start.action = 'attempt_started'
+                 AND coalesce(json_extract(start.details_json, '$.execution'), ?) = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM audit_log AS later
+                     WHERE later.subtask_id = start.subtask_id AND later.action = 'attempt_started'
+                         AND later.seq > start.seq AND later.seq < submitted.seq
+                 )
+               ORDER BY start.seq DESC, submitted.seq LIMIT 1""",
+            (subtask.id, executions - 1, execution),
+        ).fetchone()
+        if row is not None:
+            windows.append(
+                (db.parse_iso(row[0]).timestamp() - 2, db.parse_iso(row[1]).timestamp() + 2)
+            )
+            used_attempt_start = True
+    return windows, used_attempt_start
+
+
+def _workspace_outputs(
+    workspace: Workspace,
+    windows: list[tuple[float, float]],
+    *,
+    python_only: bool = False,
+) -> Iterator[tuple[str, float]]:
+    if not windows:
+        return
+    for path in workspace.iter_files():
+        if python_only and Path(path).suffix.lower() != ".py":
+            continue
+        folder, slash, _ = path.partition("/")
+        if slash and folder.startswith("from-"):
+            continue
+        if not is_work_file(path) or path.startswith(("input/", "web/", TOOL_RESULTS_DIR)):
+            continue
+        try:
+            modified = workspace.mtime(path)
+        except (OSError, PathEscapeError):
+            continue
+        if any(started <= modified <= finished for started, finished in windows):
+            yield path, modified
+
+
+def _output_order(item: tuple[str, float]) -> tuple[int, float, str]:
+    path, modified = item
+    suffix = Path(path).suffix.lower()
+    if suffix == ".py":
+        return 0, -modified, path
+    data_suffixes = {".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".parquet"}
+    return (2 if suffix in data_suffixes else 1), -modified, path
+
+
+def has_written_python_files(store: Store, subtask: Subtask, *, root: Path | None = None) -> bool:
+    """Check journaled writes and workspace command outputs for Python files."""
+    if any(
+        Path(path).suffix.lower() == ".py"
+        for execution in range(store.executions(subtask.id) - 1, -1, -1)
+        for path in _written_paths(store.effects(subtask.id, execution))
+    ):
+        return True
+    workspace = Workspace(
+        root if root is not None else workspace_root_for(store.conn), subtask.task_id
+    )
+    windows, _ = _command_windows(store, subtask)
+    return next(_workspace_outputs(workspace, windows, python_only=True), None) is not None
+
+
+def _written_files(
+    rows: list[Any], workspace: Workspace | None, store: Store, subtask: Subtask
+) -> tuple[list[dict[str, str]], bool]:
+    paths = list(_written_paths(rows))
+    used_attempt_start = False
+    from_workspace = not paths and (subtask.kind is Kind.CODE or subtask.runs_code)
+    if from_workspace:
+        windows, used_attempt_start = _command_windows(store, subtask)
+        output_workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
+        paths = [
+            path
+            for path, _ in sorted(
+                _workspace_outputs(output_workspace, windows),
+                key=_output_order,
+            )[:12]
+        ]
+        workspace = output_workspace
     files = []
     for path in paths:
         try:
             workspace = workspace or Workspace(workspace_root_for(store.conn), subtask.task_id)
-            text = workspace.read_text(path)
+            if from_workspace and workspace.size(path) > EVIDENCE_TOKENS * CHARS_PER_TOKEN:
+                text = "File exceeds the evidence budget: content unavailable."
+            else:
+                text = workspace.read_text(path)
             if "\x00" in text:
                 text = "Binary file: content unavailable."
         except (OSError, UnicodeError, PathEscapeError):
             text = "File unreadable or not UTF-8: content unavailable."
         files.append({"path": path, "text": text})
-    return files
+    return files, used_attempt_start
 
 
 def timestamp(value: str | None) -> str | None:

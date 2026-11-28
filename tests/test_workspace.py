@@ -137,9 +137,11 @@ def test_write_read_roundtrip(ws: Workspace) -> None:
 
 def test_written_files_are_private_and_no_temp_files_remain(ws: Workspace) -> None:
     ws.write("a.txt", "x")
+    ws.write("run.sh", "#!/bin/sh\n", executable=True)
     if os.name == "posix":
-        assert (ws.root / "a.txt").stat().st_mode & 0o077 == 0
-    assert os.listdir(ws.root) == ["a.txt"]
+        assert (ws.root / "a.txt").stat().st_mode & 0o777 == 0o600
+        assert (ws.root / "run.sh").stat().st_mode & 0o777 == 0o700
+    assert sorted(os.listdir(ws.root)) == ["a.txt", "run.sh"]
 
 
 @pytest.mark.parametrize("path", MALICIOUS)
@@ -184,6 +186,8 @@ def test_symlinked_directory_pointing_outside_is_not_followed(ws: Workspace, out
         ws.write("link/new", "pwned")
     with pytest.raises(PathEscapeError, match="symlink"):
         ws.write("link/secret", "pwned")
+    with pytest.raises(PathEscapeError, match="symlink"):
+        ws.mkdir("link/new-dir")
     with pytest.raises(PathEscapeError, match="symlink"):
         ws.read("link/secret")
     assert not ws.exists("link/secret")
@@ -460,3 +464,15 @@ def test_portable_read_does_not_retry_link_checks(
         space.read("answer")
     assert caught.value is error
     assert clock.slept == 0
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_iter_files_reports_linked_directories_as_skipped(tmp_path: Path) -> None:
+    # The reviewer's copy (L.5) names what it left out; a linked folder is never entered.
+    space = Workspace(tmp_path, "task")
+    space.write("data/v2/input.csv", "1\n")
+    (space.root / "current").symlink_to(space.root / "data" / "v2", target_is_directory=True)
+    skipped: list[str] = []
+    files = list(space.iter_files(on_skip=skipped.append))
+    assert files == ["data/v2/input.csv"]
+    assert skipped == ["current"]

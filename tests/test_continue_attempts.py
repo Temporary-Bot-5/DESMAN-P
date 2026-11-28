@@ -452,7 +452,10 @@ def test_runs_code_retries_run_again_in_the_current_execution(
     coordinator = Coordinator(
         store,
         llm_executor(model),
-        lambda *_: Review(verdict=Verdict.ACCEPT),
+        lambda *_: Review(
+            verdict=Verdict.ACCEPT,
+            tests="def test_addition():\n    assert 2 + 3 == 5\n",
+        ),
         workspaces=tmp_path,
         tools=registry,
         access=executor_access([Permission.SHELL]),

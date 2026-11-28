@@ -329,8 +329,17 @@ Database: `~/.local/share/desman/desman.db`, task workspaces in `workspaces/` ne
 through `Workspace`, and let executors act only through tool calls (`Work.tools`): a new
 capability is a new `Tool` with the permission it needs, never a direct call in an agent.
 A commit that changes a file listed in `src/desman/protected.toml` updates its hash there
-(`tests/test_protected.py` prints the line); agents never touch that list or its approvals. Every tool call is journaled (`core/effects.py`); a tool safe to run twice declares `repeatable`. Generated code runs only through `Sandbox` (the `run_command` tool), never with `subprocess` directly. Never edit a
-migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
+(`tests/test_protected.py` prints the line); agents never touch that list or its approvals. Every tool call is journaled (`core/effects.py`); a tool safe to run twice declares `repeatable`. Generated code runs only through `Sandbox` (the `run_command` tool), never with `subprocess` directly.
+For L.5 (ADR 0019), `runs.py` creates and removes its own disposable scratch directory under the
+workspaces root, separate from the agent's workspace. It writes the copied files and the
+reviewer's tests through `Workspace`, runs the tests through the same Sandbox, and records
+their source and outcome in `review_tests` notes committed with the verdict or failure. A
+verified pass allows acceptance. Test call failures retry execution. Stopped runs, full
+workspaces and ambiguous outcomes retry review within its transient budget. Missing executor
+imports can skip tests when their top-level names are on the curated PyPI list. Required sandbox
+outages and low disk space pause review without spending attempts. Program output in review
+context is untrusted. Deliberate tampering by code that shares the review sandbox is still
+possible. Never edit a migration in `db.MIGRATIONS` once it has been pushed to any branch; append a new one (with a
 backfill if needed) and test upgrading a database built with the previous migrations. Keep the `subtasks.status` CHECK in
 sync with `SubtaskStatus` (a test enforces it). All status changes go through `Store._apply()` (state-machine check, CAS,
 audit in one place) — public entry points are `claim()`, `transition()`, `record_failure()`,
@@ -398,7 +407,8 @@ preemption, self-improvement or network features before their phase).
   (HTTP goes through `httpx.MockTransport`)
 - Time in tests is `conftest.FakeClock` (pass `clock.sleep` to anything that waits); no real sleeps
   except in lock-contention tests, the subprocess crash and reassignment tests (`tests/test_crash.py`, `tests/test_reassign.py`, `tests/test_gui_workers.py`) and the
-  real sandbox runs (`tests/test_sandbox.py`, skipped without bubblewrap except in CI, and
+  real sandbox runs (`tests/test_sandbox.py` and the reviewer's test runs in
+  `tests/test_coordinator_review_tests.py`, skipped without bubblewrap except in CI, and
   `tests/test_sandbox_wasi.py`, skipped without wasmtime or the pinned files, and
   `tests/test_sandbox_wsl.py`, skipped unless Windows has the desman-sandbox distribution)
 - LLM behaviour is tested through a scripted fake provider (ROADMAP 1.8)

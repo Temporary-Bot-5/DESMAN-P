@@ -4,15 +4,30 @@ The operator (ADR 0003) is the coordinator with its planner, executor and review
 put together from the config: the models (a lineup per role, `llm.router`; the executor's per
 kind of subtask, each with its other lineup for retries with another model), the executor's
 access (the tool policy within the human's permissions) and its tools.
+Deliberate tampering by code that shares the review sandbox is still possible.
 """
 
 from __future__ import annotations
 
+import ast
+import errno
 import functools
+import posixpath
+import re
+import secrets
+import shutil
 import sqlite3
+import stat
+import sys
+import time
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Collection, Mapping, Set
-from dataclasses import dataclass, field
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
+from typing import Any
 
 import click
 import httpx
@@ -29,18 +44,32 @@ from desman.config import Config, ConfigError, MasterChoices, Tuning, open_confi
 from desman.core import calls, holds, protected
 from desman.core import choices as module_choices
 from desman.core.context import DEFAULT_BUDGET_TOKENS, Knowledge
-from desman.core.coordinator import Coordinator, Crew, Executor, Failure, Labels, Outcome, Work
-from desman.core.effects import evidence, quote_sources
+from desman.core.coordinator import (
+    REVIEW_TEST_TIMEOUT,
+    Coordinator,
+    Crew,
+    Executor,
+    Failure,
+    Labels,
+    Outcome,
+    ReviewTestRun,
+    ReviewTestRunner,
+    ReviewTests,
+    Work,
+    review_test_names,
+)
+from desman.core.effects import evidence, last_review_tests, quote_sources
 from desman.core.models import Kind, Subtask, TaskSpec
 from desman.core.owner import current_owner, owner_is_gone
 from desman.core.policy import Access, PolicyError, Role, default_policy, switched_on
 from desman.core.retry import FailureKind, RetryPolicy, Strategy, strategy_for
-from desman.core.sandbox import Sandbox
+from desman.core.sandbox import MOUNT_POINT, Sandbox, SandboxUnavailable
 from desman.core.search import Tavily, client, open_sources
 from desman.core.states import Actor
 from desman.core.store import DEFAULT_LEASE_SECONDS, DEFAULT_REVIEW_SECONDS, Store
 from desman.core.tools import Registry, builtin_registry
 from desman.core.web import SearchEngine, Web, WebCache
+from desman.core.workspace import PathEscapeError, Workspace, is_work_file, workspace_root_for
 from desman.i18n import t
 from desman.llm import catalog, hub, router
 from desman.llm.base import LLM, Completion, RateLimited, Request
@@ -736,6 +765,607 @@ def _personalize() -> bool:
         return False
 
 
+_REVIEW_COPY_PREFIX = "review-"
+_REVIEW_REPORT_LIMIT = 1024 * 1024
+
+
+def _review_trace_frame(trace: str) -> tuple[str, int] | None:
+    # Pytest renders collection frames, failure locations and syntax errors differently.
+    frames = re.findall(
+        r'(?m)^(?:(?:E +| +)File "([^"\n]+)", line ([0-9]{1,9})(?:, in .+)?'
+        # A frame is a .py path, never pytest's `E   ...` message (e.g. "bad time 10:30").
+        r"|([^\sE][^\n]*?\.py|E[^\s][^\n]*?\.py):([0-9]{1,9})(?:: (?:in .+|[A-Za-z_][\w.]*))?)$",
+        trace,
+    )
+    # The innermost frame inside the workspace: an error raised in the standard library or a
+    # package still belongs to the workspace file that called it.
+    for syntax_path, syntax_line, path, line in reversed(frames):
+        # The ini's `pythonpath = ..` makes paths like /workspace/.desman-review-X/../calc.py.
+        relative = posixpath.normpath(syntax_path or path).removeprefix(f"{MOUNT_POINT}/")
+        if not relative.startswith(("/", "<", "..")):
+            return relative, int(syntax_line or line)
+    return None
+
+
+_COMMON_PYPI_IMPORTS = frozenset(
+    [
+        "flask",
+        "django",
+        "fastapi",
+        "numpy",
+        "pandas",
+        "scipy",
+        "matplotlib",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "bs4",
+        "lxml",
+        "yaml",
+        "toml",
+        "pydantic",
+        "sqlalchemy",
+        "torch",
+        "tensorflow",
+        "sklearn",
+        "PIL",
+        "cv2",
+        "click",
+        "typer",
+        "rich",
+        "tqdm",
+        "jinja2",
+        "boto3",
+        "redis",
+        "psycopg2",
+        "pymongo",
+        "openai",
+        "anthropic",
+        "transformers",
+        "seaborn",
+        "plotly",
+        "dash",
+        "streamlit",
+        "nltk",
+        "spacy",
+        "sympy",
+        "networkx",
+        "dateutil",
+        "pytz",
+        "arrow",
+        "ujson",
+        "orjson",
+        "msgpack",
+        "websockets",
+        "paramiko",
+        "cryptography",
+        "jwt",
+        "markdown",
+        "docx",
+        "openpyxl",
+        "xlrd",
+        "reportlab",
+        "pygame",
+        "kivy",
+    ]
+)
+
+
+def _review_hang(output: str, root: Path, copied_files: set[str], reviewer_file: str) -> str | None:
+    # Faulthandler prints each thread's innermost frame first.
+    dumps = re.split(r"(?m)^Timeout \(\d+:\d{2}:\d{2}(?:\.\d+)?\)!\s*$", output)
+    if len(dumps) == 1:
+        return None
+    return _blame_stack(dumps[-1], root, copied_files, reviewer_file, "hung")
+
+
+def _review_crash(
+    output: str, root: Path, copied_files: set[str], reviewer_file: str
+) -> str | None:
+    """A run killed by the code under test (segfault, abort): pytest's faulthandler prints the
+    stack after "Fatal Python error", and no report is written."""
+    dumps = re.split(r"(?m)^Fatal Python error: [^\n]*$", output)
+    if len(dumps) == 1:
+        return None
+    return _blame_stack(dumps[-1], root, copied_files, reviewer_file, "crashed")
+
+
+def _blame_stack(
+    dump: str, root: Path, copied_files: set[str], reviewer_file: str, what: str
+) -> str | None:
+    stacks = re.findall(
+        r"(?m)^(?:Current thread|Thread) [^\n]+ \(most recent call first\):\n"
+        r"((?:  File [^\n]+\n?)+)",
+        dump,
+    )
+    for stack in stacks:
+        frames = []
+        for path, line, function in re.findall(
+            r'(?m)^  File "([^"\n]+)", line ([0-9]{1,9}) in ([^\n]+)$', stack
+        ):
+            normalized = posixpath.normpath(path.replace("\\", "/"))
+            relative = normalized.removeprefix(f"{MOUNT_POINT}/")
+            relative = relative.removeprefix(f"{root.as_posix()}/")
+            if relative != normalized or relative in copied_files or relative == reviewer_file:
+                frames.append((relative, line, function))
+        if not frames or frames[0][0] not in copied_files:
+            continue
+        reviewer_frames = [name for file, _, name in frames if file == reviewer_file]
+        if not reviewer_frames:
+            continue
+        path, line, _ = frames[0]
+        test = next((name for name in reviewer_frames if name.startswith("test")), None)
+        where = f"{path}:{line}"
+        return f"test {test} {what} in {where}" if test else f"test {what} in {where}"
+    return None
+
+
+def _missing_review_import(error_text: str, local_names: set[str]) -> tuple[str | None, str]:
+    match = re.fullmatch(r"ModuleNotFoundError: No module named '([^'\n]+)'", error_text)
+    if match is None:
+        return None, error_text
+    name = match[1]
+    root = name.partition(".")[0]
+    if root in sys.stdlib_module_names and all(part.isidentifier() for part in name.split(".")):
+        # The sandbox's Python lacks a standard module (e.g. _sqlite3 under WASI): the code
+        # cannot be tested here, which is not the executor's doing.
+        return f"{name} (a standard module)", error_text
+    if (
+        all(part.isidentifier() for part in name.split("."))
+        and root not in sys.stdlib_module_names
+        and root not in local_names
+    ):
+        if root in _COMMON_PYPI_IMPORTS:
+            return name, error_text
+        return None, (
+            f"your code imports {name}, which is not in the workspace "
+            "and is not an installable package known here"
+        )
+    return None, error_text
+
+
+@dataclass
+class _ReviewReport:
+    counts: dict[str, int]
+    failing: list[str]
+    executor_packages: set[str]
+    collection_setup_error: str | None
+    executor_setup_error: str | None
+    verified: bool
+
+
+def _summary_matches(stdout: str, counts: dict[str, int]) -> bool:
+    categories = {
+        "passed": "passed",
+        "failed": "failed",
+        "error": "errors",
+        "errors": "errors",
+        "skipped": "skipped",
+        "xfailed": "skipped",
+        "xpassed": "passed",
+    }
+    summaries = []
+    for line in stdout.splitlines():
+        match = re.fullmatch(
+            r"(.*?) in [0-9]+(?:\.[0-9]+)?s(?: \(\d+:\d+:\d+\))?", line.strip(" =")
+        )
+        if not match:
+            continue
+        summary = dict.fromkeys(counts, 0)
+        fields = match[1].split(", ")
+        if fields != ["no tests ran"]:
+            recognized = False
+            for field in fields:
+                item = re.fullmatch(r"([0-9]{1,9}) ([a-z]+(?: [a-z]+)*)", field)
+                if not item:
+                    break
+                label = item[2]
+                if label in categories:
+                    summary[categories[label]] += int(item[1])
+                    recognized = True
+                elif label in {"warning", "warnings", "deselected"}:
+                    recognized = True
+            else:
+                if recognized:
+                    summaries.append(summary)
+            continue
+        summaries.append(summary)
+    return summaries == [counts]
+
+
+def _read_review_report(
+    workspace: Workspace,
+    report: str,
+    copied_files: set[str],
+    local_names: set[str],
+    reviewer_file: str,
+    reviewer_tree: ast.Module,
+    stdout: str,
+    exit_code: int | None,
+    *,
+    timed_out: bool,
+) -> _ReviewReport | None:
+    try:
+        data = workspace.read(report, limit=_REVIEW_REPORT_LIMIT + 1)
+        if len(data) > _REVIEW_REPORT_LIMIT:
+            return None
+        content = data.decode("utf-8")
+        if "<!DOCTYPE" in content or "\x00" in content:
+            return None
+        root = ET.fromstring(content)
+    except (OSError, PathEscapeError, UnicodeError, ET.ParseError):
+        return None
+    if root.tag != "testsuites":
+        return None
+    suites = root.findall("testsuite")
+    if len(suites) != 1:
+        return None
+    [suite] = suites
+    counts = dict.fromkeys(("passed", "failed", "errors", "skipped"), 0)
+    failing: list[str] = []
+    missing_packages: set[str] = set()
+    all_issues_need_packages = True
+    declared_names = review_test_names(reviewer_tree)
+    collection_errors = 0
+    matching_name = False
+    all_cases_in_module = True
+    collection_setup_error = None
+    executor_setup_error = None
+    previous_failure: tuple[str, str] | None = None
+    for case in suite.iterfind("testcase"):
+        name = case.get("name", "")
+        group = case.get("classname", "")
+        error = case.find("error")
+        failure = case.find("failure")
+        teardown_error = error is not None and error.get("message", "").startswith(
+            "failed on teardown"
+        )
+        if teardown_error:
+            counts["errors"] += 1
+        if error is not None and not teardown_error:
+            status = "errors"
+            issue = error
+        elif failure is not None:
+            status = "failed"
+            issue = failure
+        elif case.find("skipped") is not None:
+            status = "skipped"
+            issue = None
+        else:
+            status = "passed"
+            issue = None
+        # Pytest emits a second testcase for teardown when the call already failed.
+        separate_teardown = (
+            teardown_error and status == "passed" and previous_failure == (group, name)
+        )
+        if not separate_teardown:
+            counts[status] += 1
+        previous_failure = (group, name) if status == "failed" else None
+        collection_error = error is not None and error.get("message") == "collection failure"
+        if collection_error and not group and name == "test_review":
+            collection_errors += 1
+        else:
+            case_file = case.get("file")
+            in_module = (
+                case_file.removeprefix(f"{MOUNT_POINT}/").removeprefix("./")
+                in {reviewer_file, "test_review.py"}
+                if case_file
+                else group == "test_review" or group.startswith("test_review.")
+            )
+            all_cases_in_module &= in_module
+            matching_name |= name.partition("[")[0] in declared_names
+        setup_error = error is not None and error.get("message", "").startswith(
+            "failed on setup with "
+        )
+        error_text = None
+        if error is not None:
+            error_text = next(
+                (
+                    line.removeprefix("E").strip()
+                    for line in reversed((error.text or "").splitlines())
+                    if line.startswith("E ") and line[1:].strip()
+                ),
+                error.get("message", "pytest error outside the test call"),
+            )[:500]
+            if collection_setup_error is None:
+                collection_setup_error = error_text
+        if failure is not None and len(failing) < 20:
+            failing.append((f"{group}::{name}" if group else name)[:250])
+        if teardown_error:
+            all_issues_need_packages = False
+        if issue is None:
+            continue
+        missing = None
+        if error is not None and error_text is not None and (collection_error or setup_error):
+            frame = _review_trace_frame(error.text or "")
+            if frame is not None:
+                path, lineno = frame
+                if path in copied_files:
+                    with suppress(OSError, PathEscapeError):
+                        if 1 <= lineno <= len(workspace.read(path).splitlines()):
+                            missing, feedback = _missing_review_import(error_text, local_names)
+                            if missing is None and executor_setup_error is None:
+                                executor_setup_error = feedback
+        if missing is None:
+            all_issues_need_packages = False
+        else:
+            missing_packages.add(missing)
+    names_match = (
+        collection_errors == 1 and sum(counts.values()) == 1 and exit_code == 2
+        if collection_errors
+        else all_cases_in_module and (matching_name or not any(counts.values()))
+    )
+    return _ReviewReport(
+        counts,
+        failing,
+        missing_packages if all_issues_need_packages else set(),
+        collection_setup_error,
+        executor_setup_error,
+        # A timeout can interrupt the terminal summary after pytest writes its XML report.
+        names_match and (timed_out or _summary_matches(stdout, counts)),
+    )
+
+
+def _sweep_review_copies(root: Path) -> None:
+    cutoff = time.time() - 3_600
+    for path in root.glob(f"{_REVIEW_COPY_PREFIX}*"):
+        with suppress(OSError):
+            info = path.lstat()
+            if stat.S_ISDIR(info.st_mode) and info.st_mtime < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+
+
+def _run_review_tests(
+    sandbox: Sandbox,
+    subtask: Subtask,
+    workspace: Workspace,
+    module: str,
+    _attempt: int,
+    cover: Callable[[float], None] = lambda _: None,
+) -> ReviewTestRun:
+    cover(30)
+    reviewer_tree = ast.parse(module)
+    skipped = 0
+    skipped_names: list[str] = []
+
+    def skip(path: str) -> None:
+        nonlocal skipped
+        skipped += 1
+        if len(skipped_names) < 5:
+            skipped_names.append(path)
+
+    def over_quota(entries: int, size: int) -> ReviewTestRun:
+        message = (
+            f"The workspace is too large for the reviewer's test run "
+            f"(at least {entries} entries, {size} bytes; sandbox quota: "
+            f"{limits.workspace_files} entries, {limits.workspace_bytes} bytes)."
+        )
+        return ReviewTestRun(
+            ran=False,
+            reason_not_run=message,
+            copy_over_quota=message,
+            skipped_files=skipped,
+            skipped_names=skipped_names,
+        )
+
+    estimated = 0
+    try:
+        if problem := sandbox.unavailable():
+            raise SandboxUnavailable(problem)
+        root = workspace.root.parent
+        _sweep_review_copies(root)
+        paths = []
+        directories: list[str] = []
+        for path in workspace.iter_files(on_skip=skip, on_directory=directories.append):
+            if not is_work_file(path):
+                continue
+            try:
+                estimated += workspace.size(path)
+            except (FileNotFoundError, PermissionError, PathEscapeError):
+                skip(path)
+                continue
+            paths.append(path)
+        directories = [path for path in directories if is_work_file(path + "/entry")]
+        entries = len(directories)
+        base_limits = sandbox.limits
+        # A copy of the initial files fits even if they already exceed the configured quota.
+        limits = replace(
+            base_limits,
+            workspace_files=max(base_limits.workspace_files, entries + len(paths)),
+            workspace_bytes=max(base_limits.workspace_bytes, estimated),
+        )
+
+        def copy_seconds(remaining: int) -> float:
+            return 30 + estimated / 10_000_000 + 0.05 * remaining
+
+        paths.sort()
+        cover(copy_seconds(len(paths) + entries))
+        with TemporaryDirectory(
+            prefix=_REVIEW_COPY_PREFIX, dir=root, ignore_cleanup_errors=True
+        ) as directory:
+            location = Path(directory)
+            copy = Workspace(location.parent, location.name)
+            for index, path in enumerate(directories):
+                if index and index % 500 == 0:
+                    cover(copy_seconds(len(paths) + entries - index))
+                copy.mkdir(path)
+            copied_files: set[str] = set()
+            local_names = {PurePosixPath(path).name for path in directories}
+            size = 0
+            for index, path in enumerate(paths):
+                if index and index % 500 == 0:
+                    cover(copy_seconds(len(paths) - index))
+                next_entries = entries + 1
+                try:
+                    next_size = size + workspace.size(path)
+                    if next_entries > limits.workspace_files or next_size > limits.workspace_bytes:
+                        return over_quota(next_entries, next_size)
+                    executable = workspace.is_executable(path)
+                    data = workspace.read(path, limit=limits.workspace_bytes - size + 1)
+                except (FileNotFoundError, PermissionError, PathEscapeError):
+                    skip(path)
+                    continue
+                next_size = size + len(data)
+                if next_size > limits.workspace_bytes:
+                    return over_quota(next_entries, next_size)
+                copy.write(path, data, executable=executable)
+                entries, size = next_entries, next_size
+                copied_files.add(path)
+                if path.endswith(".py"):
+                    local_names.add(PurePosixPath(path).stem)
+            review_dir = f".desman-review-{secrets.token_hex(16)}"
+            copy.mkdir(review_dir)
+            file = f"{review_dir}/test_review.py"
+            ini = f"{review_dir}/pytest.ini"
+            report = f"{review_dir}/{secrets.token_hex(16)}.xml"
+            config = (
+                "[pytest]\npythonpath = ..\npython_files = test_*.py *_test.py\n"
+                "python_classes = Test*\npython_functions = test*\nfaulthandler_timeout = 50\n"
+                f"addopts = --junitxml={report}\n"
+            )
+            copy.write(file, module)
+            copy.write(ini, config)
+            review_limits = replace(
+                limits,
+                # A faulthandler traceback lists its innermost frames before pytest's stack.
+                stderr_chars=max(limits.stderr_chars, 128_000),
+                workspace_files=limits.workspace_files + 4,
+                workspace_bytes=limits.workspace_bytes
+                + len(module.encode())
+                + len(config)
+                + _REVIEW_REPORT_LIMIT,
+            )
+            cover(REVIEW_TEST_TIMEOUT)
+            # python3 is the interpreter name supplied by every Sandbox backend.
+            outcome = sandbox.run(
+                [
+                    "python3",
+                    "-I",
+                    "-B",
+                    "-m",
+                    "pytest",
+                    "-c",
+                    ini,
+                    "--rootdir",
+                    review_dir,
+                    "--noconftest",
+                    "-p",
+                    "no:cacheprovider",
+                    "-q",
+                    file,
+                ],
+                copy.root,
+                timeout=REVIEW_TEST_TIMEOUT,
+                limits=review_limits,
+            )
+            output = f"{outcome.stdout}\n{outcome.stderr}"
+            hang = (
+                _review_hang(output, copy.root, copied_files, file)
+                if outcome.timed_out
+                else _review_crash(output, copy.root, copied_files, file)
+                if outcome.exit_code != 0
+                else None
+            )
+            parsed = _read_review_report(
+                copy,
+                report,
+                copied_files,
+                local_names,
+                file,
+                reviewer_tree,
+                outcome.stdout,
+                outcome.exit_code,
+                timed_out=outcome.timed_out,
+            )
+    except SandboxUnavailable as error:
+        return ReviewTestRun(
+            ran=False,
+            reason_not_run=str(error)[:1_000],
+            sandbox_unavailable=True,
+            skipped_files=skipped,
+            skipped_names=skipped_names,
+        )
+    except OSError as error:
+        if error.errno not in {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}:
+            raise
+        reason = f"disk space too low: {error.strerror or error}"
+        minimum = estimated + len(module.encode()) + _REVIEW_REPORT_LIMIT
+        with suppress(OSError):
+            # Cleanup may have freed space. Require an increase from the post-cleanup reading
+            # before paying for another review, even if the size estimate already fits.
+            minimum = max(minimum, shutil.disk_usage(workspace.root.parent).free + 1)
+        return ReviewTestRun(
+            ran=False,
+            reason_not_run=reason,
+            stopped=reason,
+            disk_low=True,
+            disk_free_minimum=minimum,
+            skipped_files=skipped,
+            skipped_names=skipped_names,
+        )
+    counts = parsed.counts if parsed else {}
+    missing_packages = parsed.executor_packages if parsed and parsed.verified else set()
+    if missing_packages and not (
+        outcome.timed_out or outcome.stopped or outcome.workspace_full or outcome.disk_low
+    ):
+        packages = sorted(missing_packages)[:20]
+        return ReviewTestRun(
+            ran=False,
+            missing_packages=packages,
+            reason_not_run="; ".join(
+                f"needs package {name}, not installed in the sandbox" for name in packages
+            )[:1_000],
+            skipped_files=skipped,
+            skipped_names=skipped_names,
+        )
+    tail = "\n".join(
+        part
+        for part in (outcome.stdout, outcome.stderr, outcome.stopped, outcome.workspace_full)
+        if part
+    )
+    return ReviewTestRun(
+        ran=True,
+        exit_code=outcome.exit_code,
+        passed=counts.get("passed", 0),
+        failed=counts.get("failed", 0),
+        errors=counts.get("errors", 0),
+        skipped=counts.get("skipped", 0),
+        report_missing=parsed is None,
+        report_unverified=parsed is not None and not parsed.verified,
+        collection_setup_error=parsed.collection_setup_error if parsed else None,
+        executor_setup_error=parsed.executor_setup_error if parsed else None,
+        failing=parsed.failing if parsed else [],
+        tail=tail[-4_000:],
+        timed_out=outcome.timed_out,
+        hang=hang,
+        workspace_full=outcome.workspace_full,
+        stopped=outcome.stopped,
+        disk_low=outcome.disk_low,
+        disk_free_minimum=outcome.disk_free_minimum,
+        skipped_files=skipped,
+        skipped_names=skipped_names,
+    )
+
+
+def _review_test_context(store: Store, subtask: Subtask) -> dict[str, Any]:
+    goal, is_final = store.subtask_goal(subtask)
+    previous = last_review_tests(store, subtask.id)
+    if previous is not None:
+        previous.pop("artifact_digest", None)
+        previous.pop("disk_free_minimum", None)
+        source = previous.get("source")
+        if isinstance(source, str) and len(source) > 8_000:
+            marker = "\n[truncated]"
+            previous["source"] = source[: 8_000 - len(marker)] + marker
+        tail = previous.pop("tail", None)
+        if isinstance(tail, str):
+            previous["program_output_untrusted"] = tail[-1_000:]
+    return {
+        **({} if is_final else {"task_goal": goal}),
+        "previous_review_tests": previous,
+    }
+
+
 def coordinator(
     store: Store,
     models: Models,
@@ -755,6 +1385,8 @@ def coordinator(
     # The person's own work only: never a job's (`network`). Their nodes are read fresh, and
     # only while personalisation is on (turned off mid-run: no longer given).
     tree = knowledge.reader(lambda: task_tree(store.conn, _personalize()))
+    sandbox = sandbox if sandbox is not None else Sandbox()
+    _sweep_review_copies(workspace_root_for(store.conn))
     return _coordinator(
         store,
         models,
@@ -767,6 +1399,9 @@ def coordinator(
             # Without the person's token: see `core.tools.suggest_model_tool`.
             models=lambda ref: hub.inspect(ref, http),
             knowledge=tree,
+        ),
+        review_tests=ReviewTestRunner(
+            functools.partial(_run_review_tests, sandbox), sandbox.unavailable
         ),
         knowledge=tree,
         lease_seconds=lease_seconds,
@@ -919,6 +1554,7 @@ def _coordinator(
     knowledge: Knowledge | None = None,
     read_tuning: Callable[[], Tuning] | None = None,
     master_check: bool = False,
+    review_tests: ReviewTests | None = None,
 ) -> Coordinator:
     tuning = tuning or Tuning()
     guard(store)
@@ -933,6 +1569,7 @@ def _coordinator(
             evidence=functools.partial(evidence, store, knowledge=knowledge),
             dependencies=store.dependency_results,
             was_decomposed=store.was_decomposed,
+            test_context=functools.partial(_review_test_context, store) if review_tests else None,
             quote_evidence=functools.partial(
                 quote_sources,
                 store,
@@ -960,4 +1597,5 @@ def _coordinator(
         gate=functools.partial(guard, store),  # a running worker stops at a later change too
         network=network,
         knowledge=knowledge,
+        review_tests=review_tests,
     )

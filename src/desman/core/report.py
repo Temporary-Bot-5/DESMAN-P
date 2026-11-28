@@ -14,10 +14,31 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from desman.core import db
+from desman.core.effects import last_review_tests
 from desman.core.models import Kind, Subtask
 from desman.core.retry import Attempts
 from desman.core.states import SubtaskStatus, TaskStatus, derive_task_status
 from desman.core.store import Store
+
+
+class ReviewTestSummary(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    attempt: int
+    ran: bool
+    reason_not_run: str | None = None
+    missing_packages: list[str] = Field(default_factory=list)
+    exit_code: int | None = None
+    passed: int = 0
+    failed: int = 0
+    errors: int = 0
+    timed_out: bool = False
+    report_missing: bool = False
+    report_unverified: bool = False
+    collection_setup_error: str | None = None
+    executor_setup_error: str | None = None
+    hang: str | None = None
+    stopped: str = ""
 
 
 class SubtaskReport(BaseModel):
@@ -42,6 +63,7 @@ class SubtaskReport(BaseModel):
     paused_until: str | None
     action: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
+    review_tests: ReviewTestSummary | None = None
     reason: str | None
     """Why it reached its current status, from the audit log (e.g. the escalation reason)."""
 
@@ -95,6 +117,9 @@ def task_report(store: Store, task_id: str) -> TaskReport:
         reports = []
         for sub in subtasks:
             reason = _reason(store, sub, by_id)
+            tests = last_review_tests(store, sub.id)
+            if tests is not None:
+                tests["stopped"] = (tests.get("stopped") or tests.get("workspace_full") or "")[:250]
             reports.append(
                 SubtaskReport(
                     id=sub.id,
@@ -112,6 +137,7 @@ def task_report(store: Store, task_id: str) -> TaskReport:
                     paused_until=sub.paused_until,
                     **_status_details(store, sub),
                     reason=reason,
+                    review_tests=ReviewTestSummary.model_validate(tests) if tests else None,
                 )
             )
         report = _report(row, [s.status for s in subtasks], reports)

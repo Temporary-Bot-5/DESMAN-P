@@ -277,6 +277,7 @@ def test_the_watch_stops_a_run_the_disk_shows_but_a_count_cannot(
         "the disk holding the workspace lost 8.0 KiB of free space during the run, "
         "more than 8.0 KiB (writes of other programs count too)",
         disk_low=True,
+        disk_free_minimum=10**9 - 8192,
     )
     free.append(10**9)
     for i in range(11):
@@ -483,6 +484,7 @@ class Scripted(Sandbox):
         *,
         stdin: str = "",
         timeout: float | None = None,
+        limits: Limits | None = None,
     ) -> Outcome:
         self.calls.append((list(command), stdin, timeout))
         return self.outcome

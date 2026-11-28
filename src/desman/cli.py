@@ -462,7 +462,7 @@ def run(
     """Create a task for GOAL (or from --spec) and work on it.
 
     The model splits GOAL into subtasks; if it cannot, the goal itself is the only subtask
-    (see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit),
+    (see --plan). Exit codes: 0 done, 3 waiting for the operator, 4 paused (provider limit or sandbox outage),
     5 failed or cancelled, 6 still in progress elsewhere.
     """
     if (goal is None) == (spec_path is None):
@@ -1284,6 +1284,7 @@ def _drive(
             wait_for_pauses=wait,
             short_pause_seconds=provider_wait.PROVIDER_WAIT,
             on_pause=lambda seconds: ui.provider_wait(seconds, as_json),
+            on_sandbox_pause=lambda seconds, reason: ui.sandbox_wait(seconds, reason, as_json),
         )
     except ScriptExhausted as e:
         raise click.ClickException(t("fake LLM script ran out: {error}", error=e)) from e
@@ -1306,7 +1307,16 @@ def _drive(
             then(False)
         if report.paused_at:
             ui.note(t("Task {ref} paused. `desman resume {ref}` continues it.", ref=short))
-        if result.paused_until:
+        if result.paused_until and result.sandbox_pause_reason is not None:
+            ui.note(
+                t(
+                    "Waiting for the sandbox until {until}. {reason} (desman resume {ref})",
+                    until=ui.when(result.paused_until),
+                    reason=result.sandbox_pause_reason,
+                    ref=short,
+                )
+            )
+        elif result.paused_until:
             ui.note(
                 t(
                     "`desman resume --wait {ref}` or `desman worker` waits automatically for longer limits.",
@@ -1332,6 +1342,11 @@ def _run_summary(result: RunResult) -> dict[str, Any]:
         "status": result.status.value,
         "ticks": result.ticks,
         "paused_until": result.paused_until,
+        **(
+            {"sandbox_pause_reason": result.sandbox_pause_reason}
+            if result.sandbox_pause_reason is not None
+            else {}
+        ),
     }
 
 

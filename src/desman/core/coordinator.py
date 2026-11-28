@@ -33,16 +33,19 @@ that a rerun of an interrupted execution does not repeat them (core/effects.py).
 
 from __future__ import annotations
 
+import ast
 import functools
+import hashlib
 import json
 import math
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -60,19 +63,23 @@ from desman.core.effects import (
     Effects,
     earlier_lookups,
     earlier_results,
+    has_written_python_files,
+    last_review_tests,
     workspace_files,
 )
 from desman.core.models import (
     MAX_DELEGATED_PARTS,
     MAX_DELEGATIONS,
+    Kind,
     Origin,
     Priority,
     Subtask,
     SubtaskSpec,
     Tools,
 )
-from desman.core.policy import Access
+from desman.core.policy import Access, executor_access
 from desman.core.retry import FailureKind, Strategies, Strategy, strategy_for
+from desman.core.sandbox import SANDBOX_RETRY_SECONDS, SandboxUnavailable, disk_still_low
 from desman.core.states import Actor, SubtaskStatus, TaskStatus
 from desman.core.store import (
     DEFAULT_LEASE_SECONDS,
@@ -81,12 +88,17 @@ from desman.core.store import (
     StaleStateError,
     Store,
 )
-from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult
+from desman.core.tools import RUN_TOOL, Registry, Tool, Toolbox, ToolResult, builtin_registry
 from desman.core.workspace import PathEscapeError, Workspace, workspace_root_for
 from desman.llm.base import LLM, ProviderError, among, guard_model_calls, noticing_unfit
 
 S = SubtaskStatus
 MODEL_CALL_MARGIN = 30
+REVIEW_TEST_TIMEOUT = 60
+REVIEW_TEST_TIMEOUT_REASON = (
+    f"your tests took longer than {REVIEW_TEST_TIMEOUT} s in total; "
+    "write fewer or faster tests (start programs fewer times)"
+)
 
 DEFAULT_POLL_SECONDS = 5.0
 """How often a coordinator with nothing to do looks again while others hold work (a worker's
@@ -115,7 +127,7 @@ class Failure(BaseModel):
     kind: FailureKind
     reason: str
     paused_until: str | None = None
-    """For LIMIT: when the provider's quota resets. Any timezone-aware ISO-8601 timestamp."""
+    """When to retry a paused failure. Any timezone-aware ISO-8601 timestamp."""
     unfit_provider: str | None = None
     """The model that cannot answer this kind of request (`ProviderError.unfit_model`), as
     `provider/model` (the provider alone when the error does not say): the task's next attempts
@@ -178,6 +190,96 @@ class Review(BaseModel):
 
     verdict: Verdict
     feedback: str = ""
+    tests: str | None = Field(default=None, max_length=20_000)
+
+    @field_validator("tests")
+    @classmethod
+    def _test_module(cls, tests: str | None) -> str | None:
+        if tests is not None:
+            try:
+                module = ast.parse(tests)
+            except (SyntaxError, ValueError, RecursionError) as error:
+                raise ValueError(f"tests must be valid Python: {error}") from error
+            if not review_test_names(module):
+                raise ValueError(
+                    "tests must define a synchronous top-level test function or Test class method"
+                )
+        return tests
+
+
+def review_test_names(module: ast.Module) -> set[str]:
+    scopes: list[ast.Module | ast.ClassDef] = [module]
+    scopes.extend(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef)
+        and node.name.startswith("Test")
+        and not any(
+            isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and member.name == "__init__"
+            for member in node.body
+        )
+    )
+    return {
+        node.name
+        for scope in scopes
+        for node in scope.body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test")
+    }
+
+
+class ReviewTestRun(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    ran: bool
+    reason_not_run: str | None = Field(default=None, max_length=1_000)
+    missing_packages: list[str] = Field(default_factory=list)
+    exit_code: int | None = None
+    passed: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    errors: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    report_missing: bool = False
+    report_unverified: bool = False
+    collection_setup_error: str | None = None
+    executor_setup_error: str | None = None
+    failing: list[Annotated[str, Field(max_length=250)]] = Field(
+        default_factory=list, max_length=20
+    )
+    tail: str = Field(default="", max_length=4_000)
+    timed_out: bool = False
+    hang: str | None = None
+    workspace_full: str = ""
+    stopped: str = ""
+    disk_low: bool = False
+    disk_free_minimum: int | None = None
+    sandbox_unavailable: bool = False
+    copy_over_quota: str = ""
+    skipped_files: int = Field(default=0, ge=0)
+    skipped_names: list[str] = Field(default_factory=list, max_length=5)
+
+
+RunReviewTests = Callable[[Subtask, Workspace, str, int, Callable[[float], None]], ReviewTestRun]
+
+
+@dataclass(frozen=True)
+class ReviewTestRunner:
+    run: RunReviewTests
+    unavailable: Callable[[], str | None]
+
+
+ReviewTests = RunReviewTests | ReviewTestRunner
+
+# Scope the test contract to the current call while keeping the two-argument Reviewer API.
+review_tests_enabled: ContextVar[bool] = ContextVar("review_tests_enabled", default=False)
+
+
+def _artifact_digest(artifact: dict[str, Any] | None) -> str:
+    return hashlib.sha256(json.dumps(artifact, sort_keys=True).encode()).hexdigest()
+
+
+def needs_review_tests(subtask: Subtask, *, written_python_files: bool) -> bool:
+    return subtask.runs_code or (subtask.kind is Kind.CODE and written_python_files)
 
 
 class Work(BaseModel):
@@ -234,6 +336,7 @@ class RunResult(BaseModel):
     ticks: int
     paused_until: str | None = None
     """Set when the run returned because only paused work was left."""
+    sandbox_pause_reason: str | None = None
     events: list[str] = Field(default_factory=list)
 
 
@@ -276,6 +379,7 @@ class Coordinator:
         gate: Callable[[], None] | None = None,
         network: Crew | None = None,
         knowledge: Knowledge | None = None,
+        review_tests: ReviewTests | None = None,
     ) -> None:
         self.store = store
         self.knowledge = knowledge
@@ -283,6 +387,7 @@ class Coordinator:
         nobody is given any. A job from desman-global never is."""
         self.executor = executor
         self.reviewer = reviewer
+        self.review_tests = review_tests
         self.owner = owner
         """Lease and review reservations are taken under this name: unique per process when
         several share a database (`core.owner.current_owner`)."""
@@ -290,7 +395,7 @@ class Coordinator:
         self._review_seconds = review_seconds
         self.context_budget_tokens = context_budget_tokens
         self.workspaces = workspaces if workspaces is not None else workspace_root_for(store.conn)
-        self.tools = tools
+        self.tools = builtin_registry() if tools is None and review_tests is not None else tools
         """The registry executors may call into; the built-in tools by default."""
         self.access = access
         """What the executor may use: its tool policy within the human's permissions. By
@@ -345,6 +450,7 @@ class Coordinator:
         max_ticks: int = 10_000,
         short_pause_seconds: float = 0,
         on_pause: Callable[[float], None] | None = None,
+        on_sandbox_pause: Callable[[float, str], None] | None = None,
     ) -> RunResult:
         """Work on `task_id` until it is no longer ACTIVE.
 
@@ -377,11 +483,16 @@ class Coordinator:
             if pause_until is None:
                 raise RuntimeError(f"task {task_id} is active but nothing can move")  # a bug
             seconds = self._seconds_until(pause_until)
+            reason = self.store.sandbox_pause_reason(task_id, pause_until)
             if not wait_for_pauses and seconds > short_pause_seconds:
                 result.paused_until = pause_until
+                result.sandbox_pause_reason = reason
                 return result
-            if not wait_for_pauses and on_pause is not None:
-                on_pause(seconds)
+            if not wait_for_pauses:
+                if reason is not None and on_sandbox_pause is not None:
+                    on_sandbox_pause(seconds, reason)
+                elif reason is None and on_pause is not None:
+                    on_pause(seconds)
             self.sleep(seconds)
         return result
 
@@ -893,21 +1004,215 @@ class Coordinator:
         self.store.note(subtask.id, Actor.EXECUTOR, "decomposition_failed", {"reason": reason})
         return False
 
+    def _review_disk_skip(
+        self, subtask: Subtask, artifact: dict[str, Any] | None
+    ) -> ReviewTestRun | None:
+        previous = last_review_tests(self.store, subtask.id)
+        if (
+            previous is not None
+            and previous.get("disk_low") is True
+            and previous.get("attempt") == subtask.attempts.quality + 1
+            and previous.get("artifact_digest") == _artifact_digest(artifact)
+            and isinstance(minimum := previous.get("disk_free_minimum"), int)
+            and disk_still_low(self.workspaces, minimum)
+        ):
+            return ReviewTestRun.model_validate(previous)
+        return None
+
+    def _review_test_skip(
+        self, subtask: Subtask, cover_call: Callable[[float], None]
+    ) -> ReviewTestRun | None:
+        if "document" in subtask.inputs:
+            return ReviewTestRun(ran=False, reason_not_run="document parts work without tools")
+        if self.store.tools(subtask.task_id) is not Tools.GRANTED:
+            return ReviewTestRun(ran=False, reason_not_run="task does not grant tools")
+        tool = self.tools.get(RUN_TOOL) if self.tools is not None else None
+        if tool is None:
+            return ReviewTestRun(ran=False, reason_not_run="run_command unavailable")
+        access = self._crew(subtask).access or executor_access()
+        if reason := access.refusal(tool):
+            return ReviewTestRun(ran=False, reason_not_run=reason)
+        if isinstance(self.review_tests, ReviewTestRunner):
+            cover_call(120)
+            if reason := self.review_tests.unavailable():
+                return ReviewTestRun(
+                    ran=False, reason_not_run=reason[:1_000], sandbox_unavailable=True
+                )
+        return None
+
+    def _check_review_tests(
+        self,
+        subtask: Subtask,
+        review: Review,
+        skipped: ReviewTestRun | None,
+        cover_call: Callable[[float], None],
+    ) -> tuple[Review | Failure, dict[str, Any] | None]:
+        attempt = subtask.attempts.quality + 1
+        if skipped is not None:
+            result = skipped
+        elif review.tests is None:
+            return Failure(kind=FailureKind.TRANSIENT, reason="reviewer gave no tests"), None
+        else:
+            runner = self.review_tests
+            assert runner is not None
+            run = runner.run if isinstance(runner, ReviewTestRunner) else runner
+            workspace = Workspace(self.workspaces, subtask.task_id)
+            try:
+                result = ReviewTestRun.model_validate(
+                    run(subtask, workspace, review.tests, attempt, cover_call)
+                )
+            except SandboxUnavailable as error:
+                result = ReviewTestRun(
+                    ran=False, reason_not_run=str(error)[:1_000], sandbox_unavailable=True
+                )
+
+        note = {
+            **result.model_dump(exclude={"tail"}),
+            "tail": result.tail[-2_000:],
+            "attempt": attempt,
+        }
+        if skipped is None:
+            note["source"] = review.tests
+        verdict = self._review_test_verdict(subtask, review, result)
+        if isinstance(verdict, Failure) and verdict.kind is FailureKind.TRANSIENT:
+            note["could_not_run"] = verdict.reason
+        return verdict, note
+
+    def _review_test_verdict(
+        self, subtask: Subtask, review: Review, result: ReviewTestRun
+    ) -> Review | Failure:
+        if result.disk_low or (subtask.runs_code and not result.ran):
+            return self._required_review_test_failure(subtask, result)
+        if not result.ran:
+            return review
+
+        verified = not (result.report_missing or result.report_unverified)
+        if result.stopped or result.workspace_full:
+            return Failure(
+                kind=FailureKind.TRANSIENT,
+                reason=f"your tests could not run: {result.stopped or result.workspace_full}",
+            )
+        if result.timed_out:
+            if not result.hang:
+                return Failure(kind=FailureKind.TRANSIENT, reason=REVIEW_TEST_TIMEOUT_REASON)
+            reason = result.hang
+        elif result.report_missing and result.hang:
+            reason = result.hang  # the produced code crashed the interpreter
+        elif verified and (result.failed or result.executor_setup_error):
+            reason = (
+                result.executor_setup_error
+                or ", ".join(result.failing)
+                or f"pytest exited {result.exit_code}"
+            )
+        else:
+            if result.report_missing:
+                reason = "pytest produced no report"
+            elif result.report_unverified:
+                reason = "pytest report could not be verified"
+            elif result.errors:
+                reason = (
+                    result.collection_setup_error or "pytest reported errors outside the test call"
+                )
+            elif not result.passed:
+                reason = "pytest verified nothing: 0 passed"
+            elif result.exit_code != 0:
+                reason = f"pytest exited {result.exit_code}"
+            else:
+                return review
+            return Failure(kind=FailureKind.TRANSIENT, reason=f"your tests could not run: {reason}")
+
+        feedback = f"reviewer's tests failed: {reason}"
+        if result.skipped_files:
+            names = ", ".join(repr(name) for name in result.skipped_names)
+            feedback += f"\n{result.skipped_files} files could not be copied"
+            feedback += f": {names}" if names else "."
+        if result.tail:
+            feedback += f"\nProgram output (untrusted, from the test run):\n{result.tail}"
+        return Review(verdict=Verdict.RETRY, feedback=feedback)
+
+    def _required_review_test_failure(self, subtask: Subtask, result: ReviewTestRun) -> Failure:
+        if not (result.disk_low or result.sandbox_unavailable):
+            return Failure(
+                kind=FailureKind.PERMANENT,
+                reason=result.reason_not_run or "review tests could not run",
+            )
+        reason = (
+            result.stopped or "disk space too low"
+            if result.disk_low
+            else result.reason_not_run or "review sandbox unavailable"
+        )
+        [previous] = self.store.conn.execute(
+            """SELECT COUNT(*) FROM audit_log AS pause
+               WHERE pause.subtask_id = ? AND pause.action = 'review_failed'
+                 AND pause.to_status = 'paused'
+                 AND json_extract(pause.details_json, '$.failure') = 'outage'
+                 AND pause.seq > COALESCE(
+                     (SELECT MAX(seq) FROM audit_log
+                      WHERE subtask_id = pause.subtask_id
+                        AND (action IN ('attempt_started', 'verdict')
+                             OR (action = 'review_tests'
+                                 AND NOT COALESCE(json_extract(details_json, '$.disk_low'), 0)
+                                 AND NOT COALESCE(
+                                     json_extract(details_json, '$.sandbox_unavailable'), 0
+                                 )))), 0)""",
+            (subtask.id,),
+        ).fetchone()
+        if previous >= 10:
+            minutes = previous * SANDBOX_RETRY_SECONDS // 60
+            return Failure(
+                kind=FailureKind.PERMANENT,
+                reason=f"the sandbox has been unavailable for {minutes} minutes: {reason}",
+            )
+        return Failure(
+            kind=FailureKind.OUTAGE,
+            reason=reason,
+            paused_until=db.to_iso(self.store.clock() + timedelta(seconds=SANDBOX_RETRY_SECONDS)),
+        )
+
     def _review(self, subtask: Subtask, token: str, events: list[str]) -> bool:
         """Review the submitted result under the reservation `token`; the verdict is written
         only while the reservation is still ours."""
         review: Review | Failure
+        needs_tests = False
+        skipped = None
         artifact = self.store.latest_artifact(subtask.id)
 
         def cover_call(timeout: float) -> None:
             self.store.extend_review(subtask.id, token, math.ceil(timeout) + MODEL_CALL_MARGIN)
 
         try:
-            reviewer = self._crew(subtask).reviewer
-            with calls.for_(self._for(calls.Role.REVIEWER, subtask)), guard_model_calls(cover_call):
-                returned = reviewer(subtask, artifact)
-            # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
-            review = returned if isinstance(returned, Failure) else Review.model_validate(returned)
+            needs_tests = (
+                self.review_tests is not None
+                and self.store.origin(subtask.task_id) is not Origin.NETWORK
+                and not is_error_report(artifact)
+                and needs_review_tests(
+                    subtask,
+                    written_python_files=subtask.kind is Kind.CODE
+                    and not subtask.runs_code
+                    and has_written_python_files(self.store, subtask, root=self.workspaces),
+                )
+            )
+            if needs_tests:
+                skipped = self._review_disk_skip(subtask, artifact)
+                if skipped is None:
+                    skipped = self._review_test_skip(subtask, cover_call)
+            if skipped is not None and (subtask.runs_code or skipped.disk_low):
+                review = self._required_review_test_failure(subtask, skipped)
+            else:
+                reviewer = self._crew(subtask).reviewer
+                setting = review_tests_enabled.set(needs_tests and skipped is None)
+                try:
+                    with (
+                        calls.for_(self._for(calls.Role.REVIEWER, subtask)),
+                        guard_model_calls(cover_call),
+                    ):
+                        returned = reviewer(subtask, artifact)
+                finally:
+                    review_tests_enabled.reset(setting)
+                # Validate at the boundary: e.g. a verdict parsed from an LLM arrives as a string.
+                review = (
+                    returned if isinstance(returned, Failure) else Review.model_validate(returned)
+                )
         except ProviderError as e:
             review = self._provider_failure(e)
             if review.kind is FailureKind.QUALITY:
@@ -927,14 +1232,42 @@ class Coordinator:
                 verdict=Verdict.RETRY,
                 feedback=f"{_error_reason(artifact)} (accepted by the reviewer, overruled)",
             )
-        verdict: dict[str, Any] = {}
-        if isinstance(review, Review):
-            verdict = {"verdict": review.verdict.value, "feedback": review.feedback}
         try:
+            note = None
+            if skipped is not None and (subtask.runs_code or skipped.disk_low):
+                if not skipped.disk_low:
+                    note = {**skipped.model_dump(), "attempt": subtask.attempts.quality + 1}
+            elif (
+                isinstance(review, Review)
+                and needs_tests
+                and (skipped is not None or review.verdict is Verdict.ACCEPT)
+            ):
+                source = review.tests
+                try:
+                    review, note = self._check_review_tests(subtask, review, skipped, cover_call)
+                except StaleStateError:
+                    raise
+                except Exception as error:
+                    reason = f"review tests raised {type(error).__name__}: {error}"
+                    note = {
+                        "ran": False,
+                        "source": source,
+                        "attempt": subtask.attempts.quality + 1,
+                        "reason_not_run": reason,
+                        "could_not_run": reason,
+                    }
+                    review = Failure(kind=FailureKind.TRANSIENT, reason=reason)
+            if note is not None and note.get("disk_low"):
+                note["artifact_digest"] = _artifact_digest(artifact)
+            if isinstance(review, Review):
+                details = {"verdict": review.verdict.value, "feedback": review.feedback}
+                if note is not None:
+                    if note["disk_low"]:
+                        details["tests"] = f"stopped: {note['stopped'] or 'disk space too low'}"
+                    elif not note["ran"]:
+                        details["tests"] = f"not run: {note['reason_not_run'] or 'unspecified'}"
             if isinstance(review, Failure):
-                # Counts against the subtask's budget, so a reviewer that keeps failing cannot
-                # loop forever. A transient one keeps the subtask in REVIEW: the submitted work is
-                # reviewed again, not run again.
+                # Transient interruptions spend budget while sandbox outages simply pause.
                 moved = self.store.record_failure(
                     subtask.id,
                     S.REVIEW,
@@ -944,6 +1277,7 @@ class Coordinator:
                     paused_until=review.paused_until,
                     action="review_failed",
                     review=token,
+                    review_tests=note,
                 )
             elif review.verdict is Verdict.ACCEPT:
                 moved = self.store.transition(
@@ -952,9 +1286,10 @@ class Coordinator:
                     S.DONE,
                     Actor.REVIEWER,
                     reason=review.feedback or None,
-                    details=verdict,
+                    details=details,
                     action="verdict",
                     review=token,
+                    review_tests=note,
                 )
             elif review.verdict is Verdict.RETRY:
                 moved = self.store.record_failure(
@@ -963,9 +1298,10 @@ class Coordinator:
                     Actor.REVIEWER,
                     FailureKind.QUALITY,
                     reason=review.feedback or "rejected by reviewer",
-                    details=verdict,
+                    details=details,
                     action="verdict",
                     review=token,
+                    review_tests=note,
                 )
             elif review.verdict is Verdict.ESCALATE:
                 moved = self.store.transition(
@@ -974,9 +1310,10 @@ class Coordinator:
                     S.NEEDS_HUMAN,
                     Actor.REVIEWER,
                     reason=review.feedback or "escalated by reviewer",
-                    details=verdict,
+                    details=details,
                     action="verdict",
                     review=token,
+                    review_tests=note,
                 )
         except StaleStateError as e:
             # Decided by someone else, or our reservation ran out and was taken over: the
@@ -986,7 +1323,15 @@ class Coordinator:
                 subtask.id,
                 Actor.REVIEWER,
                 "review_discarded",
-                {"reason": str(e), "owner": self.owner, **verdict},
+                {
+                    "reason": str(e),
+                    "owner": self.owner,
+                    **(
+                        {"verdict": review.verdict.value, "feedback": review.feedback}
+                        if isinstance(review, Review)
+                        else {"failure": review.model_dump(mode="json")}
+                    ),
+                },
             )
             return False
         self.reviewed += 1

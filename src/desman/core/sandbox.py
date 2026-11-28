@@ -177,6 +177,9 @@ def _shm(limits: Limits) -> list[str]:
     return ["--size", str(limits.tmp_bytes), "--tmpfs", "/dev/shm"]
 
 
+SANDBOX_RETRY_SECONDS = 60
+
+
 class SandboxUnavailable(RuntimeError):
     """The sandbox cannot run here: no command runs at all."""
 
@@ -227,6 +230,7 @@ class Outcome:
     disk_low: bool = False
     """It was stopped for the disk's free space, which other programs' writes lower too: not
     necessarily the code's doing."""
+    disk_free_minimum: int | None = None
 
 
 @dataclass(frozen=True)
@@ -428,6 +432,7 @@ def _watch(workdir: Path, limits: Limits) -> Callable[[], Stop | None]:
                 f"the disk holding the workspace lost {_size(lost)} of free space during the "
                 f"run, more than {_size(disk)} (writes of other programs count too)",
                 disk_low=True,
+                disk_free_minimum=before - disk,
             )
         return None
 
@@ -440,6 +445,12 @@ class Stop:
 
     reason: str
     disk_low: bool = False
+    disk_free_minimum: int | None = None
+
+
+def disk_still_low(path: Path, minimum: int) -> bool:
+    free = _free(path)
+    return free is not None and free < minimum
 
 
 def _free(path: Path) -> int | None:
@@ -630,14 +641,14 @@ class Sandbox:
                 elif self.backend == "wasi":
                     self._problem = self._probe_wasi()
                     if self.docker or self._problem is not None:
-                        self._retry_at = self._monotonic() + 60.0
+                        self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
                 elif self.backend == "wsl":
-                    self._retry_at = self._monotonic() + 60.0
+                    self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
                 else:
                     self._problem = self._probe_docker()
             except _DockerDaemonUnavailable as exc:
                 self._problem = str(exc)
-                self._retry_at = self._monotonic() + 60.0
+                self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
             if self._problem is not None and self.backend == "docker":
                 if self.platform == "win32" and self._probe_wsl():
                     self._backend = "wsl"
@@ -646,7 +657,7 @@ class Sandbox:
                 if self._backend != "docker":
                     self._problem = None
                     self.image_present = None
-                    self._retry_at = self._monotonic() + 60.0
+                    self._retry_at = self._monotonic() + SANDBOX_RETRY_SECONDS
                 elif self._wsl_issue is not None:
                     self._problem += " " + self._wsl_issue
             self._checked = True
@@ -671,12 +682,13 @@ class Sandbox:
         *,
         stdin: str = "",
         timeout: float | None = None,
+        limits: Limits | None = None,
     ) -> Outcome:
         """Run `command` with `workdir` as /workspace. Raises SandboxUnavailable."""
         problem = self.unavailable()
         if problem is not None:
             raise SandboxUnavailable(problem)
-        limits = self.limits
+        limits = self.limits if limits is None else limits
         if timeout is not None:
             limits = _with(limits, min(timeout, limits.timeout))
         outcome = self._run(command, workdir, stdin, limits)
@@ -973,7 +985,7 @@ class Sandbox:
             self.prlimit,
             f"--nproc={self.limits.processes}",
             "--",
-            *command,
+            *_isolated_pytest(command),
         ]
         return argv
 
@@ -1205,7 +1217,7 @@ class Sandbox:
             "-B",
             "-c",
             _DOCKER_EXEC,
-            *command,
+            *_isolated_pytest(command),
         ]
 
     def docker_image_present(self) -> bool:
@@ -1335,6 +1347,20 @@ def _docker_mount(source: Path, target: str, *, readonly: bool = False) -> str:
     return output.getvalue().removesuffix("\r\n")
 
 
+def _isolated_pytest(command: Sequence[str]) -> Sequence[str]:
+    """Make the read-only pytest mount available even when Python ignores PYTHONPATH."""
+    if list(command[:2]) != ["python3", "-I"]:
+        return command
+    module_flag = 3 if len(command) > 2 and command[2] == "-B" else 2
+    if list(command[module_flag : module_flag + 2]) != ["-m", "pytest"]:
+        return command
+    source = (
+        f"import runpy, sys; sys.path.insert(0, {_PYTHON_PATH!r}); "
+        "runpy.run_module('pytest', run_name='__main__', alter_sys=True)"
+    )
+    return ["python3", "-I", "-B", "-c", source, *command[module_flag + 2 :]]
+
+
 def _pytest_mounts() -> Iterator[tuple[Path, str]]:
     for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "pygments", "py"):
         spec = importlib.util.find_spec(name)
@@ -1429,6 +1455,7 @@ def _execute(
         stderr_cut=stderr.cut,
         stopped="" if stop is None else stop.reason,
         disk_low=stop is not None and stop.disk_low,
+        disk_free_minimum=None if stop is None else stop.disk_free_minimum,
     )
 
 
@@ -1638,6 +1665,7 @@ def _execute_wsl(
         stderr_cut=stderr.cut,
         stopped="" if stop_for is None else stop_for.reason,
         disk_low=stop_for is not None and stop_for.disk_low,
+        disk_free_minimum=None if stop_for is None else stop_for.disk_free_minimum,
     )
     if not timed_out and not killed:
         detail = diagnostic.text().strip()
@@ -2032,10 +2060,13 @@ def _wasi_argv(command: Sequence[str]) -> list[str] | None:
             break
     match list(command[index:]):
         case ["-m", "pytest", *args]:
+            isolated = "-I" in command[1:index]
+            bootstrap = "import sys; sys.path.append('/site'); " if isolated else "import sys; "
             source = (
-                f"{start}import sys, pytest; sys.exit(pytest.main({[*args, *_WASI_PYTEST_ARGS]!r}))"
+                f"{start}{bootstrap}import pytest; "
+                f"sys.exit(pytest.main({[*args, *_WASI_PYTEST_ARGS]!r}))"
             )
-            return ["python", "-c", source]
+            return ["python", *(["-I", "-B"] if isolated else []), "-c", source]
         case ["-m", "unittest", *args]:
             source = (
                 f"{start}import runpy; "

@@ -40,7 +40,8 @@ TOPICS: Final = (
     Topic(
         "tasks",
         "how work is planned, run and checked; the states of tasks and subtasks",
-        "Planner: 1 subtask for simple work, up to 8 for tools/dependencies; template fallback. Simple code changes and tests share one subtask. Executors work; reviewers check. Dependencies form a DAG. Stopped work resumes from checkpoints with `/resume TASK`; done work is kept. `/worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (provider limit), needs_human, failed, blocked, cancelled. `/run GOAL` and `/status TASK` show full text answers (data inside) and file folders; status --json includes the full result, files and folder. `/list` shows visible tasks (with --subtasks, --all: hidden too). `/status TASK`, `/audit TASK` and `/stats` retain access to history. `/task pin TASK` and `/task unpin TASK` control a task's pin and its modules' pin. `/task hide TASK` hides finished work only; `/task hide --finished` hides finished unpinned ones; nothing is erased. `/task pause TASK` pauses unfinished work; `/task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `/resume TASK` clears the operator pause and continues. `/task extend TASK GOAL` and `/task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. Retellings may propose these (window first). Subtasks get ≤3 knowledge nodes (see status).",
+        "Planner: 1 subtask for simple work, up to 8 for tools/dependencies; template fallback. Simple code changes and tests share one subtask. Executors work; reviewers check. Dependencies form a DAG. Stopped work resumes from checkpoints with `/resume TASK`; done work is kept. `/worker` works across unfinished tasks. The page queues tasks for its worker pool and retells results once in their chats. States: pending (dependencies), ready, running, review, done, paused (temporary limit), needs_human, failed, blocked, cancelled. `/run GOAL` and `/status TASK` show full text answers (data inside) and file folders; status --json includes the full result, files and folder. `/list` shows visible tasks (with --subtasks, --all: hidden too). `/status TASK`, `/audit TASK` and `/stats` retain access to history. `/task pin TASK` and `/task unpin TASK` control a task's pin and its modules' pin. `/task hide TASK` hides finished work only; `/task hide --finished` hides finished unpinned ones; nothing is erased. `/task pause TASK` pauses unfinished work; `/task pause --all` pauses unfinished unpinned tasks. Paused tasks are not scheduled; running executors yield at their next step, keeping checkpoints and replaying recorded effects on resume. `/resume TASK` clears the operator pause and continues. `/task extend TASK GOAL` and `/task redo SUBTASK NOTE` add subtasks starting from its result; done work stays. Retellings may propose these (window first). Subtasks get ≤3 knowledge nodes (see status). "
+        "Status shows the latest review test outcome and attempt. Audit keeps the source and output tail.",
     ),
     Topic(
         "master",
@@ -66,23 +67,19 @@ TOPICS: Final = (
     Topic(
         "files",
         "where a task's files are, giving them to a later task, running code",
-        "The executor uses tools in workspaces/TASK next to the database. Chat lists files and the "
-        "folder, skips repeated text and treats it as untrusted. Chat and run/status show written "
-        "UTF-8 texts (≤2 files, ≤40 lines/4000 characters each). A follow-up task in the same chat "
-        "gets copies in from-TASK/; "
-        "originals stay. Retries and interrupted runs can continue from saved tool results. "
-        "Retries also see work files and rewrite stale demonstration files.\n"
-        "Running code needs run_command, shell_execution (`/permissions`) and a sandbox. "
-        "When the planner or `/run --runs-code` requires a run, the last run in the attempt must "
-        "exit 0. If the tool is unavailable, the subtask waits for the person. "
-        "Code subtasks get 16 tool rounds by default (8–48 via `/tuning --code-rounds N`). "
-        "The executor can replace exact fragments with edit_file and sees the exit code and "
-        "the ends of stdout and stderr after each run. "
-        "Prose goes in the result; files are extra. Review checks web evidence, dates, sources and your language (names/translations allowed). Answers cover your request; split parts keep its language. Live data may have fewer items with sources and stated gaps; honest partial parts feed the combine step. Report blocked pages; use snippets or another official source. Review sees files written "
-        "in the latest attempt, within budget. python3 -m pytest works in the "
-        "sandbox; nothing can be pip-installed because it has no network.\n"
+        "Tools use workspaces/TASK beside the DB. Chat lists files and folder, skips repeated text and treats it as untrusted. Chat and run/status show "
+        "UTF-8 text (≤2 files, each ≤40 lines/4000 chars). Chat follow-ups copy to from-TASK/. Originals stay. Retries and resumes reuse tool results. "
+        "Retries see work files and rewrite stale demos.\n"
+        "Code execution needs run_command, shell_execution (`/permissions`) and a sandbox. "
+        "When the planner or `/run --runs-code` requires execution, the last run must "
+        "exit 0. Unavailable runs need a person. "
+        "Code defaults to 16 tool rounds per subtask (8–48 via `/tuning --code-rounds N`). "
+        "edit_file replaces exact fragments. Runs show exit codes and output tails. Results hold prose plus files. Review checks sources, dates, language "
+        "(names/translations allowed) and coverage. Cite sources and gaps for partial live data. Split parts keep the request's language and feed honest partial findings into the combine step. Use snippets or other official sources for blocked pages. "
+        "Review tests run offline on workspace copies. Acceptance needs a verified pass. Test failures and executor hangs retry execution. Stops, quota overruns and ambiguity retry review. "
+        "Low disk or required sandbox outages pause review for 60s. Status says why. Ten consecutive outage pauses or blocked required tests need a person. Network jobs skip tests. Copies allow existing usage plus reviewer files. Missing curated PyPI imports can block tests.\n"
         "The interlocutor itself does nothing: only DESMAN's own messages tell what was done. "
-        "Retellings copy task code and use your latest message’s language.",
+        "Retellings copy task code in your latest message’s language.",
     ),
     Topic(
         "attachments",
@@ -171,29 +168,28 @@ TOPICS: Final = (
         "what agents may do, their tools, the sandbox and the web",
         "Tools require both role policy and user permission. "
         "network_access, shell_execution, fs_outside_access and admin_rights default to off. "
-        "Use `/permissions` or the wizard. Chat changes require confirmation.\n"
-        "The executor can read, write, edit and list task files without following links. "
-        "run_command needs shell_execution and an available "
-        "sandbox: no network, cleared environment, system-call filter, time and memory limits, "
-        "a workspace quota. Linux uses "
+        "Set them via `/permissions` or the wizard. Chat confirms changes.\n"
+        "Executors read, write, edit and list task files without following links. "
+        "run_command needs shell_execution and a "
+        "sandbox with a cleared environment, a system-call filter and time, memory and workspace limits. python3 -m pytest works in the sandbox. No network, so nothing can be pip-installed. Linux uses "
         "bubblewrap. Windows and macOS prefer Docker Desktop in Linux-container mode. "
         "Windows tries WSL2 next, then WebAssembly. WASI supports Python, pytest and unittest "
         "without packages requiring C extensions. "
-        "`/sandbox setup --yes` installs the chosen backend. "
+        "`/sandbox setup --yes` installs the backend. "
         "`/sandbox setup --wsl --yes` (Windows) or `/sandbox setup --wasi --yes` installs "
-        "that sandbox. "
+        "it. "
         "`/sandbox remove --wsl --yes` deletes its sandbox distribution. "
         "web_search and web_fetch (network_access) read public pages and mark results untrusted. "
-        "After a task reads the web, web_fetch opens only URLs seen in it, never ones carrying "
+        "After web use, web_fetch opens only URLs seen by the task, excluding URLs carrying "
         "workspace text. "
         "Search covers Wikipedia, Stack Overflow, arXiv and GitHub. Whole-web search needs local "
         "SearXNG (`/search setup`), a Tavily key in `/config`, or borrowing via "
         "`/global search STATE`. Missing search setup pauses the subtask without spending a "
         "retry. "
-        "suggest_model records a suggestion for the person. read_node reads the knowledge tree "
-        "and is always allowed. Every tool call and refusal is recorded with its reason. "
-        "The planner, reviewer and interlocutor have no tools. admin_rights is for "
-        "test machines and warns on every run.",
+        "suggest_model records suggestions for the person. read_node reads the knowledge tree "
+        "and is always allowed. Tool calls and refusals are logged with reasons. "
+        "Planner, reviewer and interlocutor have no tools. admin_rights is for "
+        "test machines and warns each run.",
     ),
     Topic(
         "search",

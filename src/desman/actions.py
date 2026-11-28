@@ -22,6 +22,7 @@ from desman import knowledge, providers, task_files, ui
 from desman.config import ConfigError, open_config
 from desman.core import db, operator
 from desman.core.audit import AuditEntry, check_history, history
+from desman.core.coordinator import REVIEW_TEST_TIMEOUT
 from desman.core.models import Subtask
 from desman.core.report import (
     InboxItem,
@@ -325,8 +326,80 @@ def print_report(report: TaskReport, store: Store | None = None) -> None:
         if sub.paused_until:
             notes.append(t("paused until {until}", until=sub.paused_until))
         if sub.reason and sub.status.value not in ("done", "running", "pending"):
-            notes.append(one_line(sub.reason, 100))
+            notes.append(one_line(ui.display_task_reason(sub.reason), 100))
         click.echo(line + (f"  ({'; '.join(notes)})" if notes else ""))
+        review_tests = sub.review_tests
+        if review_tests:
+            if not review_tests.ran:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) did not run.",
+                    attempt=review_tests.attempt,
+                )
+                if review_tests.missing_packages:
+                    reasons = "; ".join(
+                        t("needs package {name}, not installed in the sandbox", name=name)
+                        for name in review_tests.missing_packages
+                    )
+                    test_line += " " + one_line(reasons, 1_000)
+                elif review_tests.reason_not_run == "document parts work without tools":
+                    test_line += " " + t("document parts work without tools")
+                elif review_tests.reason_not_run:
+                    test_line += " " + one_line(review_tests.reason_not_run, 1_000)
+            elif review_tests.timed_out:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) timed out.",
+                    attempt=review_tests.attempt,
+                )
+                if review_tests.hang:
+                    test_line += " " + one_line(review_tests.hang, 250)
+                else:
+                    test_line += " " + t(
+                        "The reviewer was asked for fewer or faster tests within the {seconds} s total limit.",
+                        seconds=REVIEW_TEST_TIMEOUT,
+                    )
+            elif review_tests.stopped:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) stopped: {reason}",
+                    attempt=review_tests.attempt,
+                    reason=one_line(review_tests.stopped, 250),
+                )
+            elif review_tests.report_missing:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) produced no report.",
+                    attempt=review_tests.attempt,
+                )
+            elif review_tests.report_unverified:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) could not be verified.",
+                    attempt=review_tests.attempt,
+                )
+            elif review_tests.executor_setup_error:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}): the produced code failed to import: {reason}",
+                    attempt=review_tests.attempt,
+                    reason=one_line(review_tests.executor_setup_error, 250),
+                )
+            elif review_tests.collection_setup_error:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) could not collect or set up: {reason}",
+                    attempt=review_tests.attempt,
+                    reason=one_line(review_tests.collection_setup_error, 250),
+                )
+            elif review_tests.exit_code and review_tests.failed == review_tests.errors == 0:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) — pytest exited {exit_code}",
+                    attempt=review_tests.attempt,
+                    exit_code=review_tests.exit_code,
+                )
+            else:
+                test_line = t(
+                    "Reviewer's tests (attempt {attempt}) — passed: {passed}, failed: {failed}, errors: {errors}",
+                    attempt=review_tests.attempt,
+                    passed=review_tests.passed,
+                    failed=review_tests.failed,
+                    errors=review_tests.errors,
+                )
+            click.echo("      " + test_line)
         if hint := search_setup_hint(sub):
             click.echo("      " + hint)
         if sub.knowledge:
@@ -517,7 +590,7 @@ def print_inbox(items: list[InboxItem], hint: bool = True) -> None:
             f"  [{one_line(item.goal, 40)}]"
         )
         if item.reason:
-            click.echo(f"{'':<12} {one_line(item.reason, 110)}")
+            click.echo(f"{'':<12} {one_line(ui.display_task_reason(item.reason), 110)}")
         if setup := search_setup_hint(item):
             click.echo(" " * 12 + ui.chat_hint(setup))
     if hint:
@@ -548,7 +621,7 @@ def choose_inbox(store: Store, session_id: str | None = None) -> dict[str, Any]:
                     ui.Choice(
                         label=f"{i.ref}  {i.status}  {i.description}  [{i.goal}]",
                         value=i,
-                        hint=i.reason or "",
+                        hint=ui.display_task_reason(i.reason or ""),
                     )
                     for i in items
                 ]
@@ -630,7 +703,7 @@ def print_waiting(items: list[InboxItem], hint: str) -> None:
             + Text(f"{item.status}  {one_line(item.description, 50)}  [{one_line(item.goal, 40)}]")
         )
         if item.reason:
-            ui.note(f"    {one_line(item.reason, 110)}")
+            ui.note(f"    {one_line(ui.display_task_reason(item.reason), 110)}")
         if setup := search_setup_hint(item):
             ui.note(setup)
     ui.note(hint)
