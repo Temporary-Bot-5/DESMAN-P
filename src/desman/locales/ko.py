@@ -1680,6 +1680,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "만료됨",
     "the recheck rejected the result": "재검토에서 결과를 거부했습니다",
     "nodes could not do it": "노드가 해내지 못했습니다",
+    "its operator's key was revoked": "운영자의 키가 취소되었습니다",
     "nodes took it and fell silent": "노드가 가져간 뒤 응답이 없었습니다",
     "Job {id} offered to nodes until {date}.": "작업 {id}을(를) {date}까지 노드에 제공합니다.",
     "Job": "작업",

@@ -1672,6 +1672,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "已过期",
     "the recheck rejected the result": "复核拒绝了结果",
     "nodes could not do it": "节点无法完成",
+    "its operator's key was revoked": "其操作员的密钥已被撤销",
     "nodes took it and fell silent": "节点领取后失联",
     "Job {id} offered to nodes until {date}.": "任务 {id} 已提供给节点，截止 {date}。",
     "Job": "任务",

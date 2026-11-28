@@ -1751,6 +1751,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "expirada",
     "the recheck rejected the result": "a reverificação rejeitou o resultado",
     "nodes could not do it": "os nós não conseguiram fazê-la",
+    "its operator's key was revoked": "a chave do seu operador foi revogada",
     "nodes took it and fell silent": "nós a pegaram e ficaram em silêncio",
     "Job {id} offered to nodes until {date}.": "Tarefa {id} oferecida aos nós até {date}.",
     "Job": "Tarefa",

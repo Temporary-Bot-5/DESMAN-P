@@ -1745,6 +1745,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "समाप्त",
     "the recheck rejected the result": "दोबारा जाँच ने परिणाम अस्वीकार किया",
     "nodes could not do it": "नोड इसे नहीं कर सके",
+    "its operator's key was revoked": "इसके ऑपरेटर की कुंजी रद्द कर दी गई",
     "nodes took it and fell silent": "नोड इसे लेकर चुप हो गए",
     "Job {id} offered to nodes until {date}.": "काम {id} नोडों को {date} तक दिया गया।",
     "Job": "काम",

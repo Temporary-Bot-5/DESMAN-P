@@ -84,6 +84,13 @@ def test_list_operator_states(
     assert (row["writes"], row["refusals"], row["complaint_reads"]) == (2, 1, 1)
     assert row["last_request"]["action"] == "operator_read_complaint"
     assert registry_cli("operators").exit_code == 0
+    with store.connection(db_path) as conn:  # the root's own entries are not its requests
+        for action in ("assignment", "revocation", "trust_list", "operator_work_dropped"):
+            store.log(conn, action, own.fingerprint)
+    rows = {
+        row["fingerprint"]: row for row in json.loads(registry_cli("operators", "--json").output)
+    }
+    assert rows[own.fingerprint]["last_request"]["action"] == "operator_read_complaint"
 
 
 def test_show_activity(
@@ -250,7 +257,7 @@ def test_revoke_all_open_work(
                 assert (task.status, task.reason, task.note) == (
                     "dropped",
                     "operator_revoked",
-                    "operator_revoked",
+                    None,
                 )
             else:
                 assert (task.status, task.reason, task.note) == (status, None, None)

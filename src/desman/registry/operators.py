@@ -107,7 +107,10 @@ def _summary(
         {"key": fingerprint},
     ).fetchone()
     last = conn.execute(
-        "SELECT * FROM registry_log WHERE node = ? ORDER BY seq DESC LIMIT 1", (fingerprint,)
+        "SELECT * FROM registry_log WHERE node = ? AND action NOT IN"
+        " ('assignment', 'revocation', 'trust_list', 'operator_work_dropped')"
+        " ORDER BY seq DESC LIMIT 1",
+        (fingerprint,),
     ).fetchone()
     return Summary(
         fingerprint,

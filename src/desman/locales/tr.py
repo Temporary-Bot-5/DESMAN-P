@@ -1684,6 +1684,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "süresi doldu",
     "the recheck rejected the result": "yeniden denetim sonucu reddetti",
     "nodes could not do it": "düğümler yapamadı",
+    "its operator's key was revoked": "operatörünün anahtarı iptal edildi",
     "nodes took it and fell silent": "düğümler aldı ve sessiz kaldı",
     "Job {id} offered to nodes until {date}.": "{id} işi {date} tarihine kadar düğümlere sunuldu.",
     "Job": "İş",

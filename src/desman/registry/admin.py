@@ -312,7 +312,7 @@ def revoke_with_counts(
         ).fetchall():
             task = clusters.cluster_task(conn, row["id"])
             assert task is not None
-            job_ids.extend(clusters.drop_task(conn, task, moment, note=why, reason=why))
+            job_ids.extend(clusters.drop_task(conn, task, moment, reason=why))
             cluster_ids.append(task.id)
         for row in conn.execute(
             "SELECT id FROM jobs WHERE signer = ?"

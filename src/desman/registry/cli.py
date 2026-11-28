@@ -472,6 +472,7 @@ def _job_reason(found: work.JobRow) -> str:
         "disputed": t("the recheck rejected the result"),
         "failed": t("nodes could not do it"),
         "leases_lost": t("nodes took it and fell silent"),
+        "operator_revoked": t("its operator's key was revoked"),
     }
     return "" if found.reason is None else names.get(found.reason, found.reason)
 
@@ -1507,6 +1508,7 @@ def _cluster_reason(reason: str) -> str:
         "result": t("its result came"),
         "job_given_up": t("a job gave up"),
         "operators_lost": t("its operators were lost"),
+        "operator_revoked": t("its operator's key was revoked"),
     }.get(reason, reason)
 
 

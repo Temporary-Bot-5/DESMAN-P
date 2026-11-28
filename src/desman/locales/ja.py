@@ -1682,6 +1682,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "期限切れ",
     "the recheck rejected the result": "再確認が結果を却下しました",
     "nodes could not do it": "ノードが実行できませんでした",
+    "its operator's key was revoked": "オペレーターの鍵が取り消されました",
     "nodes took it and fell silent": "ノードが受け取ったまま応答しなくなりました",
     "Job {id} offered to nodes until {date}.": "ジョブ {id} を {date} までノードに提供しました。",
     "Job": "ジョブ",

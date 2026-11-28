@@ -2000,6 +2000,7 @@ MESSAGES: dict[str, Forms] = {
     "expired": "просрочено",
     "the recheck rejected the result": "перепроверка отклонила результат",
     "nodes could not do it": "узлы не смогли его сделать",
+    "its operator's key was revoked": "ключ его оператора отозван",
     "nodes took it and fell silent": "узлы брали его и замолкали",
     "Job {id} offered to nodes until {date}.": "Задание {id} предложено узлам до {date}.",
     "Job": "Задание",
