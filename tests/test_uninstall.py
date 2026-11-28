@@ -222,6 +222,15 @@ def test_refuses_unsafe_purge(app: Path, location: str, monkeypatch: pytest.Monk
     assert f"{expected}: {path}" in result.output
 
 
+def test_windows_waiter_sets_utf8_before_launching_python(app: Path) -> None:
+    command = uninstall_cli._windows_waiter(123, app / "install.ps1", app / "uninstall.log", False)[
+        -1
+    ]
+    assert command.index("[Console]::OutputEncoding = [Text.Encoding]::UTF8;") < command.index(
+        "& $env:DESMAN_UNINSTALL_PYTHON"
+    )
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux process discovery uses /proc")
 @pytest.mark.parametrize("case", ["executable", "symlink", "timeout"])
 def test_linux_waiter_checks_other_processes(app: Path, case: str) -> None:
@@ -594,6 +603,29 @@ def test_daemon_unreachable_named_pipe_fallback(
         )
         assert not uninstall_cli._daemon_unreachable(
             click.ClickException(error + "Access is denied.")
+        )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "request returned 500 Internal Server Error for API route and version "
+        "http://%2F%2F.%2Fpipe%2FdockerDesktopLinuxEngine/info",
+        "All PIPE instances are busy",
+    ],
+)
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_docker_engine_startup_errors(
+    message: str, platform: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", platform)
+        patch.setattr(os, "listdir", lambda _: ["dockerDesktopLinuxEngine"])
+        assert uninstall_cli._daemon_unreachable(click.ClickException(message))
+        assert uninstall_cli._daemon_unreachable(
+            click.ClickException(
+                f"error during connect: //./pipe/dockerDesktopLinuxEngine: {message}"
+            )
         )
 
 

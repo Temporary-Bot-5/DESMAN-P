@@ -146,6 +146,8 @@ def _daemon_unreachable(exc: click.ClickException) -> bool:
     if isinstance(exc.__cause__, subprocess.TimeoutExpired):
         return True
     error = exc.message.casefold()
+    if "internal server error for api route" in error or "all pipe instances are busy" in error:
+        return True
     pipe_error = "error during connect" in error and any(
         detail in error
         for detail in ("//./pipe/", "npipe:", "the system cannot find the file specified")
@@ -346,6 +348,7 @@ def _windows_waiter(pid: int, script: Path, log: Path, purge: bool) -> list[str]
         "-Value $env:DESMAN_UNINSTALL_TIMEOUT; Report-Failure; exit 1 }; "
         "Start-Sleep -Seconds 1 }; "
         "Start-Sleep -Seconds 2; "
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
         f"& $env:DESMAN_UNINSTALL_PYTHON -c '{_cleanup_command(purge)}' "
         f"*> {_powershell_quote(log)}; "
         "if ($LASTEXITCODE -eq 0) { "
