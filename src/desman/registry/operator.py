@@ -26,6 +26,19 @@ class Refusal(Exception):
         super().__init__(reason)
 
 
+def verify_assignment(
+    signed_json: str, fingerprint: str, root: Ed25519PublicKey, now: datetime
+) -> sign.Operator | None:
+    believed = sign.Trust(root, clock=lambda: now)
+    try:
+        record = believed.receive(signed_json)
+    except sign.Refused:
+        return None
+    if record.issued_at > now:
+        return None
+    return believed.operator(fingerprint)
+
+
 def assignment(
     conn: sqlite3.Connection, fingerprint: str, root: Ed25519PublicKey, now: datetime
 ) -> sign.Operator:
@@ -36,13 +49,8 @@ def assignment(
             (fingerprint,),
         )
         for row in rows:
-            believed = sign.Trust(root, clock=lambda: now)
-            try:
-                record = believed.receive(row["signed_json"])
-            except sign.Refused:
-                continue
-            found = believed.operator(fingerprint)
-            if found is None or record.issued_at > now:
+            found = verify_assignment(row["signed_json"], fingerprint, root, now)
+            if found is None:
                 continue
             if found.scopes & {TASKS, MODERATION}:
                 return found

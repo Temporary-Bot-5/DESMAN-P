@@ -149,7 +149,7 @@ def assignment_key(value: str) -> Ed25519PublicKey:
 
 
 def _keep(conn: sqlite3.Connection, root: sign.NodeKey, signed: sign.Signed, now: datetime) -> str:
-    with db.transaction(conn):
+    with store.write_transaction(conn):
         believed = store.trust(conn, root.public, now)
         try:
             believed.receive(signed.model_dump(mode="json"))
@@ -265,12 +265,76 @@ def assign(
     return Assigned(subject, sorted(scopes), signed.record.expires_at)
 
 
+@dataclass(frozen=True)
+class Revoked:
+    signed: sign.Signed
+    jobs: int = 0
+    cluster_tasks: int = 0
+
+
 def revoke(
-    conn: sqlite3.Connection, root: sign.NodeKey, key: str, reason: str, *, now: datetime
+    conn: sqlite3.Connection,
+    root: sign.NodeKey,
+    key: str,
+    reason: str,
+    *,
+    now: datetime,
+    keep_work: bool = False,
 ) -> sign.Signed:
+    return revoke_with_counts(conn, root, key, reason, now=now, keep_work=keep_work).signed
+
+
+def revoke_with_counts(
+    conn: sqlite3.Connection,
+    root: sign.NodeKey,
+    key: str,
+    reason: str,
+    *,
+    now: datetime,
+    keep_work: bool = False,
+) -> Revoked:
     signed = sign.revoke(root, key, reason, issued_at=now, lifetime=REVOCATION_LIFETIME)
-    _keep(conn, root, signed, now)
-    return signed
+    with store.write_transaction(conn):
+        _keep(conn, root, signed, now)
+        assigned = conn.execute(
+            "SELECT 1 FROM records WHERE subject = ? AND kind = 'assignment' LIMIT 1", (key,)
+        ).fetchone()
+        if keep_work or assigned is None:
+            return Revoked(signed)
+        moment = db.to_iso(now)
+        why = "operator_revoked"
+        cluster_ids = []
+        job_ids = []
+        for row in conn.execute(
+            "SELECT id FROM cluster_tasks WHERE signer = ?"
+            " AND status IN ('waiting', 'running', 'operator') ORDER BY id",
+            (key,),
+        ).fetchall():
+            task = clusters.cluster_task(conn, row["id"])
+            assert task is not None
+            job_ids.extend(clusters.drop_task(conn, task, moment, note=why, reason=why))
+            cluster_ids.append(task.id)
+        for row in conn.execute(
+            "SELECT id FROM jobs WHERE signer = ?"
+            " AND status IN ('execute', 'recheck', 'operator') ORDER BY id",
+            (key,),
+        ).fetchall():
+            found = work.job(conn, row["id"])
+            assert found is not None
+            work.drop_job(conn, found, moment, reason=why)
+            job_ids.append(found.id)
+        store.log(
+            conn,
+            "operator_work_dropped",
+            key,
+            {
+                "jobs": len(job_ids),
+                "job_ids": job_ids,
+                "cluster_tasks": len(cluster_ids),
+                "cluster_task_ids": cluster_ids,
+            },
+        )
+        return Revoked(signed, len(job_ids), len(cluster_ids))
 
 
 def backup(source: Path, dest: Path) -> None:

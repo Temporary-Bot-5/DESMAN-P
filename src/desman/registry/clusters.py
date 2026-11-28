@@ -411,13 +411,7 @@ def settle(
                 (note or None, found.id),
             )
         else:
-            for job in work.jobs(conn, cluster=found.id):
-                if job.status in ("execute", "recheck", "operator"):
-                    _drop_job(conn, job, "cluster_dropped", moment)
-            conn.execute(
-                "UPDATE cluster_tasks SET status = 'dropped', note = ? WHERE id = ?",
-                (note or None, found.id),
-            )
+            drop_task(conn, found, moment, note=note)
         store.log(
             conn,
             "cluster_settled",
@@ -459,12 +453,29 @@ def _untried_reviewers(conn: sqlite3.Connection, job: work.JobRow) -> set[str]:
     }
 
 
+def drop_task(
+    conn: sqlite3.Connection,
+    found: ClusterTaskRow,
+    moment: str,
+    *,
+    note: str = "",
+    reason: str | None = None,
+) -> list[str]:
+    """Drop a task and its open jobs inside the caller's transaction."""
+    dropped = []
+    for job in work.jobs(conn, cluster=found.id):
+        if job.status in work.SETTLES_FROM["drop"]:
+            _drop_job(conn, job, reason or "cluster_dropped", moment)
+            dropped.append(job.id)
+    conn.execute(
+        "UPDATE cluster_tasks SET status = 'dropped', note = ?, reason = ? WHERE id = ?",
+        (note or None, found.reason if reason is None else reason, found.id),
+    )
+    return dropped
+
+
 def _drop_job(conn: sqlite3.Connection, job: work.JobRow, why: str, moment: str) -> None:
-    for row in conn.execute(
-        "SELECT token FROM leases WHERE job = ? AND ended IS NULL", (job.id,)
-    ).fetchall():
-        work.end_lease(conn, row["token"], "withdrawn", moment)
-    conn.execute("UPDATE jobs SET status = 'dropped', reason = ? WHERE id = ?", (why, job.id))
+    work.drop_job(conn, job, moment, reason=why)
     store.log(conn, "cluster_job_dropped", None, {"job": job.id, "why": why})
 
 

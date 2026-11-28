@@ -665,6 +665,20 @@ SETTLES_FROM: Final[dict[Decision, tuple[str, ...]]] = {
 }
 
 
+def drop_job(
+    conn: sqlite3.Connection, found: JobRow, moment: str, *, reason: str | None = None
+) -> None:
+    """Drop open work and withdraw its leases inside the caller's transaction."""
+    for row in conn.execute(
+        "SELECT token FROM leases WHERE job = ? AND ended IS NULL", (found.id,)
+    ).fetchall():
+        end_lease(conn, row["token"], "withdrawn", moment)
+    conn.execute(
+        "UPDATE jobs SET status = 'dropped', reason = ? WHERE id = ?",
+        (found.reason if reason is None else reason, found.id),
+    )
+
+
 def settle(conn: sqlite3.Connection, job_id: str, decision: Decision, now: datetime) -> JobRow:
     """The operator's word on a job: `accept` its result (one must be in hand), lend it `again`
     from the start (a new round: counts of lost leases and failures start over), or `drop` it
@@ -689,11 +703,7 @@ def settle(conn: sqlite3.Connection, job_id: str, decision: Decision, now: datet
                 (found.id,),
             )
         else:
-            for row in conn.execute(
-                "SELECT token FROM leases WHERE job = ? AND ended IS NULL", (found.id,)
-            ).fetchall():
-                end_lease(conn, row["token"], "withdrawn", moment)
-            conn.execute("UPDATE jobs SET status = 'dropped' WHERE id = ?", (found.id,))
+            drop_job(conn, found, moment)
         store.log(
             conn,
             "job_settled",
