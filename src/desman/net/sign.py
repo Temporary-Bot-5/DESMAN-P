@@ -272,6 +272,7 @@ class RecordKind(StrEnum):
     CLUSTER_PLAN = "cluster_plan"
     CLUSTER_JOB = "cluster_job"
     CLUSTER_RESULT = "cluster_result"
+    REGISTRY_CATALOG = "registry_catalog"
 
 
 STATE: Final = frozenset(
@@ -757,6 +758,8 @@ class Trust:
             raise refuse(Reason.REVOKED, "the signer's key is revoked")
         if record.kind is RecordKind.PROPOSAL_CHECK:
             raise refuse(Reason.NOT_ALLOWED, "a proposal check is not trust state")
+        if record.kind is RecordKind.REGISTRY_CATALOG:
+            raise refuse(Reason.NOT_ALLOWED, "a registry catalog is not trust state")
         if record.kind in CLUSTER_KINDS:
             key = self._cluster_signer(record)
             check_signature(signed, key)

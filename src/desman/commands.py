@@ -1185,6 +1185,12 @@ def _tuning(ctx: Context, args: TuningArgs) -> Outcome | Proposal:
     return Proposal([t("How the work is done:")] + lines, apply)
 
 
+def _global_registries(ctx: Context, args: NoArgs) -> Outcome:
+    report = global_cli.registry_report(ctx.config())
+    global_cli.print_registries(report)
+    return Outcome(report)
+
+
 def _global_status(ctx: Context, args: NoArgs) -> Outcome:
     found = global_cli.status(ctx.config(), conn=ctx.store.conn)
     global_cli.print_status(found)
@@ -3199,6 +3205,14 @@ CATALOG: tuple[Entry, ...] = (
         _global_update,
     ),
     Entry(
+        "global registries",
+        "Look up the signed list of registries and test their availability, only when the "
+        "person asks to see or look up registries.",
+        NoArgs,
+        Kind.READ,
+        _global_registries,
+    ),
+    Entry(
         "global status",
         "Show only this node's state in desman-global, including whether it takes part, "
         "its node key's fingerprint, the registry, and which model providers it lends with "
@@ -3242,7 +3256,9 @@ CATALOG: tuple[Entry, ...] = (
     Entry(
         "global join",
         "Take part in desman-global, only when the person asks for it: creates this node's "
-        "key the first time; lends nothing by itself. The person confirms.",
+        "key the first time; lends nothing by itself. The person confirms. If no address "
+        "is saved, ask which registry the person wants and pass its URL as registry. "
+        "Offer to look up registries if they need a list.",
         JoinArgs,
         Kind.CHANGE,
         _global_join,

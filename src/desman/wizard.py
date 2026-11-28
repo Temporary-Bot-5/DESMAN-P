@@ -700,7 +700,7 @@ def ask_behaviour(current: Behaviour, config: Config) -> Behaviour:
 class NetworkChoice:
     join: bool
     registry: str | None = None
-    """An address the person typed (asked only when none is known)."""
+    """An address the person selected or typed when none is known."""
 
 
 def ask_network(config: Config) -> NetworkChoice:
@@ -725,6 +725,27 @@ def ask_network(config: Config) -> NetworkChoice:
         return NetworkChoice(join=False)
     if config.network.registry is not None or net.DEFAULT_REGISTRY is not None:
         return NetworkChoice(join=True)
+    from desman import global_cli
+
+    report = global_cli.registry_report(config)
+    answering = [item for item in report["registries"] if item["answers"]]
+    if report["error"]:
+        ui.warn(report["error"])
+    elif answering:
+        other = ""
+        choices = [
+            ui.Choice(
+                global_cli.registry_label(item["name"], item["url"], item["latency_ms"]),
+                item["url"],
+            )
+            for item in answering
+        ]
+        choices += [ui.Choice(t("Enter another address"), other), ui.Choice(t("Not now"), None)]
+        selected = ui.select(t("Choose a registry"), choices)
+        if selected != other:
+            return NetworkChoice(join=selected is not None, registry=selected)
+    else:
+        ui.note(t("No catalog registries are answering."))
     while True:
         address = ui.text(t("The registry's address, https://... ('-' for not now)")).strip()
         if address in ("", "-"):

@@ -22,14 +22,16 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Final
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from desman.core import db
+from desman.core.atomic import replace_file
 from desman.i18n import t
-from desman.net import operator_records, protocol, sign
+from desman.net import catalog, operator_records, protocol, sign
 from desman.registry import clusters, store, work
 
 _BINARY: Final = getattr(os, "O_BINARY", 0)
@@ -75,6 +77,51 @@ def load_root_key(path: Path, root_pub: Path | None = None) -> sign.NodeKey:
             t("{path} is not the root key of {name}.", path=str(path), name=root_pub.name)
         )
     return key
+
+
+def sign_catalog(
+    entries: list[dict[str, str | None]],
+    *,
+    days: int,
+    now: datetime,
+    root_key: Path,
+    out: Path,
+) -> None:
+    try:
+        payload = catalog.RegistryCatalog.model_validate({"registries": entries})
+        expires = timedelta(days=days)
+        if out.resolve() in {root_key.resolve(), sign.ROOT_PUB.resolve()}:
+            raise AdminError(t("The catalog cannot be written over a key file."))
+        signed = sign.sign(
+            load_root_key(root_key),
+            sign.RecordKind.REGISTRY_CATALOG,
+            payload.model_dump(mode="json"),
+            issued_at=now,
+            lifetime=expires,
+        )
+        data = (signed.model_dump_json(indent=2) + "\n").encode("utf-8")
+        if len(data) > catalog.MAX_BYTES:
+            raise catalog.Refused(t("The registry catalog is too large."))
+        with TemporaryDirectory(dir=out.parent) as temp:
+            path = Path(temp) / "catalog.json"
+            path.write_bytes(data)
+            replace_file(path, out)
+    except AdminError:
+        raise
+    except (OSError, ValueError, OverflowError) as e:
+        raise AdminError(t("Could not sign the registry catalog: {error}", error=str(e))) from e
+
+
+def show_catalog(path: Path, now: datetime) -> tuple[catalog.RegistryCatalog, datetime]:
+    """The verified catalog and when its signature expires (sign it again before then)."""
+    try:
+        with path.open("rb") as source:
+            data = source.read(catalog.MAX_BYTES + 1)
+        return catalog.verify(data, now), sign.parse(data).record.expires_at
+    except OSError as e:
+        raise AdminError(t("Could not read the registry catalog: {error}", error=str(e))) from e
+    except catalog.CatalogError as e:
+        raise AdminError(str(e)) from e
 
 
 def operator_key(path: Path) -> Ed25519PublicKey:

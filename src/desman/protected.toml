@@ -28,10 +28,11 @@
 # How a proposal is applied and reverted: only what the person confirmed, built by code.
 "applying.py" = "655a1ac6db3304e4d031a4fcdd627ae046f67c322b9e339cbf5d403bfb21f368"
 # desman-global (ADR 0004): the root of trust and the code that checks signatures by it,
-# records and requests alike.
+# records and requests alike, and the registry catalog checked by it.
 "net/root.pub" = "1212bec4b18e53e1025fd017bfe26f2a2416e5180cd262724e3a175594372a2d"
-"net/sign.py" = "bf584026d402786305f2ef40689b2f6b842d9201e36f057b705afbc971337c77"
+"net/sign.py" = "28b64ab3871a7ee1c665f611cbe7fd78e857c3557ac90815fa8d8cf1b0d061b8"
 "net/request.py" = "c2e14185a19dcdcbe19fc2abf121ac9c85e2ca410f69e600d2e102dbfa7a88b6"
+"net/catalog.py" = "fd044807953a3e93d5dc31fc3799b6931d6ba8de440c400c26662bec151e78b4"
 # The scripted model every test of agents runs on.
 "llm/fake.py" = "df649e750263685e45881ab93edda072ce8fa114fb539766af0ccb784b9dba13"
 

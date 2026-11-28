@@ -149,7 +149,7 @@ class Fetcher:
 
     def fetch(self, url: str) -> Page:
         for _ in range(MAX_REDIRECTS + 1):
-            response = self._get(url)
+            response = self.get(url)
             location = response.headers.get("location")
             if response.is_redirect and location:
                 response.close()
@@ -161,7 +161,15 @@ class Fetcher:
                 response.close()
         raise WebError(f"more than {MAX_REDIRECTS} redirects")
 
-    def _get(self, url: str) -> httpx.Response:
+    def get(
+        self,
+        url: str,
+        *,
+        timeout: float = TIMEOUT,
+        accept: str = ACCEPT,
+        accept_encoding: str | None = None,
+    ) -> httpx.Response:
+        """Open a streaming GET pinned to a checked public address. The caller closes it."""
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise WebError("only http:// and https:// URLs can be fetched")
@@ -177,12 +185,15 @@ class Fetcher:
         target = parts._replace(netloc=f"{netloc}:{port}").geturl()
         name = f"[{host}]" if ":" in host else host  # an IPv6 literal keeps its brackets
         host_header = name if parts.port is None else f"{name}:{parts.port}"
+        headers = {"Host": host_header, "User-Agent": USER_AGENT, "Accept": accept}
+        if accept_encoding is not None:
+            headers["Accept-Encoding"] = accept_encoding
         try:
             request = self.client.build_request(
                 "GET",
                 target,
-                headers={"Host": host_header, "User-Agent": USER_AGENT, "Accept": ACCEPT},
-                timeout=TIMEOUT,
+                headers=headers,
+                timeout=timeout,
                 # TLS checks the certificate against the name, not the address connected to.
                 extensions={"sni_hostname": host},
             )

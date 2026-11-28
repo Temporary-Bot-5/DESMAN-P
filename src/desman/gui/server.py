@@ -101,6 +101,11 @@ def strings() -> dict[str, str]:
         "other_providers": t("Other providers"),
         "get_key": t("Get a key"),
         "advanced": t("Advanced"),
+        "registry_other": t("Enter another address"),
+        "registry_unreachable": t("The registry catalog is unreachable."),
+        "registry_none": t("No catalog registries are answering."),
+        "registry_latency": t("{ms} ms"),
+        "registry_choose": t("Choose a registry"),
         "saved": t("Saved"),
         "settings_permissions": t("Permissions"),
         "remove_desman": t("Remove DESMAN"),
@@ -431,6 +436,16 @@ class Server:
                 try:
                     return self._json(snapshot(self.database, url.path[1:], self.front))
                 except (sqlite3.Error, ConfigError, OSError):
+                    return Response(503)
+            if url.path == "/registries":
+                from desman import global_cli
+
+                try:
+                    config = open_config().load()
+                    if config.network.enabled:
+                        return self._json({"registries": [], "error": None})
+                    return self._json(global_cli.registry_report(config))
+                except (ConfigError, OSError):
                     return Response(503)
             if url.path == "/operator":
                 from desman.gui.operator import snapshot as operator_snapshot
