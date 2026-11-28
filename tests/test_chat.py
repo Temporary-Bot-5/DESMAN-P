@@ -138,7 +138,7 @@ def test_c_continues_the_last_session() -> None:
     chat("find cheap flights to Lisbon")
     result = again("and back on Sunday")
     assert "Continuing the session" in result.output
-    assert "find cheap flights to Lisbon" in result.output  # the last messages are shown
+    assert "You › find cheap flights to Lisbon" in result.output
     [info] = stored().recent()
     assert info.messages == 2
 
@@ -166,6 +166,7 @@ def test_sessions_switches_to_the_chosen_one() -> None:
     result = again("/sessions", "2", "more on flights")
     assert "Which session?" in result.output and "current" in result.output
     assert "Switched to the session" in result.output
+    assert "You › about flights" in result.output
     flights, trains = stored().recent()  # the one written to last comes first
     assert flights.opening == "about flights" and flights.messages == 2
     assert trains.messages == 1
@@ -559,7 +560,10 @@ def test_gui_start_failure_returns_to_the_same_chat(
     assert stored().get(session_id).title == "Continued"  # type: ignore[union-attr]
 
 
-def test_reply_hints_change_only_on_display(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("turn_type", ["reply", "clarify"])
+def test_reply_hints_change_only_on_display(
+    monkeypatch: pytest.MonkeyPatch, turn_type: str
+) -> None:
     import json
 
     from desman import runs
@@ -567,12 +571,13 @@ def test_reply_hints_change_only_on_display(monkeypatch: pytest.MonkeyPatch) -> 
 
     configured()
     reply = "See `desman list`.\n```sh\ndesman list\n```"
-    answer = json.dumps({"type": "reply", "text": reply})
+    field = "question" if turn_type == "clarify" else "text"
+    answer = json.dumps({"type": turn_type, field: reply})
     fake = FakeLLM().on("Chat turn", answer, answer)
     monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
 
     result = chat("What can I run?", "/exit")
-    assert "See `/list`." in result.output
+    assert "\n\nDESMAN ›\nSee `/list`." in result.output
     assert "\ndesman list\n" in result.output
     with db.open_db() as conn:
         sessions = Sessions(conn)
@@ -581,7 +586,7 @@ def test_reply_hints_change_only_on_display(monkeypatch: pytest.MonkeyPatch) -> 
         assert sessions.history(session.id).messages[-1].text == reply
 
     replay = again("/exit")
-    assert "See `/list`." in replay.output
+    assert "You › What can I run?\n\nDESMAN ›\nSee `/list`." in replay.output
     assert "\ndesman list\n" in replay.output
 
 

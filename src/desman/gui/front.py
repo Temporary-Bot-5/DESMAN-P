@@ -306,7 +306,7 @@ class WebFront(ui.Front):
                                     if m.styled
                                     and (styled := Text.from_ansi(m.styled)).plain == m.text
                                     and self.redact(styled.plain) == styled.plain
-                                    else _render(m)
+                                    else _render(m, terminal=False)
                                 )
                             )
                             for m in messages

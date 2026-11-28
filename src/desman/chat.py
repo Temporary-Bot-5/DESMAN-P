@@ -758,7 +758,7 @@ class Chat:
 
     def _say(self, text: str, task_id: str | None = None, *, settle: bool = True) -> None:
         if self.session_id is None:
-            ui.out(Text(text))
+            ui.out(ui.chat_reply(text) if ui.is_terminal_front() else Text(text))
             return
         message = self.sessions.add(
             self.session_id,
@@ -3037,17 +3037,20 @@ def _redacted(value: Any, config: Config | None) -> Any:
     return value
 
 
-def _render(message: Message) -> Text:
+def _render(message: Message, *, terminal: bool | None = None) -> Text:
+    if terminal is None:
+        terminal = ui.is_terminal_front()
     if message.kind is Kind.SUMMARY:
         return Text(t("Summary of the older messages:") + "\n" + message.text, style="muted")
     if message.cancelled_at is not None:
         message = message.model_copy(update={"text": message.text + " (" + t("Stopped") + ")"})
     if message.role is Role.USER:
-        return Text("› ", style="key") + Text(message.text)
+        return Text(ui.chat_user_marker() if terminal else "› ", style="key") + Text(message.text)
     if message.kind is not Kind.MESSAGE or message.role is Role.DESMAN:
         return Text(message.text, style="muted")
     with ui.chat_output():
-        return Text(ui.chat_hint(actions.plain_math(message.text)))
+        text = ui.chat_hint(actions.plain_math(message.text))
+    return ui.chat_reply(text) if terminal else Text(text)
 
 
 def _paused_until(report: TaskReport) -> str | None:

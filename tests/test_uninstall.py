@@ -368,14 +368,28 @@ def test_catalog_previews_uninstall(app: Path, monkeypatch: pytest.MonkeyPatch) 
     ["/uninstall --purge", "Remove DESMAN", "/uninstall --purge --yes", "!uninstall --purge --yes"],
 )
 def test_confirmed_uninstall_ends_terminal_chat(
-    app: Path, line: str, monkeypatch: pytest.MonkeyPatch
+    app: Path, line: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    settings = app / "searxng-docker" / "settings.yml"
+    settings.parent.mkdir()
+    settings.touch()
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        assert args == ["info"]
+        raise click.ClickException("Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(searxng, "docker", docker)
     open_config().save(make_config(configured=True))
     llm = FakeLLM().on(CHAT, '{"type":"command","name":"uninstall","args":{"purge":true}}')
     monkeypatch.setattr(runs, "models", lambda *_, **__: runs.Models(llm, None))
     confirmations: list[bool] = []
 
-    def confirm(*_: Any, **__: Any) -> bool:
+    def confirm(question: str, *, default: bool) -> bool:
+        assert (
+            "Docker is not running" in question
+            or "Docker is not running" in capsys.readouterr().out
+        )
         confirmations.append(True)
         return True
 
@@ -397,6 +411,81 @@ def test_confirmed_uninstall_ends_terminal_chat(
     assert len(confirmations) == (0 if "--yes" in line else 1)
 
 
+@pytest.mark.parametrize("recovers", [False, True])
+def test_stopped_docker_allows_uninstall(
+    app: Path, recovers: bool, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings = app / "searxng-docker" / "settings.yml"
+    settings.parent.mkdir()
+    settings.touch()
+    error = "failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine"
+    commands_run: list[list[str]] = []
+    running = False
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        commands_run.append(args)
+        if args == ["info"]:
+            assert timeout <= 5
+        if not running:
+            raise click.ClickException(error)
+        if args[0] == "ps":
+            return searxng.CONTAINER
+        if args[0] == "inspect":
+            return '[{"Mounts": []}]'
+        return ""
+
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "docker", docker)
+    lines = uninstall_cli.plan(app, False)
+    assert any(
+        "Docker is not running" in line and "docker rm -f desman-searxng" in line for line in lines
+    )
+    assert commands_run == [["info"]]
+    spawned: list[object] = []
+    uninstall_cli.start(app, False, spawn=lambda argv, **_: spawned.append(argv))
+    assert len(spawned) == 1
+    assert not capsys.readouterr().out
+    running = recovers
+    uninstall_cli._finish_cleanup(False)
+    if recovers:
+        assert commands_run[-1] == ["rm", "-f", "-v", searxng.CONTAINER]
+        assert not capsys.readouterr().out
+    else:
+        assert commands_run[-1] == ["info"]
+        [note] = capsys.readouterr().out.splitlines()
+        assert "Docker is not running" in note
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Error response from daemon: NO SUCH CONTAINER: desman-searxng",
+        "Error response from daemon: Removal of container desman-searxng is already in progress",
+        "Error response from daemon: permission denied",
+    ],
+)
+def test_container_removal_race(app: Path, error: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "inspect", lambda: {"Mounts": []})
+    calls: list[list[str]] = []
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        calls.append(args)
+        if args[0] == "rm":
+            raise click.ClickException(error)
+        return ""
+
+    monkeypatch.setattr(searxng, "docker", docker)
+    if "permission denied" in error:
+        with pytest.raises(click.ClickException, match="permission denied"):
+            uninstall_cli._finish_cleanup(False)
+        assert calls[1:] == [["info"]]
+    else:
+        uninstall_cli._finish_cleanup(False)
+        assert len(calls) == 1
+    assert calls[0] == ["rm", "-f", "-v", searxng.CONTAINER]
+
+
 @pytest.mark.parametrize("problem", ["docker", "native", "wsl"])
 def test_service_problem_refuses_to_spawn(
     app: Path, problem: str, monkeypatch: pytest.MonkeyPatch
@@ -410,6 +499,7 @@ def test_service_problem_refuses_to_spawn(
         settings.touch()
         monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
         monkeypatch.setattr(searxng, "inspect", fail)
+        monkeypatch.setattr(searxng, "docker", lambda *_, **__: "")
     elif problem == "native":
         searxng_native.directory().mkdir(parents=True)
         monkeypatch.setattr(searxng_native, "locked", fail)

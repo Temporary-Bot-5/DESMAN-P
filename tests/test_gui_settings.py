@@ -8,10 +8,11 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 from pydantic import ValidationError
 
-from desman import config_cli, global_cli, tuning_cli, ui, uninstall_cli, wizard
+from desman import config_cli, global_cli, searxng, tuning_cli, ui, uninstall_cli, wizard
 from desman.chat import Chat
 from desman.config import open_config
 from desman.core import db
@@ -677,6 +678,32 @@ def test_settings_reads_network_status_once(
     monkeypatch.setattr(global_cli, "status", status)
     snapshot(settings_app[0])
     assert count == 1
+
+
+def test_uninstall_previews_share_docker_probe(
+    settings_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = settings_app
+    settings = tmp_path / "searxng-docker" / "settings.yml"
+    settings.parent.mkdir()
+    monkeypatch.setattr(uninstall_cli, "installed_app", lambda: tmp_path)
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    probes: list[list[str]] = []
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        probes.append(args)
+        assert timeout <= 5
+        raise click.ClickException("Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(searxng, "docker", docker)
+    no_settings = snapshot(app)["uninstall"]
+    assert not probes
+    assert all("Docker is not running" not in line for line in no_settings["lines"])
+    settings.touch()
+    preview = snapshot(app)["uninstall"]
+    assert probes == [["info"]]
+    for name in ("lines", "purge_lines"):
+        assert any("Docker is not running" in line for line in preview[name])
 
 
 @pytest.mark.parametrize(("approved", "conflict"), [(False, False), (True, False), (True, True)])

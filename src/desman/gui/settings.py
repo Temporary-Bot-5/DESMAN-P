@@ -103,11 +103,16 @@ def data(conn: sqlite3.Connection | None, config: Config, front: WebFront) -> di
         }
     network = global_cli.status(config, conn=conn)
     app = uninstall_cli.installed_app()
+    docker_unavailable = app is not None and uninstall_cli.docker_search_unavailable(app)
     return {
         "uninstall": {
             "available": app is not None,
-            "lines": uninstall_cli.plan(app, False) if app is not None else [],
-            "purge_lines": uninstall_cli.plan(app, True) if app is not None else [],
+            "lines": uninstall_cli.plan(app, False, docker_unavailable=docker_unavailable)
+            if app is not None
+            else [],
+            "purge_lines": uninstall_cli.plan(app, True, docker_unavailable=docker_unavailable)
+            if app is not None
+            else [],
         },
         "general": {
             "language": config.language,
