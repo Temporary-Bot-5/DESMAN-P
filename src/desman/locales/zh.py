@@ -29,6 +29,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "已将签名后的注册服务器目录写入 {path}。",
     "The registry catalog could not be verified.": "无法验证注册服务器目录。",
     "The registry catalog has expired.": "注册服务器目录已过期。",
+    "The catalog cannot be written over a key file.": "不能用目录覆盖密钥文件。",
+    "Signed until {date}: sign it again before then.": "签名有效至 {date}：请在此之前重新签名。",
     "The registry catalog is too large.": "注册服务器目录过大。",
     "The registry catalog is unreachable.": "无法访问注册服务器目录。",
     "Verify and show a root-signed registry catalog.": "验证并显示用根密钥签名的注册服务器目录。",

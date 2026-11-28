@@ -34,6 +34,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "Подписанный каталог реестров записан в {path}.",
     "The registry catalog could not be verified.": "Не удалось проверить каталог реестров.",
     "The registry catalog has expired.": "Срок действия каталога реестров истёк.",
+    "The catalog cannot be written over a key file.": "Каталог нельзя записать поверх файла ключа.",
+    "Signed until {date}: sign it again before then.": "Подписан до {date}: подпишите заново до этой даты.",
     "The registry catalog is too large.": "Каталог реестров слишком большой.",
     "The registry catalog is unreachable.": "Каталог реестров недоступен.",
     "Verify and show a root-signed registry catalog.": "Проверить и показать каталог реестров, подписанный корневым ключом.",

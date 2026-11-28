@@ -1482,18 +1482,20 @@ function drawSettings() {
         registryOptionsRequest ||= fetch("/registries").then(response => {
           if (!response.ok) throw new Error();
           return response.json();
-        });
+        }).catch(error => { registryOptionsRequest = null; throw error; });
       }
       registryOptionsRequest?.then(data => {
         if (!select.isConnected) return;
         const answering = data.registries.filter(item => item.answers);
+        const bare = url => (url || "").replace(/\/+$/, "");
         for (const item of answering) {
           const latency = words.registry_latency.replace("{ms}", item.latency_ms);
           const label = `${item.name} · ${item.url} · ${latency}`;
-          const option = item.url === saved ? select.options[1] : text("option", label, select);
+          const same = !!saved && bare(item.url) === bare(saved);
+          const option = same ? select.options[1] : text("option", label, select);
           option.textContent = label;
-          option.value = item.url;
-          if (item.url !== saved) select.insertBefore(option, other);
+          option.value = same ? saved : item.url;
+          if (!same) select.insertBefore(option, other);
         }
         notice.textContent = data.error || (answering.length ? "" : words.registry_none);
         if (!select.value && !answering.length) { select.value = "other"; syncRegistryInput(); }

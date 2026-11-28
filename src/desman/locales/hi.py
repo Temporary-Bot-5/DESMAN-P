@@ -29,6 +29,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "हस्ताक्षरित रजिस्ट्री कैटलॉग {path} में सहेजा गया।",
     "The registry catalog could not be verified.": "रजिस्ट्री कैटलॉग सत्यापित नहीं हो सका।",
     "The registry catalog has expired.": "रजिस्ट्री कैटलॉग की समय-सीमा समाप्त हो गई है।",
+    "The catalog cannot be written over a key file.": "कैटलॉग को कुंजी फ़ाइल के ऊपर नहीं लिखा जा सकता।",
+    "Signed until {date}: sign it again before then.": "{date} तक हस्ताक्षरित: उससे पहले फिर से हस्ताक्षर करें।",
     "The registry catalog is too large.": "रजिस्ट्री कैटलॉग बहुत बड़ा है।",
     "The registry catalog is unreachable.": "रजिस्ट्री कैटलॉग तक पहुँचा नहीं जा सका।",
     "Verify and show a root-signed registry catalog.": "रूट कुंजी से हस्ताक्षरित रजिस्ट्री कैटलॉग को सत्यापित करें और दिखाएँ।",

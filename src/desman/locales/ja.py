@@ -29,6 +29,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "署名済みのレジストリカタログを {path} に書き込みました。",
     "The registry catalog could not be verified.": "レジストリカタログを検証できませんでした。",
     "The registry catalog has expired.": "レジストリカタログの有効期限が切れています。",
+    "The catalog cannot be written over a key file.": "カタログを鍵ファイルに上書きすることはできません。",
+    "Signed until {date}: sign it again before then.": "{date} まで署名済み：それまでに署名し直してください。",
     "The registry catalog is too large.": "レジストリカタログが大きすぎます。",
     "The registry catalog is unreachable.": "レジストリカタログにアクセスできません。",
     "Verify and show a root-signed registry catalog.": "ルート鍵で署名されたレジストリカタログを検証し、表示します。",

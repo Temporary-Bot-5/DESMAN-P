@@ -776,10 +776,11 @@ def catalog_sign(
 def catalog_show(file: Path) -> None:
     """Verify and show a root-signed registry catalog."""
     try:
-        found = admin.show_catalog(file, _now())
+        found, expires = admin.show_catalog(file, _now())
     except admin.AdminError as e:
         raise _fail(e) from e
     ui.ok(t("Registry catalog verified."))
+    ui.note(t("Signed until {date}: sign it again before then.", date=expires.date().isoformat()))
     for item in found.registries:
         ui.note(f"{item.name} · {item.url}")
         if item.note:

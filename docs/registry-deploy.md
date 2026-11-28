@@ -74,6 +74,23 @@ Each `assign` and `revoke` signs a new list lasting 7 days. Nodes accept a list 
 `desman-registry trust show` says which list is handed out and until when. A list lasts 30
 days at most (`--days`), but concealment is bounded by the 2-day age limit.
 
+## 3a. The registry catalog
+
+New participants do not type the registry's address: DESMAN reads
+`https://temporary-bot-5.github.io/DESMAN-P/registries.json` (the repository's
+`site/registries.json`, deployed with the site), checks the root's signature and asks each listed
+registry's `/healthz`. Sign it here, where `root.key` is, and commit the file:
+
+```bash
+desman-registry catalog sign --entry https://registry.example.org "Registry name" \
+  --note "Optional note" --days 180 --out site/registries.json
+desman-registry catalog show site/registries.json   # verifies it and prints the entries
+```
+
+Repeat `--entry URL NAME [--note TEXT]` for each registry. **The signature expires** (180 days by
+default; `catalog show` prints the date): sign it again before then, or every new participant has
+to type the address by hand. Signing again is also how a registry is added or removed.
+
 ## 4. Run it as a service
 
 `/etc/systemd/system/desman-registry.service`:

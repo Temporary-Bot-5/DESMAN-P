@@ -29,6 +29,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "Catálogo de registros firmado y guardado en {path}.",
     "The registry catalog could not be verified.": "No se pudo verificar el catálogo de registros.",
     "The registry catalog has expired.": "El catálogo de registros ha caducado.",
+    "The catalog cannot be written over a key file.": "El catálogo no puede escribirse sobre un archivo de clave.",
+    "Signed until {date}: sign it again before then.": "Firmado hasta {date}: vuelva a firmarlo antes.",
     "The registry catalog is too large.": "El catálogo de registros es demasiado grande.",
     "The registry catalog is unreachable.": "No se puede acceder al catálogo de registros.",
     "Verify and show a root-signed registry catalog.": "Verifica y muestra un catálogo de registros firmado con la clave raíz.",

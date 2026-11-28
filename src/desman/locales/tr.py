@@ -29,6 +29,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "İmzalı kayıt sunucusu kataloğu {path} konumuna yazıldı.",
     "The registry catalog could not be verified.": "Kayıt sunucusu kataloğu doğrulanamadı.",
     "The registry catalog has expired.": "Kayıt sunucusu kataloğunun süresi doldu.",
+    "The catalog cannot be written over a key file.": "Katalog bir anahtar dosyasının üzerine yazılamaz.",
+    "Signed until {date}: sign it again before then.": "{date} tarihine kadar imzalı: bu tarihten önce yeniden imzalayın.",
     "The registry catalog is too large.": "Kayıt sunucusu kataloğu çok büyük.",
     "The registry catalog is unreachable.": "Kayıt sunucusu kataloğuna erişilemiyor.",
     "Verify and show a root-signed registry catalog.": "Kök anahtarla imzalanmış kayıt sunucusu kataloğunu doğrular ve gösterir.",

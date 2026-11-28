@@ -91,7 +91,7 @@ def sign_catalog(
         payload = catalog.RegistryCatalog.model_validate({"registries": entries})
         expires = timedelta(days=days)
         if out.resolve() in {root_key.resolve(), sign.ROOT_PUB.resolve()}:
-            raise ValueError("the catalog output must differ from the key files")
+            raise AdminError(t("The catalog cannot be written over a key file."))
         signed = sign.sign(
             load_root_key(root_key),
             sign.RecordKind.REGISTRY_CATALOG,
@@ -112,11 +112,12 @@ def sign_catalog(
         raise AdminError(t("Could not sign the registry catalog: {error}", error=str(e))) from e
 
 
-def show_catalog(path: Path, now: datetime) -> catalog.RegistryCatalog:
+def show_catalog(path: Path, now: datetime) -> tuple[catalog.RegistryCatalog, datetime]:
+    """The verified catalog and when its signature expires (sign it again before then)."""
     try:
         with path.open("rb") as source:
             data = source.read(catalog.MAX_BYTES + 1)
-        return catalog.verify(data, now)
+        return catalog.verify(data, now), sign.parse(data).record.expires_at
     except OSError as e:
         raise AdminError(t("Could not read the registry catalog: {error}", error=str(e))) from e
     except catalog.CatalogError as e:

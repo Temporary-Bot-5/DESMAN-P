@@ -29,6 +29,8 @@ MESSAGES: dict[str, Forms] = {
     "Signed registry catalog written to {path}.": "서명된 레지스트리 카탈로그를 {path}에 저장했습니다.",
     "The registry catalog could not be verified.": "레지스트리 카탈로그를 검증할 수 없습니다.",
     "The registry catalog has expired.": "레지스트리 카탈로그가 만료되었습니다.",
+    "The catalog cannot be written over a key file.": "카탈로그를 키 파일 위에 쓸 수 없습니다.",
+    "Signed until {date}: sign it again before then.": "{date}까지 서명됨: 그 전에 다시 서명하세요.",
     "The registry catalog is too large.": "레지스트리 카탈로그가 너무 큽니다.",
     "The registry catalog is unreachable.": "레지스트리 카탈로그에 연결할 수 없습니다.",
     "Verify and show a root-signed registry catalog.": "루트 키로 서명된 레지스트리 카탈로그를 검증하여 표시합니다.",
