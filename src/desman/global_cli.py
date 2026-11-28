@@ -39,6 +39,7 @@ from rich.text import Text
 
 from desman import applying, bench, net, providers, searxng, ui
 from desman.actions import open_user_db
+from desman.cli_args import FreeText
 from desman.config import Config, ConfigManager, Donation, Network
 from desman.config_cli import json_option, load_config
 from desman.core import db, netlog, operator
@@ -1771,7 +1772,7 @@ def _report_command(
 
 
 @global_group.command("report")
-@click.argument("text")
+@click.argument("text", cls=FreeText, required=True)
 @click.option("--task", "task_id", help="Include this task's snapshot.")
 @click.option("--confirm", metavar="SHA256", help="Send only if this matches the preview's hash.")
 @json_option

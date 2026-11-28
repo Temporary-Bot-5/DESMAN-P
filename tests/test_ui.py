@@ -13,6 +13,10 @@ from desman import ui
         ),
         ("See one: desman proposals show NUMBER", "See one: /proposals show NUMBER"),
         ("Use `desman global join --registry URL`.", "Use `/global join --registry URL`."),
+        (
+            "Try `desman global report I can't open the page`.",
+            "Try `/global report I can't open the page`.",
+        ),
         ("Try `desman run --provider openai`.", None),
         ('Try `desman run "GOAL" --provider openai`.', None),
         ("Try desman run --provider openai.", None),

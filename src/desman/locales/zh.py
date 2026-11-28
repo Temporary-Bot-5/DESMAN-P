@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG：{url}",
     "Skip confirmation.": "跳过确认。",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access 已启用，但尚未设置全网搜索引擎：web_search 仅涵盖 Wikipedia、Stack Overflow、arXiv 和 GitHub。请运行 `desman search setup` 或使用 `desman config`。",
-    "Remembered model access refusals cleared for the checked keys.": "已清除所检查密钥的模型访问拒绝记录。",
+    "Remembered model access refusals cleared for the accepted keys.": "已清除已接受密钥的模型访问拒绝记录。",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} 对密钥 #{number} ({fingerprint}) 不可用，直到 {until}：{words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "端口 {port} 已被占用（是否已打开另一个 `desman gui`？）。请使用其他 --port，或省略此选项以选择空闲端口。",
     "{path}:": "{path}:",
@@ -985,8 +985,8 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "24 小时调用",
     "tokens 24h": "24 小时令牌",
     "API keys": "API 密钥",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{with_keys}/{providers} 个提供商共有 {n} 个密钥。`desman keys check` 可测试它们（不消耗令牌），`desman usage` 显示总量。",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{with_keys}/{providers} 个提供商共有 {n} 个密钥。`desman keys check` 可测试它们，`desman usage` 显示总量。",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "没有可检查的密钥：用 `desman keys add PROVIDER` 添加",
     "{name} is not configured": "{name} 未配置",
@@ -1317,7 +1317,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "其他要求，用你自己的话；空文本表示清除。",
     "Everything back to the interlocutor's judgement.": "全部交回对话者自行判断。",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "对话者是否分析你的对话并记录信息：查看、on 或 off。",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "询问每个提供商其密钥是否可用、报告了哪些限额，并询问每个本地\n服务器是否在运行、是否提供其模型。不消耗 token。",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "询问每个提供商其密钥是否可用、报告了哪些限额，并询问每个本地\n服务器是否在运行、是否提供其模型。NVIDIA 使用限制为一个 token 的回复。",
     "Download the model with `ollama pull {model}`.": "用 `ollama pull {model}` 下载该模型。",
     "It serves: {models}": "它提供：{models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "用 `llama-server -m MODEL.gguf --port 8080` 启动它，或在 `desman config` 中设置它的地址。",
@@ -1916,7 +1916,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "命令中的引号无效。"})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "命令中的引号无效。",
+        "Only command options can follow quoted text.": "带引号的文本后只能跟命令选项。",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2136,3 +2141,14 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked now.": "目前无法检查密钥。",
+        "rate limited right now": "当前已达到请求速率限制。",
+        "The key could not be checked: no available model.": "无法验证密钥：没有可用的模型。",
+        'Put text with spaces in double quotes, e.g. "like this".': '请将含空格的文本放在双引号内，例如 "像 这样"。',
+        "DESMAN is thinking… {seconds} s": "DESMAN 正在思考… {seconds} 秒",
+    }
+)

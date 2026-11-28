@@ -7,7 +7,7 @@ problemas. Comece pelas seções 1–3 e consulte as demais quando precisar.
 
 - **Este é um protótipo.** Pode fechar de repente, travar, dar respostas estranhas ou perder
   trabalho inacabado. Não confie a ele nada importante nem tarefas que não possam ser repetidas.
-  Os problemas encontrados são o principal resultado do teste. Relate todos (seção 7).
+  Os problemas encontrados são o principal resultado do teste. Relate todos (seção 6).
 - **Suas chaves ficam com você.** A chave de acesso ao modelo (chave de API) fica em um arquivo no
   seu computador e só você pode vê-la. Ela não vai para a rede DESMAN, para o proprietário, para
   modelos nem para o histórico da conversa. A rede recebe apenas uma *impressão digital*, um
@@ -20,10 +20,7 @@ problemas. Comece pelas seções 1–3 e consulte as demais quando precisar.
     emprestados e suas cotas diárias (provedor, modelo e impressão digital da chave, nunca a
     chave);
   - o trabalho que seu computador fez para a rede e o resultado;
-  - os relatos de problemas que você enviou, com o texto exato da janela de confirmação (seção 7);
-  - nas mensagens, seu nome, quem escreve para quem e quando. O texto é criptografado e o operador
-    não consegue lê-lo, **exceto quando há uma denúncia**. Se você denunciar uma mensagem, o texto
-    é enviado ao operador;
+  - os relatos de problemas que você enviou, com o texto exato da janela de confirmação (seção 6);
   - como qualquer site, o servidor vê o endereço IP de onde veio a conexão.
 - **Executar código no Windows.** Instale e inicie o Docker Desktop no modo de contêineres Linux
   e execute `desman sandbox setup --yes` para autorizar o download da imagem. Você pode habilitar
@@ -86,7 +83,7 @@ para o programa.
 
 Os limites gratuitos são baixos e podem mudar. Se o DESMAN disser que um limite acabou, o trabalho
 seguirá quando ele for renovado, geralmente em um minuto, às vezes em um dia. Se não houver
-resposta por mais de uma hora, relate o problema (seção 7).
+resposta por mais de uma hora, relate o problema (seção 6).
 
 ## 3. Como usar
 
@@ -156,29 +153,9 @@ na hora.
 A rede funciona enquanto a página do DESMAN está aberta. Se o servidor ficar indisponível, o
 DESMAN segue por conta própria e tenta de novo mais tarde.
 
-## 6. Mensagens
+## 6. Como relatar um problema
 
-Os participantes podem escrever uns aos outros. As mensagens são criptografadas. O operador vê
-quem escreve para quem e quando, mas não lê o texto.
-
-1. **Nome.** Digite `/global name seu_nome` na conversa. Use de 3 a 32 caracteres: letras latinas
-   minúsculas, dígitos, `_` e `-`. Os outros verão esse nome.
-2. **Contato.** Você só pode escrever para quem também concordar. Envie o pedido com
-   `/global contact add nome`. A outra pessoa aceita com o mesmo comando e seu nome.
-3. **Escrever.** Use `/global send nome "a mensagem"`. Se o texto tiver mais de uma palavra,
-   ponha-o entre aspas retas `"`, também nos comandos abaixo.
-4. **Ler.** Clique em **Mensagens** à esquerda ou use `/messages` ou `/messages nome`.
-5. **Bloquear.** Use `/global block nome`. A outra pessoa não será avisada. Para desbloquear, use
-   `/global unblock nome`.
-6. **Denunciar.** Use `/global complain nome "o que aconteceu"`. Para mostrar uma mensagem
-   específica ao operador, acrescente `--message NÚMERO`. O número aparece na leitura.
-   **O texto dessa mensagem vai para o operador**.
-
-O DESMAN nunca executa mensagens alheias como tarefas. Os links e arquivos nelas não iniciam nada.
-Se você perder o arquivo da chave do nó, por exemplo ao remover o programa por completo, as
-mensagens serão perdidas.
-
-## 7. Como relatar um problema
+Se você descrever um problema com o DESMAN na conversa, ele vai sugerir um relato para você revisar.
 
 É preciso estar na rede para enviar um relato (seção 5).
 
@@ -190,13 +167,13 @@ mensagens serão perdidas.
 
 As chaves nunca vão no relato. Se o DESMAN encontrar uma chave sua no texto, cancela o envio.
 Conversas, perfil e arquivos da tarefa também não são enviados. Para anexar o histórico de uma
-tarefa, digite `/global report "descrição" --task NÚMERO`. A janela mostra exatamente o que será
+tarefa, digite `/global report --task NÚMERO "descrição"`. A janela mostra exatamente o que será
 acrescentado.
 
 Se não conseguir enviar porque a rede não conecta ou o programa não abre, escreva ao proprietário
 pelo meio habitual e anexe uma captura de tela se puder.
 
-## 8. Atualizações
+## 7. Atualizações
 
 As atualizações só são instaladas com sua autorização. Quando o proprietário avisar que saiu uma
 versão, conecte-se à rede (seção 5). Use `/global update --show` para ver a versão e
@@ -205,7 +182,7 @@ Depois, feche e reabra o DESMAN. Se aparecer um aviso de “arquivos protegidos�
 `/protected approve` e confirme para aceitar a nova versão das regras. Para voltar à anterior, use
 `/global update --revert`.
 
-## 9. Desinstalação
+## 8. Desinstalação
 
 - **Windows:** feche o DESMAN, pressione Win+R, cole
   `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` e pressione Enter.

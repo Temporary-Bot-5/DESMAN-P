@@ -28,6 +28,9 @@ from desman.llm.openai_compat import key_id
 from helpers import make_config
 from test_gui import headers
 from test_live import call
+from test_messenger import messenger_enabled
+
+__all__ = ["messenger_enabled"]
 
 
 @pytest.fixture
@@ -222,6 +225,7 @@ def test_decisions_are_typed_version_checked(
     assert any(json.loads(r[0]).get("typed") is True for r in rows)
 
 
+@pytest.mark.usefixtures("messenger_enabled")
 def test_simple_actions_reuse_chat_commands(
     panel_app: tuple[Server, Store], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -489,3 +493,9 @@ const reply = (version, rows, last = false, session = 's') => ({events: [], stat
     subprocess.run(
         [node, str(script)], check=True, capture_output=True, text=True, encoding="utf-8"
     )
+
+
+def test_disabled_messenger_action_returns_not_found(panel_app: tuple[Server, Store]) -> None:
+    app, _ = panel_app
+    assert app.handle("POST", "/action", headers(app), b'{"type":"messenger"}').status == 404
+    assert "messenger" not in json.loads(app.handle("GET", "/strings.json", headers(app)).body)

@@ -4,7 +4,7 @@ Main menu: providers numbered in `providers.PROVIDERS` order (free, paid, local)
 engines (`providers.SEARCH`), under section
 headings that take no number, then setup options and Done. A provider without
 keys goes straight to the key prompt; one with keys opens its menu: 1 add, 2 remove, then its
-settings, then Back. Permissions follow: four Y/N questions, Enter keeps the current value;
+settings and a check for configured providers, then Back. Permissions follow: four Y/N questions, Enter keeps the current value;
 then personalisation (Y/N), whether to set up how the interlocutor talks (Y/N) and whether to
 take part in desman-global (Y/N).
 """
@@ -52,7 +52,7 @@ def test_several_providers_and_keys_in_one_run() -> None:
     result = wizard(
         "1",  # English
         menu("groq"), "y", "gsk_first",  # no key yet: privacy once, then the key
-        menu("groq"), "1", "gsk_second", "second account", "3",  # add, label, Back
+        menu("groq"), "1", "gsk_second", "second account", "4",  # add, label, Back
         menu("google"), "AIza_one",  # privacy is not asked again
         DONE,
         *KEEP_PERMISSIONS, *KEEP_PERSONAL,
@@ -91,7 +91,7 @@ def test_remove_one_key_of_several() -> None:
     config = saved().load()
     config.add_key("GROQ_API_KEY", "gsk_b")
     saved().save(config)
-    result = wizard("1", menu("groq"), "2", "1", "3", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    result = wizard("1", menu("groq"), "2", "1", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
     assert result.exit_code == 0, result.output
     assert flat_keys(saved().load()) == {"GROQ_API_KEY": "gsk_b"}
 
@@ -99,7 +99,7 @@ def test_remove_one_key_of_several() -> None:
 def test_duplicate_key_is_not_added_twice() -> None:
     saved().save(make_config(api_keys={"GROQ_API_KEY": "gsk_a"}))
     result = wizard(
-        "1", menu("groq"), "1", "gsk_a", "", "3", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
+        "1", menu("groq"), "1", "gsk_a", "", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL
     )
     assert result.exit_code == 0, result.output
     assert "already has this key" in result.output
@@ -254,3 +254,41 @@ def test_interface_section_saves_and_uses_the_current_default(
     for expected in ("gui", "gui", "terminal"):
         setup_wizard.run_section(saved(), "interface")
         assert saved().load().interface == expected
+
+
+def test_wizard_checks_nvidia_through_the_shared_key_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman import config_cli
+    from desman.config import Config
+    from desman.llm.check import KeyCheck
+
+    saved().save(make_config(api_keys={"NVIDIA_API_KEY": "test-nvidia"}))
+    checked: list[str] = []
+
+    def check_keys(
+        config: Config, provider: str
+    ) -> tuple[list[providers.Provider], list[KeyCheck]]:
+        assert config.keys("NVIDIA_API_KEY")[0].value == "test-nvidia"
+        checked.append(provider)
+        return [providers.find("nvidia")], [
+            KeyCheck("nvidia", 1, "fingerprint", True, 200, "accepted")
+        ]
+
+    monkeypatch.setattr(config_cli, "check_keys", check_keys)
+    result = wizard("1", menu("nvidia"), "3", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    assert result.exit_code == 0, result.output
+    assert checked == ["nvidia"]
+
+
+def test_wizard_does_not_offer_model_key_check_for_tavily(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from desman import config_cli
+
+    def unexpected_check(*args: object) -> None:
+        pytest.fail("The wizard offered a model key check for Tavily")
+
+    monkeypatch.setattr(config_cli, "check_keys", unexpected_check)
+    saved().save(make_config(api_keys={"TAVILY_API_KEY": "test-tavily"}))
+    result = wizard("1", menu("tavily"), "3", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    assert result.exit_code == 0, result.output
+    assert "3  Back" in result.output

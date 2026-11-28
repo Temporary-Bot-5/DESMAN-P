@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "確認を省略します。",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access は有効ですが、ウェブ全体の検索エンジンが未設定です。web_search は Wikipedia、Stack Overflow、arXiv、GitHub のみを検索します。`desman search setup` または `desman config` を使用してください。",
-    "Remembered model access refusals cleared for the checked keys.": "確認したキーのモデルアクセス拒否の記録を消去しました。",
+    "Remembered model access refusals cleared for the accepted keys.": "受理されたキーのモデルアクセス拒否の記録を消去しました。",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} はキー #{number} ({fingerprint}) では {until} まで利用不可: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "ポート {port} は使用中です（別の `desman gui` が開いていますか？）。別の --port を指定するか、省略して空きポートを選んでください。",
     "{path}:": "{path}:",
@@ -987,8 +987,8 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "呼び出し 24h",
     "tokens 24h": "トークン 24h",
     "API keys": "API キー",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{providers} 中 {with_keys} 個のプロバイダーにキーが {n} 個あります。`desman keys check` でテスト（トークン消費なし）、`desman usage` で合計を表示します。",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{providers} 中 {with_keys} 個のプロバイダーにキーが {n} 個あります。`desman keys check` でテスト、`desman usage` で合計を表示します。",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "確認するキーがありません: `desman keys add PROVIDER` で追加してください",
     "{name} is not configured": "{name} は未設定です",
@@ -1325,7 +1325,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "その他、あなたの言葉で。空のテキストで消去します。",
     "Everything back to the interlocutor's judgement.": "すべて対話役の判断に戻します。",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "対話役が会話を分析しメモを付けるかどうか：表示、on または off。",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "各プロバイダーにキーが使えるか、どんな制限を報告しているかを、各ローカル\nサーバーに起動しているか、モデルを提供しているかを確認します。トークンは消費しません。",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "各プロバイダーにキーが使えるか、どんな制限を報告しているかを、各ローカル\nサーバーに起動しているか、モデルを提供しているかを確認します。NVIDIA では応答を 1 トークンに制限して確認します。",
     "Download the model with `ollama pull {model}`.": "`ollama pull {model}` でモデルをダウンロードしてください。",
     "It serves: {models}": "提供中：{models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "`llama-server -m MODEL.gguf --port 8080` で起動するか、`desman config` でアドレスを設定してください。",
@@ -1932,7 +1932,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "コマンドの引用符が正しくありません。"})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "コマンドの引用符が正しくありません。",
+        "Only command options can follow quoted text.": "引用符で囲んだテキストの後にはコマンドのオプションのみ指定できます。",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2165,3 +2170,14 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked now.": "現在キーを確認できませんでした。",
+        "rate limited right now": "現在、リクエストのレート制限に達しています。",
+        "The key could not be checked: no available model.": "利用できるモデルがないため、キーを確認できませんでした。",
+        'Put text with spaces in double quotes, e.g. "like this".': '空白を含むテキストは二重引用符で囲んでください。例 "この ように"。',
+        "DESMAN is thinking… {seconds} s": "DESMAN が考えています… {seconds} 秒",
+    }
+)

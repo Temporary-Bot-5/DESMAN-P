@@ -9,7 +9,7 @@ the rest when you need it.
 - **This is a prototype.** It may crash, hang, give strange answers and lose unfinished work.
   Don't trust it with anything important, and don't give it tasks that can't be repeated.
   The problems you find are the main result of the test: please report every one of them
-  (section 7).
+  (section 6).
 - **Your keys stay with you.** A model access key (an API key) is kept only in a file on your
   computer, and only you can see it. It never goes to the DESMAN network, to the owner, to a
   model or into the chat history. Only the key's *fingerprint* goes to the network: a short
@@ -23,10 +23,7 @@ the rest when you need it.
     the key itself);
   - the work your computer did for the network, and its result;
   - the problem reports you sent — exactly the text that was in the confirmation window
-    (section 7);
-  - in the messenger: your name, and who writes to whom and when. Messages are encrypted and
-    the operator can't read them — **except when there is a complaint**: if you complain
-    about a message, its text goes to the operator;
+    (section 6);
   - like any website, the server sees the address it is contacted from (IP).
 - **Running code on Windows.** Install and start Docker Desktop in Linux containers mode, then
   run `desman sandbox setup --yes` to authorize the image download. You can enable permission
@@ -88,7 +85,7 @@ program.
 
 Free limits are small and they change. If DESMAN says a limit is used up, nothing is broken:
 the work continues when the limit comes back (usually in a minute, sometimes in a day). If
-there is no answer for more than an hour, report it (section 7).
+there is no answer for more than an hour, report it (section 6).
 
 ## 3. How to use it
 
@@ -162,29 +159,9 @@ from your computer at once.
 The network works while the DESMAN page is open. If the server can't be reached, DESMAN
 simply works on its own and tries again later.
 
-## 6. The messenger
+## 6. How to report a problem
 
-Network participants can write to one another. Messages are encrypted: the operator sees who
-writes to whom and when, but not the text.
-
-1. **Name.** In the chat type `/global name your_name` (Latin letters, digits, `_`, `-`,
-   3–32 characters, lower case). Others will see it.
-2. **Contact.** You can write only to someone who has agreed to it too. Send a request:
-   `/global contact add name`; the other person accepts with the same command and your name.
-3. **Write:** `/global send name "the message"` — put the text in straight quotes `"` if it
-   has more than one word (the same in all the commands below).
-4. **Read:** the **Messenger** button on the left (or `/messages`, `/messages name`).
-5. **Block:** `/global block name` (the other person isn't told); `/global unblock name`
-   lifts it.
-6. **Complain:** `/global complain name "what happened"`. To show the operator a particular
-   message, add `--message NUMBER` (the number is shown when you read messages) — **the text
-   of that message goes to the operator**.
-
-DESMAN never carries out other people's messages as tasks: links and files in them don't
-start anything. If you lose the node's key file (for example, when you remove the program
-completely), the messages are lost.
-
-## 7. How to report a problem
+If you describe a problem with DESMAN in the chat, it offers a report for you to review.
 
 A report needs the network connection (section 5).
 
@@ -196,13 +173,13 @@ A report needs the network connection (section 5).
 
 Keys never get into a report: if DESMAN finds one of your keys in the text, nothing is sent.
 Chats, the profile and task files aren't sent either. To attach the history of a particular
-task, type `/global report "description" --task NUMBER` — the window shows exactly what will
+task, type `/global report --task NUMBER "description"` — the window shows exactly what will
 be added.
 
 If you can't send it (the network doesn't connect, the program doesn't open), write to the
 owner as usual and, if you can, attach a screenshot.
 
-## 8. Updates
+## 7. Updates
 
 Updates are never installed by themselves. When the owner writes that a new version is out
 (this needs the network connection, section 5): to see it, `/global update --show`; to
@@ -211,7 +188,7 @@ confirm). After installing, close DESMAN and open it again. If after an update D
 about "protected files", type `/protected approve` and confirm in the window — that's how
 you accept the new version of the rules. To roll back: `/global update --revert`.
 
-## 9. Removal
+## 8. Removal
 
 - **Windows:** close DESMAN, press Win+R, paste
   `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` and press Enter.

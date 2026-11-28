@@ -414,7 +414,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Pomiń potwierdzenie.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access jest włączony, ale brak wyszukiwarki całej sieci: web_search obejmuje tylko Wikipedia, Stack Overflow, arXiv i GitHub. Użyj `desman search setup` lub `desman config`.",
-    "Remembered model access refusals cleared for the checked keys.": "Usunięto zapamiętane odmowy dostępu do modeli dla sprawdzonych kluczy.",
+    "Remembered model access refusals cleared for the accepted keys.": "Usunięto zapamiętane odmowy dostępu do modeli dla zaakceptowanych kluczy.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} niedostępny dla klucza #{number} ({fingerprint}) do {until}: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "Port {port} jest zajęty (czy inne `desman gui` jest otwarte?). Użyj innego --port lub pomiń tę opcję, aby wybrać wolny port.",
     "{path}:": "{path}:",
@@ -1024,10 +1024,10 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "wywołania 24h",
     "tokens 24h": "tokeny 24h",
     "API keys": "Klucze API",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{n} klucz u {with_keys} z {providers} dostawców. `desman keys check` je sprawdzi (bez zużycia tokenów), `desman usage` pokaże sumy.",
-        "{n} klucze u {with_keys} z {providers} dostawców. `desman keys check` je sprawdzi (bez zużycia tokenów), `desman usage` pokaże sumy.",
-        "{n} kluczy u {with_keys} z {providers} dostawców. `desman keys check` je sprawdzi (bez zużycia tokenów), `desman usage` pokaże sumy.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{n} klucz u {with_keys} z {providers} dostawców. `desman keys check` je sprawdzi, `desman usage` pokaże sumy.",
+        "{n} klucze u {with_keys} z {providers} dostawców. `desman keys check` je sprawdzi, `desman usage` pokaże sumy.",
+        "{n} kluczy u {with_keys} z {providers} dostawców. `desman keys check` je sprawdzi, `desman usage` pokaże sumy.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "brak kluczy do sprawdzenia: dodaj klucz przez `desman keys add PROVIDER`",
     "{name} is not configured": "{name} nie jest skonfigurowany",
@@ -1414,7 +1414,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Coś jeszcze, twoimi słowami; pusty tekst czyści.",
     "Everything back to the interlocutor's judgement.": "Wszystko z powrotem według uznania rozmówcy.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Czy rozmówca analizuje twoje rozmowy i prowadzi notatki: pokaż, on lub off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Zapytać każdego dostawcę, czy jego klucze działają i jakie limity zgłasza, a każdy lokalny\nserwer, czy działa i serwuje swój model. Nie zużywa tokenów.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Zapytać każdego dostawcę, czy jego klucze działają i jakie limity zgłasza, a każdy lokalny\nserwer, czy działa i serwuje swój model. NVIDIA używa odpowiedzi ograniczonej do jednego tokena.",
     "Download the model with `ollama pull {model}`.": "Pobierz model poleceniem `ollama pull {model}`.",
     "It serves: {models}": "Serwuje: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Uruchom go poleceniem `llama-server -m MODEL.gguf --port 8080` albo ustaw jego adres w `desman config`.",
@@ -2061,7 +2061,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Nieprawidłowe cudzysłowy w poleceniu."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Nieprawidłowe cudzysłowy w poleceniu.",
+        "Only command options can follow quoted text.": "Po tekście w cudzysłowie mogą występować tylko opcje polecenia.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2348,3 +2353,14 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Polski", plural, MESSAGES, CLICK, forms=3)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked now.": "Nie można teraz sprawdzić klucza.",
+        "rate limited right now": "Osiągnięto aktualny limit częstotliwości żądań.",
+        "The key could not be checked: no available model.": "Nie udało się sprawdzić klucza: brak dostępnego modelu.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Tekst ze spacjami ujmij w podwójny cudzysłów, np. "tak jak tu".',
+        "DESMAN is thinking… {seconds} s": "DESMAN myśli… {seconds} s",
+    }
+)

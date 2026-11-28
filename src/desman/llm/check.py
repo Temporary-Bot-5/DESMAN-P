@@ -1,7 +1,7 @@
 """`desman keys check`: is each key accepted, and what limits does the provider report?
 
-Spends no tokens: it lists the provider's models (and, for OpenRouter, reads the key's own
-limits). A key is never sent anywhere but its own provider.
+Lists the provider's models or reads the OpenRouter key's own limits. Providers with a
+public model list verify the key with authenticated completions with a one-token output limit.
 
 A local server (Ollama, llama.cpp) has no key: the check says whether it answers at its
 address and serves the model set for it (pulled into Ollama, loaded by llama-server).
@@ -9,6 +9,7 @@ address and serves the model set for it (pulled into Ollama, loaded by llama-ser
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
@@ -122,6 +123,7 @@ def _check_key(
     base = provider.endpoint(config)
     headers = provider.headers(key)
     result = partial(KeyCheck, provider.id, number, key_id(key))
+    response: httpx.Response | None
     try:
         if provider.id == "openrouter":
             # /models is public there: /key is what tells a valid key from a bad one.
@@ -129,24 +131,28 @@ def _check_key(
         else:
             response = models_response(config, provider, key, client, timeout)
     except httpx.HTTPError as e:
-        return result(ok=False, http_status=None, detail=type(e).__name__)
+        if not provider.public_models:
+            return result(ok=False, http_status=None, detail=type(e).__name__)
+        response = None
 
-    limits = {
-        k.lower(): v
-        for k, v in response.headers.items()
-        if "limit" in k.lower() and k.lower().startswith("x-")
-    }
-    if response.status_code != 200:
-        return result(
-            ok=False,
-            http_status=response.status_code,
-            detail=_refusal(response.status_code),
-            limits=limits,
+    limits: dict[str, Any] = {}
+    data = None
+    if response is not None:
+        limits.update(
+            (name, value)
+            for name, value in response.headers.items()
+            if name.startswith("x-") and "limit" in name
         )
-    try:
-        data = response.json()
-    except ValueError:
-        data = {}
+        if response.status_code == 200:
+            with suppress(ValueError):
+                data = response.json()
+        elif not provider.public_models:
+            return result(
+                ok=False,
+                http_status=response.status_code,
+                detail=_refusal(response.status_code),
+                limits=limits,
+            )
     if provider.id == "openrouter":
         info = data.get("data") if isinstance(data, dict) else None
         if not isinstance(info, dict):
@@ -154,22 +160,72 @@ def _check_key(
         limits.update(_openrouter_limits(info))
         return result(ok=True, http_status=200, detail="accepted", limits=limits)
     models = data.get("data") if isinstance(data, dict) else None
-    if not isinstance(models, list):  # an HTML page from a proxy is not an answer
-        return result(ok=False, http_status=200, detail=_UNEXPECTED, limits=limits)
+    status: int | None = 200
+    detail = "accepted"
+    accepted = True
+    if provider.public_models:
+        accepted, status, detail = _check_completion(
+            provider, base, headers, client, timeout, limits
+        )
+    if not isinstance(models, list):
+        return result(
+            ok=provider.public_models and accepted,
+            http_status=status,
+            detail=_UNEXPECTED if status == 200 and not provider.public_models else detail,
+            limits=limits,
+        )
     ids = [str(m.get("id", "")) for m in models if isinstance(m, dict)]
     served = {i.removeprefix("models/") for i in ids}
-    listed = provider.default_model in served
     others = [m.id for m in catalog.models_of(provider) if m.id != provider.default_model]
     return result(
-        ok=True,
-        http_status=200,
-        detail="accepted",
+        ok=accepted,
+        http_status=status,
+        detail=detail,
         models=len(ids),
-        default_model_listed=listed,
+        default_model_listed=provider.default_model in served,
         unlisted=tuple(m for m in others if m not in served),
         limits=limits,
         model=provider.default_model,
     )
+
+
+def _check_completion(
+    provider: Provider,
+    base: str,
+    headers: dict[str, str],
+    client: httpx.Client,
+    timeout: float,
+    limits: dict[str, Any],
+) -> tuple[bool, int | None, str]:
+    status = None
+    for model in catalog.models_of(provider)[:3]:
+        try:
+            probe = client.post(
+                f"{base}/chat/completions",
+                headers=headers,
+                timeout=max(timeout, 60.0),
+                json={
+                    "model": model.id,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                },
+            )
+        except httpx.HTTPError:
+            return False, None, CHECK_UNAVAILABLE
+        status = probe.status_code
+        limits.update(
+            (name, value) for name, value in probe.headers.items() if name.startswith("x-ratelimit")
+        )
+        if status in (404, 410):
+            continue
+        # NVIDIA authenticates the key before validating the request body.
+        if status in (200, 400, 422):
+            return True, status, "accepted"
+        if status == 429:
+            return True, status, RATE_LIMITED
+        return False, status, CHECK_UNAVAILABLE if status >= 500 else _refusal(status)
+    return False, status, NO_AVAILABLE_MODEL
 
 
 def _check_local(
@@ -221,6 +277,11 @@ def served_by(provider: Provider, model: str, ids: tuple[str, ...]) -> bool:
     return any(i == model or i.rsplit("/", 1)[-1] == model for i in ids)
 
 
+CHECK_UNAVAILABLE = "The key could not be checked now."
+RATE_LIMITED = "rate limited right now"
+NO_AVAILABLE_MODEL = "The key could not be checked: no available model."
+
+
 _UNEXPECTED_LOCAL = "unexpected reply (not an Ollama or llama.cpp server at this address?)"
 
 
@@ -231,7 +292,7 @@ def _refusal(status: int) -> str:
     if status in (401, 403):
         return "refused: the key is wrong, revoked or lacks access"
     if status == 429:
-        return "rate limited right now"
+        return RATE_LIMITED
     if status == 402:
         return "no credits left"
     return f"unexpected HTTP {status}"

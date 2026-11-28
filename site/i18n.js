@@ -33,7 +33,7 @@ window.I18N = {
   "warning_title": "This is a prototype.",
   "warning_text": "It may crash, hang or lose unfinished work. Don’t trust it with anything important.",
   "guide_title": "Everything else is in the guide",
-  "guide_text": "Installation step by step, keys, what to try, the messenger and how to report a problem.",
+  "guide_text": "Installation step by step, keys, what to try and how to report a problem.",
   "guide_link": "Read the guide →"
 },
 "ru": {
@@ -70,7 +70,7 @@ window.I18N = {
   "warning_title": "Это прототип.",
   "warning_text": "Он может падать, зависать и терять незаконченную работу. Не доверяйте ему ничего важного.",
   "guide_title": "Всё остальное — в руководстве",
-  "guide_text": "Установка по шагам, ключи, что попробовать, мессенджер и как сообщить о неполадке.",
+  "guide_text": "Установка по шагам, ключи, что попробовать и как сообщить о неполадке.",
   "guide_link": "Читать руководство →"
 },
 "uk": {
@@ -107,7 +107,7 @@ window.I18N = {
   "warning_title": "Це прототип.",
   "warning_text": "Він може падати, зависати й втрачати незавершену роботу. Не довіряйте йому нічого важливого.",
   "guide_title": "Усе інше — у посібнику",
-  "guide_text": "Встановлення крок за кроком, ключі, що спробувати, месенджер і як повідомити про несправність.",
+  "guide_text": "Встановлення крок за кроком, ключі, що спробувати і як повідомити про несправність.",
   "guide_link": "Читати посібник →"
 },
 "de": {
@@ -144,7 +144,7 @@ window.I18N = {
   "warning_title": "Dies ist ein Prototyp.",
   "warning_text": "Er kann abstürzen, hängen bleiben oder unfertige Arbeit verlieren. Vertrauen Sie ihm nichts Wichtiges an.",
   "guide_title": "Alles Weitere steht in der Anleitung",
-  "guide_text": "Installation Schritt für Schritt, Schlüssel, was Sie ausprobieren können, der Messenger und wie Sie ein Problem melden.",
+  "guide_text": "Installation Schritt für Schritt, Schlüssel, was Sie ausprobieren können und wie Sie ein Problem melden.",
   "guide_link": "Anleitung lesen →"
 },
 "fr": {
@@ -181,7 +181,7 @@ window.I18N = {
   "warning_title": "Ceci est un prototype.",
   "warning_text": "Il peut planter, se bloquer ou perdre un travail inachevé. Ne lui confiez rien d’important.",
   "guide_title": "Tout le reste est dans le guide",
-  "guide_text": "L’installation pas à pas, les clés, quoi essayer, la messagerie et comment signaler un problème.",
+  "guide_text": "L’installation pas à pas, les clés, quoi essayer et comment signaler un problème.",
   "guide_link": "Lire le guide →"
 },
 "es": {
@@ -218,7 +218,7 @@ window.I18N = {
   "warning_title": "Esto es un prototipo.",
   "warning_text": "Puede fallar, quedarse colgado o perder trabajo sin terminar. No le confíes nada importante.",
   "guide_title": "Todo lo demás está en la guía",
-  "guide_text": "Instalación paso a paso, claves, qué probar, la mensajería y cómo informar de un problema.",
+  "guide_text": "Instalación paso a paso, claves, qué probar y cómo informar de un problema.",
   "guide_link": "Leer la guía →"
 },
 "pt": {
@@ -255,7 +255,7 @@ window.I18N = {
   "warning_title": "Isto é um protótipo.",
   "warning_text": "Ele pode falhar, travar ou perder trabalho inacabado. Não confie a ele nada importante.",
   "guide_title": "Todo o resto está no guia",
-  "guide_text": "Instalação passo a passo, chaves, o que experimentar, o mensageiro e como relatar um problema.",
+  "guide_text": "Instalação passo a passo, chaves, o que experimentar e como relatar um problema.",
   "guide_link": "Ler o guia →"
 },
 "pl": {
@@ -292,7 +292,7 @@ window.I18N = {
   "warning_title": "To jest prototyp.",
   "warning_text": "Może się zawiesić, przestać działać lub stracić niedokończoną pracę. Nie powierzaj mu niczego ważnego.",
   "guide_title": "Wszystko inne jest w poradniku",
-  "guide_text": "Instalacja krok po kroku, klucze, co wypróbować, komunikator i jak zgłosić problem.",
+  "guide_text": "Instalacja krok po kroku, klucze, co wypróbować i jak zgłosić problem.",
   "guide_link": "Przeczytaj poradnik →"
 },
 "tr": {
@@ -329,7 +329,7 @@ window.I18N = {
   "warning_title": "Bu bir prototiptir.",
   "warning_text": "Çökebilir, donabilir ya da bitmemiş işi kaybedebilir. Ona önemli hiçbir şey emanet etmeyin.",
   "guide_title": "Gerisi kılavuzda",
-  "guide_text": "Adım adım kurulum, anahtarlar, neler denenebilir, mesajlaşma ve bir sorunun nasıl bildirileceği.",
+  "guide_text": "Adım adım kurulum, anahtarlar, neler denenebilir ve bir sorunun nasıl bildirileceği.",
   "guide_link": "Kılavuzu okuyun →"
 },
 "zh": {
@@ -366,7 +366,7 @@ window.I18N = {
   "warning_title": "这是一个原型。",
   "warning_text": "它可能崩溃、卡住或丢失未完成的工作。请不要把重要的事情交给它。",
   "guide_title": "其余内容都在指南里",
-  "guide_text": "分步安装、密钥、可以尝试什么、消息功能，以及如何报告问题。",
+  "guide_text": "分步安装、密钥、可以尝试什么，以及如何报告问题。",
   "guide_link": "阅读指南 →"
 },
 "ja": {
@@ -403,7 +403,7 @@ window.I18N = {
   "warning_title": "これはプロトタイプです。",
   "warning_text": "クラッシュしたり、止まったり、未完了の作業を失ったりすることがあります。大切なことは任せないでください。",
   "guide_title": "そのほかはすべてガイドに",
-  "guide_text": "インストール手順、キー、試してみること、メッセンジャー、問題の報告方法。",
+  "guide_text": "インストール手順、キー、試してみること、問題の報告方法。",
   "guide_link": "ガイドを読む →"
 },
 "ko": {
@@ -440,7 +440,7 @@ window.I18N = {
   "warning_title": "이것은 프로토타입입니다.",
   "warning_text": "충돌하거나 멈추거나 끝나지 않은 작업을 잃을 수 있습니다. 중요한 일은 맡기지 마세요.",
   "guide_title": "나머지는 모두 가이드에",
-  "guide_text": "단계별 설치, 키, 해 볼 만한 것, 메신저, 문제 신고 방법.",
+  "guide_text": "단계별 설치, 키, 해 볼 만한 것, 문제 신고 방법.",
   "guide_link": "가이드 읽기 →"
 },
 "hi": {
@@ -477,7 +477,7 @@ window.I18N = {
   "warning_title": "यह एक प्रोटोटाइप है।",
   "warning_text": "यह क्रैश हो सकता है, अटक सकता है या अधूरा काम खो सकता है। इसे कोई ज़रूरी काम न सौंपें।",
   "guide_title": "बाकी सब गाइड में है",
-  "guide_text": "कदम-दर-कदम इंस्टॉलेशन, कुंजियाँ, क्या आज़माएँ, मैसेंजर और समस्या की रिपोर्ट कैसे करें।",
+  "guide_text": "कदम-दर-कदम इंस्टॉलेशन, कुंजियाँ, क्या आज़माएँ और समस्या की रिपोर्ट कैसे करें।",
   "guide_link": "गाइड पढ़ें →"
 }
 };

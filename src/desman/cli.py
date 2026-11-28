@@ -35,6 +35,7 @@ from desman import (
 )
 from desman.actions import find_task, open_existing, open_user_db, print_report
 from desman.chat import Chat
+from desman.cli_args import FreeText
 from desman.config import Config, ConfigError, ConfigManager, MasterChoices, Tuning, open_config
 from desman.config_cli import (
     behaviour,
@@ -397,7 +398,7 @@ def model_options(command: F) -> F:
 
 
 @cli.command()
-@click.argument("goal", required=False)
+@click.argument("goal", cls=FreeText, required=False)
 @click.option(
     "--spec",
     "spec_path",
@@ -1576,7 +1577,7 @@ def task_hide(task: str | None, finished: bool, db_path: Path | None) -> None:
 
 @task_group.command("extend")
 @click.argument("task")
-@click.argument("goal")
+@click.argument("goal", cls=FreeText, required=True)
 @db_option
 def task_extend(task: str, goal: str, db_path: Path | None) -> None:
     """Continue TASK: plan and add new subtasks doing GOAL on its result so far."""
@@ -1585,7 +1586,7 @@ def task_extend(task: str, goal: str, db_path: Path | None) -> None:
 
 @task_group.command("redo")
 @click.argument("subtask")
-@click.argument("note")
+@click.argument("note", cls=FreeText, required=True)
 @db_option
 def task_redo(subtask: str, note: str, db_path: Path | None) -> None:
     """Do a done SUBTASK again, as NOTE says: new subtasks give its task a new result."""

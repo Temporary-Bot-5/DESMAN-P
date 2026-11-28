@@ -24,10 +24,12 @@ from desman.llm.fake import FakeLLM
 from desman.net import protocol as p
 from desman.net import sign
 from desman.registry.server import Registry
-from test_messenger import call, conn, joined, named, registry
+from test_messenger import call, conn, joined, messenger_enabled, named, registry
 from test_registry import Node
 
-__all__ = ["conn", "joined", "registry"]
+pytestmark = pytest.mark.usefixtures("messenger_enabled")
+
+__all__ = ["messenger_enabled", "conn", "joined", "registry"]
 
 
 @pytest.fixture

@@ -159,9 +159,15 @@ def _click_gettext(message: str) -> str:
 def _click_ngettext(singular: str, plural: str, n: int) -> str:
     translated = _current.click.get(singular)
     if translated is None:
-        return singular if n == 1 else plural
-    forms = (translated,) if isinstance(translated, str) else translated
-    return forms[min(_current.plural(n), len(forms) - 1)]
+        message = singular if n == 1 else plural
+    else:
+        forms = (translated,) if isinstance(translated, str) else translated
+        message = forms[min(_current.plural(n), len(forms) - 1)]
+    if singular == "Got unexpected extra argument ({args})":
+        from desman.cli_args import extra_args_hint
+
+        message += " " + extra_args_hint()
+    return message
 
 
 def install_click() -> None:

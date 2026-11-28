@@ -68,7 +68,7 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 @pytest.mark.parametrize(
-    "args", [["report", "It crashes"], ["share"], ["share", "--no-stats", "--failures"]]
+    "args", [["report", "It", "crashes"], ["share"], ["share", "--no-stats", "--failures"]]
 )
 def test_cli_preview_and_confirmation(
     joined: Config, sent: list[dict[str, Any]], args: list[str]
@@ -443,3 +443,63 @@ def test_report_signature_has_a_separate_domain(registry: Registry, clock: FakeC
         "POST", protocol.REPORTS, protocol.SubmitReport(signed=wrong_domain).model_dump(mode="json")
     )
     assert reply.status_code == 401
+
+
+@pytest.mark.parametrize("confirm", [False, True, None])
+def test_described_malfunction_offers_a_report(
+    conn: sqlite3.Connection,
+    joined: Config,
+    sent: list[dict[str, Any]],
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    confirm: bool | None,
+) -> None:
+    from desman import runs, ui
+    from desman.chat import Chat
+    from desman.llm.fake import FakeLLM
+
+    config = joined.model_copy(
+        update={"configured": True, "network": joined.network if confirm is not None else Network()}
+    )
+    open_config().save(config)
+    text = "DESMAN crashes when I open /status."
+    history = sessions.Sessions(conn, clock=clock)
+    session = history.add(None, sessions.Role.USER, "Run an example task.").session_id
+    task = Store(conn, clock=clock).create_task(
+        TaskSpec(
+            goal="Example goal",
+            subtasks=[SubtaskSpec(description="Work", acceptance_criteria="Done")],
+        ),
+        session_id=session,
+    )
+    provider = FakeLLM(clock=clock, sleep=clock.sleep).on(
+        "Chat turn",
+        json.dumps(
+            {"type": "command", "name": "global report", "args": {"text": text, "task": task}}
+        ),
+    )
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(provider, None))
+
+    def decide(question: str, default: bool = False) -> bool:
+        assert confirm is not None and not default and not sent
+        shown = capsys.readouterr().out
+        assert "Send this bug report" in shown and text in shown
+        return confirm
+
+    monkeypatch.setattr(ui, "confirm", decide)
+    chat = Chat(history)
+    chat.session_id = session
+    chat._message(text)
+    [request] = provider.calls
+    assert "offer to report it with a global report command turn" in request.messages[0].content
+    if confirm:
+        [submission] = sent
+        report = submission["signed"]["report"]
+        assert report["text"] == text
+        assert report["task"]["goal"] == "Example goal"
+    else:
+        assert not sent
+    if confirm is None:
+        assert "join it first (`desman global join`)" in capsys.readouterr().err
+        assert not open_config().load().network.enabled

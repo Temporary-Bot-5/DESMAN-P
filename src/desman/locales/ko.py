@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "확인을 건너뜁니다.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access가 켜져 있지만 전체 웹 검색 엔진이 설정되지 않았습니다. web_search는 Wikipedia, Stack Overflow, arXiv, GitHub만 검색합니다. `desman search setup` 또는 `desman config`를 사용하세요.",
-    "Remembered model access refusals cleared for the checked keys.": "확인한 키의 저장된 모델 접근 거부 기록을 삭제했습니다.",
+    "Remembered model access refusals cleared for the accepted keys.": "수락된 키의 저장된 모델 접근 거부 기록을 삭제했습니다.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model}: 키 #{number} ({fingerprint})에서 {until}까지 사용 불가: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "포트 {port}이 사용 중입니다(다른 `desman gui`가 열려 있나요?). 다른 --port를 사용하거나 생략하여 빈 포트를 선택하세요.",
     "{path}:": "{path}:",
@@ -987,8 +987,8 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "24시간 호출",
     "tokens 24h": "24시간 토큰",
     "API keys": "API 키",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "공급자 {providers}개 중 {with_keys}개에 키 {n}개가 있습니다. `desman keys check`로 테스트(토큰 사용 없음), `desman usage`로 합계를 볼 수 있습니다.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "공급자 {providers}개 중 {with_keys}개에 키 {n}개가 있습니다. `desman keys check`로 테스트, `desman usage`로 합계를 볼 수 있습니다.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "확인할 키가 없습니다: `desman keys add PROVIDER`로 추가하세요",
     "{name} is not configured": "{name}이(가) 설정되지 않았습니다",
@@ -1323,7 +1323,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "그 밖의 것, 당신의 말로; 빈 텍스트는 지웁니다.",
     "Everything back to the interlocutor's judgement.": "모두 대화 상대의 판단으로 되돌립니다.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "대화 상대가 대화를 분석하고 메모하는지: 보기, on 또는 off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "각 제공자에게 키가 작동하는지, 어떤 한도를 알려 주는지 묻고, 각 로컬\n서버에는 실행 중인지, 모델을 제공하는지 묻습니다. 토큰을 쓰지 않습니다.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "각 제공자에게 키가 작동하는지, 어떤 한도를 알려 주는지 묻고, 각 로컬\n서버에는 실행 중인지, 모델을 제공하는지 묻습니다. NVIDIA는 토큰 하나로 제한된 응답을 사용합니다.",
     "Download the model with `ollama pull {model}`.": "`ollama pull {model}`로 모델을 내려받으세요.",
     "It serves: {models}": "제공 중: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "`llama-server -m MODEL.gguf --port 8080`로 시작하거나 `desman config`에서 주소를 설정하세요.",
@@ -1926,7 +1926,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "명령의 따옴표가 올바르지 않습니다."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "명령의 따옴표가 올바르지 않습니다.",
+        "Only command options can follow quoted text.": "따옴표로 묶은 텍스트 뒤에는 명령 옵션만 올 수 있습니다.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2177,3 +2182,14 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked now.": "지금은 키를 확인할 수 없습니다.",
+        "rate limited right now": "현재 요청 속도 제한에 도달했습니다.",
+        "The key could not be checked: no available model.": "사용 가능한 모델이 없어 키를 확인하지 못했습니다.",
+        'Put text with spaces in double quotes, e.g. "like this".': '공백이 있는 텍스트는 큰따옴표로 감싸세요. 예 "이렇게 입력".',
+        "DESMAN is thinking… {seconds} s": "DESMAN이 생각 중… {seconds}초",
+    }
+)

@@ -8,6 +8,7 @@ typing numbers. A cancelled prompt (Ctrl+C, Esc) raises `Cancelled`.
 from __future__ import annotations
 
 import io
+import math
 import os
 import re
 import sys
@@ -27,6 +28,7 @@ from rich.console import Console, ConsoleOptions, RenderableType
 from rich.live import Live
 from rich.panel import Panel
 from rich.segment import Segment
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
@@ -1118,11 +1120,71 @@ def clear_screen() -> None:
         _front.clear_screen()
 
 
+_thinking_wait: ContextVar[Callable[[float], None] | None] = ContextVar(
+    "thinking_wait", default=None
+)
+
+
+@contextmanager
+def thinking(clock: Callable[[], datetime]) -> Iterator[None]:
+    """Show model activity on the current front until that call returns."""
+    front = _active_front.get()
+    hook = getattr(front, "set_thinking", None)
+    if hook is not None:
+        if getattr(front, "thinking_since", None) is not None:
+            yield
+            return
+        hook(clock().timestamp())
+        try:
+            yield
+        finally:
+            hook(None)
+        return
+    if not isinstance(front, TerminalFront) or front._live is not None:
+        yield
+        return
+    output = console()
+    if not output.is_terminal or _thinking_wait.get() is not None:
+        yield
+        return
+    started = clock()
+    waiting_until = started.timestamp()
+    spinner = Spinner("dots", style="accent")
+
+    def wait(seconds: float) -> None:
+        nonlocal waiting_until
+        waiting_until = clock().timestamp() + seconds
+
+    def render() -> Spinner:
+        now = clock()
+        remaining = math.ceil(waiting_until - now.timestamp())
+        seconds = int((now - started).total_seconds())
+        message = (
+            t("Waiting {seconds} s for a provider limit…", seconds=remaining)
+            if remaining > 0
+            else t("DESMAN is thinking… {seconds} s", seconds=seconds)
+        )
+        spinner.update(text=Text(message))
+        return spinner
+
+    token = _thinking_wait.set(wait)
+    try:
+        with Live(console=output, get_renderable=render, transient=True):
+            yield
+    finally:
+        _thinking_wait.reset(token)
+
+
 def provider_wait(seconds: float, as_json: bool = False) -> None:
     """Announce a provider pause through the current front (including live progress)."""
-    import math
-
-    warn(t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds)), stderr=as_json)
+    waiting = _thinking_wait.get()
+    if waiting is not None and not as_json:
+        waiting(seconds)
+    else:
+        warn(
+            t("Waiting {seconds} s for a provider limit…", seconds=math.ceil(seconds)),
+            stderr=as_json,
+        )
 
 
 def display_task_reason(reason: str) -> str:
@@ -1139,8 +1201,6 @@ def display_task_reason(reason: str) -> str:
 
 
 def sandbox_wait(seconds: float, reason: str, as_json: bool = False) -> None:
-    import math
-
     warn(
         t(
             "Waiting {seconds} s for the sandbox. {reason}",

@@ -642,3 +642,39 @@ cli(["-t"])
         )
     finally:
         conn.close()
+
+
+def test_chat_thinking_wraps_model_call_and_ends_before_reply(
+    sessions: Sessions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import contextmanager
+
+    from desman import runs
+    from desman.core.store import Clock
+    from desman.llm.base import Request
+    from desman.llm.fake import FakeLLM
+
+    configured()
+    events: list[str] = []
+
+    @contextmanager
+    def thinking(clock: Clock) -> Iterator[None]:
+        assert clock is sessions.clock
+        events.append("start")
+        try:
+            yield
+        finally:
+            events.append("stop")
+
+    def reply(_request: Request) -> str:
+        assert events == ["start"]
+        events.append("model")
+        return '{"type": "reply", "text": "Done"}'
+
+    fake = FakeLLM().on("Chat turn", reply)
+    monkeypatch.setattr(runs, "models", lambda *args, **kwargs: runs.Models(fake, None))
+    monkeypatch.setattr(ui, "thinking", thinking)
+    conversation = Chat(sessions)
+    monkeypatch.setattr(conversation, "_say", lambda text: events.append(text))
+    conversation._message("Hello")
+    assert events == ["start", "model", "stop", "Done"]

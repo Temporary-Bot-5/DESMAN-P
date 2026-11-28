@@ -19,7 +19,7 @@ from desman.config import ConfigManager, default_config_path
 from desman.core import calls, db
 from desman.core.calls import Role
 from desman.core.retry import FailureKind
-from desman.llm import check, router
+from desman.llm import catalog, check, router
 from desman.llm.base import (
     Completion,
     GenerationFailed,
@@ -318,6 +318,7 @@ def test_keys_check(mock_http: Callable[[Handler], None]) -> None:
     mock_http(handler)
     result = desman("keys", "check")
     assert result.exit_code == 1, result.output  # one key is refused
+    assert "Remembered model access refusals cleared for the accepted keys." in result.output
     assert "free requests today: 3 of 50" in result.output
     assert "x-ratelimit-limit-requests: 1000" in result.output
     # The catalog's other Groq models are not listed: said once, though Groq has two keys.
@@ -571,6 +572,7 @@ def test_key_check_sends_the_providers_own_headers() -> None:
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
         [result] = check.check(config, providers.find("anthropic"), http)
     assert result.ok and result.default_model_listed
+    assert [request.method for request in seen] == ["GET"]
     assert str(seen[0].url) == "https://api.anthropic.com/v1/models"
     assert seen[0].headers["x-api-key"] == ANTHROPIC_KEY
     assert seen[0].headers["anthropic-version"] == "2023-06-01"
@@ -995,3 +997,87 @@ def test_provider_base_timeout_above_default_cap(network_cap: int | None, expect
         )
     finally:
         llm.client.close()
+
+
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [
+        (401, "refused"),
+        (403, "refused"),
+        (200, "accepted"),
+        (400, "accepted"),
+        (422, "accepted"),
+        (410, "no available model"),
+        (404, "no available model"),
+        (429, "rate limited right now"),
+        (503, "could not be checked now"),
+        (None, "could not be checked now"),
+    ],
+)
+def test_nvidia_keys_are_checked_by_an_authenticated_completion(
+    status: int | None, detail: str
+) -> None:
+    provider = providers.find("nvidia")
+    key = "1234" if status in (401, 403) else "nvapi-test"
+    config = make_config(api_keys={"NVIDIA_API_KEY": key})
+    methods: list[str] = []
+    models = iter(catalog.models_of(provider))
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        assert request.headers["Authorization"] == f"Bearer {key}"
+        if request.method == "GET":
+            assert request.url.path.endswith("/models")
+            assert request.extensions["timeout"]["read"] == 20.0
+            return httpx.Response(
+                200,
+                json={"data": [{"id": provider.default_model}]},
+                headers={"x-ratelimit-limit-requests": "40"},
+            )
+        assert request.url.path.endswith("/chat/completions")
+        body = json.loads(request.content)
+        assert body["model"] == next(models).id
+        assert body["max_tokens"] == 1 and body["temperature"] == 0
+        assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
+        assert request.extensions["timeout"]["read"] == 60.0
+        if status is None:
+            raise httpx.ReadTimeout("timed out", request=request)
+        return httpx.Response(status, headers={"x-ratelimit-remaining-requests": "0"})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        [result] = check.check(config, provider, http)
+    count = len(catalog.models_of(provider)) if status in (404, 410) else 1
+    assert methods == ["GET"] + ["POST"] * count
+    assert result.ok is (status in (200, 400, 422, 429))
+    assert result.limits["x-ratelimit-limit-requests"] == "40"
+    if status is not None:
+        assert result.limits["x-ratelimit-remaining-requests"] == "0"
+    assert result.http_status == status and detail in result.detail
+    assert result.models == 1 and result.default_model_listed is True
+
+
+@pytest.mark.parametrize(
+    ("fallback_status", "expected_attempts", "ok"),
+    [(200, 2, True), (410, 3, False)],
+)
+def test_nvidia_falls_back_only_to_catalog_models(
+    monkeypatch: pytest.MonkeyPatch, fallback_status: int, expected_attempts: int, ok: bool
+) -> None:
+    provider = providers.find("nvidia")
+    config = make_config(api_keys={"NVIDIA_API_KEY": "nvapi-test"})
+    models = (*catalog.models_of(provider), catalog.Model("third"), catalog.Model("fourth"))
+    monkeypatch.setitem(catalog.CATALOG, provider.id, models)
+    attempted: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.extensions["timeout"]["read"] == 90.0
+        if request.method == "GET":
+            return httpx.Response(503)
+        attempted.append(json.loads(request.content)["model"])
+        return httpx.Response(404 if len(attempted) == 1 else fallback_status)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        [result] = check.check(config, provider, http, timeout=90)
+    assert attempted == [model.id for model in models[:expected_attempts]]
+    assert result.ok is ok and result.http_status == fallback_status
+    assert result.detail == ("accepted" if ok else check.NO_AVAILABLE_MODEL)

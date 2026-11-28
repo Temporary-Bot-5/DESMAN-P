@@ -197,6 +197,10 @@ class SessionFront(WebFront):
     def section(self, title: str) -> None:
         self.out(Text(title))
 
+    def set_thinking(self, started: float | None) -> None:
+        super().set_thinking(started)
+        self.owner.front.session_changed(self.runner.session_id)
+
     def live_update(self, renderable: RenderableType) -> None:
         super().live_update(renderable)
         self.owner.front.session_changed(self.runner.session_id)
@@ -301,7 +305,7 @@ class Runners:
         with self.condition:
             runner = self.runners.get(session_id)
             if runner is None:
-                return {"state": None, "queued": 0, "ahead": 0}
+                return {"state": None, "queued": 0, "ahead": 0, "thinking_since": None}
             pending = runner.front is not None and runner.front.prompt is not None
             first = runner.current or (runner.queue[0] if runner.queue else None)
             waiting = first in self.tickets
@@ -317,6 +321,7 @@ class Runners:
                 if waiting or runner.wait_reason
                 else "answering",
                 "reason": runner.wait_reason,
+                "thinking_since": runner.front.thinking_since if runner.front else None,
                 "queued": len(runner.queue) + int(waiting and runner.current is not None),
                 "ahead": ahead,
             }
@@ -648,16 +653,16 @@ class PageChat(Chat):
         )
 
     def dispatch(self, line: str) -> bool:
-        text = line.strip()
+        text = line.lstrip()
         manager = open_config()
-        if text == "/compact" and self.session_id is None:
+        if text.rstrip() == "/compact" and self.session_id is None:
             return False
         try:
             config = manager.load()
         except ConfigError:
             return False
         handed_off = False
-        model_command = text == "/compact"
+        model_command = text.rstrip() == "/compact"
         if text.startswith(("/", "!")) or self.in_terminal:
             try:
                 parsed = commands.parse_line(text.lstrip("/!"), config)

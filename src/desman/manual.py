@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from desman import messenger_cli
+
 TOPIC_CHARS: Final = 1600
 """The longest a topic's text may be: the few a lookup opens have to fit a small model's context."""
 
@@ -31,7 +33,7 @@ class Topic:
     text: str
 
 
-TOPICS: Final = (
+_TOPICS = (
     Topic(
         "page",
         "the browser page, panels, settings, problem reports and desktop shortcuts",
@@ -132,9 +134,12 @@ TOPICS: Final = (
         "Auto inherits the role again. "
         "`/modules` shows active tasks; `/modules clear --task REF` resets choices.\n"
         "See localmodels for downloads.\n"
-        "Keys enter only through a hidden field (`/keys add PROVIDER`), never the chat, "
-        "model or logs. DESMAN never shows a key in full, only masked. The full key is in config.json in the project folder (or on the provider’s site). Inspect with `/keys list`, `/keys check` (no tokens) "
-        "and `/usage` (ends with totals). Account/model access refusals last 24h; usage shows reasons, keys check clears them. Token windows are shared.",
+        "Enter keys in a hidden field (`/keys add PROVIDER`). DESMAN never shows a key in full. "
+        "The full key is in config.json in the project folder or on the provider’s site. "
+        "Inspect with `/keys list`, `/keys check` "
+        "(NVIDIA uses a one-token completion) and `/usage` (ends with totals). "
+        "Account/model access refusals last 24h; usage shows reasons. Keys check clears refusals for accepted keys. "
+        "Token windows are shared.",
     ),
     Topic(
         "modules",
@@ -247,12 +252,12 @@ TOPICS: Final = (
     Topic(
         "chat",
         "sessions, the chat's own commands, how long conversations are kept",
-        "First launch opens setup, then chat. Set gui with `/interface MODE` for the page. `/sessions` lists and opens earlier chats. `/temporary` opens a temporary chat, erased on exit with no profile or summaries; its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Model-requested changes require the person's confirmation in a window; keys use hidden fields. Decisions are journaled. A shared read can continue the answer, up to three commands per message. Command advice without a lookup gets one correction. Explicit /COMMAND (or !COMMAND) runs in place in terminal chat and logs to General Terminal. `/help` lists both sets; chat commands take precedence. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/messages`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count unseen events since the chat opened and are hidden in temporary chats. General Terminal takes commands only. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized; failed summaries leave it out of view. Fallback replies name the answering model and skipped models' reasons. Pasted keys are redacted.",
+        "First launch opens setup, then chat. Use `/interface MODE` for the page. `/sessions` lists and opens past chats. `/temporary` opens a chat with no profile or summaries. On exit, only its tasks stay. Messages become replies, clarifications, tasks or catalog commands. Confirm model-requested changes in a window. Key fields are hidden. Decisions are journaled. A shared read can continue the answer, up to three commands per message. Command advice without a lookup gets one correction. /COMMAND (or !COMMAND) runs in place and logs to General Terminal. Put options before free text or after one double-quoted string. Unquoted text takes the rest of the line. `/help` lists both sets; chat commands take precedence. Chat commands: `/new`, `/sessions`, `/rename`, `/compact`, `/profile`, `/delete`, `/pin`, `/delete-all`, `/temporary`, `/exit`. Pins protect chats from delete-all. `/terminal` opens General Terminal; `/back` returns. Notices count unseen events since opening and hide in temporary chats. General Terminal takes commands only. `/clear` clears the current screen only, keeping history and model context; reopening a chat restores messages. `/context` shows the first model, fallbacks, total/system/message token estimates and the exact request; /context full is an alias, and it names the knowledge-tree nodes (manual, commands, docs; plans marked) the last answer read. Neither calls a model. Older history is summarized; failed summaries leave it out of view. Fallback replies name the answering model and skipped models' reasons. Pasted keys are redacted.",
     ),
     Topic(
         "gui",
         "browser page, chat and task panels, buttons and keyboard completion",
-        "The page shares the terminal chat, commands and confirmation windows. Source and Model are the only two module dropdowns. Source offers Auto, each configured provider key (masked), and configured or discovered Ollama. Cloud model lists load when a source is chosen or the picker opens; catalog models come first. Failed discovery shows catalog models with a note; saved missing models remain selectable. Paid keys require explicit selection. Ollama lists installed models and supports Hugging Face GGUF search by words and download with confirmation. A checkbox applies the choice to every chat/task; otherwise it is local where that role allows it. New chats retain pending choices until their first message. Cards: #ID, roles, model, key, usage, chats, live tasks; idle ones vanish. Tasks and Modules have search. Change edits choices; Pause/Resume; Replace hands work to another model; only local ones ask. Modules inherit their task's pin. Settings and module edits keep the chat open, with output in General Terminal. `/clear` clears only this chat's screen; model history remains; the page keeps earlier messages hidden with a notice. Chat and General Terminal use the same /COMMAND catalog and `/help`; !COMMAND remains an alias. Tab/Shift+Tab cycle commands, Enter runs, Esc closes suggestions. General Terminal keeps command colours after reload. Usage opens a separate window with period, calls, tokens and reported limits. A down-arrow button returns a scrolled transcript to the bottom. General Terminal has no model. `/context` there explains this.",
+        "The page shares the terminal chat, commands and confirmation windows. Both time model replies. Source and Model are the only two module dropdowns. Source offers Auto, each configured provider key (masked), and configured or discovered Ollama. Cloud model lists load when a source is chosen or the picker opens; catalog models come first. Failed discovery shows catalog models with a note; saved missing models remain selectable. Paid keys require explicit selection. Ollama lists installed models and supports Hugging Face GGUF search by words and download with confirmation. A checkbox applies the choice to every chat/task; otherwise it is local where that role allows it. New chats retain pending choices until their first message. Cards: #ID, roles, model, key, usage, chats, live tasks; idle ones vanish. Tasks and Modules have search. Change edits choices; Pause/Resume; Replace hands work to another model; only local ones ask. Modules inherit their task's pin. Settings and module edits keep the chat open, with output in General Terminal. `/clear` clears only this chat's screen; model history remains; the page keeps earlier messages hidden with a notice. Chat and General Terminal use the same /COMMAND catalog and `/help`; !COMMAND remains an alias. Tab/Shift+Tab cycle commands, Enter runs, Esc closes suggestions. General Terminal keeps command colours after reload. Usage opens a separate window with period, calls, tokens and reported limits. A down-arrow button returns a scrolled transcript to the bottom. General Terminal has no model. `/context` there explains this.",
     ),
     Topic(
         "profile",
@@ -370,8 +375,8 @@ TOPICS: Final = (
     Topic(
         "globalsend",
         "Sending bug reports and shared memory to the registry",
-        "`/global report TEXT` previews your problem description and system/version; "
-        "--task ID adds bounded task status, descriptions and failure causes, never workspace files. "
+        "If you describe a DESMAN malfunction, the chat offers a report for you to review. `/global report TEXT` previews your description and system/version; "
+        "--task ID before TEXT adds bounded task status, descriptions and failure causes, never workspace files. "
         "`/global share` previews aggregate stats; --failures includes failures and plan "
         "fallbacks quoting your tasks and reviewers. --no-stats omits stats; choose at least one. "
         "--days N (1–365, default 30) starts at UTC midnight N days ago. "
@@ -407,6 +412,8 @@ TOPICS: Final = (
         "inbox and complaints work. Messages never become tasks, commands or clicks.",
     ),
 )
+
+TOPICS = tuple(topic for topic in _TOPICS if messenger_cli.ENABLED or topic.name != "messenger")
 
 BY_NAME: Final = {topic.name: topic for topic in TOPICS}
 

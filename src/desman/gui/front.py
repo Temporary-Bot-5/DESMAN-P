@@ -73,6 +73,7 @@ class WebFront(ui.Front):
         self._input_recordings: tuple[ui.Recording, ...] = ()
         self._prompt_id = 0
         self.busy = False
+        self.thinking_since: float | None = None
         self.redact: Callable[[str], str] = redact or redact_keys
         """What typed text is shown as: the event log is replayed to every reload, so a key
         pasted into a line never stays in it (the chat itself cuts it before keeping it)."""
@@ -219,6 +220,12 @@ class WebFront(ui.Front):
             self.condition.notify_all()
         reply.result()
 
+    def set_thinking(self, started: float | None) -> None:
+        with self.condition:
+            self.thinking_since = started
+            self.state += 1
+            self.condition.notify_all()
+
     def poll(self, after: int, timeout: float = 25, state: int | None = None) -> dict[str, Any]:
         """Return retained events and current state so reloads preserve prompts and progress."""
         with self.condition:
@@ -230,6 +237,7 @@ class WebFront(ui.Front):
                 "events": [dict(e) for e in self.events if e["seq"] > after],
                 "prompt": self.prompt,
                 "live": self.live,
+                "thinking_since": self.thinking_since,
                 "state": self.state,
                 "busy": self.busy
                 if self.runners is None

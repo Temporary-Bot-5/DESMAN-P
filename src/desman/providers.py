@@ -79,6 +79,7 @@ class Provider:
     # Provider-managed settings excluded from the wizard and config display.
     internal_settings: tuple[str, ...] = ()
     terms: Terms | None = None
+    public_models: bool = False  # listing models does not prove the key works
 
     def headers(self, key: str) -> dict[str, str]:
         return {name: value.format(key=key) for name, value in self.auth}
@@ -140,6 +141,7 @@ FREE = (
         "NVIDIA_API_KEY",
         base_url="https://integrate.api.nvidia.com/v1",
         default_model="nvidia/nemotron-3-ultra-550b-a55b",
+        public_models=True,
         limits_url="https://docs.api.nvidia.com/nim/docs/api-limits",
         # Big free models write ~60–90 tokens/s: long replies take over a minute.
         # One call plus one repair stays under the 300-second lease; long replies took 64–92 s.

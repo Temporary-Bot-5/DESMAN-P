@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG : {url}",
     "Skip confirmation.": "Ignorer la confirmation.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access est activé, mais aucun moteur pour tout le Web : web_search couvre seulement Wikipedia, Stack Overflow, arXiv et GitHub. Utilisez `desman search setup` ou `desman config`.",
-    "Remembered model access refusals cleared for the checked keys.": "Les refus d’accès aux modèles mémorisés ont été effacés pour les clés vérifiées.",
+    "Remembered model access refusals cleared for the accepted keys.": "Les refus d’accès aux modèles ont été effacés pour les clés acceptées.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model} indisponible pour la clé nº{number} ({fingerprint}) jusqu’au {until} : {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "Le port {port} est occupé (un autre `desman gui` est-il ouvert ?). Utilisez un autre --port ou omettez-le pour choisir un port libre.",
     "{path}:": "{path}:",
@@ -1008,9 +1008,9 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "appels 24h",
     "tokens 24h": "tokens 24h",
     "API keys": "Clés API",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{n} clé chez {with_keys} fournisseurs sur {providers}. `desman keys check` les teste (sans consommer de tokens), `desman usage` affiche les totaux.",
-        "{n} clés chez {with_keys} fournisseurs sur {providers}. `desman keys check` les teste (sans consommer de tokens), `desman usage` affiche les totaux.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{n} clé chez {with_keys} fournisseurs sur {providers}. `desman keys check` les teste, `desman usage` affiche les totaux.",
+        "{n} clés chez {with_keys} fournisseurs sur {providers}. `desman keys check` les teste, `desman usage` affiche les totaux.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "aucune clé à vérifier : ajoutez-en une avec `desman keys add PROVIDER`",
     "{name} is not configured": "{name} n'est pas configuré",
@@ -1379,7 +1379,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Autre chose, avec vos mots ; un texte vide l'efface.",
     "Everything back to the interlocutor's judgement.": "Tout revient au jugement de l'interlocuteur.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Si l'interlocuteur analyse vos conversations et prend des notes : afficher, on ou off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Demander à chaque fournisseur si ses clés fonctionnent et quelles limites il annonce, et à chaque serveur\nlocal s'il tourne et sert son modèle. Ne consomme aucun jeton.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Demander à chaque fournisseur si ses clés fonctionnent et quelles limites il annonce, et à chaque serveur\nlocal s'il tourne et sert son modèle. NVIDIA utilise une réponse d’un jeton.",
     "Download the model with `ollama pull {model}`.": "Téléchargez le modèle avec `ollama pull {model}`.",
     "It serves: {models}": "Il sert : {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Démarrez-le avec `llama-server -m MODEL.gguf --port 8080`, ou indiquez son adresse dans `desman config`.",
@@ -2012,7 +2012,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Guillemets incorrects dans la commande."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Guillemets incorrects dans la commande.",
+        "Only command options can follow quoted text.": "Seules les options de la commande peuvent suivre le texte entre guillemets.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2314,3 +2319,14 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Français", plural, MESSAGES, CLICK, forms=2)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked now.": "La clé n’a pas pu être vérifiée pour le moment.",
+        "rate limited right now": "Limite de requêtes atteinte pour le moment.",
+        "The key could not be checked: no available model.": "Impossible de vérifier la clé : aucun modèle disponible.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Mettez le texte contenant des espaces entre guillemets doubles, par exemple "comme ceci".',
+        "DESMAN is thinking… {seconds} s": "DESMAN réfléchit… {seconds} s",
+    }
+)

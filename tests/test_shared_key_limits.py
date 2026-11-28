@@ -300,7 +300,7 @@ def test_after_key_db_failure_keeps_completion_and_journal(
     assert events == ["journal", "limits"]
 
 
-def test_keys_check_clears_only_checked_fingerprints(
+def test_keys_check_clears_only_accepted_fingerprints(
     conn: sqlite3.Connection, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from desman import providers
@@ -309,7 +309,7 @@ def test_keys_check_clears_only_checked_fingerprints(
     from desman.llm import check
 
     path = Path(conn.execute("PRAGMA database_list").fetchone()[2])
-    for scope in ("groq/m:checked", "groq/m:other", "mistral/m:checked"):
+    for scope in ("groq/m:checked", "groq/m:failed", "groq/m:other", "mistral/m:checked"):
         conn.execute(
             "INSERT INTO model_refusals VALUES (?, 403, 'requires a card', ?)",
             (scope, db.to_iso(clock() + timedelta(hours=24))),
@@ -317,10 +317,16 @@ def test_keys_check_clears_only_checked_fingerprints(
     monkeypatch.setattr(db, "default_db_path", lambda: path)
     monkeypatch.setattr(providers.Provider, "is_ready", lambda *args: True)
     monkeypatch.setattr(
-        check, "check", lambda *args: [check.KeyCheck("groq", 1, "checked", True, 200, "ok")]
+        check,
+        "check",
+        lambda *args: [
+            check.KeyCheck("groq", 1, "checked", True, 200, "ok"),
+            check.KeyCheck("groq", 2, "failed", False, 403, "refused"),
+        ],
     )
     check_keys(Config(), "groq")
     assert [r[0] for r in conn.execute("SELECT scope FROM model_refusals ORDER BY scope")] == [
+        "groq/m:failed",
         "groq/m:other",
         "mistral/m:checked",
     ]

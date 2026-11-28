@@ -358,6 +358,8 @@ def _provider_menu(s: _Session, p: Provider) -> None:
             )
         if p.local:
             actions.append(ui.Choice(t("Download a model from Hugging Face"), "hub"))
+        if p.key_env is not None and not p.hub and not p.search and p.is_ready(s.config):
+            actions.append(ui.Choice(t("Check"), "check"))
         actions.append(ui.Choice(t("Back"), None))
         action = ui.select(p.name, actions)
         if action is None:
@@ -368,6 +370,10 @@ def _provider_menu(s: _Session, p: Provider) -> None:
             _add_key(s, p)
         elif action == "remove":
             _remove_key(s, p)
+        elif action == "check":
+            from desman.config_cli import check_keys, print_checks
+
+            print_checks(*check_keys(s.config, p.id))
         else:
             _set(s, p, action)
 

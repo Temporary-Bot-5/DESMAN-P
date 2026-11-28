@@ -409,7 +409,7 @@ MESSAGES: dict[str, Forms] = {
     "SearXNG: {url}": "SearXNG: {url}",
     "Skip confirmation.": "Onayı atlayın.",
     "network_access is on, but no engine for the whole web is set up: web_search covers only Wikipedia, Stack Overflow, arXiv and GitHub. Add one in `desman search setup` or use `desman config`.": "network_access açık, ancak tüm web için arama motoru ayarlanmamış: web_search yalnızca Wikipedia, Stack Overflow, arXiv ve GitHub kapsamındadır. `desman search setup` veya `desman config` kullanın.",
-    "Remembered model access refusals cleared for the checked keys.": "Denetlenen anahtarlar için kaydedilen model erişim retleri temizlendi.",
+    "Remembered model access refusals cleared for the accepted keys.": "Kabul edilen anahtarlar için kaydedilen model erişim retleri temizlendi.",
     "{model} unavailable to key #{number} ({fingerprint}) until {until}: {words}": "{model}, #{number} ({fingerprint}) anahtarı için {until} tarihine kadar kullanılamıyor: {words}",
     "Port {port} is busy (is another `desman gui` open?). Use another --port, or leave it out to pick a free one.": "{port} bağlantı noktası meşgul (başka bir `desman gui` açık mı?). Başka bir --port kullanın veya boş bir bağlantı noktası seçmek için belirtmeyin.",
     "{path}:": "{path}:",
@@ -987,8 +987,8 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "çağrı 24s",
     "tokens 24h": "token 24s",
     "API keys": "API anahtarları",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{providers} sağlayıcıdan {with_keys} tanesinde {n} anahtar var. `desman keys check` onları test eder (token harcamadan), `desman usage` toplamları gösterir.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{providers} sağlayıcıdan {with_keys} tanesinde {n} anahtar var. `desman keys check` onları test eder, `desman usage` toplamları gösterir.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "denetlenecek anahtar yok: `desman keys add PROVIDER` ile bir tane ekleyin",
     "{name} is not configured": "{name} yapılandırılmamış",
@@ -1327,7 +1327,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Başka bir şey, kendi sözlerinle; boş metin temizler.",
     "Everything back to the interlocutor's judgement.": "Her şey yeniden muhatabın takdirine.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Muhatap konuşmalarını inceleyip not tutuyor mu: göster, on veya off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini, her yerel\nsunucuya da çalışıp çalışmadığını ve modelini sunup sunmadığını sor. Token harcamaz.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini, her yerel\nsunucuya da çalışıp çalışmadığını ve modelini sunup sunmadığını sor. NVIDIA, bir token ile sınırlı bir yanıt kullanır.",
     "Download the model with `ollama pull {model}`.": "Modeli `ollama pull {model}` ile indirin.",
     "It serves: {models}": "Sunduğu modeller: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "`llama-server -m MODEL.gguf --port 8080` ile başlatın ya da adresini `desman config` içinde ayarlayın.",
@@ -1930,7 +1930,12 @@ MESSAGES.update(
     }
 )
 
-MESSAGES.update({"Invalid quoting in the command.": "Komuttaki tırnak işaretleri geçersiz."})
+MESSAGES.update(
+    {
+        "Invalid quoting in the command.": "Komuttaki tırnak işaretleri geçersiz.",
+        "Only command options can follow quoted text.": "Tırnak içindeki metinden sonra yalnızca komut seçenekleri gelebilir.",
+    }
+)
 
 MESSAGES.update(
     {
@@ -2209,3 +2214,14 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked now.": "Anahtar şu anda doğrulanamadı.",
+        "rate limited right now": "Şu anda istek hızı sınırına ulaşıldı.",
+        "The key could not be checked: no available model.": "Anahtar doğrulanamadı: kullanılabilir model yok.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Boşluk içeren metni çift tırnak içine alın, örneğin "bunun gibi".',
+        "DESMAN is thinking… {seconds} s": "DESMAN düşünüyor… {seconds} sn",
+    }
+)

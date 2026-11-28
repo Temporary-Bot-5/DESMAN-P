@@ -275,7 +275,7 @@ def test_master_topic_explains_the_chat_setting_lifetime() -> None:
 
 
 @pytest.mark.parametrize("operator_access", [False, True])
-def test_prompt_routes_messenger_and_network_questions(
+def test_prompt_routes_reports_and_network_questions(
     monkeypatch: pytest.MonkeyPatch, operator_access: bool
 ) -> None:
     from desman import interlocutor
@@ -284,6 +284,7 @@ def test_prompt_routes_messenger_and_network_questions(
     monkeypatch.setattr(interlocutor, "has_operator_key", lambda: operator_access)
     request = Interlocutor(FakeLLM(), "en", None).build_request(History(summary=None, messages=[]))
     system = request.messages[0].content
-    assert "desman-global messenger (global messages)" in system
+    assert "desman-global messenger (global messages)" not in system
+    assert "offer to report it with a global report command turn" in system
     assert "global status command describes this node's state" in system
     assert ("Use operator nodes for the network's node list or count." in system) == operator_access

@@ -667,9 +667,9 @@ def print_key_rows(rows: list[dict[str, Any]]) -> None:
         tn(
             total,
             "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them "
-            "(no tokens spent), `desman usage` shows totals.",
+            "and `desman usage` shows totals.",
             "{n} keys from {with_keys} of {providers} providers. `desman keys check` tests them "
-            "(no tokens spent), `desman usage` shows totals.",
+            "and `desman usage` shows totals.",
             with_keys=len(with_keys),
             providers=sum(r["env"] is not None for r in rows),
         )
@@ -681,7 +681,7 @@ def print_key_rows(rows: list[dict[str, Any]]) -> None:
 @json_option
 def keys_check(provider: str | None, as_json: bool) -> None:
     """Ask each provider whether its keys work and what limits it reports, and each local
-    server whether it runs and serves its model. Spends no tokens."""
+    server whether it runs and serves its model. NVIDIA uses a one-token completion."""
     targets, results = check_keys(load_config().load(), provider)
     if as_json:
         click.echo(json.dumps([asdict(r) for r in results], indent=2, default=str))
@@ -717,6 +717,8 @@ def check_keys(
         try:
             with db.transaction(conn):
                 for result in results:
+                    if not result.ok:
+                        continue
                     conn.execute(
                         "DELETE FROM model_refusals WHERE scope LIKE ? AND scope LIKE ?",
                         (result.provider + "/%", "%:" + result.key_id),
@@ -753,7 +755,8 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
             default,
         )
     ui.out(table)
-    ui.note(t("Remembered model access refusals cleared for the checked keys."))
+    if any(r.ok for r in results):
+        ui.note(t("Remembered model access refusals cleared for the accepted keys."))
     ui.out("")
     warned: set[str] = set()
     for r in results:
@@ -762,9 +765,16 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
         if not r.ok and p.local:
             ui.warn(f"{name}: {_local_problem(r)}")
             _local_hint(p, r)
-        elif not r.ok:
-            ui.warn(f"{name}: {r.detail}")
-        elif r.unlisted and r.provider not in warned:  # the same for each key of a provider
+        elif not r.ok or r.detail == check.RATE_LIMITED:
+            detail = r.detail
+            if detail == check.NO_AVAILABLE_MODEL:
+                detail = t("The key could not be checked: no available model.")
+            elif detail == check.CHECK_UNAVAILABLE:
+                detail = t("The key could not be checked now.")
+            elif detail == check.RATE_LIMITED:
+                detail = t("rate limited right now")
+            ui.warn(f"{name}: {detail}")
+        if r.ok and r.unlisted and r.provider not in warned:  # the same for each key of a provider
             warned.add(r.provider)
             ui.warn(
                 t(
