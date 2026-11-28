@@ -571,6 +571,7 @@ def test_key_check_sends_the_providers_own_headers() -> None:
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
         [result] = check.check(config, providers.find("anthropic"), http)
     assert result.ok and result.default_model_listed
+    assert [request.method for request in seen] == ["GET"]
     assert str(seen[0].url) == "https://api.anthropic.com/v1/models"
     assert seen[0].headers["x-api-key"] == ANTHROPIC_KEY
     assert seen[0].headers["anthropic-version"] == "2023-06-01"
@@ -995,3 +996,41 @@ def test_provider_base_timeout_above_default_cap(network_cap: int | None, expect
         )
     finally:
         llm.client.close()
+
+
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [
+        (401, "refused"),
+        (403, "refused"),
+        (200, "accepted"),
+        (410, "default model is unavailable"),
+        (404, "default model is unavailable"),
+        (503, "HTTP 503"),
+    ],
+)
+def test_nvidia_keys_are_checked_by_an_authenticated_completion(status: int, detail: str) -> None:
+    provider = providers.find("nvidia")
+    key = "1234" if status in (401, 403) else "nvapi-test"
+    config = make_config(api_keys={"NVIDIA_API_KEY": key})
+    methods: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        assert request.headers["Authorization"] == f"Bearer {key}"
+        if request.method == "GET":
+            assert request.url.path.endswith("/models")
+            return httpx.Response(200, json={"data": [{"id": provider.default_model}]})
+        assert request.url.path.endswith("/chat/completions")
+        body = json.loads(request.content)
+        assert body["model"] == provider.default_model
+        assert body["max_tokens"] == 1 and body["temperature"] == 0
+        assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
+        return httpx.Response(status)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        [result] = check.check(config, provider, http)
+    assert methods == ["GET", "POST"]
+    assert result.ok is (status == 200)
+    assert result.http_status == status and detail in result.detail
+    assert result.models == 1 and result.default_model_listed is True

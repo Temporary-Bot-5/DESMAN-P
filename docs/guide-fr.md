@@ -8,7 +8,7 @@ un problème. Commencez par les sections 1 à 3 et consultez le reste au besoin.
 - **C’est un prototype.** Il peut se fermer brusquement, se bloquer, donner des réponses étranges
   ou perdre du travail en cours. Ne lui confiez rien d’important ni de tâches impossibles à
   répéter. Les problèmes trouvés sont le principal résultat du test. Signalez-les tous (section
-  7).
+  6).
 - **Vos clés restent chez vous.** Une clé d’accès à un modèle (clé API) est stockée dans un
   fichier sur votre ordinateur et vous seul pouvez la voir. Elle n’est envoyée ni au réseau
   DESMAN, ni au propriétaire, ni à un modèle. Elle ne figure pas dans l’historique du chat. Le
@@ -22,10 +22,7 @@ un problème. Commencez par les sections 1 à 3 et consultez le reste au besoin.
   - votre nœud : l’empreinte de sa clé, son dernier contact, les modèles prêtés et leurs quotas
     quotidiens (fournisseur, modèle et empreinte de la clé, jamais la clé) ;
   - le travail effectué par votre ordinateur pour le réseau et son résultat ;
-  - vos signalements de problèmes, avec le texte exact de la fenêtre de confirmation (section 7) ;
-  - dans la messagerie, votre nom et qui écrit à qui et quand. Les messages sont chiffrés et
-    l’opérateur ne peut pas les lire, **sauf en cas de plainte**. Si vous signalez un message, il
-    en reçoit le texte ;
+  - vos signalements de problèmes, avec le texte exact de la fenêtre de confirmation (section 6) ;
   - comme sur tout site web, l’adresse IP d’où vient la connexion.
 - **Exécuter du code sous Windows.** Installez et lancez Docker Desktop en mode conteneurs Linux,
   puis exécutez `desman sandbox setup --yes` pour autoriser le téléchargement de l’image. Vous
@@ -89,7 +86,7 @@ pour le programme. La configuration s’ouvre automatiquement au premier lanceme
 
 Les limites gratuites sont basses et peuvent changer. Si DESMAN annonce qu’une limite est
 atteinte, le travail reprend à son renouvellement, généralement après une minute, parfois après un
-jour. Sans réponse au bout d’une heure, signalez-le (section 7).
+jour. Sans réponse au bout d’une heure, signalez-le (section 6).
 
 ## 3. Utilisation
 
@@ -162,29 +159,9 @@ données de votre ordinateur.
 Le réseau fonctionne tant que la page DESMAN reste ouverte. Si le serveur est inaccessible, DESMAN
 continue de travailler seul et réessaie plus tard.
 
-## 6. Messagerie
+## 6. Signaler un problème
 
-Les participants peuvent s’écrire. Les messages sont chiffrés. L’opérateur voit qui écrit à qui et
-quand, sans pouvoir lire le texte.
-
-1. **Nom.** Tapez `/global name votre_nom` dans la conversation. Utilisez 3 à 32 caractères :
-   lettres latines minuscules, chiffres, `_` et `-`. Les autres verront ce nom.
-2. **Contact.** Vous pouvez écrire à quelqu’un qui a aussi donné son accord. Envoyez
-   `/global contact add nom`. L’autre personne accepte avec la même commande et votre nom.
-3. **Écrire.** Utilisez `/global send nom "le message"`. Si le texte contient plusieurs mots,
-   mettez-le entre guillemets droits `"`, y compris dans les commandes suivantes.
-4. **Lire.** Cliquez sur **Messagerie** à gauche ou tapez `/messages` ou `/messages nom`.
-5. **Bloquer.** Utilisez `/global block nom`. L’autre personne n’est pas avertie.
-   `/global unblock nom` débloque le contact.
-6. **Porter plainte.** Utilisez `/global complain nom "ce qui s’est passé"`. Pour montrer un
-   message précis à l’opérateur, ajoutez `--message NUMÉRO`. Le numéro s’affiche à la lecture.
-   **Le texte de ce message ira à l’opérateur**.
-
-DESMAN ne traite jamais les messages d’autres personnes comme des tâches. Leurs liens et fichiers
-ne lancent rien. Si vous perdez le fichier de la clé du nœud, par exemple en désinstallant
-complètement le programme, vous perdez les messages.
-
-## 7. Signaler un problème
+Si vous décrivez un problème avec DESMAN dans la conversation, il vous propose un signalement à vérifier.
 
 Il faut être connecté au réseau (section 5).
 
@@ -196,13 +173,13 @@ Il faut être connecté au réseau (section 5).
 
 Les clés ne figurent jamais dans un signalement. Si DESMAN trouve une de vos clés dans le texte,
 il annule l’envoi. Les conversations, le profil et les fichiers ne sont pas envoyés non plus. Pour
-joindre l’historique d’une tâche, tapez `/global report "description" --task NUMÉRO`. La fenêtre
+joindre l’historique d’une tâche, tapez `/global report --task NUMÉRO "description"`. La fenêtre
 montre exactement ce qui sera ajouté.
 
 Si vous ne pouvez pas envoyer le signalement parce que le réseau ou le programme ne fonctionne
 pas, écrivez au propriétaire par le moyen habituel et joignez une capture d’écran si possible.
 
-## 8. Mises à jour
+## 7. Mises à jour
 
 Les mises à jour demandent votre accord. Quand le propriétaire annonce une nouvelle version,
 connectez-vous au réseau (section 5). Tapez `/global update --show` pour la voir et
@@ -211,7 +188,7 @@ confirmation. Ensuite, fermez et rouvrez DESMAN. S’il signale des « fichiers 
 `/protected approve` et confirmez pour accepter les nouvelles règles. Pour revenir à la version
 précédente, tapez `/global update --revert`.
 
-## 9. Désinstallation
+## 8. Désinstallation
 
 - **Windows :** fermez DESMAN, appuyez sur Win+R, collez
   `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` et appuyez sur Entrée.

@@ -22,6 +22,9 @@ from desman.core.sessions import Kind, Role, Sessions
 from desman.gui.front import WebFront
 from desman.gui.panels import snapshot
 from desman.llm.fake import FakeLLM
+from test_messenger import messenger_enabled
+
+__all__ = ["messenger_enabled"]
 
 
 @pytest.fixture
@@ -339,6 +342,7 @@ def test_notices_stay_out_of_chat_and_pointer_is_one_per_batch(
     assert "waiting notice" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("messenger_enabled")
 def test_messenger_error_is_kept_in_terminal(sessions: Sessions) -> None:
     chat = Chat(sessions)
     normal = sessions.add(None, Role.USER, "hello").session_id
@@ -513,6 +517,7 @@ def test_terminal_task_commands_use_code_report_without_retelling(
         chat._http.close()
 
 
+@pytest.mark.usefixtures("messenger_enabled")
 def test_terminal_help_slash_messages_and_error_are_saved(sessions: Sessions) -> None:
     chat = Chat(sessions)
     lines = iter(["/terminal", "/help", "/messages", "/rename wrong", "/exit"])

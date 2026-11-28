@@ -1146,13 +1146,13 @@ MESSAGES: dict[str, Forms] = {
     "tokens 24h": "токены 24ч",
     "API keys": "API-ключи",
     "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them "
-    "(no tokens spent), `desman usage` shows totals.": (
+    "and `desman usage` shows totals.": (
         "{n} ключ у {with_keys} из {providers} провайдеров. `desman keys check` проверит их "
-        "(без траты токенов), `desman usage` покажет расход.",
+        ", `desman usage` покажет расход.",
         "{n} ключа у {with_keys} из {providers} провайдеров. `desman keys check` проверит их "
-        "(без траты токенов), `desman usage` покажет расход.",
+        ", `desman usage` покажет расход.",
         "{n} ключей у {with_keys} из {providers} провайдеров. `desman keys check` проверит их "
-        "(без траты токенов), `desman usage` покажет расход.",
+        ", `desman usage` покажет расход.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": (
         "нечего проверять: добавьте ключ через `desman keys add PROVIDER`"
@@ -1596,7 +1596,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Что-то ещё, вашими словами; пустой текст очищает.",
     "Everything back to the interlocutor's judgement.": "Всё обратно на усмотрение собеседника.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Анализирует ли собеседник ваши разговоры и ведёт ли заметки: показать, on или off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Спросить каждого провайдера, работают ли его ключи и какие лимиты он сообщает, а каждый локальный\nсервер — запущен ли он и отдаёт ли свою модель. Токены не тратятся.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Спросить каждого провайдера, работают ли его ключи и какие лимиты он сообщает, а каждый локальный\nсервер — запущен ли он и отдаёт ли свою модель. Для NVIDIA запрашивается ответ длиной в один токен.",
     "Download the model with `ollama pull {model}`.": "Скачайте модель: `ollama pull {model}`.",
     "It serves: {models}": "Он отдаёт: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Запустите его: `llama-server -m MODEL.gguf --port 8080` — или укажите его адрес в `desman config`.",
@@ -2560,3 +2560,12 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked because the default model is unavailable.": "Не удалось проверить ключ, потому что модель по умолчанию недоступна.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Текст с пробелами заключите в двойные кавычки, например "вот так".',
+        "DESMAN is thinking… {seconds} s": "DESMAN думает… {seconds} с",
+    }
+)

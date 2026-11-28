@@ -7,7 +7,7 @@ zgłaszać problemy. Zacznij od rozdziałów 1–3, a do reszty zajrzyj w razie 
 
 - **To prototyp.** Może się zawiesić, zamknąć bez ostrzeżenia, dawać dziwne odpowiedzi lub tracić
   rozpoczętą pracę. Nie powierzaj mu ważnych spraw ani zadań, których nie można powtórzyć.
-  Znalezione problemy są najważniejszym wynikiem testu. Zgłoś każdy z nich (rozdział 7).
+  Znalezione problemy są najważniejszym wynikiem testu. Zgłoś każdy z nich (rozdział 6).
 - **Klucze zostają u ciebie.** Klucz dostępu do modelu (klucz API) jest zapisany tylko w pliku na
   twoim komputerze i tylko ty możesz go zobaczyć. Nie trafia do sieci DESMAN, właściciela, modelu
   ani historii rozmowy. Sieć dostaje tylko *odcisk* klucza, czyli krótki ciąg znaków, który
@@ -20,10 +20,7 @@ zgłaszać problemy. Zacznij od rozdziałów 1–3, a do reszty zajrzyj w razie 
     limity (dostawcę, model i odcisk klucza, bez samego klucza);
   - pracę wykonaną przez twój komputer dla sieci i jej wynik;
   - wysłane zgłoszenia problemów z dokładnie tym tekstem, który był w oknie potwierdzenia
-    (rozdział 7);
-  - w komunikatorze twoją nazwę oraz to, kto, do kogo i kiedy pisze. Wiadomości są szyfrowane i
-    operator ich nie przeczyta, **chyba że wpłynie skarga**. Jeśli zgłosisz konkretną wiadomość,
-    operator otrzyma jej treść;
+    (rozdział 6);
   - adres IP, z którego nastąpiło połączenie, tak jak w przypadku każdej strony.
 - **Uruchamianie kodu w systemie Windows.** Zainstaluj i uruchom Docker Desktop w trybie
   kontenerów linuksowych, a następnie wykonaj polecenie `desman sandbox setup --yes`, aby
@@ -87,7 +84,7 @@ hasło dla programu. Przy pierwszym uruchomieniu ustawienia otworzą się automa
 
 Darmowe limity są niewielkie i się zmieniają. Jeśli DESMAN informuje o wyczerpaniu limitu, praca
 ruszy po jego odnowieniu, zwykle po minucie, czasem po dniu. Jeśli przez ponad godzinę nie
-otrzymasz odpowiedzi, zgłoś to (rozdział 7).
+otrzymasz odpowiedzi, zgłoś to (rozdział 6).
 
 ## 3. Jak korzystać
 
@@ -155,29 +152,9 @@ dane z twojego komputera.
 Sieć działa, gdy strona DESMAN jest otwarta. Jeśli serwer jest niedostępny, DESMAN działa
 samodzielnie i ponawia próbę później.
 
-## 6. Komunikator
+## 6. Zgłaszanie problemu
 
-Uczestnicy sieci mogą do siebie pisać. Wiadomości są szyfrowane. Operator widzi, kto, do kogo i
-kiedy pisze, ale nie widzi treści.
-
-1. **Nazwa.** Wpisz `/global name twoja_nazwa` w rozmowie. Użyj 3–32 znaków: małych liter alfabetu
-   łacińskiego, cyfr, `_` i `-`. Inni zobaczą tę nazwę.
-2. **Kontakt.** Możesz pisać do osób, które też się zgodziły. Wyślij prośbę przez
-   `/global contact add nazwa`. Druga osoba zaakceptuje ją tym samym poleceniem z twoją nazwą.
-3. **Pisanie.** Użyj `/global send nazwa "treść wiadomości"`. Tekst z kilku słów ujmij w proste
-   cudzysłowy `"`. Dotyczy to też dalszych poleceń.
-4. **Czytanie.** Kliknij **Wiadomości** po lewej lub użyj `/messages` albo `/messages nazwa`.
-5. **Blokowanie.** Użyj `/global block nazwa`. Druga osoba nie otrzyma powiadomienia.
-   `/global unblock nazwa` usuwa blokadę.
-6. **Skarga.** Użyj `/global complain nazwa "co się stało"`. Aby pokazać operatorowi konkretną
-   wiadomość, dodaj `--message NUMER`. Numer jest widoczny podczas czytania.
-   **Treść tej wiadomości trafi do operatora**.
-
-DESMAN nigdy nie wykonuje wiadomości od innych jako zadań. Zawarte w nich linki i pliki niczego
-nie uruchamiają. Jeśli stracisz plik klucza węzła, np. po całkowitym usunięciu programu, utracisz
-też wiadomości.
-
-## 7. Zgłaszanie problemu
+Jeśli opiszesz problem z DESMAN-em w rozmowie, program zaproponuje zgłoszenie do sprawdzenia.
 
 Do wysłania zgłoszenia potrzebne jest połączenie z siecią (rozdział 5).
 
@@ -189,12 +166,12 @@ Do wysłania zgłoszenia potrzebne jest połączenie z siecią (rozdział 5).
 
 Klucze nie trafiają do zgłoszeń. Jeśli DESMAN znajdzie w tekście twój klucz, niczego nie wyśle.
 Nie wysyła też rozmów, profilu ani plików. Aby dołączyć historię konkretnego zadania, wpisz
-`/global report "opis" --task NUMER`. Okno pokaże dokładnie, co zostanie dodane.
+`/global report --task NUMER "opis"`. Okno pokaże dokładnie, co zostanie dodane.
 
 Jeśli sieć lub program nie działa i nie można wysłać zgłoszenia, napisz do właściciela zwykłą
 drogą i w miarę możliwości dołącz zrzut ekranu.
 
-## 8. Aktualizacje
+## 7. Aktualizacje
 
 Aktualizacje wymagają twojej zgody. Gdy właściciel zgłosi nową wersję, połącz się z siecią
 (rozdział 5). Użyj `/global update --show`, aby ją zobaczyć, i `/global update --apply NUMER`, aby
@@ -202,7 +179,7 @@ ją zainstalować. DESMAN pokaże zmiany i poprosi o potwierdzenie. Po instalacj
 otwórz ponownie. Jeśli pojawi się komunikat o „chronionych plikach”, wpisz `/protected approve` i
 potwierdź w oknie, aby przyjąć nowe zasady. Poprzednią wersję przywraca `/global update --revert`.
 
-## 9. Usuwanie programu
+## 8. Usuwanie programu
 
 - **Windows:** zamknij DESMAN, naciśnij Win+R, wklej
   `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` i naciśnij Enter.

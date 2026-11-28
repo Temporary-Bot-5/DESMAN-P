@@ -379,7 +379,7 @@ def test_catalog_run_accepts_typed_paths_but_never_reads_a_model_supplied_path(
     source.write_bytes(b"exclusive to the person")
     with closing(db.open_db()) as conn:
         chat = Chat(Sessions(conn))
-        chat._typed(f'run "Read" --file "{source}"')
+        chat._typed(f'run --file "{source}" "Read"')
         [(task,)] = conn.execute("SELECT id FROM tasks")
         assert (
             Workspace(workspace_root_for(conn), task).read("input/report.txt")

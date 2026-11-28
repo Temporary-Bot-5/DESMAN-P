@@ -962,8 +962,8 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "çağrı 24s",
     "tokens 24h": "token 24s",
     "API keys": "API anahtarları",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{providers} sağlayıcıdan {with_keys} tanesinde {n} anahtar var. `desman keys check` onları test eder (token harcamadan), `desman usage` toplamları gösterir.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{providers} sağlayıcıdan {with_keys} tanesinde {n} anahtar var. `desman keys check` onları test eder, `desman usage` toplamları gösterir.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "denetlenecek anahtar yok: `desman keys add PROVIDER` ile bir tane ekleyin",
     "{name} is not configured": "{name} yapılandırılmamış",
@@ -1302,7 +1302,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Başka bir şey, kendi sözlerinle; boş metin temizler.",
     "Everything back to the interlocutor's judgement.": "Her şey yeniden muhatabın takdirine.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Muhatap konuşmalarını inceleyip not tutuyor mu: göster, on veya off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini, her yerel\nsunucuya da çalışıp çalışmadığını ve modelini sunup sunmadığını sor. Token harcamaz.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Her sağlayıcıya anahtarlarının çalışıp çalışmadığını ve hangi sınırları bildirdiğini, her yerel\nsunucuya da çalışıp çalışmadığını ve modelini sunup sunmadığını sor. NVIDIA, bir token ile sınırlı bir yanıt kullanır.",
     "Download the model with `ollama pull {model}`.": "Modeli `ollama pull {model}` ile indirin.",
     "It serves: {models}": "Sunduğu modeller: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "`llama-server -m MODEL.gguf --port 8080` ile başlatın ya da adresini `desman config` içinde ayarlayın.",
@@ -2184,3 +2184,12 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked because the default model is unavailable.": "Varsayılan model kullanılamadığından anahtar doğrulanamadı.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Boşluk içeren metni çift tırnak içine alın, örneğin "bunun gibi".',
+        "DESMAN is thinking… {seconds} s": "DESMAN düşünüyor… {seconds} sn",
+    }
+)

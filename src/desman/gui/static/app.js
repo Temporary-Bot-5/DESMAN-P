@@ -546,6 +546,37 @@ function event(e) {
 
 // Poll events with their cursor and transient state with its separate revision.
 async function poll() {
+  let thinkingSince = null;
+  let thinkingLine = null;
+
+  function showThinking(started) {
+    thinkingSince = started;
+    const transcript = $("messages");
+    if (started == null) {
+      thinkingLine?.remove();
+      thinkingLine = null;
+      return;
+    }
+    if (!thinkingLine?.isConnected) {
+      thinkingLine = text("div", "", transcript);
+      thinkingLine.className = "thinking";
+      const dots = text("span", "", thinkingLine);
+      for (let i = 0; i < 3; i++) text("span", "●", dots);
+      dots.setAttribute("aria-hidden", "true");
+      text("span", "", thinkingLine);
+    }
+    transcript.append(thinkingLine);
+    updateThinking();
+  }
+
+  function updateThinking() {
+    if (!thinkingLine || thinkingSince == null) return;
+    const seconds = Math.max(0, Math.floor(Date.now() / 1000 - thinkingSince));
+    thinkingLine.lastElementChild.textContent = words.thinking.replace("{seconds}", seconds);
+  }
+
+  const thinkingTimer = setInterval(updateThinking, 250);
+
   while (!ended) {
     try {
       const response = await fetch(`/events?after=${after}&state=${state}`);
@@ -579,6 +610,8 @@ async function poll() {
       if (data.turn?.state === "queued") {
         $("live").textContent = data.turn.reason || words.waiting_module.replace("{n}", data.turn.ahead);
       } else rich($("live"), live);
+      showThinking(data.pending || data.ended ? null :
+        (data.turn?.thinking_since ?? data.thinking_since));
       canAttach = !!data.can_attach;
       showPrompt(data.pending || null, true);
       showPrompt(data.prompt);
@@ -605,7 +638,7 @@ async function poll() {
         showWaiting(waitingData);
       }
       const follow = Date.now() < followUntil;
-      if ((opened || ((data.events.length || replaced) && (nearBottom || follow))) && !document.querySelector(".greeting")) {
+      if ((opened || ((data.events.length || replaced || thinkingLine) && (nearBottom || follow))) && !document.querySelector(".greeting")) {
         transcript.scrollTop = transcript.scrollHeight;
       }
       updateBottomButton();
@@ -614,6 +647,8 @@ async function poll() {
       await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
+  showThinking(null);
+  clearInterval(thinkingTimer);
   $("status").textContent = words.ended;
   $("prompt").replaceChildren();
   $("stop").hidden = true;
@@ -741,7 +776,7 @@ function setupPanels() {
   $("sidebar-bottom").replaceChildren();
   actionButton($("sidebar-bottom"), `✕ ${words.delete_chats}`, {type: "delete_all"});
   actionButton($("sidebar-bottom"), `⚑ ${words.report_problem}`, {type: "report_problem"});
-  actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
+  if (words.messenger) actionButton($("sidebar-bottom"), `✉ ${words.messenger}`, {type: "messenger"});
   button($("sidebar-bottom"), `◔ ${words.usage}`, openUsage);
   const operator = button($("sidebar-bottom"), words.operator, openOperator);
   operator.id = "operator-button";

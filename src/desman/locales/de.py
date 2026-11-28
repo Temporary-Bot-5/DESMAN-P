@@ -983,9 +983,9 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "Aufrufe 24h",
     "tokens 24h": "Tokens 24h",
     "API keys": "API-Schlüssel",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{n} Schlüssel bei {with_keys} von {providers} Anbietern. `desman keys check` testet sie (ohne Tokens), `desman usage` zeigt die Summen.",
-        "{n} Schlüssel bei {with_keys} von {providers} Anbietern. `desman keys check` testet sie (ohne Tokens), `desman usage` zeigt die Summen.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{n} Schlüssel bei {with_keys} von {providers} Anbietern. `desman keys check` testet sie, `desman usage` zeigt die Summen.",
+        "{n} Schlüssel bei {with_keys} von {providers} Anbietern. `desman keys check` testet sie, `desman usage` zeigt die Summen.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "keine Schlüssel zu prüfen: einen mit `desman keys add PROVIDER` hinzufügen",
     "{name} is not configured": "{name} ist nicht konfiguriert",
@@ -1354,7 +1354,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Sonst noch etwas, in deinen Worten; ein leerer Text löscht es.",
     "Everything back to the interlocutor's judgement.": "Alles zurück zum Urteil des Gesprächspartners.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Ob der Gesprächspartner deine Gespräche analysiert und Notizen führt: anzeigen, on oder off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Jeden Anbieter fragen, ob seine Schlüssel funktionieren und welche Limits er meldet, und jeden lokalen\nServer, ob er läuft und sein Modell bereitstellt. Verbraucht keine Tokens.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Jeden Anbieter fragen, ob seine Schlüssel funktionieren und welche Limits er meldet, und jeden lokalen\nServer, ob er läuft und sein Modell bereitstellt. NVIDIA verwendet eine Antwort mit einem Token.",
     "Download the model with `ollama pull {model}`.": "Laden Sie das Modell mit `ollama pull {model}` herunter.",
     "It serves: {models}": "Er stellt bereit: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Starten Sie ihn mit `llama-server -m MODEL.gguf --port 8080` oder legen Sie seine Adresse in `desman config` fest.",
@@ -2282,3 +2282,12 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Deutsch", plural, MESSAGES, CLICK, forms=2)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked because the default model is unavailable.": "Der Schlüssel konnte nicht geprüft werden, weil das Standardmodell nicht verfügbar ist.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Setzen Sie Text mit Leerzeichen in doppelte Anführungszeichen, z. B. "wie hier".',
+        "DESMAN is thinking… {seconds} s": "DESMAN denkt nach… {seconds} s",
+    }
+)

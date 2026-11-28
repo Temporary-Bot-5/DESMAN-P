@@ -29,6 +29,29 @@ from test_registry import Node
 
 
 @pytest.fixture
+def messenger_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desman.global_cli import global_group
+
+    monkeypatch.setattr(messenger_cli, "ENABLED", True)
+    monkeypatch.setattr(global_group, "commands", dict(global_group.commands))
+    messenger_cli.register_commands(global_group)
+    entries = commands.CATALOG + commands._MESSENGER_ENTRIES
+    monkeypatch.setattr(commands, "CATALOG", entries)
+    monkeypatch.setattr(
+        commands,
+        "_BY_NAME",
+        {
+            commands._folded(name): entry
+            for entry in entries
+            for name in (entry.name, *entry.aliases)
+        },
+    )
+
+
+pytestmark = pytest.mark.usefixtures("messenger_enabled")
+
+
+@pytest.fixture
 def registry(tmp_path: Path, clock: FakeClock) -> Registry:
     path = tmp_path / "registry.db"
     store.open_registry(path).close()

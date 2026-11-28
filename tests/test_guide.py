@@ -60,7 +60,7 @@ def test_every_language_of_the_site_has_its_words_and_its_guide() -> None:
 @pytest.mark.parametrize("language", LANGUAGES)
 def test_every_guide_has_the_same_sections_and_commands(language: str) -> None:
     text = (DOCS / f"guide-{language}.md").read_text(encoding="utf-8")
-    assert len(re.findall(r"^## ", text, re.MULTILINE)) == 10
+    assert len(re.findall(r"^## ", text, re.MULTILINE)) == 9
 
     def shape(line: str) -> list[str]:
         _, path, rest = _command(line)
@@ -80,7 +80,7 @@ def test_every_guide_has_the_same_sections_and_commands(language: str) -> None:
 @pytest.mark.parametrize("language", LANGUAGES)
 def test_every_command_in_the_guide_exists(language: str) -> None:
     named = _named(language)
-    assert len(named) > 10
+    assert len(named) >= 7
     for line in named:
         command, path, rest = _command(line)
         if command is None:

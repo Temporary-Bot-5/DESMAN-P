@@ -109,7 +109,7 @@ def test_line_parser(line: str, name: str, data: dict[str, Any] | None) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        'run "unterminated',
+        'keys "unterminated',
         "list --unknown",
         "list --json",
         "list --db x",
@@ -744,7 +744,7 @@ def test_windows_tokenization(
         parsed = commands.parse_line(line, None, windows=True)
         assert parsed is not None
         assert expected[-1].split("=", 1)[-1] in parsed[1].model_dump().values()
-    assert seen == [expected]
+    assert [word for batch in seen for word in batch] == expected
 
 
 def test_windows_unclosed_quote() -> None:
@@ -943,3 +943,43 @@ def test_model_gui_handoff_needs_confirmation(monkeypatch: pytest.MonkeyPatch, a
     assert result.exit_code == 0, result.output
     assert "Apply this change?" in result.output
     assert start.call_count == (1 if answer == "yes" else 0)
+
+
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize(
+    ("line", "text", "task"),
+    [
+        (r"Тест тест tesT./|\~!@#$%", r"Тест тест tesT./|\~!@#$%", None),
+        ("--task X don't  remove --help  ", "don't  remove --help  ", "X"),
+        ('--task=X "two words"', "two words", "X"),
+        ('says "hello', 'says "hello', None),
+        ('"--help"', "--help", None),
+    ],
+)
+def test_report_rest_of_line(windows: bool, line: str, text: str, task: str | None) -> None:
+    parsed = commands.parse_line(f"global report {line}", None, windows=windows)
+    assert parsed is not None
+    assert parsed[1] == commands.GlobalReportArgs(text=text, task=task)
+
+
+def test_extra_argument_hint_in_chat_and_cli() -> None:
+    import click
+
+    with pytest.raises(click.UsageError, match=r'double quotes.*"like this"'):
+        commands.parse_line("status two refs", None)
+    result = CliRunner().invoke(cli, ["status", "two", "refs"])
+    assert result.exit_code == 2
+    assert 'double quotes, e.g. "like this"' in result.output
+
+
+def test_messenger_is_hidden_in_cli_catalog_and_completions() -> None:
+    from desman.chat import _commands
+
+    result = CliRunner().invoke(cli, ["global", "--help"])
+    assert result.exit_code == 0
+    assert "Show messenger correspondence" not in result.output
+    for name in ("global messages", "global send", "global contact add"):
+        assert commands.cli_command(cli, name) is None
+        assert commands.find(name) is None
+        assert "/" + name not in commands.completions()
+    assert "/messages" not in _commands()

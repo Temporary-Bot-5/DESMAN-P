@@ -456,3 +456,30 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
   .operator-mode #settings-nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--settings-border); }
   .operator-mode #settings-nav button { width: auto; flex: 0 0 auto; }
 }
+
+#messages .thinking {
+  display: flex;
+  width: fit-content;
+  padding: .5rem .75rem;
+  border-radius: .7rem;
+  background: #20343e;
+  align-items: baseline;
+  gap: .5rem;
+  opacity: .75;
+}
+.thinking > :first-child {
+  font-size: .45em;
+  letter-spacing: .2em;
+}
+.thinking > :first-child span {
+  animation: thinking-dots 1.2s ease-in-out infinite alternate;
+}
+.thinking > :first-child span:nth-child(2) { animation-delay: .16s; }
+.thinking > :first-child span:nth-child(3) { animation-delay: .32s; }
+@keyframes thinking-dots {
+  from { opacity: .25; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking > :first-child span { animation: none; }
+}

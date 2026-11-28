@@ -20,10 +20,12 @@ from desman.net import protocol as p
 from desman.net import seal, sign
 from desman.registry import store
 from desman.registry.server import Registry
-from test_messenger import connect, named, registry
+from test_messenger import connect, messenger_enabled, named, registry
 from test_registry import Node
 
-__all__ = ["registry"]
+pytestmark = pytest.mark.usefixtures("messenger_enabled")
+
+__all__ = ["messenger_enabled", "registry"]
 ADDRESS = "https://registry.test"
 
 

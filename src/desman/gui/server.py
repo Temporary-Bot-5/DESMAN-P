@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import click
 from pydantic import ValidationError
 
-from desman import task_files, ui
+from desman import messenger_cli, task_files, ui
 from desman.config import ConfigError, open_config
 from desman.core import db
 from desman.gui.front import WebFront
@@ -289,7 +289,8 @@ def strings() -> dict[str, str]:
         "op_revoked": t("revoked"),
         "usage": t("Usage"),
         "to_bottom": t("To the bottom"),
-        "messenger": t("Messenger"),
+        **({"messenger": t("Messenger")} if messenger_cli.ENABLED else {}),
+        "thinking": t("DESMAN is thinking… {seconds} s", seconds="{seconds}"),
         "report_problem": t("Report a problem"),
         "sessions": t("Chats"),
         "tasks": t("Tasks"),
@@ -399,6 +400,8 @@ class Server:
             if not isinstance(data, dict):
                 return Response(400)
             if url.path == "/action":
+                if data.get("type") == "messenger" and not messenger_cli.ENABLED:
+                    return Response(404)
                 try:
                     action = ui.ACTIONS.validate_python(data)
                 except ValidationError:

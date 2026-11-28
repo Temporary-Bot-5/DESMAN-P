@@ -8,7 +8,7 @@ gerektiğinde bakabilirsiniz.
 
 - **Bu bir prototip.** Program çökebilir, takılabilir, tuhaf yanıtlar verebilir ve bitmemiş işleri
   kaybedebilir. Önemli işlerinizi emanet etmeyin ve tekrarlanamayacak görevler vermeyin.
-  Bulduğunuz sorunlar testin en önemli sonucudur. Lütfen hepsini bildirin (7. bölüm).
+  Bulduğunuz sorunlar testin en önemli sonucudur. Lütfen hepsini bildirin (6. bölüm).
 - **Anahtarlarınız sizde kalır.** Model erişim anahtarı (API anahtarı) yalnızca bilgisayarınızdaki
   bir dosyada tutulur ve sadece siz görebilirsiniz. DESMAN ağına, sahibine, modele veya sohbet
   geçmişine gitmez. Ağa yalnızca anahtarın *parmak izi* gider. Bu kısa karakter dizisi anahtarları
@@ -21,9 +21,7 @@ gerektiğinde bakabilirsiniz.
   - düğümünüzün anahtar parmak izi, son bağlantı zamanı, ödünç verdiğiniz modeller ve günlük
     kotaları (sağlayıcı, model ve anahtar parmak izi; anahtarın kendisi görünmez);
   - bilgisayarınızın ağ için yaptığı iş ve sonucu;
-  - gönderdiğiniz sorun bildirimleri, onay penceresindeki metinle aynı şekilde (7. bölüm);
-  - mesajlaşmada adınız ve kimin kime ne zaman yazdığı. Mesajlar şifrelidir ve operatör içeriği
-    okuyamaz. **Şikâyet durumunda** bildirdiğiniz mesajın metni operatöre gider;
+  - gönderdiğiniz sorun bildirimleri, onay penceresindeki metinle aynı şekilde (6. bölüm);
   - her web sitesinde olduğu gibi, bağlantının geldiği IP adresi.
 - **Windows'ta kod çalıştırma.** Docker Desktop'ı kurup Linux kapsayıcıları modunda başlatın.
   İmajın indirilmesini onaylamak için `desman sandbox setup --yes` komutunu çalıştırın.
@@ -153,30 +151,9 @@ bırakır.
 Ağ, DESMAN sayfası açıkken çalışır. Sunucuya ulaşılamazsa DESMAN tek başına çalışmaya devam eder
 ve daha sonra yeniden dener.
 
-## 6. Mesajlaşma
+## 6. Sorun bildirme
 
-Ağ katılımcıları birbirine yazabilir. Mesajlar şifrelenir. Operatör kimin kime ne zaman yazdığını
-görür ancak içeriği okuyamaz.
-
-1. **Ad.** Sohbete `/global name adınız` yazın. 3–32 karakter kullanın: küçük Latin harfleri,
-   rakamlar, `_` ve `-`. Bu adı diğer katılımcılar görür.
-2. **Kişi ekleme.** Yalnızca size yazmaya onay veren kişilere yazabilirsiniz.
-   `/global contact add ad` ile istek gönderin. Karşı taraf aynı komutu sizin adınızla kullanarak
-   kabul eder.
-3. **Yazma.** `/global send ad "mesaj metni"` komutunu kullanın. Birden fazla sözcük varsa metni
-   düz çift tırnak `"` içine alın. Aşağıdaki komutlar için de bu geçerlidir.
-4. **Okuma.** Soldaki **Mesajlar** düğmesini, `/messages` veya `/messages ad` komutunu kullanın.
-5. **Engelleme.** `/global block ad` kullanın. Karşı tarafa bildirim gitmez. `/global unblock ad`
-   engeli kaldırır.
-6. **Şikâyet.** `/global complain ad "ne oldu"` komutunu kullanın. Operatöre belirli bir mesajı
-   göstermek için `--message NUMARA` ekleyin. Numara mesajları okurken görünür.
-   **O mesajın metni operatöre gider**.
-
-DESMAN başkalarından gelen mesajları görev olarak çalıştırmaz. Mesajlardaki bağlantılar ve
-dosyalar bir işlem başlatmaz. Programı tamamen kaldırmak gibi bir nedenle düğümün anahtar
-dosyasını kaybederseniz mesajları da kaybedersiniz.
-
-## 7. Sorun bildirme
+Sohbette DESMAN ile ilgili bir sorun anlatırsanız inceleyebileceğiniz bir bildirim önerir.
 
 Bildirim göndermek için ağa bağlı olmalısınız (5. bölüm).
 
@@ -188,12 +165,12 @@ Bildirim göndermek için ağa bağlı olmalısınız (5. bölüm).
 
 Anahtarlar bildirime eklenmez. DESMAN metinde anahtarınızı bulursa hiçbir şey göndermez.
 Sohbetler, profil ve görev dosyaları da gönderilmez. Belirli bir görevin geçmişini eklemek için
-`/global report "açıklama" --task NUMARA` yazın. Pencere tam olarak nelerin ekleneceğini gösterir.
+`/global report --task NUMARA "açıklama"` yazın. Pencere tam olarak nelerin ekleneceğini gösterir.
 
 Ağa bağlanamadığınız veya program açılmadığı için gönderemiyorsanız, sahibine her zamanki yoldan
 yazın. Mümkünse ekran görüntüsü ekleyin.
 
-## 8. Güncellemeler
+## 7. Güncellemeler
 
 Güncellemeler kendiliğinden kurulmaz. Sahip yeni sürümü duyurunca ağa bağlanın (5. bölüm). Sürümü
 görmek için `/global update --show`, kurmak için `/global update --apply NUMARA` kullanın. DESMAN
@@ -201,7 +178,7 @@ değişiklikleri gösterip onay ister. Kurulumdan sonra programı kapatıp yenid
 dosyalar” bildirimi çıkarsa `/protected approve` yazıp pencerede onaylayarak yeni kuralları kabul
 edin. Önceki sürüme dönmek için `/global update --revert` kullanın.
 
-## 9. Kaldırma
+## 8. Kaldırma
 
 - **Windows:** DESMAN'ı kapatın, Win+R tuşlarına basın,
   `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` komutunu yapıştırın ve Enter'a basın.

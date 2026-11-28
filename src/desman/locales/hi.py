@@ -983,9 +983,9 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "कॉल 24घं",
     "tokens 24h": "टोकन 24घं",
     "API keys": "API कुंजियाँ",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{providers} में से {with_keys} प्रदाताओं के पास {n} कुंजी है। `desman keys check` इन्हें जाँचता है (बिना टोकन खर्च किए), `desman usage` कुल दिखाता है।",
-        "{providers} में से {with_keys} प्रदाताओं के पास {n} कुंजियाँ हैं। `desman keys check` इन्हें जाँचता है (बिना टोकन खर्च किए), `desman usage` कुल दिखाता है।",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{providers} में से {with_keys} प्रदाताओं के पास {n} कुंजी है। `desman keys check` इन्हें जाँचता है, `desman usage` कुल दिखाता है।",
+        "{providers} में से {with_keys} प्रदाताओं के पास {n} कुंजियाँ हैं। `desman keys check` इन्हें जाँचता है, `desman usage` कुल दिखाता है।",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "जाँचने के लिए कोई कुंजी नहीं: `desman keys add PROVIDER` से एक जोड़ें",
     "{name} is not configured": "{name} कॉन्फ़िगर नहीं है",
@@ -1351,7 +1351,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "कुछ और, आपके शब्दों में; खाली पाठ इसे हटा देता है।",
     "Everything back to the interlocutor's judgement.": "सब कुछ वापस वार्ताकार के विवेक पर।",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "क्या वार्ताकार आपकी बातचीत का विश्लेषण करता है और नोट रखता है: दिखाएँ, on या off।",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "हर प्रदाता से पूछें कि उसकी कुंजियाँ काम करती हैं या नहीं और वह कौन-सी सीमाएँ बताता है, और हर स्थानीय\nसर्वर से कि वह चल रहा है या नहीं और अपना मॉडल देता है या नहीं। कोई टोकन ख़र्च नहीं होता।",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "हर प्रदाता से पूछें कि उसकी कुंजियाँ काम करती हैं या नहीं और वह कौन-सी सीमाएँ बताता है, और हर स्थानीय\nसर्वर से कि वह चल रहा है या नहीं और अपना मॉडल देता है या नहीं। NVIDIA एक टोकन की प्रतिक्रिया का उपयोग करता है।",
     "Download the model with `ollama pull {model}`.": "`ollama pull {model}` से मॉडल डाउनलोड करें।",
     "It serves: {models}": "यह देता है: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "इसे `llama-server -m MODEL.gguf --port 8080` से शुरू करें, या `desman config` में इसका पता सेट करें।",
@@ -2273,3 +2273,12 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked because the default model is unavailable.": "डिफ़ॉल्ट मॉडल उपलब्ध नहीं है, इसलिए कुंजी की जाँच नहीं हो सकी।",
+        'Put text with spaces in double quotes, e.g. "like this".': 'रिक्त स्थान वाले पाठ को दोहरे उद्धरण चिह्नों में रखें, जैसे "इस तरह"।',
+        "DESMAN is thinking… {seconds} s": "DESMAN सोच रहा है… {seconds} से",
+    }
+)

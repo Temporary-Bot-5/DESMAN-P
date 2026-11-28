@@ -37,7 +37,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, ExitStack
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -148,7 +148,6 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/rename": t("name this session: /rename NAME"),
         "/compact": t("summarise this session's older messages now"),
         "/file": t("attach with /file PATH, list with /file, or clear with /file clear"),
-        "/messages": t("read messages privately: /messages [NAME]"),
         "/profile": t("how the interlocutor talks to you and what it notes about you"),
         "/delete": t("delete this session from the list (after your yes)"),
         "/pin": t("pin or unpin this session"),
@@ -156,6 +155,8 @@ def _commands(temporary: bool = False, terminal: bool = False) -> dict[str, str]
         "/temporary": t("start a temporary chat"),
         "/exit": t("leave the chat (Ctrl+D does too)"),
     }
+    if messenger_cli.ENABLED:
+        every["/messages"] = t("read messages privately: /messages [NAME]")
     if terminal:
         return {name: what for name, what in every.items() if name in TERMINAL_COMMANDS}
     if temporary:
@@ -269,7 +270,7 @@ class Chat:
                 if isinstance(line, ui.Action):
                     self._action(line)
                     continue
-                command = line.strip()
+                command = line.lstrip()
                 if not command:
                     continue
                 if command.startswith("!") and not self.in_terminal:
@@ -440,7 +441,7 @@ class Chat:
         if self.in_terminal and not line.strip().startswith(("/", "!")):
             self._terminal_output(lambda: ui.note(t("Commands start with /, e.g. /status")), line)
             return
-        command = line.strip()
+        command = line.lstrip()
         explicit = command.startswith(("!", "/"))
         if explicit:
             command = command[1:]
@@ -544,21 +545,23 @@ class Chat:
             pending_files=self._pending_file_names(config),
         )
         self._catch_up(interlocutor)  # so the model answers knowing how those tasks ended
-        if self.session_id is not None and not self.temporary:  # nothing kept, nothing summarised
-            before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
-            after = self._gave_up.get(self.session_id, 0)
-            incoming = estimate_tokens(text)
-            if compaction.needed(before, after=after, extra=incoming):
-                self._compact(before, models, incoming=incoming)
-        if not added:
-            self.session_id = self._add_user(text)
-        assert self.session_id is not None
-        history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
-        self._turn_messages = []
-        try:
-            self._answer(history, interlocutor, config, models, personal, notes)
-        finally:
-            self._turn_messages = None
+        with ExitStack() as activity:
+            activity.enter_context(ui.thinking(self.sessions.clock))
+            if self.session_id is not None and not self.temporary:
+                before = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
+                after = self._gave_up.get(self.session_id, 0)
+                incoming = estimate_tokens(text)
+                if compaction.needed(before, after=after, extra=incoming):
+                    self._compact(before, models, incoming=incoming)
+            if not added:
+                self.session_id = self._add_user(text)
+            assert self.session_id is not None
+            history = self.sessions.history(self.session_id, last=HISTORY_MESSAGES)
+            self._turn_messages = []
+            try:
+                self._answer(history, interlocutor, config, models, personal, notes, activity)
+            finally:
+                self._turn_messages = None
 
     def _answer(
         self,
@@ -568,14 +571,19 @@ class Chat:
         models: runs.Models,
         personal: bool,
         notes: list[Note] | None,
+        activity: ExitStack,
     ) -> None:
         assert self.session_id is not None and self._turn_messages is not None
         sent: list[tuple[str, dict[str, JsonValue]]] = []
         initial = history
         reply_only = False
+        first = True
         while not self.exit_requested:
             try:
                 try:
+                    if not first:
+                        activity.enter_context(ui.thinking(self.sessions.clock))
+                    first = False
                     with (
                         provider_wait.waiting(
                             sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
@@ -588,6 +596,7 @@ class Chat:
                             else interlocutor.turn(history)
                         )
                 finally:  # what this answer read, also when it failed
+                    activity.close()
                     self._opened[self.session_id] = interlocutor.opened
             except runs.ModuleWaiting as e:
                 if not sent:
@@ -960,6 +969,14 @@ class Chat:
                 config,
             )
             return False
+        if not typed and isinstance(args, commands.GlobalReportArgs) and args.task is not None:
+            try:
+                task = self.store.find_task(args.task)
+            except (NotFoundError, AmbiguousIdError):
+                task = None
+            if task is None or self.session_id is None or task["session_id"] != self.session_id:
+                # A model may attach only a task belonging to this conversation.
+                args = args.model_copy(update={"task": None})
         command = commands.shown(entry, args)
         attached: list[task_files.Given] = []
         if isinstance(args, commands.RunArgs) and args.file:
@@ -1304,7 +1321,8 @@ class Chat:
         summary = None
         blocked = False
         try:
-            runs.summarizer(self.store, models).run(task_id)
+            with ui.thinking(self.sessions.clock):
+                runs.summarizer(self.store, models).run(task_id)
             if self.store.task_status(task_id) is TaskStatus.DONE:
                 summary = compaction.summary_of(self.store.final_result(task_id))
         except KeyboardInterrupt:
@@ -1837,6 +1855,7 @@ class Chat:
                 provider_wait.waiting(
                     sleep=self.sleep, clock=self.store.clock, announce=ui.provider_wait
                 ) as wait_state,
+                ui.thinking(self.sessions.clock),
                 self._for(calls.Role.INTERLOCUTOR),
             ):
                 retold = interlocutor.retell(outcome)
@@ -2116,7 +2135,7 @@ class Chat:
             self._compact_now()
         elif name == "/file":
             self._file_command(line[len(name) :].strip())
-        elif name == "/messages":
+        elif name == "/messages" and messenger_cli.ENABLED:
             try:
                 body = protocol.InboxQuery(with_name=line.strip()[len(name) :].strip() or None)
                 result = messenger_cli.perform(open_config(), self.store.conn, body)
@@ -2195,7 +2214,9 @@ class Chat:
             self._terminal_open()
             return
         if isinstance(action, ui.DecideAction) or (
-            isinstance(action, ui.SimpleAction) and action.type == "messenger"
+            messenger_cli.ENABLED
+            and isinstance(action, ui.SimpleAction)
+            and action.type == "messenger"
         ):
             if not isinstance(action, ui.DecideAction):
                 self._terminal_open()
@@ -2511,7 +2532,8 @@ class Chat:
             if action.type == "delete_all":
                 self._delete_all()
             elif action.type == "messenger":
-                self._slash("/messages")
+                if messenger_cli.ENABLED:
+                    self._slash("/messages")
             else:
                 self._typed("config")
         elif isinstance(action, ui.DecideAction):

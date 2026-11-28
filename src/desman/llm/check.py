@@ -1,7 +1,7 @@
 """`desman keys check`: is each key accepted, and what limits does the provider report?
 
-Spends no tokens: it lists the provider's models (and, for OpenRouter, reads the key's own
-limits). A key is never sent anywhere but its own provider.
+Lists the provider's models or reads the OpenRouter key's own limits. Providers with a
+public model list also get one authenticated completion with a one-token output limit.
 
 A local server (Ollama, llama.cpp) has no key: the check says whether it answers at its
 address and serves the model set for it (pulled into Ollama, loaded by llama-server).
@@ -154,18 +154,44 @@ def _check_key(
         limits.update(_openrouter_limits(info))
         return result(ok=True, http_status=200, detail="accepted", limits=limits)
     models = data.get("data") if isinstance(data, dict) else None
-    if not isinstance(models, list):  # an HTML page from a proxy is not an answer
-        return result(ok=False, http_status=200, detail=_UNEXPECTED, limits=limits)
+    status: int | None = 200
+    detail = "accepted"
+    if provider.public_models:
+        try:
+            probe = client.post(
+                f"{base}/chat/completions",
+                headers=headers,
+                timeout=timeout,
+                json={
+                    "model": provider.default_model,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                },
+            )
+            status = probe.status_code
+            if status in (404, 410):
+                detail = DEFAULT_MODEL_UNAVAILABLE
+            elif status != 200:
+                detail = _refusal(status)
+        except httpx.HTTPError as e:
+            status, detail = None, type(e).__name__
+    if not isinstance(models, list):
+        return result(
+            ok=provider.public_models and status == 200,
+            http_status=status,
+            detail=_UNEXPECTED if status == 200 and not provider.public_models else detail,
+            limits=limits,
+        )
     ids = [str(m.get("id", "")) for m in models if isinstance(m, dict)]
     served = {i.removeprefix("models/") for i in ids}
-    listed = provider.default_model in served
     others = [m.id for m in catalog.models_of(provider) if m.id != provider.default_model]
     return result(
-        ok=True,
-        http_status=200,
-        detail="accepted",
+        ok=status == 200,
+        http_status=status,
+        detail=detail,
         models=len(ids),
-        default_model_listed=listed,
+        default_model_listed=provider.default_model in served,
         unlisted=tuple(m for m in others if m not in served),
         limits=limits,
         model=provider.default_model,
@@ -219,6 +245,9 @@ def served_by(provider: Provider, model: str, ids: tuple[str, ...]) -> bool:
     if provider.id == "ollama" and ":" not in model:
         model += ":latest"
     return any(i == model or i.rsplit("/", 1)[-1] == model for i in ids)
+
+
+DEFAULT_MODEL_UNAVAILABLE = "The key could not be checked because the default model is unavailable."
 
 
 _UNEXPECTED_LOCAL = "unexpected reply (not an Ollama or llama.cpp server at this address?)"

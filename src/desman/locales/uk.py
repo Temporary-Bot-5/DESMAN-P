@@ -999,10 +999,10 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "виклики 24г",
     "tokens 24h": "токени 24г",
     "API keys": "API-ключі",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{n} ключ у {with_keys} з {providers} провайдерів. `desman keys check` перевірить їх (без витрати токенів), `desman usage` покаже витрати.",
-        "{n} ключі у {with_keys} з {providers} провайдерів. `desman keys check` перевірить їх (без витрати токенів), `desman usage` покаже витрати.",
-        "{n} ключів у {with_keys} з {providers} провайдерів. `desman keys check` перевірить їх (без витрати токенів), `desman usage` покаже витрати.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{n} ключ у {with_keys} з {providers} провайдерів. `desman keys check` перевірить їх, `desman usage` покаже витрати.",
+        "{n} ключі у {with_keys} з {providers} провайдерів. `desman keys check` перевірить їх, `desman usage` покаже витрати.",
+        "{n} ключів у {with_keys} з {providers} провайдерів. `desman keys check` перевірить їх, `desman usage` покаже витрати.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "нема чого перевіряти: додайте ключ через `desman keys add PROVIDER`",
     "{name} is not configured": "{name} не налаштований",
@@ -1389,7 +1389,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Щось іще, вашими словами; порожній текст очищує.",
     "Everything back to the interlocutor's judgement.": "Усе назад на розсуд співрозмовника.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Чи аналізує співрозмовник ваші розмови й чи веде нотатки: показати, on або off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Запитати кожного провайдера, чи працюють його ключі та які ліміти він повідомляє, а кожен локальний\nсервер — чи запущений він і чи надає свою модель. Токени не витрачаються.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Запитати кожного провайдера, чи працюють його ключі та які ліміти він повідомляє, а кожен локальний\nсервер — чи запущений він і чи надає свою модель. Для NVIDIA запитується відповідь завдовжки в один токен.",
     "Download the model with `ollama pull {model}`.": "Завантажте модель: `ollama pull {model}`.",
     "It serves: {models}": "Він надає: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Запустіть його: `llama-server -m MODEL.gguf --port 8080` — або вкажіть його адресу в `desman config`.",
@@ -2319,3 +2319,12 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked because the default model is unavailable.": "Не вдалося перевірити ключ, бо типова модель недоступна.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Текст із пробілами беріть у подвійні лапки, наприклад "ось так".',
+        "DESMAN is thinking… {seconds} s": "DESMAN думає… {seconds} с",
+    }
+)

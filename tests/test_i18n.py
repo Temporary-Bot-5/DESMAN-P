@@ -64,10 +64,13 @@ def source_messages() -> dict[str, str | None]:
                     and isinstance(plural.value, str)
                 ), f"{path.name}:{node.lineno}: tn(n, literal, literal)"
                 found[singular.value] = plural.value
-    for obj, attr in [*i18n._help_fields(cli), *i18n._help_fields(registry_cli)]:
-        text = i18n._ORIGINAL.get((id(obj), attr), getattr(obj, attr))
-        if text:
-            found.setdefault(i18n.help_key(text), None)
+    from desman.messenger_cli import COMMANDS
+
+    for command in (cli, registry_cli, *COMMANDS):
+        for obj, attr in i18n._help_fields(command):
+            text = i18n._ORIGINAL.get((id(obj), attr), getattr(obj, attr))
+            if text:
+                found.setdefault(i18n.help_key(text), None)
     return found
 
 

@@ -983,9 +983,9 @@ MESSAGES: dict[str, Forms] = {
     "calls 24h": "chamadas 24h",
     "tokens 24h": "tokens 24h",
     "API keys": "Chaves de API",
-    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them (no tokens spent), `desman usage` shows totals.": (
-        "{n} chave em {with_keys} de {providers} provedores. `desman keys check` as testa (sem gastar tokens), `desman usage` mostra os totais.",
-        "{n} chaves em {with_keys} de {providers} provedores. `desman keys check` as testa (sem gastar tokens), `desman usage` mostra os totais.",
+    "{n} key from {with_keys} of {providers} providers. `desman keys check` tests them and `desman usage` shows totals.": (
+        "{n} chave em {with_keys} de {providers} provedores. `desman keys check` as testa, `desman usage` mostra os totais.",
+        "{n} chaves em {with_keys} de {providers} provedores. `desman keys check` as testa, `desman usage` mostra os totais.",
     ),
     "no keys to check: add one with `desman keys add PROVIDER`": "nenhuma chave para verificar: adicione uma com `desman keys add PROVIDER`",
     "{name} is not configured": "{name} não está configurado",
@@ -1354,7 +1354,7 @@ MESSAGES: dict[str, Forms] = {
     "Anything else, in your words; an empty text clears it.": "Mais alguma coisa, com suas palavras; um texto vazio limpa.",
     "Everything back to the interlocutor's judgement.": "Tudo volta ao critério do interlocutor.",
     "Whether the interlocutor studies your conversations and keeps notes: show, on or off.": "Se o interlocutor analisa suas conversas e mantém notas: mostrar, on ou off.",
-    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. Spends no tokens.": "Perguntar a cada provedor se suas chaves funcionam e quais limites ele informa, e a cada servidor\nlocal se está em execução e serve seu modelo. Não gasta tokens.",
+    "Ask each provider whether its keys work and what limits it reports, and each local\nserver whether it runs and serves its model. NVIDIA uses a one-token completion.": "Perguntar a cada provedor se suas chaves funcionam e quais limites ele informa, e a cada servidor\nlocal se está em execução e serve seu modelo. A NVIDIA usa uma resposta de um token.",
     "Download the model with `ollama pull {model}`.": "Baixe o modelo com `ollama pull {model}`.",
     "It serves: {models}": "Ele serve: {models}",
     "Start it with `llama-server -m MODEL.gguf --port 8080`, or set its address in `desman config`.": "Inicie-o com `llama-server -m MODEL.gguf --port 8080`, ou defina seu endereço em `desman config`.",
@@ -2280,3 +2280,12 @@ MESSAGES.update(
 )
 
 CATALOG = Catalog("Português (Brasil)", plural, MESSAGES, CLICK, forms=2)
+
+
+MESSAGES.update(
+    {
+        "The key could not be checked because the default model is unavailable.": "Não foi possível verificar a chave porque o modelo padrão está indisponível.",
+        'Put text with spaces in double quotes, e.g. "like this".': 'Coloque textos com espaços entre aspas duplas, por exemplo "deste jeito".',
+        "DESMAN is thinking… {seconds} s": "DESMAN está pensando… {seconds} s",
+    }
+)

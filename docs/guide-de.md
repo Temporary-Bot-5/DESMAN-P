@@ -9,7 +9,7 @@ bei Bedarf.
 - **Das ist ein Prototyp.** Das Programm kann abstürzen, hängen bleiben, seltsame Antworten geben
   und angefangene Arbeit verlieren. Vertrauen Sie ihm nichts Wichtiges an und geben Sie ihm keine
   Aufgaben, die Sie nicht wiederholen können. Die gefundenen Probleme sind das wichtigste
-  Testergebnis. Melden Sie bitte jedes davon (Abschnitt 7).
+  Testergebnis. Melden Sie bitte jedes davon (Abschnitt 6).
 - **Ihre Schlüssel bleiben bei Ihnen.** Ein Zugriffsschlüssel für ein Modell (API-Schlüssel) liegt
   nur in einer Datei auf Ihrem Rechner, die nur Sie einsehen können. Der Schlüssel gelangt weder
   ins DESMAN-Netzwerk noch zum Betreiber, zu einem Modell oder in den Chatverlauf. Das Netzwerk
@@ -25,10 +25,7 @@ bei Bedarf.
     selbst);
   - die Arbeit Ihres Rechners für das Netzwerk und deren Ergebnis;
   - Ihre abgeschickten Problemmeldungen mit genau dem Text aus dem Bestätigungsfenster (Abschnitt
-    7);
-  - im Nachrichtendienst Ihren Namen und wer wem wann schreibt. Nachrichten sind verschlüsselt und
-    der Betreiber kann sie nicht lesen, **außer bei einer Beschwerde**. Wenn Sie eine Nachricht
-    melden, erhält er deren Text;
+    6);
   - wie bei jeder Website die IP-Adresse, von der aus der Server kontaktiert wird.
 - **Code unter Windows ausführen.** Installieren und starten Sie Docker Desktop im Modus für
   Linux-Container. Führen Sie dann `desman sandbox setup --yes` aus, um den Download des Images
@@ -97,7 +94,7 @@ Passwort für das Programm. Beim ersten Start öffnet sich automatisch die Einri
 
 Die kostenlosen Limits sind klein und können sich ändern. Meldet DESMAN ein erreichtes Limit, geht
 die Arbeit nach der Erneuerung weiter, meist nach einer Minute, manchmal nach einem Tag. Wenn
-länger als eine Stunde keine Antwort kommt, melden Sie es (Abschnitt 7).
+länger als eine Stunde keine Antwort kommt, melden Sie es (Abschnitt 6).
 
 ## 3. Bedienung
 
@@ -173,30 +170,9 @@ nichts mehr von Ihrem Rechner.
 Das Netzwerk funktioniert, solange die DESMAN-Seite offen ist. Ist der Server nicht erreichbar,
 arbeitet DESMAN allein weiter und versucht es später erneut.
 
-## 6. Nachrichten
+## 6. Ein Problem melden
 
-Teilnehmende können einander schreiben. Nachrichten sind verschlüsselt. Der Betreiber sieht, wer
-wem wann schreibt, kann den Text aber nicht lesen.
-
-1. **Name.** Geben Sie `/global name dein_name` im Chat ein. Erlaubt sind 3–32 Zeichen:
-   lateinische Kleinbuchstaben, Ziffern, `_` und `-`. Andere sehen diesen Namen.
-2. **Kontakt.** Sie können nur Personen schreiben, die ebenfalls zugestimmt haben. Senden Sie
-   `/global contact add name`. Die andere Person nimmt mit demselben Befehl und Ihrem Namen an.
-3. **Schreiben:** `/global send name "die Nachricht"`. Hat der Text mehrere Wörter, nutzen Sie
-   gerade Anführungszeichen `"`. Das gilt auch für die folgenden Befehle.
-4. **Lesen:** Klicken Sie links auf **Nachrichten** oder nutzen Sie `/messages` oder
-   `/messages name`.
-5. **Blockieren:** `/global block name`. Die andere Person wird nicht benachrichtigt.
-   `/global unblock name` hebt die Sperre auf.
-6. **Beschwerde:** `/global complain name "was passiert ist"`. Um dem Betreiber eine bestimmte
-   Nachricht zu zeigen, ergänzen Sie `--message NUMMER`. Die Nummer wird beim Lesen angezeigt.
-   **Der Text dieser Nachricht geht an den Betreiber**.
-
-DESMAN führt Nachrichten anderer Personen nie als Aufgaben aus. Links und Dateien darin starten
-nichts. Geht die Schlüsseldatei des Knotens verloren, etwa bei einer vollständigen Deinstallation,
-gehen die Nachrichten verloren.
-
-## 7. Ein Problem melden
+Wenn Sie ein Problem mit DESMAN im Chat beschreiben, bietet er Ihnen eine Meldung zur Bestätigung an.
 
 Sie brauchen eine Verbindung zum Netzwerk (Abschnitt 5).
 
@@ -208,13 +184,13 @@ Sie brauchen eine Verbindung zum Netzwerk (Abschnitt 5).
 
 Schlüssel gelangen nie in eine Meldung. Findet DESMAN einen Ihrer Schlüssel im Text, wird nichts
 abgeschickt. Chats, Profil und Aufgabendateien werden ebenfalls nicht verschickt. Mit
-`/global report "Beschreibung" --task NUMMER` fügen Sie den Verlauf einer bestimmten Aufgabe an.
+`/global report --task NUMMER "Beschreibung"` fügen Sie den Verlauf einer bestimmten Aufgabe an.
 Das Fenster zeigt genau, was hinzukommt.
 
 Wenn Sie wegen eines Netzwerk- oder Startproblems nichts senden können, schreiben Sie dem
 Betreiber auf dem üblichen Weg und fügen Sie nach Möglichkeit einen Screenshot bei.
 
-## 8. Updates
+## 7. Updates
 
 Updates werden nur mit Ihrer Zustimmung installiert. Meldet der Betreiber eine neue Version,
 verbinden Sie sich mit dem Netzwerk (Abschnitt 5). `/global update --show` zeigt die Version an,
@@ -223,7 +199,7 @@ Schließen Sie DESMAN danach und öffnen Sie es erneut. Weist das Programm auf �
 hin, geben Sie `/protected approve` ein und bestätigen Sie, um die neuen Regeln anzunehmen. Mit
 `/global update --revert` kehren Sie zur vorigen Version zurück.
 
-## 9. Deinstallation
+## 8. Deinstallation
 
 - **Windows:** Schließen Sie DESMAN, drücken Sie Win+R, fügen Sie
   `%LOCALAPPDATA%\DESMAN\app\install\install.bat -Uninstall` ein und drücken Sie die Eingabetaste.

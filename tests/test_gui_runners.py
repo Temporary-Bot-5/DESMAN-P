@@ -999,3 +999,27 @@ def test_page_followup_keeps_read_event_after_queued_question(
     assert followup_texts.index("reply:First question") < followup_texts.index("Show tasks")
     assert followup_texts[-1].startswith("list ran.")
     assert page.answers(session) == ["reply:First question", "Task list read."]
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_page_state_keeps_thinking_until_reply_or_error(page: Harness, fails: bool) -> None:
+    gate = page.gate("thinking")
+    if fails:
+        page.outcomes["thinking"] = {"type": "invalid turn"}
+    session = page.send("thinking")
+    assert page.entered["thinking"].wait(10)
+    started = page.front.poll(0, timeout=0)["turn"]["thinking_since"]
+    assert started == page.sessions.clock().timestamp()
+    # A poll with a new event cursor still sees the running turn, as on reload.
+    assert page.front.poll(page.front.seq, timeout=0)["turn"]["thinking_since"] == started
+    gate.set()
+    page.done(session)
+    poll = page.front.poll(0, timeout=0)
+    assert poll["turn"].get("thinking_since") is None
+    if fails:
+        assert any(
+            "model's answer made no sense" in msg.text or "chat turn failed" in msg.text
+            for msg in page.sessions.messages(session)
+        )
+    else:
+        assert page.answers(session) == ["reply:thinking"]
