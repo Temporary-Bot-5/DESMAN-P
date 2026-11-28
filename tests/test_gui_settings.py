@@ -715,6 +715,7 @@ def test_uninstall_settings_confirms_and_only_exits_on_success(
     settings.parent.mkdir()
     settings.touch()
     probes: list[list[str]] = []
+    monkeypatch.setattr(uninstall_cli, "_preview_probe", None)
 
     def docker(args: list[str], timeout: float = 60) -> str:
         probes.append(args)

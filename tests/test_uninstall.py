@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import stat
@@ -35,6 +36,7 @@ from helpers import make_config
 
 @pytest.fixture
 def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(uninstall_cli, "_preview_probe", None)
     app = tmp_path / "DESMAN's app"
     source = app / "src" / "desman"
     source.mkdir(parents=True)
@@ -423,17 +425,15 @@ def test_stopped_docker_allows_uninstall(
     settings = app / "searxng-docker" / "settings.yml"
     settings.parent.mkdir()
     settings.touch()
-    error = (
-        "error during connect: open //./pipe/dockerDesktopLinuxEngine: "
-        "Не удается найти указанный файл."
-    )
+    error = "Cannot connect to the Docker daemon"
     commands_run: list[list[str]] = []
     running = False
+    expected_timeout = 5
 
     def docker(args: list[str], timeout: float = 60) -> str:
         commands_run.append(args)
         if args == ["info"]:
-            assert timeout <= 5
+            assert timeout == expected_timeout
         if not running:
             raise click.ClickException(error)
         if args[0] == "ps":
@@ -453,8 +453,9 @@ def test_stopped_docker_allows_uninstall(
     uninstall_cli.start(app, False, spawn=lambda argv, **_: spawned.append(argv))
     assert len(spawned) == 1
     assert not capsys.readouterr().out
-    assert commands_run == [["info"], ["info"]]
+    assert commands_run == [["info"]]
     running = recovers
+    expected_timeout = 30
     commands_run.clear()
     uninstall_cli._finish_cleanup(False)
     if recovers:
@@ -464,6 +465,63 @@ def test_stopped_docker_allows_uninstall(
         assert commands_run == [["info"]]
         [note] = capsys.readouterr().out.splitlines()
         assert "Docker is not running" in note
+
+
+def test_uninstall_timeout_is_cached_for_preview_and_retried_in_cleanup(
+    app: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    clock: FakeClock,
+) -> None:
+    settings = app / "searxng" / "settings.yml"
+    settings.parent.mkdir()
+    settings.touch()
+    timeouts: list[float] = []
+
+    def docker(args: list[str], timeout: float = 60) -> str:
+        assert args == ["info"]
+        timeouts.append(timeout)
+        raise click.ClickException("Docker failed") from subprocess.TimeoutExpired(args, timeout)
+
+    monkeypatch.setattr(uninstall_cli, "_monotonic", lambda: clock.now.timestamp())
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "docker", docker)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_, **__: None)
+    result = CliRunner().invoke(cli, ["uninstall", "--yes"], terminal_width=250)
+    assert result.exit_code == 0, result.output
+    assert "Docker is not running or not answering" in result.output
+    assert timeouts == [5]
+    uninstall_cli._finish_cleanup(False)
+    assert "Docker is not running or not answering" in capsys.readouterr().out
+    assert timeouts == [5, 30]
+    clock.advance(30)
+    uninstall_cli.plan(app, False)
+    assert timeouts == [5, 30, 5]
+
+
+@pytest.mark.parametrize(
+    ("lang", "translated"), [("ja", "応答しない"), ("hi", "जवाब"), ("zh", "无响应")]
+)
+def test_windows_cleanup_writes_utf8_to_redirected_stdout(
+    app: Path, lang: str, translated: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = app / "searxng" / "settings.yml"
+    settings.parent.mkdir()
+    settings.touch()
+
+    def docker(*_: object, **__: object) -> str:
+        raise click.ClickException("Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(uninstall_cli, "find_docker", lambda: "docker")
+    monkeypatch.setattr(searxng, "docker", docker)
+    monkeypatch.setenv("DESMAN_UNINSTALL_LANGUAGE", lang)
+    with io.BytesIO() as log, io.TextIOWrapper(log, encoding="cp1252") as stdout:
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "platform", "win32")
+            patch.setattr(sys, "stdout", stdout)
+            uninstall_cli._finish_cleanup(False)
+        stdout.flush()
+        assert translated in log.getvalue().decode("utf-8")
 
 
 @pytest.mark.parametrize(
@@ -525,12 +583,38 @@ def test_container_removal_in_progress_checks_result(
 
 
 @pytest.mark.parametrize("target", ["//./pipe/dockerDesktopLinuxEngine", "npipe:docker_engine"])
-def test_daemon_unreachable_named_pipe(target: str) -> None:
+def test_daemon_unreachable_named_pipe_fallback(
+    target: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     error = f"error during connect: {target}: "
-    assert uninstall_cli._daemon_unreachable(
-        click.ClickException(error + "Не удается найти указанный файл.")
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", "linux")
+        assert uninstall_cli._daemon_unreachable(
+            click.ClickException(error + "Не удается найти указанный файл.")
+        )
+        assert not uninstall_cli._daemon_unreachable(
+            click.ClickException(error + "Access is denied.")
+        )
+
+
+@pytest.mark.parametrize("prefix", ["//./pipe/", "npipe:////./pipe/"])
+@pytest.mark.parametrize("present", [True, False, None])
+def test_windows_named_pipe_lookup(
+    prefix: str, present: bool | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def listdir(path: str) -> list[str]:
+        assert path == "\\\\.\\pipe\\"
+        if present is None:
+            raise OSError("Could not list named pipes")
+        return ["DOCKERDESKTOPLINUXENGINE"] if present else ["another_pipe"]
+
+    error = click.ClickException(
+        f"error during connect: {prefix}dockerDesktopLinuxEngine: Отказано в доступе."
     )
-    assert not uninstall_cli._daemon_unreachable(click.ClickException(error + "Access is denied."))
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", "win32")
+        patch.setattr(os, "listdir", listdir)
+        assert uninstall_cli._daemon_unreachable(error) is (not present)
 
 
 @pytest.mark.parametrize("problem", ["docker", "native", "wsl"])

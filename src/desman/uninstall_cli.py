@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -24,8 +25,14 @@ from desman.config import CONFIG_DIR_ENV, default_config_path, home_config_dir
 from desman.core import db
 from desman.core.sandbox import Sandbox, SandboxUnavailable, find_docker
 from desman.i18n import language, set_language, t
+from desman.stdio import configure_output
 
 FAILURE_MARKER = "uninstall-failed.txt"
+_PREVIEW_DOCKER_TIMEOUT = 5
+_CLEANUP_DOCKER_TIMEOUT = 30
+_DOCKER_PROBE_TTL = 30
+_preview_probe: tuple[str, float, click.ClickException | None] | None = None
+_monotonic = time.monotonic
 
 
 def warn_last_failure() -> None:
@@ -136,15 +143,21 @@ def _docker_settings_exist(app: Path) -> bool:
 
 
 def _daemon_unreachable(exc: click.ClickException) -> bool:
+    if isinstance(exc.__cause__, subprocess.TimeoutExpired):
+        return True
     error = exc.message.casefold()
-    if "permission denied" in error or "access is denied" in error:
-        return False
-    if "error during connect" in error and any(
+    pipe_error = "error during connect" in error and any(
         detail in error
         for detail in ("//./pipe/", "npipe:", "the system cannot find the file specified")
-    ):
-        return True
-    return isinstance(exc.__cause__, subprocess.TimeoutExpired) or any(
+    )
+    if pipe_error and sys.platform == "win32":
+        pipe = re.search(r"//\./pipe/([^/\s:\"']+)", error)
+        if pipe is not None:
+            with suppress(OSError):
+                return all(name.casefold() != pipe[1] for name in os.listdir("\\\\.\\pipe\\"))
+    if "permission denied" in error or "access is denied" in error:
+        return False
+    return pipe_error or any(
         phrase in error
         for phrase in (
             "cannot connect to the docker daemon",
@@ -155,22 +168,42 @@ def _daemon_unreachable(exc: click.ClickException) -> bool:
     )
 
 
-def _docker_stopped() -> bool:
+def _probe_docker(timeout: int) -> click.ClickException | None:
     try:
-        searxng.docker(["info"], timeout=5)
+        searxng.docker(["info"], timeout=timeout)
     except click.ClickException as exc:
-        return _daemon_unreachable(exc)
-    return False
+        return exc
+    return None
+
+
+def _preview_docker(executable: str) -> click.ClickException | None:
+    global _preview_probe
+    if _preview_probe is not None:
+        cached_executable, expires, error = _preview_probe
+        if executable == cached_executable and _monotonic() < expires:
+            return error
+    error = _probe_docker(_PREVIEW_DOCKER_TIMEOUT)
+    _preview_probe = (executable, _monotonic() + _DOCKER_PROBE_TTL, error)
+    return error
+
+
+def _docker_unreachable_now() -> bool:
+    error = _probe_docker(_CLEANUP_DOCKER_TIMEOUT)
+    return error is not None and _daemon_unreachable(error)
 
 
 def docker_search_unavailable(app: Path) -> bool:
-    return find_docker() is not None and _docker_settings_exist(app) and _docker_stopped()
+    executable = find_docker()
+    if executable is None or not _docker_settings_exist(app):
+        return False
+    error = _preview_docker(executable)
+    return error is not None and _daemon_unreachable(error)
 
 
 def _docker_skip_note() -> str:
     return t(
-        "Docker is not running, so the SearXNG container will stay. Start Docker before "
-        "uninstalling to remove it, or run `docker rm -f desman-searxng` later."
+        "Docker is not running or not answering, so the SearXNG container will stay. Start "
+        "Docker before uninstalling to remove it, or run `docker rm -f desman-searxng` later."
     )
 
 
@@ -207,19 +240,23 @@ def _powershell_quote(path: Path) -> str:
 
 
 def _docker_search(app: Path, *, removing: bool) -> dict[str, Any] | None:
-    if find_docker() is None:
+    executable = find_docker()
+    if executable is None:
         return None
     managed = _docker_settings_exist(app)
-    try:
-        searxng.docker(["info"], timeout=5)
-    except click.ClickException as exc:
-        if managed and not _daemon_unreachable(exc):
-            raise
+    error = _probe_docker(_CLEANUP_DOCKER_TIMEOUT) if removing else _preview_docker(executable)
+    if error is not None:
+        if managed and not _daemon_unreachable(error):
+            raise error
     else:
         try:
             return searxng.inspect()
-        except click.ClickException:
-            if managed and not _docker_stopped():
+        except click.ClickException as exc:
+            if (
+                managed
+                and not _daemon_unreachable(exc)
+                and not (removing and _docker_unreachable_now())
+            ):
                 raise
     if managed and removing:
         ui.out(Text(_docker_skip_note()))
@@ -259,7 +296,7 @@ def _remove_docker_search(
                 )
             )
             return
-        if not _docker_stopped():
+        if not _docker_unreachable_now():
             raise
         ui.out(Text(_docker_skip_note()))
 
@@ -282,6 +319,7 @@ def _services(app: Path, purge: bool, *, removing: bool) -> None:
 
 
 def _finish_cleanup(purge: bool) -> None:
+    configure_output()
     set_language(os.environ.get("DESMAN_UNINSTALL_LANGUAGE", language()))
     app = require_app()
     check_paths(app, purge)
