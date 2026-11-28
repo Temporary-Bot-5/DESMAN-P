@@ -2293,6 +2293,8 @@ CATALOG = Catalog("Français", plural, MESSAGES, CLICK, forms=2)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "La clé n’a pas pu être vérifiée pour le moment.",
+        "rate limited right now": "Limite de requêtes atteinte pour le moment.",
         "The key could not be checked because the default model is unavailable.": "La clé n’a pas pu être vérifiée car le modèle par défaut est indisponible.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Mettez le texte contenant des espaces entre guillemets doubles, par exemple "comme ceci".',
         "DESMAN is thinking… {seconds} s": "DESMAN réfléchit… {seconds} s",

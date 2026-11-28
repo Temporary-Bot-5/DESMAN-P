@@ -952,6 +952,10 @@ def test_model_gui_handoff_needs_confirmation(monkeypatch: pytest.MonkeyPatch, a
         (r"Тест тест tesT./|\~!@#$%", r"Тест тест tesT./|\~!@#$%", None),
         ("--task X don't  remove --help  ", "don't  remove --help  ", "X"),
         ('--task=X "two words"', "two words", "X"),
+        ('"Chat freezes" --task 1a2b3c4d', "Chat freezes", "1a2b3c4d"),
+        ("Chat --task=1a2b3c4d freezes", "Chat freezes", "1a2b3c4d"),
+        ("I can't  open --foo -x -- the page", "I can't  open --foo -x -- the page", None),
+        ('"a --task X" and "b" --task Y', '"a --task X" and "b"', "Y"),
         ('says "hello', 'says "hello', None),
         ('"--help"', "--help", None),
     ],
@@ -960,6 +964,22 @@ def test_report_rest_of_line(windows: bool, line: str, text: str, task: str | No
     parsed = commands.parse_line(f"global report {line}", None, windows=windows)
     assert parsed is not None
     assert parsed[1] == commands.GlobalReportArgs(text=text, task=task)
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_run_options_after_goal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows: bool
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "x").write_text("input", encoding="utf-8")
+
+    parsed = commands.parse_line('run "Read" --file x', None, windows=windows)
+    assert parsed is not None
+    assert parsed[1] == commands.RunArgs(goal="Read", file=["x"])
+
+    parsed = commands.parse_line("run do it --master", None, windows=windows)
+    assert parsed is not None
+    assert parsed[1] == commands.RunArgs(goal="do it", master=True)
 
 
 def test_extra_argument_hint_in_chat_and_cli() -> None:

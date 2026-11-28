@@ -457,29 +457,34 @@ body.settings-prompt #prompt h2 { white-space: pre-wrap; }
   .operator-mode #settings-nav button { width: auto; flex: 0 0 auto; }
 }
 
+/* DESMAN is working on an answer: on DESMAN's side (left), quieter than a reply. */
 #messages .thinking {
   display: flex;
+  align-items: center;
+  gap: .6rem;
   width: fit-content;
-  padding: .5rem .75rem;
-  border-radius: .7rem;
-  background: #20343e;
-  align-items: baseline;
-  gap: .5rem;
-  opacity: .75;
+  padding: .5rem 0;
+  color: #888;
+  font-size: .85rem;
 }
 .thinking > :first-child {
-  font-size: .45em;
-  letter-spacing: .2em;
+  display: inline-flex;
+  gap: .28rem;
 }
 .thinking > :first-child span {
-  animation: thinking-dots 1.2s ease-in-out infinite alternate;
+  width: .45rem;
+  height: .45rem;
+  border-radius: 50%;
+  background: #00eeff;
+  font-size: 0;
+  animation: thinking-dots 1.2s ease-in-out infinite;
 }
-.thinking > :first-child span:nth-child(2) { animation-delay: .16s; }
-.thinking > :first-child span:nth-child(3) { animation-delay: .32s; }
+.thinking > :first-child span:nth-child(2) { animation-delay: .15s; }
+.thinking > :first-child span:nth-child(3) { animation-delay: .3s; }
 @keyframes thinking-dots {
-  from { opacity: .25; }
-  to { opacity: 1; }
+  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-.2rem); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .thinking > :first-child span { animation: none; }
+  .thinking > :first-child span { animation: none; opacity: .7; }
 }

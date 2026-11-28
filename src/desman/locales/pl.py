@@ -2327,6 +2327,8 @@ CATALOG = Catalog("Polski", plural, MESSAGES, CLICK, forms=3)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "Nie można teraz sprawdzić klucza.",
+        "rate limited right now": "Osiągnięto aktualny limit częstotliwości żądań.",
         "The key could not be checked because the default model is unavailable.": "Nie udało się sprawdzić klucza, ponieważ model domyślny jest niedostępny.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Tekst ze spacjami ujmij w podwójny cudzysłów, np. "tak jak tu".',
         "DESMAN is thinking… {seconds} s": "DESMAN myśli… {seconds} s",

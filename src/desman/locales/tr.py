@@ -2188,6 +2188,8 @@ CATALOG = Catalog("Türkçe", plural, MESSAGES, CLICK, forms=1)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "Anahtar şu anda doğrulanamadı.",
+        "rate limited right now": "Şu anda istek hızı sınırına ulaşıldı.",
         "The key could not be checked because the default model is unavailable.": "Varsayılan model kullanılamadığından anahtar doğrulanamadı.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Boşluk içeren metni çift tırnak içine alın, örneğin "bunun gibi".',
         "DESMAN is thinking… {seconds} s": "DESMAN düşünüyor… {seconds} sn",

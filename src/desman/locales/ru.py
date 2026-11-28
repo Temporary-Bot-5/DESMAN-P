@@ -2564,6 +2564,8 @@ CATALOG = Catalog("Русский", plural, MESSAGES, CLICK, forms=3)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "Сейчас не удалось проверить ключ.",
+        "rate limited right now": "Сейчас достигнут лимит частоты запросов.",
         "The key could not be checked because the default model is unavailable.": "Не удалось проверить ключ, потому что модель по умолчанию недоступна.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Текст с пробелами заключите в двойные кавычки, например "вот так".',
         "DESMAN is thinking… {seconds} s": "DESMAN думает… {seconds} с",

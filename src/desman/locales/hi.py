@@ -2277,6 +2277,8 @@ CATALOG = Catalog("हिन्दी", plural, MESSAGES, CLICK, forms=2)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "कुंजी की जाँच अभी नहीं हो सकी।",
+        "rate limited right now": "अनुरोधों की दर सीमा अभी पूरी हो गई है।",
         "The key could not be checked because the default model is unavailable.": "डिफ़ॉल्ट मॉडल उपलब्ध नहीं है, इसलिए कुंजी की जाँच नहीं हो सकी।",
         'Put text with spaces in double quotes, e.g. "like this".': 'रिक्त स्थान वाले पाठ को दोहरे उद्धरण चिह्नों में रखें, जैसे "इस तरह"।',
         "DESMAN is thinking… {seconds} s": "DESMAN सोच रहा है… {seconds} से",

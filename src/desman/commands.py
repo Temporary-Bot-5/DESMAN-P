@@ -3650,9 +3650,53 @@ _POSIX_WORD = re.compile(r"""(?:[^\s'"\\]|\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*
 _WINDOWS_WORD = re.compile(r'(?:[^\s"]|"[^"]*")+(?=\s|$)')
 
 
-def _line_words(
-    line: str, root: click.Group, windows: bool, *, cli_hint: bool = False
-) -> tuple[list[str], str | None]:
+def _text_options(
+    line: str,
+    pattern: re.Pattern[str],
+    split: Callable[[str], list[str]],
+    options: dict[str, click.Option],
+    words: list[str],
+) -> str | None:
+    """Move exact option names and their values out of the prose before Click parses it."""
+    pieces: list[str] = []
+    end = 0
+    pos = 0
+    nonspace = re.compile(r"\S+")
+    while token := nonspace.search(line, pos):
+        start = token.start()
+        name, equals, _ = token[0].partition("=")
+        if name not in options:
+            # Only a quote at the start of a prose word can protect spaces inside it.
+            quoted = pattern.match(line, start) if line[start] in "\"'" else None
+            pos = quoted.end() if quoted else token.end()
+            continue
+        match = pattern.match(line, start)
+        if match is None:
+            raise ValueError("Unclosed quote or escape")
+        words.extend(split(match[0]))
+        pos = match.end()
+        option = options[name]
+        if not (option.is_flag or option.count):
+            for _ in range(option.nargs - bool(equals)):
+                value = nonspace.search(line, pos)
+                if value is None:
+                    return None  # Let Click report the incomplete option.
+                match = pattern.match(line, value.start())
+                if match is None:
+                    raise ValueError("Unclosed quote or escape")
+                words.extend(split(match[0]))
+                pos = match.end()
+        # Drop the gap before the extracted option, preserving the remaining prose spacing.
+        gap = start
+        while gap > end and line[gap - 1].isspace():
+            gap -= 1
+        pieces.append(line[end:gap])
+        end = pos
+    pieces.append(line[end:])
+    return "".join(pieces)
+
+
+def _line_words(line: str, root: click.Group, windows: bool) -> tuple[list[str], str | None]:
     import shlex
 
     pattern = _WINDOWS_WORD if windows else _POSIX_WORD
@@ -3663,6 +3707,7 @@ def _line_words(
     trailing = False
     option_values = 0
     options = True
+    named_options: dict[str, click.Option] = {}
     while line:
         line = line.lstrip()
         if not line:
@@ -3670,12 +3715,16 @@ def _line_words(
         if not trailing and not isinstance(command, click.Group):
             words.extend(split(line))
             break
-        starts_option = options and line.startswith("-") and len(line.split(maxsplit=1)[0]) > 1
+        token = line.split(maxsplit=1)[0]
+        starts_option = options and (
+            token in {"--", "--help"} or token.partition("=")[0] in named_options
+        )
         if trailing and not fixed and not option_values and not starts_option:
-            # A CLI example can have options after its text. Rewriting it as a
-            # chat command would turn those options into part of the description.
-            if cli_hint and options and any(w.startswith("-") and w != "-" for w in split(line)):
-                raise ValueError("An option follows the text in a CLI hint")
+            if options:
+                prose = _text_options(line, pattern, split, named_options, words)
+                if prose is None:
+                    return words, None
+                line = prose
             # Remove a single enclosing pair, without treating interior apostrophes or
             # incomplete quotes as syntax in an otherwise unquoted description.
             quotes = ('"',) if windows else ('"', "'")
@@ -3698,6 +3747,12 @@ def _line_words(
         if isinstance(command, click.Group) and word in command.commands:
             command = command.commands[word]
             trailing = any(isinstance(param, FreeText) for param in command.params)
+            named_options = {
+                name: param
+                for param in command.params
+                if isinstance(param, click.Option)
+                for name in (*param.opts, *param.secondary_opts)
+            }
             fixed = sum(
                 p.nargs
                 for p in command.params
@@ -3709,14 +3764,9 @@ def _line_words(
             options = False
         elif options and word.startswith("-") and word != "-":
             name, equals, _value = word.partition("=")
-            for param in command.params:
-                if (
-                    isinstance(param, click.Option)
-                    and name in (*param.opts, *param.secondary_opts)
-                    and not (param.is_flag or param.count)
-                ):
-                    option_values = param.nargs - bool(equals)
-                    break
+            param = named_options.get(name)
+            if param is not None and not (param.is_flag or param.count):
+                option_values = param.nargs - bool(equals)
         elif fixed:
             fixed -= 1
         words.append(word)
@@ -3735,7 +3785,7 @@ def parse_line(
         i18n.translate_commands(cli)
     try:
         use_windows = os.name == "nt" if windows is None else windows
-        words, free_text = _line_words(line, cli, use_windows, cli_hint=dry_run)
+        words, free_text = _line_words(line, cli, use_windows)
     except ValueError:
         raise BadArgs(t("Invalid quoting in the command.")) from None
     if dry_run:

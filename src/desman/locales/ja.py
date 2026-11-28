@@ -2144,6 +2144,8 @@ CATALOG = Catalog("日本語", plural, MESSAGES, CLICK, forms=1)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "現在キーを確認できませんでした。",
+        "rate limited right now": "現在、リクエストのレート制限に達しています。",
         "The key could not be checked because the default model is unavailable.": "既定のモデルが利用できないため、キーを確認できませんでした。",
         'Put text with spaces in double quotes, e.g. "like this".': '空白を含むテキストは二重引用符で囲んでください。例 "この ように"。',
         "DESMAN is thinking… {seconds} s": "DESMAN が考えています… {seconds} 秒",

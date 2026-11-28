@@ -277,3 +277,18 @@ def test_wizard_checks_nvidia_through_the_shared_key_check(monkeypatch: pytest.M
     result = wizard("1", menu("nvidia"), "3", "4", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
     assert result.exit_code == 0, result.output
     assert checked == ["nvidia"]
+
+
+def test_wizard_does_not_offer_model_key_check_for_tavily(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from desman import config_cli
+
+    def unexpected_check(*args: object) -> None:
+        pytest.fail("The wizard offered a model key check for Tavily")
+
+    monkeypatch.setattr(config_cli, "check_keys", unexpected_check)
+    saved().save(make_config(api_keys={"TAVILY_API_KEY": "test-tavily"}))
+    result = wizard("1", menu("tavily"), "3", DONE, *KEEP_PERMISSIONS, *KEEP_PERSONAL)
+    assert result.exit_code == 0, result.output
+    assert "3  Back" in result.output

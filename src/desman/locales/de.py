@@ -2286,6 +2286,8 @@ CATALOG = Catalog("Deutsch", plural, MESSAGES, CLICK, forms=2)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "Der Schlüssel konnte derzeit nicht geprüft werden.",
+        "rate limited right now": "Das Ratenlimit ist derzeit erreicht.",
         "The key could not be checked because the default model is unavailable.": "Der Schlüssel konnte nicht geprüft werden, weil das Standardmodell nicht verfügbar ist.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Setzen Sie Text mit Leerzeichen in doppelte Anführungszeichen, z. B. "wie hier".',
         "DESMAN is thinking… {seconds} s": "DESMAN denkt nach… {seconds} s",

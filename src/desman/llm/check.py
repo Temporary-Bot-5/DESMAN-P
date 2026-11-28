@@ -161,7 +161,7 @@ def _check_key(
             probe = client.post(
                 f"{base}/chat/completions",
                 headers=headers,
-                timeout=timeout,
+                timeout=60.0,
                 json={
                     "model": provider.default_model,
                     "messages": [{"role": "user", "content": "Hi"}],
@@ -170,15 +170,23 @@ def _check_key(
                 },
             )
             status = probe.status_code
-            if status in (404, 410):
+            limits.update(
+                (name, value)
+                for name, value in probe.headers.items()
+                if name.startswith("x-ratelimit")
+            )
+            if status >= 500:
+                detail = CHECK_UNAVAILABLE
+            elif status in (404, 410):
                 detail = DEFAULT_MODEL_UNAVAILABLE
             elif status != 200:
                 detail = _refusal(status)
-        except httpx.HTTPError as e:
-            status, detail = None, type(e).__name__
+        except httpx.HTTPError:
+            status, detail = None, CHECK_UNAVAILABLE
+    accepted = status == 200 or (provider.public_models and status == 429)
     if not isinstance(models, list):
         return result(
-            ok=provider.public_models and status == 200,
+            ok=provider.public_models and accepted,
             http_status=status,
             detail=_UNEXPECTED if status == 200 and not provider.public_models else detail,
             limits=limits,
@@ -187,7 +195,7 @@ def _check_key(
     served = {i.removeprefix("models/") for i in ids}
     others = [m.id for m in catalog.models_of(provider) if m.id != provider.default_model]
     return result(
-        ok=status == 200,
+        ok=accepted,
         http_status=status,
         detail=detail,
         models=len(ids),
@@ -247,6 +255,8 @@ def served_by(provider: Provider, model: str, ids: tuple[str, ...]) -> bool:
     return any(i == model or i.rsplit("/", 1)[-1] == model for i in ids)
 
 
+CHECK_UNAVAILABLE = "The key could not be checked now."
+RATE_LIMITED = "rate limited right now"
 DEFAULT_MODEL_UNAVAILABLE = "The key could not be checked because the default model is unavailable."
 
 
@@ -260,7 +270,7 @@ def _refusal(status: int) -> str:
     if status in (401, 403):
         return "refused: the key is wrong, revoked or lacks access"
     if status == 429:
-        return "rate limited right now"
+        return RATE_LIMITED
     if status == 402:
         return "no credits left"
     return f"unexpected HTTP {status}"

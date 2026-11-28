@@ -2115,6 +2115,8 @@ CATALOG = Catalog("简体中文", plural, MESSAGES, CLICK, forms=1)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "目前无法检查密钥。",
+        "rate limited right now": "当前已达到请求速率限制。",
         "The key could not be checked because the default model is unavailable.": "默认模型不可用，无法验证密钥。",
         'Put text with spaces in double quotes, e.g. "like this".': '请将含空格的文本放在双引号内，例如 "像 这样"。',
         "DESMAN is thinking… {seconds} s": "DESMAN 正在思考… {seconds} 秒",

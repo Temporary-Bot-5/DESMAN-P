@@ -2156,6 +2156,8 @@ CATALOG = Catalog("한국어", plural, MESSAGES, CLICK, forms=1)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "지금은 키를 확인할 수 없습니다.",
+        "rate limited right now": "현재 요청 속도 제한에 도달했습니다.",
         "The key could not be checked because the default model is unavailable.": "기본 모델을 사용할 수 없어 키를 확인하지 못했습니다.",
         'Put text with spaces in double quotes, e.g. "like this".': '공백이 있는 텍스트는 큰따옴표로 감싸세요. 예 "이렇게 입력".',
         "DESMAN is thinking… {seconds} s": "DESMAN이 생각 중… {seconds}초",

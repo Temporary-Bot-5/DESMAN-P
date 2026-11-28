@@ -717,6 +717,8 @@ def check_keys(
         try:
             with db.transaction(conn):
                 for result in results:
+                    if not result.ok:
+                        continue
                     conn.execute(
                         "DELETE FROM model_refusals WHERE scope LIKE ? AND scope LIKE ?",
                         (result.provider + "/%", "%:" + result.key_id),
@@ -753,7 +755,8 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
             default,
         )
     ui.out(table)
-    ui.note(t("Remembered model access refusals cleared for the checked keys."))
+    if results and all(r.ok for r in results):
+        ui.note(t("Remembered model access refusals cleared for the checked keys."))
     ui.out("")
     warned: set[str] = set()
     for r in results:
@@ -762,14 +765,16 @@ def print_checks(targets: list[providers.Provider], results: list[check.KeyCheck
         if not r.ok and p.local:
             ui.warn(f"{name}: {_local_problem(r)}")
             _local_hint(p, r)
-        elif not r.ok:
-            detail = (
-                t("The key could not be checked because the default model is unavailable.")
-                if r.detail == check.DEFAULT_MODEL_UNAVAILABLE
-                else r.detail
-            )
+        elif not r.ok or r.detail == check.RATE_LIMITED:
+            detail = r.detail
+            if detail == check.DEFAULT_MODEL_UNAVAILABLE:
+                detail = t("The key could not be checked because the default model is unavailable.")
+            elif detail == check.CHECK_UNAVAILABLE:
+                detail = t("The key could not be checked now.")
+            elif detail == check.RATE_LIMITED:
+                detail = t("rate limited right now")
             ui.warn(f"{name}: {detail}")
-        elif r.unlisted and r.provider not in warned:  # the same for each key of a provider
+        if r.ok and r.unlisted and r.provider not in warned:  # the same for each key of a provider
             warned.add(r.provider)
             ui.warn(
                 t(

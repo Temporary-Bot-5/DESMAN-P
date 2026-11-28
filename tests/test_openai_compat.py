@@ -1006,10 +1006,14 @@ def test_provider_base_timeout_above_default_cap(network_cap: int | None, expect
         (200, "accepted"),
         (410, "default model is unavailable"),
         (404, "default model is unavailable"),
-        (503, "HTTP 503"),
+        (429, "rate limited right now"),
+        (503, "could not be checked now"),
+        (None, "could not be checked now"),
     ],
 )
-def test_nvidia_keys_are_checked_by_an_authenticated_completion(status: int, detail: str) -> None:
+def test_nvidia_keys_are_checked_by_an_authenticated_completion(
+    status: int | None, detail: str
+) -> None:
     provider = providers.find("nvidia")
     key = "1234" if status in (401, 403) else "nvapi-test"
     config = make_config(api_keys={"NVIDIA_API_KEY": key})
@@ -1020,17 +1024,28 @@ def test_nvidia_keys_are_checked_by_an_authenticated_completion(status: int, det
         assert request.headers["Authorization"] == f"Bearer {key}"
         if request.method == "GET":
             assert request.url.path.endswith("/models")
-            return httpx.Response(200, json={"data": [{"id": provider.default_model}]})
+            assert request.extensions["timeout"]["read"] == 20.0
+            return httpx.Response(
+                200,
+                json={"data": [{"id": provider.default_model}]},
+                headers={"x-ratelimit-limit-requests": "40"},
+            )
         assert request.url.path.endswith("/chat/completions")
         body = json.loads(request.content)
         assert body["model"] == provider.default_model
         assert body["max_tokens"] == 1 and body["temperature"] == 0
         assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
-        return httpx.Response(status)
+        assert request.extensions["timeout"]["read"] == 60.0
+        if status is None:
+            raise httpx.ReadTimeout("timed out", request=request)
+        return httpx.Response(status, headers={"x-ratelimit-remaining-requests": "0"})
 
     with httpx.Client(transport=httpx.MockTransport(respond)) as http:
         [result] = check.check(config, provider, http)
     assert methods == ["GET", "POST"]
-    assert result.ok is (status == 200)
+    assert result.ok is (status in (200, 429))
+    assert result.limits["x-ratelimit-limit-requests"] == "40"
+    if status is not None:
+        assert result.limits["x-ratelimit-remaining-requests"] == "0"
     assert result.http_status == status and detail in result.detail
     assert result.models == 1 and result.default_model_listed is True

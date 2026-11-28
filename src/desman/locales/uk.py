@@ -2323,6 +2323,8 @@ CATALOG = Catalog("Українська", plural, MESSAGES, CLICK, forms=3)
 
 MESSAGES.update(
     {
+        "The key could not be checked now.": "Зараз не вдалося перевірити ключ.",
+        "rate limited right now": "Зараз досягнуто ліміту частоти запитів.",
         "The key could not be checked because the default model is unavailable.": "Не вдалося перевірити ключ, бо типова модель недоступна.",
         'Put text with spaces in double quotes, e.g. "like this".': 'Текст із пробілами беріть у подвійні лапки, наприклад "ось так".',
         "DESMAN is thinking… {seconds} s": "DESMAN думає… {seconds} с",

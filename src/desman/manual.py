@@ -138,7 +138,7 @@ _TOPICS = (
         "The full key is in config.json in the project folder or on the provider’s site. "
         "Inspect with `/keys list`, `/keys check` "
         "(NVIDIA uses a one-token completion) and `/usage` (ends with totals). "
-        "Account/model access refusals last 24h; usage shows reasons, keys check clears them. "
+        "Account/model access refusals last 24h; usage shows reasons. Keys check clears refusals for accepted keys. "
         "Token windows are shared.",
     ),
     Topic(

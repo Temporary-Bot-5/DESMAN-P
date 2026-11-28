@@ -358,7 +358,7 @@ def _provider_menu(s: _Session, p: Provider) -> None:
             )
         if p.local:
             actions.append(ui.Choice(t("Download a model from Hugging Face"), "hub"))
-        if p.key_env is not None and not p.hub and p.is_ready(s.config):
+        if p.key_env is not None and not p.hub and not p.search and p.is_ready(s.config):
             actions.append(ui.Choice(t("Check"), "check"))
         actions.append(ui.Choice(t("Back"), None))
         action = ui.select(p.name, actions)
