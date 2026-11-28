@@ -645,7 +645,7 @@ function updateActions() {
   }
   $("settings-wait").textContent = lineOpen ? "" : words.wait;
   document.querySelectorAll("[data-action]").forEach(b => {
-    b.disabled = !lineOpen || (!!b.closest("#settings-window") && !!settingsPending);
+    b.disabled = !lineOpen || (!!b.closest("#settings-window") && !!settingsPending) || (b.canAct && !b.canAct());
     b.title = lineOpen ? (b.dataset.label || "") : words.wait;
   });
   document.querySelectorAll("[data-attachment]").forEach(b => {
@@ -1137,6 +1137,7 @@ function showModules() {
 let settingsData = null;
 let settingsRedraw = false;
 let settingsSection = "general";
+let registryOptionsRequest = null;
 let settingsPending = null;
 let settingsTimer = null;
 let uninstallPending = false;
@@ -1147,6 +1148,7 @@ const settingsDeferred = new Set();
 const settingsSections = ["general", "keys", "roles", "permissions", "personalize", "behaviour", "limits", "models", "network", "protected"];
 
 function closeSettings() {
+  registryOptionsRequest = null;
   operatorOpen = false;
   operatorEpoch++;
   operatorStatusRequest = null;
@@ -1296,6 +1298,7 @@ function drawSettings() {
   for (const section of settingsSections) {
     if (section === "protected" && !d.protected.blocked) continue;
     const b = button($("settings-nav"), words[`settings_${section}`], () => {
+      if (settingsSection !== section) registryOptionsRequest = null;
       settingsSection = section; drawSettings();
     });
     b.setAttribute("aria-current", String(section === settingsSection));
@@ -1447,8 +1450,61 @@ function drawSettings() {
     operatorKeySettings(root, d.operator_key);
     const status = text("div", "desman-global", root); status.className = "provider-heading";
     text("small", d.network.enabled ? words.status_active : words.off, status).className = "setting-badge";
-    const advanced = text("details", "", root); text("summary", words.advanced, advanced);
-    const registry = settingInput(advanced, words.registry, d.network.registry || ""); registry.maxLength = 200;
+    let registryAddress = () => null;
+    if (!d.network.enabled) {
+      const registryRow = text("label", "", root);
+      registryRow.className = "setting-row";
+      text("span", words.registry, registryRow);
+      const select = text("select", "", registryRow);
+      const prompt = text("option", words.registry_choose, select); prompt.value = "";
+      prompt.disabled = true;
+      const saved = d.network.registry;
+      if (saved) { const option = text("option", saved, select); option.value = saved; }
+      const other = text("option", words.registry_other, select); other.value = "other";
+      select.value = saved || "";
+      const custom = settingInput(root, words.registry, "");
+      custom.maxLength = 200;
+      custom.parentElement.hidden = true;
+      const notice = text("small", "", root);
+      registryAddress = () => select.value === "other" ? custom.value.trim() : select.value;
+      function syncRegistryInput() {
+        const manual = select.value === "other";
+        custom.parentElement.hidden = !manual;
+        custom.required = manual;
+        updateActions();
+      }
+      select.addEventListener("change", () => {
+        syncRegistryInput();
+        if (custom.required) custom.focus();
+      });
+      custom.addEventListener("input", updateActions);
+      if (!$("settings-window").hidden) {
+        registryOptionsRequest ||= fetch("/registries").then(response => {
+          if (!response.ok) throw new Error();
+          return response.json();
+        });
+      }
+      registryOptionsRequest?.then(data => {
+        if (!select.isConnected) return;
+        const answering = data.registries.filter(item => item.answers);
+        for (const item of answering) {
+          const latency = words.registry_latency.replace("{ms}", item.latency_ms);
+          const label = `${item.name} · ${item.url} · ${latency}`;
+          const option = item.url === saved ? select.options[1] : text("option", label, select);
+          option.textContent = label;
+          option.value = item.url;
+          if (item.url !== saved) select.insertBefore(option, other);
+        }
+        notice.textContent = data.error || (answering.length ? "" : words.registry_none);
+        if (!select.value && !answering.length) { select.value = "other"; syncRegistryInput(); }
+      }).catch(() => {
+        if (!select.isConnected) return;
+        notice.textContent = words.registry_unreachable;
+        if (!select.value) { select.value = "other"; syncRegistryInput(); }
+      });
+    } else if (d.network.registry) {
+      text("small", d.network.registry, status);
+    }
     const lead = document.createElement("input");
     lead.type = "checkbox";
     lead.checked = d.network.lead;
@@ -1456,7 +1512,8 @@ function drawSettings() {
     leadRow.append(lead);
     settingAuto(leadRow, () => ({section: "network", operation: "lead", state: lead.checked ? "on" : "off"}), [lead]);
     if (d.network.cluster_text) text("small", d.network.cluster_text, status);
-    settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registry.value || null})}), d.network.enabled ? words.leave : words.join);
+    const join = settingSave(status, () => ({section: "network", operation: d.network.enabled ? "leave" : "join", ...(d.network.enabled ? {} : {registry: registryAddress()})}), d.network.enabled ? words.leave : words.join);
+    if (!d.network.enabled) join.canAct = () => Boolean(registryAddress());
     const cloud = settingInput(root, d.network.cloud_label, d.network.lend_cloud, "checkbox");
     settingAuto(root, () => ({section: "network", operation: "cloud", state: cloud.checked ? "on" : "off"}), [cloud]);
     for (const line of d.network.cloud_warnings) text("p", line, root);

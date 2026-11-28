@@ -47,7 +47,7 @@ from desman.core import report as task_reports
 from desman.core import stats as task_stats
 from desman.core.store import AmbiguousIdError, NotFoundError, Store
 from desman.i18n import t, tn
-from desman.net import cluster, jobs, node, protocol, search_lend, sign, updates
+from desman.net import catalog, cluster, jobs, node, protocol, search_lend, sign, updates
 from desman.providers import Provider, Terms
 
 DEFAULT_DONATION = Donation(calls_per_day=100, tokens_per_day=100_000)
@@ -627,6 +627,73 @@ class Joined:
     node: str
 
 
+def registry_report(config: Config) -> dict[str, Any]:
+    """Fetch and probe the catalog for an explicitly requested registry list."""
+    try:
+        probes = catalog.discover(_utc_now())
+    except catalog.CatalogError as e:
+        return {"registries": [], "error": str(e)}
+    active = net.registry(config)
+    ordered = catalog.available(probes) + [item for item in probes if not item.answers]
+    return {
+        "registries": [
+            item.entry.model_dump()
+            | {
+                "answers": item.answers,
+                "latency_ms": item.latency_ms,
+                "in_use": item.entry.url.rstrip("/") == (active or "").rstrip("/"),
+            }
+            for item in ordered
+        ],
+        "error": None,
+    }
+
+
+def registry_label(name: str, url: str, latency_ms: int | None) -> str:
+    state = t("Not answering") if latency_ms is None else t("{ms} ms", ms=latency_ms)
+    return f"{name} · {url} · {state}"
+
+
+def print_registries(report: dict[str, Any]) -> None:
+    if report["error"]:
+        ui.warn(report["error"])
+    elif not report["registries"]:
+        ui.note(t("No registries are listed."))
+    for item in report["registries"]:
+        label = registry_label(item["name"], item["url"], item["latency_ms"])
+        if item["in_use"]:
+            label += " · " + t("In use")
+        ui.note(label)
+        if item["note"]:
+            ui.note(item["note"])
+
+
+def _discover_for_join() -> str:
+    try:
+        answering = catalog.available(catalog.discover(_utc_now()))
+    except catalog.CatalogError as e:
+        problem = str(e)
+    else:
+        if len(answering) == 1:
+            return answering[0].entry.url
+        if answering:
+            choices = "\n".join(
+                registry_label(item.entry.name, item.entry.url, item.latency_ms)
+                for item in answering
+            )
+            raise click.ClickException(
+                t("Several registries are answering. Pick one with --registry URL or in Settings.")
+                + "\n"
+                + choices
+            )
+        problem = t("No catalog registries are answering.")
+    raise click.ClickException(
+        t("No registry address is known yet: give one with `desman global join --registry URL`.")
+        + "\n"
+        + problem
+    )
+
+
 def join_registry(config: Config, registry: str | None) -> str:
     """The registry joining would use: the one given, the one saved, or the shipped one."""
     found = registry or config.network.registry or net.DEFAULT_REGISTRY
@@ -739,7 +806,16 @@ def join(
     key_path: Path | None = None,
 ) -> Joined:
     """Switch desman-global on, with the node's key (created the first time)."""
+    discovered = None
+    if (
+        registry is None
+        and net.DEFAULT_REGISTRY is None
+        and manager.load().network.registry is None
+    ):
+        discovered = _discover_for_join()
     with _change(manager, conn) as (config, entries):
+        if registry is None and config.network.registry is None:
+            registry = discovered
         join_registry(config, registry)  # a bad address creates no key
         key = usable_node_key(key_path)
         assert key is not None
@@ -1084,6 +1160,19 @@ def status_command(as_json: bool) -> None:
         click.echo(json.dumps(found.as_json(), ensure_ascii=False, indent=2))
     else:
         print_status(found)
+
+
+@global_group.command("registries")
+@json_option
+def registries_command(as_json: bool) -> None:
+    """List registries and their availability."""
+    report = registry_report(load_config().load())
+    if as_json:
+        click.echo(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print_registries(report)
+    if report["error"]:
+        raise click.exceptions.Exit(1)
 
 
 @global_group.command("join")

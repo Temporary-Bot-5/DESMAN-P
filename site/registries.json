@@ -1,0 +1,19 @@
+{
+  "record": {
+    "kind": "registry_catalog",
+    "id": "c96ec39222ed4aafbb41dede6159f419",
+    "issued_at": "2026-11-28T14:56:37Z",
+    "expires_at": "2027-05-27T14:56:37Z",
+    "signer": "2f76fcd80c9c1b17743a557558efc89dae3281757355ae1121dbbf0dc97d812e",
+    "body": {
+      "registries": [
+        {
+          "url": "https://musor-linux-computer.tailb9fac1.ts.net",
+          "name": "DESMAN main",
+          "note": "The project's registry, run by the owner."
+        }
+      ]
+    }
+  },
+  "signature": "Y1s6px3rI+crn9HpQgu6fjQ7/baUrkxCmVmd2XbqMfwk7a7TkAMz//SYm2uhrn75VgxTZe7VTJkQZKaY6ohEBw=="
+}

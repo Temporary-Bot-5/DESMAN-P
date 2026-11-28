@@ -29,6 +29,7 @@ from pydantic import (
 
 from desman.core import filelock
 from desman.core.atomic import read_text, replace_file, retry_sharing
+from desman.net import RegistryUrl as RegistryUrl
 from desman.tuning_limits import LOCAL_TUNING_BOUNDS, PAGE_TUNING_BOUNDS
 from desman.tuning_limits import TUNING_BOUNDS as WORKFLOW_TUNING_BOUNDS
 
@@ -242,15 +243,6 @@ class Tuning(BaseModel):
     def is_set(self) -> bool:
         return self != Tuning()
 
-
-RegistryUrl = Annotated[
-    str,
-    StringConstraints(
-        pattern=r"^(https://[A-Za-z0-9.-]+(:\d+)?|http://(localhost|127\.0\.0\.1)(:\d+)?)(/[^\s]*)?$",
-        max_length=200,
-    ),
-]
-"""The registry of desman-global: HTTPS, or plain HTTP to this machine (a registry under test)."""
 
 DONATION_BOUNDS: dict[str, tuple[int, int]] = {
     "calls_per_day": (1, 100_000),

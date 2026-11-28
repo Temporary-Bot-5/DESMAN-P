@@ -697,6 +697,95 @@ def owner(ctx: click.Context, node_key: str, name: str | None, clear: bool) -> N
         ui.ok(t("Node {key} belongs to {owner}.", key=fingerprint[:16], owner=str(name)))
 
 
+class _CatalogSign(click.Command):
+    """Bind an optional note to the entry immediately preceding it."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        notes: dict[int, str] = {}
+        entry = -1
+        index = 0
+        while index < len(args):
+            option = args[index]
+            name, equals, value = option.partition("=")
+            if name == "--entry":
+                width = 2 if equals else 3
+                entry += 1
+            elif name == "--note":
+                if entry < 0 or entry in notes or (not equals and index + 1 >= len(args)):
+                    raise click.UsageError(t("Give at most one --note after each --entry."), ctx)
+                notes[entry] = value if equals else args[index + 1]
+                index += 1 if equals else 2
+                continue
+            elif option == "--":
+                cleaned.extend(args[index:])
+                break
+            else:
+                width = 2 if not equals and name in {"--days", "--out", "--root-key"} else 1
+            cleaned.extend(args[index : index + width])
+            index += width
+        ctx.meta["catalog_notes"] = notes
+        return super().parse_args(ctx, cleaned)
+
+
+@cli.group("catalog")
+def catalog_group() -> None:
+    """Sign or verify the registry catalog."""
+
+
+@catalog_group.command("sign", cls=_CatalogSign)
+@click.option("--entry", type=(str, str), multiple=True, required=True, metavar="URL NAME")
+@click.option(
+    "--note",
+    multiple=True,
+    expose_value=False,
+    metavar="TEXT",
+    help="Note for the preceding entry.",
+)
+@click.option("--days", default=180, show_default=True, type=click.IntRange(min=1))
+@click.option("--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
+@_root_option
+@click.pass_context
+def catalog_sign(
+    ctx: click.Context,
+    entry: tuple[tuple[str, str], ...],
+    days: int,
+    out: Path,
+    root_key: Path | None,
+) -> None:
+    """Sign the registry catalog with the root key."""
+    notes = ctx.meta["catalog_notes"]
+    entries = [
+        {"url": url, "name": name, "note": notes.get(i)} for i, (url, name) in enumerate(entry)
+    ]
+    try:
+        admin.sign_catalog(
+            entries,
+            days=days,
+            now=_now(),
+            root_key=_dir(ctx) / store.ROOT_KEY if root_key is None else root_key,
+            out=out,
+        )
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(t("Signed registry catalog written to {path}.", path=out))
+
+
+@catalog_group.command("show")
+@click.argument("file", type=click.Path(dir_okay=False, path_type=Path))
+def catalog_show(file: Path) -> None:
+    """Verify and show a root-signed registry catalog."""
+    try:
+        found = admin.show_catalog(file, _now())
+    except admin.AdminError as e:
+        raise _fail(e) from e
+    ui.ok(t("Registry catalog verified."))
+    for item in found.registries:
+        ui.note(f"{item.name} · {item.url}")
+        if item.note:
+            ui.note(item.note)
+
+
 @cli.group()
 def trust() -> None:
     """The trust list: signed by the root, without a fresh one nodes take no work."""
